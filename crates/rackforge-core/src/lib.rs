@@ -34,7 +34,10 @@ pub mod session_checkpoint;
 pub mod ump;
 /// How hard a key was struck, as this machine reads it: outside every
 /// platform gate, because every host reads its own incoming MIDI through it.
-pub mod velocity_curve;
+/// How hard a key was struck, as this machine reads it. The reading lives
+/// in the MIDI vocabulary crate so that the little screen's runtime can
+/// show it too, and is re-exported here under the name it has always had.
+pub use rackforge_midi_api::velocity_curve;
 pub use rackforge_startup as startup;
 /// The sequencer engine rides the same rule: patterns into sample-accurate
 /// MIDI on every platform, gated by nothing.

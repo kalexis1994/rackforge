@@ -2888,6 +2888,15 @@ pub fn classify_audio_change(current: &AudioPreferences, next: &AudioPreferences
     }
 }
 
+/// Every MIDI input this machine can see, without touching audio.
+///
+/// The full inventory scan instantiates every ASIO driver on the machine --
+/// most of a second, measured -- and a screen that only wants to list
+/// keyboards has no business paying for that.
+pub fn midi_input_names() -> Result<Vec<String>> {
+    discover_all_midi_inputs()
+}
+
 fn discover_all_midi_inputs() -> Result<Vec<String>> {
     let mut names = discover_midi_inputs()?;
     names.extend(crate::ump_input::discover());
@@ -3096,10 +3105,7 @@ impl MidiSupervisor {
     /// comes and goes, so a new selection is the same ordinary job.
     fn set_selected(&self, names: Vec<String>) {
         let wanted = openable_midi_ports(names, self.yield_keylab);
-        *self
-            .selected
-            .lock()
-            .expect("MIDI selection lock poisoned") = wanted;
+        *self.selected.lock().expect("MIDI selection lock poisoned") = wanted;
         self.generation.fetch_add(1, Ordering::Relaxed);
     }
 }

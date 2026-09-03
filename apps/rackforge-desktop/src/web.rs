@@ -854,10 +854,7 @@ fn now_millis() -> u64 {
 /// The engine takes it for as long as the interface keeps asking after it;
 /// nothing is written down. Applying is a different button, and leaving the
 /// screen -- or closing it -- puts back what was applied.
-async fn audition_velocity(
-    State(state): State<WebState>,
-    Json(readings): Json<Value>,
-) -> Response {
+async fn audition_velocity(State(state): State<WebState>, Json(readings): Json<Value>) -> Response {
     state
         .velocity_preview_heartbeat
         .store(now_millis(), Ordering::Relaxed);
@@ -882,11 +879,7 @@ async fn restore_velocity(State(state): State<WebState>) -> Response {
 async fn last_strike(State(state): State<WebState>) -> Response {
     // The square asks for this while it is on screen, which is exactly when an
     // audition is being listened to: the same request keeps it alive.
-    if state
-        .velocity_preview_heartbeat
-        .load(Ordering::Relaxed)
-        != 0
-    {
+    if state.velocity_preview_heartbeat.load(Ordering::Relaxed) != 0 {
         state
             .velocity_preview_heartbeat
             .store(now_millis(), Ordering::Relaxed);
@@ -2326,6 +2319,9 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::PluginStateParameters { .. }
         | ControlRequest::SetPluginStateParameter { .. }
         | ControlRequest::MidiSources
+        | ControlRequest::MidiSettings
+        | ControlRequest::SetMidiInputEnabled { .. }
+        | ControlRequest::SetVelocityCurve { .. }
         | ControlRequest::BeginMidiLearn { .. }
         | ControlRequest::MidiLearnStatus { .. }
         | ControlRequest::CancelMidiLearn { .. }

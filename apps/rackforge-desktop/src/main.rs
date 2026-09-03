@@ -22,8 +22,8 @@ use eframe::egui::{
     StrokeKind, Vec2,
 };
 use rackforge_control_api::{
-    ClientId, ControlErrorCode, ControlRequest, ControlResponse, MidiLearnCandidate,
-    MidiSourceStatus, ParameterLinkMessage, VirtualMidiMessage,
+    ClientId, ControlErrorCode, ControlRequest, ControlResponse, MidiInputSetting,
+    MidiLearnCandidate, MidiSourceStatus, ParameterLinkMessage, VirtualMidiMessage,
 };
 #[cfg(windows)]
 use rackforge_controller_api::{
@@ -1274,7 +1274,10 @@ impl DesktopApp {
     /// audio settings is the applied document's business, and a screen that is
     /// auditioning a curve has no business changing a driver.
     #[cfg(windows)]
-    fn audition_velocity(&mut self, readings: serde_json::Value) -> Result<serde_json::Value, String> {
+    fn audition_velocity(
+        &mut self,
+        readings: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         #[derive(serde::Deserialize)]
         struct Readings {
             #[serde(default)]
@@ -1305,23 +1308,23 @@ impl DesktopApp {
         let Some(audio) = self.audio.as_ref() else {
             return Ok(serde_json::json!({"status": "ok"}));
         };
-        let applied = self
-            .audio_preferences
-            .clone()
-            .unwrap_or_else(|| desktop_audio::AudioPreferences {
-                schema_version: 0,
-                driver: String::new(),
-                output_device: String::new(),
-                sample_rate_hz: 0,
-                buffer_frames: None,
-                output_gain_db: 0,
-                input_device: None,
-                input_channels: Vec::new(),
-                input_gain_db: 0,
-                midi_inputs: Vec::new(),
-                velocity_curve: Default::default(),
-                velocity_curves: Default::default(),
-            });
+        let applied =
+            self.audio_preferences
+                .clone()
+                .unwrap_or_else(|| desktop_audio::AudioPreferences {
+                    schema_version: 0,
+                    driver: String::new(),
+                    output_device: String::new(),
+                    sample_rate_hz: 0,
+                    buffer_frames: None,
+                    output_gain_db: 0,
+                    input_device: None,
+                    input_channels: Vec::new(),
+                    input_gain_db: 0,
+                    midi_inputs: Vec::new(),
+                    velocity_curve: Default::default(),
+                    velocity_curves: Default::default(),
+                });
         audio
             .set_velocity_curves(applied.velocity_curve, &applied.velocity_curves)
             .map_err(|error| format!("{error:#}"))?;
@@ -1338,7 +1341,8 @@ impl DesktopApp {
         if !self.velocity_audition {
             return;
         }
-        let heard = self.velocity_preview_heartbeat
+        let heard = self
+            .velocity_preview_heartbeat
             .load(std::sync::atomic::Ordering::Relaxed);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1347,6 +1351,133 @@ impl DesktopApp {
             return;
         }
         let _ = self.restore_velocity();
+    }
+
+    /// Every MIDI input this machine can see, and the reading applied to it.
+    ///
+    /// A port a player chose stays in the list while it is unplugged: the
+    /// choice outlives the cable, and a list that quietly dropped it would
+    /// make an unplugged keyboard look like a forgotten one.
+    #[cfg(windows)]
+    fn midi_settings_response(&mut self) -> ControlResponse {
+        let present = match desktop_audio::midi_input_names() {
+            Ok(names) => names,
+            Err(error) => {
+                return ControlResponse::Error {
+                    code: ControlErrorCode::Unavailable,
+                    message: format!("Could not list MIDI inputs: {error:#}"),
+                    current_revision: None,
+                };
+            }
+        };
+        let Some(preferences) = self.audio_preferences.clone() else {
+            return ControlResponse::MidiSettings {
+                inputs: Vec::new(),
+                shared_curve: Default::default(),
+            };
+        };
+        let chosen = preferences
+            .midi_inputs
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut inputs = present
+            .iter()
+            .map(|name| MidiInputSetting {
+                name: name.clone(),
+                enabled: chosen.contains(name),
+                connected: true,
+                curve: preferences.velocity_curves.get(name).copied(),
+            })
+            .collect::<Vec<_>>();
+        let seen = present.iter().cloned().collect::<BTreeSet<_>>();
+        inputs.extend(
+            chosen
+                .iter()
+                .filter(|name| !seen.contains(*name))
+                .map(|name| MidiInputSetting {
+                    name: name.clone(),
+                    enabled: true,
+                    connected: false,
+                    curve: preferences.velocity_curves.get(name).copied(),
+                }),
+        );
+        ControlResponse::MidiSettings {
+            inputs,
+            shared_curve: preferences.velocity_curve,
+        }
+    }
+
+    /// Listen to a MIDI input, or stop listening to it.
+    ///
+    /// This goes through the ordinary apply, which recognises a change that
+    /// touches nothing but the keyboard and leaves the audio stream alone.
+    #[cfg(windows)]
+    fn set_midi_input_enabled(&mut self, name: &str, enabled: bool) -> ControlResponse {
+        let Some(mut preferences) = self.audio_preferences.clone() else {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message: "Desktop audio is unavailable".to_owned(),
+                current_revision: None,
+            };
+        };
+        preferences.midi_inputs.retain(|chosen| chosen != name);
+        if enabled {
+            preferences.midi_inputs.push(name.to_owned());
+            preferences.midi_inputs.sort();
+        }
+        match self.apply_audio_preferences(preferences) {
+            Ok(_) => self.midi_settings_response(),
+            Err(error) => ControlResponse::Error {
+                code: ControlErrorCode::Internal,
+                message: format!("{error:#}"),
+                current_revision: None,
+            },
+        }
+    }
+
+    /// The reading for one keybed, or for every keybed without one of its own.
+    #[cfg(windows)]
+    fn set_velocity_curve(
+        &mut self,
+        device: Option<String>,
+        curve: Option<rackforge_core::velocity_curve::VelocityCurve>,
+    ) -> ControlResponse {
+        let Some(mut preferences) = self.audio_preferences.clone() else {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message: "Desktop audio is unavailable".to_owned(),
+                current_revision: None,
+            };
+        };
+        match (device, curve) {
+            (Some(device), Some(curve)) => {
+                preferences
+                    .velocity_curves
+                    .insert(device, curve.sanitised());
+            }
+            // No curve for a named device is how it goes back to following
+            // the shared reading.
+            (Some(device), None) => {
+                preferences.velocity_curves.remove(&device);
+            }
+            (None, Some(curve)) => preferences.velocity_curve = curve.sanitised(),
+            (None, None) => {
+                return ControlResponse::Error {
+                    code: ControlErrorCode::InvalidRequest,
+                    message: "The shared reading cannot be forgotten; set one instead".to_owned(),
+                    current_revision: None,
+                };
+            }
+        }
+        match self.apply_audio_preferences(preferences) {
+            Ok(_) => self.midi_settings_response(),
+            Err(error) => ControlResponse::Error {
+                code: ControlErrorCode::Internal,
+                message: format!("{error:#}"),
+                current_revision: None,
+            },
+        }
     }
 
     fn apply_audio_preferences(
@@ -3410,6 +3541,50 @@ impl DesktopApp {
                 {
                     ControlResponse::MidiSources {
                         sources: Vec::new(),
+                    }
+                }
+            }
+            ControlRequest::MidiSettings => {
+                #[cfg(windows)]
+                {
+                    self.midi_settings_response()
+                }
+                #[cfg(not(windows))]
+                {
+                    ControlResponse::MidiSettings {
+                        inputs: Vec::new(),
+                        shared_curve: Default::default(),
+                    }
+                }
+            }
+            ControlRequest::SetMidiInputEnabled { name, enabled } => {
+                #[cfg(windows)]
+                {
+                    self.set_midi_input_enabled(&name, enabled)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (name, enabled);
+                    ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: "MIDI inputs are chosen by the host that owns them".to_owned(),
+                        current_revision: None,
+                    }
+                }
+            }
+            ControlRequest::SetVelocityCurve { device, curve } => {
+                #[cfg(windows)]
+                {
+                    self.set_velocity_curve(device, curve)
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (device, curve);
+                    ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: "Velocity readings are applied by the host that reads them"
+                            .to_owned(),
+                        current_revision: None,
                     }
                 }
             }

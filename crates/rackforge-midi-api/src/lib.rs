@@ -1,3 +1,5 @@
+pub mod velocity_curve;
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
 use std::fmt;

@@ -7,6 +7,7 @@ use rackforge_audio_api::{
     AudioOutputState, AudioSampleFormat,
 };
 use rackforge_controller_api::LITTLE_TEXT_COLUMNS;
+use rackforge_midi_api::velocity_curve::VelocityCurve;
 use rackforge_performance_api::{
     LibraryRevision, LiveBrowseMode, LiveLocation, LivePerformanceState, MidiOutputRoute,
     PERFORMANCE_SCHEMA_VERSION, PerformanceEdit, PerformanceLibrary, PerformanceSnapshot,
@@ -532,6 +533,18 @@ pub enum MenuCommand {
     ApplyAudioOutput {
         profile: AudioOutputProfile,
     },
+    /// Listen to a MIDI input, or stop listening to it.
+    SetMidiInputEnabled {
+        name: String,
+        enabled: bool,
+    },
+    /// The reading for one keybed, or -- with no device -- for every keybed
+    /// that has none of its own. No curve means the named device goes back to
+    /// following the shared reading.
+    SetVelocityCurve {
+        device: Option<String>,
+        curve: Option<VelocityCurve>,
+    },
 }
 
 impl Screen {
@@ -668,6 +681,11 @@ enum Page {
     Plugins,
     PluginConfigUnavailable,
     System,
+    Midi,
+    MidiDevices,
+    MidiVelocityTarget,
+    MidiVelocityPoints,
+    MidiVelocityValue,
     Audio,
     AudioOutput,
     AudioRate,
@@ -887,10 +905,38 @@ pub struct Menu {
     editor_field: Option<ValueCarousel>,
     editor_field_id: Option<String>,
     pressed_button: Option<usize>,
+    /// Every MIDI input this host can see, switched on or off, each with the
+    /// reading it is read through.
+    midi_inputs: Vec<MidiDeviceEntry>,
+    /// The reading for a keybed that has none of its own.
+    shared_velocity_curve: VelocityCurve,
+    midi_index: usize,
+    midi_device_index: usize,
+    /// 0 is the shared reading; 1.. are the devices, in list order.
+    midi_velocity_target_index: usize,
+    midi_velocity_point_index: usize,
+    /// The point being turned, on the MIDI scale, before it is committed.
+    midi_velocity_value: u8,
     pending_command: Option<MenuCommand>,
 }
 
-const HOME_ITEMS: [&str; 3] = ["LIVE", "PLAY", "CONFIG"];
+/// One MIDI input, as this screen shows it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MidiDeviceEntry {
+    /// The port's name, as the host knows it.
+    pub name: String,
+    /// Whether the host is listening to it.
+    pub enabled: bool,
+    /// Whether it is plugged in right now.
+    pub connected: bool,
+    /// Whether this is the port carrying the surface you are looking at --
+    /// the one a player must not switch off while standing at it.
+    pub in_use: bool,
+    /// Its own reading, if it has been given one.
+    pub curve: Option<VelocityCurve>,
+}
+
+const HOME_ITEMS: [&str; 3] = ["LIVE", "PLAY", "SETTINGS"];
 const HOME_HEADER: &str = "RACKFORGE";
 const LIVE_ITEMS: [&str; 3] = ["RACK", "SONG", "SETLIST"];
 const LIVE_DETAILS: [&str; 3] = [
@@ -898,15 +944,27 @@ const LIVE_DETAILS: [&str; 3] = [
     "Songs and parts",
     "Performance order",
 ];
-const CONFIG_ITEMS: [&str; 6] = ["RACKS", "SONGS", "SETLISTS", "PLUGINS", "AUDIO", "SYSTEM"];
-const CONFIG_DETAILS: [&str; 6] = [
+const CONFIG_ITEMS: [&str; 7] = [
+    "RACKS", "SONGS", "SETLISTS", "PLUGINS", "AUDIO", "MIDI", "SYSTEM",
+];
+const CONFIG_DETAILS: [&str; 7] = [
     "Playable Racks",
     "Arrange Parts",
     "Performance order",
     "Plugin settings",
     "Output settings",
+    "Inputs & velocity",
     "RackForge settings",
 ];
+const MIDI_ITEMS: [&str; 2] = ["DEVICES", "VELOCITY"];
+const MIDI_DETAILS: [&str; 2] = ["Inputs on or off", "How a strike reads"];
+/// The three points of a reading, as four numbers a hand can turn: where the
+/// softest strike lands, where the bend sits and what it becomes, and where
+/// the hardest strike lands.
+const VELOCITY_POINT_ITEMS: [&str; 4] = ["FLOOR", "BEND IN", "BEND OUT", "CEILING"];
+/// The name the first entry of the velocity list carries: the reading every
+/// keybed follows until it is given one of its own.
+const SHARED_READING: &str = "ALL OTHERS";
 const RACK_EDITOR_ITEMS: [&str; 5] = ["NAME", "SLOTS", "ENABLED", "SAVE", "DELETE"];
 const RACK_SLOT_EDITOR_ITEMS: [&str; 12] = [
     "NAME",
@@ -1025,6 +1083,13 @@ impl Default for Menu {
             active_plugin_config_available: false,
             plugin_spinner: Spinner::ascii("plugin-loader", "LOADING PLUGIN", "PLEASE WAIT"),
             system_index: 0,
+            midi_inputs: Vec::new(),
+            shared_velocity_curve: VelocityCurve::default(),
+            midi_index: 0,
+            midi_device_index: 0,
+            midi_velocity_target_index: 0,
+            midi_velocity_point_index: 0,
+            midi_velocity_value: 0,
             system_web_index: 0,
             web_settings: WebSystemSettings::default(),
             web_edit_candidate: WebSystemSettings::default(),
@@ -1502,6 +1567,215 @@ impl Menu {
         }
         self.audio_state = Some(state);
         self.audio_value_index = 0;
+    }
+
+    /// Everything the MIDI screens show: the ports this host can see, and
+    /// the readings applied to what they send.
+    pub fn sync_midi_settings(&mut self, inputs: Vec<MidiDeviceEntry>, shared: VelocityCurve) {
+        self.midi_inputs = inputs;
+        self.shared_velocity_curve = shared.sanitised();
+        // A port that has gone leaves the list shorter under a cursor that
+        // was pointing past its end.
+        self.midi_device_index = self
+            .midi_device_index
+            .min(self.midi_inputs.len().saturating_sub(1));
+        self.midi_velocity_target_index =
+            self.midi_velocity_target_index.min(self.midi_inputs.len());
+    }
+
+    /// The device the velocity screens are pointed at, or nothing at all --
+    /// which is the shared reading, the first entry of that list.
+    fn velocity_target(&self) -> Option<&MidiDeviceEntry> {
+        self.midi_velocity_target_index
+            .checked_sub(1)
+            .and_then(|index| self.midi_inputs.get(index))
+    }
+
+    fn velocity_target_name(&self) -> String {
+        self.velocity_target()
+            .map_or_else(|| SHARED_READING.to_owned(), |device| device.name.clone())
+    }
+
+    /// The reading under the hand: a device's own if it has been given one,
+    /// otherwise the shared reading it is still following.
+    fn velocity_target_curve(&self) -> VelocityCurve {
+        self.velocity_target()
+            .and_then(|device| device.curve)
+            .unwrap_or(self.shared_velocity_curve)
+    }
+
+    /// Switch the listed input on or off.
+    ///
+    /// The screen shows the new state at once and the host confirms it with
+    /// the next sync: a player standing at the keyboard should see the state
+    /// change under their thumb, not a beat later.
+    fn toggle_midi_device(&mut self) {
+        let Some(device) = self.midi_inputs.get_mut(self.midi_device_index) else {
+            return;
+        };
+        device.enabled = !device.enabled;
+        self.pending_command = Some(MenuCommand::SetMidiInputEnabled {
+            name: device.name.clone(),
+            enabled: device.enabled,
+        });
+    }
+
+    fn turn_velocity_point(&mut self, delta: i16) {
+        let turned = i16::from(self.midi_velocity_value) + delta;
+        self.midi_velocity_value = turned.clamp(0, 100) as u8;
+    }
+
+    /// Take the number the hand stopped on into the reading.
+    fn commit_velocity_point(&mut self) {
+        let point = self.midi_velocity_point_index;
+        let curve = with_velocity_point(
+            self.velocity_target_curve(),
+            point,
+            velocity_from_hundredths(self.midi_velocity_value),
+        );
+        match self.midi_velocity_target_index.checked_sub(1) {
+            // Editing a device that was following the shared reading is how
+            // it comes to have one of its own.
+            Some(index) => {
+                if let Some(device) = self.midi_inputs.get_mut(index) {
+                    device.curve = Some(curve);
+                }
+            }
+            None => self.shared_velocity_curve = curve,
+        }
+        self.pending_command = Some(MenuCommand::SetVelocityCurve {
+            device: self.velocity_target().map(|device| device.name.clone()),
+            curve: Some(curve),
+        });
+        self.page = Page::MidiVelocityPoints;
+    }
+
+    /// Give a device back to the shared reading.
+    fn forget_velocity_curve(&mut self) {
+        let Some(index) = self.midi_velocity_target_index.checked_sub(1) else {
+            return;
+        };
+        let Some(device) = self.midi_inputs.get_mut(index) else {
+            return;
+        };
+        device.curve = None;
+        let name = device.name.clone();
+        self.pending_command = Some(MenuCommand::SetVelocityCurve {
+            device: Some(name),
+            curve: None,
+        });
+    }
+
+    /// The MIDI screens: three lists and one number.
+    ///
+    /// The lists behave like every other list here. Only the number is
+    /// different: on it the two arrows turn the value itself, so a reading can
+    /// be aimed and heard without leaving the screen, OK takes it, and BACK
+    /// leaves it where it was found.
+    fn apply_midi_input(&mut self, input: Input) {
+        let Some(action) = input.default_navigation() else {
+            return;
+        };
+        if self.page == Page::MidiVelocityValue {
+            match action {
+                Action::Previous => self.turn_velocity_point(-1),
+                Action::Next => self.turn_velocity_point(1),
+                Action::Select => self.commit_velocity_point(),
+                Action::Back => self.page = Page::MidiVelocityPoints,
+            }
+            return;
+        }
+        if self.page == Page::MidiDevices && action == Action::Select {
+            self.toggle_midi_device();
+            return;
+        }
+        if self.page == Page::MidiVelocityPoints
+            && action == Action::Select
+            && self.midi_velocity_point_index == VELOCITY_POINT_ITEMS.len()
+        {
+            self.forget_velocity_curve();
+            self.page = Page::MidiVelocityTarget;
+            return;
+        }
+        self.apply(action);
+    }
+
+    /// How many entries the points list has: the four points, plus a way back
+    /// to the shared reading for a device that has one of its own.
+    fn velocity_point_count(&self) -> usize {
+        VELOCITY_POINT_ITEMS.len()
+            + usize::from(
+                self.velocity_target()
+                    .is_some_and(|device| device.curve.is_some()),
+            )
+    }
+
+    fn render_midi_devices(&self) -> Screen {
+        let Some(device) = self.midi_inputs.get(self.midi_device_index) else {
+            return Screen::with_header("DEVICES", "NO INPUTS", "Nothing to list");
+        };
+        let state = if device.enabled {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        };
+        // The port carrying this very screen is called out: switching it off
+        // from the surface it drives is the one mistake this page can make.
+        let detail = if device.in_use {
+            format!("{state} - IN USE")
+        } else if device.connected {
+            state.to_owned()
+        } else {
+            format!("{state} - GONE")
+        };
+        Screen::with_header(
+            indexed_title("DEVICES", self.midi_device_index, self.midi_inputs.len()),
+            normalized_display_text(&device.name, " "),
+            detail,
+        )
+    }
+
+    fn render_velocity_target(&self) -> Screen {
+        let count = self.midi_inputs.len() + 1;
+        let (name, detail) = match self.velocity_target() {
+            None => (SHARED_READING.to_owned(), "Every other input"),
+            Some(device) => (
+                device.name.clone(),
+                if device.curve.is_some() {
+                    "Own reading"
+                } else {
+                    "Follows shared"
+                },
+            ),
+        };
+        Screen::with_header(
+            indexed_title("VELOCITY", self.midi_velocity_target_index, count),
+            normalized_display_text(&name, " "),
+            detail,
+        )
+    }
+
+    fn render_velocity_points(&self) -> Screen {
+        let point = self.midi_velocity_point_index;
+        let count = self.velocity_point_count();
+        let (item, detail) = match VELOCITY_POINT_ITEMS.get(point) {
+            Some(item) => (
+                (*item).to_owned(),
+                velocity_hundredths(velocity_point(self.velocity_target_curve(), point)),
+            ),
+            None => ("USE SHARED".to_owned(), "Forget own reading".to_owned()),
+        };
+        Screen::with_header(indexed_title("VELOCITY", point, count), item, detail)
+    }
+
+    fn render_velocity_value(&self) -> Screen {
+        Screen::with_header(
+            VELOCITY_POINT_ITEMS[self
+                .midi_velocity_point_index
+                .min(VELOCITY_POINT_ITEMS.len() - 1)],
+            format!("{:.2}", f32::from(self.midi_velocity_value) / 100.0),
+            normalized_display_text(&self.velocity_target_name(), " "),
+        )
     }
 
     pub fn begin_audio_busy(&mut self) {
@@ -1986,6 +2260,15 @@ impl Menu {
                 | Page::AudioResult
         ) {
             self.apply_audio_input(input);
+        } else if matches!(
+            self.page,
+            Page::Midi
+                | Page::MidiDevices
+                | Page::MidiVelocityTarget
+                | Page::MidiVelocityPoints
+                | Page::MidiVelocityValue
+        ) {
+            self.apply_midi_input(input);
         } else if self.page == Page::SystemWeb {
             self.apply_system_web_input(input);
         } else if self.page == Page::SystemWifi {
@@ -3487,6 +3770,10 @@ impl Menu {
                         Page::SystemWifiDiscovered
                     }
                     Page::System => Page::Config,
+                    Page::Midi => Page::Config,
+                    Page::MidiDevices | Page::MidiVelocityTarget => Page::Midi,
+                    Page::MidiVelocityPoints => Page::MidiVelocityTarget,
+                    Page::MidiVelocityValue => Page::MidiVelocityPoints,
                     Page::Home => Page::Home,
                     _ => Page::Home,
                 };
@@ -3650,7 +3937,30 @@ impl Menu {
                     }
                     Page::Config if self.config_index == 3 => Page::Plugins,
                     Page::Config if self.config_index == 4 => Page::Audio,
-                    Page::Config if self.config_index == 5 => Page::System,
+                    Page::Config if self.config_index == 5 => {
+                        self.midi_index = 0;
+                        Page::Midi
+                    }
+                    Page::Config if self.config_index == 6 => Page::System,
+                    Page::Midi if self.midi_index == 0 => {
+                        self.midi_device_index = 0;
+                        Page::MidiDevices
+                    }
+                    Page::Midi => {
+                        self.midi_velocity_target_index = 0;
+                        Page::MidiVelocityTarget
+                    }
+                    Page::MidiVelocityTarget => {
+                        self.midi_velocity_point_index = 0;
+                        Page::MidiVelocityPoints
+                    }
+                    Page::MidiVelocityPoints => {
+                        self.midi_velocity_value = velocity_hundredths_of(velocity_point(
+                            self.velocity_target_curve(),
+                            self.midi_velocity_point_index,
+                        ));
+                        Page::MidiVelocityValue
+                    }
                     Page::Plugins if self.plugin_index == 0 => {
                         if self.active_plugin_config_available {
                             Page::PluginCustomPrograms
@@ -3821,11 +4131,20 @@ impl Menu {
                     CONFIG_DETAILS[self.config_index].into()
                 };
                 Screen::with_header(
-                    indexed_title("CONFIG", self.config_index, CONFIG_ITEMS.len()),
+                    indexed_title("SETTINGS", self.config_index, CONFIG_ITEMS.len()),
                     CONFIG_ITEMS[self.config_index],
                     detail,
                 )
             }
+            Page::Midi => Screen::with_header(
+                indexed_title("MIDI", self.midi_index, MIDI_ITEMS.len()),
+                MIDI_ITEMS[self.midi_index],
+                MIDI_DETAILS[self.midi_index],
+            ),
+            Page::MidiDevices => self.render_midi_devices(),
+            Page::MidiVelocityTarget => self.render_velocity_target(),
+            Page::MidiVelocityPoints => self.render_velocity_points(),
+            Page::MidiVelocityValue => self.render_velocity_value(),
             Page::ConfigRacks => self.render_performance_list("RACKS"),
             Page::ConfigSongs => self.render_performance_list("SONGS"),
             Page::ConfigSetlists => self.render_performance_list("SETLISTS"),
@@ -5464,6 +5783,20 @@ impl Menu {
             }
             Page::SystemWeb => (&mut self.system_web_index, SYSTEM_WEB_ITEMS.len()),
             Page::Audio => (&mut self.audio_index, AUDIO_ITEMS.len()),
+            // The number page turns its value rather than a cursor, and does
+            // it in `apply_midi_input` before this table is ever reached.
+            Page::MidiVelocityValue => return,
+            Page::Midi => (&mut self.midi_index, MIDI_ITEMS.len()),
+            Page::MidiDevices if self.midi_inputs.is_empty() => return,
+            Page::MidiDevices => (&mut self.midi_device_index, self.midi_inputs.len()),
+            Page::MidiVelocityTarget => {
+                let len = self.midi_inputs.len() + 1;
+                (&mut self.midi_velocity_target_index, len)
+            }
+            Page::MidiVelocityPoints => {
+                let len = self.velocity_point_count();
+                (&mut self.midi_velocity_point_index, len)
+            }
             Page::PluginLibrary => {
                 let len = if self.plugin_play_context == PluginPlayContext::RackSlot {
                     1
@@ -7189,7 +7522,9 @@ fn render_home(selected: usize) -> [String; 2] {
     for (index, (item, area)) in [
         ("LIVE", Rect::new(0, 0, 8, 1)),
         ("PLAY", Rect::new(10, 0, 8, 1)),
-        ("CONFIG", Rect::new(4, 1, 10, 1)),
+        // Two more letters than CONFIG had, so the button is two columns
+        // wider and one column further left to stay centred on the row.
+        ("SETTINGS", Rect::new(3, 1, 12, 1)),
     ]
     .into_iter()
     .enumerate()
@@ -7230,6 +7565,45 @@ fn carousel_label(name: &str, loaded: bool) -> String {
     }
     let inside = text_columns(DISPLAY_COLUMNS).saturating_sub(2);
     format!("|{}|", truncated(&name, inside))
+}
+
+/// One point of a reading, on the MIDI scale.
+fn velocity_point(curve: VelocityCurve, index: usize) -> u8 {
+    match index {
+        0 => curve.low,
+        1 => curve.mid_input,
+        2 => curve.mid_output,
+        _ => curve.high,
+    }
+}
+
+/// The same point, moved, with the reading put back in order afterwards.
+fn with_velocity_point(curve: VelocityCurve, index: usize, value: u8) -> VelocityCurve {
+    let mut curve = curve;
+    match index {
+        0 => curve.low = value,
+        1 => curve.mid_input = value,
+        2 => curve.mid_output = value,
+        _ => curve.high = value,
+    }
+    curve.sanitised()
+}
+
+/// A point as a number between 0 and 1, which is how this screen shows it:
+/// hundredths, so that every press moves the number the player is reading.
+/// The MIDI scale has 128 steps and the screen shows two decimals, so counting
+/// in MIDI units here would sometimes print the same number twice in a row and
+/// read as a control that had stopped responding.
+fn velocity_hundredths_of(value: u8) -> u8 {
+    ((u16::from(value) * 100 + 63) / 127).min(100) as u8
+}
+
+fn velocity_from_hundredths(hundredths: u8) -> u8 {
+    ((u16::from(hundredths.min(100)) * 127 + 50) / 100) as u8
+}
+
+fn velocity_hundredths(value: u8) -> String {
+    format!("{:.2}", f32::from(velocity_hundredths_of(value)) / 100.0)
 }
 
 fn indexed_title(title: &str, index: usize, len: usize) -> String {
@@ -7764,6 +8138,218 @@ mod tests {
             Header::Plugin { name, context, .. }
                 if name == expected_name && context == expected_context
         ));
+    }
+
+    /// Two keyboards: one the player is standing at, one that is not.
+    fn two_keyboards() -> Vec<MidiDeviceEntry> {
+        vec![
+            MidiDeviceEntry {
+                name: "KL Essential 61 mk3 MIDI".into(),
+                enabled: true,
+                connected: true,
+                in_use: true,
+                curve: None,
+            },
+            MidiDeviceEntry {
+                name: "Pad Grid".into(),
+                enabled: false,
+                connected: true,
+                in_use: false,
+                curve: None,
+            },
+        ]
+    }
+
+    /// Walk from HOME into SETTINGS > MIDI, and stop wherever asked.
+    fn open_midi(menu: &mut Menu, item: usize) {
+        menu.sync_midi_settings(two_keyboards(), VelocityCurve::default());
+        // HOME: LIVE, PLAY, SETTINGS.
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+        // SETTINGS: MIDI is the sixth of seven.
+        for _ in 0..5 {
+            menu.apply_input(Input::Button3);
+        }
+        menu.apply_input(Input::Button1);
+        for _ in 0..item {
+            menu.apply_input(Input::Button3);
+        }
+        menu.apply_input(Input::Button1);
+    }
+
+    #[test]
+    fn the_settings_menu_is_named_as_the_big_screen_names_it() {
+        let mut menu = Menu::default();
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button3);
+        assert_eq!(menu.render().line_2, "   [ SETTINGS ]   ");
+        menu.apply_input(Input::Button1);
+        let screen = menu.render();
+        assert!(
+            matches!(&screen.header, Header::Visible(header) if header.starts_with("SETTINGS")),
+            "the header still says CONFIG: {:?}",
+            screen.header
+        );
+    }
+
+    #[test]
+    fn every_input_is_listed_with_the_state_a_player_can_change() {
+        let mut menu = Menu::default();
+        open_midi(&mut menu, 0);
+        let screen = menu.render();
+        assert_eq!(screen.line_1, "KL Essential 61 mk");
+        // The port carrying this very screen says so, so that switching it
+        // off is never a surprise.
+        assert_eq!(screen.line_2, "ENABLED - IN USE");
+
+        menu.apply_input(Input::Button3);
+        let screen = menu.render();
+        assert_eq!(screen.line_1, "Pad Grid");
+        assert_eq!(screen.line_2, "DISABLED");
+    }
+
+    #[test]
+    fn switching_an_input_on_asks_the_host_and_shows_it_at_once() {
+        let mut menu = Menu::default();
+        open_midi(&mut menu, 0);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetMidiInputEnabled {
+                name: "Pad Grid".into(),
+                enabled: true,
+            })
+        );
+        assert_eq!(menu.render().line_2, "ENABLED");
+    }
+
+    #[test]
+    fn the_velocity_list_starts_with_the_reading_every_keybed_follows() {
+        let mut menu = Menu::default();
+        open_midi(&mut menu, 1);
+        let screen = menu.render();
+        assert_eq!(screen.line_1, "ALL OTHERS");
+        assert_eq!(screen.line_2, "Every other input");
+
+        menu.apply_input(Input::Button3);
+        let screen = menu.render();
+        assert_eq!(screen.line_1, "KL Essential 61 mk");
+        assert_eq!(screen.line_2, "Follows shared");
+    }
+
+    #[test]
+    fn a_point_is_shown_and_turned_between_zero_and_one() {
+        let mut menu = Menu::default();
+        open_midi(&mut menu, 1);
+        // The shared reading, its bend output: the identity's 64 of 127.
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button3);
+        let screen = menu.render();
+        assert_eq!(screen.line_1, "BEND OUT");
+        assert_eq!(screen.line_2, "0.50");
+
+        menu.apply_input(Input::Button1);
+        for _ in 0..10 {
+            menu.apply_input(Input::Button3);
+        }
+        assert_eq!(menu.render().line_1, "0.60");
+        menu.apply_input(Input::Button1);
+
+        let Some(MenuCommand::SetVelocityCurve { device, curve }) = menu.take_command() else {
+            panic!("the reading was not sent to the host");
+        };
+        assert_eq!(device, None);
+        assert_eq!(curve.map(|curve| curve.mid_output), Some(76));
+        // And the list shows what was committed, not what it started at.
+        assert_eq!(menu.render().line_2, "0.60");
+    }
+
+    #[test]
+    fn turning_a_point_leaves_the_reading_alone_until_it_is_taken() {
+        let mut menu = Menu::default();
+        open_midi(&mut menu, 1);
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        // BACK, rather than OK.
+        menu.apply_input(Input::Button4);
+        assert_eq!(menu.take_command(), None);
+        assert_eq!(menu.render().line_2, "0.00");
+    }
+
+    #[test]
+    fn a_keybed_given_its_own_reading_can_be_handed_back_to_the_shared_one() {
+        let mut menu = Menu::default();
+        open_midi(&mut menu, 1);
+        // The first keyboard, its floor, moved once.
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+        let _ = menu.take_command();
+        // It now has a reading of its own, and a fifth entry to give it back.
+        menu.apply_input(Input::Button4);
+        assert_eq!(menu.render().line_2, "Own reading");
+        menu.apply_input(Input::Button1);
+        for _ in 0..4 {
+            menu.apply_input(Input::Button3);
+        }
+        let screen = menu.render();
+        assert_eq!(screen.line_1, "USE SHARED");
+        menu.apply_input(Input::Button1);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetVelocityCurve {
+                device: Some("KL Essential 61 mk3 MIDI".into()),
+                curve: None,
+            })
+        );
+        assert_eq!(menu.render().line_2, "Follows shared");
+    }
+
+    #[test]
+    fn a_number_between_zero_and_one_survives_the_trip_to_the_midi_scale() {
+        for hundredths in 0..=100u8 {
+            let value = velocity_from_hundredths(hundredths);
+            assert!(value <= 127);
+            assert_eq!(
+                velocity_hundredths_of(value),
+                hundredths,
+                "{hundredths} did not come back"
+            );
+        }
+        assert_eq!(velocity_from_hundredths(0), 0);
+        assert_eq!(velocity_from_hundredths(100), 127);
+    }
+
+    #[test]
+    fn the_midi_screens_never_draw_a_line_the_panel_would_refuse() {
+        let mut menu = Menu::default();
+        menu.sync_midi_settings(
+            vec![MidiDeviceEntry {
+                name: "A preposterously long MIDI port name from a hub".into(),
+                enabled: false,
+                connected: false,
+                in_use: false,
+                curve: Some(VelocityCurve::default()),
+            }],
+            VelocityCurve::default(),
+        );
+        for page in [
+            Page::Midi,
+            Page::MidiDevices,
+            Page::MidiVelocityTarget,
+            Page::MidiVelocityPoints,
+            Page::MidiVelocityValue,
+        ] {
+            menu.page = page;
+            menu.midi_velocity_target_index = 1;
+            assert!(menu.render().is_valid(), "{page:?} drew an invalid screen");
+        }
     }
 
     #[test]
@@ -8948,12 +9534,12 @@ mod tests {
         let mut menu = plugin_menu();
         menu.apply(Action::Previous);
         assert_eq!(menu.render().header, Header::Visible(HOME_HEADER.into()));
-        assert_eq!(menu.render().line_2, "    [ CONFIG ]    ");
+        assert_eq!(menu.render().line_2, "   [ SETTINGS ]   ");
 
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
-            Header::Visible("CONFIG         1/6".into())
+            Header::Visible("SETTINGS       1/7".into())
         );
     }
 

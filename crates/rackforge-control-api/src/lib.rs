@@ -3,6 +3,7 @@ pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 pub use rackforge_midi_api::{
     MidiChannel, MidiSourceDescriptor, ParameterLink, ParameterLinkChannel, ParameterLinkId,
     ParameterLinkMessage, ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
+    velocity_curve::VelocityCurve,
 };
 pub use rackforge_performance_api::{
     LibraryRevision, LivePerformanceState, PatternDefinition, PerformanceEdit, PerformanceLibrary,
@@ -481,6 +482,30 @@ pub enum ControlRequest {
     },
     /// Lists stable MIDI identities, including disconnected saved endpoints.
     MidiSources,
+    /// Everything a settings screen needs about MIDI input: every port this
+    /// machine can see, whether the host is listening to it, and the reading
+    /// applied to what it sends.
+    ///
+    /// Deliberately not `MidiSources`, which shows a plugin only the ports a
+    /// player approved. This one is for the settings screens, which are the
+    /// place where that approval is given.
+    MidiSettings,
+    /// Listen to a MIDI input, or stop listening to it.
+    SetMidiInputEnabled {
+        name: String,
+        enabled: bool,
+    },
+    /// The reading for one keybed, or -- with no name -- for every keybed
+    /// that has none of its own.
+    SetVelocityCurve {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device: Option<String>,
+        /// The reading to apply, or nothing at all -- which for a named
+        /// device means "go back to following the shared reading". Nothing
+        /// for the shared reading itself is not a request anyone can make.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        curve: Option<VelocityCurve>,
+    },
     /// Arms a transient observer. No persisted link is changed by Learn.
     BeginMidiLearn {
         instance_id: String,
@@ -655,6 +680,13 @@ pub enum ControlResponse {
     MidiSources {
         sources: Vec<MidiSourceStatus>,
     },
+    MidiSettings {
+        /// Every port this machine can see, in the order a screen should
+        /// show them.
+        inputs: Vec<MidiInputSetting>,
+        /// The reading for a keybed with none of its own.
+        shared_curve: VelocityCurve,
+    },
     MidiLearnStarted {
         learn_id: u64,
     },
@@ -720,6 +752,24 @@ pub enum ControlResponse {
 pub struct PluginParameterValue {
     pub index: u32,
     pub value: f64,
+}
+
+/// One MIDI input, as the settings screens see it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiInputSetting {
+    /// The port's name, as this host knows it.
+    pub name: String,
+    /// Whether the host is listening to it.
+    pub enabled: bool,
+    /// Whether it is plugged in right now. A port a player chose stays in
+    /// this list while it is unplugged, so unplugging a keyboard does not
+    /// silently forget the choice.
+    pub connected: bool,
+    /// Its own velocity reading, if it has been given one; otherwise the
+    /// shared reading applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curve: Option<VelocityCurve>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -4023,6 +4023,7 @@ version = "0.1.12"
 dependencies = [
  "rackforge-audio-api",
  "rackforge-controller-api",
+ "rackforge-midi-api",
  "rackforge-performance-api",
  "rackforge-plugin-api",
  "rackforge-program-api",

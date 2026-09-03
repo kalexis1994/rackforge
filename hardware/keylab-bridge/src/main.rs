@@ -2007,7 +2007,10 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         eprintln!("Could not refresh LIVE performance library: {error}");
     }
     if let Err(error) = refresh_audio_settings(menu) {
-        eprintln!("Could not refresh CONFIG > AUDIO: {error}");
+        eprintln!("Could not refresh SETTINGS > AUDIO: {error}");
+    }
+    if let Err(error) = refresh_midi_settings(menu) {
+        eprintln!("Could not refresh SETTINGS > MIDI: {error}");
     }
     if let Err(error) = refresh_web_settings(menu) {
         eprintln!("No se pudo refrescar CONFIG > SYSTEM > WEB: {error}");
@@ -2091,6 +2094,66 @@ fn refresh_performance_snapshot(menu: &mut menu::Menu) -> Result<(), String> {
         }
         ControlResponse::Error { message, .. } => Err(message),
         _ => Err("unexpected response while reading LIVE performance state".into()),
+    }
+}
+
+/// Whether this port is one of the ones carrying the surface a player is
+/// standing at. The screen calls those out so that "DISABLED" is never a
+/// surprise the player performs on themselves.
+fn drives_this_surface(name: &str) -> bool {
+    let folded = name.to_ascii_lowercase();
+    folded.contains("keylab") || folded.contains("kl essential")
+}
+
+/// The MIDI inputs and their velocity readings.
+///
+/// Unlike audio, this is not the platform host's business: the host that
+/// reads the keyboard answers it, on Windows as on the Pi.
+fn refresh_midi_settings(menu: &mut menu::Menu) -> Result<(), String> {
+    match control_request(&ControlRequest::MidiSettings)? {
+        ControlResponse::MidiSettings {
+            inputs,
+            shared_curve,
+        } => {
+            take_midi_settings(menu, inputs, shared_curve);
+            Ok(())
+        }
+        ControlResponse::Error { message, .. } => Err(message),
+        _ => Err("unexpected response while reading MIDI settings".into()),
+    }
+}
+
+fn take_midi_settings(
+    menu: &mut menu::Menu,
+    inputs: Vec<rackforge_control_api::MidiInputSetting>,
+    shared_curve: rackforge_control_api::VelocityCurve,
+) {
+    let entries = inputs
+        .into_iter()
+        .map(|input| menu::MidiDeviceEntry {
+            in_use: drives_this_surface(&input.name),
+            name: input.name,
+            enabled: input.enabled,
+            connected: input.connected,
+            curve: input.curve,
+        })
+        .collect();
+    menu.sync_midi_settings(entries, shared_curve);
+}
+
+/// Send a MIDI settings change and take the host's answer straight back into
+/// the screen, so what is shown is what the host actually did.
+fn apply_midi_settings(menu: &mut menu::Menu, request: &ControlRequest) -> Result<(), String> {
+    match control_request(request)? {
+        ControlResponse::MidiSettings {
+            inputs,
+            shared_curve,
+        } => {
+            take_midi_settings(menu, inputs, shared_curve);
+            Ok(())
+        }
+        ControlResponse::Error { message, .. } => Err(message),
+        _ => Err("unexpected response while changing MIDI settings".into()),
     }
 }
 
@@ -2698,6 +2761,14 @@ fn apply_pending_menu_command(
         #[cfg(target_os = "linux")]
         menu::MenuCommand::ApplyAudioOutput { profile } => {
             start_audio_change(audio_task, menu, profile)?;
+            Ok(true)
+        }
+        menu::MenuCommand::SetMidiInputEnabled { name, enabled } => {
+            apply_midi_settings(menu, &ControlRequest::SetMidiInputEnabled { name, enabled })?;
+            Ok(true)
+        }
+        menu::MenuCommand::SetVelocityCurve { device, curve } => {
+            apply_midi_settings(menu, &ControlRequest::SetVelocityCurve { device, curve })?;
             Ok(true)
         }
         menu::MenuCommand::ForceHome => {

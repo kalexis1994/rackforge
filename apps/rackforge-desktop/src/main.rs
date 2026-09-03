@@ -1206,11 +1206,25 @@ impl DesktopApp {
             .audio_preferences
             .clone()
             .map_or_else(|| inventory.default_preferences(), Ok)?;
+        // Each port's identity beside its name, so the interface can tell
+        // which keybed a strike came from without knowing how the identity is
+        // derived.
+        let midi_source_keys: serde_json::Map<String, serde_json::Value> = inventory
+            .midi_inputs
+            .iter()
+            .map(|name| {
+                (
+                    name.clone(),
+                    serde_json::Value::from(desktop_audio::stable_midi_source_key(name).get()),
+                )
+            })
+            .collect();
         Ok(serde_json::json!({
             "status": "ok",
             "host": "desktop",
             "inventory": inventory,
             "preferences": preferences,
+            "midi_source_keys": midi_source_keys,
             "runtime_status": self.audio_summary(),
         }))
     }
@@ -1246,24 +1260,30 @@ impl DesktopApp {
         &mut self,
         preferences: desktop_audio::AudioPreferences,
     ) -> Result<String> {
-        // Dragging a point on the velocity curve is not a device change.
+        // Dragging a point on a velocity curve is not a device change.
         // Everything below tears the stream down and scans the drivers, which
         // for a MIDI reading would mean a gap in the sound and, on
         // single-client ASIO hardware, a device that has to be re-acquired.
-        // So if the reading is the only thing that moved, it goes to the audio
-        // thread as it is and nothing is rebuilt.
+        // So if the readings are the only thing that moved, they go to the
+        // audio thread as they are and nothing is rebuilt.
         if let Some(current) = self.audio_preferences.clone() {
             let mut probe = preferences.clone();
             probe.velocity_curve = current.velocity_curve;
-            if probe == current && preferences.velocity_curve != current.velocity_curve {
+            probe.velocity_curves = current.velocity_curves.clone();
+            let readings_moved = preferences.velocity_curve != current.velocity_curve
+                || preferences.velocity_curves != current.velocity_curves;
+            if probe == current && readings_moved {
                 if let Some(audio) = self.audio.as_ref() {
                     audio
-                        .set_velocity_curve(preferences.velocity_curve)
-                        .context("sending the velocity curve to the audio runtime")?;
+                        .set_velocity_curves(
+                            preferences.velocity_curve,
+                            &preferences.velocity_curves,
+                        )
+                        .context("sending the velocity readings to the audio runtime")?;
                 }
                 preferences
                     .persist(&self.audio_config_path)
-                    .context("saving the velocity curve")?;
+                    .context("saving the velocity readings")?;
                 self.audio_preferences = Some(preferences);
                 return Ok("Velocity curve applied".to_owned());
             }
@@ -7221,6 +7241,7 @@ mod tests {
             input_gain_db: 0,
             midi_inputs: vec!["Enabled Keyboard".into(), "Disconnected Keyboard".into()],
             velocity_curve: Default::default(),
+            velocity_curves: Default::default(),
         };
         let present = BTreeSet::from(["Enabled Keyboard".into(), "Hidden Keyboard".into()]);
         let sources = approved_midi_source_statuses(Some(&preferences), &present);
@@ -7252,6 +7273,7 @@ mod tests {
             input_gain_db: 0,
             midi_inputs: vec!["KL Essential 61 mk3 MIDI".into()],
             velocity_curve: Default::default(),
+            velocity_curves: Default::default(),
         };
         let physical =
             approved_midi_source(Some(&preferences), "KL Essential 61 mk3 MIDI").unwrap();

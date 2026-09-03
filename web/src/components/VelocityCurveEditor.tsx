@@ -37,11 +37,18 @@ export function VelocityCurveEditor({
   curve,
   onChange,
   live = false,
+  sourceKey = null,
+  ownSourceKeys = [],
 }: {
   curve: VelocityCurve;
   onChange: (curve: VelocityCurve) => void;
   /** Follow the keyboard: ask the host what it last read, and aim at it. */
   live?: boolean;
+  /** The keybed this square is reading for, or null for every other one. */
+  sourceKey?: number | null;
+  /** The keybeds that have a reading of their own, so the default square
+      knows which strikes are not its business. */
+  ownSourceKeys?: number[];
 }) {
   const sane = sanitiseVelocityCurve(curve);
   const frame = useRef<SVGSVGElement | null>(null);
@@ -62,7 +69,19 @@ export function VelocityCurveEditor({
   // The fade is the mark's own animation, restarted by keying it on the
   // strike number: a timer here would be a second clock to keep honest, and a
   // piece of state that exists only to say "not any more".
-  const strike = useLastStrike(live);
+  const heard = useLastStrike(live);
+  // A strike belongs to this square when it came from the keybed the square
+  // is reading for -- or, on the square that reads for everything else, when
+  // it came from a keybed that has no reading of its own. Drawing every
+  // strike on every square would put a pad controller's marks on a piano's
+  // curve, which is exactly the confusion this screen exists to end.
+  const mine =
+    heard === null
+      ? false
+      : sourceKey === null
+        ? !ownSourceKeys.includes(heard.source_key)
+        : heard.source_key === sourceKey;
+  const strike = mine ? heard : null;
 
   /** Where a pointer is, in velocity units, whatever the box is scaled to. */
   const readPointer = useCallback((event: { clientX: number; clientY: number }) => {

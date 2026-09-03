@@ -18,6 +18,8 @@ export interface LastStrike {
   velocity: number;
   /** What the host's own reading made of it. */
   played: number;
+  /** The keybed it came from, as the identity the port list carries. */
+  source_key: number;
 }
 
 /** How often to ask. Fast enough to feel immediate, slow enough to be free. */

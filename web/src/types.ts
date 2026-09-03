@@ -49,8 +49,10 @@ export interface HostAudioPreferences {
   input_channels?: number[];
   input_gain_db?: number;
   midi_inputs: string[];
-  /** How hard a key was struck, as this host reads it. Absent means untouched. */
+  /** The reading for a keybed with none of its own. Absent means untouched. */
   velocity_curve?: VelocityCurve;
+  /** And the reading each keybed that has one gets, by port name. */
+  velocity_curves?: Record<string, VelocityCurve>;
 }
 
 export interface HostAudioSettings {
@@ -63,6 +65,9 @@ export interface HostAudioSettings {
     midi_inputs: string[];
   };
   preferences: HostAudioPreferences;
+  /** Each port's identity, so a strike can be matched to the port it came
+      from without the interface knowing how the identity is derived. */
+  midi_source_keys?: Record<string, number>;
   runtime?: HostAudioRuntimeStatus;
   runtime_status: string;
 }

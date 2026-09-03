@@ -12353,3 +12353,46 @@ body {
 .velocity-curve-strike-readout {
   color: var(--ink);
 }
+
+/* Which keybed the square is reading for. A reading corrects a keyboard, so
+   it belongs to the keyboard; the first option is the one every device
+   without its own follows, which is what a player with one keyboard uses and
+   never has to think about. */
+.velocity-curve-port {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.velocity-curve-port select {
+  min-width: 0;
+  width: 100%;
+  padding: 9px 10px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.velocity-curve-forget {
+  margin-top: 10px;
+  min-height: 28px;
+  padding: 0 12px;
+  justify-self: start;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.velocity-curve-forget:hover {
+  color: var(--ink);
+  border-color: rgba(var(--acid-rgb), 0.4);
+}

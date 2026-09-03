@@ -829,9 +829,11 @@ async fn last_strike(State(state): State<WebState>) -> Response {
         .and_then(|slot| slot.as_ref().map(|cell| cell.load(Ordering::Relaxed)))
         .unwrap_or(0);
     Json(json!({
-        "count": packed >> 16,
-        "velocity": (packed >> 8) & 0xff,
-        "played": packed & 0xff,
+        "count": packed >> 48,
+        "velocity": (packed >> 40) & 0xff,
+        "played": (packed >> 32) & 0xff,
+        // Which keybed it came from, as the identity the port list carries.
+        "source_key": packed & 0xffff_ffff,
     }))
     .into_response()
 }

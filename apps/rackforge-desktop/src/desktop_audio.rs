@@ -252,10 +252,17 @@ pub struct AudioPreferences {
     #[serde(default = "default_input_gain_db")]
     pub input_gain_db: i8,
     pub midi_inputs: Vec<String>,
-    /// How hard a key was struck, as this machine reads it. Absent in a file
-    /// written before there was a curve, and absent means the identity.
+    /// How hard a key was struck, as this machine reads it, for a device with
+    /// no reading of its own. Absent in a file written before there was a
+    /// curve, and absent means the identity.
     #[serde(default)]
     pub velocity_curve: VelocityCurve,
+    /// And the reading for each keybed that has one, by port name. A curve
+    /// belongs to the keyboard it corrects: a hammer action spreads its
+    /// velocities across the range and a pad grid piles them at the top, so
+    /// one reading for both is wrong for one of them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub velocity_curves: BTreeMap<String, VelocityCurve>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -442,6 +449,7 @@ impl AudioInventory {
             input_gain_db: DEFAULT_INPUT_GAIN_DB,
             midi_inputs: self.midi_inputs.clone(),
             velocity_curve: VelocityCurve::default(),
+            velocity_curves: BTreeMap::new(),
         })
     }
 
@@ -890,6 +898,7 @@ impl DesktopAudio {
             parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             parameter_links: Vec::new(),
             velocity_curve: preferences.velocity_curve.sanitised(),
+            velocity_curves: compile_velocity_curves(&preferences.velocity_curves),
             last_strike: Arc::clone(&last_strike),
             strike_count: 0,
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
@@ -1209,10 +1218,18 @@ impl DesktopAudio {
 
     /// Tells the audio thread whether the keyboard is conducting LIVE lanes
     /// or simply playing the instrument.
-    /// The velocity reading, live: a player drags a point and the next key
-    /// they press is already read through it.
-    pub fn set_velocity_curve(&self, curve: VelocityCurve) -> Result<()> {
-        self.send_command(AudioCommand::SetVelocityCurve(curve))
+    /// The velocity readings, live: a player drags a point and the next key
+    /// they press is already read through it. Compiled here, off the audio
+    /// thread, because resolving a port name to its identity hashes a string.
+    pub fn set_velocity_curves(
+        &self,
+        default: VelocityCurve,
+        per_name: &BTreeMap<String, VelocityCurve>,
+    ) -> Result<()> {
+        self.send_command(AudioCommand::SetVelocityCurves {
+            default,
+            per_source: compile_velocity_curves(per_name),
+        })
     }
 
     pub fn set_conducting(&self, conducting: bool) -> Result<()> {
@@ -1408,7 +1425,10 @@ enum AudioCommand {
         reply: SyncSender<Result<(), String>>,
     },
     InjectMidi(MidiPacket),
-    SetVelocityCurve(VelocityCurve),
+    SetVelocityCurves {
+        default: VelocityCurve,
+        per_source: Vec<(MidiSourceKey, VelocityCurve)>,
+    },
     Sequencer {
         command: rackforge_control_api::SequencerCommand,
         reply: SyncSender<std::result::Result<(), String>>,
@@ -1772,8 +1792,11 @@ struct AudioProcessor {
     sequencer_scratch: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
     parameter_links: Vec<CompiledParameterLink>,
-    /// The reading applied to velocities as they arrive from a device.
+    /// The reading for a device with none of its own.
     velocity_curve: VelocityCurve,
+    /// And the readings that belong to a particular keybed. A handful of
+    /// ports at most, so a scan beats a hash and allocates nothing.
+    velocity_curves: Vec<(MidiSourceKey, VelocityCurve)>,
     /// The last strike, for the interface: strike number, what arrived, and
     /// what the reading made of it, packed into one word.
     last_strike: Arc<AtomicU64>,
@@ -1812,6 +1835,14 @@ struct AudioProcessor {
 }
 
 impl AudioProcessor {
+    /// This keybed's reading, or the one every other device gets.
+    fn reading_for(&self, source: MidiSourceKey) -> &VelocityCurve {
+        self.velocity_curves
+            .iter()
+            .find(|(key, _)| *key == source)
+            .map_or(&self.velocity_curve, |(_, curve)| curve)
+    }
+
     fn render(&mut self, frames: usize) -> Result<&[f32]> {
         if frames == 0 || frames > MAX_AUDIO_FRAMES {
             bail!("Windows requested an unsupported audio block of {frames} frames");
@@ -1839,16 +1870,20 @@ impl AudioProcessor {
             // parameter links, the sequencer's conducting input and the
             // instruments all see the velocity the player meant.
             let raw_velocity = packet.data[2];
-            let packet = read_velocity(packet, &self.velocity_curve);
+            let source = packet.source;
+            let packet = read_velocity(packet, self.reading_for(source));
             // And what arrived, for the interface to draw: the velocity BEFORE
             // the reading, because the square shows where the keyboard landed
             // and where the curve took it. One relaxed store per strike on the
             // audio thread, one relaxed load per poll off it.
             if packet.length >= 3 && packet.data[0] & 0xf0 == 0x90 && packet.data[2] > 0 {
-                self.strike_count = self.strike_count.wrapping_add(1);
+                self.strike_count = (self.strike_count.wrapping_add(1)) & 0xffff;
                 let arrived = u64::from(raw_velocity);
                 self.last_strike.store(
-                    (self.strike_count << 16) | (arrived << 8) | u64::from(packet.data[2]),
+                    (self.strike_count << 48)
+                        | (arrived << 40)
+                        | (u64::from(packet.data[2]) << 32)
+                        | u64::from(source.get()),
                     Ordering::Relaxed,
                 );
             }
@@ -2328,8 +2363,12 @@ impl AudioProcessor {
                 AudioCommand::SetMasterPan(pan) => self.master_balance.set_pan(pan),
                 AudioCommand::SetRunning(running) => self.stopped = !running,
                 AudioCommand::SetConducting(conducting) => self.conducting = conducting,
-                AudioCommand::SetVelocityCurve(curve) => {
-                    self.velocity_curve = curve.sanitised();
+                AudioCommand::SetVelocityCurves {
+                    default,
+                    per_source,
+                } => {
+                    self.velocity_curve = default.sanitised();
+                    self.velocity_curves = per_source;
                 }
                 AudioCommand::EmergencyStop => {
                     for voice in &mut self.voices {
@@ -2554,6 +2593,22 @@ fn feed_sequencer_input(
         0x80 | 0x90 => sequencer.note_input(channel, data[1], 0, false),
         _ => false,
     }
+}
+
+/// The readings, resolved from port names to the identities packets carry.
+/// Names that Windows would not accept as a source are dropped rather than
+/// guessed at: a curve for a port that cannot exist would never be reached.
+fn compile_velocity_curves(
+    per_name: &BTreeMap<String, VelocityCurve>,
+) -> Vec<(MidiSourceKey, VelocityCurve)> {
+    per_name
+        .iter()
+        .filter_map(|(name, curve)| {
+            stable_midi_source_id(name)
+                .ok()
+                .map(|id| (stable_midi_source_key_from_id(&id), curve.sanitised()))
+        })
+        .collect()
 }
 
 /// A note-on's velocity, read through the curve. Every other message passes
@@ -3816,6 +3871,7 @@ mod tests {
             input_gain_db: 3,
             midi_inputs: vec!["Keyboard".into()],
             velocity_curve: Default::default(),
+            velocity_curves: Default::default(),
         };
         let text = toml::to_string(&preferences).unwrap();
         assert_eq!(
@@ -3844,6 +3900,7 @@ mod tests {
             input_gain_db: DEFAULT_INPUT_GAIN_DB,
             midi_inputs: vec!["Test MIDI".into()],
             velocity_curve: Default::default(),
+            velocity_curves: Default::default(),
         };
         preferences.persist(&path).unwrap();
         assert_eq!(AudioPreferences::load(&path).unwrap(), Some(preferences));
@@ -3893,6 +3950,7 @@ midi_inputs = []
             input_gain_db: DEFAULT_INPUT_GAIN_DB,
             midi_inputs: Vec::new(),
             velocity_curve: Default::default(),
+            velocity_curves: Default::default(),
         };
         let saved = AudioPreferences {
             schema_version: AUDIO_SCHEMA_VERSION,
@@ -3906,6 +3964,7 @@ midi_inputs = []
             input_gain_db: 0,
             midi_inputs: vec!["KL Essential 61 mk3 MIDI".into()],
             velocity_curve: Default::default(),
+            velocity_curves: Default::default(),
         };
 
         let fallback = fallback_preserving_midi(defaults, &saved);

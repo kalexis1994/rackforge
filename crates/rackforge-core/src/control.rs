@@ -602,6 +602,35 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
                 .collect();
             ControlResponse::MidiSources { sources }
         }
+        // The little screen's SETTINGS > MIDI speaks to this socket as well as
+        // to the desktop's, and this host cannot answer it yet: the Pi opens
+        // its ports from the audio engine's own configuration, and a velocity
+        // reading has to be applied where the packet arrives, which is inside
+        // the ALSA drain and not reachable from here. Saying so is better than
+        // the empty listing the desktop returns off Windows -- on a Pi with a
+        // keyboard plugged in, an empty list reads as "no keyboards", which is
+        // a lie, where an error reads as "not here", which is true.
+        ControlRequest::MidiSettings => error_response(
+            ControlErrorCode::Unavailable,
+            "MIDI settings are not served by this host yet",
+            None,
+        ),
+        ControlRequest::SetMidiInputEnabled { name, enabled } => {
+            let _ = (name, enabled);
+            error_response(
+                ControlErrorCode::Unavailable,
+                "MIDI inputs are chosen by the host that owns them",
+                None,
+            )
+        }
+        ControlRequest::SetVelocityCurve { device, curve } => {
+            let _ = (device, curve);
+            error_response(
+                ControlErrorCode::Unavailable,
+                "Velocity readings are applied by the host that reads them",
+                None,
+            )
+        }
         ControlRequest::BeginMidiLearn {
             instance_id,
             parameter_index,

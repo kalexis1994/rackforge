@@ -8911,6 +8911,14 @@ body {
   display: none;
 }
 
+/* How far the editor's floating chrome sits off the canvas wall: the menu
+   key, the details key beneath it, and the zoom column opposite. They used to
+   disagree -- 8px on the left, 10px on the right -- and both read as stuck to
+   the edge on a phone, where the wall is the screen. */
+:root {
+  --rack-float-inset: 14px;
+}
+
 .rack-details-floating-button {
   display: none;
 }
@@ -9317,9 +9325,14 @@ body {
   background: rgba(7, 17, 25, 0.92);
 }
 
-.rack-graph-canvas .react-flow__controls {
-  top: 10px;
-  right: 10px;
+/* React Flow positions its own panels -- `.react-flow__panel.top {top: 0}`
+   and `.right {right: 0}` -- at the same specificity as a two-class selector
+   here, and its stylesheet is imported by the editor's lazy chunk, so it
+   loads later and wins the tie. Naming the panel class as well takes the
+   selector to three and settles it without reaching for !important. */
+.rack-graph-canvas .react-flow__controls.react-flow__panel {
+  top: var(--rack-float-inset);
+  right: var(--rack-float-inset);
   bottom: auto;
   left: auto;
   margin: 0;

@@ -4936,6 +4936,118 @@
   box-shadow: var(--fp-lip), 0 14px 36px rgba(0, 0, 0, 0.35) !important;
 }
 
+/* Only the box above was ever ported. Everything inside it -- the header, the
+   channel keys, the scrub fields, the curve, the footer -- still carried the
+   palette from before this theme: `rgba(98, 223, 241, …)` seams, a
+   `#10232d → #091720` header, and acid fills on anything selected. Opening
+   Channel routing dropped a window from the old instrument into the middle of
+   this one. */
+
+.rack-midi-link-editor > header {
+  background: var(--fp-panel) !important;
+  border-bottom: var(--fp-seam) !important;
+}
+
+.rack-midi-link-editor > header span,
+.rack-midi-link-editor legend,
+.rack-midi-link-editor .scrub-number-field > span,
+.rack-midi-link-editor .scrub-number-input small,
+.rack-midi-check small {
+  color: var(--fp-rail-label) !important;
+}
+
+.rack-midi-link-editor button,
+.rack-midi-link-editor input {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+/* A chosen channel is a key held down, not a lamp. Pressed reads at a glance
+   across sixteen of them and keeps the label legible, which an acid fill with
+   near-black text did not at 9px. */
+.rack-midi-link-editor button:hover:not(:disabled),
+.rack-midi-link-editor button:focus-visible,
+.rack-midi-link-editor button.active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.rack-midi-link-editor input {
+  box-shadow: var(--fp-well) !important;
+  background: var(--panel-inset) !important;
+}
+
+.rack-midi-section {
+  border-bottom: var(--fp-seam) !important;
+}
+
+.rack-midi-section h3 {
+  color: var(--ink) !important;
+  font-family: var(--display-font);
+  letter-spacing: var(--fp-track);
+}
+
+.scrub-number-slider {
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  background:
+    linear-gradient(90deg, transparent 49%, rgba(var(--edge-dark-rgb), 0.18) 50%, transparent 51%),
+    var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.scrub-number-slider > i {
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+.scrub-number-slider.dragging > i {
+  border-color: var(--line) !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.rack-midi-check input {
+  accent-color: var(--red) !important;
+}
+
+.rack-midi-curve {
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.rack-midi-curve .axis {
+  stroke: rgba(var(--edge-dark-rgb), 0.45) !important;
+}
+
+.rack-midi-curve polyline {
+  stroke: var(--ink) !important;
+}
+
+.rack-midi-link-editor > footer {
+  background: var(--fp-panel) !important;
+  border-top: var(--fp-seam) !important;
+}
+
+/* Apply is the one lit key on the panel, the same red every primary wears. */
+.rack-midi-link-editor > footer .primary,
+.rack-midi-link-editor > footer .primary:hover:not(:disabled),
+.rack-midi-link-editor > footer .primary:focus-visible {
+  color: var(--red-ink) !important;
+  background: var(--red) !important;
+  border-color: var(--red) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
 /* ------------------------------------------------- the error plate ---
    Form errors predate the faceplate: a pink balloon that once swallowed a
    whole debug dump. A message plate now — seam, square cut, the red as
@@ -5109,6 +5221,32 @@
 .rack-graph-canvas .react-flow__controls-button:active {
   background: var(--panel-inset) !important;
   box-shadow: var(--fp-well);
+}
+
+/* The key that opens the workspace details, floating over the canvas on a
+   phone. Like the connection key, faceplate.css never named it, so it kept
+   the pre-faceplate palette: an acid ring on `rgba(4, 17, 26, 0.84)` with a
+   backdrop blur, flipping to a filled acid square when pressed. It is the
+   same key as the zoom column it sits opposite, and now looks like it. */
+.rack-details-floating-button {
+  color: var(--fp-rail-label) !important;
+  background: var(--paper) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  backdrop-filter: none !important;
+}
+
+.rack-details-floating-button:active {
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.rack-details-floating-button:focus-visible {
+  outline: 2px solid var(--line) !important;
+  outline-offset: 2px;
 }
 
 .rack-graph-canvas .react-flow__minimap {

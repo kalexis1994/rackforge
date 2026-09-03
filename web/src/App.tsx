@@ -1193,9 +1193,20 @@ function FloatingPerformanceMenuButton({
     };
   }, [finishGesture, stopDragCue]);
 
-  const anchorLeft = `calc(8px + ${position.x * 100}% - ${position.x * 60}px)`;
+  // One inset for every floating control the editor puts over its canvas, so
+  // the menu key, the details key under it and the zoom column on the other
+  // side all sit the same distance off the wall. `--rack-float-inset` is
+  // declared in the stylesheet; the fallback keeps the old 8px if a host ever
+  // renders this without it.
+  const floatInset = "var(--rack-float-inset, 8px)";
+  const anchorLeft = `calc(${floatInset} + ${position.x * 100}% - ${position.x * 60}px)`;
   const anchorTopOffset = position.y * (showGraphDetails ? 110 : 60);
-  const anchorTop = `calc(8px + ${position.y * 100}% - ${anchorTopOffset}px)`;
+  // The details key takes the corner, mirroring the zoom column on the other
+  // side at the same inset, and the menu key stacks beneath it. Both are
+  // placed from the one drag position, so they travel together and cannot
+  // collide however far the key is dragged.
+  const detailsTop = `calc(${floatInset} + ${position.y * 100}% - ${anchorTopOffset}px)`;
+  const anchorTop = `calc(${floatInset} * 2 + 42px + ${position.y * 100}% - ${anchorTopOffset}px)`;
 
   return (
     <>
@@ -1263,7 +1274,7 @@ function FloatingPerformanceMenuButton({
         className="rack-details-floating-button"
         style={{
           left: anchorLeft,
-          top: `calc(60px + ${position.y * 100}% - ${anchorTopOffset}px)`,
+          top: detailsTop,
         }}
         aria-label="Open workspace details"
         onClick={() => window.dispatchEvent(new Event("rackforge:open-graph-details"))}

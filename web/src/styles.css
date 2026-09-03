@@ -12096,3 +12096,121 @@ body {
 .first-run-foot button:hover {
   background: rgba(var(--acid-rgb), 0.24);
 }
+
+/* ==========================================================================
+   The velocity reading.
+
+   A square: across is what the keyboard sent, up is what the instruments are
+   told, and the faint diagonal is the keyboard left alone — the line the eye
+   measures a curve against. The handles are the size of a fingertip on the
+   phone the Settings page is read on.
+   ========================================================================== */
+
+.velocity-curve {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.velocity-curve-box {
+  width: min(260px, 100%);
+  aspect-ratio: 1;
+  touch-action: none;
+  overflow: visible;
+}
+
+.velocity-curve-field {
+  fill: rgba(4, 14, 21, 0.72);
+  stroke: var(--line);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.velocity-curve-grid line {
+  stroke: var(--line);
+  stroke-width: 0.5;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.5;
+}
+
+.velocity-curve-unity {
+  stroke: var(--muted);
+  stroke-width: 0.8;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.55;
+}
+
+.velocity-curve-line {
+  fill: none;
+  stroke: var(--acid);
+  stroke-width: 2;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.velocity-curve-handle {
+  fill: var(--acid);
+  stroke: rgba(4, 14, 21, 0.9);
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+}
+
+.velocity-curve-handle:hover,
+.velocity-curve-handle.dragging {
+  /* The grabbed handle grows rather than changing colour: on a phone the
+     finger is over it, and a colour under a finger is not feedback. */
+  r: 6;
+  cursor: grabbing;
+}
+
+.velocity-curve-handle:focus-visible {
+  outline: none;
+  stroke: var(--acid);
+  stroke-width: 2.4;
+}
+
+.velocity-curve-readout {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--muted);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.velocity-curve-readout strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.velocity-curve-readout button {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: rgba(var(--acid-rgb), 0.14);
+  border: 1px solid rgba(var(--acid-rgb), 0.36);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.velocity-curve-readout button:disabled {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--line);
+  cursor: default;
+}
+
+.velocity-curve-fieldset p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+}

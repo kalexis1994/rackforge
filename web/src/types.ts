@@ -1,3 +1,5 @@
+import type { VelocityCurve } from "./velocityCurve";
+
 export type ConnectionStatus = "connecting" | "online" | "idle" | "offline";
 
 export interface HostAudioDriver {
@@ -47,6 +49,8 @@ export interface HostAudioPreferences {
   input_channels?: number[];
   input_gain_db?: number;
   midi_inputs: string[];
+  /** How hard a key was struck, as this host reads it. Absent means untouched. */
+  velocity_curve?: VelocityCurve;
 }
 
 export interface HostAudioSettings {

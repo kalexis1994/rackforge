@@ -32,6 +32,9 @@ pub mod realtime;
 pub mod session;
 pub mod session_checkpoint;
 pub mod ump;
+/// How hard a key was struck, as this machine reads it: outside every
+/// platform gate, because every host reads its own incoming MIDI through it.
+pub mod velocity_curve;
 pub use rackforge_startup as startup;
 /// The sequencer engine rides the same rule: patterns into sample-accurate
 /// MIDI on every platform, gated by nothing.

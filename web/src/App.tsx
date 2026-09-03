@@ -116,6 +116,8 @@ import {
   type FirstRunFailure,
 } from "./firstRun";
 import { FirstRunScreen } from "./FirstRunScreen";
+import { VelocityCurveEditor } from "./components/VelocityCurveEditor";
+import { IDENTITY_VELOCITY_CURVE } from "./velocityCurve";
 import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
 import { TouchControllerPage } from "./TouchControllerPage";
 import {
@@ -6008,6 +6010,7 @@ function SettingsPage({
               </>
               ) : null}
               {settingsTab === "midi" ? (
+              <>
               <fieldset>
                 <legend>MIDI inputs</legend>
                 {audioSettings.inventory.midi_inputs.length ? audioSettings.inventory.midi_inputs.map((input) => (
@@ -6026,6 +6029,22 @@ function SettingsPage({
                   </label>
                 )) : <p>No MIDI inputs detected.</p>}
               </fieldset>
+              <fieldset className="velocity-curve-fieldset">
+                <legend>Velocity</legend>
+                {/* Across is what the keyboard sent, up is what is played.
+                    It rides the same draft as the ports, so one Apply commits
+                    both -- and the host applies a reading without touching
+                    the audio stream. */}
+                <p>
+                  How hard a key was struck, as this host reads it. Drag the floor, the
+                  bend and the ceiling.
+                </p>
+                <VelocityCurveEditor
+                  curve={audioDraft.velocity_curve ?? IDENTITY_VELOCITY_CURVE}
+                  onChange={(velocity_curve) => setAudioDraft({ ...audioDraft, velocity_curve })}
+                />
+              </fieldset>
+              </>
               ) : null}
               {settingsTab === "audio" && audioSettings.runtime ? (() => {
                 const runtime = audioSettings.runtime;

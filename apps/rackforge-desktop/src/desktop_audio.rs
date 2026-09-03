@@ -14,6 +14,7 @@ use rackforge_core::{
     LiveParameterWriterHandle, LoadedPlugin, PluginInstance,
     isolated_state::parameter_value_is_valid,
     midi_hotplug::{PanicScope, panic_packets},
+    velocity_curve::VelocityCurve,
 };
 use rackforge_midi_api::{
     IngressMidiEvent, MidiPacket as RoutedMidiPacket, MidiSourceDescriptor, MidiSourceId,
@@ -251,6 +252,10 @@ pub struct AudioPreferences {
     #[serde(default = "default_input_gain_db")]
     pub input_gain_db: i8,
     pub midi_inputs: Vec<String>,
+    /// How hard a key was struck, as this machine reads it. Absent in a file
+    /// written before there was a curve, and absent means the identity.
+    #[serde(default)]
+    pub velocity_curve: VelocityCurve,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -436,6 +441,7 @@ impl AudioInventory {
             input_channels: Vec::new(),
             input_gain_db: DEFAULT_INPUT_GAIN_DB,
             midi_inputs: self.midi_inputs.clone(),
+            velocity_curve: VelocityCurve::default(),
         })
     }
 
@@ -881,6 +887,7 @@ impl DesktopAudio {
             ),
             parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             parameter_links: Vec::new(),
+            velocity_curve: preferences.velocity_curve.sanitised(),
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
             plugin_input: vec![0.0; MAX_AUDIO_FRAMES * MAX_STANDALONE_INPUT_CHANNELS],
             capture: capture_ring.clone(),
@@ -1197,6 +1204,12 @@ impl DesktopAudio {
 
     /// Tells the audio thread whether the keyboard is conducting LIVE lanes
     /// or simply playing the instrument.
+    /// The velocity reading, live: a player drags a point and the next key
+    /// they press is already read through it.
+    pub fn set_velocity_curve(&self, curve: VelocityCurve) -> Result<()> {
+        self.send_command(AudioCommand::SetVelocityCurve(curve))
+    }
+
     pub fn set_conducting(&self, conducting: bool) -> Result<()> {
         self.send_command(AudioCommand::SetConducting(conducting))
     }
@@ -1385,6 +1398,7 @@ enum AudioCommand {
         reply: SyncSender<Result<(), String>>,
     },
     InjectMidi(MidiPacket),
+    SetVelocityCurve(VelocityCurve),
     Sequencer {
         command: rackforge_control_api::SequencerCommand,
         reply: SyncSender<std::result::Result<(), String>>,
@@ -1748,6 +1762,8 @@ struct AudioProcessor {
     sequencer_scratch: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
     parameter_links: Vec<CompiledParameterLink>,
+    /// The reading applied to velocities as they arrive from a device.
+    velocity_curve: VelocityCurve,
     output: Vec<f32>,
     plugin_input: Vec<f32>,
     capture: Option<Arc<CaptureRing>>,
@@ -1803,6 +1819,12 @@ impl AudioProcessor {
                 self.sample_rate,
                 frames,
             );
+            // The reading, here and nowhere else: this is the one point
+            // every device message passes through, and applying it here means
+            // parameter links, the sequencer's conducting input and the
+            // instruments all see the velocity the player meant. Notes the
+            // interface injects are not a keybed and keep their own velocity.
+            let packet = read_velocity(packet, &self.velocity_curve);
             let ingress = packet.ingress_at(frame);
             let active_instance_id = self.voices[self.active_voice].instance_id.as_str();
             let mut consume = false;
@@ -2279,6 +2301,9 @@ impl AudioProcessor {
                 AudioCommand::SetMasterPan(pan) => self.master_balance.set_pan(pan),
                 AudioCommand::SetRunning(running) => self.stopped = !running,
                 AudioCommand::SetConducting(conducting) => self.conducting = conducting,
+                AudioCommand::SetVelocityCurve(curve) => {
+                    self.velocity_curve = curve.sanitised();
+                }
                 AudioCommand::EmergencyStop => {
                     for voice in &mut self.voices {
                         voice.mirror_control(|instance| instance.reset())?;
@@ -2502,6 +2527,26 @@ fn feed_sequencer_input(
         0x80 | 0x90 => sequencer.note_input(channel, data[1], 0, false),
         _ => false,
     }
+}
+
+/// A note-on's velocity, read through the curve. Every other message passes
+/// untouched -- a note-off's byte is a release velocity, not a strike, and a
+/// controller's value is not a velocity at all.
+fn read_velocity(mut packet: MidiPacket, curve: &VelocityCurve) -> MidiPacket {
+    if curve.is_identity() || packet.length < 3 || packet.data[0] & 0xf0 != 0x90 {
+        return packet;
+    }
+    packet.data[2] = curve.map(packet.data[2]);
+    if let Some(value) = packet.wide {
+        // The wide value carries the velocity in its low sixteen bits, and
+        // the byte above is its projection: both ride the same shape.
+        let mapped = curve.map_wide((value & 0xffff) as u16);
+        packet.wide = Some((value & !0xffff) | u32::from(mapped));
+        if packet.data[2] > 0 {
+            packet.data[2] = ((mapped >> 9) as u8).max(1);
+        }
+    }
+    packet
 }
 
 fn push_midi_event(events: &mut Vec<rackforge_core::midi2::Midi2Event>, packet: &RoutedMidiPacket) {
@@ -3560,6 +3605,81 @@ fn publish_error(slot: &Mutex<Option<String>>, error: impl ToString) {
 
 #[cfg(test)]
 mod tests {
+    use rackforge_core::velocity_curve::VelocityCurve;
+
+    fn packet(status: u8, data: [u8; 3], wide: Option<u32>) -> super::MidiPacket {
+        super::MidiPacket {
+            source: rackforge_midi_api::MidiSourceKey::new(7),
+            length: 3,
+            data: [status, data[1], data[2]],
+            wide,
+            timestamp: None,
+        }
+    }
+
+    /// The reading touches a strike and nothing else on the wire.
+    #[test]
+    fn only_a_note_on_is_read_through_the_curve() {
+        let curve = VelocityCurve {
+            low: 0,
+            mid_input: 64,
+            mid_output: 100,
+            high: 127,
+        };
+        let read = |status: u8, velocity: u8| {
+            super::read_velocity(packet(status, [status, 60, velocity], None), &curve).data[2]
+        };
+        // A strike is read.
+        assert_eq!(read(0x90, 64), 100);
+        // A release is not: that byte is a release velocity, not a strike.
+        assert_eq!(read(0x80, 64), 64);
+        // Nor is a controller's value, or a bend's, or pressure.
+        assert_eq!(read(0xb0, 64), 64);
+        assert_eq!(read(0xe0, 64), 64);
+        assert_eq!(read(0xa0, 64), 64);
+        // A note-on of zero velocity IS a release, and stays one.
+        assert_eq!(read(0x90, 0), 0);
+        // Every channel, not just the first.
+        assert_eq!(read(0x95, 64), 100);
+    }
+
+    #[test]
+    fn the_identity_curve_leaves_the_packet_untouched() {
+        let curve = VelocityCurve::default();
+        for velocity in 0..=127u8 {
+            let before = packet(0x90, [0x90, 60, velocity], Some(0xabcd));
+            let after = super::read_velocity(before, &curve);
+            assert_eq!(after.data[2], velocity);
+            assert_eq!(after.wide, Some(0xabcd));
+        }
+    }
+
+    /// A sixteen-bit strike rides the same shape, and the byte beside it
+    /// follows the wide value rather than drifting from it.
+    #[test]
+    fn a_wide_strike_and_its_byte_stay_together() {
+        let curve = VelocityCurve {
+            low: 0,
+            mid_input: 32,
+            mid_output: 96,
+            high: 127,
+        };
+        let before = packet(0x90, [0x90, 60, 32], Some((32u32 * 0xffff) / 127));
+        let after = super::read_velocity(before, &curve);
+        let wide = after.wide.expect("the wide value survives") & 0xffff;
+        let byte = f32::from(after.data[2]) / 127.0;
+        let wide_share = wide as f32 / f32::from(u16::MAX);
+        assert!(
+            (byte - wide_share).abs() < 0.02,
+            "byte {byte} against wide {wide_share}"
+        );
+        assert!(
+            after.data[2] >= 90,
+            "the bend was not applied: {}",
+            after.data[2]
+        );
+    }
+
     /// A message stamped inside the previous block's interval lands at the
     /// same fraction of this block; late ones at the first sample, early
     /// ones at the last, unstamped ones at the first.
@@ -3668,6 +3788,7 @@ mod tests {
             input_channels: vec![1],
             input_gain_db: 3,
             midi_inputs: vec!["Keyboard".into()],
+            velocity_curve: Default::default(),
         };
         let text = toml::to_string(&preferences).unwrap();
         assert_eq!(
@@ -3695,6 +3816,7 @@ mod tests {
             input_channels: Vec::new(),
             input_gain_db: DEFAULT_INPUT_GAIN_DB,
             midi_inputs: vec!["Test MIDI".into()],
+            velocity_curve: Default::default(),
         };
         preferences.persist(&path).unwrap();
         assert_eq!(AudioPreferences::load(&path).unwrap(), Some(preferences));
@@ -3743,6 +3865,7 @@ midi_inputs = []
             input_channels: Vec::new(),
             input_gain_db: DEFAULT_INPUT_GAIN_DB,
             midi_inputs: Vec::new(),
+            velocity_curve: Default::default(),
         };
         let saved = AudioPreferences {
             schema_version: AUDIO_SCHEMA_VERSION,
@@ -3755,6 +3878,7 @@ midi_inputs = []
             input_channels: vec![1],
             input_gain_db: 0,
             midi_inputs: vec!["KL Essential 61 mk3 MIDI".into()],
+            velocity_curve: Default::default(),
         };
 
         let fallback = fallback_preserving_midi(defaults, &saved);

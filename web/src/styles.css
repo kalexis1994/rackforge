@@ -8957,7 +8957,13 @@ body {
 
 .graph-workspace-active .rack-editor-form.immersive > .editor-header,
 .graph-workspace-active .rack-editor-form.immersive > .basic-fields,
-.graph-workspace-active .rack-editor-form.immersive > .editor-section:last-child,
+/* The slot list, named rather than counted. It used to be hidden as the
+   form's `:last-child`, and a dialog's backdrop is appended to the form:
+   opening the instrument picker made this section no longer last, the rule
+   stopped matching, and the section reappeared and took half the height from
+   the canvas -- the editor shrank while the dialog was open and grew back
+   when it closed. Position is not identity. */
+.graph-workspace-active .rack-editor-form.immersive > .editor-section.slot-settings,
 .graph-workspace-active .song-editor-form.immersive > .editor-header,
 .graph-workspace-active .song-editor-form.immersive > .basic-fields,
 .graph-workspace-active .song-editor-form.immersive > .rack-preview-status,

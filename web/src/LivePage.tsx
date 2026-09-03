@@ -2211,6 +2211,7 @@ function RackEditor({
         </Suspense>
       </EditorSection>
       <EditorSection
+        className="slot-settings"
         title="Slot settings"
         detail="Configure plugin state and mix for each node. MIDI routing lives on an instrument's input connection; an effect is fed by the audio input instead."
         action={
@@ -2925,14 +2926,17 @@ function EditorSection({
   detail,
   action,
   children,
+  className = "",
 }: {
   title: string;
   detail: string;
   action: ReactNode;
   children: ReactNode;
+  /** A name for the section, where a stylesheet needs to know which one it is. */
+  className?: string;
 }) {
   return (
-    <section className="editor-section">
+    <section className={`editor-section ${className}`.trim()}>
       <header><div><h3>{title}</h3><p>{detail}</p></div>{action}</header>
       <div className="editor-section-content">{children}</div>
     </section>

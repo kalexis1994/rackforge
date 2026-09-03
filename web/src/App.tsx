@@ -113,6 +113,7 @@ import {
   markFirstRunCompleted,
   readFirstRunCompleted,
   shouldRunFirstRun,
+  type FirstRunFailure,
 } from "./firstRun";
 import { FirstRunScreen } from "./FirstRunScreen";
 import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
@@ -497,7 +498,7 @@ function useFirstRun({
   navigate: ReturnType<typeof useNavigate>;
 }) {
   const [completed, setCompleted] = useState(readFirstRunCompleted);
-  const [activationFailure, setActivationFailure] = useState<string | null>(null);
+  const [activationFailure, setActivationFailure] = useState<FirstRunFailure | null>(null);
   const [timedOut, setTimedOut] = useState(false);
   const started = useRef(false);
   const active = shouldRunFirstRun({
@@ -508,15 +509,28 @@ function useFirstRun({
 
   // Read, not held: a catalogue that cannot be read, or one with nothing in
   // it, is a state of the host rather than of this screen.
-  const failure =
-    activationFailure ??
-    (catalogStatus === "error"
-      ? "RackForge could not read its plugin catalogue."
-      : catalogStatus === "ready" && defaultInstrument(plugins) === null
-        ? "This RackForge has no instruments installed yet."
-        : timedOut
-          ? "RackForge is taking longer than usual to start."
-          : null);
+  const failure: FirstRunFailure | null = useMemo(
+    () =>
+      activationFailure ??
+      (catalogStatus === "error"
+        ? {
+            kind: "catalogue" as const,
+            message: "RackForge could not read its plugin catalogue.",
+          }
+        : catalogStatus === "ready" && defaultInstrument(plugins) === null
+          ? {
+              kind: "no_instruments" as const,
+              message:
+                "This RackForge has no instruments installed yet. Install one and it will open playing.",
+            }
+          : timedOut
+            ? {
+                kind: "timeout" as const,
+                message: "RackForge is taking longer than usual to start.",
+              }
+            : null),
+    [activationFailure, catalogStatus, plugins, timedOut],
+  );
 
   const finish = useCallback(() => {
     markFirstRunCompleted();
@@ -554,11 +568,13 @@ function useFirstRun({
         navigate("/play");
         finish();
       } catch (error) {
-        setActivationFailure(
-          error instanceof Error
-            ? error.message
-            : "RackForge could not open your instrument.",
-        );
+        setActivationFailure({
+          kind: "activation",
+          message:
+            error instanceof Error
+              ? error.message
+              : "RackForge could not open your instrument.",
+        });
       }
     })();
   }, [active, catalogStatus, plugins, navigate, finish]);
@@ -570,12 +586,30 @@ function useFirstRun({
     return () => window.clearTimeout(timer);
   }, [active]);
 
+  // Another attempt, from the catalogue up: whatever went wrong, the host is
+  // asked again rather than the player being sent past it.
+  const retry = useCallback(() => {
+    started.current = false;
+    setActivationFailure(null);
+    setTimedOut(false);
+    void refreshPluginCatalog(true);
+  }, []);
+
+  // The one failure another attempt cannot fix. Plugin Manager is where an
+  // instrument comes from, so that is where this goes -- not "continue" into
+  // an interface with nothing in it, which is the dead end this screen was
+  // built to end.
+  const openPluginManager = useCallback(() => {
+    finish();
+    navigate("/plugins");
+  }, [finish, navigate]);
+
   const view = useMemo(
     () => firstRunView({ catalogStatus, plugins, failure }),
     [catalogStatus, plugins, failure],
   );
 
-  return { active, view, failure, dismiss: finish };
+  return { active, view, failure, retry, openPluginManager };
 }
 
 function RackForgeApp() {
@@ -974,7 +1008,8 @@ function RackForgeApp() {
         <FirstRunScreen
           view={firstRun.view}
           failure={firstRun.failure}
-          onDismiss={firstRun.dismiss}
+          onRetry={firstRun.retry}
+          onOpenPluginManager={firstRun.openPluginManager}
         />
       ) : null}
       {playTransitionOpen ? (

@@ -108,7 +108,7 @@ describe("what the first run shows", () => {
     const view = firstRunView({
       catalogStatus: "ready",
       plugins: [grand],
-      failure: "the host refused",
+      failure: { kind: "activation", message: "the host refused" },
     });
     expect(view.steps.at(-1)?.state).toBe("failed");
   });

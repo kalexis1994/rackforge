@@ -33,11 +33,30 @@ export interface FirstRunStep {
   state: FirstRunStepState;
 }
 
+/**
+ * Why a first run stopped, and therefore what to offer.
+ *
+ * The kind matters more than the words: a machine with no instruments needs
+ * the Plugin Manager, and everything else needs another attempt. Offering
+ * "continue" for either would hand the player exactly the dead end this
+ * screen exists to prevent -- an interface with nothing active in it.
+ */
+export type FirstRunFailureKind =
+  | "no_instruments"
+  | "catalogue"
+  | "activation"
+  | "timeout";
+
+export interface FirstRunFailure {
+  kind: FirstRunFailureKind;
+  message: string;
+}
+
 export interface FirstRunInputs {
   /** The plugin catalogue's own status. */
   catalogStatus: "idle" | "loading" | "ready" | "error";
   plugins: PluginWebDescriptor[];
-  failure: string | null;
+  failure: FirstRunFailure | null;
 }
 
 export interface FirstRunView {

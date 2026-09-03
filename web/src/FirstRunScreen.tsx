@@ -2,12 +2,19 @@
  * The screen a machine shows once: RackForge getting itself ready.
  *
  * It is the opening half of the closing screen the desktop shows when it
- * quits — the same plate, the same monogram, the same list of steps ticking
- * over — because they are the same moment seen from the two ends.
+ * quits — the same plate, the same list of steps ticking over — with the
+ * mark RackForge already waits behind lighting up beside the heading.
+ *
+ * When something fails it offers the thing that would fix it, and never
+ * "continue": an interface with no instrument in it is the dead end this
+ * screen exists to end, so walking the player into it deliberately would be
+ * the one useless button on the panel. A machine with no instruments is sent
+ * to Plugin Manager, where instruments come from; everything else is asked
+ * of the host again.
  */
 
 import { RfLoader } from "./components/RfLoader";
-import type { FirstRunStep, FirstRunView } from "./firstRun";
+import type { FirstRunFailure, FirstRunStep, FirstRunView } from "./firstRun";
 
 function StepMark({ state }: { state: FirstRunStep["state"] }) {
   if (state === "done") {
@@ -52,19 +59,23 @@ function StepMark({ state }: { state: FirstRunStep["state"] }) {
 export function FirstRunScreen({
   view,
   failure,
-  onDismiss,
+  onRetry,
+  onOpenPluginManager,
 }: {
   view: FirstRunView;
-  failure: string | null;
-  onDismiss: () => void;
+  failure: FirstRunFailure | null;
+  onRetry: () => void;
+  onOpenPluginManager: () => void;
 }) {
   return (
-    <div className="first-run-backdrop" role="dialog" aria-modal="true" aria-label="Preparing RackForge">
+    <div
+      className="first-run-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Preparing RackForge"
+    >
       <section className="first-run-plate">
         <header className="first-run-head">
-          {/* The mark RackForge already waits behind, lit limb by limb: this
-              screen is a wait like any other, and it should look like one.
-              Its own label is hidden -- the heading beside it is the label. */}
           <RfLoader className="first-run-loader" size="compact" label="" />
           <div>
             <h1>PREPARING RACKFORGE</h1>
@@ -91,11 +102,16 @@ export function FirstRunScreen({
         </ol>
         {failure ? (
           <footer className="first-run-foot">
-            <p>{failure}</p>
-            {/* Never a trap: whatever failed, the interface is one press away. */}
-            <button type="button" onClick={onDismiss}>
-              Continue to RackForge
-            </button>
+            <p>{failure.message}</p>
+            {failure.kind === "no_instruments" ? (
+              <button type="button" onClick={onOpenPluginManager}>
+                Open Plugin Manager
+              </button>
+            ) : (
+              <button type="button" onClick={onRetry}>
+                Try again
+              </button>
+            )}
           </footer>
         ) : null}
       </section>

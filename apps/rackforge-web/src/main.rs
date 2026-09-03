@@ -3237,12 +3237,25 @@ linux-aarch64 = "lib/librackforge_rf_kr106.so"
         )
         .unwrap();
 
-        let registry = PluginWebRegistry::scan(&plugins, &root.join("plugin-store")).unwrap();
+        let store = root.join("plugin-store");
+        let registry = PluginWebRegistry::scan(&plugins, &store).unwrap();
         let discovered = registry.packages.get("org.rackforge.rf-kr106").unwrap();
         assert_eq!(discovered.public.plugin_name, "RF-KR106");
         assert_eq!(discovered.public.version, "0.1.0");
-        assert!(!discovered.public.active);
         assert!(discovered.public.surfaces.is_empty());
+        // A store where nothing has ever been switched on or off carries no
+        // activation document, and everything installed in it counts as
+        // enabled. That is what carries a store from before the document
+        // across without every plugin in it going dark, and installing does
+        // not write one -- only switching something does.
+        assert!(discovered.public.active);
+
+        // And once something has been switched, the document exists and is
+        // believed.
+        set_plugin_enabled(&store, "org.rackforge.rf-kr106", false).unwrap();
+        let registry = PluginWebRegistry::scan(&plugins, &store).unwrap();
+        let discovered = registry.packages.get("org.rackforge.rf-kr106").unwrap();
+        assert!(!discovered.public.active);
         fs::remove_dir_all(root).unwrap();
     }
 

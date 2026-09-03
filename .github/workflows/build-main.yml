@@ -126,11 +126,16 @@ jobs:
             -p rackforge-repository \
             -p rackforge-resource-host \
             -p rackforge-surface-runtime \
+            -p rackforge-plugin-sdk \
+            -p rackforge-startup \
             -p rackforge-ui \
             -p rackforge-core \
             -p rackforge-browser \
+            -p rackforge-web \
             -p rackforge-concert-grand \
             -p rackforge-demo-synth \
+            -p rackforge-parallel-demo-synth \
+            -p rackforge-roland-scva \
             -p rackforge-gain \
             -p rackforge-gain-portable
 

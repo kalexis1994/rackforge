@@ -429,25 +429,55 @@
       // the stylesheet stays as the floor's safety net, for a name so long that
       // even the smallest engraving would not hold it. Letter-spacing is in em,
       // so it follows the size down on its own.
-      const PROGRAM_TYPE_MAX = 13;
-      const PROGRAM_TYPE_MIN = 8;
+      // How far below the plate's own proportion a long name may be taken.
+      const PROGRAM_TYPE_FLOOR = 0.62;
       function fitProgram() {
-        let size = PROGRAM_TYPE_MAX;
-        programLabel.style.fontSize = `${size}px`;
-        while (
-          size > PROGRAM_TYPE_MIN &&
-          programLabel.scrollWidth > programLabel.clientWidth
-        ) {
+        // The ideal comes from the stylesheet, which measures it against the
+        // plate; this only brings a name down until it fits. Clearing the
+        // inline size first is what lets the plate speak: the old routine
+        // started from a fixed 13px and so ignored how big the brass was.
+        programLabel.style.fontSize = "";
+        const ideal = parseFloat(getComputedStyle(programLabel).fontSize) || 13;
+        const floor = ideal * PROGRAM_TYPE_FLOOR;
+        let size = ideal;
+        while (size > floor && programLabel.scrollWidth > programLabel.clientWidth) {
           size -= 0.5;
           programLabel.style.fontSize = `${size}px`;
         }
       }
-      // The plate is sized against the viewport, so a resize changes the field.
+      // The plate is sized against the panel, so anything that changes its
+      // width changes the field the name has to fit. Watching the plate rather
+      // than the window is what catches all of it: the host resizing the
+      // surface without the window moving, a dock opening beside it, the rail
+      // folding away. Measured, a window `resize` listener missed exactly
+      // those, and the name stayed at the size the wider plate had given it,
+      // running out over the screws. The plate's own width is explicit, so
+      // setting the lettering cannot feed back into what is being observed.
+      // Both triggers, because each one misses cases the other catches: the
+      // window event does not fire when the host resizes the surface alone,
+      // and an embedder can throttle observer delivery to a frame it is not
+      // showing. Whichever arrives does the work, and the debounce means two
+      // of them cost one fit. The observer is held rather than left anonymous,
+      // so nothing can collect it while it is still watching.
+      const plate = programLabel.parentElement;
       let refit = 0;
-      window.addEventListener("resize", () => {
+      const refitSoon = () => {
         clearTimeout(refit);
         refit = setTimeout(fitProgram, 120);
-      });
+      };
+      window.addEventListener("resize", refitSoon);
+      let plateObserver = null;
+      if (plate && typeof ResizeObserver === "function") {
+        plateObserver = new ResizeObserver(refitSoon);
+        plateObserver.observe(plate);
+      }
+      // And the name the plate carries before a program has been chosen -- the
+      // instrument's own, which is the longest of them -- has to be fitted
+      // too, once the fonts are in and the plate has a width to measure.
+      fitProgram();
+      if (document.fonts?.ready) {
+        void document.fonts.ready.then(fitProgram);
+      }
       function showProgram(name, direction) {
         if (!name || programLabel.textContent === name) return;
         if (!direction || !programLabel.animate) {

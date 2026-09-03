@@ -107,6 +107,14 @@ import {
   commitPlayPluginSelection,
   preflightPlayPluginSelection,
 } from "./playPluginSelection";
+import {
+  defaultInstrument,
+  firstRunView,
+  markFirstRunCompleted,
+  readFirstRunCompleted,
+  shouldRunFirstRun,
+} from "./firstRun";
+import { FirstRunScreen } from "./FirstRunScreen";
 import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
 import { TouchControllerPage } from "./TouchControllerPage";
 import {
@@ -467,6 +475,109 @@ function useResolvedLighting(): "day" | "stage" {
   return systemDark ? "stage" : "day";
 }
 
+/**
+ * The first run, driven by what the host actually reports.
+ *
+ * It waits for the catalogue rather than for a clock, opens the default
+ * instrument through the same path the plugin picker uses, and remembers
+ * that it did. Every exit — success, no instruments, a failed activation, or
+ * a host that never answers — ends with the interface uncovered.
+ */
+function useFirstRun({
+  catalogStatus,
+  plugins,
+  sessionKnown,
+  activeInstanceId,
+  navigate,
+}: {
+  catalogStatus: "idle" | "loading" | "ready" | "error";
+  plugins: PluginWebDescriptor[];
+  sessionKnown: boolean;
+  activeInstanceId: string | undefined;
+  navigate: ReturnType<typeof useNavigate>;
+}) {
+  const [completed, setCompleted] = useState(readFirstRunCompleted);
+  const [activationFailure, setActivationFailure] = useState<string | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
+  const started = useRef(false);
+  const active = shouldRunFirstRun({
+    completed,
+    sessionKnown,
+    hasActiveInstance: Boolean(activeInstanceId),
+  });
+
+  // Read, not held: a catalogue that cannot be read, or one with nothing in
+  // it, is a state of the host rather than of this screen.
+  const failure =
+    activationFailure ??
+    (catalogStatus === "error"
+      ? "RackForge could not read its plugin catalogue."
+      : catalogStatus === "ready" && defaultInstrument(plugins) === null
+        ? "This RackForge has no instruments installed yet."
+        : timedOut
+          ? "RackForge is taking longer than usual to start."
+          : null);
+
+  const finish = useCallback(() => {
+    markFirstRunCompleted();
+    setCompleted(true);
+  }, []);
+
+  // A machine that already has an instrument playing has been used before,
+  // whatever this browser remembers. `active` is already false by then; this
+  // only writes it down so the screen stays away.
+  useEffect(() => {
+    if (activeInstanceId) markFirstRunCompleted();
+  }, [activeInstanceId]);
+
+  useEffect(() => {
+    if (!active || started.current) return;
+    if (catalogStatus !== "ready") return;
+    const target = defaultInstrument(plugins);
+    if (!target) return;
+    started.current = true;
+    void (async () => {
+      try {
+        await commitPlayPluginSelection(
+          {
+            target: { pluginId: target.plugin_id, pluginName: target.plugin_name },
+          },
+          {
+            dispatch: dispatchCommandAwait,
+            activate: (pluginId) =>
+              hostJson(`/api/v1/plugins/${encodeURIComponent(pluginId)}/activate`, {
+                method: "POST",
+              }),
+            synchronize: synchronizePluginEnvironment,
+          },
+        );
+        navigate("/play");
+        finish();
+      } catch (error) {
+        setActivationFailure(
+          error instanceof Error
+            ? error.message
+            : "RackForge could not open your instrument.",
+        );
+      }
+    })();
+  }, [active, catalogStatus, plugins, navigate, finish]);
+
+  // And a host that never answers at all still hands the interface over.
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setTimeout(() => setTimedOut(true), 25_000);
+    return () => window.clearTimeout(timer);
+  }, [active]);
+
+  const view = useMemo(
+    () => firstRunView({ catalogStatus, plugins, failure }),
+    [catalogStatus, plugins, failure],
+  );
+
+  return { active, view, failure, dismiss: finish };
+}
+
 function RackForgeApp() {
   const { connection, snapshot, performance, performancePending, error } = useSelector(
     (state: RootState) => state.rackforge,
@@ -474,6 +585,13 @@ function RackForgeApp() {
   const pluginCatalog = usePluginCatalog();
   const location = useLocation();
   const navigate = useNavigate();
+  const firstRun = useFirstRun({
+    catalogStatus: pluginCatalog.status,
+    plugins: pluginCatalog.plugins,
+    sessionKnown: Boolean(snapshot),
+    activeInstanceId: snapshot?.active_instance_id,
+    navigate,
+  });
   const vstHost = isVstHost();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [installPluginOpen, setInstallPluginOpen] = useState(false);
@@ -851,6 +969,13 @@ function RackForgeApp() {
       ) : null}
       {installPluginOpen ? (
         <InstallPluginDialog onClose={() => setInstallPluginOpen(false)} />
+      ) : null}
+      {firstRun.active ? (
+        <FirstRunScreen
+          view={firstRun.view}
+          failure={firstRun.failure}
+          onDismiss={firstRun.dismiss}
+        />
       ) : null}
       {playTransitionOpen ? (
         <PlayModeTransitionDialog

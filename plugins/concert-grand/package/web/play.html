@@ -139,6 +139,12 @@
         justify-content: center;
         background: url("img/nameplate.webp") center / 100% 100% no-repeat;
         filter: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.6));
+        /* The engraving is measured in the plate, not in the window: the
+           plate is 300px on a desktop and 62vw on a phone, and a fixed 13px
+           was 4.3% of the brass in one and 5.6% in the other -- the same
+           lettering reading small on the big screen and about right on the
+           small one. */
+        container-type: inline-size;
       }
       .masthead h1 {
         margin: 0;
@@ -146,7 +152,13 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        font-size: 13px;
+        /* The size a name gets when it fits, as a share of the plate: 7.4%
+           puts a voicing like CONCERT 275 across the whole clear field
+           between the screws, which is what the brass is for. Longer names
+           are brought down to fit by `fitProgram`, and the px declaration
+           above is what an engine without container units falls back to. */
+        font-size: 20px;
+        font-size: clamp(12px, 7.4cqw, 24px);
         font-weight: 600;
         letter-spacing: 0.12em;
         text-transform: uppercase;

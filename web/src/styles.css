@@ -11930,3 +11930,169 @@ body {
     transition-duration: 1ms !important;
   }
 }
+
+/* ==========================================================================
+   The first run.
+
+   RackForge getting itself ready, once per machine: the opening half of the
+   closing screen the desktop shows when it quits, and deliberately the same
+   furniture -- the moulded monogram, the bar, the list of steps ticking over.
+   It covers the interface only while there is nothing in it worth showing.
+   ========================================================================== */
+
+.first-run-backdrop {
+  position: fixed;
+  inset:
+    var(--rackforge-safe-top)
+    var(--rackforge-safe-right)
+    var(--rackforge-safe-bottom)
+    var(--rackforge-safe-left);
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(1, 7, 11, 0.9);
+  backdrop-filter: blur(14px);
+}
+
+.first-run-plate {
+  width: min(460px, 100%);
+  padding: 22px 24px 24px;
+  color: var(--ink);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--glass-shadow);
+}
+
+.first-run-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.first-run-head h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+}
+
+.first-run-head p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* The waiting mark, sized to the heading beside it. Its own label is the
+   heading, so the copy the loader carries is left out rather than repeated. */
+.first-run-loader.rf-async-loader {
+  --rf-loader-width: 62px;
+  --rf-loader-height: 44px;
+  flex: 0 0 auto;
+  gap: 0;
+}
+
+.first-run-loader .rf-async-loader__copy {
+  display: none;
+}
+
+.first-run-bar {
+  height: 4px;
+  margin: 18px 0 14px;
+  overflow: hidden;
+  background: var(--panel-inset, rgba(255, 255, 255, 0.06));
+  border-radius: 2px;
+}
+
+.first-run-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--acid);
+  transition: width var(--rf-motion-standard) var(--rf-ease-standard);
+}
+
+.first-run-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 7px;
+}
+
+.first-run-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.first-run-step--done,
+.first-run-step--working {
+  color: var(--ink);
+}
+
+.first-run-step-detail {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.first-run-mark {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.first-run-mark--waiting {
+  border: 1px solid var(--line);
+}
+
+/* The step in hand keeps a lit ring, so the eye knows where the machine is
+   without reading a word of it. */
+.first-run-mark--working {
+  border: 1px solid var(--acid);
+  box-shadow: 0 0 0 3px rgba(var(--acid-rgb), 0.14);
+}
+
+.first-run-mark--done {
+  color: var(--acid);
+}
+
+.first-run-mark--failed {
+  color: #eb6969;
+}
+
+.first-run-foot {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.first-run-foot p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.first-run-foot button {
+  width: 100%;
+  min-height: 38px;
+  color: var(--ink);
+  background: rgba(var(--acid-rgb), 0.16);
+  border: 1px solid rgba(var(--acid-rgb), 0.4);
+  border-radius: 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.first-run-foot button:hover {
+  background: rgba(var(--acid-rgb), 0.24);
+}

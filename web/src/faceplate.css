@@ -3698,6 +3698,58 @@
   outline-offset: 2px;
 }
 
+/* The fold. The strip is the console's face and stays; the pads and any open
+   deck live in a body that unfolds downward out of it and folds back up.
+   Animated as grid rows rather than a max-height guess, so the motion is
+   exactly the height the content asks for however many lanes it has. */
+.seq-fold-key {
+  margin-left: auto;
+  min-width: 40px;
+  justify-content: center;
+  padding-inline: 10px;
+}
+
+.seq-chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(-135deg);
+  transition: transform var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.sequencer-shell.collapsed .seq-chevron {
+  transform: translateY(-2px) rotate(45deg);
+}
+
+/* The deck key keeps its lamp and no arrow: one arrow on the strip, and it
+   is the fold's. */
+
+.sequencer-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--rf-motion-standard) var(--rf-ease-standard);
+}
+
+.sequencer-body[data-collapsed="true"] {
+  grid-template-rows: 0fr;
+}
+
+.sequencer-body-inner {
+  min-height: 0;
+  overflow: hidden;
+  visibility: visible;
+}
+
+/* Clipped is not gone: a pad the fold has hidden must leave the tab order
+   too, or a keyboard walks into eight keys nobody can see. The visibility
+   flips only once the fold has finished closing, and at once on the way
+   open, so the motion is never of an empty box. */
+.sequencer-body[data-collapsed="true"] .sequencer-body-inner {
+  visibility: hidden;
+  transition: visibility 0s var(--rf-ease-standard) var(--rf-motion-standard);
+}
+
 .seq-key-narrow {
   padding: 8px 10px;
   min-width: 34px;
@@ -5725,6 +5777,34 @@
     overflow: visible !important;
   }
 
+  /* The same pane thinking, one level deeper, and this is what actually
+     flattened the zone: the browser card was still `height: 100%` of a block
+     that sizes to its content, and the list inside it `flex: 1 1 0` of that.
+     Measured on a 375px phone: the list came out 18px tall holding 90px of
+     targets, so PERFORMANCE showed its tabs and a sliver. Nothing here is a
+     pane to be divided; the card and the list take the height their content
+     asks for and the page scrolls, which is what every other page does. */
+  .live-surface-active .live-perform-surface .live-browser,
+  .live-surface-active .live-zone .live-browser {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  .live-surface-active .live-perform-surface .live-target-list,
+  .live-surface-active .live-zone .live-target-list {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    flex: 0 0 auto !important;
+  }
+
+  .live-surface-active .live-perform-surface .live-content,
+  .live-surface-active .live-zone .live-content,
+  .live-surface-active .live-zone .live-browser {
+    flex: 0 0 auto !important;
+  }
+
   /* The menu key floats over the top-left corner. The information bar leaves
      58px for it; the sequencer's legend did not, so the key landed on the
      word SEQ. Fixed rather than absolute, because a menu that scrolls away
@@ -5775,5 +5855,15 @@
   .seq-pad-state {
     min-height: 0;
     flex: 0 0 auto;
+  }
+
+  /* The strip wraps to three rows on a phone, and the fold key landed alone
+     at the end of a fourth — a stray button, and a row spent on it. Spanning
+     the row instead, it reads as what it is: the drawer's handle, and the
+     widest target on the panel. */
+  .seq-fold-key {
+    flex: 1 1 100%;
+    min-height: 28px;
+    margin-left: 0;
   }
 }

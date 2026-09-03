@@ -317,6 +317,12 @@
           }
           tabs.push({ id: "lab", name: "Lab", body });
         }
+        // The model's constants are the last thing a player reaches for, so
+        // their tab is the last on the rail, past the Lab.
+        const modelTab = tabs.findIndex((tab) => tab.id === "model");
+        if (modelTab >= 0) {
+          tabs.push(...tabs.splice(modelTab, 1));
+        }
 
         const rail = document.createElement("div");
         rail.className = "rail";

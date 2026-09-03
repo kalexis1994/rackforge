@@ -448,7 +448,12 @@
       }
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        /* `minmax(250px, 1fr)` is a FLOOR, not a wish: in a plate narrower
+           than 250px the track stays 250 and every fader hangs off the right
+           edge of the wood. Measured on a 375px phone, the plate is 181px
+           wide and the controls were 250. Capping the floor at the track's
+           own share lets the single column shrink with the plate. */
+        grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr));
         column-gap: 26px;
       }
       /* Each group of controls sits on its own screwed-down plate, which is
@@ -751,6 +756,29 @@
         letter-spacing: 0.05em;
         white-space: nowrap;
         overflow: hidden;
+      }
+
+      /* A phone. The plate's frame is 34px of border-image and 20px of
+         padding a side, and the board another 20: on a 375px screen that is
+         148px of the width spent before a fader is drawn, and the faders had
+         181px left to live in. The border-image scales with the border, so a
+         narrower frame is the same photographed plate seen smaller -- screws,
+         bevel and all -- rather than a cropped one. */
+      @media (max-width: 560px) {
+        .panelbox {
+          padding: 14px 8px 8px;
+        }
+        .labgroup {
+          border-width: 20px;
+          padding: 8px 10px 4px;
+          margin-bottom: 12px;
+        }
+        .grid {
+          column-gap: 14px;
+        }
+        .control {
+          margin-bottom: 12px;
+        }
       }
     </style>
   </head>

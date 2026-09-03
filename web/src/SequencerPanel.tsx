@@ -128,6 +128,16 @@ function useSequencerStatus(): SequencerStatus | null {
   return status;
 }
 
+const COLLAPSED_KEY = "rackforge.sequencer.collapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function SequencerStrip({
   performance,
   surface,
@@ -139,7 +149,23 @@ export function SequencerStrip({
 }) {
   const status = useSequencerStatus();
   const [open, setOpen] = useState(false);
+  // Folded away or unfolded, remembered per browser: the machine takes the
+  // top third of a phone, and a player who is not using it now should not
+  // have to fold it again next time.
+  const [collapsed, setCollapsed] = useState(readCollapsed);
   const taps = useRef<number[]>([]);
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((value) => {
+      const next = !value;
+      try {
+        window.localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // A browser that refuses storage still folds; it just forgets.
+      }
+      return next;
+    });
+  }, []);
 
   const tap = useCallback(() => {
     const now = performance_now_seconds();
@@ -160,7 +186,10 @@ export function SequencerStrip({
 
   const running = status?.running ?? false;
   return (
-    <section className="sequencer-shell" aria-label="Sequencer">
+    <section
+      className={`sequencer-shell${collapsed ? " collapsed" : ""}`}
+      aria-label="Sequencer"
+    >
       <div className="sequencer-strip">
         <span className="seq-legend">SEQ</span>
         <div className="seq-keys" role="group" aria-label="Transport">
@@ -234,19 +263,47 @@ export function SequencerStrip({
         <button
           className={`seq-key seq-lamp-key seq-open-key${open ? " engaged" : ""}`}
           aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => {
+            // Opening the deck out of a folded panel unfolds it, because
+            // otherwise the key would light with nothing to show. Closing it
+            // does not: switching the sequencers off while the panel is put
+            // away should put nothing back on the screen.
+            const opening = !open;
+            setOpen(opening);
+            if (opening && collapsed) {
+              toggleCollapsed();
+            }
+          }}
         >
           SEQUENCERS
         </button>
+        {/* The fold: the arrow points the way it will move -- down to unfold
+            the pads and any open deck, up to put them away. */}
+        <button
+          className="seq-key seq-fold-key"
+          aria-expanded={!collapsed}
+          aria-controls="sequencer-body"
+          title={collapsed ? "Unfold the sequencer" : "Fold the sequencer away"}
+          onClick={toggleCollapsed}
+        >
+          <span className="seq-chevron" aria-hidden="true" />
+          <span className="visually-hidden">
+            {collapsed ? "Unfold the sequencer" : "Fold the sequencer away"}
+          </span>
+        </button>
       </div>
-      {surface === "perform" ? <LanePadDeck status={status} /> : null}
-      {open ? (
-        <SequencerDeck
-          performance={performance}
-          status={status}
-          activeInstanceId={session?.active_instance_id ?? null}
-        />
-      ) : null}
+      <div className="sequencer-body" id="sequencer-body" data-collapsed={collapsed}>
+        <div className="sequencer-body-inner">
+          {surface === "perform" ? <LanePadDeck status={status} /> : null}
+          {open ? (
+            <SequencerDeck
+              performance={performance}
+              status={status}
+              activeInstanceId={session?.active_instance_id ?? null}
+            />
+          ) : null}
+        </div>
+      </div>
     </section>
   );
 }

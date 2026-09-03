@@ -8,9 +8,13 @@ splash 1920x1080. Nothing here bakes in text, version or state — the host
 draws those.
 
     tools/build-piano-branding.py <source.jpg> [logo.png]
+    tools/build-piano-branding.py --icon <logo.png>
 
-The optional logo is the RF-GP mark; without it the icon is cropped from the
-photograph's case and harp instead.
+The logo is the RF - Concert Grand plaque, kept at its native size in
+plugins/concert-grand/artwork/logo.png; without it the icon is cropped from
+the photograph's case and harp instead. The second form rebuilds the icon
+alone, which is what the mark changing calls for: the photograph the banner
+and splash were cut from does not live in this repository.
 """
 
 import pathlib
@@ -36,6 +40,27 @@ def cover(image: Image.Image, size: tuple[int, int], focus: float = 0.5) -> Imag
         top = int((image.height - height) * focus)
         image = image.crop((0, top, image.width, top + height))
     return image.resize(size, Image.LANCZOS)
+
+
+def contain(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Scales to fit inside `size` whole, where `cover` crops to fill it."""
+    scale = min(size[0] / image.width, size[1] / image.height)
+    return image.resize(
+        (round(image.width * scale), round(image.height * scale)), Image.LANCZOS
+    )
+
+
+def trim(logo: Image.Image) -> Image.Image:
+    """Crops the transparent margin an export leaves around the mark.
+
+    The threshold sits above zero on purpose. The plaque arrived inside a ring
+    of alpha-1 pixels reaching the file's left edge — invisible on any ground,
+    and enough to defeat a plain getbbox() and leave the mark swimming in the
+    padding it was supposed to lose.
+    """
+    alpha = logo.getchannel("A").point(lambda value: 255 if value > 1 else 0)
+    box = alpha.getbbox()
+    return logo.crop(box) if box else logo
 
 
 def vignette(image: Image.Image, strength: float = 0.55) -> Image.Image:
@@ -69,9 +94,14 @@ def splash(photo: Image.Image) -> Image.Image:
 
 
 def icon_from_logo(logo: Image.Image) -> Image.Image:
+    # Fitted, not covered: a photograph can lose a strip off its long axis, a
+    # mark cannot, and cover() would shave the plaque's own frame away. The
+    # lacquer ground stays behind it because every host frames an icon as a
+    # tile — rounded, shadowed, and bordered under the faceplate theme — and a
+    # transparent PNG would hang in that frame over the shadow of an empty box.
+    mark = contain(trim(logo.convert("RGBA")), (410, 410))   # central 80%: 410 of 512
     canvas = Image.new("RGB", (512, 512), LACQUER)
-    mark = cover(logo, (410, 410))          # central 80%: 410 of 512
-    canvas.paste(mark, (51, 51))
+    canvas.paste(mark, ((512 - mark.width) // 2, (512 - mark.height) // 2), mark)
     return canvas
 
 
@@ -86,16 +116,21 @@ def icon_from_photo(photo: Image.Image) -> Image.Image:
 
 
 def main() -> int:
-    if not 2 <= len(sys.argv) <= 3:
+    argv = sys.argv[1:]
+    icon_only = argv[:1] == ["--icon"]
+    argv = argv[1:] if icon_only else argv
+    if not argv or len(argv) > (1 if icon_only else 2):
         print(__doc__.strip(), file=sys.stderr)
         return 2
-    photo = Image.open(sys.argv[1]).convert("RGB")
-    OUT.mkdir(parents=True, exist_ok=True)
-    assets = {"banner.png": banner(photo), "splash.png": splash(photo)}
-    if len(sys.argv) == 3:
-        assets["icon.png"] = icon_from_logo(Image.open(sys.argv[2]).convert("RGB"))
+    if icon_only:
+        assets = {"icon.png": icon_from_logo(Image.open(argv[0]))}
     else:
-        assets["icon.png"] = icon_from_photo(photo)
+        photo = Image.open(argv[0]).convert("RGB")
+        assets = {"banner.png": banner(photo), "splash.png": splash(photo)}
+        assets["icon.png"] = (
+            icon_from_logo(Image.open(argv[1])) if len(argv) == 2 else icon_from_photo(photo)
+        )
+    OUT.mkdir(parents=True, exist_ok=True)
     for name, image in assets.items():
         path = OUT / name
         image.save(path, "PNG", optimize=True)

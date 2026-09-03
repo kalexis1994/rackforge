@@ -374,10 +374,12 @@ pub struct WebSystemSettings {
     pub service_online: bool,
     /// Whether an access PIN has been chosen yet.
     ///
-    /// The controller reports this and does not offer to change it. A PIN is
-    /// entered in a browser, and a device that showed its own PIN on a screen
-    /// would be back to needing a screen — which was the whole reason the code
-    /// on this display stopped being how access works.
+    /// The controller both reports this and can set it. Showing a PIN the
+    /// device invented is what put a screen back in the loop, and that is
+    /// still refused: nothing here is ever displayed that the player did not
+    /// just type, and the digits behind the cursor are masked as they are
+    /// entered. Choosing four digits at the hardware is the escape the browser
+    /// itself points at once the enrolment window has closed.
     pub pin_set: bool,
 }
 
@@ -514,6 +516,15 @@ pub enum MenuCommand {
     },
     SetWebPort {
         port: u16,
+    },
+    /// Chooses the browser access PIN from the machine itself.
+    ///
+    /// The device never shows a PIN it invented -- the player turns each digit
+    /// and the ones already set are masked. That is the difference from the
+    /// pairing code this display used to show, which is why choosing one here
+    /// does not bring back the screen-in-the-loop that was removed.
+    SetWebPin {
+        pin: String,
     },
     ActivateSavedWifi {
         connection_id: String,
@@ -849,6 +860,10 @@ pub struct Menu {
     web_settings: WebSystemSettings,
     web_edit_candidate: WebSystemSettings,
     system_web_editing: bool,
+    /// The four digits under the hand, and which one the encoder turns.
+    /// `None` when the PIN editor is not open, so it cannot be confused with
+    /// a PIN of four zeroes half entered.
+    web_pin_entry: Option<([u8; 4], usize)>,
     wifi_settings: WifiSystemSettings,
     system_wifi_index: usize,
     wifi_networks_index: usize,
@@ -1098,6 +1113,7 @@ impl Default for Menu {
             web_settings: WebSystemSettings::default(),
             web_edit_candidate: WebSystemSettings::default(),
             system_web_editing: false,
+            web_pin_entry: None,
             wifi_settings: WifiSystemSettings::default(),
             system_wifi_index: 0,
             wifi_networks_index: 0,
@@ -5201,13 +5217,22 @@ impl Menu {
                 (WebAccess::Local, _) => "ENABLE LAN FIRST".to_owned(),
             },
             3 => settings.port.to_string(),
-            4 => {
-                if settings.pin_set {
-                    "SET".to_owned()
-                } else {
-                    "NOT SET".to_owned()
-                }
-            }
+            4 => match self.web_pin_entry {
+                // Masked behind the cursor and blank ahead of it. The player
+                // has to see the digit they are turning; the ones already
+                // chosen are nobody's business, including the room's.
+                Some((digits, cursor)) => (0..digits.len())
+                    .map(|index| match index.cmp(&cursor) {
+                        core::cmp::Ordering::Less => '*',
+                        core::cmp::Ordering::Equal => {
+                            char::from_digit(u32::from(digits[index]), 10).unwrap_or('0')
+                        }
+                        core::cmp::Ordering::Greater => '_',
+                    })
+                    .collect(),
+                None if settings.pin_set => "SET".to_owned(),
+                None => "NOT SET".to_owned(),
+            },
             _ => {
                 if settings.service_online {
                     "ONLINE".to_owned()
@@ -5547,6 +5572,52 @@ impl Menu {
     }
 
     fn apply_system_web_input(&mut self, input: Input) {
+        if let Some((mut digits, mut cursor)) = self.web_pin_entry {
+            match input {
+                Input::Button2 | Input::EncoderLeft => {
+                    digits[cursor] = if digits[cursor] == 0 { 9 } else { digits[cursor] - 1 };
+                    self.web_pin_entry = Some((digits, cursor));
+                }
+                Input::Button3 | Input::EncoderRight => {
+                    digits[cursor] = (digits[cursor] + 1) % 10;
+                    self.web_pin_entry = Some((digits, cursor));
+                }
+                Input::Button1 | Input::EncoderPress => {
+                    if cursor + 1 < digits.len() {
+                        cursor += 1;
+                        self.web_pin_entry = Some((digits, cursor));
+                    } else {
+                        // The last OK is the commit. Nothing is written down
+                        // here and the entry is dropped either way, so a PIN
+                        // never outlives the moment it was typed.
+                        let pin = digits
+                            .iter()
+                            .map(|digit| {
+                                char::from_digit(u32::from(*digit), 10).unwrap_or('0')
+                            })
+                            .collect::<String>();
+                        self.web_pin_entry = None;
+                        self.system_web_editing = false;
+                        self.pending_command = Some(MenuCommand::SetWebPin { pin });
+                    }
+                }
+                // BACK walks the cursor out one digit at a time, and off the
+                // front it abandons the whole entry -- the same shape as
+                // backspacing out of a field and then leaving it.
+                Input::Button4 => {
+                    if cursor == 0 {
+                        self.web_pin_entry = None;
+                        self.system_web_editing = false;
+                    } else {
+                        cursor -= 1;
+                        digits[cursor] = 0;
+                        self.web_pin_entry = Some((digits, cursor));
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         if self.system_web_editing {
             match input {
                 Input::Button2 | Input::EncoderLeft => self.adjust_web_candidate(input, -1),
@@ -5591,6 +5662,11 @@ impl Menu {
                 0 | 1 | 3 => {
                     self.web_edit_candidate = self.web_settings;
                     self.system_web_editing = true;
+                }
+                4 => {
+                    self.web_edit_candidate = self.web_settings;
+                    self.system_web_editing = true;
+                    self.web_pin_entry = Some(([0; 4], 0));
                 }
                 _ => {}
             },
@@ -10637,10 +10713,10 @@ mod tests {
         assert_eq!(menu.render().line_1, "PORT");
         assert_eq!(menu.render().line_2, "8787");
         menu.apply(Action::Next);
-        // The controller reports whether the device has been claimed and
-        // offers no way to change it. A PIN shown on this display would put a
-        // screen back in the path of getting in, which is what taking pairing
-        // off it was for.
+        // The controller reports whether the device has been claimed, and can
+        // claim it. Showing a PIN the device invented is still refused; typing
+        // one is not the same thing, and it is the escape the browser points
+        // at once the enrolment window has closed.
         assert_eq!(menu.render().line_1, "ACCESS PIN");
         assert_eq!(menu.render().line_2, "NOT SET");
 
@@ -10653,8 +10729,46 @@ mod tests {
             pin_set: true,
         });
         assert_eq!(menu.render().line_2, "SET");
+
+        // Entering 2 0 3 9, one digit at a time.
         menu.apply_input(Input::Button1);
-        assert_eq!(menu.take_command(), None, "the display cannot set a PIN");
+        assert_eq!(menu.render().line_2, "[0___]", "the first digit is the one being turned");
+        assert_eq!(menu.take_command(), None, "nothing is sent until the last digit");
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button3);
+        assert_eq!(menu.render().line_2, "[2___]");
+        menu.apply_input(Input::Button1);
+        assert_eq!(menu.render().line_2, "[*0__]", "a chosen digit is masked behind the cursor");
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button3);
+        assert_eq!(menu.render().line_2, "[**3_]");
+        menu.apply_input(Input::Button1);
+        // Down from zero wraps to nine rather than sticking.
+        menu.apply_input(Input::Button2);
+        assert_eq!(menu.render().line_2, "[***9]");
+        assert_eq!(menu.take_command(), None, "still nothing before the commit");
+        menu.apply_input(Input::Button1);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetWebPin {
+                pin: "2039".to_owned()
+            })
+        );
+        assert_eq!(menu.render().line_2, "SET", "the row goes back to reporting");
+
+        // BACK walks out a digit at a time and abandons the entry off the
+        // front, leaving nothing half-typed behind.
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+        assert_eq!(menu.render().line_2, "[*0__]");
+        menu.apply_input(Input::Button4);
+        assert_eq!(menu.render().line_2, "[0___]", "the digit walked out of is cleared");
+        menu.apply_input(Input::Button4);
+        assert_eq!(menu.render().line_2, "SET");
+        assert_eq!(menu.take_command(), None, "leaving sends no PIN");
 
         menu.apply(Action::Next);
         assert_eq!(menu.render().line_1, "STATUS");

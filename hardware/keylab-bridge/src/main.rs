@@ -2689,6 +2689,17 @@ fn apply_pending_menu_command(
             Ok(true)
         }
         #[cfg(target_os = "linux")]
+        menu::MenuCommand::SetWebPin { pin } => {
+            web_control_request(&serde_json::json!({
+                "op": "set_pin",
+                "pin": pin
+            }))?;
+            // The digits are never logged, here or anywhere downstream. That
+            // the PIN was set is the whole of what is worth recording.
+            println!("WEB_SETTING_SET field=pin value=set");
+            Ok(true)
+        }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::ActivateSavedWifi { connection_id } => {
             let connection_id =
                 WifiConnectionId::new(connection_id).map_err(|error| error.to_string())?;
@@ -2780,6 +2791,7 @@ fn apply_pending_menu_command(
         menu::MenuCommand::SetWebEnabled { .. }
         | menu::MenuCommand::SetWebAccess { .. }
         | menu::MenuCommand::SetWebPort { .. }
+        | menu::MenuCommand::SetWebPin { .. }
         | menu::MenuCommand::ActivateSavedWifi { .. }
         | menu::MenuCommand::ForgetSavedWifi { .. }
         | menu::MenuCommand::ConnectDiscoveredWifi { .. }

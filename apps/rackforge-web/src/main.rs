@@ -392,6 +392,38 @@ impl AuthManager {
         Ok(token)
     }
 
+    /// Chooses the PIN from the machine itself -- which is exactly what the
+    /// browser tells a locked-out player to do once the enrolment window has
+    /// closed.
+    ///
+    /// The window does not apply here. It exists so a stranger on the network
+    /// cannot claim a fresh device before its owner does, and this path is not
+    /// on the network: it arrives on a Unix socket that only a process on this
+    /// machine can open, driven by a controller physically wired to it. For
+    /// the same reason it does not ask for the current PIN. Someone standing
+    /// at the hardware can already reinstall it; refusing them the four digits
+    /// would protect nothing and strand the owner of a device whose PIN was
+    /// lost, which is the state this exists to end.
+    ///
+    /// Sessions issued under the previous PIN stop working, as they do on
+    /// every other path that changes it.
+    ///
+    /// Gated with the control socket that is its only caller: that listener is
+    /// `#[cfg(unix)]`, and without the gate this reads as dead code on Windows.
+    #[cfg(unix)]
+    fn set_pin_locally(&self, pin: &str) -> Result<()> {
+        if pin.len() != PIN_DIGITS || !pin.bytes().all(|byte| byte.is_ascii_digit()) {
+            bail!("a PIN is {PIN_DIGITS} digits");
+        }
+        let mut store = self.store.lock().expect("web auth mutex poisoned");
+        store.pin = Some(build_pin(pin)?);
+        store.failures = 0;
+        store.locked_until = 0;
+        store.session_hashes.clear();
+        self.persist(&store)?;
+        Ok(())
+    }
+
     fn issue(store: &mut AuthStore) -> String {
         let mut token = [0_u8; 32];
         getrandom::fill(&mut token).expect("generating browser session");
@@ -761,6 +793,23 @@ fn start_system_control(
                                     Err(message) => json!({
                                         "status": "error",
                                         "message": message
+                                    }),
+                                }
+                            }
+                            Some("set_pin") => {
+                                match request.get("pin").and_then(Value::as_str) {
+                                    Some(pin) => match auth.set_pin_locally(pin) {
+                                        // The PIN is never echoed back, not
+                                        // even to the socket that just set it.
+                                        Ok(()) => json!({"status": "ok", "pin_state": auth.pin_state()}),
+                                        Err(error) => json!({
+                                            "status": "error",
+                                            "message": error.to_string()
+                                        }),
+                                    },
+                                    None => json!({
+                                        "status": "error",
+                                        "message": "set_pin requires a pin"
                                     }),
                                 }
                             }

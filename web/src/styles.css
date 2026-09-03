@@ -8929,6 +8929,16 @@ body {
     display: none;
   }
 
+  /* Beside the zoom cluster inside the canvas, one inset clear of it. The
+     cluster is three 30px keys and its two borders; if a fourth is ever
+     added, this is the number that moves with it. */
+  .rack-graph-canvas .rack-details-floating-button {
+    position: absolute;
+    top: var(--rack-float-inset);
+    right: calc(var(--rack-float-inset) * 2 + 92px);
+    z-index: 5;
+  }
+
   .rack-details-floating-button {
     position: absolute;
     z-index: 36;

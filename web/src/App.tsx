@@ -634,7 +634,6 @@ function RackForgeApp() {
   const [playOverlay, setPlayOverlay] = useState<"plugins" | "presets" | null>(null);
   const [liveSurface, setLiveSurface] = useState<"perform" | "configure">("perform");
   const [liveWorkspace, setLiveWorkspace] = useState<PerformanceGraphWorkspace | null>(null);
-  const [rackGraphOverlayOpen, setRackGraphOverlayOpen] = useState(false);
   const [playTransitionOpen, setPlayTransitionOpen] = useState(false);
   const [preferredPlayInstanceId, setPreferredPlayInstanceId] = useState<string | null>(null);
   const pendingPlayInstance = useRef<PluginInstance | null>(null);
@@ -652,14 +651,6 @@ function RackForgeApp() {
     [vstHost, immersiveController],
   );
   const lastContentRoute = useRef(location.pathname === "/controller" ? "/play" : location.pathname);
-  useEffect(() => {
-    const updateOverlay = (event: Event) => {
-      const detail = (event as CustomEvent<{ open?: boolean }>).detail;
-      setRackGraphOverlayOpen(detail?.open === true);
-    };
-    window.addEventListener("rackforge:rack-graph-overlay", updateOverlay);
-    return () => window.removeEventListener("rackforge:rack-graph-overlay", updateOverlay);
-  }, []);
   /* Where the controller is not available at all the route sends the player
      to PLAY; until it does, the path still reads `/controller`, and calling
      that a controller surface would blank the topbar for a frame. */
@@ -862,7 +853,6 @@ function RackForgeApp() {
             menuOpen={mobileMenuOpen}
             onOpen={() => setMobileMenuOpen(true)}
             showGraphDetails={liveWorkspace !== null}
-            graphDetailsButtonVisible={liveWorkspace !== null && !rackGraphOverlayOpen}
           />
         ) : null}
         {error && <div className="error-banner">{error}</div>}
@@ -1053,12 +1043,10 @@ function FloatingPerformanceMenuButton({
   menuOpen,
   onOpen,
   showGraphDetails,
-  graphDetailsButtonVisible,
 }: {
   menuOpen: boolean;
   onOpen: () => void;
   showGraphDetails: boolean;
-  graphDetailsButtonVisible: boolean;
 }) {
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [position, setPosition] = useState(readPerformanceMenuPosition);
@@ -1201,12 +1189,7 @@ function FloatingPerformanceMenuButton({
   const floatInset = "var(--rack-float-inset, 8px)";
   const anchorLeft = `calc(${floatInset} + ${position.x * 100}% - ${position.x * 60}px)`;
   const anchorTopOffset = position.y * (showGraphDetails ? 110 : 60);
-  // The details key takes the corner, mirroring the zoom column on the other
-  // side at the same inset, and the menu key stacks beneath it. Both are
-  // placed from the one drag position, so they travel together and cannot
-  // collide however far the key is dragged.
-  const detailsTop = `calc(${floatInset} + ${position.y * 100}% - ${anchorTopOffset}px)`;
-  const anchorTop = `calc(${floatInset} * 2 + 42px + ${position.y * 100}% - ${anchorTopOffset}px)`;
+  const anchorTop = `calc(${floatInset} + ${position.y * 100}% - ${anchorTopOffset}px)`;
 
   return (
     <>
@@ -1268,20 +1251,6 @@ function FloatingPerformanceMenuButton({
     >
       <Menu aria-hidden="true" />
     </button>
-    {graphDetailsButtonVisible ? (
-      <button
-        type="button"
-        className="rack-details-floating-button"
-        style={{
-          left: anchorLeft,
-          top: detailsTop,
-        }}
-        aria-label="Open workspace details"
-        onClick={() => window.dispatchEvent(new Event("rackforge:open-graph-details"))}
-      >
-        <Settings2 aria-hidden="true" strokeWidth={1.9} />
-      </button>
-    ) : null}
     </>
   );
 }

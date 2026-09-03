@@ -22,6 +22,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { Settings2 } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -1014,6 +1015,23 @@ export default function RackGraphEditor({
             orientation="horizontal"
             showInteractive={false}
           />
+          {/* Beside the zoom cluster rather than hanging off the draggable
+              menu key: it belongs to the editor, so it lives in the editor's
+              own frame and stays put wherever that key is dragged. Hidden
+              while an overlay is up, which is the state that used to be
+              reported all the way out to the shell to place it. */}
+          {overlayOpen ? null : (
+            <button
+              type="button"
+              className="rack-details-floating-button"
+              aria-label="Open workspace details"
+              onClick={() =>
+                window.dispatchEvent(new Event("rackforge:open-graph-details"))
+              }
+            >
+              <Settings2 aria-hidden="true" strokeWidth={1.9} />
+            </button>
+          )}
         </ReactFlow>
         <div className="rack-graph-menu-layer">
           {paneMenu ? (

@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   IDENTITY_VELOCITY_CURVE,
+  bendFraction,
   evaluateVelocityCurve,
   isIdentityVelocityCurve,
   mapVelocity,
   sanitiseVelocityCurve,
   velocityCurvePath,
+  withBendFraction,
   type VelocityCurve,
 } from "./velocityCurve";
 
@@ -92,6 +94,39 @@ describe("the velocity reading", () => {
     for (let i = 1; i < points.length; i += 1) {
       expect(points[i][1]).toBeLessThanOrEqual(points[i - 1][1] + 1e-6);
     }
+  });
+
+  it("keeps its curvature when an end moves", () => {
+    // The curvature is where the bend sits inside the span, not what number
+    // it happens to be: pulling the ceiling down must carry the shape with
+    // it rather than flatten the curve against the end being dragged.
+    const bent: VelocityCurve = { low: 0, mid_input: 40, mid_output: 100, high: 127 };
+    const before = bendFraction(bent);
+    const lowered = withBendFraction({ ...bent, high: 80 }, before ?? 0.5);
+    expect(bendFraction(lowered)).toBeCloseTo(before ?? 0, 2);
+    expect(lowered.mid_output).toBe(63);
+    // And a raised floor carries it too.
+    const lifted = withBendFraction({ ...bent, low: 30 }, before ?? 0.5);
+    expect(bendFraction(lifted)).toBeCloseTo(before ?? 0, 2);
+  });
+
+  it("keeps a straight line straight when an end moves", () => {
+    const fraction = bendFraction(IDENTITY_VELOCITY_CURVE) ?? 0.5;
+    for (const high of [127, 100, 64, 30]) {
+      const moved = withBendFraction({ ...IDENTITY_VELOCITY_CURVE, high }, fraction);
+      // Every reading on a straight line from the floor to the ceiling.
+      for (const velocity of [1, 32, 64, 96, 127]) {
+        const straight = (velocity / 127) * high;
+        expect(
+          Math.abs(mapVelocity(moved, velocity) - straight),
+          `ceiling ${high} at ${velocity}`,
+        ).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+
+  it("has no fraction to read when the span is nothing", () => {
+    expect(bendFraction({ low: 60, mid_input: 64, mid_output: 60, high: 60 })).toBeNull();
   });
 
   it("reads the unit square the same way at both ends", () => {

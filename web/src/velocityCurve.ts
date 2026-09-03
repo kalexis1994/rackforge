@@ -47,6 +47,35 @@ export function sanitiseVelocityCurve(curve: VelocityCurve): VelocityCurve {
   };
 }
 
+/**
+ * Where the bend sits inside the output span, 0 at the floor and 1 at the
+ * ceiling. This is the curvature: it is the shape of the reading, and it is
+ * relative, so moving the floor or the ceiling must not change it. A span of
+ * nothing has no fraction to read, and the caller keeps the one it had.
+ */
+export function bendFraction(curve: VelocityCurve): number | null {
+  const sane = sanitiseVelocityCurve(curve);
+  const span = sane.high - sane.low;
+  if (span <= 0) return null;
+  return (sane.mid_output - sane.low) / span;
+}
+
+/**
+ * The same curvature over a new floor and ceiling: the bend is placed back at
+ * its own fraction of the span rather than clamped into it. Clamping is what
+ * flattened a curve against the end you were dragging — pull the ceiling down
+ * and the bend stayed where it was in absolute terms until the ceiling ran
+ * into it, so the shape changed under your hand.
+ */
+export function withBendFraction(curve: VelocityCurve, fraction: number): VelocityCurve {
+  const sane = sanitiseVelocityCurve(curve);
+  const span = sane.high - sane.low;
+  return sanitiseVelocityCurve({
+    ...sane,
+    mid_output: Math.round(sane.low + clamp(fraction, 0, 1) * span),
+  });
+}
+
 export function isIdentityVelocityCurve(curve: VelocityCurve): boolean {
   const sane = sanitiseVelocityCurve(curve);
   return sane.low === 0 && sane.high === 127 && sane.mid_output === sane.mid_input;

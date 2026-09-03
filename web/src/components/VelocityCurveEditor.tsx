@@ -17,12 +17,16 @@ import { useCallback, useId, useRef, useState } from "react";
 
 import {
   IDENTITY_VELOCITY_CURVE,
+  bendFraction,
   sanitiseVelocityCurve,
   velocityCurvePath,
+  withBendFraction,
   type VelocityCurve,
 } from "../velocityCurve";
 
 const BOX = 100;
+/** Quarters: enough to read a curve against, few enough to stay quiet. */
+const GRID = [25, 50, 75];
 
 type Handle = "low" | "mid" | "high";
 
@@ -37,6 +41,13 @@ export function VelocityCurveEditor({
   const frame = useRef<SVGSVGElement | null>(null);
   const [dragging, setDragging] = useState<Handle | null>(null);
   const titleId = useId();
+  // The curvature is relative: where the bend sits inside the output span,
+  // not what number it happens to be. It is remembered rather than derived on
+  // the spot, so an end can be dragged the length of the box and the shape
+  // arrives intact -- deriving it from the rounded state at every step let a
+  // drift accumulate across a drag. Written only where the bend actually
+  // moves, which is in the gestures below.
+  const curvature = useRef(bendFraction(sane) ?? 0.5);
 
   /** Where a pointer is, in velocity units, whatever the box is scaled to. */
   const readPointer = useCallback((event: { clientX: number; clientY: number }) => {
@@ -50,14 +61,16 @@ export function VelocityCurveEditor({
   const moveHandle = useCallback(
     (handle: Handle, at: { x: number; y: number }) => {
       if (handle === "low") {
-        onChange(sanitiseVelocityCurve({ ...sane, low: at.y }));
+        onChange(withBendFraction({ ...sane, low: at.y }, curvature.current));
         return;
       }
       if (handle === "high") {
-        onChange(sanitiseVelocityCurve({ ...sane, high: at.y }));
+        onChange(withBendFraction({ ...sane, high: at.y }, curvature.current));
         return;
       }
-      onChange(sanitiseVelocityCurve({ ...sane, mid_input: at.x, mid_output: at.y }));
+      const bent = sanitiseVelocityCurve({ ...sane, mid_input: at.x, mid_output: at.y });
+      curvature.current = bendFraction(bent) ?? curvature.current;
+      onChange(bent);
     },
     [onChange, sane],
   );
@@ -88,20 +101,20 @@ export function VelocityCurveEditor({
     if (!vertical && !horizontal) return;
     event.preventDefault();
     if (handle === "low") {
-      onChange(sanitiseVelocityCurve({ ...sane, low: sane.low + vertical }));
+      onChange(withBendFraction({ ...sane, low: sane.low + vertical }, curvature.current));
       return;
     }
     if (handle === "high") {
-      onChange(sanitiseVelocityCurve({ ...sane, high: sane.high + vertical }));
+      onChange(withBendFraction({ ...sane, high: sane.high + vertical }, curvature.current));
       return;
     }
-    onChange(
-      sanitiseVelocityCurve({
-        ...sane,
-        mid_input: sane.mid_input + horizontal,
-        mid_output: sane.mid_output + vertical,
-      }),
-    );
+    const bent = sanitiseVelocityCurve({
+      ...sane,
+      mid_input: sane.mid_input + horizontal,
+      mid_output: sane.mid_output + vertical,
+    });
+    curvature.current = bendFraction(bent) ?? curvature.current;
+    onChange(bent);
   };
 
   const point = (x: number, y: number) => ({
@@ -119,53 +132,87 @@ export function VelocityCurveEditor({
     { id: "high", label: `Ceiling, ${sane.high}`, x: 127, y: sane.high },
   ];
 
+  const line = velocityCurvePath(sane, BOX);
+  // The same line closed down the two lower edges: what the reading lets
+  // through, as an area, which is what makes a soft or a hard keybed legible
+  // at a glance rather than by tracing a stroke.
+  const area = `${line} L ${BOX},${BOX} L 0,${BOX} Z`;
+  const fillId = `${titleId}-fill`;
   return (
     <div className="velocity-curve">
-      <svg
-        ref={frame}
-        className="velocity-curve-box"
-        viewBox={`0 0 ${BOX} ${BOX}`}
-        role="group"
-        aria-labelledby={titleId}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerLeave={endDrag}
-        onPointerCancel={endDrag}
-      >
-        <title id={titleId}>Velocity curve: what the keyboard sent against what is played</title>
-        <rect className="velocity-curve-field" x="0" y="0" width={BOX} height={BOX} rx="2" />
-        <g className="velocity-curve-grid" aria-hidden="true">
-          {[25, 50, 75].map((at) => (
-            <line key={`v${at}`} x1={at} y1="0" x2={at} y2={BOX} />
-          ))}
-          {[25, 50, 75].map((at) => (
-            <line key={`h${at}`} x1="0" y1={at} x2={BOX} y2={at} />
-          ))}
-        </g>
-        {/* The keyboard left alone, for the eye to measure the reading against. */}
-        <line className="velocity-curve-unity" x1="0" y1={BOX} x2={BOX} y2="0" aria-hidden="true" />
-        <path className="velocity-curve-line" d={velocityCurvePath(sane, BOX)} />
-        {handles.map((handle) => {
-          const at = point(handle.x, handle.y);
-          return (
-            <circle
-              key={handle.id}
-              className={`velocity-curve-handle${dragging === handle.id ? " dragging" : ""}`}
-              cx={at.cx}
-              cy={at.cy}
-              r="4.2"
-              role="slider"
-              tabIndex={0}
-              aria-label={handle.label}
-              aria-valuemin={0}
-              aria-valuemax={127}
-              aria-valuenow={handle.y}
-              onPointerDown={onPointerDown(handle.id)}
-              onKeyDown={onKeyDown(handle.id)}
-            />
-          );
-        })}
-      </svg>
+      <div className={`velocity-curve-frame${dragging ? " dragging" : ""}`}>
+        <svg
+          ref={frame}
+          className="velocity-curve-box"
+          viewBox={`0 0 ${BOX} ${BOX}`}
+          role="group"
+          aria-labelledby={titleId}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerLeave={endDrag}
+          onPointerCancel={endDrag}
+        >
+          <title id={titleId}>
+            Velocity curve: what the keyboard sent against what is played
+          </title>
+          <defs>
+            <linearGradient id={fillId} x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor="var(--acid)" stopOpacity="0.03" />
+              <stop offset="100%" stopColor="var(--acid)" stopOpacity="0.2" />
+            </linearGradient>
+          </defs>
+          <g className="velocity-curve-grid" aria-hidden="true">
+            {GRID.map((at) => (
+              <line key={`v${at}`} x1={at} y1="0" x2={at} y2={BOX} />
+            ))}
+            {GRID.map((at) => (
+              <line key={`h${at}`} x1="0" y1={at} x2={BOX} y2={at} />
+            ))}
+          </g>
+          {/* The keyboard left alone, for the eye to measure the reading against. */}
+          <line
+            className="velocity-curve-unity"
+            x1="0"
+            y1={BOX}
+            x2={BOX}
+            y2="0"
+            aria-hidden="true"
+          />
+          <path
+            className="velocity-curve-area"
+            d={area}
+            fill={`url(#${fillId})`}
+            aria-hidden="true"
+          />
+          <path className="velocity-curve-line" d={line} />
+          {handles.map((handle) => {
+            const at = point(handle.x, handle.y);
+            const active = dragging === handle.id;
+            return (
+              <g key={handle.id} className={`velocity-curve-pin${active ? " dragging" : ""}`}>
+                {/* A small mark is a tidy drawing and an unfair target, so the
+                    ring under it carries the pointer and the focus. */}
+                <circle className="velocity-curve-halo" cx={at.cx} cy={at.cy} r="8" />
+                <circle className="velocity-curve-handle" cx={at.cx} cy={at.cy} r="2.4" />
+                <circle
+                  className="velocity-curve-grab"
+                  cx={at.cx}
+                  cy={at.cy}
+                  r="8"
+                  role="slider"
+                  tabIndex={0}
+                  aria-label={handle.label}
+                  aria-valuemin={0}
+                  aria-valuemax={127}
+                  aria-valuenow={handle.y}
+                  onPointerDown={onPointerDown(handle.id)}
+                  onKeyDown={onKeyDown(handle.id)}
+                />
+              </g>
+            );
+          })}
+        </svg>
+      </div>
       <div className="velocity-curve-readout">
         <span>
           Floor <strong>{sane.low}</strong>
@@ -178,7 +225,10 @@ export function VelocityCurveEditor({
         </span>
         <button
           type="button"
-          onClick={() => onChange(IDENTITY_VELOCITY_CURVE)}
+          onClick={() => {
+            curvature.current = bendFraction(IDENTITY_VELOCITY_CURVE) ?? 0.5;
+            onChange(IDENTITY_VELOCITY_CURVE);
+          }}
           disabled={
             sane.low === 0 && sane.high === 127 && sane.mid_input === sane.mid_output
           }

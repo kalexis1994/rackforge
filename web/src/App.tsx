@@ -6010,8 +6010,13 @@ function SettingsPage({
               </>
               ) : null}
               {settingsTab === "midi" ? (
+              /* Two plain fieldsets: the form's own grid already fills as
+                 many 280px columns as fit, so the ports land on the left and
+                 the curve beside them where there is room and underneath
+                 where there is not. A wrapper here would have been one item in
+                 that grid, and the two would have stacked forever. */
               <>
-              <fieldset>
+              <fieldset className="midi-ports">
                 <legend>MIDI inputs</legend>
                 {audioSettings.inventory.midi_inputs.length ? audioSettings.inventory.midi_inputs.map((input) => (
                   <label className="host-audio-check" key={input}>

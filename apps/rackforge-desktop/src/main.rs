@@ -1353,32 +1353,43 @@ impl DesktopApp {
         &mut self,
         preferences: desktop_audio::AudioPreferences,
     ) -> Result<String> {
-        // Dragging a point on a velocity curve is not a device change.
-        // Everything below tears the stream down and scans the drivers, which
-        // for a MIDI reading would mean a gap in the sound and, on
-        // single-client ASIO hardware, a device that has to be re-acquired.
-        // So if the readings are the only thing that moved, they go to the
-        // audio thread as they are and nothing is rebuilt.
+        // Whatever happens below, the reading being applied is the reading
+        // that is heard: an audition is over the moment its curve is written
+        // down or the stream is rebuilt under it.
+        self.velocity_audition = false;
+        // A keyboard is not an audio device. Everything below takes the
+        // stream down, scans every driver and loads the instrument again --
+        // about a second of silence, and on single-client ASIO hardware a
+        // device that has to be re-acquired. That is right for a new sample
+        // rate and absurd for ticking a keyboard or dragging a point on a
+        // velocity curve, so those two go straight to the parts that own
+        // them and nothing is rebuilt.
         if let Some(current) = self.audio_preferences.clone() {
-            let mut probe = preferences.clone();
-            probe.velocity_curve = current.velocity_curve;
-            probe.velocity_curves = current.velocity_curves.clone();
-            let readings_moved = preferences.velocity_curve != current.velocity_curve
-                || preferences.velocity_curves != current.velocity_curves;
-            if probe == current && readings_moved {
+            let change = desktop_audio::classify_audio_change(&current, &preferences);
+            if change.is_keyboard_only() {
                 if let Some(audio) = self.audio.as_ref() {
-                    audio
-                        .set_velocity_curves(
-                            preferences.velocity_curve,
-                            &preferences.velocity_curves,
-                        )
-                        .context("sending the velocity readings to the audio runtime")?;
+                    if change.readings {
+                        audio
+                            .set_velocity_curves(
+                                preferences.velocity_curve,
+                                &preferences.velocity_curves,
+                            )
+                            .context("sending the velocity readings to the audio runtime")?;
+                    }
+                    if change.ports {
+                        audio.set_midi_inputs(preferences.midi_inputs.clone());
+                    }
                 }
                 preferences
                     .persist(&self.audio_config_path)
-                    .context("saving the velocity readings")?;
+                    .context("saving the MIDI settings")?;
                 self.audio_preferences = Some(preferences);
-                return Ok("Velocity curve applied".to_owned());
+                return Ok(match (change.ports, change.readings) {
+                    (true, true) => "MIDI ports and velocity readings applied",
+                    (true, false) => "MIDI ports applied",
+                    _ => "Velocity curve applied",
+                }
+                .to_owned());
             }
         }
         let previous = self.audio_preferences.clone();

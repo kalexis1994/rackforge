@@ -734,7 +734,7 @@ fn prepare_capture_stream(
 pub struct DesktopAudio {
     _stream: cpal::Stream,
     _input_stream: Option<cpal::Stream>,
-    _midi_supervisor: MidiSupervisor,
+    midi_supervisor: MidiSupervisor,
     command_sender: SyncSender<AudioCommand>,
     /// Notes played on a surface, sharing the hardware MIDI queue.
     injected_midi: SyncSender<MidiPacket>,
@@ -999,7 +999,7 @@ impl DesktopAudio {
         Ok(Self {
             _stream: stream,
             _input_stream: input_stream,
-            _midi_supervisor: midi_supervisor,
+            midi_supervisor,
             command_sender,
             injected_midi,
             last_strike: Arc::clone(&last_strike),
@@ -1230,6 +1230,15 @@ impl DesktopAudio {
             default,
             per_source: compile_velocity_curves(per_name),
         })
+    }
+
+    /// The MIDI ports the player has chosen, live.
+    ///
+    /// Opening or closing a port is the supervisor's ordinary work -- it does
+    /// it every second as hardware comes and goes -- so a change of mind on
+    /// the settings page is not a reason to rebuild anything.
+    pub fn set_midi_inputs(&self, names: Vec<String>) {
+        self.midi_supervisor.set_selected(names);
     }
 
     pub fn set_conducting(&self, conducting: bool) -> Result<()> {
@@ -2833,6 +2842,52 @@ fn silence_output(data: &mut cpal::Data, format: SampleFormat) {
 
 /// Every input a user can select: the byte ports `midir` sees, then the
 /// packet endpoints Windows MIDI Services exposes, under their own names.
+/// What a new set of audio preferences actually asks for.
+///
+/// Most of this document is about the audio device, and moving any of it
+/// means the stream comes down, every driver is scanned and the instrument is
+/// loaded again. Two fields are not about the device at all: the MIDI ports
+/// and the velocity readings are the keyboard's business, and a player who
+/// ticks a keyboard should not lose the sound of the one they are playing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudioChange {
+    /// The chosen MIDI ports moved.
+    pub ports: bool,
+    /// A velocity reading moved.
+    pub readings: bool,
+    /// Something the audio stream is built from moved.
+    pub stream: bool,
+}
+
+impl AudioChange {
+    /// Whether this can be done without touching the audio stream.
+    ///
+    /// A document that moved nowhere is deliberately not one of these: an
+    /// unchanged Apply is how a player retries after a device error, and it
+    /// must still reopen the stream.
+    pub fn is_keyboard_only(self) -> bool {
+        !self.stream && (self.ports || self.readings)
+    }
+}
+
+/// Compare two documents field by field, by elimination.
+///
+/// The keyboard's fields are lifted out of the candidate and the rest is
+/// compared whole, so a field added to `AudioPreferences` later counts as a
+/// device change until someone decides otherwise -- the safe way round.
+pub fn classify_audio_change(current: &AudioPreferences, next: &AudioPreferences) -> AudioChange {
+    let mut probe = next.clone();
+    probe.midi_inputs.clone_from(&current.midi_inputs);
+    probe.velocity_curve = current.velocity_curve;
+    probe.velocity_curves.clone_from(&current.velocity_curves);
+    AudioChange {
+        ports: next.midi_inputs != current.midi_inputs,
+        readings: next.velocity_curve != current.velocity_curve
+            || next.velocity_curves != current.velocity_curves,
+        stream: probe != *current,
+    }
+}
+
 fn discover_all_midi_inputs() -> Result<Vec<String>> {
     let mut names = discover_midi_inputs()?;
     names.extend(crate::ump_input::discover());
@@ -2879,6 +2934,16 @@ pub fn stable_midi_source_key_from_id(id: &MidiSourceId) -> MidiSourceKey {
 
 struct MidiSupervisor {
     stop: mpsc::Sender<()>,
+    /// The ports the player has chosen, shared with the worker. Changing the
+    /// selection is a write here and a reconcile on the next tick -- not a
+    /// rebuilt audio stream.
+    selected: Arc<Mutex<BTreeSet<String>>>,
+    /// Bumped on every write, so the worker acts at once instead of waiting
+    /// out its reconnect interval.
+    generation: Arc<AtomicU64>,
+    /// Whether an installed controller package owns the surface, which
+    /// decides which of those ports this host may open at all.
+    yield_keylab: bool,
     worker: Option<thread::JoinHandle<()>>,
 }
 
@@ -2891,23 +2956,10 @@ impl MidiSupervisor {
         display_mailbox: ScreenMailbox,
         yield_keylab: bool,
     ) -> Result<(Self, Vec<String>)> {
-        // When an installed controller package is enabled, ITS driver owns
-        // the surface: the built-in KeyLab handling stands down and the
-        // surface endpoint (Windows MIDI ports are exclusive-open) is left
-        // for the driver. Note endpoints (ALV and friends) stay captured.
-        let selected = selected
-            .into_iter()
-            .filter(|name| {
-                let port = crate::ump_input::endpoint_name(name).unwrap_or(name);
-                let yielded = yield_keylab && keylab_controller::little_driver(port).is_some();
-                if yielded {
-                    println!(
-                        "DESKTOP_MIDI_SOURCE_YIELDED name={name:?} reason=\"an installed controller package owns this port\""
-                    );
-                }
-                !yielded
-            })
-            .collect::<BTreeSet<_>>();
+        let selected = Arc::new(Mutex::new(openable_midi_ports(selected, yield_keylab)));
+        let generation = Arc::new(AtomicU64::new(0));
+        let worker_selected = Arc::clone(&selected);
+        let worker_generation = Arc::clone(&generation);
         let (stop_sender, stop_receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -2916,8 +2968,17 @@ impl MidiSupervisor {
                 let mut connections = BTreeMap::new();
                 let mut ump = UmpInputs::new();
                 let mut display = None;
+                // Read afresh at every reconcile: the settings page may have
+                // ticked a keyboard since the last one.
+                let wanted = || {
+                    worker_selected
+                        .lock()
+                        .expect("MIDI selection lock poisoned")
+                        .clone()
+                };
+                let mut seen_generation = worker_generation.load(Ordering::Relaxed);
                 match reconcile_midi_inputs(
-                    &selected,
+                    &wanted(),
                     &mut connections,
                     &mut ump,
                     &sender,
@@ -2929,7 +2990,7 @@ impl MidiSupervisor {
                         if !yield_keylab && reconcile_keylab_display(&mut display, &display_mailbox)
                         {
                             reconnect_keylab_inputs(
-                                &selected,
+                                &wanted(),
                                 &mut connections,
                                 &mut ump,
                                 &sender,
@@ -2964,9 +3025,16 @@ impl MidiSupervisor {
                     if display.as_ref().is_some_and(|display| display.failed) {
                         display = None;
                     }
+                    // A selection the player just changed does not wait out
+                    // the hotplug interval.
+                    let generation = worker_generation.load(Ordering::Relaxed);
+                    if generation != seen_generation {
+                        seen_generation = generation;
+                        next_reconcile = Instant::now();
+                    }
                     if Instant::now() >= next_reconcile {
                         if let Err(error) = reconcile_midi_inputs(
-                            &selected,
+                            &wanted(),
                             &mut connections,
                             &mut ump,
                             &sender,
@@ -2979,7 +3047,7 @@ impl MidiSupervisor {
                         if !yield_keylab && reconcile_keylab_display(&mut display, &display_mailbox)
                         {
                             reconnect_keylab_inputs(
-                                &selected,
+                                &wanted(),
                                 &mut connections,
                                 &mut ump,
                                 &sender,
@@ -3002,6 +3070,9 @@ impl MidiSupervisor {
             Ok(names) => Ok((
                 Self {
                     stop: stop_sender,
+                    selected,
+                    generation,
+                    yield_keylab,
                     worker: Some(worker),
                 },
                 names,
@@ -3013,6 +3084,46 @@ impl MidiSupervisor {
             }
         }
     }
+}
+
+impl MidiSupervisor {
+    /// Change the ports without touching the sound.
+    ///
+    /// Ticking a keyboard on the settings page used to take the audio stream
+    /// down, scan every driver and load the instrument again: seconds of
+    /// silence for a decision that has nothing to do with the audio device.
+    /// This supervisor already opens and closes ports on its own as hardware
+    /// comes and goes, so a new selection is the same ordinary job.
+    fn set_selected(&self, names: Vec<String>) {
+        let wanted = openable_midi_ports(names, self.yield_keylab);
+        *self
+            .selected
+            .lock()
+            .expect("MIDI selection lock poisoned") = wanted;
+        self.generation.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// The ports this host may open, given who owns the surface.
+///
+/// When an installed controller package is enabled, ITS driver owns the
+/// surface: the built-in KeyLab handling stands down and the surface endpoint
+/// (Windows MIDI ports are exclusive-open) is left for the driver. Note
+/// endpoints (ALV and friends) stay captured.
+fn openable_midi_ports(selected: Vec<String>, yield_keylab: bool) -> BTreeSet<String> {
+    selected
+        .into_iter()
+        .filter(|name| {
+            let port = crate::ump_input::endpoint_name(name).unwrap_or(name);
+            let yielded = yield_keylab && keylab_controller::little_driver(port).is_some();
+            if yielded {
+                println!(
+                    "DESKTOP_MIDI_SOURCE_YIELDED name={name:?} reason=\"an installed controller package owns this port\""
+                );
+            }
+            !yielded
+        })
+        .collect()
 }
 
 impl Drop for MidiSupervisor {
@@ -3856,6 +3967,82 @@ mod tests {
     }
 
     use super::*;
+
+    /// A settled document, so each test can move exactly one thing.
+    fn a_settled_document() -> AudioPreferences {
+        AudioPreferences {
+            schema_version: AUDIO_SCHEMA_VERSION,
+            driver: "WASAPI".into(),
+            output_device: "Speakers".into(),
+            sample_rate_hz: 48_000,
+            buffer_frames: Some(256),
+            output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
+            input_device: None,
+            input_channels: Vec::new(),
+            input_gain_db: DEFAULT_INPUT_GAIN_DB,
+            midi_inputs: vec!["Keyboard".into()],
+            velocity_curve: Default::default(),
+            velocity_curves: Default::default(),
+        }
+    }
+
+    #[test]
+    fn ticking_a_keyboard_is_not_a_device_change() {
+        let current = a_settled_document();
+        let mut next = current.clone();
+        next.midi_inputs.push("Pads".into());
+        let change = classify_audio_change(&current, &next);
+        assert!(change.ports);
+        assert!(!change.stream);
+        assert!(change.is_keyboard_only());
+    }
+
+    #[test]
+    fn a_velocity_reading_is_not_a_device_change() {
+        let current = a_settled_document();
+        let mut next = current.clone();
+        next.velocity_curve = VelocityCurve {
+            low: 0,
+            mid_input: 64,
+            mid_output: 90,
+            high: 127,
+        };
+        next.velocity_curves
+            .insert("Pads".into(), next.velocity_curve);
+        let change = classify_audio_change(&current, &next);
+        assert!(change.readings);
+        assert!(!change.ports);
+        assert!(change.is_keyboard_only());
+    }
+
+    #[test]
+    fn a_new_sample_rate_rebuilds_the_stream() {
+        let current = a_settled_document();
+        let mut next = current.clone();
+        next.sample_rate_hz = 44_100;
+        next.midi_inputs.push("Pads".into());
+        let change = classify_audio_change(&current, &next);
+        assert!(change.stream);
+        assert!(!change.is_keyboard_only());
+    }
+
+    /// Pressing Apply on a document that moved nowhere is how a player
+    /// retries after a device error, so it must still reopen the stream.
+    #[test]
+    fn an_unchanged_document_still_reopens_the_stream() {
+        let current = a_settled_document();
+        let change = classify_audio_change(&current, &current.clone());
+        assert!(!change.is_keyboard_only());
+    }
+
+    #[test]
+    fn the_ports_this_host_may_open_are_the_ones_nobody_else_owns() {
+        let chosen = vec!["Keyboard".to_owned(), "Pads".to_owned()];
+        let openable = openable_midi_ports(chosen.clone(), false);
+        assert_eq!(openable.len(), 2);
+        assert!(openable.contains("Keyboard"));
+        assert_eq!(openable_midi_ports(chosen, false).len(), 2);
+    }
 
     #[test]
     fn preferences_round_trip_as_toml() {

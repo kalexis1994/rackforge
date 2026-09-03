@@ -73,6 +73,51 @@ import type {
 
 const RackGraphEditor = lazy(() => import("./components/RackGraphEditor"));
 
+/** A confirmation the app draws itself.
+ *
+ * `window.confirm` looks like the obvious tool and cannot be used here:
+ * Android's WebView answers it only when the host installs a WebChromeClient,
+ * and this one does not, so the call returns false the instant it is made.
+ * Every destructive action guarded that way was a button that did nothing and
+ * said nothing -- Exit, and deleting a Rack, a Song or a Setlist.
+ */
+function useConfirmation() {
+  const [request, setRequest] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    action: () => void;
+  } | null>(null);
+  const dialog = request ? (
+    <ModalDialog
+      eyebrow="Confirm"
+      title={request.title}
+      role="alertdialog"
+      message={request.message}
+      onClose={() => setRequest(null)}
+      closeLabel="Cancel"
+      actions={
+        <>
+          <button className="secondary-button" onClick={() => setRequest(null)}>
+            Cancel
+          </button>
+          <button
+            className="danger-button"
+            onClick={() => {
+              const run = request.action;
+              setRequest(null);
+              run();
+            }}
+          >
+            {request.confirmLabel}
+          </button>
+        </>
+      }
+    />
+  ) : null;
+  return [dialog, setRequest] as const;
+}
+
 type ConfigKind = "rack" | "song" | "setlist";
 
 export interface PerformanceGraphWorkspace {
@@ -1026,6 +1071,7 @@ function PerformanceConfig({
   const [kind, setKind] = useState<ConfigKind>("rack");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
   const [editorResetEpoch, setEditorResetEpoch] = useState(0);
   const [rackWorkspaceId, setRackWorkspaceId] = useState<string | null>(null);
   const [songPartWorkspace, setSongPartWorkspace] = useState<{ id: string; name: string } | null>(null);
@@ -1085,13 +1131,20 @@ function PerformanceConfig({
     [onWorkspaceChange],
   );
 
+  // `window.confirm` cannot be used here. Android's WebView answers it only
+  // when the host installs a WebChromeClient, and this one does not: the call
+  // returns false immediately, so leaving a dirty editor did nothing at all
+  // and said nothing either -- Exit simply stopped working. A dialog of our
+  // own also asks the question in the app's own voice on every host.
   const proceed = useCallback((action: () => void) => {
-    if (
-      editorDirty &&
-      !window.confirm("Discard the unsaved changes in this editor?")
-    )
+    if (!editorDirty) {
+      action();
       return;
-    action();
+    }
+    // Wrapped: passing a bare function to setState makes React treat it as an
+    // updater and call it, which would perform the very navigation being
+    // asked about.
+    setPendingLeave(() => action);
   }, [editorDirty]);
   useEffect(() => {
     const closeWorkspace = () => {
@@ -1200,9 +1253,38 @@ function PerformanceConfig({
     }
   };
 
+  const leaveDialog = pendingLeave ? (
+    <ModalDialog
+      eyebrow="Unsaved changes"
+      title="Leave this editor?"
+      role="alertdialog"
+      message="This editor has changes that were never saved. Leaving discards them."
+      onClose={() => setPendingLeave(null)}
+      closeLabel="Keep editing"
+      actions={
+        <>
+          <button className="secondary-button" onClick={() => setPendingLeave(null)}>
+            Keep editing
+          </button>
+          <button
+            className="danger-button"
+            onClick={() => {
+              const leave = pendingLeave;
+              setPendingLeave(null);
+              leave();
+            }}
+          >
+            Discard and leave
+          </button>
+        </>
+      }
+    />
+  ) : null;
+
   if (activeSelectedId === null) {
     return (
       <>
+      {leaveDialog}
       <div className="live-browser config-library-browser">
         <div className="live-mode-tabs" role="tablist" aria-label="Configuration type">
           {(["rack", "song", "setlist"] as ConfigKind[]).map((item) => (
@@ -1294,6 +1376,7 @@ function PerformanceConfig({
     }${activeRackWorkspaceId ? " rack-graph-workspace" : ""}${
       activeSongPartWorkspace ? " song-graph-workspace" : ""
     }`}>
+      {leaveDialog}
       <main className="config-editor">
         {kind === "rack" && (
           <RackEditor
@@ -1917,6 +2000,7 @@ function RackEditor({
   );
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDialog, askConfirmation] = useConfirmation();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pluginPicker, setPluginPicker] = useState<{
     position?: RackGraphPosition;
@@ -2105,10 +2189,14 @@ function RackEditor({
       setError(`Cannot delete this Rack; it is used by ${usedBy.join(", ")}.`);
       return;
     }
-    if (
-      !window.confirm(`Delete Rack “${draft.name}”? This cannot be undone.`)
-    )
-      return;
+    askConfirmation({
+      title: `Delete Rack “${draft.name}”?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Delete Rack",
+      action: () => void removeConfirmed(),
+    });
+  };
+  const removeConfirmed = async () => {
     try {
       const snapshot = await dispatchEdit(baseRevision, {
         kind: "delete_rack",
@@ -2146,6 +2234,7 @@ function RackEditor({
       className={`performance-form rack-editor-form entity-rack${immersive ? " immersive" : ""}`}
       onSubmit={(event) => event.preventDefault()}
     >
+      {confirmDialog}
       <EditorHeader
         eyebrow={isNew ? "New Rack" : "Rack configuration"}
         title={draft.name}
@@ -2508,6 +2597,7 @@ function SongEditor({
   const [draft, setDraft] = useState(() => (song ? clone(song) : undefined));
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDialog, askConfirmation] = useConfirmation();
   const [selectedPartId, setSelectedPartId] = useState(song?.parts[0]?.id);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pluginPicker, setPluginPicker] = useState<{
@@ -2613,7 +2703,14 @@ function SongEditor({
       setError(`Cannot delete this Song; it is used by ${usedBy.join(", ")}.`);
       return;
     }
-    if (!window.confirm(`Delete Song “${draft.name}”? This cannot be undone.`)) return;
+    askConfirmation({
+      title: `Delete Song “${draft.name}”?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Delete Song",
+      action: () => void removeConfirmed(),
+    });
+  };
+  const removeConfirmed = async () => {
     try {
       const snapshot = await dispatchEdit(baseRevision, {
         kind: "delete_song",
@@ -2672,6 +2769,7 @@ function SongEditor({
       className={`performance-form song-editor-form entity-song${immersive ? " immersive" : ""}`}
       onSubmit={(event) => event.preventDefault()}
     >
+      {confirmDialog}
       <EditorHeader eyebrow={isNew ? "New Song" : "Song configuration"} title={draft.name} dirty={dirty || isNew} pending={pending} onSave={save} onReset={() => { setDraft(original ? clone(original) : newSong(performance)); setBaseRevision(performance.revision); setError(null); }} onDelete={isNew ? undefined : remove} />
       {error && <div className="form-error">{error}</div>}
       {partPreview.error ? <div className="form-error">Part preview: {partPreview.error}</div> : null}
@@ -2868,6 +2966,7 @@ function SetlistEditor({
   const [draft, setDraft] = useState(() => (setlist ? clone(setlist) : undefined));
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDialog, askConfirmation] = useConfirmation();
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
   const isNew = !!draft && !performance.library.setlists.some((item) => item.id === draft.id);
   useEffect(() => {
@@ -2893,7 +2992,14 @@ function SetlistEditor({
     }
   };
   const remove = async () => {
-    if (!window.confirm(`Delete Setlist “${draft.name}”? This cannot be undone.`)) return;
+    askConfirmation({
+      title: `Delete Setlist “${draft.name}”?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Delete Setlist",
+      action: () => void removeConfirmed(),
+    });
+  };
+  const removeConfirmed = async () => {
     try {
       const snapshot = await dispatchEdit(baseRevision, {
         kind: "delete_setlist",
@@ -2906,6 +3012,7 @@ function SetlistEditor({
   };
   return (
     <form className="performance-form entity-setlist" onSubmit={(event) => event.preventDefault()}>
+      {confirmDialog}
       <EditorHeader eyebrow={isNew ? "New Setlist" : "Setlist configuration"} title={draft.name} dirty={dirty || isNew} pending={pending} onSave={save} onReset={() => { setDraft(original ? clone(original) : newSetlist(performance)); setBaseRevision(performance.revision); setError(null); }} onDelete={isNew ? undefined : remove} />
       {error && <div className="form-error">{error}</div>}
       <BasicFields name={draft.name} enabled={draft.enabled} onName={(name) => setDraft({ ...draft, name })} onEnabled={(enabled) => setDraft({ ...draft, enabled })} />

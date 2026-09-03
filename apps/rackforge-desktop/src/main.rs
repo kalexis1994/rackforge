@@ -776,8 +776,14 @@ impl DesktopApp {
         };
 
         let web_url = web_servers.local_url().to_owned();
-        // Point surface notes at the engine that just started.
+        // Point surface notes at the engine that just started, and hand over
+        // the cell it writes each strike into. Both, and in the same breath:
+        // handing over only the first meant the velocity square saw nothing
+        // until something republished the runtime -- which is what pressing
+        // Apply does, so the curve looked as though it needed applying before
+        // it would follow the keyboard.
         web_servers.set_injected_midi(audio.as_ref().map(|audio| audio.injected_midi_sender()));
+        web_servers.set_last_strike(audio.as_ref().map(|audio| audio.last_strike_cell()));
         #[cfg(windows)]
         let audio_recovery_at =
             if audio.is_none() && audio_preferences.is_some() && !plugins.is_empty() {

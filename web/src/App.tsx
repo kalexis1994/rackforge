@@ -6047,6 +6047,7 @@ function SettingsPage({
                 <VelocityCurveEditor
                   curve={audioDraft.velocity_curve ?? IDENTITY_VELOCITY_CURVE}
                   onChange={(velocity_curve) => setAudioDraft({ ...audioDraft, velocity_curve })}
+                  live={settingsTab === "midi"}
                 />
               </fieldset>
               </>

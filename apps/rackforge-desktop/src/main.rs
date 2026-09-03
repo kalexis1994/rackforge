@@ -997,9 +997,11 @@ impl DesktopApp {
     /// sender last makes Touch Controller switch to the same generation.
     fn publish_audio_runtime(&mut self, audio: desktop_audio::DesktopAudio) {
         let injected_midi = audio.injected_midi_sender();
+        let last_strike = audio.last_strike_cell();
         self.audio = Some(audio);
         self.audio_watchdog = None;
         self.web_servers.set_injected_midi(Some(injected_midi));
+        self.web_servers.set_last_strike(Some(last_strike));
     }
 
     #[cfg(windows)]

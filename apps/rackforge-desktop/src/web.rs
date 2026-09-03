@@ -88,6 +88,10 @@ struct WebState {
     /// about sixty a second — so fast playing on a touch surface queued up
     /// and arrived late. It is refreshed whenever the audio engine restarts.
     injected_midi: Arc<Mutex<Option<SyncSender<crate::desktop_audio::MidiPacket>>>>,
+    /// The last strike the audio thread read, for the velocity square to aim
+    /// with. A cell rather than a message: the interface asks while the
+    /// square is on screen and nobody pays for it when it is not.
+    last_strike: Arc<Mutex<Option<Arc<AtomicU64>>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -332,6 +336,12 @@ impl DesktopWebServers {
         }
     }
 
+    pub fn set_last_strike(&self, cell: Option<Arc<AtomicU64>>) {
+        if let Ok(mut slot) = self.state.last_strike.lock() {
+            *slot = cell;
+        }
+    }
+
     pub fn local_url(&self) -> &str {
         &self.local_url
     }
@@ -424,8 +434,10 @@ pub fn start(
     preferences.validate()?;
     let shared_preferences = Arc::new(RwLock::new(preferences.clone()));
     let injected_midi = Arc::new(Mutex::new(None));
+    let last_strike = Arc::new(Mutex::new(None));
     let state = WebState {
         injected_midi: Arc::clone(&injected_midi),
+        last_strike: Arc::clone(&last_strike),
         session,
         performance_revision,
         plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
@@ -653,6 +665,7 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             get(audio_settings).put(apply_audio_settings),
         )
         .route("/api/v1/host/audio/test", post(test_audio))
+        .route("/api/v1/host/midi/last-strike", get(last_strike))
         .route("/api/v1/plugins", get(plugin_catalog))
         .route(
             "/api/v1/plugins/{plugin_id}",
@@ -802,6 +815,25 @@ async fn apply_audio_settings(
         preferences,
         response,
     })
+}
+
+/// What the keyboard last sent, and what the reading made of it.
+///
+/// Zero for the count means nothing has been played since the engine started,
+/// which is what a square with no crosshair on it means.
+async fn last_strike(State(state): State<WebState>) -> Response {
+    let packed = state
+        .last_strike
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|cell| cell.load(Ordering::Relaxed)))
+        .unwrap_or(0);
+    Json(json!({
+        "count": packed >> 16,
+        "velocity": (packed >> 8) & 0xff,
+        "played": packed & 0xff,
+    }))
+    .into_response()
 }
 
 async fn test_audio(State(state): State<WebState>) -> Response {
@@ -2570,6 +2602,7 @@ mod tests {
             package_scan_revision: Arc::new(AtomicU64::new(0)),
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
+            last_strike: Arc::new(Mutex::new(None)),
         };
         let packet = crate::desktop_audio::MidiPacket {
             source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
@@ -2614,6 +2647,7 @@ mod tests {
             package_scan_revision: Arc::new(AtomicU64::new(0)),
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(Some(audio_sender))),
+            last_strike: Arc::new(Mutex::new(None)),
         };
         let client_id = ClientId::new("controller.test.forwarder").unwrap();
         let request = ControlRequest::VirtualMidi {
@@ -2673,6 +2707,7 @@ mod tests {
             package_scan_revision: Arc::new(AtomicU64::new(0)),
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
+            last_strike: Arc::new(Mutex::new(None)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let request = ControlRequest::Dispatch {
@@ -2736,6 +2771,7 @@ mod tests {
             package_scan_revision: Arc::new(AtomicU64::new(0)),
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
+            last_strike: Arc::new(Mutex::new(None)),
         };
         let request = ControlRequest::Dispatch {
             envelope: CommandEnvelope::new(
@@ -2799,6 +2835,7 @@ mod tests {
             package_scan_revision: Arc::new(AtomicU64::new(0)),
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
+            last_strike: Arc::new(Mutex::new(None)),
         };
         let request = ControlRequest::Dispatch {
             envelope: CommandEnvelope::new(
@@ -2862,6 +2899,7 @@ mod tests {
             package_scan_revision: Arc::new(AtomicU64::new(0)),
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
+            last_strike: Arc::new(Mutex::new(None)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let responder = std::thread::spawn(move || {
@@ -2916,6 +2954,7 @@ mod tests {
             package_scan_revision: Arc::new(AtomicU64::new(0)),
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
+            last_strike: Arc::new(Mutex::new(None)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let responder = std::thread::spawn(move || {

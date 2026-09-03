@@ -730,6 +730,7 @@ pub struct DesktopAudio {
     command_sender: SyncSender<AudioCommand>,
     /// Notes played on a surface, sharing the hardware MIDI queue.
     injected_midi: SyncSender<MidiPacket>,
+    last_strike: Arc<AtomicU64>,
     controller_receiver: Receiver<DesktopControllerEvent>,
     display_mailbox: ScreenMailbox,
     errors: Arc<Mutex<Option<String>>>,
@@ -837,6 +838,7 @@ impl DesktopAudio {
         // a keyboard: 4096 deep, and anything that does not fit in this block
         // waits for the next one.
         let injected_midi = midi_sender.clone();
+        let last_strike = Arc::new(AtomicU64::new(0));
         let (controller_sender, controller_receiver) =
             mpsc::sync_channel(CONTROLLER_QUEUE_CAPACITY);
         let display_mailbox = ScreenMailbox::default();
@@ -888,6 +890,8 @@ impl DesktopAudio {
             parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             parameter_links: Vec::new(),
             velocity_curve: preferences.velocity_curve.sanitised(),
+            last_strike: Arc::clone(&last_strike),
+            strike_count: 0,
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
             plugin_input: vec![0.0; MAX_AUDIO_FRAMES * MAX_STANDALONE_INPUT_CHANNELS],
             capture: capture_ring.clone(),
@@ -989,6 +993,7 @@ impl DesktopAudio {
             _midi_supervisor: midi_supervisor,
             command_sender,
             injected_midi,
+            last_strike: Arc::clone(&last_strike),
             controller_receiver,
             display_mailbox,
             errors,
@@ -1286,6 +1291,11 @@ impl DesktopAudio {
 
     /// The queue notes are injected into, so a surface can reach the audio
     /// thread directly instead of waiting for a GUI frame.
+    /// The cell the audio thread writes each strike into, for the interface.
+    pub fn last_strike_cell(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.last_strike)
+    }
+
     pub fn injected_midi_sender(&self) -> SyncSender<MidiPacket> {
         self.injected_midi.clone()
     }
@@ -1764,6 +1774,10 @@ struct AudioProcessor {
     parameter_links: Vec<CompiledParameterLink>,
     /// The reading applied to velocities as they arrive from a device.
     velocity_curve: VelocityCurve,
+    /// The last strike, for the interface: strike number, what arrived, and
+    /// what the reading made of it, packed into one word.
+    last_strike: Arc<AtomicU64>,
+    strike_count: u64,
     output: Vec<f32>,
     plugin_input: Vec<f32>,
     capture: Option<Arc<CaptureRing>>,
@@ -1820,11 +1834,24 @@ impl AudioProcessor {
                 frames,
             );
             // The reading, here and nowhere else: this is the one point
-            // every device message passes through, and applying it here means
+            // every incoming message passes through -- a hardware port and a
+            // controller bridged through its package share this queue -- so
             // parameter links, the sequencer's conducting input and the
-            // instruments all see the velocity the player meant. Notes the
-            // interface injects are not a keybed and keep their own velocity.
+            // instruments all see the velocity the player meant.
+            let raw_velocity = packet.data[2];
             let packet = read_velocity(packet, &self.velocity_curve);
+            // And what arrived, for the interface to draw: the velocity BEFORE
+            // the reading, because the square shows where the keyboard landed
+            // and where the curve took it. One relaxed store per strike on the
+            // audio thread, one relaxed load per poll off it.
+            if packet.length >= 3 && packet.data[0] & 0xf0 == 0x90 && packet.data[2] > 0 {
+                self.strike_count = self.strike_count.wrapping_add(1);
+                let arrived = u64::from(raw_velocity);
+                self.last_strike.store(
+                    (self.strike_count << 16) | (arrived << 8) | u64::from(packet.data[2]),
+                    Ordering::Relaxed,
+                );
+            }
             let ingress = packet.ingress_at(frame);
             let active_instance_id = self.voices[self.active_voice].instance_id.as_str();
             let mut consume = false;

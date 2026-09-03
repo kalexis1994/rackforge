@@ -12308,3 +12308,48 @@ body {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* The keyboard on the square: two small marks and two hairlines, and they
+   fade on their own. A mark that stays is a mark in the way. */
+.velocity-curve-strike,
+.velocity-curve-strike-readout {
+  animation: velocity-strike-fade 1.4s var(--rf-ease-standard) both;
+}
+
+@keyframes velocity-strike-fade {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.velocity-curve-strike-guide {
+  stroke: var(--acid);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* What arrived, on the line the keyboard would have drawn by itself. */
+.velocity-curve-strike-arrived {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+/* And what was played, on the reading in force. */
+.velocity-curve-strike-played {
+  fill: #f4f2ec;
+  stroke: rgba(3, 11, 17, 0.9);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.velocity-curve-strike-readout {
+  color: var(--ink);
+}

@@ -15,9 +15,12 @@
 
 import { useCallback, useId, useRef, useState } from "react";
 
+import { useLastStrike } from "../lastStrike";
+
 import {
   IDENTITY_VELOCITY_CURVE,
   bendFraction,
+  mapVelocity,
   sanitiseVelocityCurve,
   velocityCurvePath,
   withBendFraction,
@@ -33,9 +36,12 @@ type Handle = "low" | "mid" | "high";
 export function VelocityCurveEditor({
   curve,
   onChange,
+  live = false,
 }: {
   curve: VelocityCurve;
   onChange: (curve: VelocityCurve) => void;
+  /** Follow the keyboard: ask the host what it last read, and aim at it. */
+  live?: boolean;
 }) {
   const sane = sanitiseVelocityCurve(curve);
   const frame = useRef<SVGSVGElement | null>(null);
@@ -48,6 +54,15 @@ export function VelocityCurveEditor({
   // drift accumulate across a drag. Written only where the bend actually
   // moves, which is in the gestures below.
   const curvature = useRef(bendFraction(sane) ?? 0.5);
+
+  // The keyboard, drawn where it landed. The point on the diagonal is what
+  // arrived; the point on the curve is where the reading takes it, which is
+  // the same place when the reading is straight. It fades on its own, because
+  // a mark that stays is a mark in the way.
+  // The fade is the mark's own animation, restarted by keying it on the
+  // strike number: a timer here would be a second clock to keep honest, and a
+  // piece of state that exists only to say "not any more".
+  const strike = useLastStrike(live);
 
   /** Where a pointer is, in velocity units, whatever the box is scaled to. */
   const readPointer = useCallback((event: { clientX: number; clientY: number }) => {
@@ -185,6 +200,46 @@ export function VelocityCurveEditor({
             aria-hidden="true"
           />
           <path className="velocity-curve-line" d={line} />
+          {strike && strike.count > 0 ? (
+            <g key={strike.count} className="velocity-curve-strike" aria-hidden="true">
+              {(() => {
+                const arrived = point(strike.velocity, strike.velocity);
+                const played = point(strike.velocity, mapVelocity(sane, strike.velocity));
+                return (
+                  <>
+                    {/* From the key that was struck, up to where it was taken,
+                        and across to the value the instruments were given. */}
+                    <line
+                      className="velocity-curve-strike-guide"
+                      x1={played.cx}
+                      y1={BOX}
+                      x2={played.cx}
+                      y2={played.cy}
+                    />
+                    <line
+                      className="velocity-curve-strike-guide"
+                      x1={played.cx}
+                      y1={played.cy}
+                      x2="0"
+                      y2={played.cy}
+                    />
+                    <circle
+                      className="velocity-curve-strike-arrived"
+                      cx={arrived.cx}
+                      cy={arrived.cy}
+                      r="2"
+                    />
+                    <circle
+                      className="velocity-curve-strike-played"
+                      cx={played.cx}
+                      cy={played.cy}
+                      r="3"
+                    />
+                  </>
+                );
+              })()}
+            </g>
+          ) : null}
           {handles.map((handle) => {
             const at = point(handle.x, handle.y);
             const active = dragging === handle.id;
@@ -223,6 +278,11 @@ export function VelocityCurveEditor({
         <span>
           Ceiling <strong>{sane.high}</strong>
         </span>
+        {strike && strike.count > 0 ? (
+          <span key={strike.count} className="velocity-curve-strike-readout">
+            Played <strong>{strike.velocity}</strong> → <strong>{mapVelocity(sane, strike.velocity)}</strong>
+          </span>
+        ) : null}
         <button
           type="button"
           onClick={() => {

@@ -26,6 +26,7 @@ use rackforge_core::{
     performance::PerformanceRepository,
     plugin_parameters, set_plugin_parameter,
 };
+use rackforge_dsp::output_ceiling;
 use rackforge_midi_api::{
     IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
     MidiSourceRegistry, ParameterLink, ParameterLinkPassThrough,
@@ -2522,10 +2523,16 @@ unsafe extern "C" fn render_callback(
                 *sample = 0.0;
                 nonfinite += 1;
             } else {
+                // Still counted the moment the mix asks for more than full
+                // scale, which is the thing worth reporting; what changed is
+                // that asking no longer squares the wave off. See
+                // `output_ceiling`: a brick wall is a high-order
+                // nonlinearity, and on a chord it invents energy below the
+                // lowest note being played.
                 if value.abs() > 1.0 {
                     clipped += 1;
                 }
-                *sample = value.clamp(-1.0, 1.0);
+                *sample = output_ceiling(value);
             }
         }
     }

@@ -78,6 +78,127 @@ fn knob_slot(index: u32) -> Option<usize> {
     (slot < KNOB_COUNT).then_some(slot)
 }
 
+/// Radians per degree, spelled out because this crate is `no_std` on wasm
+/// and `to_radians` is not always available there.
+const DEGREES_TO_RADIANS: f32 = core::f32::consts::PI / 180.0;
+
+/// A0's fundamental, where the scale is anchored.
+const A0_HZ: f32 = 27.5;
+
+/// The A0 speaking length a wound-bass scale of this gauge comes out at.
+///
+/// Derived rather than written down: `string_length` builds the bass from
+/// the wire, and the length at the bottom follows from the gauge there and
+/// the constant that scales it. Stating 1.90 m separately would be a second
+/// place for the same number to live, and the two would part.
+fn a0_length_m(constant: f32, gauge: f32) -> f32 {
+    let denominator = A0_HZ * gauge;
+    if denominator <= 0.0 {
+        return 1.0;
+    }
+    constant / denominator
+}
+
+/// The bass strike point of the calibrated action, as a fraction of the
+/// speaking length: one eighth, where a real action strikes.
+const STRIKE_BASS_FRACTION: f32 = 0.125;
+
+/// How far the scale can be lengthened and shortened from the calibrated one.
+/// Asymmetric because the instruments are -- see `scale_length`.
+const SIZE_SHORTEST: f32 = 1.0 / 1.82;
+const SIZE_LONGEST: f32 = 1.15;
+/// The same, for the tension: down to the historical scales, and barely up,
+/// because 1200 N is already past any real instrument -- see `tension_newtons`.
+const TENSION_LIGHTEST: f32 = 1.0 / 2.83;
+const TENSION_HEAVIEST: f32 = 1.41;
+/// A quarter of the measured board loss through to four times it: a dry
+/// ribbed plate to a loose old one.
+const BOARD_LOSS_SPAN: f32 = 4.0;
+/// Modal density, as a multiple of the measured law.
+const BOARD_DENSITY_SPAN: f32 = 1.5811388;
+/// The damper's grip, as a multiple of the calibrated felt's.
+const DAMPER_GRIP_SPAN: f32 = 1.7320508;
+/// The strike point either side of the calibrated action's.
+const STRIKE_SPAN: f32 = 1.3784049;
+/// The noises, in decibels about the calibrated level. The floor is off.
+const NOISE_FLOOR_DB: f32 = -24.082401;
+const NOISE_CEILING_DB: f32 = 24.082401;
+/// The output level in decibels, floored at silence.
+const LEVEL_FLOOR_DB: f32 = -60.0;
+
+/// The range a parameter accepts, which is the range the manifest publishes.
+///
+/// This used to be one line at the top of `Controls::set` -- nought to one,
+/// and anything else was a caller's mistake. That stopped being true the day
+/// the controls started carrying units: a microphone stands at 0.66 METRES
+/// and a hammer strikes with newtons, and a blanket gate rejects every honest
+/// value a host can send. Each parameter answers for its own bounds instead,
+/// and `the_panel_and_the_engine_start_from_the_same_place` holds them to the
+/// ones the manifest publishes.
+///
+/// The bounds read `compiled()` rather than `get()` deliberately. They are
+/// the contract with the host, and the host only ever reads the manifest,
+/// which is written from the compiled model. A knob that moves its own
+/// bound -- and `MIC_DISTANCE_MAX_M` is itself a knob -- must not move what
+/// the host is allowed to send.
+fn parameter_bounds(index: u32) -> (f64, f64) {
+    if let Some(slot) = knob_slot(index) {
+        let compiled = TUNABLES[slot].1.compiled() as f64;
+        // Four octaves either way: exactly the span the saved state's
+        // nought-to-one fader covers, so writing a session down loses
+        // nothing. A knob compiled at zero has no ratio to sweep and keeps
+        // the nought-to-one meaning it always had.
+        return if compiled == 0.0 {
+            (0.0, 1.0)
+        } else if compiled > 0.0 {
+            (compiled / 16.0, compiled * 16.0)
+        } else {
+            (compiled * 16.0, compiled / 16.0)
+        };
+    }
+    // The compiled A0, for the same reason the bounds read `compiled()` at
+    // all: the manifest is written from the model as it ships.
+    let calibrated_a0 = a0_length_m(GAUGE_CONSTANT.compiled(), GAUGE_A0_M.compiled()) as f64;
+    match index {
+        PARAM_LEVEL => (LEVEL_FLOOR_DB as f64, 0.0),
+        PARAM_ACTION_NOISE | PARAM_RELEASE_NOISE | PARAM_PEDAL_NOISE => {
+            (NOISE_FLOOR_DB as f64, NOISE_CEILING_DB as f64)
+        }
+        PARAM_BOARD_DAMPING => (
+            (BOARD_LOSS_FACTOR.compiled() * 100.0 / BOARD_LOSS_SPAN) as f64,
+            (BOARD_LOSS_FACTOR.compiled() * 100.0 * BOARD_LOSS_SPAN) as f64,
+        ),
+        PARAM_BOARD_DENSITY => ((1.0 / BOARD_DENSITY_SPAN) as f64, BOARD_DENSITY_SPAN as f64),
+        PARAM_SIZE => (
+            calibrated_a0 * SIZE_SHORTEST as f64,
+            calibrated_a0 * SIZE_LONGEST as f64,
+        ),
+        PARAM_STRIKE_POINT => (
+            (STRIKE_BASS_FRACTION / STRIKE_SPAN) as f64,
+            (STRIKE_BASS_FRACTION * STRIKE_SPAN) as f64,
+        ),
+        PARAM_TENSION => (
+            (STRING_TENSION_N.compiled() * TENSION_LIGHTEST) as f64,
+            (STRING_TENSION_N.compiled() * TENSION_HEAVIEST) as f64,
+        ),
+        PARAM_DAMPER => ((1.0 / DAMPER_GRIP_SPAN) as f64, DAMPER_GRIP_SPAN as f64),
+        PARAM_ROOM_SIZE => (
+            ROOM_VOLUME_MIN_M3.compiled() as f64,
+            ROOM_VOLUME_MAX_M3.compiled() as f64,
+        ),
+        PARAM_MIC_DISTANCE => (
+            MIC_DISTANCE_MIN_M.compiled() as f64,
+            MIC_DISTANCE_MAX_M.compiled() as f64,
+        ),
+        PARAM_LID => (
+            (LID_CLOSED_RAD.compiled() / DEGREES_TO_RADIANS) as f64,
+            (LID_OPEN_RAD.compiled() / DEGREES_TO_RADIANS) as f64,
+        ),
+        PARAM_PREAMP => (0.0, PREAMP_RANGE_DB.compiled() as f64),
+        _ => (0.0, 1.0),
+    }
+}
+
 fn knob_from_fader(default: f32, fader: f32) -> f32 {
     if default == 0.0 {
         fader
@@ -1024,7 +1145,95 @@ const PARAM_COUNT: usize = 6 + LAB_COUNT + 18 + KNOB_COUNT;
 /// the recipe floor, compiled at zero, landed on a neighbour at a sixteenth
 /// of its value and the instrument sounded broken). A state whose
 /// fingerprint is not this build's keeps its voicing and drops its knobs.
-const STATE_COUNT: usize = PARAM_COUNT + 2;
+/// A saved state, as this build writes it: every control, the preamp, the
+/// knob registry's fingerprint, and the era word.
+const STATE_COUNT: usize = PARAM_COUNT + 3;
+/// The same layout before the controls carried units, when every one of them
+/// was a nought-to-one fader position. Identical in shape to today's, which
+/// is the whole problem: without a word saying which it is, a session saved
+/// at level 0.5 would be read back as half a decibel.
+const STATE_FADER_COUNT: usize = PARAM_COUNT + 2;
+/// The era word: "UNIT" in ASCII, in the slot a fader-era state does not have.
+const STATE_ERA_UNITS: u32 = 0x554E_4954;
+
+/// A control's value as an older build saved it, in the unit it carries now.
+///
+/// Each of these slots held a position from nought to one, and the law that
+/// turned it into a physical quantity lived in the accessor that read it.
+/// The accessors are the identity now -- the control IS the quantity -- so
+/// the laws live here instead, for as long as anyone still has a session
+/// saved by a build that shipped before they moved. They read `compiled()`
+/// because that is the model the older build was writing against.
+fn fader_to_units(index: usize, fader: f32) -> f32 {
+    /// Decibels per octave of a SQUARED gain: forty over the log of ten,
+    /// because the old level fader was multiplied by itself before it left.
+    const DB_PER_OCTAVE: f32 = 40.0 / core::f32::consts::LOG2_10;
+    let signed = 2.0 * (fader - 0.5);
+    match index {
+        PARAM_LEVEL_SLOT if fader <= 0.0 => LEVEL_FLOOR_DB,
+        PARAM_LEVEL_SLOT => (DB_PER_OCTAVE * log2f(fader)).max(LEVEL_FLOOR_DB),
+        ROOM_SIZE_SLOT => {
+            let low = ROOM_VOLUME_MIN_M3.compiled();
+            low * powf(ROOM_VOLUME_MAX_M3.compiled() / low, fader)
+        }
+        MIC_DISTANCE_SLOT => {
+            let near = MIC_DISTANCE_MIN_M.compiled();
+            near * powf(MIC_DISTANCE_MAX_M.compiled() / near, fader)
+        }
+        ACTION_NOISE_SLOT | RELEASE_NOISE_SLOT | PEDAL_NOISE_SLOT => {
+            // The old fader muted at 0.02, and its floor is the floor here.
+            if fader <= 0.02 {
+                NOISE_FLOOR_DB
+            } else {
+                signed * NOISE_CEILING_DB
+            }
+        }
+        BOARD_DAMPING_SLOT => BOARD_LOSS_FACTOR.compiled() * 100.0 * powf(BOARD_LOSS_SPAN, signed),
+        BOARD_DENSITY_SLOT => powf(BOARD_DENSITY_SPAN, signed),
+        SIZE_SLOT => {
+            let span = if fader < 0.5 {
+                1.0 / SIZE_SHORTEST
+            } else {
+                SIZE_LONGEST
+            };
+            a0_length_m(GAUGE_CONSTANT.compiled(), GAUGE_A0_M.compiled()) * powf(span, signed)
+        }
+        STRIKE_POINT_SLOT => STRIKE_BASS_FRACTION * powf(STRIKE_SPAN, signed),
+        TENSION_SLOT => {
+            let span = if fader < 0.5 {
+                1.0 / TENSION_LIGHTEST
+            } else {
+                TENSION_HEAVIEST
+            };
+            STRING_TENSION_N.compiled() * powf(span, signed)
+        }
+        LID_SLOT => {
+            let closed = LID_CLOSED_RAD.compiled();
+            (closed + (LID_OPEN_RAD.compiled() - closed) * fader) / DEGREES_TO_RADIANS
+        }
+        DAMPER_SLOT => powf(DAMPER_GRIP_SPAN, signed),
+        PREAMP_SLOT => PREAMP_RANGE_DB.compiled() * fader,
+        _ => fader,
+    }
+}
+
+/// The slots `fader_to_units` speaks for, by their place in the saved state
+/// rather than by their parameter index -- the two part company at the tail,
+/// where the preamp was appended.
+const PARAM_LEVEL_SLOT: usize = 5;
+const ROOM_SIZE_SLOT: usize = 6 + LAB_COUNT;
+const MIC_DISTANCE_SLOT: usize = 6 + LAB_COUNT + 2;
+const ACTION_NOISE_SLOT: usize = 6 + LAB_COUNT + 4;
+const RELEASE_NOISE_SLOT: usize = 6 + LAB_COUNT + 5;
+const PEDAL_NOISE_SLOT: usize = 6 + LAB_COUNT + 6;
+const BOARD_DAMPING_SLOT: usize = 6 + LAB_COUNT + 8;
+const BOARD_DENSITY_SLOT: usize = 6 + LAB_COUNT + 9;
+const SIZE_SLOT: usize = 6 + LAB_COUNT + 10;
+const STRIKE_POINT_SLOT: usize = 6 + LAB_COUNT + 11;
+const TENSION_SLOT: usize = 6 + LAB_COUNT + 12;
+const LID_SLOT: usize = 6 + LAB_COUNT + 13;
+const DAMPER_SLOT: usize = 6 + LAB_COUNT + 14;
+const PREAMP_SLOT: usize = PARAM_COUNT;
 
 /// FNV-1a over the registry's names, in order: the same names in the same
 /// order is the same layout.
@@ -2385,7 +2594,7 @@ impl Default for Controls {
             unison: 0.65,
             decay: 0.35,
             width: 0.35,
-            level: 0.72,
+            level: -5.7067003,
             preamp: 4.5,
             // The user's lab refinements, by ear: felt corner a touch up, the
             // hammer a shade softer and heavier, bloom up, both decay stages
@@ -2424,19 +2633,19 @@ impl Default for Controls {
             room_hardness: 0.35,
             mic_distance: 0.6598,
             mic_pattern: 0.6,
-            action_noise: 0.39,
-            release_noise: 0.3,
-            pedal_noise: 0.5,
+            action_noise: -5.298128,
+            release_noise: -9.63296,
+            pedal_noise: 0.0,
             // Centre of the recalibrated travel: the subtle level the
             // user's ear chose now IS mid-fader, with room below it.
             impact: 0.26,
-            board_damping: 0.5,
-            board_density: 0.5,
-            size: 0.5,
-            strike_point: 0.5,
-            tension: 0.5,
+            board_damping: 2.3,
+            board_density: 1.0,
+            size: 1.9000946,
+            strike_point: 0.125,
+            tension: 850.0,
             lid: 24.35,
-            damper: 0.5,
+            damper: 1.0,
             clang_falloff: 0.5,
             // What a plain string keeps of a wound one's longitudinal
             // drive. Not zero: plain wire has longitudinal modes too, they
@@ -2451,18 +2660,31 @@ impl Controls {
     /// Lab multiplier i: 0..1 slider -> off..x16, centre = x1.
     /// The lab curve for a standalone control: off at the bottom, x1 at
     /// the centre, x16 at the top.
-    fn noise_gain(value: f32) -> f32 {
-        if value <= 0.02 {
+    fn noise_gain(decibels: f32) -> f32 {
+        // The bottom of the travel is off, and it is the ONLY place that is
+        // off. The nought-to-one fader this replaced muted below 0.02, which
+        // put a silent sliver just above its own floor -- a dead zone the
+        // player could land in and hear nothing from a control that read
+        // "on". In decibels the floor says what it is.
+        if decibels <= NOISE_FLOOR_DB {
             return 0.0;
         }
-        powf(256.0, value - 0.5)
+        powf(10.0, decibels / 20.0)
+    }
+
+    /// The output gain, from the decibels the player set.
+    fn level_gain(&self) -> f32 {
+        if self.level <= LEVEL_FLOOR_DB {
+            return 0.0;
+        }
+        powf(10.0, self.level / 20.0)
     }
 
     /// The board's loss factor. Centre is Ege & Boutillon's measured 2.3%;
     /// the travel spans a quarter of that to four times it, which covers a
     /// dry ribbed plate through to a loose old one.
     fn board_loss(&self) -> f32 {
-        BOARD_LOSS_FACTOR.get() * powf(16.0, self.board_damping - 0.5)
+        self.board_damping / 100.0
     }
 
     /// How far apart the plate's modes sit, as a multiplier on the measured
@@ -2476,24 +2698,32 @@ impl Controls {
     /// partial above it, and the upper ladder measured 3 dB WORSE rather
     /// than better. 256 slots cover the tightest setting here to 8.5 kHz.
     fn board_density(&self) -> f32 {
-        powf(2.5, 0.5 - self.board_density)
+        // The control carries DENSITY and this returns SPACING, which is its
+        // reciprocal: more modes to the kilohertz means less room between
+        // them. The two were the same fader before, and it ran backwards --
+        // the profiles put grands "a little above centre" for their higher
+        // density while the number underneath was the gap.
+        if self.board_density <= 0.0 {
+            return 1.0;
+        }
+        1.0 / self.board_density
     }
 
     /// The speaking lengths, as a multiple of the calibrated scale AT A0.
     /// A little over half at the bottom of the travel -- an upright's bass --
     /// to a third longer than a concert grand at the top.
     fn scale_length(&self) -> f32 {
-        // Asymmetric, for the same reason the tension travel is: the real
-        // instruments are not spread evenly around the calibrated one. A
-        // concert grand's A0 speaking length is about 1.90 m and the longest
-        // piano ever built reaches perhaps 2.15 -- there is almost nothing
-        // above -- while below lie the five-foot grands at 1.09 m and the
-        // studio uprights at 1.22. A symmetric travel put a third of its
-        // length past any piano that exists and could not reach a baby grand
-        // at all.
-        let offset = self.size - 0.5;
-        let span = if offset < 0.0 { 1.82 } else { 1.15 };
-        powf(span, 2.0 * offset)
+        // The control IS the A0 speaking length in metres, so this is only
+        // that length over the one the scale was calibrated at. The travel is
+        // asymmetric because the instruments are: a concert grand's A0 runs
+        // about 1.90 m and the longest piano ever built reaches perhaps 2.15
+        // -- there is almost nothing above -- while below lie the five-foot
+        // grands at 1.09 m and the studio uprights at 1.22.
+        let calibrated = a0_length_m(GAUGE_CONSTANT.get(), GAUGE_A0_M.get());
+        if calibrated <= 0.0 {
+            return 1.0;
+        }
+        self.size / calibrated
     }
 
     /// How much of that scaling a given note actually receives.
@@ -2519,7 +2749,7 @@ impl Controls {
     /// spans roughly 1/11 to 1/6 of the speaking length, which brackets what
     /// real actions are regulated to.
     fn strike_ratio(&self) -> f32 {
-        powf(1.9, self.strike_point - 0.5)
+        self.strike_point / STRIKE_BASS_FRACTION
     }
 
     /// The scale's tension in newtons, centred on the calibrated 850 N.
@@ -2537,16 +2767,14 @@ impl Controls {
     /// which is the trade -- a lighter scale is fatter and less jangly, with
     /// a third of the inharmonicity and correspondingly less stretch.
     fn tension_newtons(&self) -> f32 {
-        let offset = self.tension - 0.5;
-        let span = if offset < 0.0 { 2.83 } else { 1.41 };
-        STRING_TENSION_N.get() * powf(span, 2.0 * offset)
+        self.tension
     }
 
     /// How much of the damper's grip the felt actually delivers. Below centre
     /// the felt is worn and the note bleeds past the key; above it the set is
     /// hard and new and shuts the string dead.
     fn damper_grip(&self) -> f32 {
-        powf(3.0, self.damper - 0.5)
+        self.damper
     }
 
     /// HF Floor as signed travel from the shipped value: -1 at the bottom of
@@ -2627,14 +2855,27 @@ impl Controls {
             _ => {
                 let slot = knob_slot(index)?;
                 let (_, knob, _) = TUNABLES[slot];
-                return Some(fader_from_knob(knob.compiled(), knob.get()) as f64);
+                // The constant itself. It used to be a position on a sweep
+                // four octaves either side of the compiled value, which told
+                // a voicer nothing about the 850 newtons or the 3.5 millimetre
+                // wire they were moving. The sweep survives as the range and
+                // the logarithmic taper the descriptor declares.
+                //
+                // A knob compiled at zero has no ratio to sweep, so it keeps
+                // the nought-to-one meaning `knob_from_fader` already gave it.
+                return Some(if knob.compiled() == 0.0 {
+                    fader_from_knob(knob.compiled(), knob.get()) as f64
+                } else {
+                    knob.get() as f64
+                });
             }
         };
         Some(value as f64)
     }
 
     fn set(&mut self, index: u32, value: f64) -> bool {
-        if !(0.0..=1.0).contains(&value) {
+        let (minimum, maximum) = parameter_bounds(index);
+        if !(minimum..=maximum).contains(&value) {
             return false;
         }
         let value = value as f32;
@@ -2670,7 +2911,11 @@ impl Controls {
                     return false;
                 };
                 let (_, knob, _) = TUNABLES[slot];
-                knob.set(knob_from_fader(knob.compiled(), value));
+                knob.set(if knob.compiled() == 0.0 {
+                    knob_from_fader(knob.compiled(), value)
+                } else {
+                    value
+                });
                 self.knobs_dirty = true;
             }
         }
@@ -3310,14 +3555,9 @@ fn simulate_strike(
 }
 
 impl ConcertGrand {
-    /// Radians per degree, spelled out because this crate is `no_std` on wasm
-    /// and `to_radians` is not always available there.
-    const DEGREES_TO_RADIANS: f32 = core::f32::consts::PI / 180.0;
-
     /// The lid's angle in radians, from the degrees the player set.
     fn lid_radians(&self) -> f32 {
-        (self.controls.lid * Self::DEGREES_TO_RADIANS)
-            .clamp(LID_CLOSED_RAD.get(), LID_OPEN_RAD.get())
+        (self.controls.lid * DEGREES_TO_RADIANS).clamp(LID_CLOSED_RAD.get(), LID_OPEN_RAD.get())
     }
 
     /// How far open the lid is, nought shut to one wide.
@@ -4265,7 +4505,7 @@ impl ConcertGrand {
         // 30.8 and the ninth at 48.3: the hole in the middle of the harmonics
         // that makes the note sound like a thinner string.
         let upper = (position - 0.35).max(0.0) / 0.65;
-        let base = 1.0 / (8.0 + 8.0 * upper * upper) * self.controls.strike_ratio();
+        let base = STRIKE_BASS_FRACTION / (1.0 + upper * upper) * self.controls.strike_ratio();
         #[cfg(test)]
         if let Ok(scale) = std::env::var("CG_X0_SCALE")
             && let Ok(scale) = scale.parse::<f32>()
@@ -6337,11 +6577,11 @@ impl Processor for ConcertGrand {
             // A0 ~2.10 m.
             "concert-308" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.60), (LAB_HF, 0.43)]),
-                size: 0.86,
+                size: 2.1,
                 brightness: 0.62,
-                tension: 0.55,
-                strike_point: 0.5,
-                board_density: 0.56,
+                tension: 880.0,
+                strike_point: 0.125,
+                board_density: 1.057,
                 unison: 0.42,
                 decay: 0.55,
                 room_size: 541.0,
@@ -6352,11 +6592,11 @@ impl Processor for ConcertGrand {
             // the bass its signature. A0 ~2.02 m.
             "concert-280" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.45), (LAB_HF, 0.45)]),
-                size: 0.72,
+                size: 2.02,
                 brightness: 0.36,
-                tension: 0.34,
-                strike_point: 0.42,
-                board_density: 0.54,
+                tension: 609.0,
+                strike_point: 0.1187,
+                board_density: 1.037,
                 unison: 0.55,
                 decay: 0.58,
                 room_size: 471.2,
@@ -6368,11 +6608,11 @@ impl Processor for ConcertGrand {
             // sits closest to the factory instrument. A0 ~2.00 m.
             "concert-275" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.62), (LAB_HF, 0.37)]),
-                size: 0.68,
+                size: 2.0,
                 brightness: 0.60,
-                tension: 0.58,
-                strike_point: 0.52,
-                board_density: 0.53,
+                tension: 898.0,
+                strike_point: 0.1266,
+                board_density: 1.028,
                 room_size: 439.8,
                 mic_distance: 0.7846,
                 ..Controls::default()
@@ -6381,11 +6621,11 @@ impl Processor for ConcertGrand {
             // itself at low velocities. A0 ~1.98 m.
             "concert-274" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.50), (LAB_HF, 0.41)]),
-                size: 0.65,
+                size: 1.98,
                 brightness: 0.47,
-                tension: 0.5,
-                strike_point: 0.47,
-                board_density: 0.53,
+                tension: 850.0,
+                strike_point: 0.1226,
+                board_density: 1.028,
                 unison: 0.58,
                 dynamics: 0.62,
                 room_size: 439.8,
@@ -6399,11 +6639,11 @@ impl Processor for ConcertGrand {
             // what the class is for. A0 ~1.81 m.
             "concert-227" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.55), (LAB_HF, 0.39)]),
-                size: 0.455,
+                size: 1.8,
                 brightness: 0.52,
-                tension: 0.52,
-                strike_point: 0.49,
-                board_density: 0.53,
+                tension: 862.0,
+                strike_point: 0.1242,
+                board_density: 1.028,
                 unison: 0.56,
                 dynamics: 0.58,
                 room_size: 383.0,
@@ -6415,11 +6655,11 @@ impl Processor for ConcertGrand {
             // A0 ~1.65 m.
             "salon-211" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.51), (LAB_HF, 0.37)]),
-                size: 0.38,
+                size: 1.65,
                 brightness: 0.47,
-                tension: 0.5,
-                strike_point: 0.47,
-                board_density: 0.52,
+                tension: 850.0,
+                strike_point: 0.1226,
+                board_density: 1.018,
                 unison: 0.58,
                 dynamics: 0.62,
                 room_size: 333.6,
@@ -6430,11 +6670,11 @@ impl Processor for ConcertGrand {
             // A0 ~1.45 m.
             "parlour-185" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.53), (LAB_HF, 0.31)]),
-                size: 0.27,
+                size: 1.44,
                 brightness: 0.53,
-                tension: 0.5,
-                strike_point: 0.5,
-                board_density: 0.49,
+                tension: 850.0,
+                strike_point: 0.125,
+                board_density: 0.991,
                 unison: 0.52,
                 decay: 0.46,
                 room_size: 271.2,
@@ -6445,11 +6685,11 @@ impl Processor for ConcertGrand {
             // treble, which is the whole character of the thing. A0 ~1.09 m.
             "baby-150" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.55), (LAB_HF, 0.27)]),
-                size: 0.04,
+                size: 1.1,
                 brightness: 0.55,
-                tension: 0.5,
-                strike_point: 0.55,
-                board_density: 0.47,
+                tension: 850.0,
+                strike_point: 0.1291,
+                board_density: 0.973,
                 decay: 0.4,
                 room_size: 205.7,
                 mic_distance: 0.683,
@@ -6460,11 +6700,11 @@ impl Processor for ConcertGrand {
             // uprights beat small grands where it matters.
             "upright-52" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.58), (LAB_HF, 0.25)]),
-                size: 0.23,
+                size: 1.38,
                 brightness: 0.52,
-                tension: 0.5,
-                strike_point: 0.55,
-                board_density: 0.45,
+                tension: 850.0,
+                strike_point: 0.1291,
+                board_density: 0.955,
                 width: 0.45,
                 decay: 0.42,
                 room_size: 179.1,
@@ -6475,11 +6715,11 @@ impl Processor for ConcertGrand {
             // A 45-inch studio upright. A0 ~1.22 m.
             "upright-studio" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.60), (LAB_HF, 0.21)]),
-                size: 0.13,
+                size: 1.22,
                 brightness: 0.55,
-                tension: 0.52,
-                strike_point: 0.58,
-                board_density: 0.43,
+                tension: 862.0,
+                strike_point: 0.1316,
+                board_density: 0.938,
                 width: 0.4,
                 decay: 0.38,
                 room_size: 135.9,
@@ -6528,16 +6768,16 @@ impl Processor for ConcertGrand {
                     (LAB_HAMMER, 0.60),
                     (LAB_DETUNE, 0.56),
                 ]),
-                size: 0.20,
+                size: 1.33,
                 brightness: 0.56,
-                tension: 0.5,
-                strike_point: 0.56,
-                board_density: 0.44,
-                board_damping: 0.55,
+                tension: 850.0,
+                strike_point: 0.1299,
+                board_density: 0.947,
+                board_damping: 2.642,
                 unison: 0.70,
                 decay: 0.4,
                 dynamics: 0.4,
-                action_noise: 0.46,
+                action_noise: -1.93,
                 width: 0.42,
                 room_size: 167.2,
                 mic_distance: 0.7846,
@@ -6550,12 +6790,12 @@ impl Processor for ConcertGrand {
             // widened tension travel exists for.
             "fortepiano" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.44), (LAB_HF, 0.19)]),
-                size: 0.30,
+                size: 1.5,
                 brightness: 0.45,
-                tension: 0.06,
-                strike_point: 0.35,
-                board_density: 0.4,
-                board_damping: 0.6,
+                tension: 340.0,
+                strike_point: 0.1135,
+                board_density: 0.912,
+                board_damping: 3.035,
                 unison: 0.35,
                 decay: 0.3,
                 dynamics: 0.35,
@@ -6605,6 +6845,7 @@ impl Processor for ConcertGrand {
         }
         values[PARAM_COUNT] = self.controls.preamp;
         values[PARAM_COUNT + 1] = f32::from_bits(knob_registry_fingerprint());
+        values[PARAM_COUNT + 2] = f32::from_bits(STATE_ERA_UNITS);
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -6680,6 +6921,12 @@ impl Processor for ConcertGrand {
         } else {
             state.len() / 4
         };
+        // Whether the controls in it carry their units, which is the one
+        // thing about a state that its shape cannot tell you: the layout did
+        // not change when they did, only the meaning of the numbers.
+        let carries_units = state.len() == STATE_COUNT * 4
+            && f32::from_le_bytes(state.as_chunks::<4>().0[PARAM_COUNT + 2]).to_bits()
+                == STATE_ERA_UNITS;
         for (index, (value, chunk)) in values
             .iter_mut()
             .zip(state.as_chunks::<4>().0)
@@ -6687,29 +6934,52 @@ impl Processor for ConcertGrand {
             .take(readable)
         {
             let decoded = f32::from_le_bytes(*chunk);
-            // Most controls are still a nought-to-one position, and a saved
-            // state outside that is corrupt. Four are not: Room Size is cubic
-            // metres, Mic Distance is metres, Lid is degrees and Preamp is
-            // decibels, and each is bounded by the model where it is read.
-            // The blanket range was an invariant of a layout where every
-            // control happened to be normalised, and it stopped being true
-            // the day they started carrying their own units -- it rejected
-            // every state this instrument saves.
-            let normalised = !matches!(
-                index,
-                i if i == 6 + LAB_COUNT
-                    || i == 6 + LAB_COUNT + 2
-                    || i == 6 + LAB_COUNT + 13
-                    || i == PARAM_COUNT
-            );
-            let out_of_range = normalised && !(0.0..=1.0).contains(&decoded);
-            if !decoded.is_finite() || out_of_range {
-                // The fingerprint slot is a hash, not a control.
-                if index != PARAM_COUNT + 1 {
-                    return false;
-                }
+            // The fingerprint and the era word are not controls: one is a
+            // hash and the other is four letters, and neither is a number
+            // that has to make sense.
+            if !decoded.is_finite() && index < PARAM_COUNT + 1 {
+                return false;
             }
             *value = decoded;
+        }
+        // A state without the era word was written when every control was a
+        // nought-to-one position, so each one is converted by the law that
+        // used to read it. Only what was actually read is converted: the
+        // slots a shorter state did not reach already hold this build's
+        // defaults, which are in units.
+        if !carries_units {
+            for (index, value) in values.iter_mut().enumerate().take(readable) {
+                *value = fader_to_units(index, *value);
+            }
+        }
+        // Now they can be judged. Each control answers for its own range,
+        // because they carry units -- metres, newtons, decibels -- and the
+        // blanket nought-to-one this replaced was an invariant of a layout
+        // where every control happened to be normalised.
+        //
+        // The knobs are the exception, and deliberately: the state writes
+        // them as their nought-to-one fader position, which is exactly the
+        // four octaves either side that their range spans, so a session
+        // loses nothing and an older one still reads.
+        for (index, value) in values
+            .iter()
+            .enumerate()
+            .take(readable.min(PARAM_COUNT + 1))
+        {
+            let out_of_range = if knob_slot(index as u32).is_some() {
+                !(0.0..=1.0).contains(value)
+            } else {
+                let parameter = if index == PREAMP_SLOT {
+                    PARAM_PREAMP
+                } else {
+                    index as u32
+                };
+                let (minimum, maximum) = parameter_bounds(parameter);
+                !(minimum..=maximum).contains(&(*value as f64))
+            };
+            if out_of_range {
+                return false;
+            }
         }
         let mut lab = [0.5f32; LAB_COUNT];
         lab.copy_from_slice(&values[6..6 + LAB_COUNT]);
@@ -6744,7 +7014,7 @@ impl Processor for ConcertGrand {
         };
         // The knobs, only from a state this build wrote: by position, any
         // other layout hands them their neighbours' values.
-        let same_layout = state.len() == STATE_COUNT * 4
+        let same_layout = (state.len() == STATE_COUNT * 4 || state.len() == STATE_FADER_COUNT * 4)
             && values[PARAM_COUNT + 1].to_bits() == knob_registry_fingerprint();
         for (slot, (_, knob, _)) in TUNABLES.iter().enumerate() {
             let fader = if same_layout {
@@ -6842,7 +7112,7 @@ impl Processor for ConcertGrand {
             self.scale_dirty = false;
             self.tune();
         }
-        let level = self.controls.level * self.controls.level;
+        let level = self.controls.level_gain();
         let preamp_gain = self.preamp_gain();
         let knee_positive = PREAMP_KNEE.get().clamp(0.1, 0.95);
         // The asymmetry: the negative half bends a little later.
@@ -8079,7 +8349,15 @@ mod tests {
         let mut piano = prepared();
         assert!(piano.set_parameter(PARAM_BRIGHTNESS, 0.31));
         let slot = KNOB_PARAM_BASE + 3;
-        assert!(piano.set_parameter(slot, 0.625));
+        // A knob carries its own quantity now, so "moved" has to be said in
+        // that knob's units. A quarter above compiled is well inside the four
+        // octaves either side that the control offers.
+        let (name, knob, _) = TUNABLES[3];
+        let compiled = knob.compiled() as f64;
+        assert!(compiled != 0.0, "{name} must have something to scale");
+        let moved = compiled * 1.25;
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-6 * b.abs().max(1.0);
+        assert!(piano.set_parameter(slot, moved));
         let mut state = [0u8; STATE_COUNT * 4];
         assert_eq!(piano.save_state(&mut state), Some(STATE_COUNT * 4));
         // The same bytes with another registry's fingerprint: a build that
@@ -8090,16 +8368,105 @@ mod tests {
         assert!(piano.load_state(&state));
         assert!((piano.get_parameter(PARAM_BRIGHTNESS).unwrap() - 0.31).abs() < 1e-6);
         assert!(
-            (piano.get_parameter(slot).unwrap() - 0.5).abs() < 1e-6,
+            close(piano.get_parameter(slot).unwrap(), compiled),
             "a knob from another layout must come back compiled"
         );
         // And the same state as this build wrote it keeps the knob.
-        assert!(piano.set_parameter(slot, 0.625));
+        assert!(piano.set_parameter(slot, moved));
         assert_eq!(piano.save_state(&mut state), Some(STATE_COUNT * 4));
-        assert!(piano.set_parameter(slot, 0.5));
+        assert!(piano.set_parameter(slot, compiled));
         assert!(piano.load_state(&state));
-        assert!((piano.get_parameter(slot).unwrap() - 0.625).abs() < 1e-6);
-        assert!(piano.set_parameter(slot, 0.5));
+        assert!(close(piano.get_parameter(slot).unwrap(), moved));
+        assert!(piano.set_parameter(slot, compiled));
+    }
+
+    /// A session saved by the build that shipped, read by this one.
+    ///
+    /// The layout did not change when the controls started carrying units --
+    /// same slots, same length -- so nothing about the SHAPE of an old state
+    /// says that its level is a fader position and not half a decibel. The
+    /// era word is what says it, and this is the test that it is believed:
+    /// the factory instrument of 0.160.0 must come back as the factory
+    /// instrument of this build, control for control.
+    #[test]
+    fn a_session_from_before_the_units_comes_back_as_the_same_instrument() {
+        // The faders exactly as 0.160.0's `Controls::default()` held them.
+        let mut values = [0.5f32; STATE_FADER_COUNT];
+        values[0] = 0.44; // brightness
+        values[1] = 0.45; // dynamics
+        values[2] = 0.65; // unison
+        values[3] = 0.35; // decay
+        values[4] = 0.35; // width
+        values[5] = 0.72; // level
+        values[6..6 + LAB_COUNT].copy_from_slice(&Controls::default().lab);
+        values[ROOM_SIZE_SLOT] = 0.28;
+        values[ROOM_SIZE_SLOT + 1] = 0.35; // room hardness
+        values[MIC_DISTANCE_SLOT] = 0.08;
+        values[MIC_DISTANCE_SLOT + 1] = 0.6; // mic pattern
+        values[ACTION_NOISE_SLOT] = 0.39;
+        values[RELEASE_NOISE_SLOT] = 0.3;
+        values[PEDAL_NOISE_SLOT] = 0.5;
+        values[PEDAL_NOISE_SLOT + 1] = 0.26; // impact
+        values[LID_SLOT] = 0.5;
+        values[LID_SLOT + 2] = 0.5; // clang falloff
+        values[LID_SLOT + 3] = 0.25; // clang plain
+        values[LID_SLOT + 4] = 0.0; // action: a grand
+        for (slot, (_, knob, _)) in TUNABLES.iter().enumerate() {
+            values[KNOB_PARAM_BASE as usize + slot] =
+                fader_from_knob(knob.compiled(), knob.compiled());
+        }
+        values[PREAMP_SLOT] = 0.15;
+        values[PREAMP_SLOT + 1] = f32::from_bits(knob_registry_fingerprint());
+
+        let mut state = [0u8; STATE_FADER_COUNT * 4];
+        for (chunk, value) in state.as_chunks_mut::<4>().0.iter_mut().zip(values) {
+            chunk.copy_from_slice(&value.to_le_bytes());
+        }
+
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(
+            piano.load_state(&state),
+            "a shipped session must still open"
+        );
+
+        let factory = Controls::default();
+        let read = piano.controls;
+        for (name, was, now) in [
+            ("level", read.level, factory.level),
+            ("room size", read.room_size, factory.room_size),
+            ("mic distance", read.mic_distance, factory.mic_distance),
+            ("action noise", read.action_noise, factory.action_noise),
+            ("release noise", read.release_noise, factory.release_noise),
+            ("pedal noise", read.pedal_noise, factory.pedal_noise),
+            ("board damping", read.board_damping, factory.board_damping),
+            ("board density", read.board_density, factory.board_density),
+            ("size", read.size, factory.size),
+            ("strike point", read.strike_point, factory.strike_point),
+            ("tension", read.tension, factory.tension),
+            ("lid", read.lid, factory.lid),
+            ("damper", read.damper, factory.damper),
+            ("preamp", read.preamp, factory.preamp),
+        ] {
+            // A tenth of a percent: the faders were saved at two decimals, so
+            // the migration cannot land closer than the fader itself did.
+            assert!(
+                (was - now).abs() <= 1e-3 * now.abs().max(1.0),
+                "{name} migrated to {was}, and the factory instrument has {now}"
+            );
+        }
+        // And the voicing, which never moved, is bit for bit.
+        assert_eq!(read.brightness, factory.brightness);
+        assert_eq!(read.lab, factory.lab);
+        // A state this build wrote is not migrated a second time.
+        let mut written = [0u8; STATE_COUNT * 4];
+        assert_eq!(piano.save_state(&mut written), Some(STATE_COUNT * 4));
+        let mut again = Box::new(ConcertGrand::default());
+        assert!(again.load_state(&written));
+        assert_eq!(
+            again.controls.level, read.level,
+            "read twice, converted twice"
+        );
+        assert_eq!(again.controls.tension, read.tension);
     }
 
     #[test]
@@ -9672,15 +10039,49 @@ mod tests {
                 .next()
                 .and_then(|d| d.parse().ok())
                 .expect("an index");
-            let Some(rest) = chunk.split("\"default\":").nth(1) else {
+            // `e`, `-` and `+` because a model constant can be 3e-10. The
+            // parser stopped at the first character it did not recognise and
+            // read that one as 3, which is a billion times the truth.
+            let number = |field: &str| -> Option<f64> {
+                chunk
+                    .split(field)
+                    .nth(1)?
+                    .trim_start()
+                    .split(|c: char| {
+                        !(c.is_ascii_digit()
+                            || c == '.'
+                            || c == 'e'
+                            || c == 'E'
+                            || c == '-'
+                            || c == '+')
+                    })
+                    .next()?
+                    .parse()
+                    .ok()
+            };
+            let Some(declared) = number("\"default\":") else {
                 continue;
             };
-            let declared: f64 = rest
-                .trim_start()
-                .split(|c: char| !(c.is_ascii_digit() || c == '.'))
-                .next()
-                .and_then(|d| d.parse().ok())
-                .expect("a default");
+            // The gate and the manifest have to be the same sentence said
+            // twice: the host clamps what it sends to the range it read here,
+            // and `Controls::set` refuses anything outside the range it
+            // derives from the compiled model. A knob whose constant moves
+            // without this file being regenerated would leave the panel
+            // offering travel the engine rejects -- silently, at the ends,
+            // which is exactly where nobody looks.
+            if let (Some(minimum), Some(maximum)) = (number("\"minimum\":"), number("\"maximum\":"))
+            {
+                let (low, high) = parameter_bounds(index);
+                let near = |a: f64, b: f64| (a - b).abs() <= 1e-6 * b.abs().max(1.0);
+                assert!(
+                    near(minimum, low) && near(maximum, high),
+                    "parameter {index}: the panel offers {minimum}..{maximum},                      the engine accepts {low}..{high}"
+                );
+                assert!(
+                    declared >= minimum && declared <= maximum,
+                    "parameter {index}: it starts at {declared}, outside {minimum}..{maximum}"
+                );
+            }
             let actual = engine.get_parameter(index).expect("the engine knows it");
             // Relative, because the parameters stopped all being nought to
             // one. A room is declared as 311.3 cubic metres and the engine
@@ -10770,11 +11171,24 @@ mod tests {
         let mut piano = prepared();
         for (slot, (name, knob, _)) in TUNABLES.iter().enumerate() {
             let index = KNOB_PARAM_BASE + slot as u32;
-            let rest = fader_from_knob(knob.compiled(), knob.compiled());
+            // A model knob is its own constant now. Writing the compiled
+            // value must leave the knob exactly there, and read back as
+            // itself -- 850 newtons in, 850 newtons out. A knob compiled at
+            // zero has no ratio to sweep and keeps the nought-to-one meaning,
+            // where the resting position is the middle.
+            let rest = if knob.compiled() == 0.0 {
+                fader_from_knob(knob.compiled(), knob.compiled())
+            } else {
+                knob.compiled()
+            };
             assert!(piano.set_parameter(index, rest as f64), "{name}");
             assert_eq!(knob.get(), knob.compiled(), "{name} moved");
             let read = piano.get_parameter(index).unwrap();
-            assert!((read - rest as f64).abs() < 1e-6, "{name} reads {read}");
+            let tolerance = 1e-6 * (rest as f64).abs().max(1.0);
+            assert!(
+                (read - rest as f64).abs() <= tolerance,
+                "{name} reads {read}, not {rest}"
+            );
         }
         assert!(
             piano

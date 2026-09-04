@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 121;
+pub const KNOB_COUNT: usize = 122;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -703,6 +703,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "ACTION_NOISE_VELOCITY_POWER",
         &ACTION_NOISE_VELOCITY_POWER,
         "How steeply the action's own noise follows the blow.",
+    ),
+    (
+        "ACTION_NOISE_KNEE",
+        &ACTION_NOISE_KNEE,
+        "Where a blow starts counting as hard.",
     ),
 ];
 
@@ -1605,6 +1610,39 @@ impl BodyMode {
 /// after the metrics cleared it. That is the reason this is a knob and not a
 /// number: the instrument for this is an ear.
 pub static ACTION_NOISE_VELOCITY_POWER: Knob = Knob::new(4.0);
+
+/// Where a blow starts counting as hard.
+///
+/// The steeper law above pivoted on velocity ONE, which is MIDI 127 and not
+/// somewhere a player lives. A hard blow at 95 or 110 therefore lost level
+/// with everything else -- six decibels in the top octave at 95 -- and the
+/// instrument lost its punch exactly where the ear wanted it kept.
+///
+/// So the steepening stops here. At and above this velocity the law is the
+/// one the instrument shipped with, to the sample; below it the exponent
+/// takes over, and the two meet without a step. Nought point eight is MIDI
+/// 102, which is a forte.
+pub static ACTION_NOISE_KNEE: Knob = Knob::new(0.8);
+
+/// The velocity law the action noise shipped with, kept above the knee.
+const ACTION_NOISE_SHIPPED_POWER: f32 = 1.9;
+
+/// How loudly the action answers a blow, as a multiplier on its level.
+fn action_noise_dynamic(velocity: f32) -> f32 {
+    let knee = ACTION_NOISE_KNEE.get().clamp(0.05, 1.0);
+    if velocity >= knee {
+        return powf(velocity, ACTION_NOISE_SHIPPED_POWER);
+    }
+    // Continuous at the knee: the shipped level there, times the steeper
+    // fall below it.
+    powf(knee, ACTION_NOISE_SHIPPED_POWER)
+        * powf(
+            velocity / knee,
+            ACTION_NOISE_VELOCITY_POWER
+                .get()
+                .max(ACTION_NOISE_SHIPPED_POWER),
+        )
+}
 
 /// pitch. Two agreeing metrics are not a verdict.
 pub static KNOCK_LEVEL: Knob = Knob::new(0.028);
@@ -5492,7 +5530,7 @@ impl ConcertGrand {
         // recording level at ~0.65 and x16 above it at the top.
         self.strike_serial = self.strike_serial.wrapping_add(1);
         let strike_salt = self.strike_serial.wrapping_mul(0x9E37_79B9);
-        let clack_level = powf(velocity, ACTION_NOISE_VELOCITY_POWER.get())
+        let clack_level = action_noise_dynamic(velocity)
             * KNOCK_LEVEL.get()
             * 3.4
             * (0.75 + 0.5 * hash01(strike_salt ^ 0xA5))
@@ -5547,7 +5585,7 @@ impl ConcertGrand {
         // mid and treble notes than strings alone can explain. Three short
         // dark components stand in for it.
         {
-            let thump_level = powf(velocity, ACTION_NOISE_VELOCITY_POWER.get())
+            let thump_level = action_noise_dynamic(velocity)
                 * 0.095
                 // Shortening the thud from 300 ms to 60 ms takes its energy
                 // with it, and that energy is wanted: the model already sits
@@ -8558,6 +8596,54 @@ mod tests {
     /// are timbral and move energy between bands without changing how much
     /// there is -- so this reports the largest per-band change as well, and
     /// the change in the attack, which is where several of them live.
+    /// Which part of the attack is it: the action, or the burst?
+    ///
+    /// The two are separate mechanisms with separate laws and separate
+    /// registers. The Impact Burst is the strike's own tension pulse -- v^4,
+    /// and weighted `(1 - position)^1.2`, so it is at FULL strength on the
+    /// bottom note and gone by the top. The action noise is the shank's knock
+    /// and the key hitting its bed, only mildly register-dependent. Muting
+    /// them together says the attack is loud; it does not say which one to
+    /// reach for.
+    ///
+    /// Each is rendered alone against the bare note, so the two columns are
+    /// what each contributes on its own, in decibels against the note.
+    #[test]
+    #[ignore]
+    fn which_part_of_the_attack_is_it() {
+        let attack = (0.030 * FS) as usize * 2;
+        let sustain = ((0.120 * FS) as usize * 2, (0.400 * FS) as usize * 2);
+        let db = |x: f32| 10.0 * x.log10();
+        println!("{:>4} {:>4} {:>9} {:>9}", "note", "vel", "action", "burst");
+        for note in [24u8, 33, 45, 60, 76] {
+            for velocity in [45u8, 70, 95, 120] {
+                let render_with = |action: bool, burst: bool| {
+                    let mut piano = prepared();
+                    let (floor, _) = parameter_bounds(PARAM_ACTION_NOISE);
+                    if !action {
+                        assert!(piano.set_parameter(PARAM_ACTION_NOISE, floor));
+                    }
+                    if !burst {
+                        assert!(piano.set_parameter(PARAM_IMPACT, floor));
+                    }
+                    render(&mut piano, (FS * 0.45) as usize, &[note_on(note, velocity)])
+                };
+                let bare = render_with(false, false);
+                let end = sustain.1.min(bare.len());
+                let floor_energy = energy(&bare[..attack]);
+                let note_energy = energy(&bare[sustain.0..end]).max(1e-20);
+                let part = |samples: &[f32]| {
+                    db((energy(&samples[..attack]) - floor_energy).max(1e-20) / note_energy)
+                };
+                println!(
+                    "{note:>4} {velocity:>4} {:>9.1} {:>9.1}",
+                    part(&render_with(true, false)),
+                    part(&render_with(false, true))
+                );
+            }
+        }
+    }
+
     /// How much of the attack is tick, at each blow.
     ///
     /// Not pass/fail: run it to see whether the action noise is a DYNAMIC

@@ -161,7 +161,7 @@ fn parameter_bounds(index: u32) -> (f64, f64) {
     let calibrated_a0 = a0_length_m(GAUGE_CONSTANT.compiled(), GAUGE_A0_M.compiled()) as f64;
     match index {
         PARAM_LEVEL => (LEVEL_FLOOR_DB as f64, 0.0),
-        PARAM_ACTION_NOISE | PARAM_RELEASE_NOISE | PARAM_PEDAL_NOISE => {
+        PARAM_ACTION_NOISE | PARAM_RELEASE_NOISE | PARAM_PEDAL_NOISE | PARAM_IMPACT => {
             (NOISE_FLOOR_DB as f64, NOISE_CEILING_DB as f64)
         }
         PARAM_BOARD_DAMPING => (
@@ -1180,7 +1180,7 @@ fn fader_to_units(index: usize, fader: f32) -> f32 {
             let near = MIC_DISTANCE_MIN_M.compiled();
             near * powf(MIC_DISTANCE_MAX_M.compiled() / near, fader)
         }
-        ACTION_NOISE_SLOT | RELEASE_NOISE_SLOT | PEDAL_NOISE_SLOT => {
+        ACTION_NOISE_SLOT | RELEASE_NOISE_SLOT | PEDAL_NOISE_SLOT | IMPACT_SLOT => {
             // The old fader muted at 0.02, and its floor is the floor here.
             if fader <= 0.02 {
                 NOISE_FLOOR_DB
@@ -1226,6 +1226,7 @@ const MIC_DISTANCE_SLOT: usize = 6 + LAB_COUNT + 2;
 const ACTION_NOISE_SLOT: usize = 6 + LAB_COUNT + 4;
 const RELEASE_NOISE_SLOT: usize = 6 + LAB_COUNT + 5;
 const PEDAL_NOISE_SLOT: usize = 6 + LAB_COUNT + 6;
+const IMPACT_SLOT: usize = 6 + LAB_COUNT + 7;
 const BOARD_DAMPING_SLOT: usize = 6 + LAB_COUNT + 8;
 const BOARD_DENSITY_SLOT: usize = 6 + LAB_COUNT + 9;
 const SIZE_SLOT: usize = 6 + LAB_COUNT + 10;
@@ -2636,9 +2637,9 @@ impl Default for Controls {
             action_noise: -5.298128,
             release_noise: -9.63296,
             pedal_noise: 0.0,
-            // Centre of the recalibrated travel: the subtle level the
-            // user's ear chose now IS mid-fader, with room below it.
-            impact: 0.26,
+            // The subtle level the user's ear chose, eleven and a half
+            // decibels under the calibrated burst.
+            impact: -11.559552,
             board_damping: 2.3,
             board_density: 1.0,
             size: 1.9000946,
@@ -3557,7 +3558,11 @@ fn simulate_strike(
 impl ConcertGrand {
     /// The lid's angle in radians, from the degrees the player set.
     fn lid_radians(&self) -> f32 {
-        (self.controls.lid * DEGREES_TO_RADIANS).clamp(LID_CLOSED_RAD.get(), LID_OPEN_RAD.get())
+        clamp_between(
+            self.controls.lid * DEGREES_TO_RADIANS,
+            LID_CLOSED_RAD.get(),
+            LID_OPEN_RAD.get(),
+        )
     }
 
     /// How far open the lid is, nought shut to one wide.
@@ -3826,10 +3831,11 @@ impl ConcertGrand {
         // absorption comes from one hardness axis, where soft surfaces eat the
         // top first and take the lows with the mids, and hard ones keep the
         // top ringing and let the lows boom.
-        let volume = self
-            .controls
-            .room_size
-            .clamp(ROOM_VOLUME_MIN_M3.get(), ROOM_VOLUME_MAX_M3.get());
+        let volume = clamp_between(
+            self.controls.room_size,
+            ROOM_VOLUME_MIN_M3.get(),
+            ROOM_VOLUME_MAX_M3.get(),
+        );
         let scale = powf(volume / 3.84, 1.0 / 3.0);
         let (length, width, height) = (2.4 * scale, 1.6 * scale, scale);
         let surface = 2.0 * (length * width + length * height + width * height);
@@ -3880,10 +3886,11 @@ impl ConcertGrand {
         // defining it. The fader keeps its feel through the logarithmic taper
         // its descriptor declares, which is a property of the control and not
         // of the number.
-        let distance = self
-            .controls
-            .mic_distance
-            .clamp(MIC_DISTANCE_MIN_M.get(), MIC_DISTANCE_MAX_M.get());
+        let distance = clamp_between(
+            self.controls.mic_distance,
+            MIC_DISTANCE_MIN_M.get(),
+            MIC_DISTANCE_MAX_M.get(),
+        );
         // The pattern axis b: p(theta) = (1-b) + b*cos(theta). Random-energy
         // efficiency is what a capsule hears of a DIFFUSE field, which depends
         // on the pattern and not on where the capsule stands, so it stays
@@ -7426,7 +7433,7 @@ impl Processor for ConcertGrand {
             }
             // The soft clip is a safety net on the output, not part of the
             // voice, so it belongs AFTER the level control -- and it was sitting
-            // before it. Level is `controls.level` squared, 0.518 by default, so
+            // before it. Level is a gain of 0.518 by default (-5.7 dB), so
             // the clip was defending against a 1.38 peak that the very next
             // multiply was about to bring down to 0.71. Measured on a seven-note
             // fortissimo chord against the sum of the same notes struck alone,
@@ -8443,6 +8450,7 @@ mod tests {
             ("size", read.size, factory.size),
             ("strike point", read.strike_point, factory.strike_point),
             ("tension", read.tension, factory.tension),
+            ("impact burst", read.impact, factory.impact),
             ("lid", read.lid, factory.lid),
             ("damper", read.damper, factory.damper),
             ("preamp", read.preamp, factory.preamp),
@@ -8549,9 +8557,13 @@ mod tests {
         );
         for index in 0..PARAM_COUNT as u32 {
             let mut line = format!("{index:>5}");
+            // Each control's OWN travel. This swept nought to one, which was
+            // every control's range until they started carrying units; after
+            // that it asked for 0 N of string tension and was refused.
+            let (minimum, maximum) = parameter_bounds(index);
             for note in [33u8, 60, 88] {
-                let low = render_at(index, 0.0, note);
-                let high = render_at(index, 1.0, note);
+                let low = render_at(index, minimum, note);
+                let high = render_at(index, maximum, note);
                 let level = db(energy(&high) + 1e-20, energy(&low) + 1e-20);
                 // The attack is the first 30 ms, where the hammer controls act.
                 let head = (0.030 * FS) as usize * 2;
@@ -10023,6 +10035,146 @@ mod tests {
             held > dropped * 30.0,
             "sostenuto did not separate the captured note: held {held} vs dropped {dropped}"
         );
+    }
+
+    /// Every control that is a LEVEL is silent at the bottom of its travel
+    /// and loud at the top.
+    ///
+    /// This exists because Impact Burst was not. `noise_gain` started taking
+    /// decibels when Action, Release and Pedal Noise were converted, and
+    /// Impact -- a fourth caller, on another page, found by nobody's grep --
+    /// kept handing it a nought-to-one position. Ten to the power of a fader
+    /// is a curve that barely moves: the whole travel spanned ONE decibel,
+    /// and its off end was unity gain. It read as a fader that did nothing,
+    /// which is exactly what it was.
+    #[test]
+    fn a_level_control_is_silent_at_the_bottom_and_loud_at_the_top() {
+        for (name, index) in [
+            ("Action Noise", PARAM_ACTION_NOISE),
+            ("Release Noise", PARAM_RELEASE_NOISE),
+            ("Pedal Noise", PARAM_PEDAL_NOISE),
+            ("Impact Burst", PARAM_IMPACT),
+            ("Level", PARAM_LEVEL),
+        ] {
+            let (minimum, maximum) = parameter_bounds(index);
+            let mut piano = Box::new(ConcertGrand::default());
+            let gain_of = |piano: &ConcertGrand| {
+                if index == PARAM_LEVEL {
+                    piano.controls.level_gain()
+                } else {
+                    Controls::noise_gain(piano.get_parameter(index).unwrap() as f32)
+                }
+            };
+            assert!(
+                piano.set_parameter(index, minimum),
+                "{name} refused its floor"
+            );
+            assert_eq!(gain_of(&piano), 0.0, "{name} is not silent at {minimum} dB");
+            assert!(
+                piano.set_parameter(index, maximum),
+                "{name} refused its ceiling"
+            );
+            let loud = gain_of(&piano);
+            // The declared travel has to BE the travel. A control whose
+            // extremes sit a decibel apart is a control nobody can hear.
+            let expected = powf(10.0, maximum as f32 / 20.0);
+            assert!(
+                (loud - expected).abs() <= 1e-3 * expected,
+                "{name} reaches {loud} at {maximum} dB, not {expected}"
+            );
+        }
+    }
+
+    /// No clamp may take two knobs as its bounds.
+    ///
+    /// Model knobs that come in pairs -- the lid's shut and open angles, the
+    /// room's smallest and largest volume, the pair's nearest and furthest
+    /// stand -- sweep four octaves INDEPENDENTLY, so a player can put the
+    /// minimum above the maximum. `f32::clamp` panics on exactly that, and in
+    /// wasm a panic is a trap: a piano that stops sounding mid-note. That is
+    /// what `clamp_between` exists for, and it has said so at the top of this
+    /// file for a long time.
+    ///
+    /// Three clamps written later took their bounds raw anyway, and nothing
+    /// noticed until a parameter sweep drove one of them across. Rendering
+    /// with an inverted pair would catch it, but a knob is process-global and
+    /// the tests run in parallel, so a test that moves one perturbs whatever
+    /// is rendering beside it. Reading the source costs nothing and cannot
+    /// race.
+    #[test]
+    fn no_clamp_takes_two_knobs_for_its_bounds() {
+        let source = include_str!("lib.rs");
+        // Down to the test module, not to the first `#[cfg(test)]`: that
+        // attribute appears on single items hundreds of lines above the
+        // module, and cutting there hid two thirds of the file -- this test
+        // passed over a clamp deliberately put back to check it.
+        let module = "
+mod tests {";
+        let source = &source[..source.rfind(module).map_or(source.len(), |at| at + 1)];
+        // Assembled rather than written, so this test does not find itself.
+        let needle = format!(".{}(", "clamp");
+        let live = format!(".{}()", "get");
+        let mut offenders = Vec::new();
+        let mut at = 0;
+        while let Some(found) = source[at..].find(&needle) {
+            let open = at + found + needle.len();
+            let mut depth = 1;
+            let mut close = open;
+            for (offset, character) in source[open..].char_indices() {
+                match character {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close = open + offset;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let arguments = &source[open..close];
+            // Bounds put in order on the spot are fine, and one call does
+            // exactly that: `A.min(B)` and `A.max(B)` cannot come out crossed
+            // however far the two knobs travel.
+            let ordered = arguments.contains(".min(") && arguments.contains(".max(");
+            if !ordered && arguments.matches(&live).count() >= 2 {
+                let line = source[..open].lines().count();
+                offenders.push(format!("line {line}: clamp({arguments})"));
+            }
+            at = close.max(open);
+        }
+        assert!(
+            offenders.is_empty(),
+            "these clamps trap when a player crosses the pair -- use              `clamp_between`:
+{}",
+            offenders.join(
+                "
+"
+            )
+        );
+    }
+
+    /// Every control accepts the whole travel it publishes.
+    ///
+    /// The model knobs are left out on purpose, not for lack of interest:
+    /// they are process-global, the tests run in parallel, and a test that
+    /// moves one changes what every render beside it hears. Their bounds are
+    /// derived uniformly from the compiled value, so there is nothing
+    /// per-knob here to get wrong; the panel's own controls each have their
+    /// own answer, and those are what this walks.
+    #[test]
+    fn every_parameter_accepts_its_own_range() {
+        let mut piano = Box::new(ConcertGrand::default());
+        for index in (0..KNOB_PARAM_BASE).chain([PARAM_PREAMP]) {
+            let (minimum, maximum) = parameter_bounds(index);
+            for edge in [minimum, maximum, (minimum + maximum) / 2.0] {
+                assert!(
+                    piano.set_parameter(index, edge),
+                    "parameter {index} refused {edge}, which it offers"
+                );
+            }
+        }
     }
 
     #[test]

@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 122;
+pub const KNOB_COUNT: usize = 123;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -705,9 +705,14 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "How steeply the action's own noise follows the blow.",
     ),
     (
-        "ACTION_NOISE_KNEE",
-        &ACTION_NOISE_KNEE,
+        "ATTACK_KNEE",
+        &ATTACK_KNEE,
         "Where a blow starts counting as hard.",
+    ),
+    (
+        "IMPACT_VELOCITY_POWER",
+        &IMPACT_VELOCITY_POWER,
+        "How steeply the impact's tension pulse follows the blow, under the knee.",
     ),
 ];
 
@@ -1613,6 +1618,10 @@ pub static ACTION_NOISE_VELOCITY_POWER: Knob = Knob::new(4.0);
 
 /// Where a blow starts counting as hard.
 ///
+/// Shared by both attack mechanisms -- the action's own noise and the
+/// impact's tension pulse -- because it is one musical fact about the player
+/// and not two facts about the model.
+///
 /// The steeper law above pivoted on velocity ONE, which is MIDI 127 and not
 /// somewhere a player lives. A hard blow at 95 or 110 therefore lost level
 /// with everything else -- six decibels in the top octave at 95 -- and the
@@ -1622,14 +1631,45 @@ pub static ACTION_NOISE_VELOCITY_POWER: Knob = Knob::new(4.0);
 /// one the instrument shipped with, to the sample; below it the exponent
 /// takes over, and the two meet without a step. Nought point eight is MIDI
 /// 102, which is a forte.
-pub static ACTION_NOISE_KNEE: Knob = Knob::new(0.8);
+pub static ATTACK_KNEE: Knob = Knob::new(0.8);
+
+/// How steeply the impact's tension pulse follows the blow, under the knee.
+///
+/// The burst is the OTHER half of the attack, and in the bass it is the half
+/// that is heard: measured against the note it sits on, it runs nearly twelve
+/// decibels above the action noise on the bottom octave and twenty-five
+/// decibels beneath it in the middle. It carries `(1 - position)^1.2`, so it
+/// is at full strength on the lowest note and gone by the top -- which is why
+/// the ear finds this one in the bass and the other one everywhere else.
+///
+/// It ships at the fourth power, which is already steep, and it still climbed
+/// fourteen decibels against its note between a mezzo blow and a forte one.
+/// Six under the knee takes six decibels off the mezzo and fourteen off the
+/// piano, and about one off a forte, which stays where it was.
+pub static IMPACT_VELOCITY_POWER: Knob = Knob::new(6.0);
 
 /// The velocity law the action noise shipped with, kept above the knee.
 const ACTION_NOISE_SHIPPED_POWER: f32 = 1.9;
 
+/// The same, for the impact's pulse.
+const IMPACT_SHIPPED_POWER: f32 = 4.0;
+
+/// How hard the impact's tension pulse answers a blow.
+fn impact_dynamic(velocity: f32) -> f32 {
+    let knee = ATTACK_KNEE.get().clamp(0.05, 1.0);
+    if velocity >= knee {
+        return powf(velocity, IMPACT_SHIPPED_POWER);
+    }
+    powf(knee, IMPACT_SHIPPED_POWER)
+        * powf(
+            velocity / knee,
+            IMPACT_VELOCITY_POWER.get().max(IMPACT_SHIPPED_POWER),
+        )
+}
+
 /// How loudly the action answers a blow, as a multiplier on its level.
 fn action_noise_dynamic(velocity: f32) -> f32 {
-    let knee = ACTION_NOISE_KNEE.get().clamp(0.05, 1.0);
+    let knee = ATTACK_KNEE.get().clamp(0.05, 1.0);
     if velocity >= knee {
         return powf(velocity, ACTION_NOISE_SHIPPED_POWER);
     }
@@ -5768,8 +5808,7 @@ impl ConcertGrand {
             voice.energy = 1.0;
             // The mechanism knocks again in full.
             voice.noise_amp = voice.noise_amp.max(
-                velocity
-                    * velocity
+                action_noise_dynamic(velocity)
                     * KNOCK_LEVEL.get()
                     * action
                     * chiff_mult
@@ -5781,10 +5820,7 @@ impl ConcertGrand {
             voice.noise_shrink = noise_shrink;
             // The impact's tension pulse fires again on the wire it finds.
             let clang_kick = IMPACT_CLANG.get()
-                * velocity
-                * velocity
-                * velocity
-                * velocity
+                * impact_dynamic(velocity)
                 * powf(1.0 - position, 1.2)
                 * self.clang_register(position)
                 * impact_gain;
@@ -5848,10 +5884,7 @@ impl ConcertGrand {
         // that "no siempre se debe escuchar fuerte eso": v^4 keeps the
         // pianissimo clean and saves the bark for the hard strike.
         let clang_kick = IMPACT_CLANG.get()
-            * velocity
-            * velocity
-            * velocity
-            * velocity
+            * impact_dynamic(velocity)
             * powf(1.0 - position, 1.2)
             * clang_register
             * impact_gain;

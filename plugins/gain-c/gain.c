@@ -54,11 +54,14 @@ static unsigned char rf_transfer[RF_TRANSFER_BYTES];
 static double rf_gain = 1.0;
 static int rf_prepared = 0;
 
-RF_EXPORT("rackforge_input_ptr") int rf_input_ptr(void) { return (int)(long)rf_input; }
-RF_EXPORT("rackforge_output_ptr") int rf_output_ptr(void) { return (int)(long)rf_output; }
-RF_EXPORT("rackforge_midi_ptr") int rf_midi_ptr(void) { return (int)(long)rf_midi; }
-RF_EXPORT("rackforge_parameter_ptr") int rf_parameter_ptr(void) { return (int)(long)rf_parameters; }
-RF_EXPORT("rackforge_transfer_ptr") int rf_transfer_ptr(void) { return (int)(long)rf_transfer; }
+/* An address in this module's linear memory, as the i32 the host expects. */
+#define RF_ADDRESS(buffer) ((int)(__UINTPTR_TYPE__)(buffer))
+
+RF_EXPORT("rackforge_input_ptr") int rf_input_ptr(void) { return RF_ADDRESS(rf_input); }
+RF_EXPORT("rackforge_output_ptr") int rf_output_ptr(void) { return RF_ADDRESS(rf_output); }
+RF_EXPORT("rackforge_midi_ptr") int rf_midi_ptr(void) { return RF_ADDRESS(rf_midi); }
+RF_EXPORT("rackforge_parameter_ptr") int rf_parameter_ptr(void) { return RF_ADDRESS(rf_parameters); }
+RF_EXPORT("rackforge_transfer_ptr") int rf_transfer_ptr(void) { return RF_ADDRESS(rf_transfer); }
 
 RF_EXPORT("rackforge_capacity_input_samples") int rf_capacity_input(void) { return RF_MAX_SAMPLES; }
 RF_EXPORT("rackforge_capacity_output_samples") int rf_capacity_output(void) { return RF_MAX_SAMPLES; }
@@ -180,16 +183,20 @@ static void rf_apply_parameters(int parameter_event_count) {
 RF_EXPORT("rackforge_process")
 int rf_process(int frames, int input_channels, int output_channels, int midi_event_count,
                int parameter_event_count) {
-    if (frames <= 0 || frames > RF_MAX_FRAMES || input_channels < 0 || output_channels < 0 ||
-        midi_event_count < 0 || midi_event_count > RF_MAX_MIDI_EVENTS ||
-        parameter_event_count < 0 || parameter_event_count > RF_MAX_PARAMETER_EVENTS) {
+    /* Bound the channel counts before multiplying by them. The host validates
+     * a block against the capacities above before it ever calls, so this
+     * cannot happen from a real host -- but a reference is read and copied,
+     * and `frames * channels` on an unbounded count is signed overflow, which
+     * C leaves undefined. Reject first, arithmetic second. */
+    if (frames <= 0 || frames > RF_MAX_FRAMES || input_channels < 0 ||
+        input_channels > RF_MAX_CHANNELS || output_channels < 0 ||
+        output_channels > RF_MAX_CHANNELS || midi_event_count < 0 ||
+        midi_event_count > RF_MAX_MIDI_EVENTS || parameter_event_count < 0 ||
+        parameter_event_count > RF_MAX_PARAMETER_EVENTS) {
         return RF_INVALID_ARGUMENT;
     }
     if (!rf_prepared) {
         return RF_INVALID_STATE;
-    }
-    if (frames * output_channels > RF_MAX_SAMPLES || frames * input_channels > RF_MAX_SAMPLES) {
-        return RF_INVALID_ARGUMENT;
     }
 
     rf_apply_midi(midi_event_count);

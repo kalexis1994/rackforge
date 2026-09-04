@@ -5,7 +5,7 @@ use rackforge_midi_api::{
     ParameterLinkMessage, ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
 };
 use rackforge_plugin_api::abi::ParameterEventV1;
-use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterSchema};
+use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterSchema, ParameterTaper};
 use rackforge_session_api::{RackForgeParameterId, SemanticControlProfile};
 
 use crate::validate_parameter_write;
@@ -232,13 +232,27 @@ fn map_parameter_value(kind: &ParameterKind, normalized: f64) -> f64 {
             minimum,
             maximum,
             step,
+            taper,
             ..
-        } => quantize(
-            *minimum + (*maximum - *minimum) * normalized,
-            *minimum,
-            *step,
-        )
-        .clamp(*minimum, *maximum),
+        } => {
+            // A controller sends a position, and the parameter says what a
+            // position means. Spreading a logarithmic range linearly puts
+            // almost all of it at the top: a knob offering a sixteenth of its
+            // value to sixteen times it would reach that value at controller
+            // 8 of 127, and spend the rest of the wheel above it. The taper
+            // is the same one the panel and the little screen read, so a
+            // wheel and a fader land in the same place.
+            if *taper == ParameterTaper::Logarithmic && *minimum > 0.0 {
+                (*minimum * (*maximum / *minimum).powf(normalized)).clamp(*minimum, *maximum)
+            } else {
+                quantize(
+                    *minimum + (*maximum - *minimum) * normalized,
+                    *minimum,
+                    *step,
+                )
+                .clamp(*minimum, *maximum)
+            }
+        }
         ParameterKind::Integer {
             minimum,
             maximum,
@@ -275,7 +289,6 @@ mod tests {
         MidiChannel, MidiPacket, MidiSourceId, PARAMETER_LINK_SCHEMA_VERSION, ParameterLinkChannel,
         ParameterLinkId, ParameterLinkSource, ParameterLinkTransform,
     };
-    use rackforge_plugin_api::ParameterTaper;
     use rackforge_plugin_api::{
         EnumChoice, PARAMETER_SCHEMA_VERSION, PageDescriptor, ParameterFlags,
         PluginSemanticControl, SemanticControlId, SuggestedControl,
@@ -336,6 +349,47 @@ mod tests {
             source: MidiSourceKey::new(7),
             packet: MidiPacket::new(0, message).unwrap(),
         }
+    }
+
+    /// A wheel on a logarithmic parameter turns through the value the way a
+    /// fader does, not through its arithmetic middle.
+    #[test]
+    fn cc_follows_a_logarithmic_taper() {
+        let compiled = CompiledParameterLink::new(
+            link(ParameterLinkMessage::ControlChange { controller: 74 }),
+            MidiSourceKey::new(7),
+            &schema(ParameterKind::Float {
+                // A model knob: a sixteenth of its compiled value to sixteen
+                // times it, which is the shape most of the piano's are.
+                minimum: 0.5,
+                maximum: 128.0,
+                default: 8.0,
+                step: 0.08,
+                unit: None,
+                taper: ParameterTaper::Logarithmic,
+            }),
+        )
+        .unwrap();
+        let at = |controller: u8| {
+            compiled
+                .apply(ingress(&[0xb1, 74, controller]))
+                .unwrap()
+                .event
+                .value
+        };
+        assert!((at(0) - 0.5).abs() < 1e-9, "the bottom is the minimum");
+        assert!((at(127) - 128.0).abs() < 1e-9, "the top is the maximum");
+        // Half a wheel is the geometric middle -- 8, the compiled value --
+        // where a linear map would have put 64 and left the useful half of
+        // the range in the first eight controller steps. Controller 64 is
+        // 0.5039 of the way rather than half, and on a range this wide one
+        // step of the wheel is 2%, so the window is a step wide.
+        let middle = at(64);
+        assert!(
+            (middle - 8.0).abs() < 0.25,
+            "half the wheel reached {middle}, not the value it is centred on"
+        );
+        assert!(at(63) < 8.0 && at(64) > 8.0, "the value is not straddled");
     }
 
     #[test]

@@ -3313,6 +3313,27 @@
         "read_only": false,
         "advanced": true
       }
+    },
+    {
+      "index": 162,
+      "id": "knob_action_noise_knee",
+      "name": "ACTION_NOISE_KNEE",
+      "page": "model_misc",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.05,
+        "maximum": 12.8,
+        "step": 0.008,
+        "default": 0.8,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
     }
   ]
 }

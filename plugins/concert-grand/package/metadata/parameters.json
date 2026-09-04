@@ -540,10 +540,12 @@
       "order": 5,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.01,
-        "default": 0.26
+        "minimum": -24.082401275634766,
+        "maximum": 24.082401275634766,
+        "step": 0.240824,
+        "default": -11.559552,
+        "taper": "linear",
+        "unit": "dB"
       }
     },
     {

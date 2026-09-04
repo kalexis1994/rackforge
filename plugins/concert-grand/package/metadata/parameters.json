@@ -3316,8 +3316,8 @@
     },
     {
       "index": 162,
-      "id": "knob_action_noise_knee",
-      "name": "ACTION_NOISE_KNEE",
+      "id": "knob_attack_knee",
+      "name": "ATTACK_KNEE",
       "page": "model_misc",
       "order": 2,
       "kind": {
@@ -3326,6 +3326,27 @@
         "maximum": 12.8,
         "step": 0.008,
         "default": 0.8,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 163,
+      "id": "knob_impact_velocity_power",
+      "name": "IMPACT_VELOCITY_POWER",
+      "page": "model_misc",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.375,
+        "maximum": 96.0,
+        "step": 0.06,
+        "default": 6.0,
         "taper": "logarithmic"
       },
       "flags": {

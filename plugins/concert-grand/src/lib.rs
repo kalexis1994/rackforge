@@ -1589,7 +1589,22 @@ impl BodyMode {
 /// at three. Velocity is nought to one with one being fortissimo, so raising
 /// this leaves the loudest blow exactly where it was and lowers everything
 /// beneath it, which is the shape the ear asked for.
-pub static ACTION_NOISE_VELOCITY_POWER: Knob = Knob::new(3.0);
+/// Three was the first correction and it was not enough. It fixed the top
+/// octave, where the tick had been AS LOUD AS the note, and left the middle
+/// almost where it was -- three decibels at a mezzo blow. The ear found it
+/// again on the darkest profile, the 280, which is where it would show: a
+/// soft hammer on a light scale puts less of the note's own energy in the
+/// 700-2800 Hz the shank knock lives in, so the same tick stands further out
+/// of it. Four takes another five decibels off a mezzo blow and nine off a
+/// piano one, and still nothing off the fortissimo.
+///
+/// No measurement here found it. The tick is thirty decibels under the note
+/// broadband, which lifts the attack's energy by four thousandths of a
+/// decibel -- the ear resolves a transient that an energy ratio cannot, and
+/// this is the third attack component in this model to be found that way
+/// after the metrics cleared it. That is the reason this is a knob and not a
+/// number: the instrument for this is an ear.
+pub static ACTION_NOISE_VELOCITY_POWER: Knob = Knob::new(4.0);
 
 /// pitch. Two agreeing metrics are not a verdict.
 pub static KNOCK_LEVEL: Knob = Knob::new(0.028);

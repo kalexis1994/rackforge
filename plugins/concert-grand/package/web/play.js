@@ -114,15 +114,27 @@
         slider.setAttribute("aria-label", parameter.name);
 
         /** Enough figures to see a change, never more than the value carries. */
+        const span = Math.abs(kind.maximum - kind.minimum) || 1;
         const format = (magnitude) => {
-          const size = Math.abs(magnitude);
-          // A model constant can be 3e-10, and two decimals render that as
-          // "0.00" -- a control that is doing something, reading as off. Below
-          // a hundredth, show the figures the value actually has.
-          const text =
-            size !== 0 && size < 0.01
-              ? magnitude.toExponential(2)
-              : magnitude.toFixed(size >= 100 ? 0 : size >= 10 ? 1 : 2);
+          // Small against its OWN range is zero, whatever the arithmetic says.
+          // A saved session can hold a fader an ulp off centre, and on a
+          // control running -24 to +24 dB that came out as "-1.28e-6 dB":
+          // true, alarming, and inaudible.
+          const size = Math.abs(magnitude) < span * 1e-6 ? 0 : Math.abs(magnitude);
+          let text;
+          if (size >= 0.01 || size === 0) {
+            text = (size === 0 ? 0 : magnitude).toFixed(
+              size >= 100 ? 0 : size >= 10 ? 1 : 2,
+            );
+          } else {
+            // A model constant can be a wire gauge of 0.00123 m or a squared
+            // magnitude of 3e-10, and two decimals render both as "0.00" -- a
+            // control that is doing something, reading as off. Three figures
+            // of it, in whichever notation carries them.
+            const decimals = Math.ceil(-Math.log10(size)) + 2;
+            text =
+              decimals <= 6 ? magnitude.toFixed(decimals) : magnitude.toExponential(2);
+          }
           return kind.unit ? `${text} ${kind.unit}` : text;
         };
 

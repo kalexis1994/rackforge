@@ -6857,11 +6857,21 @@ impl Processor for ConcertGrand {
             // not "a bit more action", it was 3.6x, a clatter under every
             // note.
             //
-            // Detune and Unison multiply the same number, so what matters is
-            // their product: the house instrument is 0.65 x 0.50 = 0.325 and
-            // this is 0.70 x 0.56 = 0.392, a fifth wider. That sounds far too
-            // little on paper and is not, because it is not the only thing
-            // detuning this instrument -- see the note on Size below.
+            // Detune and Unison multiply the same number, but NOT the same
+            // way, and reading them as if they did understated this control
+            // by half. Unison enters linearly and Detune is a lab slider,
+            // which is 256^(v-0.5): 0.56 is x1.39, not x1.12. Comparing the
+            // two sliders as a product -- "0.70 x 0.56 against 0.65 x 0.50,
+            // a fifth wider" -- was arithmetic on the wrong axis.
+            //
+            // In cents, which is what a tuner would measure. The house
+            // instrument runs 0.95 at A1 to 1.44 at C6; this one runs 2.0 to
+            // 3.0, a shade over twice as wide, and the tuner's beat cap holds
+            // the top octave at 1.65 where the law would have gone further.
+            // Kirk's tuners preferred one to two cents on a piano they had
+            // just finished tuning. Sitting above that band is the whole
+            // claim of this profile: nobody has finished tuning this one in
+            // a long time.
             //
             // A tack piano, which is what going further sounds like, is a
             // different instrument: tacks in the hammer felt, a metallic
@@ -6879,7 +6889,7 @@ impl Processor for ConcertGrand {
                     (LAB_FELT, 0.62),
                     (LAB_HF, 0.29),
                     (LAB_HAMMER, 0.60),
-                    (LAB_DETUNE, 0.56),
+                    (LAB_DETUNE, 0.62),
                 ]),
                 size: 1.33,
                 brightness: 0.56,
@@ -8629,6 +8639,49 @@ mod tests {
     /// are timbral and move energy between bands without changing how much
     /// there is -- so this reports the largest per-band change as well, and
     /// the change in the attack, which is where several of them live.
+    /// How much of a small upright's sourness is its SCALE, and how much is
+    /// its tuning?
+    ///
+    /// The two are different claims about an instrument. Inharmonicity is
+    /// construction: a short case forces a thick bass string for its pitch,
+    /// its partials stretch sharp, and its own overtones stop lining up with
+    /// the treble's fundamentals. Detune is maintenance: how long since
+    /// somebody tuned it. A profile that reaches for both without saying so
+    /// is asserting the second while meaning the first.
+    ///
+    /// B is Fletcher's coefficient, so partial n sits at n*f0*sqrt(1 + B n^2).
+    /// The mistuning printed is what that does to the octave: how far the
+    /// second partial lands above the note an octave up, in cents. Beside it,
+    /// what the unison detune contributes at the same note.
+    #[test]
+    #[ignore]
+    fn the_scale_or_the_tuning() {
+        println!(
+            "{:>16} {:>5} {:>9} {:>11} {:>10}",
+            "profile", "note", "length", "octave off", "unison"
+        );
+        for id in ["concert-275", "player-upright", "baby-150"] {
+            for note in [33u8, 45, 57] {
+                let mut piano = prepared();
+                assert!(piano.load_preset(id), "{id} is not a preset");
+                piano.retune();
+                let index = (note - LOW_NOTE) as usize;
+                let b = piano.inharmonicity[index];
+                let f0 = piano.fundamental[index];
+                // The second partial against a true octave, in cents.
+                let stretched = 2.0 * f0 * sqrtf(1.0 + b * 4.0);
+                let octave_off = 1200.0 * log2f(stretched / (2.0 * f0));
+                let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+                let length = piano.string_length(position);
+                let cents = 0.5
+                    * (0.9 + 0.9 * position)
+                    * (piano.controls.unison * 2.86)
+                    * piano.controls.lab(13);
+                println!("{id:>16} {note:>5} {length:>8.2}m {octave_off:>10.1}c {cents:>9.2}c");
+            }
+        }
+    }
+
     /// Which part of the attack is it: the action, or the burst?
     ///
     /// The two are separate mechanisms with separate laws and separate

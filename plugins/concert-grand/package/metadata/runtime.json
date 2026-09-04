@@ -1,6 +1,6 @@
 {
- "schema_version": 1,
- "id": "org.rackforge.concert-grand",
- "version": "0.161.0",
- "state_version": 1
+  "schema_version": 1,
+  "id": "org.rackforge.concert-grand",
+  "version": "0.161.1",
+  "state_version": 1
 }

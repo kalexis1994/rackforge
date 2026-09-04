@@ -343,6 +343,21 @@ answer to "how much do I have to write".
     i32.const 0))
 ```
 
+## The same thing in C
+
+[`plugins/gain-c/gain.c`](../plugins/gain-c/gain.c) is this contract
+implemented in freestanding C -- no SDK, no libc, one file, about 2 KB of
+WebAssembly:
+
+```bash
+clang --target=wasm32 -nostdlib -O2       -Wl,--no-entry -Wl,--export-memory       -o gain.wasm gain.c
+```
+
+It is compiled with `-Werror`, loaded through the real portable loader and
+played by `crates/rackforge-plugin-runtime/tests/c_reference_plugin.rs`, which
+CI cannot skip. If this document and that plugin ever disagree, the test says
+so before a plugin author does.
+
 ## Rules a host will hold you to
 
 - **Never import anything.** The module is refused before it runs.

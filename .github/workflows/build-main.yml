@@ -105,6 +105,13 @@ jobs:
 
       - name: Test shared runtime contracts
         shell: bash
+        # The C reference plugin proves docs/PLUGIN_ABI.md is implementable
+        # outside Rust, and its test skips where no clang emits wasm32 so a
+        # contributor without one is not blocked. Here it must never skip:
+        # this runner has clang, and a silent skip is exactly how a broken
+        # plugin reached three releases before.
+        env:
+          RACKFORGE_REQUIRE_WASM_CC: "1"
         run: |
           cargo test --locked \
             -p rackforge-audio-api \

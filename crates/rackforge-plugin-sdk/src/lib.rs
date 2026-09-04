@@ -1,4 +1,10 @@
 #![no_std]
+// The crate README is the front page on crates.io and docs.rs, and its example
+// is the first RackForge plugin most people will read. Including it here makes
+// that example a doctest: it is compiled against this crate on every run, and
+// a trait signature that changes under it fails the build rather than
+// misleading a newcomer.
+#![doc = include_str!("../README.md")]
 
 //! Guest-side contract for `wasm-v1` RackForge processors.
 //!

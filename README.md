@@ -336,6 +336,7 @@ Current limitations:
 
 ## Guides and help
 
+- [Plugin ABI](docs/PLUGIN_ABI.md) — the `wasm-v1` contract, for any language
 - [Windows Desktop guide](apps/rackforge-desktop/README.md)
 - [Android guide](apps/rackforge-android/README.md)
 - [Raspberry Pi guide](platforms/raspberry-pi/README.md)

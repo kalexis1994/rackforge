@@ -121,10 +121,17 @@ Schema 1 remains loadable so already published plugins do not break. RackForge
 uses its generic plugin identity for those packages; adding any branding field
 requires upgrading the whole manifest to schema 2.
 
-The preferred format is `wasm-v1`: a plugin is compiled once against
-`rackforge-plugin-sdk`, and RackForge runs the same component on every
-compatible host. Native libraries remain supported during the transition, but
-they are platform-specific artifacts.
+The preferred format is `wasm-v1`: a plugin is compiled once and RackForge
+runs the same component on every compatible host. Native libraries remain
+supported during the transition, but they are platform-specific artifacts.
+
+`wasm-v1` is a plain WebAssembly ABI -- exported functions taking integers and
+floats, and buffers the host reads and writes inside the module's own linear
+memory -- so any language that compiles to WebAssembly can implement it.
+[PLUGIN_ABI.md](PLUGIN_ABI.md) is the contract, with a complete working plugin
+written in WebAssembly text. `rackforge-plugin-sdk` is the Rust implementation
+of that contract, and the convenient choice if you are writing Rust; it is not
+a requirement.
 
 Instruments whose block splits into independent units — a voice-per-core
 synthesizer, for example — may additionally declare the versioned

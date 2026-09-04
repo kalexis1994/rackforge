@@ -407,3 +407,20 @@ send physical events and render the state they receive. A handshake rebuilds
 the control surface after either side restarts.
 
 </details>
+
+## Licence
+
+RackForge itself — the host, its interfaces and the instruments in this
+repository — is [GPL-2.0-or-later](LICENSE).
+
+**`rackforge-plugin-sdk` is not.** It is dual
+[MIT](crates/rackforge-plugin-sdk/LICENSE-MIT) or
+[Apache-2.0](crates/rackforge-plugin-sdk/LICENSE-APACHE), at your choice,
+because a guest SDK that a third party links into their own instrument must
+not decide that instrument's licence. Plugins you build for RackForge are
+yours, under whatever terms you choose.
+
+The same is true by construction of the ABI in
+[docs/PLUGIN_ABI.md](docs/PLUGIN_ABI.md): a plugin that implements it directly,
+as [`plugins/gain-c/gain.c`](plugins/gain-c/gain.c) does, links nothing of ours
+at all.

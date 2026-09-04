@@ -3955,6 +3955,7 @@ mod tests {
     use crate::live_midi_state::{MidiControllerState, matches_midi_input_channel};
     use rackforge_midi_api::{MidiPacket, MidiSourceId};
     use rackforge_performance_api::{RackKeyboardPart, RackMidiTransform};
+    use rackforge_plugin_api::ParameterTaper;
     use rackforge_session_api::{
         HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
         MidiButtonBinding, MidiControlChangeBinding,
@@ -4523,6 +4524,7 @@ mod tests {
             default: 0.5,
             step: 0.01,
             unit: None,
+            taper: ParameterTaper::Linear,
         };
         assert!(parameter_value_is_valid(&float, 0.625));
         assert!(!parameter_value_is_valid(&float, 1.1));

@@ -1635,6 +1635,52 @@ mod tests {
         )
     "#;
 
+    /// The worked example in `docs/PLUGIN_ABI.md` is compiled and run here
+    /// rather than trusted.
+    ///
+    /// That document is the whole contract for a plugin author outside this
+    /// repository, and its example is the shortest complete statement of it.
+    /// Reading the WAT out of the Markdown means the two cannot drift: an ABI
+    /// change that invalidates the example fails this test, and the fix is to
+    /// correct the document.
+    #[test]
+    fn the_documented_minimal_plugin_loads_and_renders() {
+        const SPEC: &str = include_str!("../../../docs/PLUGIN_ABI.md");
+        let source = documented_wat_module(SPEC);
+        let bytes = wat::parse_str(&source).expect("the documented example must assemble");
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine
+            .compile(&bytes)
+            .expect("the documented example must load as a wasm-v1 plugin");
+        let mut instance = module.instantiate().unwrap();
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        instance.set_parameter(0, 0.5).unwrap();
+        let input = [1.0, -1.0, 0.25, -0.25];
+        let mut output = [0.0; 4];
+        instance
+            .process_interleaved(&input, &mut output, 2)
+            .unwrap();
+        assert_eq!(
+            output,
+            [0.5, -0.5, 0.125, -0.125],
+            "the documented gain must halve its input"
+        );
+    }
+
+    /// The one fenced `wat` block in the specification that is a whole module;
+    /// the others are single signatures quoted in prose.
+    fn documented_wat_module(specification: &str) -> String {
+        let mut blocks = specification.split("```wat");
+        blocks.next();
+        for block in blocks {
+            let body = block.split("```").next().unwrap_or_default();
+            if body.contains("(module") {
+                return body.to_owned();
+            }
+        }
+        panic!("docs/PLUGIN_ABI.md no longer contains a complete wat module");
+    }
+
     #[test]
     fn runs_one_portable_gain_module() {
         let bytes = wat::parse_str(GAIN).unwrap();

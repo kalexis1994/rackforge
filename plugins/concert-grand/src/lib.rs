@@ -2386,7 +2386,7 @@ impl Default for Controls {
             decay: 0.35,
             width: 0.35,
             level: 0.72,
-            preamp: 0.15,
+            preamp: 4.5,
             // The user's lab refinements, by ear: felt corner a touch up, the
             // hammer a shade softer and heavier, bloom up, both decay stages
             // a little longer, the board eased.
@@ -2420,9 +2420,9 @@ impl Default for Controls {
                 0.52, 0.5, 0.5, 0.07, 0.5, 0.5, 0.35, 0.49, 0.55, 0.15, 0.5, 0.57, 0.58, 0.5, 0.45,
                 0.5, 0.5,
             ],
-            room_size: 0.28,
+            room_size: 311.3,
             room_hardness: 0.35,
-            mic_distance: 0.08,
+            mic_distance: 0.6598,
             mic_pattern: 0.6,
             action_noise: 0.39,
             release_noise: 0.3,
@@ -2435,7 +2435,7 @@ impl Default for Controls {
             size: 0.5,
             strike_point: 0.5,
             tension: 0.5,
-            lid: 0.5,
+            lid: 24.35,
             damper: 0.5,
             clang_falloff: 0.5,
             // What a plain string keeps of a wound one's longitudinal
@@ -3310,6 +3310,30 @@ fn simulate_strike(
 }
 
 impl ConcertGrand {
+    /// Radians per degree, spelled out because this crate is `no_std` on wasm
+    /// and `to_radians` is not always available there.
+    const DEGREES_TO_RADIANS: f32 = core::f32::consts::PI / 180.0;
+
+    /// The lid's angle in radians, from the degrees the player set.
+    fn lid_radians(&self) -> f32 {
+        (self.controls.lid * Self::DEGREES_TO_RADIANS)
+            .clamp(LID_CLOSED_RAD.get(), LID_OPEN_RAD.get())
+    }
+
+    /// How far open the lid is, nought shut to one wide.
+    ///
+    /// The angle is what the player sets and what the geometry uses; the leak
+    /// and the cutoff were written against a fraction, so it is derived here
+    /// once rather than separately in each of them.
+    fn lid_fraction(&self) -> f32 {
+        let closed = LID_CLOSED_RAD.get();
+        let open = LID_OPEN_RAD.get();
+        if open <= closed {
+            return 0.0;
+        }
+        ((self.lid_radians() - closed) / (open - closed)).clamp(0.0, 1.0)
+    }
+
     /// Interpolated per-note calibration multiplier.
     fn cal(&self, note: u8, param: usize) -> f32 {
         let n = note.clamp(CAL_ANCHORS[0], CAL_ANCHORS[9]);
@@ -3557,15 +3581,15 @@ impl ConcertGrand {
 
     /// Sizes the chamber's delay lines and feedback for the current rate.
     fn tune_room(&mut self) {
-        // The space the sliders describe. Volume on a log axis, a hall-ish
-        // box (2.4 : 1.6 : 1), and per-band absorption from one hardness
-        // axis: soft surfaces eat the top first and take the lows with the
-        // mids; hard ones keep the top ringing and let the lows boom.
-        let volume = ROOM_VOLUME_MIN_M3.get()
-            * powf(
-                ROOM_VOLUME_MAX_M3.get() / ROOM_VOLUME_MIN_M3.get(),
-                self.controls.room_size,
-            );
+        // The space the sliders describe. The control is the volume itself, in
+        // cubic metres, shaped into a hall-ish box (2.4 : 1.6 : 1); per-band
+        // absorption comes from one hardness axis, where soft surfaces eat the
+        // top first and take the lows with the mids, and hard ones keep the
+        // top ringing and let the lows boom.
+        let volume = self
+            .controls
+            .room_size
+            .clamp(ROOM_VOLUME_MIN_M3.get(), ROOM_VOLUME_MAX_M3.get());
         let scale = powf(volume / 3.84, 1.0 / 3.0);
         let (length, width, height) = (2.4 * scale, 1.6 * scale, scale);
         let surface = 2.0 * (length * width + length * height + width * height);
@@ -3610,11 +3634,16 @@ impl ConcertGrand {
         // on a log axis; the direct sound falls as r_ref/r per capsule, the
         // reverberant field holds, and the early reflections arrive from their
         // mirror images along each capsule's own path.
-        let distance = MIC_DISTANCE_MIN_M.get()
-            * powf(
-                MIC_DISTANCE_MAX_M.get() / MIC_DISTANCE_MIN_M.get(),
-                self.controls.mic_distance,
-            );
+        // The control is the distance, in metres. It used to be a position on
+        // a log axis between these two knobs; they are still the range the
+        // model will work over, but they bound the value now rather than
+        // defining it. The fader keeps its feel through the logarithmic taper
+        // its descriptor declares, which is a property of the control and not
+        // of the number.
+        let distance = self
+            .controls
+            .mic_distance
+            .clamp(MIC_DISTANCE_MIN_M.get(), MIC_DISTANCE_MAX_M.get());
         // The pattern axis b: p(theta) = (1-b) + b*cos(theta). Random-energy
         // efficiency is what a capsule hears of a DIFFUSE field, which depends
         // on the pattern and not on where the capsule stands, so it stays
@@ -3658,8 +3687,7 @@ impl ConcertGrand {
             (2.0 * length - piano.0, piano.1, piano.2), // front wall
         ];
         let reflect = 1.0 - alpha_mid;
-        let lid_angle =
-            LID_CLOSED_RAD.get() + (LID_OPEN_RAD.get() - LID_CLOSED_RAD.get()) * self.controls.lid;
+        let lid_angle = self.lid_radians();
         for side in 0..2 {
             let turn = if side == 0 { 1.0 } else { -1.0 };
             // The capsule, offset across the pair's line and turned outward.
@@ -3718,7 +3746,7 @@ impl ConcertGrand {
             let (lid_sin, lid_cos) = sincosf(lid_angle);
             let half_width = LID_HALF_WIDTH_M.get();
             let hinge_y = piano.1 + half_width;
-            let leak = powf(LID_CLOSED_LEAK.get(), 1.0 - self.controls.lid);
+            let leak = powf(LID_CLOSED_LEAK.get(), 1.0 - self.lid_fraction());
             for ((along_hinge, across), tap) in
                 [(-0.6f32, -0.45f32), (0.6, -0.45), (-0.6, 0.45), (0.6, 0.45)]
                     .into_iter()
@@ -3776,8 +3804,8 @@ impl ConcertGrand {
                 );
             }
         }
-        let lid_corner =
-            LID_CLOSED_HZ.get() * powf(LID_OPEN_HZ.get() / LID_CLOSED_HZ.get(), self.controls.lid);
+        let lid_corner = LID_CLOSED_HZ.get()
+            * powf(LID_OPEN_HZ.get() / LID_CLOSED_HZ.get(), self.lid_fraction());
         self.lid_damp = 1.0
             - expf(
                 -core::f32::consts::TAU * lid_corner.min(0.45 * self.sample_rate)
@@ -6046,10 +6074,15 @@ impl ConcertGrand {
     /// So: exactly the identity below the knee, and a bend only above it. The
     /// ceiling is unchanged at 1.0, and normal playing no longer touches the
     /// curve at all.
-    /// The microphone preamplifier's gain, as a factor: the fader spans
-    /// PREAMP_RANGE_DB.
+    /// The microphone preamplifier's gain, as a factor.
+    ///
+    /// The control is the gain in decibels, so the only arithmetic left here
+    /// is the one turning decibels into a factor.
     fn preamp_gain(&self) -> f32 {
-        powf(10.0, PREAMP_RANGE_DB.get() * self.controls.preamp / 20.0)
+        powf(
+            10.0,
+            self.controls.preamp.clamp(0.0, PREAMP_RANGE_DB.get()) / 20.0,
+        )
     }
 
     /// A console channel's input stage: exactly linear up to the knee, and
@@ -6184,6 +6217,13 @@ impl Processor for ConcertGrand {
         self.controls.get(index)
     }
 
+    // Two voicings place the pair at 0.7071 m, which is 0.5 * 32^0.1 -- the
+    // distance the old nought-to-one fader put them at, carried across when
+    // the control became metres. Clippy reads four figures of it as a clumsy
+    // 1/sqrt(2); it is a microphone standing seventy centimetres from a
+    // soundboard, and writing it to more figures only makes it look more like
+    // the constant it is not.
+    #[allow(clippy::approx_constant)]
     fn load_preset(&mut self, id: &str) -> bool {
         /// The house lab bank with a few entries moved.
         ///
@@ -6222,9 +6262,9 @@ impl Processor for ConcertGrand {
                 unison: 0.55,
                 decay: 0.55,
                 width: 0.6,
-                room_size: 0.55,
+                room_size: 2010.0,
                 room_hardness: 0.3,
-                mic_distance: 0.45,
+                mic_distance: 2.378,
                 mic_pattern: 0.8,
                 ..Controls::default()
             },
@@ -6236,9 +6276,9 @@ impl Processor for ConcertGrand {
                 unison: 0.45,
                 decay: 0.45,
                 width: 0.75,
-                room_size: 0.55,
+                room_size: 2010.0,
                 room_hardness: 0.7,
-                mic_distance: 0.3,
+                mic_distance: 1.414,
                 mic_pattern: 0.5,
                 ..Controls::default()
             },
@@ -6248,8 +6288,8 @@ impl Processor for ConcertGrand {
             // so picking it did nothing at all.
             "intimate" => Controls {
                 lab: voiced(&[(LAB_FELT, 0.48), (LAB_HF, 0.29)]),
-                room_size: 0.18,
-                mic_distance: 0.04,
+                room_size: 156.0,
+                mic_distance: 0.5743,
                 width: 0.30,
                 ..Controls::default()
             },
@@ -6304,8 +6344,8 @@ impl Processor for ConcertGrand {
                 board_density: 0.56,
                 unison: 0.42,
                 decay: 0.55,
-                room_size: 0.36,
-                mic_distance: 0.15,
+                room_size: 541.0,
+                mic_distance: 0.8409,
                 ..Controls::default()
             },
             // Bösendorfer 280VC, 280 cm: warm and singing, a drier attack,
@@ -6319,8 +6359,8 @@ impl Processor for ConcertGrand {
                 board_density: 0.54,
                 unison: 0.55,
                 decay: 0.58,
-                room_size: 0.34,
-                mic_distance: 0.14,
+                room_size: 471.2,
+                mic_distance: 0.8123,
                 ..Controls::default()
             },
             // Yamaha CFX, 275 cm: bright, even and powerful. The reference
@@ -6333,8 +6373,8 @@ impl Processor for ConcertGrand {
                 tension: 0.58,
                 strike_point: 0.52,
                 board_density: 0.53,
-                room_size: 0.33,
-                mic_distance: 0.13,
+                room_size: 439.8,
+                mic_distance: 0.7846,
                 ..Controls::default()
             },
             // Steinway D-274: rich and complex rather than bright, and most
@@ -6348,8 +6388,8 @@ impl Processor for ConcertGrand {
                 board_density: 0.53,
                 unison: 0.58,
                 dynamics: 0.62,
-                room_size: 0.33,
-                mic_distance: 0.13,
+                room_size: 439.8,
+                mic_distance: 0.7846,
                 ..Controls::default()
             },
             // A semi-concert around 227 cm -- Steinway C, Yamaha C7, Kawai
@@ -6366,8 +6406,8 @@ impl Processor for ConcertGrand {
                 board_density: 0.53,
                 unison: 0.56,
                 dynamics: 0.58,
-                room_size: 0.31,
-                mic_distance: 0.12,
+                room_size: 383.0,
+                mic_distance: 0.7579,
                 ..Controls::default()
             },
             // Steinway B, 211 cm: the same voice in a shorter case. The bass
@@ -6382,8 +6422,8 @@ impl Processor for ConcertGrand {
                 board_density: 0.52,
                 unison: 0.58,
                 dynamics: 0.62,
-                room_size: 0.29,
-                mic_distance: 0.11,
+                room_size: 333.6,
+                mic_distance: 0.732,
                 ..Controls::default()
             },
             // A parlour grand around 1.85 m: the common six-foot instrument.
@@ -6397,8 +6437,8 @@ impl Processor for ConcertGrand {
                 board_density: 0.49,
                 unison: 0.52,
                 decay: 0.46,
-                room_size: 0.26,
-                mic_distance: 0.1,
+                room_size: 271.2,
+                mic_distance: 0.7071,
                 ..Controls::default()
             },
             // A five-foot baby grand: a foreshortened bass under an ordinary
@@ -6411,8 +6451,8 @@ impl Processor for ConcertGrand {
                 strike_point: 0.55,
                 board_density: 0.47,
                 decay: 0.4,
-                room_size: 0.22,
-                mic_distance: 0.09,
+                room_size: 205.7,
+                mic_distance: 0.683,
                 ..Controls::default()
             },
             // A 52-inch professional upright. Its bass string is LONGER than
@@ -6427,8 +6467,8 @@ impl Processor for ConcertGrand {
                 board_density: 0.45,
                 width: 0.45,
                 decay: 0.42,
-                room_size: 0.2,
-                mic_distance: 0.12,
+                room_size: 179.1,
+                mic_distance: 0.7579,
                 action: 1.0,
                 ..Controls::default()
             },
@@ -6442,8 +6482,8 @@ impl Processor for ConcertGrand {
                 board_density: 0.43,
                 width: 0.4,
                 decay: 0.38,
-                room_size: 0.16,
-                mic_distance: 0.1,
+                room_size: 135.9,
+                mic_distance: 0.7071,
                 action: 1.0,
                 ..Controls::default()
             },
@@ -6499,8 +6539,8 @@ impl Processor for ConcertGrand {
                 dynamics: 0.4,
                 action_noise: 0.46,
                 width: 0.42,
-                room_size: 0.19,
-                mic_distance: 0.13,
+                room_size: 167.2,
+                mic_distance: 0.7846,
                 action: 1.0,
                 ..Controls::default()
             },
@@ -6519,8 +6559,8 @@ impl Processor for ConcertGrand {
                 unison: 0.35,
                 decay: 0.3,
                 dynamics: 0.35,
-                room_size: 0.22,
-                mic_distance: 0.13,
+                room_size: 205.7,
+                mic_distance: 0.7846,
                 ..Controls::default()
             },
             _ => return false,
@@ -6647,7 +6687,23 @@ impl Processor for ConcertGrand {
             .take(readable)
         {
             let decoded = f32::from_le_bytes(*chunk);
-            if !decoded.is_finite() || !(0.0..=1.0).contains(&decoded) {
+            // Most controls are still a nought-to-one position, and a saved
+            // state outside that is corrupt. Four are not: Room Size is cubic
+            // metres, Mic Distance is metres, Lid is degrees and Preamp is
+            // decibels, and each is bounded by the model where it is read.
+            // The blanket range was an invariant of a layout where every
+            // control happened to be normalised, and it stopped being true
+            // the day they started carrying their own units -- it rejected
+            // every state this instrument saves.
+            let normalised = !matches!(
+                index,
+                i if i == 6 + LAB_COUNT
+                    || i == 6 + LAB_COUNT + 2
+                    || i == 6 + LAB_COUNT + 13
+                    || i == PARAM_COUNT
+            );
+            let out_of_range = normalised && !(0.0..=1.0).contains(&decoded);
+            if !decoded.is_finite() || out_of_range {
                 // The fingerprint slot is a hash, not a control.
                 if index != PARAM_COUNT + 1 {
                     return false;
@@ -7171,6 +7227,75 @@ mod tests {
 
     /// Tests run at a low rate to keep them fast; the model is rate-agnostic.
     const FS: f64 = 16_000.0;
+
+    /// The four Room controls carry their own units, and the instrument they
+    /// describe did not move when they started to.
+    ///
+    /// These faders used to be 0..1 positions that the model mapped onto
+    /// metres, cubic metres, radians and decibels. They are the metres now.
+    /// Every stored value was converted through the mapping it replaced, so
+    /// the numbers a listener hears must be exactly the ones the old defaults
+    /// produced -- 0.08 on a log axis from half a metre to sixteen was 0.66 m,
+    /// and it still is. If this fails, a voicing changed under the rename.
+    #[test]
+    fn the_room_controls_are_physical_and_the_instrument_did_not_move() {
+        let piano = ConcertGrand::default();
+
+        // 0.5 * (16/0.5)^0.08
+        assert!(
+            (piano.controls.mic_distance - 0.6598).abs() < 5e-4,
+            "mic distance is {} m",
+            piano.controls.mic_distance
+        );
+        // 45 * (45000/45)^0.28
+        assert!(
+            (piano.controls.room_size - 311.3).abs() < 0.5,
+            "room is {} m3",
+            piano.controls.room_size
+        );
+        // The lid is degrees now; the geometry still wants the radians the
+        // old halfway fader gave it: 0.05 + (0.8 - 0.05) * 0.5.
+        assert!(
+            (piano.lid_radians() - 0.425).abs() < 1e-3,
+            "lid is {} rad",
+            piano.lid_radians()
+        );
+        assert!(
+            (piano.lid_fraction() - 0.5).abs() < 1e-3,
+            "lid fraction is {}",
+            piano.lid_fraction()
+        );
+        // 30 dB * 0.15 = 4.5 dB, and the gain that was and remains 10^(4.5/20).
+        assert!(
+            (piano.controls.preamp - 4.5).abs() < 1e-3,
+            "preamp is {} dB",
+            piano.controls.preamp
+        );
+        assert!(
+            (piano.preamp_gain() - 1.678_804).abs() < 1e-4,
+            "preamp gain is {}",
+            piano.preamp_gain()
+        );
+    }
+
+    /// A value outside the model's own limits is clamped, not wrapped.
+    ///
+    /// The range knobs stopped defining the mapping when the control became
+    /// the quantity; they still bound it, and nothing downstream should ever
+    /// see a negative room or a lid past its hinge.
+    #[test]
+    fn the_room_controls_are_bounded_by_the_model() {
+        let mut piano = ConcertGrand::default();
+        piano.controls.lid = 1_000.0;
+        assert!((piano.lid_radians() - LID_OPEN_RAD.get()).abs() < 1e-6);
+        assert!((piano.lid_fraction() - 1.0).abs() < 1e-6);
+        piano.controls.lid = -1_000.0;
+        assert!((piano.lid_radians() - LID_CLOSED_RAD.get()).abs() < 1e-6);
+        assert!((piano.lid_fraction() - 0.0).abs() < 1e-6);
+        piano.controls.preamp = 1_000.0;
+        let ceiling = powf(10.0, PREAMP_RANGE_DB.get() / 20.0);
+        assert!((piano.preamp_gain() - ceiling).abs() < 1e-3);
+    }
 
     fn prepared() -> Box<ConcertGrand> {
         if let Ok(path) = std::env::var("CG_TUNING") {
@@ -9557,8 +9682,14 @@ mod tests {
                 .and_then(|d| d.parse().ok())
                 .expect("a default");
             let actual = engine.get_parameter(index).expect("the engine knows it");
+            // Relative, because the parameters stopped all being nought to
+            // one. A room is declared as 311.3 cubic metres and the engine
+            // holds the f32 nearest it, 311.29998779296875: the same number,
+            // twelve microns apart, which an absolute 1e-6 called a
+            // disagreement the moment a control carried a real magnitude.
+            let tolerance = 1e-6 * declared.abs().max(1.0);
             assert!(
-                (declared - actual).abs() < 1e-6,
+                (declared - actual).abs() <= tolerance,
                 "parameter {index}: the panel starts it at {declared}, the engine at {actual}"
             );
             checked += 1;

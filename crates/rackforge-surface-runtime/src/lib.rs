@@ -15,7 +15,7 @@ use rackforge_performance_api::{
     SetlistDefinition, SetlistEntry, SetlistEntryId, SetlistId, SongDefinition, SongId, SongPart,
     SongPartId,
 };
-use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterSchema};
+use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterSchema, ParameterTaper};
 use rackforge_program_api::{
     ProgramEditorField, ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue,
 };
@@ -7337,15 +7337,32 @@ fn little_parameter_editable_value(
             maximum,
             step,
             unit,
+            taper,
             ..
-        } => Some(EditableValue::number(
-            value.clamp(*minimum, *maximum),
-            *minimum,
-            *maximum,
-            *step,
-            parameter_display_decimals(*step, display_decimals),
-            unit.as_deref().unwrap_or(""),
-        )),
+        } => Some(
+            // A hundred turns across the span either way, so the encoder
+            // behaves the same whatever the quantity is; what changes is
+            // whether each turn adds or multiplies.
+            if *taper == ParameterTaper::Logarithmic && *minimum > 0.0 {
+                EditableValue::number_logarithmic(
+                    value.clamp(*minimum, *maximum),
+                    *minimum,
+                    *maximum,
+                    0.01,
+                    parameter_display_decimals(*step, display_decimals),
+                    unit.as_deref().unwrap_or(""),
+                )
+            } else {
+                EditableValue::number(
+                    value.clamp(*minimum, *maximum),
+                    *minimum,
+                    *maximum,
+                    *step,
+                    parameter_display_decimals(*step, display_decimals),
+                    unit.as_deref().unwrap_or(""),
+                )
+            },
+        ),
         ParameterKind::Integer {
             minimum,
             maximum,
@@ -8802,6 +8819,7 @@ mod tests {
                         default: 0.5,
                         step: 0.1,
                         unit: None,
+                        taper: ParameterTaper::Linear,
                     },
                 ),
                 parameter(

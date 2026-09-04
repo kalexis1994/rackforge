@@ -275,6 +275,7 @@ mod tests {
         MidiChannel, MidiPacket, MidiSourceId, PARAMETER_LINK_SCHEMA_VERSION, ParameterLinkChannel,
         ParameterLinkId, ParameterLinkSource, ParameterLinkTransform,
     };
+    use rackforge_plugin_api::ParameterTaper;
     use rackforge_plugin_api::{
         EnumChoice, PARAMETER_SCHEMA_VERSION, PageDescriptor, ParameterFlags,
         PluginSemanticControl, SemanticControlId, SuggestedControl,
@@ -348,6 +349,7 @@ mod tests {
                 default: 0.0,
                 step: 0.01,
                 unit: None,
+                taper: ParameterTaper::Linear,
             }),
         )
         .unwrap();
@@ -368,6 +370,7 @@ mod tests {
                 default: 0.0,
                 step: 0.000001,
                 unit: None,
+                taper: ParameterTaper::Linear,
             }),
         )
         .unwrap();
@@ -487,6 +490,7 @@ mod tests {
             default: 0.5,
             step: 0.01,
             unit: None,
+            taper: ParameterTaper::Linear,
         });
         plugin.semantic_controls = vec![PluginSemanticControl {
             role: SemanticControlId::new("synth.filter.cutoff").unwrap(),

@@ -87,26 +87,52 @@
         reading.className = "value";
         row.append(name, reading);
 
+        // A logarithmic control moves the slider through equal RATIOS rather
+        // than equal steps, so the travel is spent where a player works. Mic
+        // Distance runs half a metre to sixteen and Room Size forty-five cubic
+        // metres to forty-five thousand: drawn linearly, everything anyone
+        // would choose sits in the first fraction of the track. The slider
+        // therefore carries a position from nought to one and the value is
+        // derived from it; only the plugin's descriptor knows which of the two
+        // a parameter is.
+        const ratio = kind.taper === "logarithmic" && kind.minimum > 0
+          ? kind.maximum / kind.minimum
+          : 0;
+        const toValue = (position) =>
+          ratio ? kind.minimum * Math.pow(ratio, position) : position;
+        const toPosition = (magnitude) =>
+          ratio
+            ? Math.log(Math.max(magnitude, kind.minimum) / kind.minimum) / Math.log(ratio)
+            : magnitude;
+
         const slider = document.createElement("input");
         slider.type = "range";
-        slider.min = String(kind.minimum);
-        slider.max = String(kind.maximum);
-        slider.step = String(kind.step ?? 0.01);
-        slider.value = String(value ?? kind.default);
+        slider.min = String(ratio ? 0 : kind.minimum);
+        slider.max = String(ratio ? 1 : kind.maximum);
+        slider.step = String(ratio ? 0.001 : (kind.step ?? 0.01));
+        slider.value = String(toPosition(value ?? kind.default));
         slider.setAttribute("aria-label", parameter.name);
 
+        /** Enough figures to see a change, never more than the value carries. */
+        const format = (magnitude) => {
+          const decimals = Math.abs(magnitude) >= 100 ? 0 : Math.abs(magnitude) >= 10 ? 1 : 2;
+          const text = magnitude.toFixed(decimals);
+          return kind.unit ? `${text} ${kind.unit}` : text;
+        };
+
         const show = () => {
-          const span = kind.maximum - kind.minimum || 1;
-          const fill = ((Number(slider.value) - kind.minimum) / span) * 100;
-          slider.style.setProperty("--fill", `${fill}%`);
-          reading.textContent = Number(slider.value).toFixed(2);
+          const position = Number(slider.value);
+          const low = ratio ? 0 : kind.minimum;
+          const span = (ratio ? 1 : kind.maximum) - low || 1;
+          slider.style.setProperty("--fill", `${((position - low) / span) * 100}%`);
+          reading.textContent = format(toValue(position));
         };
         show();
         slider.addEventListener("input", () => {
           show();
           void call("plugin.set_parameter", {
             parameter_index: parameter.index,
-            value: Number(slider.value),
+            value: toValue(Number(slider.value)),
           }).catch((error) => {
             state.textContent = error.message;
           });

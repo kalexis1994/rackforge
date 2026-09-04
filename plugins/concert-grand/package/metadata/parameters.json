@@ -1,3106 +1,3112 @@
 {
- "schema_version": 1,
- "pages": [
-  {
-   "id": "sound",
-   "name": "Sound",
-   "order": 0
-  },
-  {
-   "id": "room",
-   "name": "Room & Microphones",
-   "order": 1
-  },
-  {
-   "id": "noises",
-   "name": "Action & Noises",
-   "order": 2
-  },
-  {
-   "id": "lab_strike",
-   "name": "Lab · Strike",
-   "order": 3
-  },
-  {
-   "id": "lab_strings",
-   "name": "Lab · Strings",
-   "order": 4
-  },
-  {
-   "id": "lab_board",
-   "name": "Lab · Board & Air",
-   "order": 5
-  },
-  {
-   "id": "model_strings",
-   "name": "Model · Strings",
-   "order": 6
-  },
-  {
-   "id": "model_hammer",
-   "name": "Model · Hammer",
-   "order": 7
-  },
-  {
-   "id": "model_board",
-   "name": "Model · Board",
-   "order": 8
-  },
-  {
-   "id": "model_air",
-   "name": "Model · Air & Mics",
-   "order": 9
-  },
-  {
-   "id": "model_misc",
-   "name": "Model · Misc",
-   "order": 10
-  }
- ],
- "parameters": [
-  {
-   "index": 0,
-   "id": "brightness",
-   "name": "Brightness",
-   "page": "sound",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "default": 0.44,
-    "step": 0.01
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": true,
-    "read_only": false,
-    "advanced": false
-   },
-   "suggested_control": "knob"
-  },
-  {
-   "index": 1,
-   "id": "dynamics",
-   "name": "Dynamics",
-   "page": "sound",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "default": 0.45,
-    "step": 0.01
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": true,
-    "read_only": false,
-    "advanced": false
-   },
-   "suggested_control": "knob"
-  },
-  {
-   "index": 2,
-   "id": "unison",
-   "name": "Unison",
-   "page": "sound",
-   "order": 5,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "default": 0.65,
-    "step": 0.01
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": true,
-    "read_only": false,
-    "advanced": false
-   },
-   "suggested_control": "knob"
-  },
-  {
-   "index": 3,
-   "id": "decay",
-   "name": "Decay",
-   "page": "sound",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "default": 0.35,
-    "step": 0.01
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": true,
-    "read_only": false,
-    "advanced": false
-   },
-   "suggested_control": "knob"
-  },
-  {
-   "index": 4,
-   "id": "width",
-   "name": "Stereo Width",
-   "page": "room",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "default": 0.35,
-    "step": 0.01
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": true,
-    "read_only": false,
-    "advanced": false
-   },
-   "suggested_control": "knob"
-  },
-  {
-   "index": 5,
-   "id": "level",
-   "name": "Level",
-   "page": "sound",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "default": 0.72,
-    "step": 0.01
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": true,
-    "read_only": false,
-    "advanced": false
-   },
-   "suggested_control": "knob"
-  },
-  {
-   "index": 6,
-   "id": "lab_felt_corner",
-   "name": "Felt Corner",
-   "page": "lab_strike",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.52
-   }
-  },
-  {
-   "index": 7,
-   "id": "lab_treble_life",
-   "name": "Treble Life",
-   "page": "lab_board",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 8,
-   "id": "lab_thump",
-   "name": "Thud Colour (low)",
-   "page": "noises",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 9,
-   "id": "lab_chiff",
-   "name": "Click Colour (bright)",
-   "page": "noises",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.07
-   }
-  },
-  {
-   "index": 10,
-   "id": "lab_clang",
-   "name": "Clang",
-   "page": "lab_strings",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 11,
-   "id": "lab_phantoms",
-   "name": "Phantoms",
-   "page": "lab_strings",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 12,
-   "id": "lab_hf_floor",
-   "name": "HF Floor",
-   "page": "lab_strike",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.35
-   }
-  },
-  {
-   "index": 13,
-   "id": "lab_hammer_hard",
-   "name": "Hammer Hard",
-   "page": "lab_strike",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.49
-   }
-  },
-  {
-   "index": 14,
-   "id": "lab_hammer_mass",
-   "name": "Hammer Mass",
-   "page": "lab_strike",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.55
-   }
-  },
-  {
-   "index": 15,
-   "id": "lab_bloom",
-   "name": "Bloom",
-   "page": "lab_strike",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.15
-   }
-  },
-  {
-   "index": 16,
-   "id": "lab_glide",
-   "name": "Glide",
-   "page": "lab_strings",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 17,
-   "id": "lab_prompt_decay",
-   "name": "Prompt Decay",
-   "page": "lab_strings",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.57
-   }
-  },
-  {
-   "index": 18,
-   "id": "lab_tail",
-   "name": "Tail",
-   "page": "lab_strings",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.58
-   }
-  },
-  {
-   "index": 19,
-   "id": "lab_detune",
-   "name": "Detune",
-   "page": "lab_strings",
-   "order": 8,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 20,
-   "id": "lab_board",
-   "name": "Board",
-   "page": "lab_board",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.45
-   }
-  },
-  {
-   "index": 21,
-   "id": "lab_sympathy",
-   "name": "Sympathy",
-   "page": "lab_board",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 22,
-   "id": "lab_air",
-   "name": "Ambience Level",
-   "page": "room",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 23,
-   "id": "room_size",
-   "name": "Room Size",
-   "page": "room",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.28
-   }
-  },
-  {
-   "index": 24,
-   "id": "room_hardness",
-   "name": "Wall Hardness",
-   "page": "room",
-   "order": 5,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.35
-   }
-  },
-  {
-   "index": 25,
-   "id": "mic_distance",
-   "name": "Mic Distance",
-   "page": "room",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.08
-   }
-  },
-  {
-   "index": 26,
-   "id": "mic_pattern",
-   "name": "Mic Pattern (omni to ribbon)",
-   "page": "room",
-   "order": 6,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.6
-   }
-  },
-  {
-   "index": 27,
-   "id": "action_noise",
-   "name": "Action Noise",
-   "page": "noises",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.39
-   }
-  },
-  {
-   "index": 28,
-   "id": "release_noise",
-   "name": "Release Noise",
-   "page": "noises",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.3
-   }
-  },
-  {
-   "index": 29,
-   "id": "pedal_noise",
-   "name": "Pedal Noise",
-   "page": "noises",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 30,
-   "id": "impact",
-   "name": "Impact Burst",
-   "page": "lab_strike",
-   "order": 5,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.26
-   }
-  },
-  {
-   "index": 31,
-   "id": "board_damping",
-   "name": "Board Damping",
-   "page": "lab_board",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 32,
-   "id": "board_density",
-   "name": "Board Density",
-   "page": "lab_board",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 33,
-   "id": "size",
-   "name": "Size",
-   "page": "sound",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 34,
-   "id": "strike_point",
-   "name": "Strike Point",
-   "page": "sound",
-   "order": 6,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 35,
-   "id": "tension",
-   "name": "String Tension",
-   "page": "sound",
-   "order": 7,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 36,
-   "id": "lid",
-   "name": "Lid",
-   "page": "room",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 37,
-   "id": "damper",
-   "name": "Damper Grip",
-   "page": "sound",
-   "order": 8,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 38,
-   "id": "clang_falloff",
-   "name": "Clang Falloff",
-   "page": "lab_strings",
-   "order": 6,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.5
-   }
-  },
-  {
-   "index": 39,
-   "id": "clang_plain",
-   "name": "Plain Clang",
-   "page": "lab_strings",
-   "order": 7,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.25
-   }
-  },
-  {
-   "index": 40,
-   "id": "action",
-   "name": "Action",
-   "page": "sound",
-   "order": 9,
-   "kind": {
-    "type": "enum",
-    "default": 0,
-    "choices": [
-     {
-      "value": 0,
-      "name": "Grand"
-     },
-     {
-      "value": 1,
-      "name": "Upright"
-     }
-    ]
-   },
-   "flags": {
-    "automatable": false,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": false
-   },
-   "suggested_control": "list"
-  },
-  {
-   "index": 200,
-   "id": "preamp",
-   "name": "Preamp",
-   "page": "room",
-   "order": 7,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.01,
-    "default": 0.15
-   }
-  },
-  {
-   "index": 41,
-   "id": "knob_radiation_corner_hz",
-   "name": "RADIATION_CORNER_HZ",
-   "page": "model_board",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 42,
-   "id": "knob_comb_floor",
-   "name": "COMB_FLOOR",
-   "page": "model_hammer",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 43,
-   "id": "knob_string_t60_s",
-   "name": "STRING_T60_S",
-   "page": "model_strings",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 44,
-   "id": "knob_slow_stage_ratio",
-   "name": "SLOW_STAGE_RATIO",
-   "page": "model_strings",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 45,
-   "id": "knob_incoherent_radiation",
-   "name": "INCOHERENT_RADIATION",
-   "page": "model_strings",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 46,
-   "id": "knob_slow_wire_share",
-   "name": "SLOW_WIRE_SHARE",
-   "page": "model_strings",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 47,
-   "id": "knob_string_knee_hz",
-   "name": "STRING_KNEE_HZ",
-   "page": "model_strings",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 48,
-   "id": "knob_string_tilt",
-   "name": "STRING_TILT",
-   "page": "model_strings",
-   "order": 5,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 49,
-   "id": "knob_scatter_knee_hz",
-   "name": "SCATTER_KNEE_HZ",
-   "page": "model_board",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 50,
-   "id": "knob_horizontal_bridge",
-   "name": "HORIZONTAL_BRIDGE",
-   "page": "model_strings",
-   "order": 6,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 51,
-   "id": "knob_horizontal_share",
-   "name": "HORIZONTAL_SHARE",
-   "page": "model_strings",
-   "order": 7,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 52,
-   "id": "knob_strike_skew_m",
-   "name": "STRIKE_SKEW_M",
-   "page": "model_hammer",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 53,
-   "id": "knob_polarisation_cents",
-   "name": "POLARISATION_CENTS",
-   "page": "model_strings",
-   "order": 8,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 54,
-   "id": "knob_longitudinal_ratio",
-   "name": "LONGITUDINAL_RATIO",
-   "page": "model_strings",
-   "order": 9,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 55,
-   "id": "knob_longitudinal_mix",
-   "name": "LONGITUDINAL_MIX",
-   "page": "model_strings",
-   "order": 10,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 56,
-   "id": "knob_tension_gain",
-   "name": "TENSION_GAIN",
-   "page": "model_strings",
-   "order": 11,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 57,
-   "id": "knob_tension_max_shift",
-   "name": "TENSION_MAX_SHIFT",
-   "page": "model_strings",
-   "order": 12,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 58,
-   "id": "knob_tension_smoothing",
-   "name": "TENSION_SMOOTHING",
-   "page": "model_strings",
-   "order": 13,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 59,
-   "id": "knob_dead_magnitude_squared",
-   "name": "DEAD_MAGNITUDE_SQUARED",
-   "page": "model_strings",
-   "order": 14,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 60,
-   "id": "knob_radiation_coincidence",
-   "name": "RADIATION_COINCIDENCE",
-   "page": "model_board",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 61,
-   "id": "knob_radiation_rolloff_hz",
-   "name": "RADIATION_ROLLOFF_HZ",
-   "page": "model_board",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 62,
-   "id": "knob_bridge_reference_speed",
-   "name": "BRIDGE_REFERENCE_SPEED",
-   "page": "model_strings",
-   "order": 15,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 63,
-   "id": "knob_bridge_impedance_power",
-   "name": "BRIDGE_IMPEDANCE_POWER",
-   "page": "model_strings",
-   "order": 16,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 64,
-   "id": "knob_bridge_reference_gauge_m",
-   "name": "BRIDGE_REFERENCE_GAUGE_M",
-   "page": "model_strings",
-   "order": 17,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 65,
-   "id": "knob_bridge_length_power",
-   "name": "BRIDGE_LENGTH_POWER",
-   "page": "model_strings",
-   "order": 18,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 66,
-   "id": "knob_bridge_reference_length_m",
-   "name": "BRIDGE_REFERENCE_LENGTH_M",
-   "page": "model_strings",
-   "order": 19,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 67,
-   "id": "knob_bridge_factor_cap",
-   "name": "BRIDGE_FACTOR_CAP",
-   "page": "model_strings",
-   "order": 20,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 68,
-   "id": "knob_slow_factor_cap",
-   "name": "SLOW_FACTOR_CAP",
-   "page": "model_strings",
-   "order": 21,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 69,
-   "id": "knob_radiation_rate",
-   "name": "RADIATION_RATE",
-   "page": "model_board",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 70,
-   "id": "knob_kappa_loss",
-   "name": "KAPPA_LOSS",
-   "page": "model_strings",
-   "order": 22,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 71,
-   "id": "knob_knock_level",
-   "name": "KNOCK_LEVEL",
-   "page": "model_hammer",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 72,
-   "id": "knob_board_loss_factor",
-   "name": "BOARD_LOSS_FACTOR",
-   "page": "model_board",
-   "order": 5,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 73,
-   "id": "knob_house_felt_corner",
-   "name": "HOUSE_FELT_CORNER",
-   "page": "model_strings",
-   "order": 23,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 74,
-   "id": "knob_house_hf_floor",
-   "name": "HOUSE_HF_FLOOR",
-   "page": "model_strings",
-   "order": 24,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 75,
-   "id": "knob_hf_floor_corner_hz",
-   "name": "HF_FLOOR_CORNER_HZ",
-   "page": "model_strings",
-   "order": 25,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 76,
-   "id": "knob_hf_floor_span",
-   "name": "HF_FLOOR_SPAN",
-   "page": "model_strings",
-   "order": 26,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 77,
-   "id": "knob_felt_reference_compression_m",
-   "name": "FELT_REFERENCE_COMPRESSION_M",
-   "page": "model_hammer",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 78,
-   "id": "knob_scale_join",
-   "name": "SCALE_JOIN",
-   "page": "model_hammer",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 79,
-   "id": "knob_scale_break",
-   "name": "SCALE_BREAK",
-   "page": "model_hammer",
-   "order": 5,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 80,
-   "id": "knob_gauge_a0_m",
-   "name": "GAUGE_A0_M",
-   "page": "model_hammer",
-   "order": 6,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 81,
-   "id": "knob_gauge_break_m",
-   "name": "GAUGE_BREAK_M",
-   "page": "model_hammer",
-   "order": 7,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 82,
-   "id": "knob_gauge_join_m",
-   "name": "GAUGE_JOIN_M",
-   "page": "model_hammer",
-   "order": 8,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 83,
-   "id": "knob_gauge_top_m",
-   "name": "GAUGE_TOP_M",
-   "page": "model_hammer",
-   "order": 9,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 84,
-   "id": "knob_gauge_constant",
-   "name": "GAUGE_CONSTANT",
-   "page": "model_hammer",
-   "order": 10,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 85,
-   "id": "knob_clang_length_power",
-   "name": "CLANG_LENGTH_POWER",
-   "page": "model_hammer",
-   "order": 11,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 86,
-   "id": "knob_clack_scatter",
-   "name": "CLACK_SCATTER",
-   "page": "model_hammer",
-   "order": 12,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 87,
-   "id": "knob_thump_t60_s",
-   "name": "THUMP_T60_S",
-   "page": "model_hammer",
-   "order": 13,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 88,
-   "id": "knob_felt_exponent_at_bass",
-   "name": "FELT_EXPONENT_AT_BASS",
-   "page": "model_hammer",
-   "order": 14,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 89,
-   "id": "knob_felt_exponent_rise",
-   "name": "FELT_EXPONENT_RISE",
-   "page": "model_hammer",
-   "order": 15,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 90,
-   "id": "knob_action_span_base",
-   "name": "ACTION_SPAN_BASE",
-   "page": "model_hammer",
-   "order": 16,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 91,
-   "id": "knob_action_span_per_dynamics",
-   "name": "ACTION_SPAN_PER_DYNAMICS",
-   "page": "model_hammer",
-   "order": 17,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 92,
-   "id": "knob_contact_swing_base",
-   "name": "CONTACT_SWING_BASE",
-   "page": "model_hammer",
-   "order": 18,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 93,
-   "id": "knob_contact_swing_per_dynamics",
-   "name": "CONTACT_SWING_PER_DYNAMICS",
-   "page": "model_hammer",
-   "order": 19,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 94,
-   "id": "knob_felt_exponent_min",
-   "name": "FELT_EXPONENT_MIN",
-   "page": "model_hammer",
-   "order": 20,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 95,
-   "id": "knob_felt_exponent_max",
-   "name": "FELT_EXPONENT_MAX",
-   "page": "model_hammer",
-   "order": 21,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 96,
-   "id": "knob_board_mean_mobility",
-   "name": "BOARD_MEAN_MOBILITY",
-   "page": "model_board",
-   "order": 6,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 97,
-   "id": "knob_board_coincidence_hz",
-   "name": "BOARD_COINCIDENCE_HZ",
-   "page": "model_board",
-   "order": 7,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 98,
-   "id": "knob_board_radiation_order",
-   "name": "BOARD_RADIATION_ORDER",
-   "page": "model_board",
-   "order": 8,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 99,
-   "id": "knob_headroom",
-   "name": "HEADROOM",
-   "page": "model_board",
-   "order": 9,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 100,
-   "id": "knob_preamp_range_db",
-   "name": "PREAMP_RANGE_DB",
-   "page": "model_air",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 101,
-   "id": "knob_preamp_knee",
-   "name": "PREAMP_KNEE",
-   "page": "model_air",
-   "order": 1,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 102,
-   "id": "knob_preamp_asymmetry",
-   "name": "PREAMP_ASYMMETRY",
-   "page": "model_air",
-   "order": 2,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 103,
-   "id": "knob_board_mix",
-   "name": "BOARD_MIX",
-   "page": "model_board",
-   "order": 10,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 104,
-   "id": "knob_board_top_hz",
-   "name": "BOARD_TOP_HZ",
-   "page": "model_board",
-   "order": 11,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 105,
-   "id": "knob_board_bottom_hz",
-   "name": "BOARD_BOTTOM_HZ",
-   "page": "model_board",
-   "order": 12,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 106,
-   "id": "knob_open_mix",
-   "name": "OPEN_MIX",
-   "page": "model_air",
-   "order": 3,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 107,
-   "id": "knob_undamped_low_hz",
-   "name": "UNDAMPED_LOW_HZ",
-   "page": "model_air",
-   "order": 4,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 108,
-   "id": "knob_undamped_high_hz",
-   "name": "UNDAMPED_HIGH_HZ",
-   "page": "model_air",
-   "order": 5,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 109,
-   "id": "knob_undamped_t60_low_s",
-   "name": "UNDAMPED_T60_LOW_S",
-   "page": "model_air",
-   "order": 6,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 110,
-   "id": "knob_undamped_t60_high_s",
-   "name": "UNDAMPED_T60_HIGH_S",
-   "page": "model_air",
-   "order": 7,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 111,
-   "id": "knob_undamped_mix",
-   "name": "UNDAMPED_MIX",
-   "page": "model_air",
-   "order": 8,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 112,
-   "id": "knob_halo_rt60_s",
-   "name": "HALO_RT60_S",
-   "page": "model_air",
-   "order": 9,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 113,
-   "id": "knob_halo_hp_hz",
-   "name": "HALO_HP_HZ",
-   "page": "model_air",
-   "order": 10,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 114,
-   "id": "knob_halo_mix",
-   "name": "HALO_MIX",
-   "page": "model_air",
-   "order": 11,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 115,
-   "id": "knob_lid_half_width_m",
-   "name": "LID_HALF_WIDTH_M",
-   "page": "model_air",
-   "order": 12,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 116,
-   "id": "knob_lid_half_length_m",
-   "name": "LID_HALF_LENGTH_M",
-   "page": "model_air",
-   "order": 13,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 117,
-   "id": "knob_mic_azimuth_rad",
-   "name": "MIC_AZIMUTH_RAD",
-   "page": "model_air",
-   "order": 14,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 118,
-   "id": "knob_lid_closed_rad",
-   "name": "LID_CLOSED_RAD",
-   "page": "model_air",
-   "order": 15,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 119,
-   "id": "knob_lid_open_rad",
-   "name": "LID_OPEN_RAD",
-   "page": "model_air",
-   "order": 16,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 120,
-   "id": "knob_lid_reflect",
-   "name": "LID_REFLECT",
-   "page": "model_air",
-   "order": 17,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 121,
-   "id": "knob_lid_closed_leak",
-   "name": "LID_CLOSED_LEAK",
-   "page": "model_air",
-   "order": 18,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 122,
-   "id": "knob_lid_closed_hz",
-   "name": "LID_CLOSED_HZ",
-   "page": "model_air",
-   "order": 19,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 123,
-   "id": "knob_lid_open_hz",
-   "name": "LID_OPEN_HZ",
-   "page": "model_air",
-   "order": 20,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 124,
-   "id": "knob_sound_speed",
-   "name": "SOUND_SPEED",
-   "page": "model_air",
-   "order": 21,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 125,
-   "id": "knob_room_volume_min_m3",
-   "name": "ROOM_VOLUME_MIN_M3",
-   "page": "model_air",
-   "order": 22,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 126,
-   "id": "knob_room_volume_max_m3",
-   "name": "ROOM_VOLUME_MAX_M3",
-   "page": "model_air",
-   "order": 23,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 127,
-   "id": "knob_mic_distance_min_m",
-   "name": "MIC_DISTANCE_MIN_M",
-   "page": "model_air",
-   "order": 24,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 128,
-   "id": "knob_mic_distance_max_m",
-   "name": "MIC_DISTANCE_MAX_M",
-   "page": "model_air",
-   "order": 25,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 129,
-   "id": "knob_mic_reference_m",
-   "name": "MIC_REFERENCE_M",
-   "page": "model_air",
-   "order": 26,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 130,
-   "id": "knob_mic_near_cap",
-   "name": "MIC_NEAR_CAP",
-   "page": "model_air",
-   "order": 27,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 131,
-   "id": "knob_mic_height_m",
-   "name": "MIC_HEIGHT_M",
-   "page": "model_air",
-   "order": 28,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 132,
-   "id": "knob_air_absorb_4k_per_m",
-   "name": "AIR_ABSORB_4K_PER_M",
-   "page": "model_air",
-   "order": 29,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 133,
-   "id": "knob_mic_spacing_m",
-   "name": "MIC_SPACING_M",
-   "page": "model_air",
-   "order": 30,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 134,
-   "id": "knob_mic_preamp",
-   "name": "MIC_PREAMP",
-   "page": "model_air",
-   "order": 31,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 135,
-   "id": "knob_proximity_strength",
-   "name": "PROXIMITY_STRENGTH",
-   "page": "model_air",
-   "order": 32,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 136,
-   "id": "knob_sympathy_rate",
-   "name": "SYMPATHY_RATE",
-   "page": "model_strings",
-   "order": 27,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 137,
-   "id": "knob_impact_clang",
-   "name": "IMPACT_CLANG",
-   "page": "model_hammer",
-   "order": 22,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 138,
-   "id": "knob_impact_pulse_tau_s",
-   "name": "IMPACT_PULSE_TAU_S",
-   "page": "model_hammer",
-   "order": 23,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 139,
-   "id": "knob_air_highpass",
-   "name": "AIR_HIGHPASS",
-   "page": "model_air",
-   "order": 33,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 140,
-   "id": "knob_room_mix",
-   "name": "ROOM_MIX",
-   "page": "model_air",
-   "order": 34,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 141,
-   "id": "knob_hammer_mass_scale",
-   "name": "HAMMER_MASS_SCALE",
-   "page": "model_hammer",
-   "order": 24,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 142,
-   "id": "knob_string_tension_n",
-   "name": "STRING_TENSION_N",
-   "page": "model_strings",
-   "order": 28,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 143,
-   "id": "knob_felt_k_a0",
-   "name": "FELT_K_A0",
-   "page": "model_hammer",
-   "order": 25,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 144,
-   "id": "knob_felt_k_decades",
-   "name": "FELT_K_DECADES",
-   "page": "model_hammer",
-   "order": 26,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 145,
-   "id": "knob_felt_table_floor",
-   "name": "FELT_TABLE_FLOOR",
-   "page": "model_hammer",
-   "order": 27,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 146,
-   "id": "knob_felt_bass_gain",
-   "name": "FELT_BASS_GAIN",
-   "page": "model_hammer",
-   "order": 28,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 147,
-   "id": "knob_felt_treble_gain",
-   "name": "FELT_TREBLE_GAIN",
-   "page": "model_hammer",
-   "order": 29,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 148,
-   "id": "knob_duplex_level",
-   "name": "DUPLEX_LEVEL",
-   "page": "model_strings",
-   "order": 29,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 149,
-   "id": "knob_unison_beat_cap_hz",
-   "name": "UNISON_BEAT_CAP_HZ",
-   "page": "model_strings",
-   "order": 30,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 150,
-   "id": "knob_unison_width",
-   "name": "UNISON_WIDTH",
-   "page": "model_strings",
-   "order": 31,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 151,
-   "id": "knob_unison_jitter_spread",
-   "name": "UNISON_JITTER_SPREAD",
-   "page": "model_strings",
-   "order": 32,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 152,
-   "id": "knob_stulov_epsilon",
-   "name": "STULOV_EPSILON",
-   "page": "model_hammer",
-   "order": 30,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 153,
-   "id": "knob_stulov_tau_s",
-   "name": "STULOV_TAU_S",
-   "page": "model_hammer",
-   "order": 31,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 154,
-   "id": "knob_string_hf_loss",
-   "name": "STRING_HF_LOSS",
-   "page": "model_strings",
-   "order": 33,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 155,
-   "id": "knob_board_low_loss",
-   "name": "BOARD_LOW_LOSS",
-   "page": "model_board",
-   "order": 13,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 156,
-   "id": "knob_board_mean_cap",
-   "name": "BOARD_MEAN_CAP",
-   "page": "model_board",
-   "order": 14,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 157,
-   "id": "knob_sim_top_hz",
-   "name": "SIM_TOP_HZ",
-   "page": "model_hammer",
-   "order": 32,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 158,
-   "id": "knob_hammer_v_ff",
-   "name": "HAMMER_V_FF",
-   "page": "model_hammer",
-   "order": 33,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 159,
-   "id": "knob_contact_stretch",
-   "name": "CONTACT_STRETCH",
-   "page": "model_hammer",
-   "order": 34,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.5
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 160,
-   "id": "knob_recipe_floor",
-   "name": "RECIPE_FLOOR",
-   "page": "model_misc",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.0
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  }
- ]
+  "schema_version": 1,
+  "pages": [
+    {
+      "id": "sound",
+      "name": "Sound",
+      "order": 0
+    },
+    {
+      "id": "room",
+      "name": "Room & Microphones",
+      "order": 1
+    },
+    {
+      "id": "noises",
+      "name": "Action & Noises",
+      "order": 2
+    },
+    {
+      "id": "lab_strike",
+      "name": "Lab · Strike",
+      "order": 3
+    },
+    {
+      "id": "lab_strings",
+      "name": "Lab · Strings",
+      "order": 4
+    },
+    {
+      "id": "lab_board",
+      "name": "Lab · Board & Air",
+      "order": 5
+    },
+    {
+      "id": "model_strings",
+      "name": "Model · Strings",
+      "order": 6
+    },
+    {
+      "id": "model_hammer",
+      "name": "Model · Hammer",
+      "order": 7
+    },
+    {
+      "id": "model_board",
+      "name": "Model · Board",
+      "order": 8
+    },
+    {
+      "id": "model_air",
+      "name": "Model · Air & Mics",
+      "order": 9
+    },
+    {
+      "id": "model_misc",
+      "name": "Model · Misc",
+      "order": 10
+    }
+  ],
+  "parameters": [
+    {
+      "index": 0,
+      "id": "brightness",
+      "name": "Brightness",
+      "page": "sound",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.44,
+        "step": 0.01
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": true,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "knob"
+    },
+    {
+      "index": 1,
+      "id": "dynamics",
+      "name": "Dynamics",
+      "page": "sound",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.45,
+        "step": 0.01
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": true,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "knob"
+    },
+    {
+      "index": 2,
+      "id": "unison",
+      "name": "Unison",
+      "page": "sound",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.65,
+        "step": 0.01
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": true,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "knob"
+    },
+    {
+      "index": 3,
+      "id": "decay",
+      "name": "Decay",
+      "page": "sound",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.35,
+        "step": 0.01
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": true,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "knob"
+    },
+    {
+      "index": 4,
+      "id": "width",
+      "name": "Stereo Width",
+      "page": "room",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.35,
+        "step": 0.01
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": true,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "knob"
+    },
+    {
+      "index": 5,
+      "id": "level",
+      "name": "Level",
+      "page": "sound",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.72,
+        "step": 0.01
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": true,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "knob"
+    },
+    {
+      "index": 6,
+      "id": "lab_felt_corner",
+      "name": "Felt Corner",
+      "page": "lab_strike",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.52
+      }
+    },
+    {
+      "index": 7,
+      "id": "lab_treble_life",
+      "name": "Treble Life",
+      "page": "lab_board",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 8,
+      "id": "lab_thump",
+      "name": "Thud Colour (low)",
+      "page": "noises",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 9,
+      "id": "lab_chiff",
+      "name": "Click Colour (bright)",
+      "page": "noises",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.07
+      }
+    },
+    {
+      "index": 10,
+      "id": "lab_clang",
+      "name": "Clang",
+      "page": "lab_strings",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 11,
+      "id": "lab_phantoms",
+      "name": "Phantoms",
+      "page": "lab_strings",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 12,
+      "id": "lab_hf_floor",
+      "name": "HF Floor",
+      "page": "lab_strike",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.35
+      }
+    },
+    {
+      "index": 13,
+      "id": "lab_hammer_hard",
+      "name": "Hammer Hard",
+      "page": "lab_strike",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.49
+      }
+    },
+    {
+      "index": 14,
+      "id": "lab_hammer_mass",
+      "name": "Hammer Mass",
+      "page": "lab_strike",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.55
+      }
+    },
+    {
+      "index": 15,
+      "id": "lab_bloom",
+      "name": "Bloom",
+      "page": "lab_strike",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.15
+      }
+    },
+    {
+      "index": 16,
+      "id": "lab_glide",
+      "name": "Glide",
+      "page": "lab_strings",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 17,
+      "id": "lab_prompt_decay",
+      "name": "Prompt Decay",
+      "page": "lab_strings",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.57
+      }
+    },
+    {
+      "index": 18,
+      "id": "lab_tail",
+      "name": "Tail",
+      "page": "lab_strings",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.58
+      }
+    },
+    {
+      "index": 19,
+      "id": "lab_detune",
+      "name": "Detune",
+      "page": "lab_strings",
+      "order": 8,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 20,
+      "id": "lab_board",
+      "name": "Board",
+      "page": "lab_board",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.45
+      }
+    },
+    {
+      "index": 21,
+      "id": "lab_sympathy",
+      "name": "Sympathy",
+      "page": "lab_board",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 22,
+      "id": "lab_air",
+      "name": "Ambience Level",
+      "page": "room",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 23,
+      "id": "room_size",
+      "name": "Room Size",
+      "page": "room",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 45.0,
+        "maximum": 45000.0,
+        "step": 1.0,
+        "default": 311.3,
+        "unit": "m³",
+        "taper": "logarithmic"
+      }
+    },
+    {
+      "index": 24,
+      "id": "room_hardness",
+      "name": "Wall Hardness",
+      "page": "room",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.35
+      }
+    },
+    {
+      "index": 25,
+      "id": "mic_distance",
+      "name": "Mic Distance",
+      "page": "room",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.5,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 0.6598,
+        "unit": "m",
+        "taper": "logarithmic"
+      }
+    },
+    {
+      "index": 26,
+      "id": "mic_pattern",
+      "name": "Mic Pattern (omni to ribbon)",
+      "page": "room",
+      "order": 6,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.6
+      }
+    },
+    {
+      "index": 27,
+      "id": "action_noise",
+      "name": "Action Noise",
+      "page": "noises",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.39
+      }
+    },
+    {
+      "index": 28,
+      "id": "release_noise",
+      "name": "Release Noise",
+      "page": "noises",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.3
+      }
+    },
+    {
+      "index": 29,
+      "id": "pedal_noise",
+      "name": "Pedal Noise",
+      "page": "noises",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 30,
+      "id": "impact",
+      "name": "Impact Burst",
+      "page": "lab_strike",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.26
+      }
+    },
+    {
+      "index": 31,
+      "id": "board_damping",
+      "name": "Board Damping",
+      "page": "lab_board",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 32,
+      "id": "board_density",
+      "name": "Board Density",
+      "page": "lab_board",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 33,
+      "id": "size",
+      "name": "Size",
+      "page": "sound",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 34,
+      "id": "strike_point",
+      "name": "Strike Point",
+      "page": "sound",
+      "order": 6,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 35,
+      "id": "tension",
+      "name": "String Tension",
+      "page": "sound",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 36,
+      "id": "lid",
+      "name": "Lid",
+      "page": "room",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 2.86,
+        "maximum": 45.84,
+        "step": 0.1,
+        "default": 24.35,
+        "unit": "°"
+      }
+    },
+    {
+      "index": 37,
+      "id": "damper",
+      "name": "Damper Grip",
+      "page": "sound",
+      "order": 8,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 38,
+      "id": "clang_falloff",
+      "name": "Clang Falloff",
+      "page": "lab_strings",
+      "order": 6,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 39,
+      "id": "clang_plain",
+      "name": "Plain Clang",
+      "page": "lab_strings",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.25
+      }
+    },
+    {
+      "index": 40,
+      "id": "action",
+      "name": "Action",
+      "page": "sound",
+      "order": 9,
+      "kind": {
+        "type": "enum",
+        "default": 0,
+        "choices": [
+          {
+            "value": 0,
+            "name": "Grand"
+          },
+          {
+            "value": 1,
+            "name": "Upright"
+          }
+        ]
+      },
+      "flags": {
+        "automatable": false,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "list"
+    },
+    {
+      "index": 200,
+      "id": "preamp",
+      "name": "Preamp",
+      "page": "room",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 30.0,
+        "step": 0.1,
+        "default": 4.5,
+        "unit": "dB"
+      }
+    },
+    {
+      "index": 41,
+      "id": "knob_radiation_corner_hz",
+      "name": "RADIATION_CORNER_HZ",
+      "page": "model_board",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 42,
+      "id": "knob_comb_floor",
+      "name": "COMB_FLOOR",
+      "page": "model_hammer",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 43,
+      "id": "knob_string_t60_s",
+      "name": "STRING_T60_S",
+      "page": "model_strings",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 44,
+      "id": "knob_slow_stage_ratio",
+      "name": "SLOW_STAGE_RATIO",
+      "page": "model_strings",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 45,
+      "id": "knob_incoherent_radiation",
+      "name": "INCOHERENT_RADIATION",
+      "page": "model_strings",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 46,
+      "id": "knob_slow_wire_share",
+      "name": "SLOW_WIRE_SHARE",
+      "page": "model_strings",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 47,
+      "id": "knob_string_knee_hz",
+      "name": "STRING_KNEE_HZ",
+      "page": "model_strings",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 48,
+      "id": "knob_string_tilt",
+      "name": "STRING_TILT",
+      "page": "model_strings",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 49,
+      "id": "knob_scatter_knee_hz",
+      "name": "SCATTER_KNEE_HZ",
+      "page": "model_board",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 50,
+      "id": "knob_horizontal_bridge",
+      "name": "HORIZONTAL_BRIDGE",
+      "page": "model_strings",
+      "order": 6,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 51,
+      "id": "knob_horizontal_share",
+      "name": "HORIZONTAL_SHARE",
+      "page": "model_strings",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 52,
+      "id": "knob_strike_skew_m",
+      "name": "STRIKE_SKEW_M",
+      "page": "model_hammer",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 53,
+      "id": "knob_polarisation_cents",
+      "name": "POLARISATION_CENTS",
+      "page": "model_strings",
+      "order": 8,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 54,
+      "id": "knob_longitudinal_ratio",
+      "name": "LONGITUDINAL_RATIO",
+      "page": "model_strings",
+      "order": 9,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 55,
+      "id": "knob_longitudinal_mix",
+      "name": "LONGITUDINAL_MIX",
+      "page": "model_strings",
+      "order": 10,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 56,
+      "id": "knob_tension_gain",
+      "name": "TENSION_GAIN",
+      "page": "model_strings",
+      "order": 11,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 57,
+      "id": "knob_tension_max_shift",
+      "name": "TENSION_MAX_SHIFT",
+      "page": "model_strings",
+      "order": 12,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 58,
+      "id": "knob_tension_smoothing",
+      "name": "TENSION_SMOOTHING",
+      "page": "model_strings",
+      "order": 13,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 59,
+      "id": "knob_dead_magnitude_squared",
+      "name": "DEAD_MAGNITUDE_SQUARED",
+      "page": "model_strings",
+      "order": 14,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 60,
+      "id": "knob_radiation_coincidence",
+      "name": "RADIATION_COINCIDENCE",
+      "page": "model_board",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 61,
+      "id": "knob_radiation_rolloff_hz",
+      "name": "RADIATION_ROLLOFF_HZ",
+      "page": "model_board",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 62,
+      "id": "knob_bridge_reference_speed",
+      "name": "BRIDGE_REFERENCE_SPEED",
+      "page": "model_strings",
+      "order": 15,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 63,
+      "id": "knob_bridge_impedance_power",
+      "name": "BRIDGE_IMPEDANCE_POWER",
+      "page": "model_strings",
+      "order": 16,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 64,
+      "id": "knob_bridge_reference_gauge_m",
+      "name": "BRIDGE_REFERENCE_GAUGE_M",
+      "page": "model_strings",
+      "order": 17,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 65,
+      "id": "knob_bridge_length_power",
+      "name": "BRIDGE_LENGTH_POWER",
+      "page": "model_strings",
+      "order": 18,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 66,
+      "id": "knob_bridge_reference_length_m",
+      "name": "BRIDGE_REFERENCE_LENGTH_M",
+      "page": "model_strings",
+      "order": 19,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 67,
+      "id": "knob_bridge_factor_cap",
+      "name": "BRIDGE_FACTOR_CAP",
+      "page": "model_strings",
+      "order": 20,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 68,
+      "id": "knob_slow_factor_cap",
+      "name": "SLOW_FACTOR_CAP",
+      "page": "model_strings",
+      "order": 21,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 69,
+      "id": "knob_radiation_rate",
+      "name": "RADIATION_RATE",
+      "page": "model_board",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 70,
+      "id": "knob_kappa_loss",
+      "name": "KAPPA_LOSS",
+      "page": "model_strings",
+      "order": 22,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 71,
+      "id": "knob_knock_level",
+      "name": "KNOCK_LEVEL",
+      "page": "model_hammer",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 72,
+      "id": "knob_board_loss_factor",
+      "name": "BOARD_LOSS_FACTOR",
+      "page": "model_board",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 73,
+      "id": "knob_house_felt_corner",
+      "name": "HOUSE_FELT_CORNER",
+      "page": "model_strings",
+      "order": 23,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 74,
+      "id": "knob_house_hf_floor",
+      "name": "HOUSE_HF_FLOOR",
+      "page": "model_strings",
+      "order": 24,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 75,
+      "id": "knob_hf_floor_corner_hz",
+      "name": "HF_FLOOR_CORNER_HZ",
+      "page": "model_strings",
+      "order": 25,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 76,
+      "id": "knob_hf_floor_span",
+      "name": "HF_FLOOR_SPAN",
+      "page": "model_strings",
+      "order": 26,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 77,
+      "id": "knob_felt_reference_compression_m",
+      "name": "FELT_REFERENCE_COMPRESSION_M",
+      "page": "model_hammer",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 78,
+      "id": "knob_scale_join",
+      "name": "SCALE_JOIN",
+      "page": "model_hammer",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 79,
+      "id": "knob_scale_break",
+      "name": "SCALE_BREAK",
+      "page": "model_hammer",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 80,
+      "id": "knob_gauge_a0_m",
+      "name": "GAUGE_A0_M",
+      "page": "model_hammer",
+      "order": 6,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 81,
+      "id": "knob_gauge_break_m",
+      "name": "GAUGE_BREAK_M",
+      "page": "model_hammer",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 82,
+      "id": "knob_gauge_join_m",
+      "name": "GAUGE_JOIN_M",
+      "page": "model_hammer",
+      "order": 8,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 83,
+      "id": "knob_gauge_top_m",
+      "name": "GAUGE_TOP_M",
+      "page": "model_hammer",
+      "order": 9,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 84,
+      "id": "knob_gauge_constant",
+      "name": "GAUGE_CONSTANT",
+      "page": "model_hammer",
+      "order": 10,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 85,
+      "id": "knob_clang_length_power",
+      "name": "CLANG_LENGTH_POWER",
+      "page": "model_hammer",
+      "order": 11,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 86,
+      "id": "knob_clack_scatter",
+      "name": "CLACK_SCATTER",
+      "page": "model_hammer",
+      "order": 12,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 87,
+      "id": "knob_thump_t60_s",
+      "name": "THUMP_T60_S",
+      "page": "model_hammer",
+      "order": 13,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 88,
+      "id": "knob_felt_exponent_at_bass",
+      "name": "FELT_EXPONENT_AT_BASS",
+      "page": "model_hammer",
+      "order": 14,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 89,
+      "id": "knob_felt_exponent_rise",
+      "name": "FELT_EXPONENT_RISE",
+      "page": "model_hammer",
+      "order": 15,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 90,
+      "id": "knob_action_span_base",
+      "name": "ACTION_SPAN_BASE",
+      "page": "model_hammer",
+      "order": 16,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 91,
+      "id": "knob_action_span_per_dynamics",
+      "name": "ACTION_SPAN_PER_DYNAMICS",
+      "page": "model_hammer",
+      "order": 17,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 92,
+      "id": "knob_contact_swing_base",
+      "name": "CONTACT_SWING_BASE",
+      "page": "model_hammer",
+      "order": 18,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 93,
+      "id": "knob_contact_swing_per_dynamics",
+      "name": "CONTACT_SWING_PER_DYNAMICS",
+      "page": "model_hammer",
+      "order": 19,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 94,
+      "id": "knob_felt_exponent_min",
+      "name": "FELT_EXPONENT_MIN",
+      "page": "model_hammer",
+      "order": 20,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 95,
+      "id": "knob_felt_exponent_max",
+      "name": "FELT_EXPONENT_MAX",
+      "page": "model_hammer",
+      "order": 21,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 96,
+      "id": "knob_board_mean_mobility",
+      "name": "BOARD_MEAN_MOBILITY",
+      "page": "model_board",
+      "order": 6,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 97,
+      "id": "knob_board_coincidence_hz",
+      "name": "BOARD_COINCIDENCE_HZ",
+      "page": "model_board",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 98,
+      "id": "knob_board_radiation_order",
+      "name": "BOARD_RADIATION_ORDER",
+      "page": "model_board",
+      "order": 8,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 99,
+      "id": "knob_headroom",
+      "name": "HEADROOM",
+      "page": "model_board",
+      "order": 9,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 100,
+      "id": "knob_preamp_range_db",
+      "name": "PREAMP_RANGE_DB",
+      "page": "model_air",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 101,
+      "id": "knob_preamp_knee",
+      "name": "PREAMP_KNEE",
+      "page": "model_air",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 102,
+      "id": "knob_preamp_asymmetry",
+      "name": "PREAMP_ASYMMETRY",
+      "page": "model_air",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 103,
+      "id": "knob_board_mix",
+      "name": "BOARD_MIX",
+      "page": "model_board",
+      "order": 10,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 104,
+      "id": "knob_board_top_hz",
+      "name": "BOARD_TOP_HZ",
+      "page": "model_board",
+      "order": 11,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 105,
+      "id": "knob_board_bottom_hz",
+      "name": "BOARD_BOTTOM_HZ",
+      "page": "model_board",
+      "order": 12,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 106,
+      "id": "knob_open_mix",
+      "name": "OPEN_MIX",
+      "page": "model_air",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 107,
+      "id": "knob_undamped_low_hz",
+      "name": "UNDAMPED_LOW_HZ",
+      "page": "model_air",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 108,
+      "id": "knob_undamped_high_hz",
+      "name": "UNDAMPED_HIGH_HZ",
+      "page": "model_air",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 109,
+      "id": "knob_undamped_t60_low_s",
+      "name": "UNDAMPED_T60_LOW_S",
+      "page": "model_air",
+      "order": 6,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 110,
+      "id": "knob_undamped_t60_high_s",
+      "name": "UNDAMPED_T60_HIGH_S",
+      "page": "model_air",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 111,
+      "id": "knob_undamped_mix",
+      "name": "UNDAMPED_MIX",
+      "page": "model_air",
+      "order": 8,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 112,
+      "id": "knob_halo_rt60_s",
+      "name": "HALO_RT60_S",
+      "page": "model_air",
+      "order": 9,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 113,
+      "id": "knob_halo_hp_hz",
+      "name": "HALO_HP_HZ",
+      "page": "model_air",
+      "order": 10,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 114,
+      "id": "knob_halo_mix",
+      "name": "HALO_MIX",
+      "page": "model_air",
+      "order": 11,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 115,
+      "id": "knob_lid_half_width_m",
+      "name": "LID_HALF_WIDTH_M",
+      "page": "model_air",
+      "order": 12,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 116,
+      "id": "knob_lid_half_length_m",
+      "name": "LID_HALF_LENGTH_M",
+      "page": "model_air",
+      "order": 13,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 117,
+      "id": "knob_mic_azimuth_rad",
+      "name": "MIC_AZIMUTH_RAD",
+      "page": "model_air",
+      "order": 14,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 118,
+      "id": "knob_lid_closed_rad",
+      "name": "LID_CLOSED_RAD",
+      "page": "model_air",
+      "order": 15,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 119,
+      "id": "knob_lid_open_rad",
+      "name": "LID_OPEN_RAD",
+      "page": "model_air",
+      "order": 16,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 120,
+      "id": "knob_lid_reflect",
+      "name": "LID_REFLECT",
+      "page": "model_air",
+      "order": 17,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 121,
+      "id": "knob_lid_closed_leak",
+      "name": "LID_CLOSED_LEAK",
+      "page": "model_air",
+      "order": 18,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 122,
+      "id": "knob_lid_closed_hz",
+      "name": "LID_CLOSED_HZ",
+      "page": "model_air",
+      "order": 19,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 123,
+      "id": "knob_lid_open_hz",
+      "name": "LID_OPEN_HZ",
+      "page": "model_air",
+      "order": 20,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 124,
+      "id": "knob_sound_speed",
+      "name": "SOUND_SPEED",
+      "page": "model_air",
+      "order": 21,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 125,
+      "id": "knob_room_volume_min_m3",
+      "name": "ROOM_VOLUME_MIN_M3",
+      "page": "model_air",
+      "order": 22,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 126,
+      "id": "knob_room_volume_max_m3",
+      "name": "ROOM_VOLUME_MAX_M3",
+      "page": "model_air",
+      "order": 23,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 127,
+      "id": "knob_mic_distance_min_m",
+      "name": "MIC_DISTANCE_MIN_M",
+      "page": "model_air",
+      "order": 24,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 128,
+      "id": "knob_mic_distance_max_m",
+      "name": "MIC_DISTANCE_MAX_M",
+      "page": "model_air",
+      "order": 25,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 129,
+      "id": "knob_mic_reference_m",
+      "name": "MIC_REFERENCE_M",
+      "page": "model_air",
+      "order": 26,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 130,
+      "id": "knob_mic_near_cap",
+      "name": "MIC_NEAR_CAP",
+      "page": "model_air",
+      "order": 27,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 131,
+      "id": "knob_mic_height_m",
+      "name": "MIC_HEIGHT_M",
+      "page": "model_air",
+      "order": 28,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 132,
+      "id": "knob_air_absorb_4k_per_m",
+      "name": "AIR_ABSORB_4K_PER_M",
+      "page": "model_air",
+      "order": 29,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 133,
+      "id": "knob_mic_spacing_m",
+      "name": "MIC_SPACING_M",
+      "page": "model_air",
+      "order": 30,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 134,
+      "id": "knob_mic_preamp",
+      "name": "MIC_PREAMP",
+      "page": "model_air",
+      "order": 31,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 135,
+      "id": "knob_proximity_strength",
+      "name": "PROXIMITY_STRENGTH",
+      "page": "model_air",
+      "order": 32,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 136,
+      "id": "knob_sympathy_rate",
+      "name": "SYMPATHY_RATE",
+      "page": "model_strings",
+      "order": 27,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 137,
+      "id": "knob_impact_clang",
+      "name": "IMPACT_CLANG",
+      "page": "model_hammer",
+      "order": 22,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 138,
+      "id": "knob_impact_pulse_tau_s",
+      "name": "IMPACT_PULSE_TAU_S",
+      "page": "model_hammer",
+      "order": 23,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 139,
+      "id": "knob_air_highpass",
+      "name": "AIR_HIGHPASS",
+      "page": "model_air",
+      "order": 33,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 140,
+      "id": "knob_room_mix",
+      "name": "ROOM_MIX",
+      "page": "model_air",
+      "order": 34,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 141,
+      "id": "knob_hammer_mass_scale",
+      "name": "HAMMER_MASS_SCALE",
+      "page": "model_hammer",
+      "order": 24,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 142,
+      "id": "knob_string_tension_n",
+      "name": "STRING_TENSION_N",
+      "page": "model_strings",
+      "order": 28,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 143,
+      "id": "knob_felt_k_a0",
+      "name": "FELT_K_A0",
+      "page": "model_hammer",
+      "order": 25,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 144,
+      "id": "knob_felt_k_decades",
+      "name": "FELT_K_DECADES",
+      "page": "model_hammer",
+      "order": 26,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 145,
+      "id": "knob_felt_table_floor",
+      "name": "FELT_TABLE_FLOOR",
+      "page": "model_hammer",
+      "order": 27,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 146,
+      "id": "knob_felt_bass_gain",
+      "name": "FELT_BASS_GAIN",
+      "page": "model_hammer",
+      "order": 28,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 147,
+      "id": "knob_felt_treble_gain",
+      "name": "FELT_TREBLE_GAIN",
+      "page": "model_hammer",
+      "order": 29,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 148,
+      "id": "knob_duplex_level",
+      "name": "DUPLEX_LEVEL",
+      "page": "model_strings",
+      "order": 29,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 149,
+      "id": "knob_unison_beat_cap_hz",
+      "name": "UNISON_BEAT_CAP_HZ",
+      "page": "model_strings",
+      "order": 30,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 150,
+      "id": "knob_unison_width",
+      "name": "UNISON_WIDTH",
+      "page": "model_strings",
+      "order": 31,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 151,
+      "id": "knob_unison_jitter_spread",
+      "name": "UNISON_JITTER_SPREAD",
+      "page": "model_strings",
+      "order": 32,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 152,
+      "id": "knob_stulov_epsilon",
+      "name": "STULOV_EPSILON",
+      "page": "model_hammer",
+      "order": 30,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 153,
+      "id": "knob_stulov_tau_s",
+      "name": "STULOV_TAU_S",
+      "page": "model_hammer",
+      "order": 31,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 154,
+      "id": "knob_string_hf_loss",
+      "name": "STRING_HF_LOSS",
+      "page": "model_strings",
+      "order": 33,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 155,
+      "id": "knob_board_low_loss",
+      "name": "BOARD_LOW_LOSS",
+      "page": "model_board",
+      "order": 13,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 156,
+      "id": "knob_board_mean_cap",
+      "name": "BOARD_MEAN_CAP",
+      "page": "model_board",
+      "order": 14,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 157,
+      "id": "knob_sim_top_hz",
+      "name": "SIM_TOP_HZ",
+      "page": "model_hammer",
+      "order": 32,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 158,
+      "id": "knob_hammer_v_ff",
+      "name": "HAMMER_V_FF",
+      "page": "model_hammer",
+      "order": 33,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 159,
+      "id": "knob_contact_stretch",
+      "name": "CONTACT_STRETCH",
+      "page": "model_hammer",
+      "order": 34,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.5
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 160,
+      "id": "knob_recipe_floor",
+      "name": "RECIPE_FLOOR",
+      "page": "model_misc",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.001,
+        "default": 0.0
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    }
+  ]
 }

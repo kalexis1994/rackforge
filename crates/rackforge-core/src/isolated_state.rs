@@ -205,7 +205,7 @@ pub fn validate_parameter_write(
 mod tests {
     use super::*;
     use crate::{PluginPackage, PluginStateStore};
-    use rackforge_plugin_api::{EnumChoice, ParameterFlags};
+    use rackforge_plugin_api::{EnumChoice, ParameterFlags, ParameterTaper};
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -286,6 +286,7 @@ mod tests {
                 default: 0.0,
                 step: 0.01,
                 unit: None,
+                taper: ParameterTaper::Linear,
             },
             false,
         ));

@@ -158,6 +158,29 @@ pub struct ParameterDescriptor {
     pub suggested_control: SuggestedControl,
 }
 
+/// How a control's travel maps onto a parameter's range.
+///
+/// Only the plugin knows this. A microphone distance of half a metre to
+/// sixteen is perceptually logarithmic, and a room of forty-five cubic metres
+/// to forty-five thousand spans three orders of magnitude: drawn linearly,
+/// everything a player would choose sits in the first fraction of the travel.
+/// A host cannot guess that from the numbers, and a parameter carrying real
+/// units is worth less than the one it replaced if the fader becomes unusable.
+///
+/// This is a hint about the control, not about the value. The parameter is
+/// still the plain number in its own unit wherever it is read, written,
+/// automated or stored -- there is no second representation to keep in step.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterTaper {
+    /// Equal travel, equal change. The default, and right for anything
+    /// measured in decibels, degrees or per cent.
+    #[default]
+    Linear,
+    /// Equal travel, equal ratio. Requires a minimum above zero.
+    Logarithmic,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParameterKind {
@@ -168,6 +191,8 @@ pub enum ParameterKind {
         step: f64,
         #[serde(default)]
         unit: Option<String>,
+        #[serde(default)]
+        taper: ParameterTaper,
     },
     Integer {
         minimum: i64,
@@ -201,6 +226,7 @@ impl ParameterKind {
                 maximum,
                 default,
                 step,
+                taper,
                 ..
             } => {
                 if !minimum.is_finite()
@@ -212,6 +238,11 @@ impl ParameterKind {
                     || default > maximum
                     || *step <= 0.0
                 {
+                    return Err(SchemaError::InvalidRange(parameter.to_owned()));
+                }
+                // A ratio from zero is every ratio at once. Rejecting it here
+                // means no surface has to decide what to draw for it.
+                if *taper == ParameterTaper::Logarithmic && *minimum <= 0.0 {
                     return Err(SchemaError::InvalidRange(parameter.to_owned()));
                 }
             }
@@ -334,6 +365,54 @@ pub enum SchemaError {
 mod tests {
     use super::*;
 
+    fn float(minimum: f64, taper: ParameterTaper) -> ParameterKind {
+        ParameterKind::Float {
+            minimum,
+            maximum: 16.0,
+            default: minimum,
+            step: 0.01,
+            unit: Some("m".into()),
+            taper,
+        }
+    }
+
+    #[test]
+    fn a_logarithmic_taper_needs_a_range_that_starts_above_zero() {
+        // A ratio from zero is every ratio at once, so the fader has no
+        // sensible travel and every surface would have to invent one.
+        assert!(
+            float(0.5, ParameterTaper::Logarithmic)
+                .validate("mic")
+                .is_ok()
+        );
+        assert!(
+            float(0.0, ParameterTaper::Logarithmic)
+                .validate("mic")
+                .is_err()
+        );
+        // Linear does not care, and remains the default for a manifest that
+        // never mentions a taper at all.
+        assert!(float(0.0, ParameterTaper::Linear).validate("mic").is_ok());
+        assert_eq!(ParameterTaper::default(), ParameterTaper::Linear);
+    }
+
+    #[test]
+    fn a_manifest_without_a_taper_still_parses() {
+        // Every package published before this field existed must keep loading,
+        // and must mean linear.
+        let kind: ParameterKind = serde_json::from_str(
+            r#"{"type":"float","minimum":0.0,"maximum":1.0,"default":0.5,"step":0.01}"#,
+        )
+        .expect("a taperless float is still a float");
+        match kind {
+            ParameterKind::Float { taper, unit, .. } => {
+                assert_eq!(taper, ParameterTaper::Linear);
+                assert_eq!(unit, None);
+            }
+            other => panic!("expected a float, got {other:?}"),
+        }
+    }
+
     #[test]
     fn validates_declarative_pages_and_parameters() {
         let schema = ParameterSchema {
@@ -358,6 +437,7 @@ mod tests {
                     default: 1.0,
                     step: 0.01,
                     unit: None,
+                    taper: ParameterTaper::Linear,
                 },
                 flags: ParameterFlags::default(),
                 suggested_control: SuggestedControl::Knob,
@@ -439,6 +519,7 @@ mod tests {
                     default: 0.5,
                     step: 0.01,
                     unit: None,
+                    taper: ParameterTaper::Linear,
                 },
                 flags: ParameterFlags {
                     automatable: true,

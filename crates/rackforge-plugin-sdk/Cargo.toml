@@ -4,6 +4,16 @@ description = "Safe Rust guest SDK for portable RackForge plugins"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+readme = "README.md"
+repository = "https://github.com/kalexis1994/rackforge"
+homepage = "https://github.com/kalexis1994/rackforge"
+documentation = "https://docs.rs/rackforge-plugin-sdk"
+keywords = ["audio", "wasm", "plugin", "midi", "dsp"]
+categories = ["multimedia::audio", "wasm", "no-std", "api-bindings"]
+# Proven, not guessed: the crate is built and its doctest run on this version.
+# The edition alone would allow 1.85, but a floor nobody has compiled against
+# is a promise nobody has kept, so lowering this means running it there first.
+rust-version = "1.97"
 
 [lib]
 crate-type = ["rlib"]

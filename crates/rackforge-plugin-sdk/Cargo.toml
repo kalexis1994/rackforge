@@ -3,7 +3,14 @@ name = "rackforge-plugin-sdk"
 description = "Safe Rust guest SDK for portable RackForge plugins"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+# Deliberately not the workspace's GPL-2.0-or-later. The host is copyleft; a
+# guest SDK that a third party links into their own instrument must not be,
+# or every RackForge plugin written in Rust inherits the licence of the tool
+# used to build it. The ABI in docs/PLUGIN_ABI.md never imposed anything --
+# the C reference plugin links nothing -- and this makes the Rust path agree.
+# Dual MIT/Apache-2.0 is the Rust ecosystem's default and leaves the choice
+# with whoever writes the plugin.
+license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/kalexis1994/rackforge"
 homepage = "https://github.com/kalexis1994/rackforge"

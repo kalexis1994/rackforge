@@ -8936,6 +8936,70 @@ mod tests {
         }
     }
 
+    /// Who makes the harshness: the instrument, or the host that plays it?
+    ///
+    /// The plugin's own output stage bends -- a transformer's curve above a
+    /// knee of 0.75, asymmetric, which is a console channel and is meant to be
+    /// there. The desktop then multiplies by two and squares the result off at
+    /// full scale, which is not a curve at all. Both are "saturation" and only
+    /// one of them is a fault, so this renders one chord and reads the same
+    /// signal at both points.
+    ///
+    /// A flat top is a high-order nonlinearity, and a high-order nonlinearity
+    /// on a chord makes intermodulation BELOW the lowest note being played.
+    /// That is what the ear calls harsh, and it is what this counts: energy
+    /// under the lowest fundamental, where no string is producing anything.
+    #[test]
+    #[ignore]
+    fn who_makes_the_harshness() {
+        fn band(samples: &[f32], low: f32, high: f32) -> f32 {
+            let mut total = 0.0f32;
+            let mut hz = low;
+            while hz < high {
+                let w = 2.0 * core::f32::consts::PI * hz / FS as f32;
+                let (sine, cosine) = sincosf(w);
+                let (mut s1, mut s2) = (0.0f32, 0.0f32);
+                for frame in samples.as_chunks::<2>().0 {
+                    let s0 = frame[0] + 2.0 * cosine * s1 - s2;
+                    s2 = s1;
+                    s1 = s0;
+                }
+                let (re, im) = (s1 - s2 * cosine, s2 * sine);
+                total += (re * re + im * im) / samples.len() as f32;
+                hz *= 1.06;
+            }
+            total.max(1e-20)
+        }
+        // A ten-note fortissimo chord: the case the ear complains about. Its
+        // lowest note is E1 at 41.2 Hz, so anything under 40 is invented.
+        let notes = [28u8, 33, 40, 45, 47, 52, 57, 59, 64, 69];
+        let mut piano = prepared();
+        let events: Vec<MidiEvent> = notes.iter().map(|n| note_on(*n, 127)).collect();
+        let plugin = render(&mut piano, (FS * 0.6) as usize, &events);
+        // Exactly what `desktop_audio.rs` does: +6 dB, then clamp.
+        let gain = powf(10.0, 6.0 / 20.0);
+        let host: Vec<f32> = plugin.iter().map(|s| (s * gain).clamp(-1.0, 1.0)).collect();
+        let db = |x: f32| 10.0 * x.log10();
+        println!(
+            "{:>26} {:>12} {:>12} {:>10}",
+            "band", "plugin", "after host", "added"
+        );
+        for (label, low, high) in [
+            ("5-20 Hz  (invented)", 5.0, 20.0),
+            ("20-40 Hz (invented)", 20.0, 40.0),
+            ("41 Hz    (the lowest note)", 40.0, 43.0),
+            ("4-8 kHz  (the top)", 4000.0, 8000.0),
+        ] {
+            // Referenced to the lowest note in both, so the host's own +6 dB
+            // does not read as if it had created something.
+            let anchor_plugin = band(&plugin, 40.0, 43.0);
+            let anchor_host = band(&host, 40.0, 43.0);
+            let a = db(band(&plugin, low, high) / anchor_plugin);
+            let b = db(band(&host, low, high) / anchor_host);
+            println!("{label:>26} {a:>11.1} {b:>11.1} {:>9.1}", b - a);
+        }
+    }
+
     /// How close the instrument comes to the desktop's brick wall.
     ///
     /// The desktop applies +6 dB and then hard-clips at full scale. Anything
@@ -8946,25 +9010,29 @@ mod tests {
     #[ignore]
     fn headroom_against_the_desktop_output() {
         let ceiling = 1.0 / powf(10.0, 6.0 / 20.0);
-        for (label, notes) in [
-            ("single ff bass", vec![21u8]),
-            ("bass octave ff", vec![21, 33]),
-            ("five-note chord ff", vec![28, 35, 40, 44, 47]),
-            (
-                "ten-note chord ff",
-                vec![28, 33, 40, 45, 47, 52, 57, 59, 64, 69],
-            ),
-        ] {
-            let mut piano = prepared();
-            let events: Vec<MidiEvent> = notes.iter().map(|n| note_on(*n, 127)).collect();
-            let out = render(&mut piano, (FS * 0.6) as usize, &events);
-            let peak = out.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-            let over = out.iter().filter(|s| s.abs() > ceiling).count();
-            println!(
-                "{label:>20}: peak {peak:.3}  (the desktop clips above {ceiling:.3})  {over} of {} samples clipped = {:.2}%",
-                out.len(),
-                100.0 * over as f32 / out.len() as f32
-            );
+        for preamp in [4.5f64, 0.0] {
+            println!("-- the instrument's own Preamp at {preamp} dB --");
+            for (label, notes) in [
+                ("single ff bass", vec![21u8]),
+                ("bass octave ff", vec![21, 33]),
+                ("five-note chord ff", vec![28, 35, 40, 44, 47]),
+                (
+                    "ten-note chord ff",
+                    vec![28, 33, 40, 45, 47, 52, 57, 59, 64, 69],
+                ),
+            ] {
+                let mut piano = prepared();
+                assert!(piano.set_parameter(PARAM_PREAMP, preamp));
+                let events: Vec<MidiEvent> = notes.iter().map(|n| note_on(*n, 127)).collect();
+                let out = render(&mut piano, (FS * 0.6) as usize, &events);
+                let peak = out.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+                let over = out.iter().filter(|s| s.abs() > ceiling).count();
+                println!(
+                    "{label:>20}: peak {peak:.3}  (the desktop clips above {ceiling:.3})  {over} of {} samples clipped = {:.2}%",
+                    out.len(),
+                    100.0 * over as f32 / out.len() as f32
+                );
+            }
         }
     }
 

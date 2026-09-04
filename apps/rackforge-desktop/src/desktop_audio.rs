@@ -16,6 +16,7 @@ use rackforge_core::{
     midi_hotplug::{PanicScope, panic_packets},
     velocity_curve::VelocityCurve,
 };
+use rackforge_dsp::output_ceiling;
 use rackforge_midi_api::{
     IngressMidiEvent, MidiPacket as RoutedMidiPacket, MidiSourceDescriptor, MidiSourceId,
     MidiSourceKey,
@@ -62,7 +63,33 @@ const CONTROLLER_QUEUE_CAPACITY: usize = 256;
 const MAX_MIDI_EVENTS_PER_BLOCK: usize = 256;
 const COMMON_SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
 const COMMON_BUFFER_FRAMES: [u32; 8] = [32, 64, 128, 256, 512, 1_024, 2_048, 4_096];
-const DEFAULT_OUTPUT_GAIN_DB: i8 = 6;
+/// Unity, because an instrument already reaches full scale on its own.
+///
+/// This was 6 dB, undocumented, and it was making the harshness players heard
+/// on dense chords. Six decibels is a factor of two, and `clean_sample` then
+/// squared the result off at full scale -- so a ten-note fortissimo came back
+/// with one sample in six flat-topped, which is a high-order nonlinearity, and
+/// a high-order nonlinearity on a chord makes intermodulation BELOW the lowest
+/// note being played. Measured on the piano: six decibels of energy under
+/// 40 Hz that no string was producing, on a chord whose lowest note is 41.
+///
+/// Measured at the plugins rather than assumed. Rendering a ten-note
+/// fortissimo chord through each installed instrument, peak amplitude:
+///
+/// ```text
+/// Concert Grand   0.925      RF-5   0.788      RF-106   0.368
+/// ```
+///
+/// Every one of them sits under full scale on its own, which is what a
+/// well-behaved instrument does -- nought dBFS is its ceiling, not a target to
+/// be exceeded by the host. At unity none of the three clips at all; at six
+/// the piano clipped 11.8% of its samples and RF-5 0.6%. RF-106 is the quiet
+/// one and is probably why the gain was there, but eight decibels of headroom
+/// is that plugin's own gain staging to spend, not something to buy for it by
+/// distorting the other two.
+///
+/// The control stays, 0 to 12, for whoever wants it.
+const DEFAULT_OUTPUT_GAIN_DB: i8 = 0;
 const MAX_OUTPUT_GAIN_DB: i8 = 12;
 const DEFAULT_INPUT_GAIN_DB: i8 = 0;
 const MIN_INPUT_GAIN_DB: i8 = -60;
@@ -2808,12 +2835,11 @@ fn db_to_amplitude(db: i8) -> f32 {
     10.0_f32.powf(f32::from(db) / 20.0)
 }
 
+/// The last thing between the mix and the converter, from `rackforge-dsp`
+/// because the Android host needs exactly the same curve and used to carry
+/// its own `clamp(-1.0, 1.0)`.
 fn clean_sample(sample: f32) -> f32 {
-    if sample.is_finite() {
-        sample.clamp(-1.0, 1.0)
-    } else {
-        0.0
-    }
+    output_ceiling(sample)
 }
 
 fn silence_output(data: &mut cpal::Data, format: SampleFormat) {
@@ -3804,6 +3830,19 @@ fn publish_error(slot: &Mutex<Option<String>>, error: impl ToString) {
 
 #[cfg(test)]
 mod tests {
+    /// The output gain leaves the instruments room to reach full scale.
+    #[test]
+    fn the_default_output_gain_does_not_ask_for_headroom_nobody_has() {
+        // The loudest thing the store can produce, measured through the
+        // portable runtime: a ten-note fortissimo chord on the Concert Grand.
+        const LOUDEST_INSTRUMENT_PEAK: f32 = 0.925;
+        let gain = db_to_amplitude(DEFAULT_OUTPUT_GAIN_DB);
+        assert!(
+            LOUDEST_INSTRUMENT_PEAK * gain <= rackforge_dsp::OUTPUT_KNEE,
+            "the default gain drives the loudest instrument into the ceiling"
+        );
+    }
+
     use rackforge_core::velocity_curve::VelocityCurve;
 
     fn packet(status: u8, data: [u8; 3], wide: Option<u32>) -> super::MidiPacket {
@@ -4102,18 +4141,26 @@ mod tests {
 
     #[test]
     fn stereo_is_mapped_to_multichannel_without_duplication() {
-        let rendered = [0.25, -0.5, 0.75, -1.0];
+        // Kept under the output knee: this is about where samples land, not
+        // about the ceiling, and full scale would now be shaped on the way.
+        let rendered = [0.25, -0.5, 0.75, -0.9];
         let mut target = vec![0.0_f32; 8];
         write_samples(&mut target, &rendered, 4, 1.0).unwrap();
-        assert_eq!(target, [0.25, -0.5, 0.0, 0.0, 0.75, -1.0, 0.0, 0.0]);
+        assert_eq!(target, [0.25, -0.5, 0.0, 0.0, 0.75, -0.9, 0.0, 0.0]);
     }
 
     #[test]
-    fn output_gain_is_applied_and_clamped() {
+    fn output_gain_is_applied_and_the_ceiling_bends() {
         let rendered = [0.25, -0.75];
         let mut target = [0.0_f32; 2];
         write_samples(&mut target, &rendered, 2, 2.0).unwrap();
-        assert_eq!(target, [0.5, -1.0]);
+        // The gain is exact where the signal is under the knee.
+        assert_eq!(target[0], 0.5);
+        // And -1.5 arrives bent rather than squared off at -1.0. It used to
+        // be clamped, which is what made a dense chord harsh; what matters
+        // here is that it is under full scale and NOT at it, because a run of
+        // samples all sitting exactly on the rail is the flat top itself.
+        assert!(target[1] > -1.0 && target[1] < -0.95, "{}", target[1]);
     }
 
     #[test]

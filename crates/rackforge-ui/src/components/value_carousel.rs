@@ -12,6 +12,15 @@ pub enum EditableValue {
         minimum: f64,
         maximum: f64,
         step: f64,
+        /// `maximum / minimum` when a turn should multiply rather than add.
+        ///
+        /// A room runs forty-five cubic metres to forty-five thousand. Stepping
+        /// that by its declared cubic metre would take forty-five thousand
+        /// presses to cross, and stepping it by a hundredth of the range would
+        /// jump from a broom cupboard to a hall on the first one. Equal ratios
+        /// give the same number of turns everywhere, which is how the quantity
+        /// is heard.
+        ratio: Option<f64>,
         decimals: usize,
         unit: String,
     },
@@ -43,6 +52,31 @@ pub enum EditableValue {
 }
 
 impl EditableValue {
+    /// A number whose turns are equal ratios rather than equal steps.
+    ///
+    /// `step` is read as the fraction of the whole span one turn covers, so a
+    /// logarithmic control has the same number of detents as a linear one and
+    /// spends them where the quantity actually changes.
+    pub fn number_logarithmic(
+        value: f64,
+        minimum: f64,
+        maximum: f64,
+        turn_fraction: f64,
+        decimals: usize,
+        unit: impl Into<String>,
+    ) -> Self {
+        assert!(minimum > 0.0 && minimum < maximum && turn_fraction > 0.0);
+        Self::Number {
+            value: value.clamp(minimum, maximum),
+            minimum,
+            maximum,
+            step: turn_fraction,
+            ratio: Some(maximum / minimum),
+            decimals,
+            unit: unit.into(),
+        }
+    }
+
     pub fn number(
         value: f64,
         minimum: f64,
@@ -66,6 +100,7 @@ impl EditableValue {
             minimum,
             maximum,
             step,
+            ratio: None,
             decimals,
             unit: unit.into(),
         }
@@ -212,10 +247,25 @@ impl EditableValue {
                 minimum,
                 maximum,
                 step,
+                ratio,
                 ..
             } => {
-                let index = ((*value - *minimum) / *step).round() + delta as f64;
-                let next = (*minimum + index * *step).clamp(*minimum, *maximum);
+                let next = if let Some(ratio) = *ratio {
+                    // `step` is the fraction of the whole span one turn
+                    // covers, so the detents are the same count as a linear
+                    // control's and each is the same ratio wide.
+                    let turns = (1.0 / *step).max(1.0);
+                    let position = if *value > 0.0 && *minimum > 0.0 {
+                        (*value / *minimum).ln() / ratio.ln()
+                    } else {
+                        0.0
+                    };
+                    let index = (position * turns).round() + delta as f64;
+                    (*minimum * ratio.powf(index / turns)).clamp(*minimum, *maximum)
+                } else {
+                    let index = ((*value - *minimum) / *step).round() + delta as f64;
+                    (*minimum + index * *step).clamp(*minimum, *maximum)
+                };
                 if (next - *value).abs() <= f64::EPSILON {
                     return false;
                 }
@@ -463,6 +513,53 @@ impl Component for ValueCarousel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A control spanning three orders of magnitude is turned by ratio.
+    ///
+    /// A room runs 45 to 45000 cubic metres. Stepping that by its declared
+    /// cubic metre would take forty-five thousand presses to cross; stepping
+    /// it by a hundredth of the span would jump from a cupboard to a hall on
+    /// the first one. Equal ratios cross it in a hundred turns and give the
+    /// same resolution at both ends, which is how the size is heard.
+    #[test]
+    fn a_logarithmic_carousel_turns_by_ratio_not_by_step() {
+        let mut room = EditableValue::number_logarithmic(45.0, 45.0, 45_000.0, 0.01, 0, "m3");
+
+        // One turn off the bottom is a few cubic metres, not four hundred.
+        assert!(room.adjust(1));
+        let first = room.as_f64().unwrap();
+        assert!(
+            (3.0..5.0).contains(&(first - 45.0)),
+            "first turn to {first}"
+        );
+
+        // The same turn near the top moves by hundreds, and by the same ratio.
+        let mut hall = EditableValue::number_logarithmic(45_000.0, 45.0, 45_000.0, 0.01, 0, "m3");
+        assert!(hall.adjust(-1));
+        let down = hall.as_f64().unwrap();
+        assert!(
+            ((first / 45.0) - (45_000.0 / down)).abs() < 1e-9,
+            "both ends must move by one ratio: {first} and {down}"
+        );
+
+        // A hundred turns crosses the whole span, and it stops at the ends.
+        let mut sweep = EditableValue::number_logarithmic(45.0, 45.0, 45_000.0, 0.01, 0, "m3");
+        for _ in 0..100 {
+            sweep.adjust(1);
+        }
+        assert!((sweep.as_f64().unwrap() - 45_000.0).abs() < 1.0);
+        assert!(!sweep.adjust(1), "the top is the top");
+    }
+
+    /// A linear control is untouched by any of that.
+    #[test]
+    fn a_linear_carousel_still_adds_its_step() {
+        let mut decibels = EditableValue::number(4.5, 0.0, 30.0, 0.1, 1, "dB");
+        assert!(decibels.adjust(1));
+        assert!((decibels.as_f64().unwrap() - 4.6).abs() < 1e-9);
+        assert!(decibels.adjust(-2));
+        assert!((decibels.as_f64().unwrap() - 4.4).abs() < 1e-9);
+    }
     use crate::TextFallback;
 
     fn carousel() -> ValueCarousel {

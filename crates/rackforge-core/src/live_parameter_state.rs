@@ -387,6 +387,7 @@ pub use writer::{LiveParameterTarget, LiveParameterWriter, LiveParameterWriterHa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_plugin_api::ParameterTaper;
     use rackforge_plugin_api::{
         EnumChoice, PageDescriptor, ParameterDescriptor, ParameterFlags, SuggestedControl,
     };
@@ -415,6 +416,7 @@ mod tests {
                         default: 0.5,
                         step: 0.01,
                         unit: None,
+                        taper: ParameterTaper::Linear,
                     },
                     flags: ParameterFlags::default(),
                     suggested_control: SuggestedControl::Knob,

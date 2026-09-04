@@ -22,7 +22,7 @@ pub use manifest::{
 };
 pub use parameter::{
     EnumChoice, PageDescriptor, ParameterDescriptor, ParameterFlags, ParameterKind,
-    ParameterSchema, PluginSemanticControl, SuggestedControl,
+    ParameterSchema, ParameterTaper, PluginSemanticControl, SuggestedControl,
 };
 pub use preset::{BankDescriptor, PresetCatalog, PresetDescriptor, ProgramCatalog};
 pub use program::{

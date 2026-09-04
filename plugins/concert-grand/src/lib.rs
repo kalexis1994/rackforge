@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 120;
+pub const KNOB_COUNT: usize = 121;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -698,6 +698,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "RECIPE_FLOOR",
         &RECIPE_FLOOR,
         "How much of the recipe's amplitude survives inside the simulated range.",
+    ),
+    (
+        "ACTION_NOISE_VELOCITY_POWER",
+        &ACTION_NOISE_VELOCITY_POWER,
+        "How steeply the action's own noise follows the blow.",
     ),
 ];
 
@@ -1570,6 +1575,22 @@ impl BodyMode {
 ///
 /// Which is the third time in one sitting that a measurable improvement was
 /// overruled by listening, after the Impact Burst and the shank knock's fixed
+/// How steeply the action's own noise follows the blow.
+///
+/// The tick a key makes is a DYNAMIC thing: an action clatters under a
+/// fortissimo and is nearly mute under a pianissimo. Measured, this model's
+/// was not. The note's radiated amplitude grows as the square of velocity, and
+/// the knock and the key-bottom thud grew as v^2 and v^1.9 -- so the tick sat
+/// a fixed distance under the note however hard you played, 5 dB of movement
+/// across the whole compass of the keyboard's dynamic. No single level can be
+/// right for that: what suits the loud blows buries the soft ones.
+///
+/// Above two, the tick recedes as you play softer -- six decibels per halving
+/// at three. Velocity is nought to one with one being fortissimo, so raising
+/// this leaves the loudest blow exactly where it was and lowers everything
+/// beneath it, which is the shape the ear asked for.
+pub static ACTION_NOISE_VELOCITY_POWER: Knob = Knob::new(3.0);
+
 /// pitch. Two agreeing metrics are not a verdict.
 pub static KNOCK_LEVEL: Knob = Knob::new(0.028);
 
@@ -5456,8 +5477,7 @@ impl ConcertGrand {
         // recording level at ~0.65 and x16 above it at the top.
         self.strike_serial = self.strike_serial.wrapping_add(1);
         let strike_salt = self.strike_serial.wrapping_mul(0x9E37_79B9);
-        let clack_level = velocity
-            * velocity
+        let clack_level = powf(velocity, ACTION_NOISE_VELOCITY_POWER.get())
             * KNOCK_LEVEL.get()
             * 3.4
             * (0.75 + 0.5 * hash01(strike_salt ^ 0xA5))
@@ -5512,7 +5532,7 @@ impl ConcertGrand {
         // mid and treble notes than strings alone can explain. Three short
         // dark components stand in for it.
         {
-            let thump_level = powf(velocity, 1.9)
+            let thump_level = powf(velocity, ACTION_NOISE_VELOCITY_POWER.get())
                 * 0.095
                 // Shortening the thud from 300 ms to 60 ms takes its energy
                 // with it, and that energy is wanted: the model already sits
@@ -8523,6 +8543,55 @@ mod tests {
     /// are timbral and move energy between bands without changing how much
     /// there is -- so this reports the largest per-band change as well, and
     /// the change in the attack, which is where several of them live.
+    /// How much of the attack is tick, at each blow.
+    ///
+    /// Not pass/fail: run it to see whether the action noise is a DYNAMIC
+    /// thing. A real action clatters under a fortissimo and is nearly mute
+    /// under a pianissimo, so the tick's level against the note it sits on
+    /// should climb steeply with velocity. If that ratio is flat, then no
+    /// single level is right -- what suits the loud blows buries the soft
+    /// ones, and lowering it until the soft ones are clean takes the loud
+    /// ones with it.
+    ///
+    /// Renders each blow twice, once as the instrument ships and once with
+    /// Action Noise and Impact Burst at their floor, which is silence. The
+    /// difference in the first 30 ms is the tick; the 120-400 ms window is
+    /// the note it has to be heard against.
+    #[test]
+    #[ignore]
+    fn how_the_tick_follows_the_blow() {
+        let attack = (0.030 * FS) as usize * 2;
+        let sustain = ((0.120 * FS) as usize * 2, (0.400 * FS) as usize * 2);
+        println!(
+            "{:>4} {:>4}  {:>10}  {:>10}  {:>10}",
+            "note", "vel", "tick/note", "tick", "note"
+        );
+        for note in [33u8, 60, 88] {
+            for velocity in [20u8, 45, 70, 95, 127] {
+                let render_one = |quiet: bool| {
+                    let mut piano = prepared();
+                    if quiet {
+                        let (floor, _) = parameter_bounds(PARAM_ACTION_NOISE);
+                        assert!(piano.set_parameter(PARAM_ACTION_NOISE, floor));
+                        assert!(piano.set_parameter(PARAM_IMPACT, floor));
+                    }
+                    render(&mut piano, (FS * 0.45) as usize, &[note_on(note, velocity)])
+                };
+                let loud = render_one(false);
+                let bare = render_one(true);
+                let tick = (energy(&loud[..attack]) - energy(&bare[..attack])).max(1e-20);
+                let note_energy = energy(&bare[sustain.0..sustain.1.min(bare.len())]).max(1e-20);
+                let db = |x: f32| 10.0 * x.log10();
+                println!(
+                    "{note:>4} {velocity:>4}  {:>10.1}  {:>10.1}  {:>10.1}",
+                    db(tick / note_energy),
+                    db(tick),
+                    db(note_energy)
+                );
+            }
+        }
+    }
+
     #[test]
     #[ignore]
     fn sweep_every_parameter() {

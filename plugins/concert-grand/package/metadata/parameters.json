@@ -171,10 +171,12 @@
       "order": 0,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.72,
-        "step": 0.01
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -5.706700325012207,
+        "step": 0.3,
+        "taper": "linear",
+        "unit": "dB"
       },
       "flags": {
         "automatable": true,
@@ -490,10 +492,12 @@
       "order": 0,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.01,
-        "default": 0.39
+        "minimum": -24.082401275634766,
+        "maximum": 24.082401275634766,
+        "step": 0.240824,
+        "default": -5.298128128051758,
+        "taper": "linear",
+        "unit": "dB"
       }
     },
     {
@@ -504,10 +508,12 @@
       "order": 1,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.01,
-        "default": 0.3
+        "minimum": -24.082401275634766,
+        "maximum": 24.082401275634766,
+        "step": 0.240824,
+        "default": -9.632960319519043,
+        "taper": "linear",
+        "unit": "dB"
       }
     },
     {
@@ -518,10 +524,12 @@
       "order": 2,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.01,
-        "default": 0.5
+        "minimum": -24.082401275634766,
+        "maximum": 24.082401275634766,
+        "step": 0.240824,
+        "default": 0.0,
+        "taper": "linear",
+        "unit": "dB"
       }
     },
     {
@@ -546,10 +554,12 @@
       "order": 3,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.01,
-        "default": 0.5
+        "minimum": 0.574999988079071,
+        "maximum": 9.199999809265137,
+        "step": 0.023,
+        "default": 2.299999952316284,
+        "taper": "logarithmic",
+        "unit": "%"
       }
     },
     {
@@ -560,10 +570,12 @@
       "order": 4,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
+        "minimum": 0.6324555277824402,
+        "maximum": 1.5811388492584229,
         "step": 0.01,
-        "default": 0.5
+        "default": 1.0,
+        "taper": "logarithmic",
+        "unit": "×"
       }
     },
     {
@@ -574,10 +586,12 @@
       "order": 3,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.01,
-        "default": 0.5
+        "minimum": 1.0440079098188448,
+        "maximum": 2.185108640191686,
+        "step": 0.019001,
+        "default": 1.9000946283340454,
+        "taper": "logarithmic",
+        "unit": "m"
       }
     },
     {
@@ -588,10 +602,11 @@
       "order": 6,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.01,
-        "default": 0.5
+        "minimum": 0.09068453311920166,
+        "maximum": 0.17230060696601868,
+        "step": 0.00125,
+        "default": 0.125,
+        "taper": "logarithmic"
       }
     },
     {
@@ -602,10 +617,12 @@
       "order": 7,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.01,
-        "default": 0.5
+        "minimum": 300.3533630371094,
+        "maximum": 1198.5,
+        "step": 8.5,
+        "default": 850.0,
+        "taper": "logarithmic",
+        "unit": "N"
       }
     },
     {
@@ -616,8 +633,8 @@
       "order": 3,
       "kind": {
         "type": "float",
-        "minimum": 2.86,
-        "maximum": 45.84,
+        "minimum": 2.8647890090942383,
+        "maximum": 45.83662414550781,
         "step": 0.1,
         "default": 24.35,
         "unit": "°"
@@ -631,10 +648,12 @@
       "order": 8,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
+        "minimum": 0.5773502588272095,
+        "maximum": 1.7320507764816284,
         "step": 0.01,
-        "default": 0.5
+        "default": 1.0,
+        "taper": "logarithmic",
+        "unit": "×"
       }
     },
     {
@@ -716,10 +735,12 @@
       "order": 0,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 2.8125,
+        "maximum": 720.0,
+        "step": 0.45,
+        "default": 45.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -736,10 +757,11 @@
       "order": 0,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.01625,
+        "maximum": 4.16,
+        "step": 0.0026,
+        "default": 0.26,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -756,10 +778,12 @@
       "order": 0,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 2.5,
+        "maximum": 640.0,
+        "step": 0.4,
+        "default": 40.0,
+        "taper": "logarithmic",
+        "unit": "s"
       },
       "flags": {
         "automatable": true,
@@ -776,10 +800,11 @@
       "order": 1,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.09375,
+        "maximum": 24.0,
+        "step": 0.015,
+        "default": 1.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -796,10 +821,11 @@
       "order": 2,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.015625,
+        "maximum": 4.0,
+        "step": 0.0025,
+        "default": 0.25,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -816,10 +842,11 @@
       "order": 3,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
+        "minimum": 0.00625,
+        "maximum": 1.6,
         "step": 0.001,
-        "default": 0.5
+        "default": 0.1,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -836,10 +863,12 @@
       "order": 4,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 1.25,
+        "maximum": 320.0,
+        "step": 0.2,
+        "default": 20.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -856,10 +885,11 @@
       "order": 5,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.003125,
+        "maximum": 0.8,
+        "step": 0.0005,
+        "default": 0.05,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -876,10 +906,12 @@
       "order": 1,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 20.0,
+        "maximum": 5120.0,
+        "step": 3.2,
+        "default": 320.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -896,10 +928,11 @@
       "order": 6,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0075,
+        "maximum": 1.92,
+        "step": 0.0012,
+        "default": 0.12,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -916,10 +949,11 @@
       "order": 7,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
+        "minimum": 0.00625,
+        "maximum": 1.6,
         "step": 0.001,
-        "default": 0.5
+        "default": 0.1,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -936,10 +970,12 @@
       "order": 1,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 1.5625e-05,
+        "maximum": 0.004,
+        "step": 2.5e-06,
+        "default": 0.00025,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -956,10 +992,12 @@
       "order": 8,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.03125,
+        "maximum": 8.0,
+        "step": 0.005,
+        "default": 0.5,
+        "taper": "logarithmic",
+        "unit": "cents"
       },
       "flags": {
         "automatable": true,
@@ -976,10 +1014,11 @@
       "order": 9,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 1.09375,
+        "maximum": 280.0,
+        "step": 0.175,
+        "default": 17.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -996,10 +1035,11 @@
       "order": 10,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.25,
+        "maximum": 64.0,
+        "step": 0.04,
+        "default": 4.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1016,10 +1056,11 @@
       "order": 11,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.00325,
+        "maximum": 0.832,
+        "step": 0.00052,
+        "default": 0.052,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1036,10 +1077,11 @@
       "order": 12,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.000625,
+        "maximum": 0.16,
+        "step": 0.0001,
+        "default": 0.01,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1056,10 +1098,11 @@
       "order": 13,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.001788125,
+        "maximum": 0.45776,
+        "step": 0.0002861,
+        "default": 0.02861,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1076,10 +1119,11 @@
       "order": 14,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 1.875e-11,
+        "maximum": 4.8e-09,
+        "step": 3e-12,
+        "default": 3e-10,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1096,10 +1140,11 @@
       "order": 2,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 12.5,
+        "maximum": 3200.0,
+        "step": 2.0,
+        "default": 200.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1116,10 +1161,12 @@
       "order": 3,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 750.0,
+        "maximum": 192000.0,
+        "step": 120.0,
+        "default": 12000.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -1136,10 +1183,11 @@
       "order": 15,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 20.0,
+        "maximum": 5120.0,
+        "step": 3.2,
+        "default": 320.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1156,10 +1204,11 @@
       "order": 16,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.125,
+        "maximum": 32.0,
+        "step": 0.02,
+        "default": 2.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1176,10 +1225,12 @@
       "order": 17,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 7.6875e-05,
+        "maximum": 0.01968,
+        "step": 1.2299999999999999e-05,
+        "default": 0.00123,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -1196,10 +1247,11 @@
       "order": 18,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1216,10 +1268,12 @@
       "order": 19,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.03875,
+        "maximum": 9.92,
+        "step": 0.0062,
+        "default": 0.62,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -1236,10 +1290,11 @@
       "order": 20,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.25,
+        "maximum": 64.0,
+        "step": 0.04,
+        "default": 4.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1256,10 +1311,11 @@
       "order": 21,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.09375,
+        "maximum": 24.0,
+        "step": 0.015,
+        "default": 1.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1276,10 +1332,11 @@
       "order": 4,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.2125,
+        "maximum": 54.4,
+        "step": 0.034,
+        "default": 3.4,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1296,10 +1353,11 @@
       "order": 22,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 1.25e-06,
+        "maximum": 0.00032,
+        "step": 2.0000000000000002e-07,
+        "default": 2e-05,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1316,10 +1374,11 @@
       "order": 2,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.00175,
+        "maximum": 0.448,
+        "step": 0.00028000000000000003,
+        "default": 0.028,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1336,10 +1395,11 @@
       "order": 5,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0014375,
+        "maximum": 0.368,
+        "step": 0.00023,
+        "default": 0.023,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1356,10 +1416,11 @@
       "order": 23,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0325,
+        "maximum": 8.32,
+        "step": 0.0052,
+        "default": 0.52,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1376,10 +1437,11 @@
       "order": 24,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.03125,
+        "maximum": 8.0,
+        "step": 0.005,
+        "default": 0.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1396,10 +1458,12 @@
       "order": 25,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 150.0,
+        "maximum": 38400.0,
+        "step": 24.0,
+        "default": 2400.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -1416,10 +1480,11 @@
       "order": 26,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.25,
+        "maximum": 64.0,
+        "step": 0.04,
+        "default": 4.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1436,10 +1501,12 @@
       "order": 3,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 3.125e-05,
+        "maximum": 0.008,
+        "step": 5e-06,
+        "default": 0.0005,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -1456,10 +1523,11 @@
       "order": 4,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.02370689625,
+        "maximum": 6.06896544,
+        "step": 0.0037931034,
+        "default": 0.37931034,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1476,10 +1544,11 @@
       "order": 5,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.015804598125,
+        "maximum": 4.04597712,
+        "step": 0.0025287357,
+        "default": 0.25287357,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1496,10 +1565,12 @@
       "order": 6,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0002220625,
+        "maximum": 0.056848,
+        "step": 3.553e-05,
+        "default": 0.003553,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -1516,10 +1587,12 @@
       "order": 7,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 8.75e-05,
+        "maximum": 0.0224,
+        "step": 1.4e-05,
+        "default": 0.0014,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -1536,10 +1609,12 @@
       "order": 8,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 8.091875e-05,
+        "maximum": 0.0207152,
+        "step": 1.2947e-05,
+        "default": 0.0012947,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -1556,10 +1631,12 @@
       "order": 9,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 5e-05,
+        "maximum": 0.0128,
+        "step": 8e-06,
+        "default": 0.0008,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -1576,10 +1653,11 @@
       "order": 10,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.01160334375,
+        "maximum": 2.970456,
+        "step": 0.001856535,
+        "default": 0.1856535,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1596,10 +1674,11 @@
       "order": 11,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.125,
+        "maximum": 32.0,
+        "step": 0.02,
+        "default": 2.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1616,10 +1695,11 @@
       "order": 12,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.00875,
+        "maximum": 2.24,
+        "step": 0.0014000000000000002,
+        "default": 0.14,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1636,10 +1716,12 @@
       "order": 13,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.00375,
+        "maximum": 0.96,
+        "step": 0.0006,
+        "default": 0.06,
+        "taper": "logarithmic",
+        "unit": "s"
       },
       "flags": {
         "automatable": true,
@@ -1656,10 +1738,11 @@
       "order": 14,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.14375,
+        "maximum": 36.8,
+        "step": 0.023,
+        "default": 2.3,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1676,10 +1759,11 @@
       "order": 15,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.04375,
+        "maximum": 11.2,
+        "step": 0.006999999999999999,
+        "default": 0.7,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1696,10 +1780,11 @@
       "order": 16,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.9375,
+        "maximum": 240.0,
+        "step": 0.15,
+        "default": 15.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1716,10 +1801,11 @@
       "order": 17,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 4.125,
+        "maximum": 1056.0,
+        "step": 0.66,
+        "default": 66.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1736,10 +1822,11 @@
       "order": 18,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1756,10 +1843,11 @@
       "order": 19,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.075,
+        "maximum": 19.2,
+        "step": 0.012,
+        "default": 1.2,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1776,10 +1864,11 @@
       "order": 20,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.075,
+        "maximum": 19.2,
+        "step": 0.012,
+        "default": 1.2,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1796,10 +1885,11 @@
       "order": 21,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.21875,
+        "maximum": 56.0,
+        "step": 0.035,
+        "default": 3.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1816,10 +1906,11 @@
       "order": 6,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.03125,
+        "maximum": 8.0,
+        "step": 0.005,
+        "default": 0.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1836,10 +1927,12 @@
       "order": 7,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 3.75,
+        "maximum": 960.0,
+        "step": 0.6,
+        "default": 60.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -1856,10 +1949,11 @@
       "order": 8,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1876,10 +1970,11 @@
       "order": 9,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0045,
+        "maximum": 1.152,
+        "step": 0.0007199999999999999,
+        "default": 0.072,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1896,10 +1991,12 @@
       "order": 0,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 1.875,
+        "maximum": 480.0,
+        "step": 0.3,
+        "default": 30.0,
+        "taper": "logarithmic",
+        "unit": "dB"
       },
       "flags": {
         "automatable": true,
@@ -1916,10 +2013,11 @@
       "order": 1,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.046875,
+        "maximum": 12.0,
+        "step": 0.0075,
+        "default": 0.75,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1936,10 +2034,11 @@
       "order": 2,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.009375,
+        "maximum": 2.4,
+        "step": 0.0015,
+        "default": 0.15,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1956,10 +2055,11 @@
       "order": 10,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.5,
+        "maximum": 128.0,
+        "step": 0.08,
+        "default": 8.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -1976,10 +2076,12 @@
       "order": 11,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 531.25,
+        "maximum": 136000.0,
+        "step": 85.0,
+        "default": 8500.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -1996,10 +2098,12 @@
       "order": 12,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 2.8125,
+        "maximum": 720.0,
+        "step": 0.45,
+        "default": 45.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -2016,10 +2120,11 @@
       "order": 3,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.00075,
+        "maximum": 0.192,
+        "step": 0.00012,
+        "default": 0.012,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2036,10 +2141,12 @@
       "order": 4,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 118.75,
+        "maximum": 30400.0,
+        "step": 19.0,
+        "default": 1900.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -2056,10 +2163,12 @@
       "order": 5,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 437.5,
+        "maximum": 112000.0,
+        "step": 70.0,
+        "default": 7000.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -2076,10 +2185,12 @@
       "order": 6,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.1625,
+        "maximum": 41.6,
+        "step": 0.026000000000000002,
+        "default": 2.6,
+        "taper": "logarithmic",
+        "unit": "s"
       },
       "flags": {
         "automatable": true,
@@ -2096,10 +2207,12 @@
       "order": 7,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.05625,
+        "maximum": 14.4,
+        "step": 0.009000000000000001,
+        "default": 0.9,
+        "taper": "logarithmic",
+        "unit": "s"
       },
       "flags": {
         "automatable": true,
@@ -2116,10 +2229,11 @@
       "order": 8,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0075,
+        "maximum": 1.92,
+        "step": 0.0012,
+        "default": 0.12,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2136,10 +2250,12 @@
       "order": 9,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.1375,
+        "maximum": 35.2,
+        "step": 0.022000000000000002,
+        "default": 2.2,
+        "taper": "logarithmic",
+        "unit": "s"
       },
       "flags": {
         "automatable": true,
@@ -2156,10 +2272,12 @@
       "order": 10,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 112.5,
+        "maximum": 28800.0,
+        "step": 18.0,
+        "default": 1800.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -2176,10 +2294,11 @@
       "order": 11,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.003125,
+        "maximum": 0.8,
+        "step": 0.0005,
+        "default": 0.05,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2196,10 +2315,12 @@
       "order": 12,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.04375,
+        "maximum": 11.2,
+        "step": 0.006999999999999999,
+        "default": 0.7,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -2216,10 +2337,12 @@
       "order": 13,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.05625,
+        "maximum": 14.4,
+        "step": 0.009000000000000001,
+        "default": 0.9,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -2236,10 +2359,12 @@
       "order": 14,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0375,
+        "maximum": 9.6,
+        "step": 0.006,
+        "default": 0.6,
+        "taper": "logarithmic",
+        "unit": "rad"
       },
       "flags": {
         "automatable": true,
@@ -2256,10 +2381,12 @@
       "order": 15,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.003125,
+        "maximum": 0.8,
+        "step": 0.0005,
+        "default": 0.05,
+        "taper": "logarithmic",
+        "unit": "rad"
       },
       "flags": {
         "automatable": true,
@@ -2276,10 +2403,12 @@
       "order": 16,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.05,
+        "maximum": 12.8,
+        "step": 0.008,
+        "default": 0.8,
+        "taper": "logarithmic",
+        "unit": "rad"
       },
       "flags": {
         "automatable": true,
@@ -2296,10 +2425,11 @@
       "order": 17,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.05625,
+        "maximum": 14.4,
+        "step": 0.009000000000000001,
+        "default": 0.9,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2316,10 +2446,11 @@
       "order": 18,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.01875,
+        "maximum": 4.8,
+        "step": 0.003,
+        "default": 0.3,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2336,10 +2467,12 @@
       "order": 19,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 93.75,
+        "maximum": 24000.0,
+        "step": 15.0,
+        "default": 1500.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -2356,10 +2489,12 @@
       "order": 20,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 750.0,
+        "maximum": 192000.0,
+        "step": 120.0,
+        "default": 12000.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -2376,10 +2511,11 @@
       "order": 21,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 21.4375,
+        "maximum": 5488.0,
+        "step": 3.43,
+        "default": 343.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2396,10 +2532,12 @@
       "order": 22,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 2.8125,
+        "maximum": 720.0,
+        "step": 0.45,
+        "default": 45.0,
+        "taper": "logarithmic",
+        "unit": "m³"
       },
       "flags": {
         "automatable": true,
@@ -2416,10 +2554,12 @@
       "order": 23,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 2812.5,
+        "maximum": 720000.0,
+        "step": 450.0,
+        "default": 45000.0,
+        "taper": "logarithmic",
+        "unit": "m³"
       },
       "flags": {
         "automatable": true,
@@ -2436,10 +2576,12 @@
       "order": 24,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.03125,
+        "maximum": 8.0,
+        "step": 0.005,
+        "default": 0.5,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -2456,10 +2598,12 @@
       "order": 25,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 1.0,
+        "maximum": 256.0,
+        "step": 0.16,
+        "default": 16.0,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -2476,10 +2620,12 @@
       "order": 26,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.125,
+        "maximum": 32.0,
+        "step": 0.02,
+        "default": 2.0,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -2496,10 +2642,11 @@
       "order": 27,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.375,
+        "maximum": 96.0,
+        "step": 0.06,
+        "default": 6.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2516,10 +2663,12 @@
       "order": 28,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.025,
+        "maximum": 6.4,
+        "step": 0.004,
+        "default": 0.4,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -2536,10 +2685,11 @@
       "order": 29,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0001375,
+        "maximum": 0.0352,
+        "step": 2.2000000000000003e-05,
+        "default": 0.0022,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2556,10 +2706,12 @@
       "order": 30,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.010625,
+        "maximum": 2.72,
+        "step": 0.0017000000000000001,
+        "default": 0.17,
+        "taper": "logarithmic",
+        "unit": "m"
       },
       "flags": {
         "automatable": true,
@@ -2576,10 +2728,11 @@
       "order": 31,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.098125,
+        "maximum": 25.12,
+        "step": 0.015700000000000002,
+        "default": 1.57,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2596,10 +2749,11 @@
       "order": 32,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.021875,
+        "maximum": 5.6,
+        "step": 0.0034999999999999996,
+        "default": 0.35,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2616,10 +2770,11 @@
       "order": 27,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.00025,
+        "maximum": 0.064,
+        "step": 4e-05,
+        "default": 0.004,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2636,10 +2791,11 @@
       "order": 22,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.21875,
+        "maximum": 56.0,
+        "step": 0.035,
+        "default": 3.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2656,10 +2812,12 @@
       "order": 23,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 9.375e-05,
+        "maximum": 0.024,
+        "step": 1.5e-05,
+        "default": 0.0015,
+        "taper": "logarithmic",
+        "unit": "s"
       },
       "flags": {
         "automatable": true,
@@ -2676,10 +2834,11 @@
       "order": 33,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0005875,
+        "maximum": 0.1504,
+        "step": 9.400000000000001e-05,
+        "default": 0.0094,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2696,10 +2855,11 @@
       "order": 34,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.005625,
+        "maximum": 1.44,
+        "step": 0.0009,
+        "default": 0.09,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2716,10 +2876,11 @@
       "order": 24,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2736,10 +2897,12 @@
       "order": 28,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 53.125,
+        "maximum": 13600.0,
+        "step": 8.5,
+        "default": 850.0,
+        "taper": "logarithmic",
+        "unit": "N"
       },
       "flags": {
         "automatable": true,
@@ -2756,10 +2919,11 @@
       "order": 25,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 3500000.0,
+        "maximum": 896000000.0,
+        "step": 560000.0,
+        "default": 56000000.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2776,10 +2940,11 @@
       "order": 26,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.25,
+        "maximum": 64.0,
+        "step": 0.04,
+        "default": 4.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2796,10 +2961,11 @@
       "order": 27,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.01075,
+        "maximum": 2.752,
+        "step": 0.00172,
+        "default": 0.172,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2816,10 +2982,11 @@
       "order": 28,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.25,
+        "maximum": 64.0,
+        "step": 0.04,
+        "default": 4.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2836,10 +3003,11 @@
       "order": 29,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2856,10 +3024,11 @@
       "order": 29,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.001125,
+        "maximum": 0.288,
+        "step": 0.00017999999999999998,
+        "default": 0.018,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2876,10 +3045,12 @@
       "order": 30,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.125,
+        "maximum": 32.0,
+        "step": 0.02,
+        "default": 2.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -2896,10 +3067,11 @@
       "order": 31,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.03125,
+        "maximum": 8.0,
+        "step": 0.005,
+        "default": 0.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2916,10 +3088,11 @@
       "order": 32,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.375,
+        "maximum": 96.0,
+        "step": 0.06,
+        "default": 6.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2936,10 +3109,11 @@
       "order": 30,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.03125,
+        "maximum": 8.0,
+        "step": 0.005,
+        "default": 0.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2956,10 +3130,12 @@
       "order": 31,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 1.25e-05,
+        "maximum": 0.0032,
+        "step": 2e-06,
+        "default": 0.0002,
+        "taper": "logarithmic",
+        "unit": "s"
       },
       "flags": {
         "automatable": true,
@@ -2976,10 +3152,11 @@
       "order": 33,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.3125,
+        "maximum": 80.0,
+        "step": 0.05,
+        "default": 5.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -2996,10 +3173,11 @@
       "order": 13,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.003125,
+        "maximum": 0.8,
+        "step": 0.0005,
+        "default": 0.05,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -3016,10 +3194,11 @@
       "order": 14,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.09375,
+        "maximum": 24.0,
+        "step": 0.015,
+        "default": 1.5,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -3036,10 +3215,12 @@
       "order": 32,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 500.0,
+        "maximum": 128000.0,
+        "step": 80.0,
+        "default": 8000.0,
+        "taper": "logarithmic",
+        "unit": "Hz"
       },
       "flags": {
         "automatable": true,
@@ -3056,10 +3237,11 @@
       "order": 33,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.425,
+        "maximum": 108.8,
+        "step": 0.068,
+        "default": 6.8,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -3076,10 +3258,11 @@
       "order": 34,
       "kind": {
         "type": "float",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "step": 0.001,
-        "default": 0.5
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,
@@ -3098,7 +3281,7 @@
         "type": "float",
         "minimum": 0.0,
         "maximum": 1.0,
-        "step": 0.001,
+        "step": 0.01,
         "default": 0.0
       },
       "flags": {

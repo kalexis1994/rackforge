@@ -11,7 +11,7 @@ mod webview_env;
 use engine::{RackForgeEngine, VstPluginModel};
 use rackforge_core::midi2::{Midi2Event, Midi2Message};
 use rackforge_plugin_api::{
-    ParameterDescriptor, ParameterKind,
+    ParameterDescriptor, ParameterKind, ParameterTaper,
     abi::{MidiEventV1, ParameterEventV1},
 };
 use std::{
@@ -1376,9 +1376,18 @@ fn parameter_plain_to_normalized(parameter: &ParameterDescriptor, value: f64) ->
     }
     match &parameter.kind {
         ParameterKind::Float {
-            minimum, maximum, ..
+            minimum,
+            maximum,
+            taper,
+            ..
+        } if (*minimum..=*maximum).contains(&value) => {
+            Some(if *taper == ParameterTaper::Logarithmic && *minimum > 0.0 {
+                (value / *minimum).ln() / (*maximum / *minimum).ln()
+            } else {
+                (value - *minimum) / (*maximum - *minimum)
+            })
         }
-        | ParameterKind::Meter {
+        ParameterKind::Meter {
             minimum, maximum, ..
         } if (*minimum..=*maximum).contains(&value) => {
             Some((value - *minimum) / (*maximum - *minimum))
@@ -1418,11 +1427,23 @@ fn parameter_normalized_to_plain(parameter: &ParameterDescriptor, normalized: f6
             minimum,
             maximum,
             step,
+            taper,
             ..
         } => {
-            let raw = *minimum + (*maximum - *minimum) * normalized;
-            let steps = ((raw - *minimum) / *step).round();
-            (*minimum + steps * *step).clamp(*minimum, *maximum)
+            // A host automates in nought to one, and the parameter says what
+            // a position in that means. Spread linearly, a control whose
+            // range is a sixteenth of its value to sixteen times it sits at
+            // 0.06 of the host's fader, and the whole useful half of it is in
+            // the first breath of travel. The taper is the one the panel and
+            // the little screen read, and `parameter_plain_to_normalized` is
+            // its exact inverse, so a value written back is the value read.
+            if *taper == ParameterTaper::Logarithmic && *minimum > 0.0 {
+                (*minimum * (*maximum / *minimum).powf(normalized)).clamp(*minimum, *maximum)
+            } else {
+                let raw = *minimum + (*maximum - *minimum) * normalized;
+                let steps = ((raw - *minimum) / *step).round();
+                (*minimum + steps * *step).clamp(*minimum, *maximum)
+            }
         }
         ParameterKind::Integer {
             minimum,
@@ -1896,6 +1917,46 @@ extern "system" fn GetPluginFactory() -> *mut IPluginFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A logarithmic parameter reaches a host's automation lane the way it
+    /// reaches a fader, and comes back the value it went out as.
+    #[test]
+    fn a_logarithmic_parameter_survives_the_host_round_trip() {
+        let parameter = ParameterDescriptor {
+            index: 0,
+            id: "knob".into(),
+            name: "Knob".into(),
+            page: String::new(),
+            group: None,
+            order: 0,
+            suggested_control: Default::default(),
+            kind: ParameterKind::Float {
+                minimum: 0.5,
+                maximum: 128.0,
+                default: 8.0,
+                step: 0.08,
+                unit: None,
+                taper: ParameterTaper::Logarithmic,
+            },
+            flags: Default::default(),
+        };
+        // Half the host's fader is the value the control is centred on, not
+        // the arithmetic middle of its range.
+        let middle = parameter_normalized_to_plain(&parameter, 0.5);
+        assert!(
+            (middle - 8.0).abs() < 1e-9,
+            "half the lane reached {middle}"
+        );
+        for value in [0.5, 1.0, 8.0, 42.0, 128.0] {
+            let normalized = parameter_plain_to_normalized(&parameter, value).unwrap();
+            assert!((0.0..=1.0).contains(&normalized), "{value} left the lane");
+            let back = parameter_normalized_to_plain(&parameter, normalized);
+            assert!(
+                (back - value).abs() <= 1e-9 * value.abs().max(1.0),
+                "{value} came back as {back}"
+            );
+        }
+    }
 
     #[test]
     fn state_round_trip_preserves_plugin_blob_and_level() {

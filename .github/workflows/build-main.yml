@@ -137,7 +137,8 @@ jobs:
             -p rackforge-parallel-demo-synth \
             -p rackforge-roland-scva \
             -p rackforge-gain \
-            -p rackforge-gain-portable
+            -p rackforge-gain-portable \
+            -p rackforge-vst3
 
       # Keep the native driver harness in its own Cargo graph. On Windows GNU,
       # feature unification with the full plugin-validation graph can produce

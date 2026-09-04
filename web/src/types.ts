@@ -714,6 +714,8 @@ export type PluginParameterKind =
       default: number;
       step: number;
       unit?: string;
+      /** How the travel is spread: each step adds, or each step multiplies. */
+      taper?: "linear" | "logarithmic";
     }
   | {
       type: "integer";
@@ -722,6 +724,7 @@ export type PluginParameterKind =
       default: number;
       step: number;
       unit?: string;
+      taper?: "linear" | "logarithmic";
     }
   | { type: "boolean"; default: boolean }
   | {

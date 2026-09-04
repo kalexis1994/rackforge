@@ -1402,23 +1402,33 @@ function MelodicLane({
   const lockRange = (descriptor: PluginParameterDescriptor | undefined) => {
     const kind = descriptor?.kind;
     if (kind && (kind.type === "float" || kind.type === "integer")) {
-      return { min: kind.minimum, max: kind.maximum, def: kind.default };
+      // A logarithmic parameter is stepped and drawn by ratio. A twentieth of
+      // the arithmetic span is meaningless on one: a knob offering 0.5 to 128
+      // would move in jumps of 6.4, so its first nudge off the bottom would
+      // clear the whole useful half of its travel in one press.
+      const ratio =
+        kind.taper === "logarithmic" && kind.minimum > 0 ? kind.maximum / kind.minimum : 0;
+      return { min: kind.minimum, max: kind.maximum, def: kind.default, ratio };
     }
-    return { min: 0, max: 1, def: 0.5 };
+    return { min: 0, max: 1, def: 0.5, ratio: 0 };
   };
+  const lockPosition = (value: number, range: ReturnType<typeof lockRange>) =>
+    range.ratio
+      ? Math.log(Math.max(value, range.min) / range.min) / Math.log(range.ratio)
+      : (value - range.min) / Math.max(1e-9, range.max - range.min);
   const nudgeLock = (direction: 1 | -1) => {
     if (!lock || selected === null) return;
-    const { min, max } = lockRange(lockDescriptor);
-    const step = (max - min) / 20;
-    const next = Math.min(max, Math.max(min, lock.value + direction * step));
-    onEdit(setStepLock(pattern, selected, null, lock.parameter, next));
+    const range = lockRange(lockDescriptor);
+    const position = Math.min(1, Math.max(0, lockPosition(lock.value, range) + direction / 20));
+    const next = range.ratio
+      ? range.min * Math.pow(range.ratio, position)
+      : range.min + (range.max - range.min) * position;
+    onEdit(
+      setStepLock(pattern, selected, null, lock.parameter, Math.min(range.max, Math.max(range.min, next))),
+    );
   };
   const lockPercent = lock
-    ? Math.round(
-        ((lock.value - lockRange(lockDescriptor).min) /
-          Math.max(1e-9, lockRange(lockDescriptor).max - lockRange(lockDescriptor).min)) *
-          100,
-      )
+    ? Math.round(lockPosition(lock.value, lockRange(lockDescriptor)) * 100)
     : 0;
 
   const press = (step: number) => {

@@ -115,8 +115,14 @@
 
         /** Enough figures to see a change, never more than the value carries. */
         const format = (magnitude) => {
-          const decimals = Math.abs(magnitude) >= 100 ? 0 : Math.abs(magnitude) >= 10 ? 1 : 2;
-          const text = magnitude.toFixed(decimals);
+          const size = Math.abs(magnitude);
+          // A model constant can be 3e-10, and two decimals render that as
+          // "0.00" -- a control that is doing something, reading as off. Below
+          // a hundredth, show the figures the value actually has.
+          const text =
+            size !== 0 && size < 0.01
+              ? magnitude.toExponential(2)
+              : magnitude.toFixed(size >= 100 ? 0 : size >= 10 ? 1 : 2);
           return kind.unit ? `${text} ${kind.unit}` : text;
         };
 

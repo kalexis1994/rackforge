@@ -7433,12 +7433,22 @@ fn parameter_display_decimals(step: f64, display_decimals: Option<u8>) -> usize 
 }
 
 fn parameter_decimals(step: f64) -> usize {
+    /// As many decimals as a two-line display can carry.
+    const CEILING: usize = 6;
     if step >= 1.0 {
         0
     } else {
         let mut scaled = step.abs();
+        // A step finer than the loop's own tolerance already looks like a
+        // whole number to it, so it stopped at once and asked for NO
+        // decimals -- a control whose step is 3e-12 rendered as "0" and stayed
+        // "0" while the encoder moved it. It is a very small quantity, not an
+        // integer: give it every decimal the display has.
+        if scaled != 0.0 && scaled <= 1.0e-9 {
+            return CEILING;
+        }
         let mut decimals = 0;
-        while decimals < 6 && (scaled.round() - scaled).abs() > 1.0e-9 {
+        while decimals < CEILING && (scaled.round() - scaled).abs() > 1.0e-9 {
             scaled *= 10.0;
             decimals += 1;
         }
@@ -8314,6 +8324,19 @@ pub fn demo_frames() -> Vec<Screen> {
 
 #[cfg(test)]
 mod tests {
+    /// A step can be far finer than a whole number is "close to zero".
+    #[test]
+    fn a_very_fine_step_still_asks_for_decimals() {
+        assert_eq!(parameter_decimals(1.0), 0);
+        assert_eq!(parameter_decimals(0.01), 2);
+        // 2e-7: the loop reaches it in seven and the display caps at six.
+        assert_eq!(parameter_decimals(2.0e-7), 6);
+        // 3e-12 used to render as a plain "0" and stay there while the
+        // encoder multiplied it.
+        assert_eq!(parameter_decimals(3.0e-12), 6);
+        assert_eq!(parameter_decimals(0.0), 0);
+    }
+
     use super::*;
     use rackforge_audio_api::{
         AUDIO_DEVICE_SCHEMA_VERSION, AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioBackend,

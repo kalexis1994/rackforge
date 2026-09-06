@@ -67,6 +67,18 @@ targets are rejected. The compiled mapper converts MIDI into the normal
 - bipolar ranges preserve both endpoints and the center;
 - Pitch Bend uses all 14 bits and maps 8192 to the exact center.
 
+A control that holds a position — a knob, a fader, any absolute control
+change — is picked up rather than obeyed. The link starts detached: a knob
+that sits at two thirds while the parameter sits at zero moves nothing until
+it comes within about four controller steps of the parameter, or crosses it;
+from then on it follows. A parameter set from the screen, or restored with
+the session, detaches the controls linked to it again. Without this, the
+knob's stored position jumps onto the parameter the moment it is brushed, and
+a value nobody chose stays with the session. Bend, pressure and notes are
+gestures, and are taken as they come. The host reads the parameter's value
+once, the first time a detached control is touched; the Android appliance
+cannot yet and lets the control take over at once.
+
 Runtime tables and event buffers are prepared outside the audio callback. The
 callback performs bounded, allocation-free matching. `pass_through` is the
 default, so a mapping observes the message without silently removing it from

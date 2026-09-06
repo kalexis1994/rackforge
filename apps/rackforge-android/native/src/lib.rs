@@ -1806,11 +1806,13 @@ impl AndroidEngine {
                     packet,
                 };
                 let mut consume = false;
-                for link in &self.parameter_links {
+                for link in &mut self.parameter_links {
                     if link.link.instance_id != ANDROID_INSTANCE_ID {
                         continue;
                     }
-                    if let Some(output) = link.apply(ingress_event) {
+                    // The appliance cannot yet say where a parameter stands
+                    // from here, so a control takes over at once, as before.
+                    if let Some(output) = link.apply(ingress_event, |_| None) {
                         if self.parameter_events.len() < MAX_PENDING_MIDI_EVENTS {
                             self.parameter_events.push(output.event);
                             self.live_parameter_writer_handle.try_record(

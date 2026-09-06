@@ -1851,12 +1851,14 @@ impl BrowserHost {
                 packet,
             };
             let active_instance_id = self.store.state().active_instance_id.clone();
-            for link in self.parameter_links.iter().filter(|link| {
+            for link in self.parameter_links.iter_mut().filter(|link| {
                 active_instance_id
                     .as_ref()
                     .is_some_and(|instance_id| link.link.instance_id == instance_id.as_str())
             }) {
-                let Some(mapped) = link.apply(ingress) else {
+                // The browser demo cannot yet read a parameter from here, so
+                // a control takes over at once, as before.
+                let Some(mapped) = link.apply(ingress, |_| None) else {
                     continue;
                 };
                 consumed |= mapped.pass_through == ParameterLinkPassThrough::Consume;

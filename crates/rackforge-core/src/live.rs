@@ -2306,7 +2306,11 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     // back the moment it is touched.
                     if let Ok(canonical) = result {
                         for link in &mut parameter_links {
-                            link.observe_parameter(&instance_id, parameter_index, canonical);
+                            link.observe_parameter(
+                                instance_id.as_str(),
+                                parameter_index,
+                                canonical,
+                            );
                         }
                     }
                     let _ = reply.send(result);
@@ -2838,11 +2842,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 }
                 AudioRenderMode::Rack => {
                     for voice in &mut rack_voices {
+                        let instance = &mut voice.instance;
                         let consume = apply_parameter_links(
-                            &parameter_links,
+                            &mut parameter_links,
                             event,
                             &voice.slot_id,
                             &mut voice.parameter_events,
+                            &mut |index| instance.get_parameter(index).ok(),
                         );
                         if !consume
                             && let Some(routed) = route_rack_event_through_stages(

@@ -1731,18 +1731,22 @@ fn compile_parameter_links_for_runtime(
         .collect()
 }
 
+/// `current` answers where a parameter of the instance stands now, for a
+/// link whose control has not yet been picked up; it is asked at most once
+/// per link, on the first touch, and never on the block's ordinary path.
 fn apply_parameter_links(
-    links: &[CompiledParameterLink],
+    links: &mut [CompiledParameterLink],
     event: IngressMidiEvent,
     instance_id: &str,
     output: &mut Vec<ParameterEventV1>,
+    current: &mut dyn FnMut(u32) -> Option<f64>,
 ) -> bool {
     let mut consume = false;
     for link in links
-        .iter()
+        .iter_mut()
         .filter(|link| link.link.instance_id == instance_id)
     {
-        let Some(mapped) = link.apply(event) else {
+        let Some(mapped) = link.apply(event, &mut *current) else {
             continue;
         };
         consume |= mapped.pass_through == ParameterLinkPassThrough::Consume;
@@ -2297,6 +2301,18 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             );
                             Ok(canonical)
                         });
+                    // A parameter set from the screen detaches the controls
+                    // linked to it, so a knob elsewhere does not drag it
+                    // back the moment it is touched.
+                    if let Ok(canonical) = result {
+                        for link in &mut parameter_links {
+                            link.observe_parameter(
+                                instance_id.as_str(),
+                                parameter_index,
+                                canonical,
+                            );
+                        }
+                    }
                     let _ = reply.send(result);
                 }
                 AudioControlCommand::ReplaceParameterLinks { links, reply } => {
@@ -2684,10 +2700,16 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     AudioRenderMode::Plugin => {
                         let parameter_start = parameter_events.len();
                         let consume = apply_parameter_links(
-                            &parameter_links,
+                            &mut parameter_links,
                             event,
                             active_instance_id.as_str(),
                             &mut parameter_events,
+                            &mut |index| {
+                                standalone_voices
+                                    .iter_mut()
+                                    .find(|voice| voice.instance_id == active_instance_id)
+                                    .and_then(|voice| voice.instance.get_parameter(index).ok())
+                            },
                         );
                         if let Some(voice) = standalone_voices
                             .iter()
@@ -2711,11 +2733,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     }
                     AudioRenderMode::Rack => {
                         for voice in &mut rack_voices {
+                            let instance = &mut voice.instance;
                             let consume = apply_parameter_links(
-                                &parameter_links,
+                                &mut parameter_links,
                                 event,
                                 &voice.slot_id,
                                 &mut voice.parameter_events,
+                                &mut |index| instance.get_parameter(index).ok(),
                             );
                             if !consume
                                 && let Some(routed) = route_rack_event_through_stages(
@@ -2785,10 +2809,16 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 AudioRenderMode::Plugin => {
                     let parameter_start = parameter_events.len();
                     let consume = apply_parameter_links(
-                        &parameter_links,
+                        &mut parameter_links,
                         event,
                         active_instance_id.as_str(),
                         &mut parameter_events,
+                        &mut |index| {
+                            standalone_voices
+                                .iter_mut()
+                                .find(|voice| voice.instance_id == active_instance_id)
+                                .and_then(|voice| voice.instance.get_parameter(index).ok())
+                        },
                     );
                     if let Some(voice) = standalone_voices
                         .iter()
@@ -2812,11 +2842,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 }
                 AudioRenderMode::Rack => {
                     for voice in &mut rack_voices {
+                        let instance = &mut voice.instance;
                         let consume = apply_parameter_links(
-                            &parameter_links,
+                            &mut parameter_links,
                             event,
                             &voice.slot_id,
                             &mut voice.parameter_events,
+                            &mut |index| instance.get_parameter(index).ok(),
                         );
                         if !consume
                             && let Some(routed) = route_rack_event_through_stages(

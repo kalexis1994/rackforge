@@ -1924,25 +1924,38 @@ impl AudioProcessor {
                 );
             }
             let ingress = packet.ingress_at(frame);
-            let active_instance_id = self.voices[self.active_voice].instance_id.as_str();
+            let active_voice = self.active_voice;
             let mut consume = false;
-            for link in self
-                .parameter_links
-                .iter()
-                .filter(|link| link.link.instance_id == active_instance_id)
             {
-                let Some(mapped) = link.apply(ingress) else {
-                    continue;
-                };
-                consume |=
-                    mapped.pass_through == rackforge_midi_api::ParameterLinkPassThrough::Consume;
-                if self.parameter_events.len() < MAX_MIDI_EVENTS_PER_BLOCK {
-                    self.parameter_events.push(mapped.event);
-                    self.live_parameter_writer.try_record(
-                        self.voices[self.active_voice].live_parameter_target,
-                        mapped.event.parameter_index,
-                        mapped.event.value,
-                    );
+                let Self {
+                    parameter_links,
+                    voices,
+                    parameter_events,
+                    live_parameter_writer,
+                    ..
+                } = &mut *self;
+                let voice = &mut voices[active_voice];
+                for link in parameter_links
+                    .iter_mut()
+                    .filter(|link| link.link.instance_id == voice.instance_id)
+                {
+                    // Where the parameter stands, asked only when a control
+                    // is first touched and the link does not know yet.
+                    let Some(mapped) =
+                        link.apply(ingress, |index| voice.instance.0.get_parameter(index).ok())
+                    else {
+                        continue;
+                    };
+                    consume |= mapped.pass_through
+                        == rackforge_midi_api::ParameterLinkPassThrough::Consume;
+                    if parameter_events.len() < MAX_MIDI_EVENTS_PER_BLOCK {
+                        parameter_events.push(mapped.event);
+                        live_parameter_writer.try_record(
+                            voice.live_parameter_target,
+                            mapped.event.parameter_index,
+                            mapped.event.value,
+                        );
+                    }
                 }
             }
             if !consume {
@@ -2373,6 +2386,14 @@ impl AudioProcessor {
                             );
                             Ok(canonical)
                         });
+                    // A parameter set from the screen detaches the controls
+                    // linked to it, so a knob elsewhere does not drag it back
+                    // the moment it is touched.
+                    if let Ok(canonical) = result {
+                        for link in &mut self.parameter_links {
+                            link.observe_parameter(&instance_id, parameter_index, canonical);
+                        }
+                    }
                     let _ = reply.try_send(result);
                 }
                 AudioCommand::ReplaceParameterLinks { links, reply } => {

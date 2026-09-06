@@ -10,11 +10,36 @@ use rackforge_session_api::{RackForgeParameterId, SemanticControlProfile};
 
 use crate::validate_parameter_write;
 
+/// How close, as a fraction of the range, a control has to come to the
+/// parameter before an absolute controller takes it over. About four steps
+/// of a seven-bit controller.
+const PICKUP_WINDOW: f64 = 0.03;
+
+/// Where an absolute controller stands against its parameter.
+///
+/// A knob or a fader keeps its own position; the parameter under it keeps
+/// another — restored with the session, set from the screen, left by an
+/// earlier session's knob. Sending the knob's position the moment it is
+/// touched makes the parameter jump, and a knob brushed while playing puts a
+/// value nobody chose where it stays. So a link starts detached, and takes
+/// the parameter over only once the control has come to where the parameter
+/// is, or has crossed it.
+#[derive(Clone, Copy, Debug, Default)]
+struct Pickup {
+    engaged: bool,
+    /// The parameter's position, 0..=1 over its range, as last known: what
+    /// the link sent, or what the host said was set from elsewhere.
+    parameter: Option<f64>,
+    /// The control's last position, so a crossing can be seen.
+    input: Option<f64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct CompiledParameterLink {
     pub link: ParameterLink,
     pub source_key: MidiSourceKey,
     parameter: ParameterDescriptor,
+    pickup: Pickup,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -44,10 +69,36 @@ impl CompiledParameterLink {
             link,
             source_key,
             parameter,
+            pickup: Pickup::default(),
         })
     }
 
-    pub fn apply(&self, ingress: IngressMidiEvent) -> Option<ParameterLinkOutput> {
+    /// The parameter's index on its plugin.
+    pub fn parameter_index(&self) -> u32 {
+        self.parameter.index
+    }
+
+    /// The parameter was set by something other than this link — the
+    /// screen, a restored session — so the control is no longer where the
+    /// parameter is, and has to come back to it before it takes over again.
+    pub fn observe_parameter(&mut self, instance_id: &str, parameter_index: u32, value: f64) {
+        if self.link.instance_id != instance_id || self.parameter.index != parameter_index {
+            return;
+        }
+        self.pickup.parameter = Some(normalize_parameter_value(&self.parameter.kind, value));
+        self.pickup.engaged = false;
+        self.pickup.input = None;
+    }
+
+    /// Map one incoming message onto the parameter. `current` is asked for
+    /// the parameter's value the first time an absolute control is touched
+    /// and the link does not yet know where the parameter is; a host that
+    /// cannot say answers `None`, and the control takes over at once.
+    pub fn apply(
+        &mut self,
+        ingress: IngressMidiEvent,
+        current: impl FnOnce(u32) -> Option<f64>,
+    ) -> Option<ParameterLinkOutput> {
         if ingress.source != self.source_key || !self.link.matches_channel(ingress.packet.channel())
         {
             return None;
@@ -58,6 +109,37 @@ impl CompiledParameterLink {
         } else {
             normalized
         };
+        // Only a control that holds a position needs picking up. A bend
+        // wheel springs back, pressure and notes are momentary: they are
+        // gestures, and a gesture is taken as it comes.
+        if matches!(
+            self.link.message,
+            ParameterLinkMessage::ControlChange { .. }
+        ) && !self.pickup.engaged
+        {
+            let known = match self.pickup.parameter {
+                Some(position) => Some(position),
+                None => current(self.parameter.index)
+                    .map(|value| normalize_parameter_value(&self.parameter.kind, value)),
+            };
+            match known {
+                None => self.pickup.engaged = true,
+                Some(position) => {
+                    let crossed = self.pickup.input.is_some_and(|previous| {
+                        (previous - position) * (normalized - position) <= 0.0
+                    });
+                    if (normalized - position).abs() <= PICKUP_WINDOW || crossed {
+                        self.pickup.engaged = true;
+                    } else {
+                        self.pickup.parameter = Some(position);
+                        self.pickup.input = Some(normalized);
+                        return None;
+                    }
+                }
+            }
+        }
+        self.pickup.input = Some(normalized);
+        self.pickup.parameter = Some(normalized);
         Some(ParameterLinkOutput {
             event: ParameterEventV1 {
                 frame: ingress.packet.frame,
@@ -282,6 +364,68 @@ fn quantize(value: f64, origin: f64, step: f64) -> f64 {
     origin + ((value - origin) / step).round() * step
 }
 
+/// Where a parameter's value sits over its range, 0..=1: the inverse of
+/// [`map_parameter_value`], on the same taper.
+fn normalize_parameter_value(kind: &ParameterKind, value: f64) -> f64 {
+    let position = match kind {
+        ParameterKind::Float {
+            minimum,
+            maximum,
+            taper,
+            ..
+        } => {
+            if *taper == ParameterTaper::Logarithmic && *minimum > 0.0 && *maximum > *minimum {
+                (value.max(*minimum) / *minimum).ln() / (*maximum / *minimum).ln()
+            } else if *maximum > *minimum {
+                (value - *minimum) / (*maximum - *minimum)
+            } else {
+                0.0
+            }
+        }
+        ParameterKind::Integer {
+            minimum, maximum, ..
+        } => {
+            if *maximum > *minimum {
+                (value - *minimum as f64) / (*maximum - *minimum) as f64
+            } else {
+                0.0
+            }
+        }
+        ParameterKind::Boolean { .. } | ParameterKind::Trigger => {
+            if value >= 0.5 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        ParameterKind::Enum { choices, .. } => {
+            let position = choices
+                .iter()
+                .position(|choice| choice.value as f64 == value)
+                .unwrap_or(0);
+            if choices.len() > 1 {
+                position as f64 / (choices.len() - 1) as f64
+            } else {
+                0.0
+            }
+        }
+        ParameterKind::Meter {
+            minimum, maximum, ..
+        } => {
+            if *maximum > *minimum {
+                (value - *minimum) / (*maximum - *minimum)
+            } else {
+                0.0
+            }
+        }
+    };
+    if position.is_finite() {
+        position.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,7 +499,7 @@ mod tests {
     /// fader does, not through its arithmetic middle.
     #[test]
     fn cc_follows_a_logarithmic_taper() {
-        let compiled = CompiledParameterLink::new(
+        let mut compiled = CompiledParameterLink::new(
             link(ParameterLinkMessage::ControlChange { controller: 74 }),
             MidiSourceKey::new(7),
             &schema(ParameterKind::Float {
@@ -370,9 +514,9 @@ mod tests {
             }),
         )
         .unwrap();
-        let at = |controller: u8| {
+        let mut at = |controller: u8| {
             compiled
-                .apply(ingress(&[0xb1, 74, controller]))
+                .apply(ingress(&[0xb1, 74, controller]), |_| None)
                 .unwrap()
                 .event
                 .value
@@ -393,8 +537,71 @@ mod tests {
     }
 
     #[test]
-    fn cc_scales_float_and_preserves_pass_through() {
-        let compiled = CompiledParameterLink::new(
+    fn an_absolute_control_picks_the_parameter_up_where_it_is() {
+        let float = schema(ParameterKind::Float {
+            minimum: 0.0,
+            maximum: 4.0,
+            default: 0.0,
+            step: 0.01,
+            unit: None,
+            taper: ParameterTaper::Linear,
+        });
+        let mut compiled = CompiledParameterLink::new(
+            link(ParameterLinkMessage::ControlChange { controller: 102 }),
+            MidiSourceKey::new(7),
+            &float,
+        )
+        .unwrap();
+        // The parameter sits at 0.0 and the knob arrives at two thirds: the
+        // knob is not where the parameter is, so nothing moves.
+        let parameter_at = |value: f64| move |_index: u32| Some(value);
+        assert!(
+            compiled
+                .apply(ingress(&[0xb1, 102, 84]), parameter_at(0.0))
+                .is_none()
+        );
+        assert!(
+            compiled
+                .apply(ingress(&[0xb1, 102, 60]), parameter_at(0.0))
+                .is_none()
+        );
+        // Coming down to it, the knob takes over within the window...
+        let output = compiled
+            .apply(ingress(&[0xb1, 102, 3]), parameter_at(0.0))
+            .unwrap();
+        assert!(
+            (output.event.value - 4.0 * 3.0 / 127.0).abs() < 0.011,
+            "a step of 0.01"
+        );
+        // ...and follows from then on, wherever it goes.
+        let output = compiled
+            .apply(ingress(&[0xb1, 102, 100]), parameter_at(0.0))
+            .unwrap();
+        assert!((output.event.value - 4.0 * 100.0 / 127.0).abs() < 0.011);
+        // The screen moves the parameter elsewhere: the knob is detached
+        // again, and crossing the new position is enough to take over.
+        compiled.observe_parameter("desktop.main", 17, 2.0);
+        assert!(
+            compiled
+                .apply(ingress(&[0xb1, 102, 20]), parameter_at(2.0))
+                .is_none()
+        );
+        let output = compiled
+            .apply(ingress(&[0xb1, 102, 90]), parameter_at(2.0))
+            .unwrap();
+        assert!((output.event.value - 4.0 * 90.0 / 127.0).abs() < 0.011);
+        // Another instance's parameter is not this link's business.
+        compiled.observe_parameter("elsewhere", 17, 0.0);
+        assert!(
+            compiled
+                .apply(ingress(&[0xb1, 102, 91]), parameter_at(0.0))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_host_that_cannot_say_where_the_parameter_is_lets_the_control_take_over() {
+        let mut compiled = CompiledParameterLink::new(
             link(ParameterLinkMessage::ControlChange { controller: 74 }),
             MidiSourceKey::new(7),
             &schema(ParameterKind::Float {
@@ -407,15 +614,100 @@ mod tests {
             }),
         )
         .unwrap();
-        let output = compiled.apply(ingress(&[0xb1, 74, 127])).unwrap();
+        assert!(
+            compiled
+                .apply(ingress(&[0xb1, 74, 127]), |_| None)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_gesture_is_never_held_back_by_the_pickup() {
+        let mut compiled = CompiledParameterLink::new(
+            link(ParameterLinkMessage::PitchBend),
+            MidiSourceKey::new(7),
+            &schema(ParameterKind::Float {
+                minimum: -1.0,
+                maximum: 1.0,
+                default: 0.0,
+                step: 0.01,
+                unit: None,
+                taper: ParameterTaper::Linear,
+            }),
+        )
+        .unwrap();
+        // The parameter is at the bottom and the wheel starts at the top.
+        assert!(
+            compiled
+                .apply(ingress(&[0xe1, 0x7f, 0x7f]), |_| Some(-1.0))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn normalizing_a_value_inverts_the_mapping() {
+        let log = ParameterKind::Float {
+            minimum: 0.25,
+            maximum: 4.0,
+            default: 1.0,
+            step: 0.01,
+            unit: None,
+            taper: ParameterTaper::Logarithmic,
+        };
+        for position in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let value = map_parameter_value(&log, position);
+            assert!((normalize_parameter_value(&log, value) - position).abs() < 0.02);
+        }
+        let choices = ParameterKind::Enum {
+            default: 0,
+            choices: vec![
+                EnumChoice {
+                    value: 0,
+                    name: "Pitch".into(),
+                },
+                EnumChoice {
+                    value: 1,
+                    name: "Amplitude".into(),
+                },
+                EnumChoice {
+                    value: 2,
+                    name: "Both".into(),
+                },
+            ],
+        };
+        assert_eq!(normalize_parameter_value(&choices, 2.0), 1.0);
+        assert_eq!(normalize_parameter_value(&choices, 1.0), 0.5);
+        assert_eq!(normalize_parameter_value(&ParameterKind::Trigger, 1.0), 1.0);
+    }
+
+    #[test]
+    fn cc_scales_float_and_preserves_pass_through() {
+        let mut compiled = CompiledParameterLink::new(
+            link(ParameterLinkMessage::ControlChange { controller: 74 }),
+            MidiSourceKey::new(7),
+            &schema(ParameterKind::Float {
+                minimum: -1.0,
+                maximum: 1.0,
+                default: 0.0,
+                step: 0.01,
+                unit: None,
+                taper: ParameterTaper::Linear,
+            }),
+        )
+        .unwrap();
+        let output = compiled.apply(ingress(&[0xb1, 74, 127]), |_| None).unwrap();
         assert_eq!(output.event.value, 1.0);
         assert_eq!(output.pass_through, ParameterLinkPassThrough::PassThrough);
-        assert!(compiled.apply(ingress(&[0xb0, 74, 127])).is_none());
+        assert!(
+            compiled
+                .apply(ingress(&[0xb0, 74, 127]), |_| None)
+                .is_none()
+        );
     }
 
     #[test]
     fn pitch_bend_maps_endpoints_and_exact_center() {
-        let compiled = CompiledParameterLink::new(
+        let mut compiled = CompiledParameterLink::new(
             link(ParameterLinkMessage::PitchBend),
             MidiSourceKey::new(7),
             &schema(ParameterKind::Float {
@@ -429,16 +721,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            compiled.apply(ingress(&[0xe1, 0, 0])).unwrap().event.value,
+            compiled
+                .apply(ingress(&[0xe1, 0, 0]), |_| None)
+                .unwrap()
+                .event
+                .value,
             -1.0
         );
         assert_eq!(
-            compiled.apply(ingress(&[0xe1, 0, 64])).unwrap().event.value,
+            compiled
+                .apply(ingress(&[0xe1, 0, 64]), |_| None)
+                .unwrap()
+                .event
+                .value,
             0.0
         );
         assert_eq!(
             compiled
-                .apply(ingress(&[0xe1, 127, 127]))
+                .apply(ingress(&[0xe1, 127, 127]), |_| None)
                 .unwrap()
                 .event
                 .value,
@@ -448,21 +748,29 @@ mod tests {
 
     #[test]
     fn bool_enum_trigger_and_pressure_quantize_to_valid_values() {
-        let boolean = CompiledParameterLink::new(
+        let mut boolean = CompiledParameterLink::new(
             link(ParameterLinkMessage::ChannelPressure),
             MidiSourceKey::new(7),
             &schema(ParameterKind::Boolean { default: false }),
         )
         .unwrap();
         assert_eq!(
-            boolean.apply(ingress(&[0xd1, 63])).unwrap().event.value,
+            boolean
+                .apply(ingress(&[0xd1, 63]), |_| None)
+                .unwrap()
+                .event
+                .value,
             0.0
         );
         assert_eq!(
-            boolean.apply(ingress(&[0xd1, 64])).unwrap().event.value,
+            boolean
+                .apply(ingress(&[0xd1, 64]), |_| None)
+                .unwrap()
+                .event
+                .value,
             1.0
         );
-        let enumeration = CompiledParameterLink::new(
+        let mut enumeration = CompiledParameterLink::new(
             link(ParameterLinkMessage::ControlChange { controller: 1 }),
             MidiSourceKey::new(7),
             &schema(ParameterKind::Enum {
@@ -486,13 +794,13 @@ mod tests {
         .unwrap();
         assert_eq!(
             enumeration
-                .apply(ingress(&[0xb1, 1, 127]))
+                .apply(ingress(&[0xb1, 1, 127]), |_| None)
                 .unwrap()
                 .event
                 .value,
             90.0
         );
-        let trigger = CompiledParameterLink::new(
+        let mut trigger = CompiledParameterLink::new(
             link(ParameterLinkMessage::Note { note: 60 }),
             MidiSourceKey::new(7),
             &schema(ParameterKind::Trigger),
@@ -500,14 +808,18 @@ mod tests {
         .unwrap();
         assert_eq!(
             trigger
-                .apply(ingress(&[0x91, 60, 100]))
+                .apply(ingress(&[0x91, 60, 100]), |_| None)
                 .unwrap()
                 .event
                 .value,
             1.0
         );
         assert_eq!(
-            trigger.apply(ingress(&[0x81, 60, 0])).unwrap().event.value,
+            trigger
+                .apply(ingress(&[0x81, 60, 0]), |_| None)
+                .unwrap()
+                .event
+                .value,
             0.0
         );
     }
@@ -565,7 +877,7 @@ mod tests {
         };
         let runtime_source_id = MidiSourceId::new("windows.endpoint.42").unwrap();
 
-        let automatic = compile_semantic_parameter_links(SemanticParameterLinkContext {
+        let mut automatic = compile_semantic_parameter_links(SemanticParameterLinkContext {
             controller_id: "org.rackforge.arturia",
             controller_name: "Arturia KeyLab",
             profile: &profile,
@@ -581,10 +893,13 @@ mod tests {
         assert_eq!(automatic[0].link.source.source_id, runtime_source_id);
         assert_eq!(
             automatic[0]
-                .apply(IngressMidiEvent {
-                    source: MidiSourceKey::new(5),
-                    packet: MidiPacket::new(0, &[0xb0, 109, 127]).unwrap(),
-                })
+                .apply(
+                    IngressMidiEvent {
+                        source: MidiSourceKey::new(5),
+                        packet: MidiPacket::new(0, &[0xb0, 109, 127]).unwrap(),
+                    },
+                    |_| None
+                )
                 .unwrap()
                 .event
                 .value,

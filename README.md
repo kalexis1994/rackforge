@@ -97,7 +97,8 @@ graph, so changing stage routing does not rewrite the plugin.
 Native CI builds are published in two editions for every supported platform:
 
 - **Standard** includes Concert Grand and the officially pinned instruments —
-  today RF-106 and RF-5 — so a new installation can be played immediately.
+  today RF-106, RF-5 and RF-7 — so a new installation can be played
+  immediately.
 - **Minimal** includes no instrument plugins. It keeps the complete RackForge
   host, Plugin Manager, controller support, and performance tools so you can
   install only the instruments you want.
@@ -115,11 +116,14 @@ Standard installations include:
 - **RF-106**, a portable virtual-analog synthesizer with its own PLAY interface
   and RackForge parameter mapping.
 - **RF-5**, a five-voice programmable polyphonic synthesizer.
+- **RF-7**, a six-operator FM instrument with its own panel, voice editor and
+  cartridge reader, built from the instrument's own firmware tables.
 
 Other open-source instruments include:
 
 - [RF-106 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-106)
 - [RF-5 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-5)
+- [RF-7 source and releases](https://github.com/kalexis1994/RF-7)
 - [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
   a SoundFont instrument that includes the sampled YDP Grand Piano
 

@@ -73,6 +73,30 @@ OFFICIAL_PLUGINS = (
             "web/styles.css",
         ),
     },
+    {
+        "filename": "RF-7.rfplugin",
+        "plugin_id": "org.rackforge.rf7",
+        "version": "0.4.0",
+        "url": "https://github.com/kalexis1994/RF-7/releases/download/v0.4.0/RF-7.rfplugin",
+        "sha256": "2b7ff96a30b238880cc58317c06f166ac57d3dd27a8d3ad707884cf2776c5d27",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/config.html",
+            "web/app.js",
+            "web/app_bg.wasm",
+            "web/style.css",
+        ),
+    },
 )
 
 

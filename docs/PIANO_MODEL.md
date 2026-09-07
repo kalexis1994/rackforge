@@ -828,6 +828,28 @@ hearing the keybed at arm's length, which is not where a player sits. The
 register law, the velocity law and the ring stay as measured; the metric
 gives back part of what 0.169 took, and that is the ear's call.
 
+**The treble's contact, read from the pulse (0.170, open).** The raw force
+trace of the integration (`strike_profile` now writes it with
+`CG_TRACE_OUT`), Fourier-read at the partials: at C6 the pulse is a clean
+Hann-like bell of 1.04 ms at velocity 36 and 0.69 ms at 117, with its
+second partial 22 and 20 dB under its first. The strike-point comb hands
+the second partial six back, which is the −16 to −18 the strike hands over
+and the render shows; the reference wants −29 at pp and −21 at ff, so the
+pulse would need its second partial at −35 and −27 — a pulse nearly twice
+as long, or one whose n-weighting the slope law does not add. Every felt
+sweep of the day had read as saturated because `FELT_TREBLE_GAIN` ramps
+linearly from C4 and "a thirtieth at C8" is a half at C6; measured with a
+decade-scale law (`FELT_TREBLE_DECADES`, 1.0 / 1.5 / 2.0), the treble's
+fortissimo ladder comes down from +11 dB over the reference to +8, +7, +6
+while its pianissimo goes UP from +7 to +7, +8, +9. A softer felt brightens
+the soft blow at the top: at C6 the pianissimo contact (1.04 ms) is one
+round trip (0.96), the far reflection ends it whatever the felt does, and
+the pulse's length is the string's. One decade ships, where the two blows
+meet. What the treble still needs is in the contact's physics — the near
+reflection from the agraffe, 2·x₀/c ≈ 0.07 ms at C6, lives above the 8 kHz
+the integration carries modes for — and in whether bridge force is the
+slope for a string this short, not in K.
+
 **The bass comb, two floors (0.166).** The reference notches the bass's
 eighth partial to −33 dB under its strongest (pp −36) and leaves the
 sixteenth at −28 (pp −39); the model at one floor of 0.26 had the eighth at

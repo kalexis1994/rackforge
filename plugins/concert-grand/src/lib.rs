@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 134;
+pub const KNOB_COUNT: usize = 135;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -768,6 +768,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "THUMP_RISE_DB",
         &THUMP_RISE_DB,
         "How much the thump rises against the note from A0 to C8, in decibels.",
+    ),
+    (
+        "FELT_TREBLE_DECADES",
+        &FELT_TREBLE_DECADES,
+        "A further softening of the top felt, in decades at C8, log-linear from C4.",
     ),
 ];
 
@@ -3713,6 +3718,19 @@ pub static FELT_TABLE_FLOOR: Knob = Knob::new(0.172);
 pub static FELT_BASS_GAIN: Knob = Knob::new(4.0);
 /// Multiplier on the felt stiffness at C8, fading to one at C4.
 pub static FELT_TREBLE_GAIN: Knob = Knob::new(1.0);
+/// A further softening of the top felt, in decades at C8, log-linear from
+/// C4 -- see the note where it is applied.
+///
+/// Swept at 1.0, 1.5 and 2.0 decades (2026-09-07, `ftd*` against `knock4`):
+/// the treble's fortissimo ladder came down from +11 dB over the reference
+/// to +8, +7 and +6, and its pianissimo went UP from +7 to +7, +8 and +9 --
+/// a softer felt brightens the soft blow at the top. That is the regime,
+/// not the felt: at C6 the pianissimo contact is 1.04 ms against a round
+/// trip of 0.96, so the far reflection throws the hammer off after one
+/// trip whatever the felt does, and the pulse's length is the string's.
+/// One decade is where the two blows meet; what the treble still needs is
+/// in the contact's physics, not in K.
+pub static FELT_TREBLE_DECADES: Knob = Knob::new(1.0);
 /// Level of the duplex segments' ring at 2.015 and 4.03 times the pitch (notes above the middle).
 pub static DUPLEX_LEVEL: Knob = Knob::new(0.018);
 /// The fastest beat a unison may leave at its fundamental, in hertz; caps the
@@ -5520,6 +5538,20 @@ impl ConcertGrand {
                 let treble_gain = 1.0
                     + (FELT_TREBLE_GAIN.get() - 1.0)
                         * ((position - 0.448) / (1.0 - 0.448)).clamp(0.0, 1.0);
+                // And a second softening, in DECADES from C4 to C8, because
+                // the linear one above is half applied at C6 and a quarter
+                // at C7: "the top felt at a thirtieth" was a half at C6, which
+                // is why every felt sweep of 2026-09-07 read as saturated.
+                // The force pulse the integration hands C6 has its second
+                // partial 22 dB under its first at pp where the reference's
+                // ladder wants 35 (the comb gives n2 six back): the contact is
+                // 1.0 ms and needs nearer two.
+                let treble_gain = treble_gain
+                    * powf(
+                        10.0,
+                        -FELT_TREBLE_DECADES.get()
+                            * ((position - 0.448) / (1.0 - 0.448)).clamp(0.0, 1.0),
+                    );
                 let house = FELT_EXPONENT_AT_BASS.get() + FELT_EXPONENT_RISE.get() * felt_position;
                 let reach = self.controls.felt_corner_travel();
                 // The top's own hardening, on top of the line: from the end
@@ -9774,6 +9806,22 @@ mod tests {
             render(&mut piano, 128, &[note_on(note, velocity)]);
             CONTACT_TRACE_ARMED.store(false, core::sync::atomic::Ordering::Relaxed);
             let trace = CONTACT_TRACE.lock().unwrap().clone();
+            // CG_TRACE_OUT=<dir>: the raw trace, one row per step, so the
+            // pulse can be read outside (step, force, hammer_y, string_y, v).
+            if let Ok(dir) = std::env::var("CG_TRACE_OUT") {
+                let mut text = String::from(
+                    "step,force,hammer_y,string_y,hammer_v
+",
+                );
+                for row in &trace {
+                    text += &format!(
+                        "{},{},{},{},{}
+",
+                        row[0], row[1], row[2], row[3], row[4]
+                    );
+                }
+                std::fs::write(format!("{dir}/trace{note:03}v{velocity}.csv"), text).unwrap();
+            }
             // Only the steps in contact (force > 0), which is the pulse.
             let contact: Vec<&[f32; 5]> = trace.iter().filter(|row| row[1] > 0.0).collect();
             if contact.is_empty() {

@@ -3584,6 +3584,27 @@
         "read_only": false,
         "advanced": true
       }
+    },
+    {
+      "index": 175,
+      "id": "knob_felt_treble_decades",
+      "name": "FELT_TREBLE_DECADES",
+      "page": "model_hammer",
+      "order": 41,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
     }
   ]
 }

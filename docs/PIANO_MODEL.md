@@ -860,6 +860,37 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**What sounds after a key comes up (0.171.13).** The user, with F6 on its
+damper: "por qué es el día y la noche en términos de sustain". The
+mechanism's boundary is a step — a key has a damper or it has not — but
+the sound after a key-up was never silence, and the model's was: a
+damped E6 sat at −93 dBFS 0.8 s after the key, where the reference's own
+release samples leave the instrument at −60 to −78 for a second. Two
+parts, both measured on those samples. (1) The key-off knock (`rel1..88`,
+the SFZ's "HammerNoise" group at −37 dB): −54 dBFS over five
+milliseconds on every key from E2 to C8, the undamped top included,
+falling 7 dB by 20 ms, 14 by 50, 20 by 100, 30 by 200, dark (30–150 Hz
+carries it, 1–3 kHz thirty-three under, above that fifty-five). The
+model's was −92. Now the strike's own dark burst rings again at key-up
+on every key (`KEYOFF_KNOCK`, T60 0.22 s) with a short click on the
+action path for the 1–3 kHz (`KEYOFF_CLICK`): isolated, −51 to −59 dBFS
+at C3, C4, E6, F♯6 and C7, tail −7/−12/−17/−24, bands within a few
+decibels. (2) The release resonance (`harmL*`): after a loud C6 the
+instrument keeps sounding at −60 dBFS 0.1 s after the key, −64 at 0.2,
+−74 at 0.4, −80 at 0.8, in the note's own band — the strings above the
+last damper catching the partials they share. The model's bank was
+forty-eight resonators at drawn frequencies, which a partial rarely met
+(a released C6 left −81 at 0.2 s and −97 at 0.8; thirty times the
+coupling moved it two decibels). The bank is now the free strings
+themselves: every note above the last damper with its partial ladder to
+7 kHz at its own inharmonicity, panned where it sits, its bank copy
+silent while its own voice sounds (it caught itself and swelled its note
+by seven decibels). `UNDAMPED_MIX` 0.12 → 4.5, from a sweep against the
+samples: the residue after an 80 ms key now sits within five decibels of
+the reference at C4, C5, A5, C6 and D♯6 from 0.1 to 0.8 s. E6 released
+against F♯6 released at 0.4 s: −76 against −46 dBFS, the reference's own
+thirty to thirty-seven.
+
 **The last damper is on F6 (0.171.12).** The user, with the boundary at
 E6: "es muy evidente, F6 en adelante las notas duran mucho más ...
 pareciera como si tuviera el pedal de sustain". Measured: F♯6 released

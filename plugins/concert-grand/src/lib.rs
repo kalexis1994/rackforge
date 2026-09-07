@@ -2125,6 +2125,33 @@ const THUMP_NOISE_GAIN: f32 = 22.0;
 /// -60 dB figure, twice that).
 const PEDAL_NOISE_POLES_HZ: (f32, f32, f32) = (100.0, 600.0, 30.0);
 const PEDAL_NOISE_T60_S: f32 = 1.0;
+/// The key coming back: every key of the compass, damper or not.
+///
+/// Measured on the reference's own key-off samples (`rel1..rel88`, the
+/// SFZ's "HammerNoise" group at -37 dB, release velocity 64): a knock
+/// peaking at -54 dBFS over five milliseconds on every key from E2 to C8
+/// -- the undamped top included, -55 to -62 up there -- falling seven
+/// decibels by 20 ms, fourteen by 50, twenty by 100 and thirty by 200,
+/// dark: the 30-150 Hz band carries it, 150-400 seven under, 400-1000
+/// fourteen, 1-3 kHz thirty-three, above that fifty-five. The model's
+/// release knock sat at -92 dBFS, and a damped note went to silence
+/// (-93 dBFS 0.8 s after the key) where the reference's release samples
+/// leave the instrument at -60 to -78 for a second. So a damped E6 stopped
+/// dead and a free F#6 rang, "el día y la noche"; the mechanism's boundary
+/// is a step, but the sound after a key-up never was silence. The knock is
+/// the strike's own dark burst (`THUMP_CORNER_HZ`) rung again at key-up,
+/// with this level at release velocity 64 and this ring, on every key.
+/// `KEYOFF_KNOCK` is calibrated on the isolated knock (a render minus the
+/// same render with Release Noise at its floor) at E6, F#6 and C4.
+const KEYOFF_KNOCK: f32 = 0.28;
+const KEYOFF_T60_S: f32 = 0.22;
+/// The click in the key-off: the reference's 1-3 kHz sits thirty-three
+/// decibels under its 30-150, and the dark burst alone had it at
+/// fifty-five. A short bright burst on the voice's action-noise path, as
+/// a share of the knock's amplitude, its corner and its ring.
+const KEYOFF_CLICK: f32 = 0.3;
+const KEYOFF_CLICK_HZ: f32 = 1200.0;
+const KEYOFF_CLICK_T60_S: f32 = 0.03;
 /// The felt's hardening exponent across the compass, before any voicing.
 ///
 /// In `F = K*x^p`, p is how sharply the felt stiffens as it is squashed, so it
@@ -2611,13 +2638,30 @@ pub static OPEN_MIX: Knob = Knob::new(0.012);
 /// resonators is a glockenspiel. Real duplex lengths are set by where the
 /// duplex bar happens to cross each string, so their pitches are scattered,
 /// not scalar, and that is what makes them read as texture.
-const UNDAMPED_COUNT: usize = 48;
+const UNDAMPED_COUNT: usize = 96;
+/// The free strings' resonance after a key-up, measured on the reference's
+/// release-resonance samples (`harmL*`, struck at velocity 45 and up, the
+/// SFZ's -4 dB): after a C6 the instrument keeps sounding at -60 dBFS
+/// 0.1 s after the key, -64 at 0.2, -74 at 0.4, -80 at 0.8, and the
+/// energy sits in the note's own band -- the strings above the last
+/// damper catching the partials they share (a C6's second is a C7's
+/// fundamental, its third a G7's). The model's bank was forty-eight
+/// resonators at drawn frequencies, which a partial rarely met: a released
+/// C6 left -81 dBFS at 0.2 s and -97 at 0.8, twenty short, and thirty
+/// times the coupling moved it by two decibels. So the bank is now the
+/// free strings themselves: every note above `LAST_DAMPER_NOTE`, each
+/// with its partial ladder up to `UNDAMPED_HIGH_HZ` at the note's own
+/// inharmonicity, ringing `UNDAMPED_T60_LOW_S` at the bottom of the range
+/// and `UNDAMPED_T60_HIGH_S` at the top, panned where the string is.
+/// `UNDAMPED_MIX` is then the coupling, calibrated on the residue after
+/// an 80 ms key at C5, A5, C6 and D#6 against those samples.
+const FREE_STRING_PARTIALS: usize = 8;
 pub static UNDAMPED_LOW_HZ: Knob = Knob::new(1900.0);
 pub static UNDAMPED_HIGH_HZ: Knob = Knob::new(7000.0);
 /// Undamped, but not endless: these are short, light, well-terminated lengths.
 pub static UNDAMPED_T60_LOW_S: Knob = Knob::new(2.6);
 pub static UNDAMPED_T60_HIGH_S: Knob = Knob::new(0.9);
-pub static UNDAMPED_MIX: Knob = Knob::new(0.12);
+pub static UNDAMPED_MIX: Knob = Knob::new(4.5);
 
 /// The damped strings, ringing anyway: the bed under every note.
 ///
@@ -3367,6 +3411,42 @@ impl Voice {
         }
     }
 
+    /// The key coming back to rest: the dark burst of the strike, again,
+    /// at the level the reference's key-off samples have. See `KEYOFF_KNOCK`.
+    fn key_off_knock(
+        &mut self,
+        amplitude: f32,
+        decay: f32,
+        rise_step: f32,
+        seed: u32,
+        sample_rate: f32,
+    ) {
+        if amplitude <= self.thump_amp {
+            return;
+        }
+        self.thump_amp = amplitude;
+        self.thump_decay = decay;
+        self.thump_rise = 1.0;
+        self.thump_rise_step = rise_step;
+        self.thump_x1 = 0.0;
+        self.thump_x2 = 0.0;
+        self.thump_y1 = 0.0;
+        self.thump_y2 = 0.0;
+        self.thump_z1 = 0.0;
+        self.thump_z2 = 0.0;
+        self.thump_floor = 0.0;
+        self.thump_seed = seed | 1;
+        let click = amplitude * KEYOFF_CLICK;
+        if click > self.noise_amp {
+            self.noise_amp = click;
+            self.noise_coefficient =
+                1.0 - expf(-core::f32::consts::TAU * KEYOFF_CLICK_HZ / sample_rate);
+            self.noise_decay = expf(-LN_1000 / (KEYOFF_CLICK_T60_S * sample_rate));
+            self.noise_shrink = 1.0;
+            self.noise_lp = 0.0;
+        }
+    }
+
     fn damp(&mut self, factor: f32, thud_coefficient: f32, thud_decay: f32, release_gain: f32) {
         for partial in &mut self.partials[..self.partial_count] {
             for lane in 0..LANES {
@@ -3856,6 +3936,13 @@ pub struct ConcertGrand {
     /// The undamped top-octave strings, always listening to the bridge.
     open_strings: [BodyMode; OPEN_STRINGS.len()],
     undamped: [BodyMode; UNDAMPED_COUNT],
+    /// Which note each free-string resonator belongs to, and which notes
+    /// have a sounding voice this block: a string that is being played is
+    /// the voice, not the bank, so its bank copy takes no drive meanwhile
+    /// -- measured, the copy caught its own note and swelled it by seven
+    /// decibels at 0.4 s.
+    undamped_note: [u8; UNDAMPED_COUNT],
+    note_sounding: [bool; NOTE_COUNT],
     /// The damped strings' bed: forty fundamentals, A0 up, humming under everything.
     bed: [BodyMode; BED_COUNT],
     /// The open-register shimmer: short undamped HF feedback delay network.
@@ -3999,6 +4086,8 @@ impl Default for ConcertGrand {
             board_count: 0,
             open_strings: [BodyMode::default(); OPEN_STRINGS.len()],
             undamped: [BodyMode::default(); UNDAMPED_COUNT],
+            undamped_note: [0; UNDAMPED_COUNT],
+            note_sounding: [false; NOTE_COUNT],
             bed: [BodyMode::default(); BED_COUNT],
             halo: [[0.0; HALO_BUFFER]; 4],
             halo_len: [1; 4],
@@ -4874,29 +4963,43 @@ impl ConcertGrand {
 
     fn tune_undamped(&mut self) {
         self.tune_bed();
-        let span = UNDAMPED_HIGH_HZ.get() / UNDAMPED_LOW_HZ.get();
-        let step = powf(span, 1.0 / (UNDAMPED_COUNT - 1) as f32);
-        let mut frequency = UNDAMPED_LOW_HZ.get();
-        for (i, string) in self.undamped.iter_mut().enumerate() {
-            let scatter = 1.0
-                + 0.33
-                    * (hash01((i as u32).wrapping_mul(2_654_435_761)) - 0.5)
-                    * (step - 1.0)
-                    * 2.0;
-            let hz = clamp_between(
-                frequency * scatter,
-                UNDAMPED_LOW_HZ.get(),
-                UNDAMPED_HIGH_HZ.get(),
-            );
-            // Shorter lengths ring less: the T60 falls across the bank.
-            let t = i as f32 / (UNDAMPED_COUNT - 1) as f32;
-            let t60 = UNDAMPED_T60_LOW_S.get()
-                + (UNDAMPED_T60_HIGH_S.get() - UNDAMPED_T60_LOW_S.get()) * t;
-            // Alternating sides with a wobble, because they sit along the
-            // bridge and are not heard from one point.
-            let pan = 0.5 + 0.42 * (hash01(i as u32 * 40_503 + 7) - 0.5) * 2.0;
-            *string = BodyMode::tune(hz, t60, pan.clamp(0.05, 0.95), self.sample_rate);
-            frequency *= step;
+        let low = UNDAMPED_LOW_HZ.get().min(UNDAMPED_HIGH_HZ.get());
+        let high = UNDAMPED_HIGH_HZ
+            .get()
+            .max(low * 1.01)
+            .min(0.45 * self.sample_rate);
+        let mut index = 0;
+        for note in (LAST_DAMPER_NOTE + 1)..=(LOW_NOTE + NOTE_COUNT as u8 - 1) {
+            let f0 = self.fundamental[(note - LOW_NOTE) as usize].max(20.0);
+            let b = self.inharmonicity_for(note);
+            let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+            let pan = (0.5 + 0.8 * (position - 0.5) * self.controls.width).clamp(0.05, 0.95);
+            for k in 1..=FREE_STRING_PARTIALS {
+                if index >= UNDAMPED_COUNT {
+                    break;
+                }
+                let kf = k as f32;
+                let hz = kf * f0 * sqrtf(1.0 + b * kf * kf);
+                if hz >= high {
+                    break;
+                }
+                // The ring falls with frequency between the range's ends.
+                let t = ((hz - low) / (high - low)).clamp(0.0, 1.0);
+                let t60 = UNDAMPED_T60_LOW_S.get()
+                    + (UNDAMPED_T60_HIGH_S.get() - UNDAMPED_T60_LOW_S.get()) * t;
+                self.undamped[index] = BodyMode::tune(hz, t60, pan, self.sample_rate);
+                self.undamped_note[index] = note;
+                index += 1;
+            }
+        }
+        for (string, owner) in self
+            .undamped
+            .iter_mut()
+            .zip(self.undamped_note.iter_mut())
+            .skip(index)
+        {
+            *string = BodyMode::default();
+            *owner = 0;
         }
     }
 
@@ -7378,8 +7481,16 @@ impl ConcertGrand {
         let pressure = self.pedal_pressure;
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
+        let key_off = KEYOFF_KNOCK * release_gain;
+        let key_off_decay = expf(-LN_1000 / (KEYOFF_T60_S * rate));
+        let key_off_rise = expf(-1.0 / (0.002 * rate));
+        let key_off_seed = self
+            .damp_serial
+            .wrapping_mul(0x9E37_79B9)
+            .wrapping_add((note as u32).wrapping_mul(2_654_435_761));
         for voice in &mut self.voices {
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
+                voice.key_off_knock(key_off, key_off_decay, key_off_rise, key_off_seed, rate);
                 if voice.undamped {
                     // No felt lands: the key comes up and the string goes
                     // on ringing exactly as it was. `sustained` keeps it
@@ -8432,6 +8543,15 @@ impl Processor for ConcertGrand {
         let knob_board_mix = BOARD_MIX.get();
         let knob_halo_mix = HALO_MIX.get();
         self.tune_pair();
+        self.note_sounding = [false; NOTE_COUNT];
+        for voice in &self.voices {
+            if !(voice.active && !voice.halo && voice.note >= LOW_NOTE) {
+                continue;
+            }
+            if let Some(slot) = self.note_sounding.get_mut((voice.note - LOW_NOTE) as usize) {
+                *slot = true;
+            }
+        }
         let knob_headroom = HEADROOM.get();
         let knob_open_mix = OPEN_MIX.get();
         let pedal_c1 =
@@ -8630,8 +8750,10 @@ impl Processor for ConcertGrand {
             // Every other string's undamped length, listening to the bridge.
             let mut undamped_left = 0.0;
             let mut undamped_right = 0.0;
-            for string in &mut self.undamped {
-                let y = string.tick(excitation);
+            for (string, owner) in self.undamped.iter_mut().zip(self.undamped_note.iter()) {
+                let sounding =
+                    *owner >= LOW_NOTE && self.note_sounding[(*owner - LOW_NOTE) as usize];
+                let y = string.tick(if sounding { 0.0 } else { excitation });
                 undamped_left += y * string.pan_left;
                 undamped_right += y * string.pan_right;
             }

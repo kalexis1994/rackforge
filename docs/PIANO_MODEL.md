@@ -668,6 +668,25 @@ slot, so inserting modes in front re-rolled every drawn mode's jitter, pan,
 strength and sign; they seed from their own counter now, and the bank at
 share zero is bit-identical to the bank before.)
 
+**The treble, measured (0.165.1, open).** Above its second partial the
+treble runs six to eight decibels bright at ff and its pianissimo is nearly
+as bright as its fortissimo (n2 at −18 dB under n1 at both blows; the
+reference has −21 and −29). Ruled out by ablation on the grid, each
+alone and all together: the action, release and pedal noises, the impact
+burst, the knock, the duplex, the undamped and open banks, the halo, the
+bloom, the clang and the phantoms — none moves the ladder by a decibel.
+Ruled out as a lever: softening the top felt to a quarter (a decibel); the
+Stulov hysteresis at 0.9 (nothing); simulating the top octave instead of
+drawing it (0.2 points worse, same shape). What the strike itself hands
+over at C6 (`what_the_strike_hands_over`, now taking CG_NOTE) is n2 at
+−17.6 dB under n1 at velocity 36 and −14.6 at 117, from contacts of 1.40
+and 1.08 ms: the integration's pianissimo at the top does not lengthen the
+contact the way the reference's ladder says a real one does (about two to
+one). The felt's exponent is the fortissimo lever — FELT_EXPONENT_RISE 1.2
+took the treble's ff ladder from +7.6 to +1.2 dB — but it rises from the
+bass and took the tenor's pianissimo with it (−13 dB), so it needs a
+register-local form before it is a fix. That is the next item.
+
 What the same survey said was NOT the chain: the tenor's pianissimo was
 thirty to forty decibels darker than the reference above 1 kHz (n8 at
 −76 dB against −40) while its fortissimo was close, so the model's touch

@@ -5169,6 +5169,18 @@ impl ConcertGrand {
             {
                 sim_modes += 1;
             }
+            // Four simulated modes or the recipe. Above G#6 a note has fewer
+            // than four partials under SIM_TOP_HZ, so the top octave and a
+            // half is drawn, not struck. Simulating whatever a note has was
+            // tried against the reference (2026-09-07, `trebsim` against
+            // `span12`): the treble came out 0.2 points WORSE, its pianissimo
+            // second partial at -18 dB under the first either way where the
+            // reference has -29 -- the integration's own pianissimo at the
+            // top is as bright as its fortissimo (C6 contact 1.40 ms pp,
+            // 1.08 ms ff; the reference's ladder wants about two to one), so
+            // the strike and the recipe are wrong in the same place, and the
+            // recipe is cheaper. The treble's hammer is the open item, not
+            // this gate.
             if sim_modes >= 4 && self.strike_budget > 0 {
                 self.strike_budget -= 1;
                 // Everything the contact needs, in physical units.
@@ -9441,8 +9453,8 @@ mod tests {
             "{:>5} {:>4} {:>12} {:>12} {:>8}",
             "note", "vel", "simulado", "pedido", "razon"
         );
-        for note in [21u8, 36, 48, 60] {
-            for velocity in [60u8, 127] {
+        for note in [21u8, 36, 48, 60, 72, 84, 96, 108] {
+            for velocity in [36u8, 117] {
                 CONTACT_STEPS.store(0, core::sync::atomic::Ordering::Relaxed);
                 let mut piano = prepared();
                 render(&mut piano, 128, &[note_on(note, velocity)]);
@@ -10391,9 +10403,10 @@ mod tests {
     #[test]
     #[ignore]
     fn what_the_strike_hands_over() {
-        for velocity in [40u8, 125u8] {
+        let note: u8 = std::env::var("CG_NOTE").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+        for velocity in [36u8, 117u8] {
             let mut piano = prepared();
-            render(&mut piano, 64, &[note_on(60, velocity)]);
+            render(&mut piano, 64, &[note_on(note, velocity)]);
             let voice = piano.voices.iter().find(|v| v.active).unwrap();
             let mut num = 0.0f64;
             let mut den = 0.0f64;
@@ -10411,13 +10424,15 @@ mod tests {
                 den += e;
             }
             let cent = (num / den.max(1e-30)).exp();
-            for (i, p) in voice.partials[..voice.partial_count.min(14)]
+            for (i, p) in voice.partials[..voice.partial_count.min(20)]
                 .iter()
                 .enumerate()
             {
+                let hz = (p.rs[0].atan2(p.rc[0]) as f64).abs() * FS / core::f64::consts::TAU;
                 rows += &format!(
-                    " n{}:{:.1}dB",
+                    " n{}@{:.0}Hz:{:.1}dB",
                     i + 1,
+                    hz,
                     10.0 * (p.lane_magnitude_squared(0) as f64).max(1e-30).log10()
                 );
             }

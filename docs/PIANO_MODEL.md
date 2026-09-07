@@ -860,6 +860,20 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The contact's ramp (0.171.4, unverified by ear).** With the phases
+dispersed the user heard the pick LOUDER, which says what it is: a voice
+that jumps in one sample from rest to the state the integration hands
+over at the end of the contact, and with the phases in step that jump
+happened to cancel in the output where the dispersed one does not. A
+fresh voice now fades in over `ATTACK_RAMP_S` (1.5 ms, a smoothstep) —
+the string builds up under the hammer — and the merge is back to pushing
+magnitude into the cosine quadrature only, because a living voice cannot
+be ramped from rest. Measured, the ramp removes no sample step the
+detector can see (there was none it could see), and the crest comes back
+up (A3 +9): the pulse is delayed, not gone. The ear is the instrument
+here; every knob of this family is on the panel (`ATTACK_DISPERSION`,
+`ATTACK_RAMP_S`, `RESTRIKE_MERGE`) so it can be heard one at a time.
+
 **The attack was a pulse (0.171.3, partly fixed).** With the FLAC of the
 render heard on another machine, the "pick" was in the samples, and every
 attack component switched off in turn left it in place; the merge and the

@@ -3647,6 +3647,27 @@
         "read_only": false,
         "advanced": true
       }
+    },
+    {
+      "index": 178,
+      "id": "knob_attack_ramp_s",
+      "name": "ATTACK_RAMP_S",
+      "page": "model_hammer",
+      "order": 44,
+      "kind": {
+        "type": "float",
+        "minimum": 9.375e-05,
+        "maximum": 0.024,
+        "step": 1e-05,
+        "default": 0.0015,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
     }
   ]
 }

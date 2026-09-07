@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 137;
+pub const KNOB_COUNT: usize = 138;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -783,6 +783,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "ATTACK_DISPERSION",
         &ATTACK_DISPERSION,
         "Initial-phase dispersion of a strike, radians per harmonic.",
+    ),
+    (
+        "ATTACK_RAMP_S",
+        &ATTACK_RAMP_S,
+        "How long a fresh voice fades in from rest: the hammer's contact, in seconds.",
     ),
 ];
 
@@ -2041,6 +2046,10 @@ pub static RESTRIKE_MERGE: Knob = Knob::new(1.0);
 /// The A4 and A5 do not move with it (+4 and 0 against -27 and -26): what
 /// spikes those is not phase, and is still open.
 pub static ATTACK_DISPERSION: Knob = Knob::new(0.8);
+/// How long a fresh voice takes to fade in from rest: the hammer's contact,
+/// during which the string builds up to the state the integration hands
+/// over. A smoothstep, zero slope at both ends.
+pub static ATTACK_RAMP_S: Knob = Knob::new(0.0015);
 
 /// Amplitude T60 of a board mode: `ln(10^3) / (π·f·η)`.
 fn board_t60(frequency: f32, loss: f32) -> f32 {
@@ -2587,6 +2596,14 @@ struct Voice {
     /// A sympathetic halo shadow, not a struck note: never a re-strike
     /// target.
     halo: bool,
+    /// The contact's ramp: a fresh voice fades in over ATTACK_RAMP_S from
+    /// nothing, because the string is at rest when the hammer arrives and
+    /// only reaches the state the integration hands over at the END of the
+    /// contact. Starting the partials at that state in one sample is a
+    /// step in the output -- a click on every note, made plain the moment
+    /// the phases were dispersed and the step stopped cancelling.
+    onset: f32,
+    onset_step: f32,
     /// This string's own damper: how firmly its felt seats, drawn once at
     /// the strike. A half pedal presses and relieves through the SAME
     /// damper, so every relief undoes exactly the press it answers.
@@ -2664,6 +2681,8 @@ impl Default for Voice {
             sostenuto: false,
             damper_applied: 0.0,
             halo: false,
+            onset: 1.0,
+            onset_step: 0.0,
             firmness: 1.0,
             partials: [Partial::default(); MAX_PARTIALS],
             partial_count: 0,
@@ -2776,6 +2795,11 @@ impl Voice {
             // The knock darkens as it dies: a tapped soundboard's noise is a
             // low-pass whose bandwidth contracts over time.
             self.noise_coefficient *= self.noise_shrink;
+        }
+        if self.onset < 1.0 {
+            let x = self.onset;
+            self.onset = (x + self.onset_step).min(1.0);
+            return sum * (x * x * (3.0 - 2.0 * x));
         }
         sum
     }
@@ -6423,8 +6447,15 @@ impl ConcertGrand {
                         // the magnitude into `c` alone put every merged
                         // partial back in step -- the pulse the dispersion had
                         // just removed, on every repeated note.
-                        existing.s[lane] += fresh.s[lane];
-                        existing.c[lane] += fresh.c[lane];
+                        //
+                        // Into `c` alone, after all: a living voice cannot be
+                        // ramped from rest, so the merged blow must not step
+                        // the output, and only the cosine quadrature keeps
+                        // `s` continuous. The repeated note starts more in
+                        // step than a fresh one; it does not click.
+                        let energy =
+                            sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
+                        existing.c[lane] += if fresh.c[lane] < 0.0 { -energy } else { energy };
                     }
                     existing.coupling = fresh.coupling;
                 } else if voice.partial_count < MAX_PARTIALS {
@@ -6484,6 +6515,8 @@ impl ConcertGrand {
         voice.sostenuto = false;
         voice.damper_applied = 0.0;
         voice.firmness = firmness;
+        voice.onset = 0.0;
+        voice.onset_step = 1.0 / (ATTACK_RAMP_S.get().max(1e-4) * sample_rate);
         voice.partials = partials;
         voice.partial_count = placed;
         voice.duplex = duplex;

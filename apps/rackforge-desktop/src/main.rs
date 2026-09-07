@@ -4272,44 +4272,24 @@ impl DesktopApp {
         let state = self.session.read().expect("session lock poisoned");
         let revision = state.revision;
         let mut instance_id = instance_id.clone();
-        if state.active_instance_id.as_ref() != Some(&instance_id) {
+        if !self
+            .plugins
+            .iter()
+            .any(|plugin| plugin.instance_id == instance_id.as_str())
+        {
             // The panel this came from may have been opened before its plugin
             // was reinstalled or reactivated, which mints a new instance id.
-            // The panel keeps working -- and every control on it silently
-            // stops doing anything, because this guard rejected each edit
-            // with an error only a status line showed. If the ACTIVE instance
-            // is the same plugin, the edit is for it.
-            let stale_plugin = self
-                .plugins
-                .iter()
-                .find(|plugin| plugin.instance_id == instance_id.as_str())
-                .map(|plugin| plugin.plugin_id.clone());
-            let active = state.active_instance_id.clone();
-            let retarget = match (stale_plugin, &active) {
-                (Some(plugin_id), Some(active_id)) => self
-                    .plugins
-                    .iter()
-                    .any(|plugin| {
-                        plugin.instance_id == active_id.as_str() && plugin.plugin_id == plugin_id
-                    })
-                    .then(|| active_id.clone()),
-                // The stale id is gone entirely: if the active instance
-                // exists at all, route the edit there rather than nowhere.
-                (None, Some(active_id)) => Some(active_id.clone()),
-                _ => None,
+            // Reads for a current inactive voice are valid: CONFIG can inspect
+            // any installed plugin while another instrument owns PLAY. Only a
+            // genuinely stale id falls back to the active instance.
+            let Some(active_id) = state.active_instance_id.clone() else {
+                return ControlResponse::Error {
+                    code: ControlErrorCode::NotFound,
+                    message: format!("Plugin instance {instance_id} does not exist"),
+                    current_revision: Some(revision),
+                };
             };
-            match retarget {
-                Some(target) => instance_id = target,
-                None => {
-                    return ControlResponse::Error {
-                        code: ControlErrorCode::Rejected,
-                        message: format!(
-                            "Plugin instance {instance_id} is not the active Desktop plugin"
-                        ),
-                        current_revision: Some(revision),
-                    };
-                }
-            }
+            instance_id = active_id;
         }
         drop(state);
 

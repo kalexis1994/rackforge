@@ -2086,8 +2086,10 @@ mod tests {
         let mut shared = vec![0_u8; words * 4];
         coordinator.parallel_read_shared(&mut shared).unwrap();
         shared
-            .chunks_exact(4)
-            .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| f32::from_le_bytes(*chunk))
             .collect()
     }
 

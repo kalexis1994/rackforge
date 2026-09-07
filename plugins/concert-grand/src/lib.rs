@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 135;
+pub const KNOB_COUNT: usize = 137;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -773,6 +773,16 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "FELT_TREBLE_DECADES",
         &FELT_TREBLE_DECADES,
         "A further softening of the top felt, in decades at C8, log-linear from C4.",
+    ),
+    (
+        "RESTRIKE_MERGE",
+        &RESTRIKE_MERGE,
+        "Whether a re-strike merges into the living voice (1) or eases it out and strikes fresh (0).",
+    ),
+    (
+        "ATTACK_DISPERSION",
+        &ATTACK_DISPERSION,
+        "Initial-phase dispersion of a strike, radians per harmonic.",
     ),
 ];
 
@@ -2017,6 +2027,20 @@ pub static FELT_EXPONENT_TREBLE: Knob = Knob::new(0.0);
 /// integrated rather than drawn. Four leaves everything above G#6 to the
 /// recipe; one strikes every note.
 pub static SIM_MIN_MODES: Knob = Knob::new(4.0);
+/// Whether a re-strike merges into the living voice (1) or eases it out and
+/// strikes fresh (0) -- a switch for the ear, not a voicing.
+pub static RESTRIKE_MERGE: Knob = Knob::new(1.0);
+/// Initial-phase dispersion of a strike, radians per harmonic -- see the
+/// note where it is applied.
+///
+/// 0.8 (2026-09-07). Measured as the attack's crest -- the peak RMS of the
+/// first 1.5 ms against the mean of 4-7.5 ms -- against the reference:
+/// Salamander's A3 sits 10-14 dB BELOW its own body in that window and
+/// rises into it; the model's sat +12 dB above it, a pulse. At 0.8 radians
+/// per harmonic the A3 comes out at -5 and the A2 at velocity 90 at -1.
+/// The A4 and A5 do not move with it (+4 and 0 against -27 and -26): what
+/// spikes those is not phase, and is still open.
+pub static ATTACK_DISPERSION: Knob = Knob::new(0.8);
 
 /// Amplitude T60 of a board mode: `ln(10^3) / (π·f·η)`.
 fn board_t60(frequency: f32, loss: f32) -> f32 {
@@ -5227,7 +5251,8 @@ impl ConcertGrand {
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
         for (slot, voice) in self.voices.iter_mut().enumerate() {
-            if voice.active
+            if RESTRIKE_MERGE.get() >= 0.5
+                && voice.active
                 && !voice.halo
                 && voice.note == note
                 && voice.channel == channel
@@ -5820,6 +5845,24 @@ impl ConcertGrand {
                 phase_o[n] = cos_t;
             }
         }
+        // And a dispersion over the whole ladder: each partial's initial
+        // phase turned back by ATTACK_DISPERSION radians per harmonic. With
+        // every partial starting in step the first millisecond of a note is
+        // a pulse -- measured, the model's A3 at velocity 73 peaks 8 dB
+        // above its own 4-7.5 ms body inside 1.5 ms where the reference's
+        // sits 10 to 14 dB BELOW it and rises into it -- and a pulse at the
+        // top of every attack is heard as a pick. Dispersion is what a
+        // stiff string and a bridge with delay do to a strike's phases.
+        let dispersion = ATTACK_DISPERSION.get();
+        if dispersion > 0.0 {
+            for n in 0..count {
+                let theta = -dispersion * n as f32;
+                let (sin_t, cos_t) = sincosf(theta);
+                let (q, o) = (phase_q[n], phase_o[n]);
+                phase_q[n] = q * cos_t + o * sin_t;
+                phase_o[n] = o * cos_t - q * sin_t;
+            }
+        }
 
         let floor = peak * 1e-3;
         let budget_left = PARTIAL_BUDGET.saturating_sub(self.active_partials);
@@ -6371,10 +6414,17 @@ impl ConcertGrand {
                             existing.rs[lane] = fresh.rs[lane];
                             continue;
                         }
-                        let energy =
-                            sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
-                        let push = if fresh.c[lane] < 0.0 { -energy } else { energy };
-                        existing.c[lane] += push;
+                        //
+                        // With the strike's phases dispersed (ATTACK_DISPERSION)
+                        // the fresh phasors no longer add up to a pulse, and a
+                        // fresh note starts from exactly this sum with no click
+                        // measured; so the merge takes the fresh phasor whole,
+                        // both quadratures, and keeps the dispersion. Pushing
+                        // the magnitude into `c` alone put every merged
+                        // partial back in step -- the pulse the dispersion had
+                        // just removed, on every repeated note.
+                        existing.s[lane] += fresh.s[lane];
+                        existing.c[lane] += fresh.c[lane];
                     }
                     existing.coupling = fresh.coupling;
                 } else if voice.partial_count < MAX_PARTIALS {

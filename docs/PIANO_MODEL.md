@@ -860,6 +860,28 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The attack was a pulse (0.171.3, partly fixed).** With the FLAC of the
+render heard on another machine, the "pick" was in the samples, and every
+attack component switched off in turn left it in place; the merge and the
+drawn strike too. What the A/B could not say, the reference did: measured
+as the attack's CREST — the peak RMS of the first 1.5 ms against the mean
+of 4 to 7.5 ms — Salamander's A3 sits 10 to 14 dB below its own body in
+that window and rises into it, its A4 27 below, its A2 7; the model's A3
+sat 12 dB ABOVE, its A2 at velocity 60 16 above. Every partial started in
+step, and a ladder in step is a pulse at the top of every note. That is
+the pick. `ATTACK_DISPERSION` turns each partial's initial phase back by
+0.8 radians per harmonic — what a stiff string and a bridge with delay do
+to a strike's phases; the bass already had a hand-drawn version of it on
+its first six partials — and the A3 comes out at −5 dB, the A2 at
+velocity 90 at −1. The merge now takes the fresh phasor in both
+quadratures so a repeated note keeps the dispersion (pushing magnitude
+into the cosine alone put every merged partial back in step); a re-struck
+A3 measures +4.6 against a fresh one's −4.8, with no larger sample step.
+Still open, and named: the A2 at velocity 60 keeps a +14 dB crest that
+goes away with the impact burst off (the tension kick's 1.5 ms pulse), and
+the A4 and A5 keep +4 and 0 against −27 and −26 whatever the phases —
+those two spike from something that is not phase and not an extra.
+
 **FIXED (0.171.2): a re-struck note arrived without its bloom.** The
 "pequeño popeo" survived the thud fix, and the synthetic case said why the
 thud was never it: at 1:11 the pedal had already been relieved to zero, so

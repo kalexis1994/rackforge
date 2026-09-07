@@ -3605,6 +3605,48 @@
         "read_only": false,
         "advanced": true
       }
+    },
+    {
+      "index": 176,
+      "id": "knob_restrike_merge",
+      "name": "RESTRIKE_MERGE",
+      "page": "model_hammer",
+      "order": 42,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 177,
+      "id": "knob_attack_dispersion",
+      "name": "ATTACK_DISPERSION",
+      "page": "model_hammer",
+      "order": 43,
+      "kind": {
+        "type": "float",
+        "minimum": 0.05,
+        "maximum": 12.8,
+        "step": 0.01,
+        "default": 0.8,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
     }
   ]
 }

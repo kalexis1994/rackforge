@@ -715,21 +715,6 @@
       "suggested_control": "list"
     },
     {
-      "index": 200,
-      "id": "preamp",
-      "name": "Preamp",
-      "page": "room",
-      "order": 7,
-      "kind": {
-        "type": "float",
-        "minimum": 0.0,
-        "maximum": 30.0,
-        "step": 0.1,
-        "default": 4.5,
-        "unit": "dB"
-      }
-    },
-    {
       "index": 41,
       "id": "knob_radiation_corner_hz",
       "name": "RADIATION_CORNER_HZ",
@@ -3666,6 +3651,63 @@
         "modulatable": false,
         "read_only": false,
         "advanced": true
+      }
+    },
+    {
+      "index": 179,
+      "id": "knob_board_shape",
+      "name": "BOARD_SHAPE",
+      "page": "model_board",
+      "order": 18,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 180,
+      "id": "knob_board_pair",
+      "name": "BOARD_PAIR",
+      "page": "model_board",
+      "order": 19,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 200,
+      "id": "preamp",
+      "name": "Preamp",
+      "page": "room",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 30.0,
+        "step": 0.1,
+        "default": 4.5,
+        "unit": "dB"
       }
     }
   ]

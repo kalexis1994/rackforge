@@ -860,6 +860,40 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The strings take their places on the bridge, and the pair hears the
+board (0.171.11).** Until now every string entered one mono point and a
+board mode was one number with one random level pan. Measured first on
+the reference (`tools/salamander-image.py`, `tools/salamander-image.csv`):
+the pair's channels carry no time difference on any note (under 17 µs,
+GCC-PHAT on the attack's envelope) yet are decorrelated (coherence 0.1 in
+300–1000 Hz, 0.2–0.3 in 1–4 kHz), and the level difference is ragged
+note by note (F♯3 −9 dB, D♯6 +11, C6 −5, the same in the soft and the
+hard layer) — two capsules a hand over the board, each hearing its own
+mixture of the same modes. So: (1) each string drives the board at its
+point `x_i` of the bridge and a mode takes it with its shape's value
+there, `φ_k(x_i) = √2 cos(π q_k x_i + θ_k)`, a plate's cosine at a
+wavenumber from the dispersion (`q_k ∝ √f`, fifteen half-waves at 8 kHz
+over 1.4 m) and a phase drawn per mode; the wavenumber splits between the
+bridge's direction and the board's width per mode. Computed as sixteen
+drive points the voices interpolate into and a cosine and sine transform
+every mode reads — 512 multiplies for the transforms and three per mode,
+not 256 per voice (`BOARD_SHAPE`). Below 100 Hz the board breathes as a
+whole from every string; drawn shapes there made C1's fundamental a
+lottery. (2) Each mode reaches each capsule through the Rayleigh integral
+over the board, `G_km = ∫∫ φ_k D_m e^{−jω r_m/c} / r_m`, a level and a
+phase per mode per capsule, computed when the pair or the board moves
+(thirty-two modes a block) and applied as two multiplies on the mode's
+last two velocity samples (`BOARD_PAIR`). No delay line: the phase is
+the delay at the mode's frequency, and the capsules hear different
+mixtures, which is what was measured. Every mode keeps the power its pan
+gave it. Result, thirty notes at v92 by the reference's own measure: at
+the house pair (0.66 m, 6 cm) the level difference's spread across notes
+is 3.5 dB in 1–3 kHz (reference 3.9; was 1.6) and the coherence 0.53
+(was 0.91); at 0.5 m and 17 cm the coherence is 0.31 (reference 0.27).
+The rest of the reference's decorrelation is the board's own floor under
+the partials, thirty decibels stronger there than here. The Campanella
+renders in 27 s against 17.
+
 **The bridge's drain, per sample (0.171.10).** Still there after 0.171.9:
 "un ruido latoso que suena luego de tocar", in every A/B of the passage
 with a noise or a resonance removed — and absent from the same passage

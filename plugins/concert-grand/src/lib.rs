@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 138;
+pub const KNOB_COUNT: usize = 140;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -788,6 +788,16 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "ATTACK_RAMP_S",
         &ATTACK_RAMP_S,
         "How long a fresh voice fades in from rest: the hammer's contact, in seconds.",
+    ),
+    (
+        "BOARD_SHAPE",
+        &BOARD_SHAPE,
+        "Depth of the board's mode shapes along the bridge: 0 is a mono bridge, 1 lets each string drive each mode with the shape's value at its point.",
+    ),
+    (
+        "BOARD_PAIR",
+        &BOARD_PAIR,
+        "Whether each board mode reaches each capsule through the Rayleigh integral over the bridge (1) or through its old random level pan (0).",
     ),
 ];
 
@@ -1625,6 +1635,32 @@ struct BodyMode {
     velocity: f32,
     pan_left: f32,
     pan_right: f32,
+    /// The mode's shape along the bridge, read from the drive points'
+    /// transforms: `shape_a` on the plain sum (the mono bridge),
+    /// `shape_b` on the cosine at `shape_q`, `shape_c` on the sine.
+    shape_q: usize,
+    shape_a: f32,
+    shape_b: f32,
+    shape_c: f32,
+    /// The shape's phase along the bridge, kept for the pair's integral.
+    shape_theta: f32,
+    /// The shape across the board's width, for the pair's integral: a
+    /// plate mode is a cosine in both directions, `k^2 = kx^2 + ky^2`, and
+    /// the split between them is drawn per mode. Half-waves over the width
+    /// and the phase there.
+    shape_qy: f32,
+    shape_theta_y: f32,
+    omega: f32,
+    /// The output to each capsule as coefficients on the mode's last two
+    /// VELOCITY samples: `out_m = v * out_y[m] + v1 * out_y1[m]`. A
+    /// sinusoid's two consecutive samples span its plane, so any level and
+    /// phase per capsule is two multiplies -- on the velocity, so that
+    /// content below a mode's frequency keeps the 6 dB per octave the
+    /// board's radiation gives it (a displacement output summed over
+    /// hundreds of modes was a +15 dB shelf under the bass). See `BOARD_PAIR`.
+    out_y: [f32; 2],
+    out_y1: [f32; 2],
+    v1: f32,
 }
 
 impl BodyMode {
@@ -1632,16 +1668,71 @@ impl BodyMode {
         let r = expf(-6.907_755 / (t60 * sample_rate));
         let omega = core::f32::consts::TAU * frequency / sample_rate;
         let (sin, cos) = sincosf(omega);
+        let velocity = 1.0 / (2.0 * sincosf(0.5 * omega).0).max(1e-6_f32);
         Self {
             y1: 0.0,
             y2: 0.0,
             a1: 2.0 * r * cos,
             a2: -r * r,
             drive: (1.0 - r) * 2.0 * sin,
-            velocity: 1.0 / (2.0 * sincosf(0.5 * omega).0).max(1e-6_f32),
+            velocity,
             pan_left: 1.0 - pan,
             pan_right: pan,
+            shape_q: 0,
+            shape_a: 1.0,
+            shape_b: 0.0,
+            shape_c: 0.0,
+            shape_theta: 0.0,
+            shape_qy: 0.0,
+            shape_theta_y: 0.0,
+            omega,
+            out_y: [1.0 - pan, pan],
+            out_y1: [0.0, 0.0],
+            v1: 0.0,
         }
+    }
+
+    /// One sample into the pair: the mode's state advances and each
+    /// capsule reads its own level and phase of it.
+    #[inline(always)]
+    fn tick_pair(&mut self, input: f32) -> (f32, f32) {
+        let y = self.a1 * self.y1 + self.a2 * self.y2 + self.drive * input;
+        let v = (y - self.y1) * self.velocity;
+        let left = v * self.out_y[0] + self.v1 * self.out_y1[0];
+        let right = v * self.out_y[1] + self.v1 * self.out_y1[1];
+        self.y2 = self.y1;
+        self.y1 = y;
+        self.v1 = v;
+        (left, right)
+    }
+
+    /// Sets the capsule outputs from complex gains: `gain` is what the
+    /// capsule hears of the mode's unit velocity at the mode's frequency.
+    fn set_pair(&mut self, gains: [(f32, f32); 2]) {
+        let (sin_w, cos_w) = sincosf(self.omega);
+        let sin_w = if sin_w.abs() < 1e-4 { 1e-4 } else { sin_w };
+        for (m, (re, im)) in gains.iter().copied().enumerate() {
+            let magnitude = sqrtf(re * re + im * im);
+            let (sin_psi, cos_psi) = if magnitude > 0.0 {
+                (im / magnitude, re / magnitude)
+            } else {
+                (0.0, 1.0)
+            };
+            self.out_y[m] = magnitude * (cos_psi - sin_psi * cos_w / sin_w);
+            self.out_y1[m] = magnitude * sin_psi / sin_w;
+        }
+    }
+
+    /// The excitation this mode takes from the drive points' transforms.
+    #[inline(always)]
+    fn excitation(
+        &self,
+        cos_t: &[f32; BOARD_DRIVE_POINTS],
+        sin_t: &[f32; BOARD_DRIVE_POINTS],
+    ) -> f32 {
+        self.shape_a * cos_t[0]
+            + self.shape_b * cos_t[self.shape_q]
+            + self.shape_c * sin_t[self.shape_q]
     }
 
     #[inline(always)]
@@ -2184,6 +2275,72 @@ pub static BOARD_MEAN_MOBILITY: Knob = Knob::new(0.5);
 /// re-derivation of the mean transfer with the signs settled, not a knob,
 /// and it must be heard on the bass first.
 pub static BOARD_SIGN_TOP_HZ: Knob = Knob::new(700.0);
+/// Where on the bridge a string drives the board, as the board's modes see
+/// it.
+///
+/// Until 0.171.11 every string entered one point: the bridge was a mono
+/// sum and a mode's drive was one number. A real bridge runs over a metre,
+/// and a mode receives a string with the value its shape has at that
+/// string's point, `phi_k(x_i)`. Measured on the reference (2026-09-07,
+/// `tools/salamander-image.py`): the pair's channels are decorrelated
+/// (coherence 0.1 in 300-1000 Hz, 0.2-0.3 in 1-4 kHz) with no time
+/// difference between them (under 17 us on every note), and the level
+/// difference is ragged note by note (F#3 -9 dB, D#6 +11, C6 -5, the same
+/// in the soft and the hard layer) -- a modal pattern seen from two close
+/// capsules, which no pan law by key can make and a shaped drive can.
+///
+/// The shape along the bridge is a cosine at the mode's wavenumber, from
+/// the plate's dispersion (`kappa` grows as the square root of frequency)
+/// with a phase drawn per mode: `phi_k(x) = sqrt(2) cos(pi q_k x + theta_k)`
+/// with `q_k` the wavenumber in half-waves over the bridge, `BOARD_DRIVE_POINTS - 1`
+/// at `BOARD_SHAPE_TOP_HZ` -- fifteen half-waves at 8 kHz over a 1.4 m
+/// bridge is a 19 cm wavelength, near the plate's. The root two keeps the
+/// mean transfer over positions where the measurement put it. Each voice
+/// splits its bridge force between the two drive points either side of
+/// its position, and the drive of every mode is read from the cosine and
+/// sine transforms of the sixteen points: 2 x 16 x 16 multiplies per
+/// sample for the transforms and three per mode, instead of 256 per voice.
+///
+/// This knob is the depth: 0 is the mono bridge as it was, 1 the shape.
+pub static BOARD_SHAPE: Knob = Knob::new(1.0);
+const BOARD_DRIVE_POINTS: usize = 16;
+const BOARD_SHAPE_TOP_HZ: f32 = 8000.0;
+/// Below this the board breathes as a whole: its first modes have no
+/// interior node along the bridge, so every string drives them alike.
+/// Drawn shapes down there made C1's fundamental a lottery -- three times
+/// its measured share of the note on one draw -- where the instrument's
+/// lowest notes speak through their partials and a test holds them to it.
+const BOARD_SHAPE_FLOOR_HZ: f32 = 100.0;
+/// How each board mode reaches each capsule of the pair.
+///
+/// A mode radiates from the whole board, and a capsule a hand's breadth
+/// above it hears the part under it most: the Rayleigh integral over the
+/// bridge line, `G_km = integral of phi_k(x) D_m(x) exp(-j w_k r_m(x) / c) / r_m(x) dx`,
+/// with `r_m` the distance from the point to capsule m, `D_m` the capsule's
+/// pattern toward it (omni to figure-of-eight, the Mic Pattern control) and
+/// the mode's own shape `phi_k` along the bridge. G is a complex gain per
+/// mode per capsule -- a level and a PHASE -- computed once when the pair
+/// or the board moves, and read per sample as two multiplies per capsule
+/// on the mode's last two states. There is no delay line: the phase is
+/// the delay at the mode's frequency, and what the two capsules hear is
+/// two different mixtures of the same modes, which is what the reference
+/// measures (channels decorrelated, no lag). Until 0.171.11 every mode had
+/// one random level pan between 0.35 and 0.65 and the same phase in both
+/// channels: coherence 0.9 where the reference has 0.3.
+///
+/// Normalised so every mode keeps the power its pan gave it: the distance
+/// sets the image, not the level (the level is the near field's, kept
+/// elsewhere). 0 keeps the old pans.
+pub static BOARD_PAIR: Knob = Knob::new(1.0);
+/// The bridge from A0 to C8, in metres, as the pair looks down on it.
+const BRIDGE_LENGTH_M: f32 = 1.4;
+/// The board's width across the bridge, in metres, for the pair's integral.
+const BOARD_WIDTH_M: f32 = 1.0;
+/// How many board modes the pair's integral settles per block: the
+/// integral is a few hundred thousand sines for the whole board, too many
+/// for one block while a microphone slider moves, so it is spread over
+/// eight.
+const PAIR_MODES_PER_BLOCK: usize = 32;
 /// The MEASURED mean transfer of the board-and-microphones chain, relative
 /// to the flat Skudrzyk mean the bank is normalised to: third-octave centres
 /// in hertz and the correction in decibels, zero-mean over 200 Hz to 4 kHz
@@ -2749,6 +2906,10 @@ struct Voice {
     thump_seed: u32,
     pan_left: f32,
     pan_right: f32,
+    /// Where on the bridge this string drives the board: the drive point
+    /// below its position and the share that goes to the one above.
+    drive_index: usize,
+    drive_frac: f32,
     /// The spaced pair's per-channel arrival: this voice's mono output is
     /// written here once and each microphone reads its own tap.
     /// This voice's previous output sample, so the sympathetic feed can be
@@ -2838,6 +2999,8 @@ impl Default for Voice {
             thump_c0: 0.0,
             thump_seed: 1,
             pan_left: 0.0,
+            drive_index: 0,
+            drive_frac: 0.0,
             pan_right: 0.0,
             last_out: 0.0,
             duplex: [Component::default(); 2],
@@ -3676,6 +3839,13 @@ pub struct ConcertGrand {
     /// through path — which between them held 45 resonators against the
     /// 200-500 a modelled board needs, and damped them like rubber.
     board: [BodyMode; BOARD_MODES],
+    /// `cos(pi q x_j)` and `sin(pi q x_j)` over the drive points `x_j = j / (J - 1)`:
+    /// the transforms every board mode reads its excitation from.
+    drive_basis_cos: [[f32; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
+    drive_basis_sin: [[f32; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
+    /// The next board mode whose pair integral is due; `board_count` when
+    /// the board is settled.
+    pair_next: usize,
     /// How many slots the generator actually filled at this sample rate.
     board_count: usize,
     /// The undamped top-octave strings, always listening to the bridge.
@@ -3818,6 +3988,9 @@ impl Default for ConcertGrand {
                 ],
             ],
             board: [BodyMode::default(); BOARD_MODES],
+            drive_basis_cos: [[0.0; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
+            drive_basis_sin: [[0.0; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
+            pair_next: 0,
             board_count: 0,
             open_strings: [BodyMode::default(); OPEN_STRINGS.len()],
             undamped: [BodyMode::default(); UNDAMPED_COUNT],
@@ -4395,6 +4568,14 @@ impl ConcertGrand {
     /// regular.
     fn tune_board(&mut self) {
         self.board_dirty = false;
+        for q in 0..BOARD_DRIVE_POINTS {
+            for j in 0..BOARD_DRIVE_POINTS {
+                let x = j as f32 / (BOARD_DRIVE_POINTS - 1) as f32;
+                let (sin, cos) = sincosf(core::f32::consts::PI * q as f32 * x);
+                self.drive_basis_cos[q][j] = cos;
+                self.drive_basis_sin[q][j] = sin;
+            }
+        }
         let loss = self.controls.board_loss();
         let density = self.controls.board_density();
         let ceiling = if BOARD_TOP_HZ.get() < 0.45 * self.sample_rate {
@@ -4471,6 +4652,7 @@ impl ConcertGrand {
         for slot in self.board.iter_mut().skip(index) {
             *slot = BodyMode::default();
         }
+        self.pair_next = 0;
     }
 
     /// One mode of the board bank at `placed` hertz: its damping from the
@@ -4479,6 +4661,76 @@ impl ConcertGrand {
     /// by `strength` (the drawn bank's ±8 dB lottery, or a measured mode's
     /// ripple), rolled off below the radiation corner and the coincidence
     /// corner, panned and signed by hash.
+    /// The Rayleigh integral of every board mode toward each capsule, a
+    /// few modes per block from `pair_next` until the board is done. See
+    /// `BOARD_PAIR`.
+    fn tune_pair(&mut self) {
+        if self.pair_next >= self.board_count {
+            return;
+        }
+        let from = self.pair_next;
+        let to = (from + PAIR_MODES_PER_BLOCK).min(self.board_count);
+        self.pair_next = to;
+        if BOARD_PAIR.get() < 0.5 {
+            for mode in self.board[from..to].iter_mut() {
+                mode.out_y = [mode.pan_left, mode.pan_right];
+                mode.out_y1 = [0.0, 0.0];
+            }
+            return;
+        }
+        let height = clamp_between(
+            self.controls.mic_distance,
+            MIC_DISTANCE_MIN_M.get(),
+            MIC_DISTANCE_MAX_M.get(),
+        );
+        let half = 0.5 * MIC_SPACING_M.get() * self.controls.width;
+        let capsules = [0.5 * BRIDGE_LENGTH_M - half, 0.5 * BRIDGE_LENGTH_M + half];
+        let pattern = self.controls.mic_pattern;
+        let speed = SOUND_SPEED.get();
+        const ALONG: usize = 40;
+        const ACROSS: usize = 7;
+        let sample_rate = self.sample_rate;
+        for mode in self.board[from..to].iter_mut() {
+            let frequency = mode.omega * sample_rate / core::f32::consts::TAU;
+            let k = core::f32::consts::TAU * frequency / speed;
+            let mut gains = [(0.0f32, 0.0f32); 2];
+            for i in 0..ALONG {
+                let x = (i as f32 + 0.5) / ALONG as f32;
+                let along =
+                    sincosf(core::f32::consts::PI * mode.shape_q as f32 * x + mode.shape_theta).1;
+                for j in 0..ACROSS {
+                    let y = ((j as f32 + 0.5) / ACROSS as f32 - 0.5) * BOARD_WIDTH_M;
+                    let across = sincosf(
+                        core::f32::consts::PI * mode.shape_qy * y / BOARD_WIDTH_M
+                            + mode.shape_theta_y,
+                    )
+                    .1;
+                    let shape = 2.0 * along * across;
+                    for (m, capsule) in capsules.iter().enumerate() {
+                        let dx = x * BRIDGE_LENGTH_M - capsule;
+                        let r = sqrtf(dx * dx + y * y + height * height).max(1e-3);
+                        let directivity = (1.0 - pattern) + pattern * height / r;
+                        let (sin_kr, cos_kr) = sincosf(-k * r);
+                        let weight = shape * directivity / r / (ALONG * ACROSS) as f32;
+                        gains[m].0 += weight * cos_kr;
+                        gains[m].1 += weight * sin_kr;
+                    }
+                }
+            }
+            // Every mode keeps the power its pan gave it: 0.5 for the pair.
+            let power = gains[0].0 * gains[0].0
+                + gains[0].1 * gains[0].1
+                + gains[1].0 * gains[1].0
+                + gains[1].1 * gains[1].1;
+            let scale = if power > 0.0 { sqrtf(0.5 / power) } else { 0.0 };
+            for gain in gains.iter_mut() {
+                gain.0 *= scale;
+                gain.1 *= scale;
+            }
+            mode.set_pair(gains);
+        }
+    }
+
     fn board_mode(
         &self,
         seed: u32,
@@ -4532,6 +4784,34 @@ impl ConcertGrand {
         // transfer; one sign with the strength swing kept gives that.
         if placed < BOARD_SIGN_TOP_HZ.get() && hash01(0x51C4 ^ seed << 9) < 0.5 {
             mode.drive = -mode.drive;
+        }
+        {
+            let depth = BOARD_SHAPE.get().clamp(0.0, 1.0);
+            let theta = core::f32::consts::TAU * hash01(0x5A4E ^ seed << 11);
+            let (sin_theta, cos_theta) = sincosf(theta);
+            let half_waves = (BOARD_DRIVE_POINTS - 1) as f32 * sqrtf(placed / BOARD_SHAPE_TOP_HZ);
+            // The plate's wavenumber points somewhere between along the
+            // bridge and across the board; along the bridge the shape has
+            // its cosine of that share, across it the sine.
+            let (sin_alpha, cos_alpha) =
+                sincosf(core::f32::consts::FRAC_PI_2 * hash01(0x2D1E ^ seed << 13));
+            mode.shape_qy = half_waves * sin_alpha * BOARD_WIDTH_M / BRIDGE_LENGTH_M;
+            mode.shape_theta_y = core::f32::consts::TAU * hash01(0x7E1A ^ seed << 15);
+            if placed < BOARD_SHAPE_FLOOR_HZ {
+                // The whole board, in phase, from every string.
+                mode.shape_q = 0;
+                mode.shape_theta = 0.0;
+                mode.shape_a = 1.0;
+                mode.shape_b = 0.0;
+                mode.shape_c = 0.0;
+            } else {
+                mode.shape_q =
+                    (roundf(half_waves * cos_alpha) as usize).clamp(1, BOARD_DRIVE_POINTS - 1);
+                mode.shape_theta = theta;
+                mode.shape_a = 1.0 - depth;
+                mode.shape_b = depth * core::f32::consts::SQRT_2 * cos_theta;
+                mode.shape_c = -depth * core::f32::consts::SQRT_2 * sin_theta;
+            }
         }
         // And the board does not radiate its own lowest modes any more
         // than it radiates a string's lowest partials.
@@ -4889,6 +5169,7 @@ impl ConcertGrand {
             );
         self.early_gain = 0.55 * self.reverb_gain;
         self.room_dirty = false;
+        self.pair_next = 0;
     }
 
     /// T60 fitted to published decay ranges: tens of seconds for the lowest
@@ -6854,6 +7135,14 @@ impl ConcertGrand {
         // components this replaces rang the same note on every strike.
         voice.thump_seed = thump_seed;
         voice.pan_left = pan_left;
+        {
+            // The bridge from A0 to C8, as the key position for now: the
+            // bass bridge's own geometry is a later measurement.
+            let along = position.clamp(0.0, 1.0) * (BOARD_DRIVE_POINTS - 1) as f32;
+            let index = (along as usize).min(BOARD_DRIVE_POINTS - 2);
+            voice.drive_index = index;
+            voice.drive_frac = (along - index as f32).clamp(0.0, 1.0);
+        }
         voice.pan_right = pan_right;
         // The glide is no longer scripted. It used to be a 28-step ramp of a
         // hand-set size; it now falls out of the tension law above, which
@@ -8137,6 +8426,7 @@ impl Processor for ConcertGrand {
         let knob_air_highpass = AIR_HIGHPASS.get();
         let knob_board_mix = BOARD_MIX.get();
         let knob_halo_mix = HALO_MIX.get();
+        self.tune_pair();
         let knob_headroom = HEADROOM.get();
         let knob_open_mix = OPEN_MIX.get();
         let pedal_c1 =
@@ -8246,6 +8536,7 @@ impl Processor for ConcertGrand {
             }
             let mut strings_total = 0.0f32;
             let mut bridge_drive = 0.0f32;
+            let mut drive_points = [0.0f32; BOARD_DRIVE_POINTS];
             for voice in &mut self.voices {
                 if !voice.active {
                     continue;
@@ -8278,7 +8569,10 @@ impl Processor for ConcertGrand {
                 // bell-like mid-register the ear reported as metallic. The
                 // machinery is gone; the pan weight stays so each string
                 // drives the board at the level the calibration expects.
-                bridge_drive += sample * (voice.pan_left + voice.pan_right);
+                let force = sample * (voice.pan_left + voice.pan_right);
+                bridge_drive += force;
+                drive_points[voice.drive_index] += force * (1.0 - voice.drive_frac);
+                drive_points[voice.drive_index + 1] += force * voice.drive_frac;
 
                 voice.tension_in -= 1;
                 if voice.tension_in == 0 {
@@ -8294,14 +8588,31 @@ impl Processor for ConcertGrand {
             }
 
             bridge_feed = strings_total;
-            // Everything the strings produce radiates through the board.
+            // Everything the strings produce radiates through the board --
+            // each string from its own point of the bridge (`BOARD_SHAPE`).
             let excitation = bridge_drive;
+            let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
+            let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
+            for q in 0..BOARD_DRIVE_POINTS {
+                let mut c = 0.0f32;
+                let mut s = 0.0f32;
+                for ((basis_cos, basis_sin), point) in self.drive_basis_cos[q]
+                    .iter()
+                    .zip(self.drive_basis_sin[q].iter())
+                    .zip(drive_points.iter())
+                {
+                    c += basis_cos * point;
+                    s += basis_sin * point;
+                }
+                cos_t[q] = c;
+                sin_t[q] = s;
+            }
             let mut board_left = 0.0;
             let mut board_right = 0.0;
             for mode in self.board.iter_mut().take(self.board_count) {
-                let y = mode.tick(excitation);
-                board_left += y * mode.pan_left;
-                board_right += y * mode.pan_right;
+                let (left, right) = mode.tick_pair(mode.excitation(&cos_t, &sin_t));
+                board_left += left;
+                board_right += right;
             }
             // The open top octave listens to the bridge and rings on.
             let mut open_left = 0.0;

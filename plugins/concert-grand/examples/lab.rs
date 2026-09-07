@@ -229,7 +229,27 @@ mod lab {
         let mut last_ms = 0u64;
         for line in text.lines() {
             let f: Vec<&str> = line.split_whitespace().collect();
-            if f.len() < 4 || f[0].starts_with('#') {
+            if f.is_empty() || f[0].starts_with('#') {
+                continue;
+            }
+            // A pedal POSITION: "onset_ms pedal 0..127" (CC 64), and the
+            // same for "sostenuto" (CC 66) and "soft" (CC 67) -- a MIDI file
+            // of a nocturne is mostly pedal, and a score that drops it is a
+            // different piece.
+            if f.len() == 3 {
+                let onset: u64 = f[0].parse().expect("onset_ms");
+                let controller = match f[1] {
+                    "pedal" => 64,
+                    "sostenuto" => 66,
+                    "soft" => 67,
+                    other => panic!("unknown control {other}"),
+                };
+                let level: u8 = f[2].parse().expect("control 0..127");
+                events.push((onset, [0xB0, controller, level.min(127)]));
+                last_ms = last_ms.max(onset);
+                continue;
+            }
+            if f.len() < 4 {
                 continue;
             }
             let onset: u64 = f[0].parse().expect("onset_ms");

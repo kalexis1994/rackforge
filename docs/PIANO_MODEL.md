@@ -860,6 +860,34 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The top octave, against the reference (0.171.8).** The user, with the
+pedal: "los agudos con sustain tienen como una estridencia, como un
+trasteo finito que queda resonando ... si son varias notas chilla mucho".
+Isolated first: none of the resonance paths carry it (sympathy, open
+strings, undamped bank, halo, duplex and bed each removed changed the
+pedalled treble ring by nothing); the ring is the struck strings. Measured
+on Salamander C7, D#7, F#7, A7 and C8 at four velocities against the
+model's same notes (`top.py`): from G#6 up the strike is drawn, not
+integrated, and the recipe's felt corner was pinned at 1.5 f0 — its second
+partial stood 6 to 17 dB under the fundamental where the reference's stands
+20 to 44 (around −32) and its third around −55; that partial at 4 to 6 kHz
+is the stridency. And the fundamental's envelope: the reference falls ten
+decibels in the first 50 ms and then in two slopes, monotonically; the
+model's fell twenty in 100 ms, came BACK five to eight by 0.3 s and fell
+again — a beat near the unison's 2 Hz cap, a wobble on every top note and,
+under the pedal, on all of them at once (the trasteo). Three changes,
+each ramped in over G#6..C7 (`top_octave`): the felt corner may fall to
+1.05 f0 (`FELT_FLOOR_TOP`; 0.95 measured at −46 average, too dark); the
+unison is tuned clean (a width of 0.05 left a slower beat at 1 s); the
+prompt life (`cal` column 8) goes to 1.5 at C6 and 2.0 at C7 and C8, and
+the slow stage radiates 1.6x there (`TOP_INCOHERENT_EXTRA`; 2x overshot
+the two-second mark by fifteen decibels). Result at v92: second partial
+−34 to −57 (reference −24 to −46), the fundamental's envelope within five
+decibels of the reference to one second at C7 and nine at C8, monotone.
+Open: the sixth octave (C6 integrated) is 10 to 22 dB too quiet through
+its decay and its second partial 17 to 36 too quiet — the integration's
+treble, the other half of this seam.
+
 **The ear on the thump, a third time (0.171.7).** With the thump a noise
 the user took the Thud Colour fader to 0.26 again — "bajé el thud a 0.26
 y ahí se corrigió, tenía ruido todavía" — the same −11.6 dB off the

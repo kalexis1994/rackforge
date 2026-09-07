@@ -2058,6 +2058,16 @@ pub static FELT_EXPONENT_MAX: Knob = Knob::new(3.5);
 /// takes the tenor's pianissimo down with it (-13 dB); this is the same
 /// lever confined to the register that needs it.
 pub static FELT_EXPONENT_TREBLE: Knob = Knob::new(0.0);
+/// See `felt_floor_ratio`.
+const FELT_FLOOR_TOP: f32 = 1.05;
+/// The dephased aftersound of the top octave radiates more than the
+/// slow stage's share says: measured (2026-09-07, Salamander C7/D#7/C8 at
+/// v92) with the unison clean and the prompt life at two, the model's
+/// fundamental sat eight (C7) to seventeen (C8) decibels over the
+/// reference's one second in, and twice the incoherent radiation there
+/// overshot the two-second mark by fifteen. A factor of 1 + this on the
+/// top octave (`top_octave`), applied to the slow stage's radiation.
+const TOP_INCOHERENT_EXTRA: f32 = 0.6;
 /// How many partials a note must have under SIM_TOP_HZ before its strike is
 /// integrated rather than drawn. Four leaves everything above G#6 to the
 /// recipe; one strikes every note.
@@ -3757,13 +3767,13 @@ impl Default for ConcertGrand {
                     4.0000, 0.6556, 1.8725, 1.0000, 1.0000, 0.7958, 0.2500, 1.0000, 1.0000,
                 ],
                 [
-                    0.9443, 0.9026, 4.0000, 3.9996, 1.0000, 1.0000, 1.9942, 1.0000, 1.0000,
+                    0.9443, 0.9026, 4.0000, 3.9996, 1.0000, 1.0000, 1.9942, 1.0000, 1.5000,
                 ],
                 [
-                    0.4820, 0.2500, 4.0000, 4.0000, 1.0000, 1.1800, 0.3836, 1.0000, 1.0000,
+                    0.4820, 0.2500, 4.0000, 4.0000, 1.0000, 1.1800, 0.3836, 1.0000, 2.0000,
                 ],
                 [
-                    1.0345, 0.4249, 4.0000, 4.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000,
+                    1.0345, 0.4249, 4.0000, 4.0000, 1.0000, 1.0000, 1.0000, 1.0000, 2.0000,
                 ],
             ],
             board: [BodyMode::default(); BOARD_MODES],
@@ -4866,9 +4876,13 @@ impl ConcertGrand {
         // Weinreich's measured second slopes are slower, not flat -- so the
         // slow stage keeps a share of the radiation channel. Without it the
         // top of the compass rang 2.3x too long once it dephased.
+        let top = Self::top_octave(
+            (12.0 * log2f(f0.max(1.0) / 440.0) + 69.0 - LOW_NOTE as f32) / (NOTE_COUNT - 1) as f32,
+        );
         let rate = LN_1000 / (SLOW_STAGE_RATIO.get() * string)
             + bending
             + INCOHERENT_RADIATION.get()
+                * (1.0 + TOP_INCOHERENT_EXTRA * top)
                 * RADIATION_RATE.get()
                 * Self::radiation_efficiency(radiating)
                 * self.slow_bridge_factor(f0)
@@ -5315,6 +5329,31 @@ impl ConcertGrand {
 
     /// Hammer–string contact time in seconds: longer for soft blows and low
     /// notes, under a millisecond for hard treble blows (Askenfelt & Jansson).
+    /// The lowest the felt's corner may fall, as a multiple of the
+    /// fundamental. 1.5 f0 through the compass; in the top octave, where the
+    /// recipe draws the strike, it eases to `FELT_FLOOR_TOP` f0 at C8.
+    ///
+    /// Measured (2026-09-07, Salamander C7..C8 at four velocities): the
+    /// second partial of a real top-octave note stands 20 to 44 decibels
+    /// under its fundamental, around -32, and the third around -55 -- a
+    /// hammer in contact for a millisecond cannot push a string at 4 kHz.
+    /// With the corner pinned at 1.5 f0 the recipe put the second at -6 to
+    /// -17 (C7 -15 at fortissimo, D#7 -6 at every velocity), and the user
+    /// heard it under the pedal: "una estridencia, como un trasteo finito
+    /// que queda resonando ... si son varias notas chilla mucho". The ramp
+    /// starts where the recipe takes over from the integration (G#6).
+    fn felt_floor_ratio(position: f32) -> f32 {
+        1.5 + (FELT_FLOOR_TOP - 1.5) * Self::top_octave(position)
+    }
+
+    /// How far into the drawn top a note is: 0 through the integrated
+    /// compass, rising over G#6..C7 (position 0.80..0.86) to 1 for the
+    /// top octave, where the recipe draws the strike and the reference's
+    /// own top-octave samples are what the ladder and the decay answer to.
+    fn top_octave(position: f32) -> f32 {
+        ((position - 0.80) / 0.06).clamp(0.0, 1.0)
+    }
+
     fn contact_time(&self, note: u8, velocity: f32) -> f32 {
         let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
         // The base is the fortissimo contact — ~2 ms in the bass, under half
@@ -5473,7 +5512,7 @@ impl ConcertGrand {
             * bass_top
             * self.controls.lab(0)
             * (0.5 + 1.5 * self.controls.brightness))
-            .max(1.5 * f0);
+            .max(Self::felt_floor_ratio(position) * f0);
 
         // Aftersound detune: a fraction of a cent in the bass, over a cent in
         // the treble, scaled by the unison control.
@@ -5509,8 +5548,19 @@ impl ConcertGrand {
         // the drain had done its work); at half the width the early decays
         // land on them, and the late ones hold. Kirk's tuners preferred one
         // to two cents; this is a cent and a bit through the middle.
+        // The top octave's unison is tuned clean. Measured (2026-09-07,
+        // Salamander C7, D#7, C8 at four velocities, the fundamental's
+        // envelope in 0.1 s windows): the reference decays monotonically,
+        // ten decibels in the first 50 ms and then two slopes; the model's
+        // top notes fell twenty in 100 ms, came BACK five to eight by 0.3 s
+        // and fell again -- a beat near the 2 Hz cap, a wobble on every top
+        // note and, under the pedal, on all of them at once. With the width
+        // at zero the envelope is monotone and within three decibels of the
+        // reference to half a second; at 0.05 a slower beat appears at 1 s.
+        // The taper follows `top_octave`.
         let detune_cents = UNISON_WIDTH.get()
             * (0.9 + 0.9 * position)
+            * (1.0 - Self::top_octave(position))
             * (self.controls.unison * 2.86)
             * self.controls.lab(13)
             * unison_precision;

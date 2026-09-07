@@ -3551,10 +3551,10 @@
       "order": 39,
       "kind": {
         "type": "float",
-        "minimum": 0.05625,
-        "maximum": 14.4,
-        "step": 0.009,
-        "default": 0.9,
+        "minimum": 0.015,
+        "maximum": 3.84,
+        "step": 0.0024,
+        "default": 0.24,
         "taper": "logarithmic"
       },
       "flags": {

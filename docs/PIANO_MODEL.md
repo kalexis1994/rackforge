@@ -818,6 +818,16 @@ band is 30–46 Hz, where the board radiates nothing and the reference's
 250 to 630 Hz on the treble notes, which is the shank and the case rather
 than the keybed, and lives where the ear placed the tick.
 
+**The ear on the knock (0.169.1).** The same afternoon, the user took Thud
+Colour from 0.5 to 0.26 — "se escucha mucho el ruido" — which on that
+fader's 256^(x − 0.5) law is −11.6 dB. `THUMP_BASE` goes 0.9 → 0.24 so
+the centre of the fader is that level: a travel's centre is what someone
+wants, not what a reference measured (0.081's lesson, again). The
+reference's knock is a close pair twelve centimetres over the strings
+hearing the keybed at arm's length, which is not where a player sits. The
+register law, the velocity law and the ring stay as measured; the metric
+gives back part of what 0.169 took, and that is the ear's call.
+
 **The bass comb, two floors (0.166).** The reference notches the bass's
 eighth partial to −33 dB under its strongest (pp −36) and leaves the
 sixteenth at −28 (pp −39); the model at one floor of 0.26 had the eighth at

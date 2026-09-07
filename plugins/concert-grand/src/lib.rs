@@ -1878,8 +1878,17 @@ pub static THUMP_T60_S: Knob = Knob::new(0.15);
 pub static THUMP_VELOCITY_POWER: Knob = Knob::new(2.0);
 /// The thump's level against the calibrated one, as a factor at A0 (a
 /// factor and not decibels: a knob compiled below zero cannot ride the
-/// fader's sixteen-fold sweep, and -1 dB is 0.9) ...
-pub static THUMP_BASE: Knob = Knob::new(0.9);
+/// fader's sixteen-fold sweep) ...
+///
+/// 0.9 landed C4 on the reference's measured knock, and the user's ear
+/// took the Thud Colour fader from 0.5 to 0.26 the same afternoon -- "se
+/// escucha mucho el ruido" -- which on that fader's 256^(x - 0.5) law is
+/// -11.6 dB. So 0.24: the centre of a travel is the level someone wants,
+/// not the level a reference measured (0.081's lesson, again), and the
+/// reference's floor is a close pair twelve centimetres over the strings
+/// hearing the keybed at arm's length, which is not where a player sits.
+/// The register law, the velocity law and the ring stay as measured.
+pub static THUMP_BASE: Knob = Knob::new(0.24);
 /// ... rising by this much at C8. Measured: the reference's knock stands
 /// -26 dB under a C2's attack, -20 under a C3, -14 under a C4, -8 under a
 /// C6 and a C7 -- the mechanism is the same size everywhere and the tone

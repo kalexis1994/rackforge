@@ -395,8 +395,9 @@ mod tests {
         // 11 adds `taper` to a float parameter. A package declaring it needs a
         // host that knows the field; every older minor keeps loading.
         assert!(is_compatible(pack_version(1, 11)));
+        // 12 adds the wide pre-stage to the parallel contract.
         assert!(is_compatible(pack_version(1, 12)));
-        assert!(!is_compatible(pack_version(1, 12)));
+        assert!(!is_compatible(pack_version(1, 13)));
         assert!(is_program_extension_compatible(pack_version(1, 0)));
         assert!(is_program_extension_compatible(pack_version(1, 1)));
         assert!(is_program_extension_compatible(pack_version(1, 2)));

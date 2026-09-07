@@ -873,6 +873,14 @@ const NOTE_COUNT: usize = 88;
 /// arithmetic is bounded by PARTIAL_BUDGET, not by this: more voices cost
 /// memory and a little per-voice overhead, and thin the newest notes under
 /// a dense pedal instead of cutting old ones off.
+///
+/// Memory, not time, is what this costs: the processor is built by value
+/// before it is written into its static, so every host that constructs it
+/// needs the room on its stack -- the wasm links with 8 MiB
+/// (`.cargo/config.toml`), the lab renders on a 32 MiB thread, and the
+/// test suite runs under `RUST_MIN_STACK=16777216` in CI because a debug
+/// build keeps the temporaries and the harness's 2 MiB thread overflowed.
+/// Locally, `cargo test --release` fits; a debug run wants the variable.
 const MAX_VOICES: usize = 32;
 /// How many strikes have had to steal a sounding voice, natively: the lab
 /// reports it after a render, since a steal is a step in the output.

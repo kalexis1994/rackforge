@@ -9,6 +9,7 @@ use rackforge_control_api::{
     ControlResponse, PluginParameterControlCommand, PresetImportConflictPolicy, RfPresetFile,
     parse_plugin_parameter_control_command,
 };
+use rackforge_core::midi2::Midi2Event;
 use rackforge_core::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
     process_slots_sequential, spawn_telemetry_publisher,
@@ -757,6 +758,9 @@ struct AndroidEngine {
     render_telemetry: std::sync::Arc<RenderTelemetry>,
     runtime: SendableLoadedPlugin,
     midi: Vec<MidiEventV1>,
+    /// The same block's MIDI in the host's vocabulary, for the pool's
+    /// pre-stage, which cuts it by the families the plugin declared wide.
+    wide: Vec<Midi2Event>,
     parameter_events: Vec<ParameterEventV1>,
     parameter_links: Vec<CompiledParameterLink>,
     persisted_parameter_links: Vec<ParameterLink>,
@@ -796,6 +800,7 @@ struct AndroidSlot<'block> {
     parallel: Option<&'block mut ParallelUnits<'static>>,
     output: &'block mut [f32],
     midi: &'block [MidiEventV1],
+    wide: &'block [Midi2Event],
     parameter_events: &'block [ParameterEventV1],
     faulted: &'block mut bool,
 }
@@ -835,7 +840,7 @@ unsafe impl ScheduledSlot for AndroidSlot<'_> {
         }
         let parallel = self.parallel.as_mut()?;
         parallel
-            .begin(self.instance, &[], frames, self.midi, self.parameter_events)
+            .begin(self.instance, &[], frames, self.wide, self.parameter_events)
             .ok()
     }
 
@@ -1154,6 +1159,7 @@ impl AndroidEngine {
             render_telemetry,
             runtime: SendableLoadedPlugin(plugin),
             midi: Vec::with_capacity(256),
+            wide: Vec::with_capacity(256),
             parameter_events: Vec::with_capacity(256),
             parameter_links: Vec::new(),
             persisted_parameter_links: Vec::new(),
@@ -1831,11 +1837,15 @@ impl AndroidEngine {
         }
         let deadline_ns = u64::from(frames) * 1_000_000_000 / SAMPLE_RATE as u64;
         let was_faulted = self.process_faulted;
+        self.wide.clear();
+        self.wide
+            .extend(self.midi.iter().map(Midi2Event::from_midi1));
         let mut slot = AndroidSlot {
             instance: &mut self.instance.0,
             parallel: self.parallel.as_mut().map(|parallel| &mut parallel.0),
             output,
             midi: &self.midi,
+            wide: &self.wide,
             parameter_events: &self.parameter_events,
             faulted: &mut self.process_faulted,
         };

@@ -1605,7 +1605,6 @@ struct AudioVoice {
     events: Vec<rackforge_core::midi2::Midi2Event>,
     /// The same events as bytes, for `parallel_render_v1`, whose block
     /// entry takes MIDI 1.0 events.
-    events_v1: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
 }
@@ -1665,9 +1664,6 @@ unsafe impl ScheduledSlot for AudioVoice {
             return Some(0);
         }
         let input_samples = frames as usize * self.input_channels;
-        self.events_v1.clear();
-        self.events_v1
-            .extend(self.events.iter().map(|event| event.to_midi1()));
         let parallel = self.parallel.as_mut()?;
         parallel
             .0
@@ -1675,7 +1671,7 @@ unsafe impl ScheduledSlot for AudioVoice {
                 &mut self.instance.0,
                 &self.input[..input_samples],
                 frames,
-                &self.events_v1,
+                &self.events,
                 &self.parameter_events,
             )
             .ok()
@@ -2576,7 +2572,6 @@ fn prepare_audio_voice(
         input: vec![0.0; MAX_AUDIO_FRAMES * input_channels.max(1)],
         output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
         events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
-        events_v1: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
         parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
         process_faulted: false,
     })

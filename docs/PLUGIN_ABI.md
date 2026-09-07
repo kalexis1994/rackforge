@@ -234,6 +234,7 @@ is needed for a plugin that makes sound.
 | `rackforge_exchange_input_ptr` | A separate input area for the program-editing calls. |
 | `rackforge_program_*` | Editing individual programs from the host's interface. See [WEB_PLUGIN_API.md](WEB_PLUGIN_API.md). |
 | `rackforge_parallel_*` | Splitting one block across the host's audio workers. The complete contract is in [PARALLEL_RENDER.md](PARALLEL_RENDER.md). |
+| `rackforge_parallel_begin_block_v2` | The parallel pre-stage plus `midi2_event_count`. Required by, and requiring, the MIDI 2.0 exports on a parallel component. |
 
 ### MIDI 2.0 event — 16 bytes
 

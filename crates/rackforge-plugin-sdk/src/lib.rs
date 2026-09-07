@@ -279,6 +279,10 @@ pub const PARALLEL_ABI_VERSION_V1: u32 = 0x0001_0000;
 pub struct BlockContext<'a> {
     pub input: &'a [f32],
     pub midi: &'a [MidiEvent],
+    /// The events of the families the component declared wide, at their
+    /// MIDI 2.0 widths; no event is in both slices. Empty for a component
+    /// exported without a `midi2` clause.
+    pub midi2: &'a [MidiEvent2],
     pub parameters: &'a [ParameterEvent],
     pub frames: u32,
     pub input_channels: u32,
@@ -486,6 +490,37 @@ pub trait ParallelProcessor: Default {
 
     fn load_state(&mut self, _state: &[u8]) -> bool {
         false
+    }
+
+    /// The program-editing contract, as on [`Processor`]: control-plane
+    /// calls that reach the coordinator only, and are mirrored to the unit
+    /// instances by the host like every other control operation.
+    fn program_editing_capabilities(&self) -> u32 {
+        0
+    }
+
+    fn begin_program_edit(&mut self, _request: &[u8], _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
+    fn prepare_program_save(&mut self, _document: &[u8], _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
+    fn install_program(&mut self, _prepared: &[u8]) -> bool {
+        false
+    }
+
+    fn preview_program(&mut self, _prepared: &[u8]) -> bool {
+        false
+    }
+
+    fn program_editor_view(&mut self, _document: &[u8], _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
+    fn apply_program_edit(&mut self, _request: &[u8], _destination: &mut [u8]) -> Option<usize> {
+        None
     }
 
     /// Serial pre-stage: consume MIDI and automation, advance global state
@@ -1190,6 +1225,105 @@ macro_rules! export_processor {
 #[macro_export]
 macro_rules! export_parallel_processor {
     ($processor:ty, max_units = $max_units:expr, dispatch_stride = $dispatch_stride:expr, shared_capacity = $shared_capacity:expr, max_frames = $max_frames:expr, max_input_channels = $max_input_channels:expr, max_output_channels = $max_output_channels:expr, max_midi_events = $max_midi_events:expr, max_parameter_events = $max_parameter_events:expr, max_transfer_bytes = $max_transfer_bytes:expr) => {
+        $crate::export_parallel_processor!(
+            @body $processor,
+            max_units = $max_units,
+            dispatch_stride = $dispatch_stride,
+            shared_capacity = $shared_capacity,
+            max_frames = $max_frames,
+            max_input_channels = $max_input_channels,
+            max_output_channels = $max_output_channels,
+            max_midi_events = $max_midi_events,
+            max_parameter_events = $max_parameter_events,
+            max_transfer_bytes = $max_transfer_bytes
+        );
+        $crate::export_processor!(
+            RackForgeParallelExport,
+            max_frames = $max_frames,
+            max_input_channels = $max_input_channels,
+            max_output_channels = $max_output_channels,
+            max_midi_events = $max_midi_events,
+            max_parameter_events = $max_parameter_events,
+            max_transfer_bytes = $max_transfer_bytes
+        );
+    };
+    // The same component taking the families it names at MIDI 2.0 widths:
+    // the classic wide contract on the composed `process`, and a second
+    // pre-stage entry that takes the wide count, so a scheduling host hands
+    // the coordinator exactly what the sequential path hands `process_v2`.
+    ($processor:ty, max_units = $max_units:expr, dispatch_stride = $dispatch_stride:expr, shared_capacity = $shared_capacity:expr, max_frames = $max_frames:expr, max_input_channels = $max_input_channels:expr, max_output_channels = $max_output_channels:expr, max_midi_events = $max_midi_events:expr, max_parameter_events = $max_parameter_events:expr, max_transfer_bytes = $max_transfer_bytes:expr, midi2 = { max_events = $max_midi2_events:expr, families = $midi2_families:expr }) => {
+        $crate::export_parallel_processor!(
+            @body $processor,
+            max_units = $max_units,
+            dispatch_stride = $dispatch_stride,
+            shared_capacity = $shared_capacity,
+            max_frames = $max_frames,
+            max_input_channels = $max_input_channels,
+            max_output_channels = $max_output_channels,
+            max_midi_events = $max_midi_events,
+            max_parameter_events = $max_parameter_events,
+            max_transfer_bytes = $max_transfer_bytes
+        );
+        $crate::export_processor!(
+            RackForgeParallelExport,
+            max_frames = $max_frames,
+            max_input_channels = $max_input_channels,
+            max_output_channels = $max_output_channels,
+            max_midi_events = $max_midi_events,
+            max_parameter_events = $max_parameter_events,
+            max_transfer_bytes = $max_transfer_bytes,
+            midi2 = { max_events = $max_midi2_events, families = $midi2_families }
+        );
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_begin_block_v2(
+            frames: i32,
+            input_channels: i32,
+            output_channels: i32,
+            midi_event_count: i32,
+            parameter_event_count: i32,
+            midi2_event_count: i32,
+        ) -> i32 {
+            if frames <= 0
+                || midi2_event_count < 0
+                || midi2_event_count as usize > RF_MAX_MIDI2_EVENTS
+            {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            // SAFETY: single-threaded component entry point over the same
+            // statics as `rackforge_process_v2`.
+            unsafe {
+                let packed_midi2 = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_MIDI2).cast::<u64>(),
+                    2 * midi2_event_count as usize,
+                );
+                let mut events2 = [$crate::MidiEvent2 {
+                    frame: 0,
+                    kind: 0,
+                    channel: 0,
+                    index: 0,
+                    flags: 0,
+                    value: 0,
+                    extra: 0,
+                }; RF_MAX_MIDI2_EVENTS];
+                for (destination, packed) in events2.iter_mut().zip(packed_midi2.chunks_exact(2)) {
+                    *destination = $crate::MidiEvent2::from_packed(packed[0], packed[1]);
+                    if destination.frame >= frames as u32 {
+                        return $crate::STATUS_INVALID_ARGUMENT;
+                    }
+                }
+                RackForgeParallelExport::rf_begin_packed(
+                    frames,
+                    input_channels,
+                    output_channels,
+                    midi_event_count,
+                    parameter_event_count,
+                    &events2[..midi2_event_count as usize],
+                )
+            }
+        }
+    };
+    (@body $processor:ty, max_units = $max_units:expr, dispatch_stride = $dispatch_stride:expr, shared_capacity = $shared_capacity:expr, max_frames = $max_frames:expr, max_input_channels = $max_input_channels:expr, max_output_channels = $max_output_channels:expr, max_midi_events = $max_midi_events:expr, max_parameter_events = $max_parameter_events:expr, max_transfer_bytes = $max_transfer_bytes:expr) => {
         use $crate::Processor as _;
 
         const RF_PARALLEL_MAX_UNITS: usize = $max_units;
@@ -1239,12 +1373,24 @@ macro_rules! export_parallel_processor {
         }
 
         impl RackForgeParallelExport {
+            /// The coordinator, for tests and tools that reach past the ABI
+            /// to the processor's own methods.
+            pub fn coordinator(&self) -> &$processor {
+                &self.inner
+            }
+
+            pub fn coordinator_mut(&mut self) -> &mut $processor {
+                &mut self.inner
+            }
+
             /// Serial pre-stage over the shared plan/dispatch statics.
             /// Returns the number of planned units.
+            #[allow(clippy::too_many_arguments)]
             fn rf_begin(
                 &mut self,
                 input: &[f32],
                 midi: &[$crate::MidiEvent],
+                midi2: &[$crate::MidiEvent2],
                 parameters: &[$crate::ParameterEvent],
                 frames: u32,
                 input_channels: u32,
@@ -1267,6 +1413,7 @@ macro_rules! export_parallel_processor {
                     let context = $crate::BlockContext {
                         input,
                         midi,
+                        midi2,
                         parameters,
                         frames,
                         input_channels,
@@ -1280,6 +1427,91 @@ macro_rules! export_parallel_processor {
                     header[1] = 0;
                     RF_PLAN_COUNT = count;
                     count
+                }
+            }
+
+            /// The pre-stage as the host enters it: the counts it passed,
+            /// the regions it wrote, and — for the wide entry — the packed
+            /// MIDI 2.0 words. Returns the planned unit count or a status.
+            ///
+            /// # Safety
+            /// Single-threaded component entry; the caller is an exported
+            /// entry point over the same statics as `rackforge_process`.
+            unsafe fn rf_begin_packed(
+                frames: i32,
+                input_channels: i32,
+                output_channels: i32,
+                midi_event_count: i32,
+                parameter_event_count: i32,
+                midi2: &[$crate::MidiEvent2],
+            ) -> i32 {
+                if frames <= 0
+                    || input_channels < 0
+                    || output_channels < 0
+                    || midi_event_count < 0
+                    || parameter_event_count < 0
+                {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                }
+                let Some(input_samples) = (frames as usize).checked_mul(input_channels as usize)
+                else {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                };
+                if input_samples > RF_MAX_INPUT_SAMPLES
+                    || frames as usize > RF_MAX_FRAMES
+                    || midi_event_count as usize > RF_MAX_MIDI_EVENTS
+                    || parameter_event_count as usize > RF_MAX_PARAMETER_EVENTS
+                {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                }
+                // SAFETY: as promised by the caller.
+                unsafe {
+                    if !RF_PREPARED {
+                        return $crate::STATUS_INVALID_STATE;
+                    }
+                    let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR)
+                        .cast::<RackForgeParallelExport>();
+                    let input = core::slice::from_raw_parts(
+                        core::ptr::addr_of!(RF_INPUT).cast::<f32>(),
+                        input_samples,
+                    );
+                    let packed_midi = core::slice::from_raw_parts(
+                        core::ptr::addr_of!(RF_MIDI).cast::<u64>(),
+                        midi_event_count as usize,
+                    );
+                    let parameter_events = core::slice::from_raw_parts(
+                        core::ptr::addr_of!(RF_PARAMETERS).cast::<$crate::ParameterEvent>(),
+                        parameter_event_count as usize,
+                    );
+                    let mut events = [$crate::MidiEvent {
+                        frame: 0,
+                        data: [0; 3],
+                        length: 1,
+                    }; RF_MAX_MIDI_EVENTS];
+                    for (destination, packed) in events.iter_mut().zip(packed_midi) {
+                        *destination = $crate::MidiEvent::from_packed(*packed);
+                        if destination.frame >= frames as u32
+                            || destination.length == 0
+                            || destination.length > 3
+                        {
+                            return $crate::STATUS_INVALID_ARGUMENT;
+                        }
+                    }
+                    if parameter_events
+                        .iter()
+                        .any(|event| event.frame >= frames as u32 || !event.value.is_finite())
+                    {
+                        return $crate::STATUS_INVALID_ARGUMENT;
+                    }
+                    processor.rf_begin(
+                        input,
+                        &events[..midi_event_count as usize],
+                        midi2,
+                        parameter_events,
+                        frames as u32,
+                        input_channels as u32,
+                        output_channels as u32,
+                    ) as i32
                 }
             }
 
@@ -1372,6 +1604,34 @@ macro_rules! export_parallel_processor {
                 $crate::ParallelProcessor::load_state(&mut self.inner, state)
             }
 
+            fn program_editing_capabilities(&self) -> u32 {
+                $crate::ParallelProcessor::program_editing_capabilities(&self.inner)
+            }
+
+            fn begin_program_edit(&mut self, request: &[u8], destination: &mut [u8]) -> Option<usize> {
+                $crate::ParallelProcessor::begin_program_edit(&mut self.inner, request, destination)
+            }
+
+            fn prepare_program_save(&mut self, document: &[u8], destination: &mut [u8]) -> Option<usize> {
+                $crate::ParallelProcessor::prepare_program_save(&mut self.inner, document, destination)
+            }
+
+            fn install_program(&mut self, prepared: &[u8]) -> bool {
+                $crate::ParallelProcessor::install_program(&mut self.inner, prepared)
+            }
+
+            fn preview_program(&mut self, prepared: &[u8]) -> bool {
+                $crate::ParallelProcessor::preview_program(&mut self.inner, prepared)
+            }
+
+            fn program_editor_view(&mut self, document: &[u8], destination: &mut [u8]) -> Option<usize> {
+                $crate::ParallelProcessor::program_editor_view(&mut self.inner, document, destination)
+            }
+
+            fn apply_program_edit(&mut self, request: &[u8], destination: &mut [u8]) -> Option<usize> {
+                $crate::ParallelProcessor::apply_program_edit(&mut self.inner, request, destination)
+            }
+
             fn process(
                 &mut self,
                 input: &[f32],
@@ -1382,9 +1642,38 @@ macro_rules! export_parallel_processor {
                 input_channels: u32,
                 output_channels: u32,
             ) {
+                self.process_wide(
+                    input,
+                    output,
+                    midi,
+                    &[],
+                    parameters,
+                    frames,
+                    input_channels,
+                    output_channels,
+                );
+            }
+
+            /// The sequential composition: the pre-stage, every planned
+            /// unit in ascending order into its mix slot, the post-stage.
+            /// A scheduling host performs the same sequence across its own
+            /// instances, so both paths produce identical audio.
+            #[allow(clippy::too_many_arguments)]
+            fn process_wide(
+                &mut self,
+                input: &[f32],
+                output: &mut [f32],
+                midi: &[$crate::MidiEvent],
+                midi2: &[$crate::MidiEvent2],
+                parameters: &[$crate::ParameterEvent],
+                frames: u32,
+                input_channels: u32,
+                output_channels: u32,
+            ) {
                 let count = self.rf_begin(
                     input,
                     midi,
+                    midi2,
                     parameters,
                     frames,
                     input_channels,
@@ -1432,16 +1721,6 @@ macro_rules! export_parallel_processor {
                 self.rf_end(output, frames, output_channels);
             }
         }
-
-        $crate::export_processor!(
-            RackForgeParallelExport,
-            max_frames = $max_frames,
-            max_input_channels = $max_input_channels,
-            max_output_channels = $max_output_channels,
-            max_midi_events = $max_midi_events,
-            max_parameter_events = $max_parameter_events,
-            max_transfer_bytes = $max_transfer_bytes
-        );
 
         #[unsafe(no_mangle)]
         pub extern "C" fn rackforge_parallel_abi_version() -> i32 {
@@ -1491,72 +1770,17 @@ macro_rules! export_parallel_processor {
             midi_event_count: i32,
             parameter_event_count: i32,
         ) -> i32 {
-            if frames <= 0
-                || input_channels < 0
-                || output_channels < 0
-                || midi_event_count < 0
-                || parameter_event_count < 0
-            {
-                return $crate::STATUS_INVALID_ARGUMENT;
-            }
-            let Some(input_samples) = (frames as usize).checked_mul(input_channels as usize) else {
-                return $crate::STATUS_INVALID_ARGUMENT;
-            };
-            if input_samples > RF_MAX_INPUT_SAMPLES
-                || frames as usize > RF_MAX_FRAMES
-                || midi_event_count as usize > RF_MAX_MIDI_EVENTS
-                || parameter_event_count as usize > RF_MAX_PARAMETER_EVENTS
-            {
-                return $crate::STATUS_INVALID_ARGUMENT;
-            }
             // SAFETY: single-threaded component entry point over the same
             // statics as `rackforge_process`.
             unsafe {
-                if !RF_PREPARED {
-                    return $crate::STATUS_INVALID_STATE;
-                }
-                let processor =
-                    &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<RackForgeParallelExport>();
-                let input = core::slice::from_raw_parts(
-                    core::ptr::addr_of!(RF_INPUT).cast::<f32>(),
-                    input_samples,
-                );
-                let packed_midi = core::slice::from_raw_parts(
-                    core::ptr::addr_of!(RF_MIDI).cast::<u64>(),
-                    midi_event_count as usize,
-                );
-                let parameter_events = core::slice::from_raw_parts(
-                    core::ptr::addr_of!(RF_PARAMETERS).cast::<$crate::ParameterEvent>(),
-                    parameter_event_count as usize,
-                );
-                let mut events = [$crate::MidiEvent {
-                    frame: 0,
-                    data: [0; 3],
-                    length: 1,
-                }; RF_MAX_MIDI_EVENTS];
-                for (destination, packed) in events.iter_mut().zip(packed_midi) {
-                    *destination = $crate::MidiEvent::from_packed(*packed);
-                    if destination.frame >= frames as u32
-                        || destination.length == 0
-                        || destination.length > 3
-                    {
-                        return $crate::STATUS_INVALID_ARGUMENT;
-                    }
-                }
-                if parameter_events
-                    .iter()
-                    .any(|event| event.frame >= frames as u32 || !event.value.is_finite())
-                {
-                    return $crate::STATUS_INVALID_ARGUMENT;
-                }
-                processor.rf_begin(
-                    input,
-                    &events[..midi_event_count as usize],
-                    parameter_events,
-                    frames as u32,
-                    input_channels as u32,
-                    output_channels as u32,
-                ) as i32
+                RackForgeParallelExport::rf_begin_packed(
+                    frames,
+                    input_channels,
+                    output_channels,
+                    midi_event_count,
+                    parameter_event_count,
+                    &[],
+                )
             }
         }
 

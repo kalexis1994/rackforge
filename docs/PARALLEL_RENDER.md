@@ -84,10 +84,24 @@ rackforge_parallel_begin_block(frames, input_channels, output_channels,
 rackforge_parallel_render_unit(unit, payload_bytes, shared_bytes, frames,
                                output_channels) -> i32
 rackforge_parallel_end_block(frames, output_channels) -> i32
+
+;; with the wide-MIDI contract (rackforge_midi2_* and rackforge_process_v2):
+rackforge_parallel_begin_block_v2(frames, input_channels, output_channels,
+                                  midi_count, parameter_count,
+                                  midi2_count) -> i32
 ```
 
 `begin_block` consumes the standard input/MIDI/parameter regions (the same
-ones `rackforge_process` uses) and returns the number of active units. The
+ones `rackforge_process` uses) and returns the number of active units. A
+component that also takes MIDI at 2.0 widths — the four optional exports in
+[PLUGIN_ABI.md](PLUGIN_ABI.md) — must export `begin_block_v2` as well, and
+the host then enters the coordinator through it on every block, wide events
+or not, exactly as it enters `rackforge_process_v2`: the families the
+component declared wide arrive in the MIDI 2.0 region at their full width,
+everything else as MIDI 1.0 bytes, no event in both. A pooled render and
+the sequential fallback therefore hand the coordinator the same events. The
+host refuses at load a component that exports one side of that pair without
+the other. The
 **plan region** starts with an 8-byte header `{shared_payload_bytes: u32,
 reserved: u32}` followed by one `{unit: u32, payload_bytes: u32}` entry per
 active unit, with strictly increasing unit indices. The host validates all
@@ -182,6 +196,7 @@ by **mirroring the same canonical input** to every instance:
 | `load_state` | same canonical snapshot bytes applied to every instance |
 | `save_state` | read from the **coordinator only** — it is the authority |
 | resources | delivered identically to every instance at creation |
+| program editing (`rackforge_program_*`) | coordinator only — the SDK forwards the `ParallelProcessor` program-editing methods, which default to none |
 
 Worker instances therefore never evolve global state on their own: their
 mirrored globals only change at control-plane granularity, and everything
@@ -291,6 +306,14 @@ export_parallel_processor!(
     max_transfer_bytes = 4096
 );
 ```
+
+Add a `midi2 = { max_events = 256, families = MIDI_FAMILY_NOTE | … }` clause
+to the same invocation for a coordinator that takes those families at MIDI
+2.0 widths: `begin_block` then finds them in `ctx.midi2`, the macro exports
+the wide contract and `rackforge_parallel_begin_block_v2` alongside, and
+the package declares `[api] minor = 12`. The `ParallelProcessor` trait also
+carries the program-editing methods of `Processor`, so an instrument with an
+editor keeps it when it splits into units.
 
 `plugins/parallel-demo-synth` is the complete worked example: a five-voice
 instrument whose coordinator allocates voices, renders a per-frame vibrato

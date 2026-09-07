@@ -390,6 +390,23 @@ impl PortableModule {
                     align_of::<f32>(),
                     memory_size,
                 )?;
+                // A coordinator that takes MIDI at 2.0 widths needs a
+                // pre-stage that takes the wide count, or the pool would
+                // hand it less than the sequential path does.
+                let begin_block_v2 = optional_typed::<(i32, i32, i32, i32, i32, i32), i32>(
+                    &instance,
+                    &mut store,
+                    "rackforge_parallel_begin_block_v2",
+                )?;
+                match (midi2.is_some(), begin_block_v2.is_some()) {
+                    (true, false) => bail!(
+                        "a component that takes MIDI 2.0 and renders in parallel must export rackforge_parallel_begin_block_v2"
+                    ),
+                    (false, true) => bail!(
+                        "component exports rackforge_parallel_begin_block_v2 without the wide-MIDI contract"
+                    ),
+                    _ => {}
+                }
                 Some(PortableParallelApi {
                     layout: ParallelLayout {
                         max_units,
@@ -402,6 +419,7 @@ impl PortableModule {
                     mix_offset,
                     shared_offset,
                     begin_block: typed(&instance, &mut store, "rackforge_parallel_begin_block")?,
+                    begin_block_v2,
                     render_unit: typed(&instance, &mut store, "rackforge_parallel_render_unit")?,
                     end_block: typed(&instance, &mut store, "rackforge_parallel_end_block")?,
                 })
@@ -467,6 +485,10 @@ struct PortableParallelApi {
     mix_offset: i32,
     shared_offset: i32,
     begin_block: TypedFunc<(i32, i32, i32, i32, i32), i32>,
+    /// The pre-stage that takes the wide count: present exactly when the
+    /// component declared the wide-MIDI contract, and entered on every
+    /// block then, wide events or not, as `rackforge_process_v2` is.
+    begin_block_v2: Option<ParallelBeginV2Fn>,
     render_unit: TypedFunc<(i32, i32, i32, i32, i32), i32>,
     end_block: TypedFunc<(i32, i32), i32>,
 }
@@ -484,6 +506,8 @@ struct PortableProgramApi {
 
 /// The wide-MIDI block entry: `rackforge_process` plus the wide event count.
 type ProcessV2Fn = TypedFunc<(i32, i32, i32, i32, i32, i32), i32>;
+/// The parallel pre-stage with the wide count: the same shape as `process_v2`.
+type ParallelBeginV2Fn = TypedFunc<(i32, i32, i32, i32, i32, i32), i32>;
 
 pub struct PortableInstance {
     store: Store<HostState>,
@@ -991,12 +1015,18 @@ impl PortableInstance {
     /// sample-accurate automation, voice allocation and every other piece of
     /// global state. Fills `plan` with the units that are ready to render and
     /// returns how many entries are valid.
+    ///
+    /// `midi2` carries the events of the families the component declared
+    /// wide, exactly as [`Self::process_interleaved_with_midi2`] does: a
+    /// component with the wide contract is entered through its wide
+    /// pre-stage on every block, and one without it refuses any wide event.
     pub fn parallel_begin_block(
         &mut self,
         input: &[f32],
         frames: u32,
         midi: &[MidiEvent],
         parameters: &[ParameterEvent],
+        midi2: &[MidiEvent2],
         plan: &mut [ParallelPlanEntry],
     ) -> Result<ParallelBlockPlan> {
         let api = self
@@ -1006,6 +1036,7 @@ impl PortableInstance {
         let layout = api.layout;
         let plan_offset = api.plan_offset;
         let begin_block = api.begin_block.clone();
+        let begin_block_v2 = api.begin_block_v2.clone();
         if plan.len() < layout.max_units {
             bail!("parallel plan buffer is smaller than max_units");
         }
@@ -1023,8 +1054,24 @@ impl PortableInstance {
             self.capacity_midi_events,
             self.capacity_parameter_events,
         )?;
+        if midi2.len() > self.capacity_midi2_events {
+            bail!("wide MIDI event count exceeds plugin capacity");
+        }
+        if midi2.iter().any(|event| event.frame >= frames) {
+            bail!("wide MIDI event is outside the audio block");
+        }
         let memory_size = self.memory.data_size(&self.store);
         let input_range = memory_range(self.input_offset, input_samples, memory_size)?;
+        let midi2_range = match self.midi2_offset {
+            Some(offset) if !midi2.is_empty() => Some(byte_range(
+                offset,
+                midi2.len(),
+                16,
+                align_of::<u64>(),
+                memory_size,
+            )?),
+            _ => None,
+        };
         let midi_range = byte_range(
             self.midi_offset,
             midi.len(),
@@ -1041,22 +1088,38 @@ impl PortableInstance {
         )?;
         write_f32(self.memory.data_mut(&mut self.store), input_range, input);
         write_midi(self.memory.data_mut(&mut self.store), midi_range, midi);
+        if let Some(range) = midi2_range {
+            write_midi2(self.memory.data_mut(&mut self.store), range, midi2);
+        }
         write_parameters(
             self.memory.data_mut(&mut self.store),
             parameter_range,
             parameters,
         );
         self.reset_realtime_fuel()?;
-        let result = begin_block.call(
-            &mut self.store,
-            (
-                frames as i32,
-                self.prepared_input_channels as i32,
-                self.prepared_output_channels as i32,
-                midi.len() as i32,
-                parameters.len() as i32,
+        let result = match &begin_block_v2 {
+            Some(begin_block_v2) => begin_block_v2.call(
+                &mut self.store,
+                (
+                    frames as i32,
+                    self.prepared_input_channels as i32,
+                    self.prepared_output_channels as i32,
+                    midi.len() as i32,
+                    parameters.len() as i32,
+                    midi2.len() as i32,
+                ),
             ),
-        );
+            None => begin_block.call(
+                &mut self.store,
+                (
+                    frames as i32,
+                    self.prepared_input_channels as i32,
+                    self.prepared_output_channels as i32,
+                    midi.len() as i32,
+                    parameters.len() as i32,
+                ),
+            ),
+        };
         self.last_realtime_fuel_consumed = self
             .fuel_per_call
             .saturating_sub(self.store.get_fuel().unwrap_or(0));
@@ -1887,7 +1950,7 @@ mod tests {
 
             let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
             let block_plan = coordinator
-                .parallel_begin_block(&[], 64, midi, parameters, &mut plan)
+                .parallel_begin_block(&[], 64, midi, parameters, &[], &mut plan)
                 .unwrap();
             let active = block_plan.active_units;
             let mut shared = [0_u8; 256];
@@ -1942,7 +2005,7 @@ mod tests {
 
         let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
         let block_plan = coordinator
-            .parallel_begin_block(&[], 64, &[], &[], &mut plan)
+            .parallel_begin_block(&[], 64, &[], &[], &[], &mut plan)
             .unwrap();
         assert_eq!(block_plan.active_units, 3);
         let mut unit_output = [0.0_f32; 128];
@@ -1971,7 +2034,7 @@ mod tests {
         coordinator.prepare(48_000.0, 64, 0, 2).unwrap();
         let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
         let error = coordinator
-            .parallel_begin_block(&[], 64, &[], &[], &mut plan)
+            .parallel_begin_block(&[], 64, &[], &[], &[], &mut plan)
             .unwrap_err();
         assert!(format!("{error:#}").contains("beyond max_units"));
     }
@@ -1988,9 +2051,132 @@ mod tests {
         coordinator.prepare(48_000.0, 64, 0, 2).unwrap();
         let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
         let error = coordinator
-            .parallel_begin_block(&[], 64, &[], &[], &mut plan)
+            .parallel_begin_block(&[], 64, &[], &[], &[], &mut plan)
             .unwrap_err();
         assert!(format!("{error:#}").contains("exceeds dispatch stride"));
+    }
+
+    /// The fixture taking notes at MIDI 2.0 widths: the wide contract on
+    /// `process`, and a wide pre-stage that reports the wide count and the
+    /// first wide event's index behind the LFO in the shared payload.
+    fn wide_parallel_synth() -> String {
+        const WIDE: &str = r#"
+          (func (export "rackforge_midi2_ptr") (result i32) i32.const 20480)
+          (func (export "rackforge_capacity_midi2_events") (result i32) i32.const 4)
+          (func (export "rackforge_midi2_families") (result i32) i32.const 1)
+          (func (export "rackforge_process_v2") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (param $midi2 i32) (result i32)
+            local.get $frames local.get $in local.get $out local.get $midi local.get $parameters call $process)
+          (func (export "rackforge_parallel_begin_block_v2") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (param $midi2 i32) (result i32)
+            (local $count i32)
+            local.get $frames local.get $midi local.get $parameters call $begin local.set $count
+            i32.const 12288 i32.const 16 i32.store
+            i32.const 16708 local.get $midi2 f32.convert_i32_s f32.store
+            i32.const 16712 i32.const 20486 i32.load8_u f32.convert_i32_u f32.store
+            local.get $count)
+          (func $plan_unit"#;
+        PARALLEL_SYNTH
+            .replace(
+                "(func (export \"rackforge_process\") (param $frames i32)",
+                "(func $process (export \"rackforge_process\") (param $frames i32)",
+            )
+            .replacen("(func $plan_unit", WIDE.trim_start(), 1)
+    }
+
+    fn shared_words(coordinator: &PortableInstance, words: usize) -> Vec<f32> {
+        let mut shared = vec![0_u8; words * 4];
+        coordinator.parallel_read_shared(&mut shared).unwrap();
+        shared
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| f32::from_le_bytes(*chunk))
+            .collect()
+    }
+
+    #[test]
+    fn a_wide_coordinator_is_entered_through_its_wide_pre_stage() {
+        let engine = parallel_engine();
+        let module = engine
+            .compile(&wat::parse_str(wide_parallel_synth()).unwrap())
+            .unwrap();
+        let mut coordinator = module.instantiate().unwrap();
+        coordinator.prepare(48_000.0, 64, 0, 2).unwrap();
+        let note_on = MidiEvent2 {
+            frame: 3,
+            kind: 2,
+            channel: 0,
+            index: 61,
+            flags: 0,
+            value: 0xFFFF,
+            extra: 0,
+        };
+        let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
+        let block = coordinator
+            .parallel_begin_block(
+                &[],
+                64,
+                &[],
+                &[],
+                core::slice::from_ref(&note_on),
+                &mut plan,
+            )
+            .unwrap();
+        assert_eq!(block.shared_bytes, 16);
+        assert_eq!(&shared_words(&coordinator, 4)[1..3], &[1.0, 61.0]);
+
+        // No wide event this block: still the wide entry, with a count of 0.
+        let block = coordinator
+            .parallel_begin_block(&[], 64, &[], &[], &[], &mut plan)
+            .unwrap();
+        assert_eq!(block.shared_bytes, 16);
+        assert_eq!(shared_words(&coordinator, 4)[1], 0.0);
+
+        // Outside the block, or beyond the declared capacity: refused.
+        let late = MidiEvent2 {
+            frame: 64,
+            ..note_on
+        };
+        let error = coordinator
+            .parallel_begin_block(&[], 64, &[], &[], core::slice::from_ref(&late), &mut plan)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("outside the audio block"));
+        let error = coordinator
+            .parallel_begin_block(&[], 64, &[], &[], &[note_on; 5], &mut plan)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("exceeds plugin capacity"));
+
+        // A coordinator without the wide contract refuses any wide event.
+        let classic = engine
+            .compile(&wat::parse_str(PARALLEL_SYNTH).unwrap())
+            .unwrap();
+        let mut classic = classic.instantiate().unwrap();
+        classic.prepare(48_000.0, 64, 0, 2).unwrap();
+        let error = classic
+            .parallel_begin_block(
+                &[],
+                64,
+                &[],
+                &[],
+                core::slice::from_ref(&note_on),
+                &mut plan,
+            )
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("exceeds plugin capacity"));
+    }
+
+    #[test]
+    fn a_wide_parallel_component_without_the_wide_pre_stage_is_refused() {
+        let source = wide_parallel_synth().replace(
+            "(func (export \"rackforge_parallel_begin_block_v2\")",
+            "(func (export \"rackforge_parallel_begin_block_v3\")",
+        );
+        let engine = parallel_engine();
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let error = match module.instantiate() {
+            Ok(_) => panic!("a wide parallel component without the wide pre-stage loaded"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:#}").contains("rackforge_parallel_begin_block_v2"));
     }
 
     #[test]
@@ -2005,7 +2191,7 @@ mod tests {
         coordinator.prepare(48_000.0, 64, 0, 2).unwrap();
         let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
         let error = coordinator
-            .parallel_begin_block(&[], 64, &[], &[], &mut plan)
+            .parallel_begin_block(&[], 64, &[], &[], &[], &mut plan)
             .unwrap_err();
         assert!(format!("{error:#}").contains("strictly increasing"));
     }
@@ -2037,7 +2223,7 @@ mod tests {
         coordinator.prepare(48_000.0, 64, 0, 2).unwrap();
         let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
         let error = coordinator
-            .parallel_begin_block(&[], 64, &[], &[], &mut plan)
+            .parallel_begin_block(&[], 64, &[], &[], &[], &mut plan)
             .unwrap_err();
         assert!(format!("{error:#}").contains("beyond capacity"));
     }
@@ -2053,7 +2239,7 @@ mod tests {
         coordinator.set_parameter(0, 0.0).unwrap();
         let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
         let block_plan = coordinator
-            .parallel_begin_block(&[], 64, &[], &[], &mut plan)
+            .parallel_begin_block(&[], 64, &[], &[], &[], &mut plan)
             .unwrap();
         assert_eq!(block_plan.active_units, 0);
         let mut produced = [0.0_f32; 128];

@@ -172,7 +172,6 @@ struct RackSlotVoice<'plugin> {
     output: Vec<f32>,
     events: Vec<crate::midi2::Midi2Event>,
     /// The events as the parallel scheduler takes them, rebuilt each block.
-    midi1_scratch: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
 }
@@ -327,16 +326,13 @@ unsafe impl<'plugin> ScheduledSlot for RackSlotVoice<'plugin> {
         if self.process_faulted {
             return Some(0);
         }
-        self.midi1_scratch.clear();
-        self.midi1_scratch
-            .extend(self.events.iter().map(|event| event.to_midi1()));
         let parallel = self.parallel.as_mut()?;
         parallel
             .begin(
                 &mut self.instance,
                 &self.input,
                 frames,
-                &self.midi1_scratch,
+                &self.events,
                 &self.parameter_events,
             )
             .ok()
@@ -498,7 +494,6 @@ struct StandaloneVoice<'plugin> {
     output: Vec<f32>,
     events: Vec<crate::midi2::Midi2Event>,
     /// The events as the parallel scheduler takes them, rebuilt each block.
-    midi1_scratch: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
 }
@@ -552,16 +547,13 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
         if self.process_faulted {
             return Some(0);
         }
-        self.midi1_scratch.clear();
-        self.midi1_scratch
-            .extend(self.events.iter().map(|event| event.to_midi1()));
         let parallel = self.parallel.as_mut()?;
         parallel
             .begin(
                 &mut self.instance,
                 &self.input,
                 frames,
-                &self.midi1_scratch,
+                &self.events,
                 &self.parameter_events,
             )
             .ok()
@@ -711,7 +703,6 @@ fn create_rack_voices<'plugin>(
             input: vec![0.0; period_frames as usize * input_channels],
             output: vec![0.0; period_frames as usize * channels as usize],
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
-            midi1_scratch: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
         });
@@ -748,7 +739,6 @@ fn rack_voices_from_prepared(
                 .iter()
                 .map(crate::midi2::Midi2Event::from_midi1)
                 .collect(),
-            midi1_scratch: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             parameter_events: prepared.parameter_events,
             process_faulted: false,
         })
@@ -1163,7 +1153,6 @@ pub fn run(config: LiveConfig) -> Result<()> {
             input: vec![0.0; period_frames * input_channels],
             output: vec![0.0; period_frames * channels],
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
-            midi1_scratch: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
         });

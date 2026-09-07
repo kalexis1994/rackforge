@@ -682,6 +682,7 @@ mod tests {
         let context = BlockContext {
             input: &[],
             midi,
+            midi2: &[],
             parameters: &[],
             frames: FRAMES,
             input_channels: 0,
@@ -792,6 +793,7 @@ mod tests {
             &BlockContext {
                 input: &[],
                 midi: &chord,
+                midi2: &[],
                 parameters: &[],
                 frames: FRAMES,
                 input_channels: 0,

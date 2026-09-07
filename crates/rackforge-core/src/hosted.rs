@@ -858,15 +858,37 @@ impl PluginInstance<'_> {
 
     /// Serial pre-stage of one parallel block on the coordinator instance.
     /// Fills `plan` and returns the number of ready units.
+    ///
+    /// MIDI arrives in the host's vocabulary and is cut the way
+    /// [`Self::process_wide`] cuts it: the families the plug-in declared
+    /// wide reach its wide pre-stage at their full width, everything else
+    /// as MIDI 1.0 bytes, so a coordinator sees exactly what the sequential
+    /// path would have handed `process`.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn parallel_begin_block(
         &mut self,
         input: &[f32],
         frames: u32,
-        midi_events: &[MidiEventV1],
+        midi: &[Midi2Event],
         parameter_events: &[ParameterEventV1],
         plan: &mut [ParallelPlanEntry],
     ) -> Result<ParallelBlockPlan> {
+        if midi.len() > MAX_REALTIME_EVENTS {
+            bail!("process block exceeds RackForge's real-time event limit");
+        }
+        let families = self.midi2_families();
+        self.midi1_scratch.clear();
+        self.midi2_scratch.clear();
+        for event in midi {
+            match event
+                .family()
+                .filter(|family| families & family != 0)
+                .and_then(|_| event.to_v2())
+            {
+                Some(wide) => self.midi2_scratch.push(wide),
+                None => self.midi1_scratch.push(event.to_midi1()),
+            }
+        }
         match &mut self.backend {
             PluginInstanceBackend::Native(_) => {
                 bail!("native plugins do not expose parallel render")
@@ -875,14 +897,24 @@ impl PluginInstance<'_> {
                 if !instance.active {
                     bail!("plugin instance is not active");
                 }
-                instance.stage_realtime_events(midi_events, parameter_events, &[])?;
+                instance.stage_realtime_events(
+                    &self.midi1_scratch,
+                    parameter_events,
+                    &self.midi2_scratch,
+                )?;
                 let midi = std::mem::take(&mut instance.midi_scratch);
+                let midi2 = std::mem::take(&mut instance.midi2_scratch);
                 let parameters = std::mem::take(&mut instance.parameter_scratch);
-                let result =
-                    instance
-                        .instance
-                        .parallel_begin_block(input, frames, &midi, &parameters, plan);
+                let result = instance.instance.parallel_begin_block(
+                    input,
+                    frames,
+                    &midi,
+                    &parameters,
+                    &midi2,
+                    plan,
+                );
                 instance.midi_scratch = midi;
+                instance.midi2_scratch = midi2;
                 instance.parameter_scratch = parameters;
                 result
             }

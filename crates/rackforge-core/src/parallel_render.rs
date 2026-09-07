@@ -27,8 +27,9 @@
 //! extension's bounded dispatch/mix buffers, copied by the host — never by
 //! duplicating MIDI into cloned full instances.
 
+use crate::midi2::Midi2Event;
 use crate::{LoadedPlugin, PluginInstance};
-use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
+use rackforge_plugin_api::abi::ParameterEventV1;
 use rackforge_plugin_runtime::{MAX_PARALLEL_UNITS, ParallelLayout, ParallelPlanEntry};
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
@@ -1590,18 +1591,22 @@ impl<'plugin> ParallelUnits<'plugin> {
     /// every announced dispatch payload into its unit cell. Returns the
     /// bitmask of units the scheduler should run, with previously
     /// quarantined units already excluded.
+    ///
+    /// MIDI is taken in the host's vocabulary; the coordinator cuts it by
+    /// the families the plug-in declared wide, so a pooled render and the
+    /// sequential fallback hand the plug-in the same events.
     pub fn begin(
         &mut self,
         coordinator: &mut PluginInstance<'plugin>,
         input: &[f32],
         frames: u32,
-        midi_events: &[MidiEventV1],
+        midi: &[Midi2Event],
         parameter_events: &[ParameterEventV1],
     ) -> anyhow::Result<u32> {
         let block = coordinator.parallel_begin_block(
             input,
             frames,
-            midi_events,
+            midi,
             parameter_events,
             &mut self.plan,
         )?;

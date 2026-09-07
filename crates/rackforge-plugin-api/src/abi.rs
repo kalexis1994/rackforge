@@ -8,7 +8,7 @@ use std::mem::size_of;
 use std::ptr;
 
 pub const ABI_VERSION_MAJOR: u16 = 1;
-pub const ABI_VERSION_MINOR: u16 = 11;
+pub const ABI_VERSION_MINOR: u16 = 12;
 pub const ABI_VERSION: u32 = pack_version(ABI_VERSION_MAJOR, ABI_VERSION_MINOR);
 pub const ENTRY_SYMBOL_V1: &[u8] = b"rackforge_plugin_entry_v1\0";
 pub const PROGRAM_EXTENSION_VERSION_MAJOR: u16 = 1;

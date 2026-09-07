@@ -4,11 +4,13 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use rackforge_core::midi2::Midi2Event;
 use rackforge_core::parallel_render::{
     ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob, process_slots_sequential,
 };
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
+use rackforge_plugin_runtime::{MAX_PARALLEL_UNITS, ParallelPlanEntry};
 use std::collections::BTreeMap;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -254,6 +256,36 @@ const PRESETS_JSON: &str = r#"{
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
 fn build_package() -> &'static LoadedPlugin {
+    build_package_from(PARALLEL_SYNTH)
+}
+
+/// The fixture taking notes at MIDI 2.0 widths: the wide contract on
+/// `process`, and a wide pre-stage that reports the wide count and the
+/// first wide event's index behind the LFO in the shared payload.
+fn wide_parallel_synth() -> String {
+    const WIDE: &str = r#"
+      (func (export "rackforge_midi2_ptr") (result i32) i32.const 20480)
+      (func (export "rackforge_capacity_midi2_events") (result i32) i32.const 4)
+      (func (export "rackforge_midi2_families") (result i32) i32.const 1)
+      (func (export "rackforge_process_v2") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (param $midi2 i32) (result i32)
+        local.get $frames local.get $in local.get $out local.get $midi local.get $parameters call $process)
+      (func (export "rackforge_parallel_begin_block_v2") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (param $midi2 i32) (result i32)
+        (local $count i32)
+        local.get $frames local.get $midi local.get $parameters call $begin local.set $count
+        i32.const 12288 i32.const 16 i32.store
+        i32.const 16708 local.get $midi2 f32.convert_i32_s f32.store
+        i32.const 16712 i32.const 20486 i32.load8_u f32.convert_i32_u f32.store
+        local.get $count)
+      (func $plan_unit"#;
+    PARALLEL_SYNTH
+        .replace(
+            "(func (export \"rackforge_process\") (param $frames i32)",
+            "(func $process (export \"rackforge_process\") (param $frames i32)",
+        )
+        .replacen("(func $plan_unit", WIDE.trim_start(), 1)
+}
+
+fn build_package_from(source: &str) -> &'static LoadedPlugin {
     let root = std::env::temp_dir().join(format!(
         "rackforge-parallel-test-{}-{}",
         std::process::id(),
@@ -262,11 +294,7 @@ fn build_package() -> &'static LoadedPlugin {
     let metadata = root.join("metadata");
     fs::create_dir_all(&metadata).unwrap();
     fs::write(root.join("rackforge-plugin.toml"), MANIFEST).unwrap();
-    fs::write(
-        root.join("component.wasm"),
-        wat::parse_str(PARALLEL_SYNTH).unwrap(),
-    )
-    .unwrap();
+    fs::write(root.join("component.wasm"), wat::parse_str(source).unwrap()).unwrap();
     fs::write(metadata.join("runtime.json"), RUNTIME_JSON).unwrap();
     fs::write(metadata.join("parameters.json"), PARAMETERS_JSON).unwrap();
     fs::write(metadata.join("presets.json"), PRESETS_JSON).unwrap();
@@ -401,13 +429,17 @@ unsafe impl ScheduledSlot for TestVoice {
             self.output.fill(0.0);
             return Some(0);
         }
+        // The pool takes the host's vocabulary; the classic path above took
+        // the bytes. Same events either way, which is what the equality
+        // tests below hold the two paths to.
+        let wide: Vec<Midi2Event> = self.events.iter().map(Midi2Event::from_midi1).collect();
         let parallel = self.parallel.as_mut()?;
         parallel
             .begin(
                 &mut self.instance,
                 &self.input,
                 frames,
-                &self.events,
+                &wide,
                 &self.parameter_events,
             )
             .ok()
@@ -509,6 +541,58 @@ fn render_scripted(
         blocks.push(voices[0].output.clone());
     }
     blocks
+}
+
+/// The pool takes MIDI in the host's vocabulary and the coordinator cuts it
+/// by the families the plug-in declared wide, exactly as the sequential path
+/// does: a note reaches a wide coordinator at its full width, a controller
+/// it did not ask for wide arrives as bytes, and a classic coordinator sees
+/// only bytes.
+#[test]
+fn the_pool_hands_a_wide_coordinator_its_families_wide() {
+    let shared_words = |instance: &PluginInstance<'static>| {
+        let mut shared = [0_u8; 16];
+        instance.parallel_read_shared(&mut shared).unwrap();
+        let word = |at: usize| f32::from_le_bytes(shared[at..at + 4].try_into().unwrap());
+        [word(4), word(8)]
+    };
+    let note_on = Midi2Event::from_midi1(&MidiEventV1 {
+        frame: 1,
+        length: 3,
+        data: [0x90, 61, 100],
+    });
+    let controller = Midi2Event::from_midi1(&MidiEventV1 {
+        frame: 2,
+        length: 3,
+        data: [0xB0, 1, 50],
+    });
+    let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
+
+    let wide = build_package_from(&wide_parallel_synth());
+    let mut coordinator = wide.create_instance().unwrap();
+    coordinator.activate(48_000.0, FRAMES, 0, CHANNELS).unwrap();
+    let block = coordinator
+        .parallel_begin_block(&[], FRAMES, &[note_on, controller], &[], &mut plan)
+        .unwrap();
+    // The note went wide; the controller went narrow, which the fixture
+    // answers with its four-unit plan.
+    assert_eq!(block.active_units, 4);
+    assert_eq!(shared_words(&coordinator), [1.0, 61.0]);
+    let block = coordinator
+        .parallel_begin_block(&[], FRAMES, &[controller], &[], &mut plan)
+        .unwrap();
+    assert_eq!(block.active_units, 4);
+    assert_eq!(shared_words(&coordinator)[0], 0.0);
+
+    // The classic fixture is entered narrow, note and all.
+    let classic = build_package();
+    let mut coordinator = classic.create_instance().unwrap();
+    coordinator.activate(48_000.0, FRAMES, 0, CHANNELS).unwrap();
+    let block = coordinator
+        .parallel_begin_block(&[], FRAMES, &[note_on], &[], &mut plan)
+        .unwrap();
+    assert_eq!(block.active_units, 4);
+    assert_eq!(block.shared_bytes, 8);
 }
 
 #[test]

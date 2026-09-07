@@ -5,7 +5,7 @@
 //!
 //!     cargo run --release -p rackforge-concert-grand --example lab -- [--list]
 //!         [--out <device substring>] [--midi <port substring>]
-//!         [--tuning <file>] [--render <score.txt> <out.wav>]
+//!         [--tuning <file>] [--preset <id>] [--render <score.txt> <out.wav>]
 //!         [--foreground] [--no-edit] [--stop]
 //!
 //! MIDI comes from Windows MIDI Services (every UMP source the service
@@ -22,8 +22,12 @@
 //!
 //! The tuning file is created with every knob at its shipped value and its
 //! documentation the first time; lines read `NAME = value`, and a line
-//! `fader.<index> = 0..1` sets one of the instrument's own parameters (the
-//! indices are those of `metadata/parameters.json`). A score for `--render`
+//! `fader.<index> = value` sets one of the instrument's own parameters in
+//! that parameter's own units -- decibels for the noises, not 0..1 -- (the
+//! indices are those of `metadata/parameters.json`). `--preset <id>` loads
+//! one of `metadata/presets.json` (`concert-308`, `upright-52`, ...) before
+//! the faders are applied, so a render can be heard the way the panel
+//! plays it. A score for `--render`
 //! is one note per line, `onset_ms duration_ms note velocity`, rendered in
 //! stereo at 48 kHz with three seconds of tail.
 
@@ -49,6 +53,7 @@ mod lab {
         out: Option<String>,
         midi: Option<String>,
         tuning: PathBuf,
+        preset: Option<String>,
         render: Option<(PathBuf, PathBuf)>,
     }
 
@@ -62,6 +67,7 @@ mod lab {
             out: None,
             midi: None,
             tuning: default_tuning_path(),
+            preset: None,
             render: None,
         };
         while let Some(arg) = args.next() {
@@ -73,6 +79,7 @@ mod lab {
                 "--out" => options.out = args.next(),
                 "--midi" => options.midi = args.next(),
                 "--tuning" => options.tuning = PathBuf::from(args.next().expect("--tuning <file>")),
+                "--preset" => options.preset = args.next(),
                 "--render" => {
                     let score = PathBuf::from(args.next().expect("--render <score> <wav>"));
                     let wav = PathBuf::from(args.next().expect("--render <score> <wav>"));
@@ -190,6 +197,18 @@ mod lab {
         std::fs::metadata(path).and_then(|m| m.modified()).ok()
     }
 
+    /// The preset first, the tuning file's faders over it: a render is heard
+    /// the way the panel plays it, and the file still has the last word.
+    fn load_preset(piano: &mut ConcertGrand, preset: Option<&str>) {
+        if let Some(id) = preset {
+            if piano.load_preset(id) {
+                println!("preset: {id}");
+            } else {
+                println!("preset: the instrument does not know {id}; the default voicing stays");
+            }
+        }
+    }
+
     fn apply_faders(piano: &mut ConcertGrand, faders: &[(usize, f32)]) {
         for (index, value) in faders {
             if !piano.set_parameter(*index as u32, *value as f64) {
@@ -222,7 +241,7 @@ mod lab {
         std::fs::File::create(path)?.write_all(&out)
     }
 
-    fn render(score: &Path, wav: &Path, tuning: &Path) {
+    fn render(score: &Path, wav: &Path, tuning: &Path, preset: Option<&str>) {
         let rate = 48_000u32;
         let text = std::fs::read_to_string(score).expect("cannot read the score");
         let mut events: Vec<(u64, [u8; 3])> = Vec::new();
@@ -264,6 +283,7 @@ mod lab {
         let faders = load_tuning(tuning, true);
         let mut piano = Box::new(ConcertGrand::default());
         assert!(piano.prepare(rate as f64, BLOCK as u32, 0, 2));
+        load_preset(&mut piano, preset);
         apply_faders(&mut piano, &faders);
         let total = ((last_ms + 3_000) * rate as u64 / 1000) as usize;
         let mut output = Vec::with_capacity(total * 2);
@@ -339,9 +359,10 @@ mod lab {
             // On a thread with room: the instrument is built by value, and
             // thirty-two voices of it overflow the main thread's megabyte.
             let (score, wav, tuning) = (score.clone(), wav.clone(), options.tuning.clone());
+            let preset = options.preset.clone();
             std::thread::Builder::new()
                 .stack_size(32 << 20)
-                .spawn(move || render(&score, &wav, &tuning))
+                .spawn(move || render(&score, &wav, &tuning, preset.as_deref()))
                 .expect("render thread")
                 .join()
                 .expect("render thread panicked");
@@ -521,6 +542,7 @@ mod lab {
         let first_faders = load_tuning(&options.tuning, true);
         let mut piano = Box::new(ConcertGrand::default());
         assert!(piano.prepare(rate as f64, BLOCK as u32, 0, 2));
+        load_preset(&mut piano, options.preset.as_deref());
         for fader in first_faders {
             let _ = fader_tx.send(fader);
         }

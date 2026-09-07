@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 123;
+pub const KNOB_COUNT: usize = 125;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -713,6 +713,16 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "IMPACT_VELOCITY_POWER",
         &IMPACT_VELOCITY_POWER,
         "How steeply the impact's tension pulse follows the blow, under the knee.",
+    ),
+    (
+        "BOARD_TRANSFER",
+        &BOARD_TRANSFER,
+        "How much of the measured board-and-microphones transfer the bank applies (1 = as measured).",
+    ),
+    (
+        "BOARD_MEASURED_MODES",
+        &BOARD_MEASURED_MODES,
+        "The measured low modes' share against the drawn ones below 250 Hz (1 = measured, 0 = drawn).",
     ),
 ];
 
@@ -1819,11 +1829,24 @@ pub static FELT_EXPONENT_RISE: Knob = Knob::new(0.7);
 /// runs above the simulated modes and for any note whose ladder outruns them.
 /// The action's dynamic span: how much faster the hammer arrives at full
 /// velocity than at none, as `velocity0 = V_ff * span^(v - 1)`. At the house
-/// Dynamics of 0.45 these give 14.1, a 5.41x range of hammer speed between
-/// velocity 35 and 116 -- and since the felt hardens with speed, this is what
+/// Dynamics of 0.45 these give 12, a hammer at 1.1 m/s for velocity 36 and
+/// 5.4 m/s for 117 -- and since the felt hardens with speed, this is what
 /// finally decides how much brighter a hard blow is.
-pub static ACTION_SPAN_BASE: Knob = Knob::new(15.0);
-pub static ACTION_SPAN_PER_DYNAMICS: Knob = Knob::new(66.0);
+///
+/// These were 15 and 66 (a span of 44.7, velocity 36 at 0.45 m/s), set from
+/// Boutillon's published extremes of 0.11 to 6.83 m/s. Against the one
+/// reference (2026-09-07, scorecard `span10`/`span3`/`span22`/`span30`
+/// against `board2`, all else equal) the pianissimo of the tenor was
+/// thirteen decibels too dark across its ladder and the pp-to-ff brightness
+/// swing twenty decibels too wide; a span of 15 took those to -2.7 and
+/// +2.7, a span of 10 to +1.4 and -2.5, and neither moved the fortissimo by
+/// more than a tenth of a decibel. Twelve sits between them. The felt's
+/// stiffness was swept the same day (x2, x4, and x4 with the slope
+/// flattened) and rejected: it brightens the fortissimo bass by 10-20 dB in
+/// 4-8 kHz before it reaches the pianissimo. A published extreme is one
+/// point on the travel; the reference's third layer is not a 0.45 m/s blow.
+pub static ACTION_SPAN_BASE: Knob = Knob::new(4.0);
+pub static ACTION_SPAN_PER_DYNAMICS: Knob = Knob::new(17.7);
 pub static CONTACT_SWING_BASE: Knob = Knob::new(1.0);
 pub static CONTACT_SWING_PER_DYNAMICS: Knob = Knob::new(1.2);
 pub static FELT_EXPONENT_MIN: Knob = Knob::new(1.2);
@@ -1844,6 +1867,132 @@ const BOARD_MODES: usize = 256;
 /// mode falls toward zero at BOARD_RADIATION_ORDER times 6 dB per octave.
 /// Scale on the Skudrzyk normalisation of the board's mean mobility.
 pub static BOARD_MEAN_MOBILITY: Knob = Knob::new(0.5);
+/// The MEASURED mean transfer of the board-and-microphones chain, relative
+/// to the flat Skudrzyk mean the bank is normalised to: third-octave centres
+/// in hertz and the correction in decibels, zero-mean over 200 Hz to 4 kHz
+/// so the instrument's level does not move.
+///
+/// Where it comes from (2026-09-07, `tools/scorecard-salamander.py` and the
+/// partial-envelope survey in its session): every partial of all 30 grid
+/// notes, as (frequency, level) points, for the model and for the reference
+/// (Salamander, a Yamaha C5 under a close AB pair), medians per third octave,
+/// each source relative to its own 500 Hz bin. What the hammer does moves
+/// with the note and with the blow; what the chain does is fixed in
+/// frequency. So the table keeps only the part of the difference that the
+/// fortissimo and the pianissimo renders agree on below 1 kHz, that the
+/// three registers agree on between 1 and 5 kHz (the pianissimo there is
+/// the hammer's, forty decibels of it), and nothing above 5 kHz, where the
+/// two blows disagree by twenty. Smoothed over three quarters of an octave
+/// either side, because at seven to thirteen partials per bin the fine
+/// structure is the luck of which partial landed where, not the board.
+///
+/// Read as physics: the reference's chain is strongest from 80 to 200 Hz
+/// (its release taps, averaged over all 88 keys, peak there too), sits
+/// six decibels under this bank at 250-315 Hz where the bank happens to
+/// hump, and carries three to four decibels more from 2.5 to 4 kHz -- the
+/// rise toward coincidence that the bank's flat mean leaves out. Measured
+/// where there is a measurement; the fine structure of the low modes is
+/// not in here yet, and is the next thing to take from those taps.
+///
+/// The bottom of the table is smoothed among its own neighbours only: the
+/// first pass let the two or three partials that land at 50-63 Hz (the
+/// bottom four notes' fundamentals, where the reference's board radiates
+/// almost nothing) pull the 80-200 Hz correction down to half, and the
+/// bass notes' strongest partials -- the ones that set every band ratio's
+/// denominator -- stayed six decibels short while the rest of the compass
+/// came out level.
+const BOARD_TRANSFER_DB: &[(f32, f32)] = &[
+    (50.0, -2.0),
+    (63.0, -1.0),
+    (80.0, 2.0),
+    (100.0, 6.5),
+    (125.0, 7.5),
+    (160.0, 6.0),
+    (200.0, 3.0),
+    (250.0, -5.5),
+    (315.0, -6.5),
+    (400.0, -2.8),
+    (500.0, -0.9),
+    (630.0, 0.2),
+    (800.0, 0.3),
+    (1000.0, 1.0),
+    (1250.0, 1.8),
+    (1600.0, 1.5),
+    (2000.0, 1.8),
+    (2500.0, 3.5),
+    (3150.0, 3.9),
+    (4000.0, 3.0),
+    (5000.0, 1.3),
+    (6300.0, 0.0),
+    (8000.0, 0.0),
+];
+/// How much of the measured transfer the bank applies: one is the table as
+/// measured, a sixteenth is as good as off, above one over-corrects.
+pub static BOARD_TRANSFER: Knob = Knob::new(1.0);
+
+/// The reference board's low modes, where its 88 release taps put them.
+///
+/// Each key's release (the damper landing, the key returning) is a broadband
+/// tap on the board at that key's bridge point. Per key, the peaks of its
+/// spectrum below 400 Hz were listed; a frequency that many keys share is
+/// the board's, one that follows the key is not. These are the clusters at
+/// least a dozen keys agreed on (2026-09-07, `low_modes.py` in the session),
+/// with the ripple of the average tap about its own third-octave trend --
+/// the fine structure the mean transfer table smooths away, in decibels.
+/// Below `BOARD_MEASURED_KNEE_HZ` these stand in for the drawn bank's
+/// evenly spaced modes; above it the taps' peaks crowd into a continuum and
+/// the statistical law is the right description.
+const BOARD_LOW_MODES: &[(f32, f32)] = &[
+    (65.3, 1.6),
+    (84.3, 2.8),
+    (102.2, 1.7),
+    (112.5, -2.3),
+    (125.4, 2.9),
+    (137.5, 0.7),
+    (153.4, 0.5),
+    (174.3, 1.6),
+    (195.2, 2.8),
+    (231.7, 3.1),
+];
+const BOARD_MEASURED_KNEE_HZ: f32 = 250.0;
+/// The measured low modes' share against the drawn ones under the knee:
+/// one is the measured board, zero the drawn bank as it was.
+///
+/// Ships at ZERO. Measured on the grid (`lm100` against `board2`, same
+/// build, only this knob moved), the measured placement left the bass
+/// notes' partials at 63-177 Hz four to five decibels further under the
+/// reference than the drawn bank with the mean transfer already does: ten
+/// sparse modes put the grid's low fundamentals in the gaps between them,
+/// and nothing sits under 65 Hz at all, where the taps could not agree on a
+/// mode. What the taps give reliably is the mean, and that is in the
+/// transfer table; the placement stays here as a fader (compiled at zero,
+/// so the fader is the share itself, nought to one) for the ear to try.
+pub static BOARD_MEASURED_MODES: Knob = Knob::new(0.0);
+
+/// The measured chain transfer at a frequency, as an amplitude factor:
+/// linear in decibels between the table's centres on a log-frequency axis,
+/// held flat past either end.
+fn board_transfer(frequency: f32) -> f32 {
+    let table = BOARD_TRANSFER_DB;
+    let f = frequency.max(1.0);
+    let db = if f <= table[0].0 {
+        table[0].1
+    } else if f >= table[table.len() - 1].0 {
+        table[table.len() - 1].1
+    } else {
+        let mut db = 0.0;
+        for pair in table.windows(2) {
+            let (lo, hi) = (pair[0], pair[1]);
+            if f >= lo.0 && f <= hi.0 {
+                let t = log2f(f / lo.0) / log2f(hi.0 / lo.0);
+                db = lo.1 + (hi.1 - lo.1) * t;
+                break;
+            }
+        }
+        db
+    };
+    powf(10.0, db * BOARD_TRANSFER.get() / 20.0)
+}
 pub static BOARD_COINCIDENCE_HZ: Knob = Knob::new(60.0);
 pub static BOARD_RADIATION_ORDER: Knob = Knob::new(1.0);
 
@@ -3797,77 +3946,67 @@ impl ConcertGrand {
         } else {
             0.45 * self.sample_rate
         };
-        let mut frequency = BOARD_BOTTOM_HZ.get();
         let mut index = 0;
+        // The measured low modes first: where the reference's board puts
+        // them, each with the ripple the taps read there. `measured` is
+        // their share; the statistical modes under the same knee carry the
+        // rest, so the knob crossfades one bank into the other and the ear
+        // can settle it live.
+        let measured = BOARD_MEASURED_MODES.get().clamp(0.0, 1.0);
+        if measured > 0.0 {
+            let modes = BOARD_LOW_MODES;
+            for (i, (hz, ripple_db)) in modes.iter().copied().enumerate() {
+                if index >= BOARD_MODES || hz >= ceiling {
+                    break;
+                }
+                // The local spacing for the mean-mobility normalisation is
+                // the gap to the neighbours, as it is for the drawn bank.
+                let below = if i > 0 { modes[i - 1].0 } else { 0.0 };
+                let above = if i + 1 < modes.len() {
+                    modes[i + 1].0
+                } else {
+                    BOARD_MEASURED_KNEE_HZ
+                };
+                let spacing_here = 0.5 * (above - below);
+                let mut mode = self.board_mode(
+                    0x4D0D_E000 | i as u32,
+                    hz,
+                    spacing_here,
+                    loss,
+                    powf(10.0, ripple_db / 20.0),
+                );
+                mode.drive *= measured;
+                self.board[index] = mode;
+                index += 1;
+            }
+        }
+        let mut frequency = BOARD_BOTTOM_HZ.get();
+        // The drawn modes keep their own count for the seeds: with the
+        // measured set in front of them their slot moves, and a seed taken
+        // from the slot would re-roll every drawn mode's jitter, pan,
+        // strength and sign the moment the knob left zero -- a different
+        // bank above the knee, not a different bank below it.
+        let mut drawn = 0u32;
         while index < BOARD_MODES && frequency < ceiling {
-            let seed = index as u32;
+            let seed = drawn;
+            drawn += 1;
             // ±3% of the local spacing, so neighbouring modes crowd and part
             // the way a real plate's do instead of marching in step.
             let jitter = 1.0 + 0.06 * (hash01(0xB0A2D ^ seed << 3) - 0.5);
             let placed = frequency * jitter;
-            let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ seed << 5);
-            // The lowest modes of a real board are the most damped -- three
-            // to five percent against two above the ribs' transition -- and
-            // wide enough that no bass fundamental falls into a hole between
-            // two neighbours of opposite sign. The loss rises toward the
-            // bottom, log-linear from 300 Hz down to BOARD_LOW_LOSS at 50 Hz.
-            let low = (log2f(300.0 / placed.max(20.0)) / log2f(6.0)).clamp(0.0, 1.0);
-            let loss_here = loss * powf(BOARD_LOW_LOSS.get() / BOARD_LOSS_FACTOR.get(), low);
-            let mut mode =
-                BodyMode::tune(placed, board_t60(placed, loss_here), pan, self.sample_rate);
-            // Skudrzyk: a plate's MEAN mobility is flat with frequency,
-            // whatever its modal density and damping. A bank of unit-gain
-            // peaks is not -- where the modes overlap more the mean rises --
-            // so each peak is scaled by the square root of its spacing over
-            // its bandwidth, and the mean comes out level.
-            let spacing_here = board_spacing(frequency, density);
-            let bandwidth = (loss_here * placed).max(1e-3);
-            mode.drive *= sqrtf(spacing_here / bandwidth).min(BOARD_MEAN_CAP.get())
-                * BOARD_MEAN_MOBILITY.get();
             // A real plate's mobility is ragged: per-mode strength swings
             // ~±8 dB — a bank of equal modes is only a volume knob.
-            mode.drive *= 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
-            // The mode shape at the bridge is as often negative as positive.
-            if hash01(0x51C4 ^ seed << 9) < 0.5 {
-                mode.drive = -mode.drive;
-            }
-            // And the board does not radiate its own lowest modes any more
-            // than it radiates a string's lowest partials.
-            //
-            // The bank starts at 50 Hz, and every note in the compass kicks
-            // that mode -- a treble note hardest of all, because its strike
-            // is the sharpest and so the broadest in spectrum. Measured, a
-            // 49.8 Hz tone sat under every single note, at -75.8 dB under G2
-            // and rising to -68.9 dB under C4, at a fixed pitch that follows
-            // nothing being played. Six voices of a chord each contribute it
-            // and it sums into an audible drone an octave and a half below
-            // the music, which is what the user heard the moment they played
-            // chords on the packaged build and called an octave discrepancy.
-            //
-            // Nothing in the test suite could catch it: every render this
-            // model is measured against is one note, and one note buries it.
-            mode.drive *= Self::board_radiation(placed);
-            // Below coincidence a plate radiates poorly: the near-field of
-            // neighbouring antinodes cancels. A first-order rise toward the
-            // corner keeps the bass fundamental where the references put it,
-            // well under its own second and third partials.
-            let ratio = powf(
-                placed / BOARD_COINCIDENCE_HZ.get(),
-                BOARD_RADIATION_ORDER.get(),
+            let strength = 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
+            let mut mode = self.board_mode(
+                seed,
+                placed,
+                board_spacing(frequency, density),
+                loss,
+                strength,
             );
-            mode.drive *= ratio / (1.0 + ratio);
-            // And a SIGN. A mode's transfer from the bridge to the ear is
-            // the product of its shape at the drive point and its net
-            // radiating area, and both alternate as the shapes gain nodal
-            // lines -- a real plate's transfer flips sign mode to mode. A
-            // bank of all-positive modes in parallel with the through path
-            // notches every anti-resonance coherently: measured on B3, the
-            // bank alone carved its eleventh partial 8.4 dB below the naked
-            // string sum, its twelfth 10, in a fixed-in-Hz patchwork that
-            // gave every note a different ragged ladder -- the bell-like
-            // strike the ear reported. Below ~700 Hz the modes are sparse
-            // and a flipped neighbour could notch a fundamental, so the
-            // dense region alone draws signs.
+            if placed < BOARD_MEASURED_KNEE_HZ {
+                mode.drive *= 1.0 - measured;
+            }
             self.board[index] = mode;
             frequency += board_spacing(frequency, density);
             index += 1;
@@ -3876,6 +4015,84 @@ impl ConcertGrand {
         for slot in self.board.iter_mut().skip(index) {
             *slot = BodyMode::default();
         }
+    }
+
+    /// One mode of the board bank at `placed` hertz: its damping from the
+    /// measured plate's law, its drive normalised for a level mean mobility
+    /// over `spacing_here`, coloured by the measured chain transfer, scaled
+    /// by `strength` (the drawn bank's ±8 dB lottery, or a measured mode's
+    /// ripple), rolled off below the radiation corner and the coincidence
+    /// corner, panned and signed by hash.
+    fn board_mode(
+        &self,
+        seed: u32,
+        placed: f32,
+        spacing_here: f32,
+        loss: f32,
+        strength: f32,
+    ) -> BodyMode {
+        let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ seed << 5);
+        // The lowest modes of a real board are the most damped -- three
+        // to five percent against two above the ribs' transition -- and
+        // wide enough that no bass fundamental falls into a hole between
+        // two neighbours of opposite sign. The loss rises toward the
+        // bottom, log-linear from 300 Hz down to BOARD_LOW_LOSS at 50 Hz.
+        let low = (log2f(300.0 / placed.max(20.0)) / log2f(6.0)).clamp(0.0, 1.0);
+        let loss_here = loss * powf(BOARD_LOW_LOSS.get() / BOARD_LOSS_FACTOR.get(), low);
+        let mut mode = BodyMode::tune(placed, board_t60(placed, loss_here), pan, self.sample_rate);
+        // Skudrzyk: a plate's MEAN mobility is flat with frequency,
+        // whatever its modal density and damping. A bank of unit-gain
+        // peaks is not -- where the modes overlap more the mean rises --
+        // so each peak is scaled by the square root of its spacing over
+        // its bandwidth, and the mean comes out level.
+        let bandwidth = (loss_here * placed).max(1e-3);
+        mode.drive *= sqrtf(spacing_here.max(1e-3) / bandwidth).min(BOARD_MEAN_CAP.get())
+            * BOARD_MEAN_MOBILITY.get();
+        // Then the chain as measured: the flat mean is Skudrzyk's plate
+        // alone, and what reaches a microphone is that plate radiating
+        // into a lid and a room, which is not flat -- see the table.
+        mode.drive *= board_transfer(placed);
+        mode.drive *= strength;
+        // The mode shape at the bridge is as often negative as positive.
+        //
+        // A mode's transfer from the bridge to the ear is the product of
+        // its shape at the drive point and its net radiating area, and both
+        // alternate as the shapes gain nodal lines -- a real plate's
+        // transfer flips sign mode to mode. A bank of all-positive modes in
+        // parallel with the through path notches every anti-resonance
+        // coherently: measured on B3, the bank alone carved its eleventh
+        // partial 8.4 dB below the naked string sum, its twelfth 10, in a
+        // fixed-in-Hz patchwork that gave every note a different ragged
+        // ladder -- the bell-like strike the ear reported.
+        if hash01(0x51C4 ^ seed << 9) < 0.5 {
+            mode.drive = -mode.drive;
+        }
+        // And the board does not radiate its own lowest modes any more
+        // than it radiates a string's lowest partials.
+        //
+        // The bank starts at 50 Hz, and every note in the compass kicks
+        // that mode -- a treble note hardest of all, because its strike
+        // is the sharpest and so the broadest in spectrum. Measured, a
+        // 49.8 Hz tone sat under every single note, at -75.8 dB under G2
+        // and rising to -68.9 dB under C4, at a fixed pitch that follows
+        // nothing being played. Six voices of a chord each contribute it
+        // and it sums into an audible drone an octave and a half below
+        // the music, which is what the user heard the moment they played
+        // chords on the packaged build and called an octave discrepancy.
+        //
+        // Nothing in the test suite could catch it: every render this
+        // model is measured against is one note, and one note buries it.
+        mode.drive *= Self::board_radiation(placed);
+        // Below coincidence a plate radiates poorly: the near-field of
+        // neighbouring antinodes cancels. A first-order rise toward the
+        // corner keeps the bass fundamental where the references put it,
+        // well under its own second and third partials.
+        let ratio = powf(
+            placed / BOARD_COINCIDENCE_HZ.get(),
+            BOARD_RADIATION_ORDER.get(),
+        );
+        mode.drive *= ratio / (1.0 + ratio);
+        mode
     }
 
     /// Retunes the undamped top-octave strings.
@@ -4023,11 +4240,23 @@ impl ConcertGrand {
         // at the reference distance and beyond it stands at ear height. With
         // the height fixed at 1.4 m the bottom fifth of the fader changed the
         // path by centimetres, and Mic Distance did nothing there.
-        let height = piano.2 + MIC_HEIGHT_M.get() * (reach / MIC_REFERENCE_M.get()).clamp(0.0, 1.0);
+        //
+        // Named for what it is, and not `height`: that name is the ROOM's
+        // height a few lines up, and shadowing it put the ceiling image at
+        // the pair's own height. The mirror then sat at the same distance as
+        // the direct path, the clamp below pushed it to direct + 0.1 m, and
+        // every note in the compass went through a comb whose first notch
+        // is at 343 / (2 * 0.1) = 1.7 kHz. Measured on the partial envelope
+        // of all 30 grid notes against the reference: a fixed 15 dB hole
+        // from 1.4 to 2 kHz, present in every register alike, that vanished
+        // with the air chain off and survived the lid and the chamber being
+        // turned down one at a time.
+        let pair_height =
+            piano.2 + MIC_HEIGHT_M.get() * (reach / MIC_REFERENCE_M.get()).clamp(0.0, 1.0);
         let centre = (
             0.33 * length + reach * az_cos,
             (0.5 * width - reach * az_sin).max(0.3),
-            height,
+            pair_height,
         );
         // Both capsules look back at the instrument, splayed either side of
         // that line. The splay is what makes the pattern axis do directional

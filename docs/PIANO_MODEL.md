@@ -608,6 +608,81 @@ bone-dry direct-injected tone is precisely what an electric piano is, the
 comparison samples are recordings made in a room, and direct A/B listening
 named the missing tail as the single largest audible difference.
 
+**FIXED (0.165): the ceiling stood at the microphones.** In `tune_room` the
+pair's height shadowed the room's `height`, so the ceiling's mirror image
+was taken about the plane of the capsules: its path equalled the direct one,
+the `direct + 0.1 m` clamp pushed it to 0.29 ms behind, and every note went
+through a comb whose first notch sits at 343 / (2 × 0.1) = 1.7 kHz. Measured
+on the partial envelope of all thirty grid notes against Salamander (each
+partial of each note as a (frequency, level) point, medians per half octave,
+each source relative to its own 500–707 Hz bin): a fixed 15 dB hole from
+1.4 to 2 kHz, the same in the bass's high partials, the tenor's middle ones
+and the treble's low ones — which is what "fixed in frequency" means — that
+vanished with the air chain off and survived the lid and the chamber being
+turned down one at a time. With the ceiling where the room's height puts it
+the hole is gone (−15 → −0.1 dB at 1.4–2 kHz) and the output drops about
+4 dB, which is the coherent copy that was being added.
+
+### The chain as measured, against one reference (0.165)
+
+From 2026-09-07 the model is judged against ONE instrument — the Salamander
+Grand Piano V3 (a Yamaha C5 under a close AB pair, sixteen velocity layers)
+— by `tools/scorecard-salamander.py`: thirty notes in minor thirds from A0
+at four blows, every level relative inside its own source, one distance in
+points per register and every gap listed by size, plus a listening set from
+the same build. The YDP and Pianoteq comparisons stay in the history; every
+correction against a different piano had pulled toward a different piano.
+
+The first thing the survey showed, once the ceiling was fixed, was the
+chain's remaining fixed colour: relative to 500 Hz the reference carries
+six to nine decibels more at 80–200 Hz (its release taps, averaged over all
+88 keys, peak there too), six less at 250–315 Hz where this bank happens to
+hump, and three to four more from 2.5 to 4 kHz — the rise toward
+coincidence that a flat Skudrzyk mean leaves out. `BOARD_TRANSFER_DB` is
+that table, third-octave centres in dB, zero-mean over 200 Hz–4 kHz,
+applied to each mode's drive after the mean-mobility normalisation, and
+`BOARD_TRANSFER` (knob, param 164) is how much of it applies. It keeps only
+the part of the difference the fortissimo and pianissimo renders agree on
+below 1 kHz and the three registers agree on from 1 to 5 kHz; above 5 kHz
+the two blows disagree by twenty decibels, which is the hammer, and the
+table is flat there. After it, the model's partial envelope sits within
+±4 dB of the reference from 63 Hz to 5.6 kHz in every register. The fine
+structure of the low modes — the taps put the reference's at about 84,
+174, 198 and 237 Hz — is not in the bank yet; it is the next thing to take
+from them, separately switchable, and heard on the bass phrase before it
+ships (the lesson of 0.150).
+
+**The low modes, tried and parked.** The same taps, peak-listed per key and
+histogrammed, name the modes a dozen or more keys share: 65, 84, 102, 112,
+125, 137, 153, 174, 195 and 232 Hz, each with the average tap's ripple
+about its own trend (`BOARD_LOW_MODES`). Placing them in the bank under
+250 Hz in place of the drawn modes — `BOARD_MEASURED_MODES`, param 165, a
+linear share nought to one — measured WORSE: the grid's bass partials at
+63–177 Hz sat four to five decibels further under the reference than the
+drawn bank does, because ten sparse modes leave the low fundamentals in the
+gaps between them and nothing sits under 65 Hz, where the taps could not
+agree on a mode. It ships at zero and stays as a fader for the ear. What
+the taps give reliably is the mean, and the mean is in the table. (A
+confound found on the way: the drawn modes took their hash seed from their
+slot, so inserting modes in front re-rolled every drawn mode's jitter, pan,
+strength and sign; they seed from their own counter now, and the bank at
+share zero is bit-identical to the bank before.)
+
+What the same survey said was NOT the chain: the tenor's pianissimo was
+thirty to forty decibels darker than the reference above 1 kHz (n8 at
+−76 dB against −40) while its fortissimo was close, so the model's touch
+swung brightness twenty-odd decibels too far. That was the action's span
+— see the hammer-speed row of the literature table — and one pair of knobs
+took the tenor's pianissimo ladder from −13 dB to −0.3. Still open: the
+treble is six to eight decibels too bright above its second partial at ff
+and carries fourteen decibels too much 4–8 kHz at pp (softening the top
+felt by four barely moves it, so it is not the felt's stiffness); the
+treble dies by 4 s where the reference keeps a −51 dB tail of undamped
+strings and room; the bass's strike-point comb at n8 is twenty decibels
+shallower than the reference's; and under every fundamental the reference
+carries fifteen to forty decibels more floor (knock, board, room) than the
+model, which is the un-modelled broadband knock the list below names.
+
 ### The preamplifier (tested by measurement)
 
 A console channel's input stage after the capsules and before Level: a
@@ -914,7 +989,7 @@ ambiguous or the measurement said no, it did not, and the reason is here.
 
 | Quantity | Model | Published | Source | Outcome |
 |---|---|---|---|---|
-| Hammer speed pp .. ff | 0.9 .. 6.0 m/s (span 14) | 0.11 .. 6.83 m/s (span ~60) | Boutillon, via Euphonics 12.2 | **Moved**: HAMMER_V_FF 6.8, ACTION_SPAN 15 + 66·dynamics. Pianissimo centroids land on the references (bass 197 Hz vs 166-172, tenor 385 vs 393-394), fortissimo untouched. |
+| Hammer speed pp .. ff | 1.1 .. 5.4 m/s at velocities 36 .. 117 (span 12) | 0.11 .. 6.83 m/s (span ~60) | Boutillon, via Euphonics 12.2 | **Moved, then moved back (0.165)**: HAMMER_V_FF 6.8 stays; ACTION_SPAN went 15 + 66·dynamics (span 44.7, velocity 36 at 0.45 m/s) and, against the single reference, back to 4 + 17.7·dynamics. The published extremes are the ends of a travel, and the reference's third velocity layer is not a 0.45 m/s blow: at span 44.7 the tenor's pianissimo ladder ran 13 dB dark and the pp-to-ff swing 20 dB wide; at 12 they are −0.3 and +0.5 dB, the fortissimo unchanged. The centroid had said the pianissimo matched — it is dominated by the first three partials and hid the ladder. |
 | Felt stiffness and exponent | C2 4e8 / 2.3, C4 4.5e9 / 2.5, C7 1e12 / 3.0 log-linear | Same figures | Hall & Askenfelt; Chaigne & Askenfelt 1994; Euphonics 12.2 | Kept at C2 and C4; C7 a decade softer (FELT_K_DECADES 4.0): at the table's value a C5's tenth partial sat 26 dB above both references. |
 | Stulov hysteresis | epsilon 0.5, tau 0.2 ms | epsilon 0.992, tau 2 us | Stulov 1995, SMAC 03 | Now knobs (STULOV_EPSILON, STULOV_TAU_S). Tried at his values with the stiffness rescaled: fortissimo darker, treble unchanged; shipped unchanged. |
 | Hammer head mass | 11 g (A0) .. 3.5 g (C8) | ~11 g bass, ~3.5 g treble; effective point masses 1-3 g per string | Conklin Part I; Euphonics | Matches. |
@@ -1580,6 +1655,16 @@ code and is far beyond audibility at control rate).
   in contact longer and speaks darker, which is why a bass note is dark.
   At the control's centre the mass is the nominal one, so the default voice
   is unchanged -- the score is 19.95 before and after, to the digit.
+
+* **RESOLVED since `RECIPE_FLOOR` went to zero — the two entries that follow
+  describe a build that no longer exists.** The simulated strike now SETS
+  every partial below `SIM_TOP_HZ`; the recipe only supplies the
+  normalisation peak and the partials above 8 kHz (scaled by the seam), and
+  the level is imposed afterwards as `0.28 · cal(level) · v^2.2` by energy
+  normalisation. What remains of the concern is that the strike's own
+  velocity-to-level law is discarded by that normalisation, and that `cal`
+  is still fitted to the YDP; both are refit items against the single
+  reference, not structural ones. Kept below for the record.
 
 * **The `max` blend is the binding constraint, and testing it needs a refit.**
   Confirmed by measurement rather than argument: the two hammer *weights*

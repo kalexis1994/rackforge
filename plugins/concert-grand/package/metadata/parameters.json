@@ -1782,10 +1782,10 @@
       "order": 16,
       "kind": {
         "type": "float",
-        "minimum": 0.9375,
-        "maximum": 240.0,
+        "minimum": 0.25,
+        "maximum": 64.0,
         "step": 0.15,
-        "default": 15.0,
+        "default": 4.0,
         "taper": "logarithmic"
       },
       "flags": {
@@ -1803,10 +1803,10 @@
       "order": 17,
       "kind": {
         "type": "float",
-        "minimum": 4.125,
-        "maximum": 1056.0,
+        "minimum": 1.10625,
+        "maximum": 283.2,
         "step": 0.66,
-        "default": 66.0,
+        "default": 17.7,
         "taper": "logarithmic"
       },
       "flags": {
@@ -3348,6 +3348,47 @@
         "step": 0.06,
         "default": 6.0,
         "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 164,
+      "id": "knob_board_transfer",
+      "name": "BOARD_TRANSFER",
+      "page": "model_board",
+      "order": 15,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 165,
+      "id": "knob_board_measured_modes",
+      "name": "BOARD_MEASURED_MODES",
+      "page": "model_board",
+      "order": 16,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.0
       },
       "flags": {
         "automatable": true,

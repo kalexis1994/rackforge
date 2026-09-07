@@ -860,6 +860,25 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**FIXED (0.171.2): a re-struck note arrived without its bloom.** The
+"pequeño popeo" survived the thud fix, and the synthetic case said why the
+thud was never it: at 1:11 the pedal had already been relieved to zero, so
+the repeated B-flats took the MERGE path, not the legacy one. In the merge
+every fresh lane is pushed into the living partial's cosine quadrature —
+but the living voice's bloom lane is retired within tens of milliseconds
+of any strike (the cull zeroes its rotation), and a push into a phasor
+that no longer turns is silence. So a merged blow had no negative bloom at
+all: measured on a re-strike under the pedal, the note reached −42 dB in
+half a millisecond where a fresh note takes three to bloom (−48, −44, −45,
+−43, −39). A hard edge on every repeated melody note. A retired lane now
+takes the fresh strike's lane whole — rotation and magnitude, the output
+quadrature at zero so nothing steps — and the re-strike blooms like a
+first strike (−49, −48, −44, −41). A long-decayed voice's retired vertical
+lanes come back the same way, so a re-struck note has its high partials.
+Re-strikes under a HALF pedal now relieve the voice's own damper and merge
+too, instead of easing out and starting a stranger. The synthetic pair
+lives in `target/scorecard/restrike-half*.wav`.
+
 **FIXED (0.171.1): a repeated note under a half pedal knocked.** The
 "pequeño popeo" the user heard on the Op. 9 No. 2 file, at 1:11.10 and
 1:11.4: both are re-strikes of note 70 under a moving pedal. A re-strike

@@ -5212,14 +5212,32 @@ impl ConcertGrand {
         // had its decay rates scaled and cannot be honestly re-lifted, so
         // those still take the legacy path: ease the dying voice out and
         // strike fresh.
+        //
+        // A voice under a HALF pedal can be re-lifted now: since 0.170.1 it
+        // carries its own damper's firmness, so relieving what was pressed
+        // restores its free rates exactly -- which is what the key does, the
+        // damper rising with the key whatever the pedal is doing -- and
+        // then the blow merges as it would into a free string. It used to
+        // take the legacy path instead, and on the Op. 9 No. 2 file every
+        // repeated melody note under the moving pedal was an ease-out plus a
+        // stranger: two B-flats a few cents apart, beating in the first
+        // milliseconds -- heard as "un pequeño popeo" that the thud fix did
+        // not remove.
         let mut restrike_target: Option<usize> = None;
-        for (slot, voice) in self.voices.iter().enumerate() {
+        let rate = self.sample_rate;
+        let grip = self.controls.damper_grip();
+        for (slot, voice) in self.voices.iter_mut().enumerate() {
             if voice.active
                 && !voice.halo
                 && voice.note == note
                 && voice.channel == channel
-                && (voice.held || (voice.sustained && voice.damper_applied == 0.0))
+                && (voice.held || voice.sustained)
             {
+                if voice.sustained && voice.damper_applied > 0.0 {
+                    let own = Self::damper_for(note, rate, grip * voice.firmness, 1.0);
+                    voice.press_damper(own, -voice.damper_applied);
+                    voice.damper_applied = 0.0;
+                }
                 restrike_target = Some(slot);
                 break;
             }
@@ -6327,6 +6345,32 @@ impl ConcertGrand {
                         // The blow's whole contribution therefore arrives as
                         // velocity, keeping its size and losing its
                         // discontinuity.
+                        //
+                        // Unless the living voice has RETIRED this lane (the
+                        // cull zeroed its rotation): then the fresh lane comes
+                        // in whole, its rotation with it, with the output
+                        // quadrature at zero so nothing steps. The bloom lane
+                        // is the one that matters -- it is dead within tens of
+                        // milliseconds of every strike, so a merged blow used
+                        // to arrive with no negative bloom at all, at full
+                        // amplitude inside a quarter cycle: measured, a
+                        // re-struck note reached -42 dB in half a millisecond
+                        // where a fresh one takes three to bloom. That hard
+                        // edge on every repeated melody note was the
+                        // "pequeño popeo" of the Op. 9 No. 2 file, which no
+                        // thud, steal or step explained. A long-decayed
+                        // voice's retired vertical lanes come back the same
+                        // way, so a re-struck note has its high partials.
+                        if existing.rc[lane] == 0.0 && existing.rs[lane] == 0.0 {
+                            let energy = sqrtf(
+                                fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane],
+                            );
+                            existing.s[lane] = 0.0;
+                            existing.c[lane] = if fresh.c[lane] < 0.0 { -energy } else { energy };
+                            existing.rc[lane] = fresh.rc[lane];
+                            existing.rs[lane] = fresh.rs[lane];
+                            continue;
+                        }
                         let energy =
                             sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
                         let push = if fresh.c[lane] < 0.0 { -energy } else { energy };

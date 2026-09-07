@@ -1949,30 +1949,46 @@ pub static THUMP_BASE: Knob = Knob::new(0.24);
 /// is masked, and the ratio holds.
 pub static THUMP_RISE_DB: Knob = Knob::new(12.0);
 const THUMP_RISE_TO: f32 = 0.45;
-/// The thump's components: the keybed, the case and the board's low modes
-/// as the reference's first 60 ms show them -- flat within a few decibels
-/// from 40 to 400 Hz and seven down by 630 (C6 at ff: 40:-1, 63:-5, 100:-3,
-/// 160:-1, 250:0, 400:-1, 630:-7). Five components to 214 Hz falling
-/// fourteen decibels was a thud with no body above it. (Hz, level, seed.)
-///
-/// The levels are what the STRING side hands the board, and the board's
-/// radiation corner and its mobility then tilt them: written flat, the
-/// render came out fifteen decibels light at 40-63 Hz and heavy from 250 up,
-/// and the treble's sub-fundamental band (which reaches 700 Hz and more)
-/// overshot by eight decibels while C4's landed. Weighted toward the bottom
-/// so that what radiates is flat.
-const THUMP_COMPONENTS: [(f32, f32, u32); 8] = [
-    (46.0, 2.0, 17),
-    (71.0, 1.6, 23),
-    (103.0, 1.0, 31),
-    (149.0, 0.8, 37),
-    (214.0, 0.6, 41),
-    // The top three halved on 0.170.2 with the velocity law: they are what
-    // a soft note's knock reads as a "pick".
-    (310.0, 0.15, 43),
-    (450.0, 0.12, 47),
-    (650.0, 0.09, 53),
-];
+/// The thump is a noise, not a chord. It was eight damped sinusoids from
+/// 46 to 650 Hz, weighted toward the bottom so that what radiated through
+/// the board came out flat, and measured against the reference their BAND
+/// levels landed -- but a damped sinusoid with a 150 ms ring is a line two
+/// hertz wide, and the first 120 ms of a model C7 showed six of them
+/// standing forty decibels over their floor at 83-167 Hz, where the
+/// reference's low attack is a broadband thump with a crest of fourteen to
+/// twenty (Salamander C7 v10: 13.9 dB, D#7: 17.5, C6: 19.9; model note 96:
+/// 40.9, note 100: 42.6). The same lines on every strike of the same key,
+/// which on a page of repeated treble notes is a mechanism with a pitch.
+/// The user: "sigo escuchando como el sonido mecánico grave en las notas
+/// altas". So: white noise through two cascaded two-pole low-passes
+/// (`THUMP_CORNER_HZ`, `THUMP_Q`: flat to the corner, then the cliff the
+/// components had past 300 Hz -- two cascaded single poles were measured
+/// and left the 400-1000 Hz band twenty decibels too full, one two-pole
+/// fifteen) with a slow pole subtracted at `THUMP_FLOOR_HZ` for the
+/// sub-bass the board does not carry; the same rise, the same ring, the
+/// same level laws, seeded per strike. `THUMP_NOISE_GAIN` is the factor that puts the burst's
+/// 30-150 and 150-400 Hz bands where the components had them, measured on
+/// the isolated knock (a render minus the same render with the action
+/// noise at its floor) at notes 72, 84, 96 and 100.
+const THUMP_CORNER_HZ: f32 = 260.0;
+const THUMP_Q: f32 = 0.7;
+const THUMP_FLOOR_HZ: f32 = 30.0;
+const THUMP_NOISE_GAIN: f32 = 22.0;
+/// The pedal's knock, measured on the reference's own pedal samples as
+/// its SFZ mixes them (pedalD at -20 dB, pedalU at -19): the up-stroke
+/// peaks at -53 to -59 dBFS over five milliseconds, is gone to -30 dB in
+/// half a second, and its centroid is 125 Hz -- the 30-150 Hz band carries
+/// it, 150-400 sits ten decibels under, 400-1000 fifteen, 1-3 kHz twenty,
+/// above that thirty-five. The model's was a single pole at 270 Hz over
+/// white with a 180 ms ring: -63 dBFS at the peak, quieter than the
+/// reference, and a centroid of 700-830 Hz, three times brighter -- a
+/// tick where the recording has a thump. The user asked for less of it;
+/// it is the brightness that made the little there was read as much. Two
+/// poles, 100 and 600 Hz, and a slow one subtracted at 30; the ring to
+/// -30 dB is the reference's half second (`PEDAL_NOISE_T60_S` is the
+/// -60 dB figure, twice that).
+const PEDAL_NOISE_POLES_HZ: (f32, f32, f32) = (100.0, 600.0, 30.0);
+const PEDAL_NOISE_T60_S: f32 = 1.0;
 /// The felt's hardening exponent across the compass, before any voicing.
 ///
 /// In `F = K*x^p`, p is how sharply the felt stiffens as it is squashed, so it
@@ -2639,6 +2655,26 @@ struct Voice {
     /// Per-sample shrink applied to the noise low-pass coefficient.
     noise_shrink: f32,
     noise_seed: u32,
+    /// The key-bottom thump, as a noise: white through two dark poles with
+    /// a slow pole subtracted, rising over the first milliseconds and
+    /// decaying with `THUMP_T60_S`. See `THUMP_NOISE_GAIN`.
+    thump_amp: f32,
+    thump_decay: f32,
+    thump_rise: f32,
+    thump_rise_step: f32,
+    thump_x1: f32,
+    thump_x2: f32,
+    thump_y1: f32,
+    thump_y2: f32,
+    thump_z1: f32,
+    thump_z2: f32,
+    thump_b0: f32,
+    thump_b1: f32,
+    thump_a1: f32,
+    thump_a2: f32,
+    thump_floor: f32,
+    thump_c0: f32,
+    thump_seed: u32,
     pan_left: f32,
     pan_right: f32,
     /// The spaced pair's per-channel arrival: this voice's mono output is
@@ -2711,6 +2747,23 @@ impl Default for Voice {
             noise_coefficient: 0.0,
             noise_shrink: 1.0,
             noise_seed: 1,
+            thump_amp: 0.0,
+            thump_decay: 0.0,
+            thump_rise: 1.0,
+            thump_rise_step: 0.0,
+            thump_x1: 0.0,
+            thump_x2: 0.0,
+            thump_y1: 0.0,
+            thump_y2: 0.0,
+            thump_z1: 0.0,
+            thump_z2: 0.0,
+            thump_b0: 0.0,
+            thump_b1: 0.0,
+            thump_a1: 0.0,
+            thump_a2: 0.0,
+            thump_floor: 0.0,
+            thump_c0: 0.0,
+            thump_seed: 1,
             pan_left: 0.0,
             pan_right: 0.0,
             last_out: 0.0,
@@ -2812,6 +2865,34 @@ impl Voice {
             // The knock darkens as it dies: a tapped soundboard's noise is a
             // low-pass whose bandwidth contracts over time.
             self.noise_coefficient *= self.noise_shrink;
+        }
+        if self.thump_amp > 1e-7 {
+            self.thump_seed = self
+                .thump_seed
+                .wrapping_mul(1_664_525)
+                .wrapping_add(1_013_904_223);
+            let white = (self.thump_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
+            // Two identical two-pole low-passes in cascade: flat to the
+            // corner and twenty-four decibels an octave past it, which is
+            // the cliff the components had at 300 Hz. One two-pole was
+            // measured and left the 400-1000 Hz band fifteen decibels
+            // fuller than the components; two cascaded single poles, twenty.
+            let y = self.thump_b0 * (white + self.thump_x2) + self.thump_b1 * self.thump_x1
+                - self.thump_a1 * self.thump_y1
+                - self.thump_a2 * self.thump_y2;
+            self.thump_x2 = self.thump_x1;
+            self.thump_x1 = white;
+            let z = self.thump_b0 * (y + self.thump_y2) + self.thump_b1 * self.thump_y1
+                - self.thump_a1 * self.thump_z1
+                - self.thump_a2 * self.thump_z2;
+            self.thump_y2 = self.thump_y1;
+            self.thump_y1 = y;
+            self.thump_z2 = self.thump_z1;
+            self.thump_z1 = z;
+            self.thump_floor += self.thump_c0 * (z - self.thump_floor);
+            sum += (z - self.thump_floor) * self.thump_amp * (1.0 - self.thump_rise);
+            self.thump_rise *= self.thump_rise_step;
+            self.thump_amp *= self.thump_decay;
         }
         if self.onset < 1.0 {
             let x = self.onset;
@@ -3025,6 +3106,7 @@ impl Voice {
         self.energy = energy + duplex_energy;
         if self.partial_count == 0
             && self.noise_amp <= 1e-7
+            && self.thump_amp <= 1e-7
             && duplex_energy < knob_dead_magnitude_squared
         {
             self.active = false;
@@ -3576,6 +3658,8 @@ pub struct ConcertGrand {
     /// for the sympathetic feed.
     bridge_feed: f32,
     pedal_noise_lp: f32,
+    pedal_noise_lp2: f32,
+    pedal_noise_floor: f32,
     pedal_noise_seed: u32,
     room_gain: [f32; ROOM_LINES],
     room_lp: [f32; ROOM_LINES],
@@ -3700,6 +3784,8 @@ impl Default for ConcertGrand {
             sostenuto: false,
             bridge_feed: 0.0,
             pedal_noise_lp: 0.0,
+            pedal_noise_lp2: 0.0,
+            pedal_noise_floor: 0.0,
             pedal_noise_seed: 0x5EED_C0DE,
             room_gain: [0.0; ROOM_LINES],
             room_lp: [0.0; ROOM_LINES],
@@ -6282,9 +6368,13 @@ impl ConcertGrand {
         // board's whole-body motion put a low-frequency thud under every
         // note, treble included — the A/B against the YDP renders shows the
         // real instrument carrying tens of dB more 30–120 Hz energy under
-        // mid and treble notes than strings alone can explain. Three short
-        // dark components stand in for it.
-        {
+        // mid and treble notes than strings alone can explain. A dark noise
+        // burst stands in for it (`THUMP_NOISE_GAIN` says why a noise and
+        // not the eight components it replaced).
+        // A different burst every time, and a different one per key: the
+        // components this replaces rang the same note on every strike.
+        let thump_seed = strike_salt.wrapping_add((note as u32).wrapping_mul(2_654_435_761)) | 1;
+        let (thump_amp, thump_decay, thump_rise_step) = {
             let thump_level = powf(velocity.max(0.01), THUMP_VELOCITY_POWER.get())
                 * 0.095
                 // Shortening the thud from 300 ms to 60 ms takes its energy
@@ -6301,26 +6391,12 @@ impl ConcertGrand {
                 * self.controls.lab(2)
                 * self.cal(note, 2);
             let rise = expf(-1.0 / (0.004 * sample_rate));
-            for (freq, level, seed) in THUMP_COMPONENTS {
-                if placed >= MAX_PARTIALS {
-                    break;
-                }
-                let jitter = 1.0 + 0.10 * (hash01((note as u32) << 7 | seed) - 0.5);
-                let amplitude = thump_level * level;
-                let decay = self.decay_per_sample(THUMP_T60_S.get());
-                let mut built = Partial::default();
-                built.set_lane(
-                    0,
-                    Component::start(amplitude, freq * jitter, decay, sample_rate),
-                );
-                built.set_lane(
-                    LANE_BLOOM,
-                    Component::start(-amplitude, freq * jitter, rise, sample_rate),
-                );
-                partials[placed] = built;
-                placed += 1;
-            }
-        }
+            (
+                thump_level * THUMP_NOISE_GAIN,
+                self.decay_per_sample(THUMP_T60_S.get()),
+                rise,
+            )
+        };
 
         // Duplex scale: the string segments behind the bridge, tuned high,
         // struck only through the bridge, and — crucially — undamped, so a
@@ -6651,6 +6727,32 @@ impl ConcertGrand {
         voice.noise_shrink = noise_shrink;
         voice.noise_lp = 0.0;
         voice.noise_seed = 0x9E37_79B9 ^ (note as u32).wrapping_mul(2_654_435_761);
+        voice.thump_amp = thump_amp;
+        voice.thump_decay = thump_decay;
+        voice.thump_rise = 1.0;
+        voice.thump_rise_step = thump_rise_step;
+        voice.thump_x1 = 0.0;
+        voice.thump_x2 = 0.0;
+        voice.thump_y1 = 0.0;
+        voice.thump_y2 = 0.0;
+        voice.thump_z1 = 0.0;
+        voice.thump_z2 = 0.0;
+        {
+            // RBJ low-pass at THUMP_CORNER_HZ with quality THUMP_Q.
+            let w0 = core::f32::consts::TAU * THUMP_CORNER_HZ / sample_rate;
+            let (sin_w0, cos_w0) = sincosf(w0);
+            let alpha = sin_w0 / (2.0 * THUMP_Q);
+            let a0 = 1.0 + alpha;
+            voice.thump_b0 = (1.0 - cos_w0) * 0.5 / a0;
+            voice.thump_b1 = (1.0 - cos_w0) / a0;
+            voice.thump_a1 = -2.0 * cos_w0 / a0;
+            voice.thump_a2 = (1.0 - alpha) / a0;
+        }
+        voice.thump_floor = 0.0;
+        voice.thump_c0 = 1.0 - expf(-core::f32::consts::TAU * THUMP_FLOOR_HZ / sample_rate);
+        // A different burst every time, and a different one per key: the
+        // components this replaces rang the same note on every strike.
+        voice.thump_seed = thump_seed;
         voice.pan_left = pan_left;
         voice.pan_right = pan_right;
         // The glide is no longer scripted. It used to be a 28-step ramp of a
@@ -6921,7 +7023,10 @@ impl ConcertGrand {
             // The rail lifts twenty dampers going down and drops them all
             // back at once coming up -- which is why the release is the
             // louder of the two on every recording of pedalled playing.
-            let knock = (if down { 0.006 } else { 0.011 })
+            // 0.006 / 0.011 until 0.171.6: the spectrum was measured then
+            // and the level asked down by ear; four decibels, with the
+            // brightness gone, is where the ear put it.
+            let knock = (if down { 0.0038 } else { 0.007 })
                 * Controls::noise_gain(self.controls.pedal_noise);
             self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
         }
@@ -6983,7 +7088,7 @@ impl ConcertGrand {
             return;
         }
         self.sostenuto = down;
-        let knock = 0.004 * Controls::noise_gain(self.controls.pedal_noise);
+        let knock = 0.0025 * Controls::noise_gain(self.controls.pedal_noise);
         self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
         if down {
             for voice in &mut self.voices {
@@ -7924,6 +8029,13 @@ impl Processor for ConcertGrand {
         let knob_halo_mix = HALO_MIX.get();
         let knob_headroom = HEADROOM.get();
         let knob_open_mix = OPEN_MIX.get();
+        let pedal_c1 =
+            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.0 / self.sample_rate);
+        let pedal_c2 =
+            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.1 / self.sample_rate);
+        let pedal_c0 =
+            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.2 / self.sample_rate);
+        let pedal_decay = expf(-LN_1000 / (PEDAL_NOISE_T60_S * self.sample_rate));
         let knob_room_mix = ROOM_MIX.get();
         let knob_sympathy_rate = SYMPATHY_RATE.get();
         let knob_undamped_mix = UNDAMPED_MIX.get();
@@ -8292,12 +8404,16 @@ impl Processor for ConcertGrand {
                     .wrapping_mul(1_664_525)
                     .wrapping_add(1_013_904_223);
                 let white = (self.pedal_noise_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
-                // Dark and woody: the rail speaks through the case.
-                self.pedal_noise_lp += 0.035 * (white - self.pedal_noise_lp);
-                let knock = self.pedal_noise_lp * self.pedal_noise_amp;
+                // Dark and woody: the rail speaks through the case. Measured
+                // on the reference's own pedal samples (`PEDAL_NOISE_POLES_HZ`).
+                self.pedal_noise_lp += pedal_c1 * (white - self.pedal_noise_lp);
+                self.pedal_noise_lp2 += pedal_c2 * (self.pedal_noise_lp - self.pedal_noise_lp2);
+                self.pedal_noise_floor +=
+                    pedal_c0 * (self.pedal_noise_lp2 - self.pedal_noise_floor);
+                let knock = (self.pedal_noise_lp2 - self.pedal_noise_floor) * self.pedal_noise_amp;
                 direct_left += knock;
                 direct_right += knock;
-                self.pedal_noise_amp *= 0.9996;
+                self.pedal_noise_amp *= pedal_decay;
             }
             // Proximity: the pressure-gradient microphone's low end rises
             // with 1/r. A 120 Hz shelf whose gain follows the pattern and

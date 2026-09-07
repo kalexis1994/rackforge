@@ -860,6 +860,32 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The thump is a noise, and the pedal is a thump (0.171.6).** The user,
+on the Campanella: "sigo escuchando como el sonido mecánico grave en las
+notas altas", heard as release noise, and the pedal's noise asked down.
+Measured on the isolated parts (a render minus the same render with one
+fader at its floor): the release knock is at −92 dBFS, thirty decibels
+under the reference's own key-off samples and not what anyone hears; the
+strike's thump under a treble note peaks at −51 dBFS with its centroid
+at 130–150 Hz, and its 30–150 / 150–400 Hz bands sit where the reference's
+do, four decibels under if anything. What differed was its nature: eight
+damped sinusoids, the same eight on every strike of the same key, and the
+model's first 120 ms at C7 showed them where the reference (Salamander
+C7 v10, D#7, C6) shows a broadband thump. The thump is now white noise
+through two cascaded two-pole low-passes at 260 Hz (the cliff the
+components had past 300 — the one the ear asked for in 0.170.2), a slow
+pole subtracted at 30 Hz, the same 4 ms rise, the same ring, the same
+velocity and register laws, seeded per strike; `THUMP_NOISE_GAIN` (22)
+puts its two low bands back on the components' within a decibel or two at
+notes 84, 96 and 100. The pedal's knock, measured on the reference's
+pedal samples as the SFZ mixes them, is a 125 Hz-centred thump half a
+second long; the model's was a 270 Hz single pole over white, 180 ms,
+centroid 700–830 Hz — quieter than the reference and three times
+brighter, which is why the little there was read as much. Two poles at
+100 and 600 Hz, a slow one subtracted at 30, a one-second T60, and four
+decibels off the level. The Campanella renders with each part removed
+(thump, bed, pedal noise, release noise) went to the ear.
+
 **The merge was the last of the pops (0.171.5).** With the contact ramp
 on fresh voices the user heard two or three pops left in the 1:52–2:03
 passage, and none with the re-strike merge off — "ahora no se escuchan

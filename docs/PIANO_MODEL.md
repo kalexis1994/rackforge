@@ -850,6 +850,16 @@ reflection from the agraffe, 2·x₀/c ≈ 0.07 ms at C6, lives above the 8 kHz
 the integration carries modes for — and in whether bridge force is the
 slope for a string this short, not in K.
 
+**The ear on the knock, again (0.170.2).** With the thump at the second
+power the user heard "un pick mecánico" on soft notes: the knock standing
+out of a pianissimo the way the reference's close pair hears it and a
+player does not. `THUMP_VELOCITY_POWER` 2 → 3 (6.5 dB off velocity 36,
+3 off 60, nothing off a forte) and the 310–650 Hz components halved — they
+are what a soft knock reads as a "pick". The metric gives back what it
+must: the attack floor at pp goes from −7 / −7 dB under the reference
+(tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
+The ear's call, recorded as such.
+
 **FIXED (0.170.1): a half pedal could wind a string up.** Found the first
 time a whole piece went through the model instead of single notes: the
 Op. 9 No. 2 file, 1498 notes and 3031 pedal positions, rendered through

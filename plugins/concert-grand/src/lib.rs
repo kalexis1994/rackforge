@@ -1880,7 +1880,12 @@ pub static THUMP_T60_S: Knob = Knob::new(0.15);
 /// three to seven decibels LOUDER at the soft blow on C3 and C7 -- the key
 /// reaches the keybed at every dynamic. Against a tone that grows as the
 /// 2.2nd power, this is what leaves the ratio near flat.
-pub static THUMP_VELOCITY_POWER: Knob = Knob::new(2.0);
+///
+/// Three, not two, since 0.170.2: at two the ear heard "un pick mecánico"
+/// on soft notes -- the knock standing out of a pianissimo the way the
+/// reference's close pair hears it and a player does not. Three takes
+/// 6.5 dB off velocity 36, 3 off velocity 60, nothing off a forte.
+pub static THUMP_VELOCITY_POWER: Knob = Knob::new(3.0);
 /// The thump's level against the calibrated one, as a factor at A0 (a
 /// factor and not decibels: a knob compiled below zero cannot ride the
 /// fader's sixteen-fold sweep) ...
@@ -1925,9 +1930,11 @@ const THUMP_COMPONENTS: [(f32, f32, u32); 8] = [
     (103.0, 1.0, 31),
     (149.0, 0.8, 37),
     (214.0, 0.6, 41),
-    (310.0, 0.3, 43),
-    (450.0, 0.25, 47),
-    (650.0, 0.18, 53),
+    // The top three halved on 0.170.2 with the velocity law: they are what
+    // a soft note's knock reads as a "pick".
+    (310.0, 0.15, 43),
+    (450.0, 0.12, 47),
+    (650.0, 0.09, 53),
 ];
 /// The felt's hardening exponent across the compass, before any voicing.
 ///

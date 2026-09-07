@@ -50,12 +50,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-5.rfplugin",
         "plugin_id": "org.rackforge.rf-5",
-        "version": "0.1.14",
+        "version": "0.1.15",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-5/"
-            "releases/download/v0.1.14/RF-5.rfplugin"
+            "releases/download/v0.1.15/RF-5.rfplugin"
         ),
-        "sha256": "a791b911e003b5b0c6fee451abdad63f26f88cb5eecaaa836dfdd96dbfe87662",
+        "sha256": "fc5d70134b76c8a136b5f41eb5bf996b203da8db8bc6518fa36acb008a366409",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -76,9 +76,9 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-7.rfplugin",
         "plugin_id": "org.rackforge.rf7",
-        "version": "0.4.0",
-        "url": "https://github.com/kalexis1994/RF-7/releases/download/v0.4.0/RF-7.rfplugin",
-        "sha256": "2b7ff96a30b238880cc58317c06f166ac57d3dd27a8d3ad707884cf2776c5d27",
+        "version": "0.5.0",
+        "url": "https://github.com/kalexis1994/RF-7/releases/download/v0.5.0/RF-7.rfplugin",
+        "sha256": "dbdbead013c6278433238e76f42d0e399db15bde2ae204bcc2969bf359eae283",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

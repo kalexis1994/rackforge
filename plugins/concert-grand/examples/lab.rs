@@ -270,6 +270,8 @@ mod lab {
         let mut next = 0;
         let mut frame = 0usize;
         let mut block = vec![0.0f32; BLOCK * 2];
+        let mut steals_seen =
+            rackforge_concert_grand::STEALS.load(std::sync::atomic::Ordering::Relaxed);
         while frame < total {
             let frames = BLOCK.min(total - frame);
             let mut midi = Vec::new();
@@ -296,6 +298,18 @@ mod lab {
                 2,
             );
             output.extend_from_slice(&block[..frames * 2]);
+            // CG_STEAL_LOG: say when a strike had to steal a sounding voice.
+            let stolen = rackforge_concert_grand::STEALS.load(std::sync::atomic::Ordering::Relaxed);
+            if stolen != steals_seen {
+                if std::env::var("CG_STEAL_LOG").is_ok() {
+                    println!(
+                        "steal at {:.3} s (block of {} frames)",
+                        frame as f32 / rate as f32,
+                        frames
+                    );
+                }
+                steals_seen = stolen;
+            }
             frame += frames;
         }
         write_wav_stereo(wav, rate, &output).expect("cannot write the wav");

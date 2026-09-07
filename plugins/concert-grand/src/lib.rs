@@ -5227,10 +5227,19 @@ impl ConcertGrand {
         if restrike_target.is_none() {
             let restrike = expf(-1.0 / (0.25 * self.sample_rate));
             let (thud_coefficient, thud_decay) = self.damper_thud();
-            let release_gain = Controls::noise_gain(self.controls.release_noise);
+            // WITHOUT the release thud. `damp` is the damper landing, and
+            // its thud is the felt meeting a moving string; here no damper
+            // lands -- the hammer re-strikes a string the pedal is holding
+            // half-clear -- yet the thud fired on every repeated note under
+            // a half pedal, because a half pedal leaves `damper_applied`
+            // above zero and every such re-strike takes this path. Heard on
+            // the Op. 9 No. 2 file as "un pequeño popeo" on the repeated
+            // B-flats at 1:11 (found by the score: both pops were re-strikes
+            // of note 70 under a moving pedal, and neither a steal nor a
+            // step). The ease-out stays; the knock goes.
             for voice in &mut self.voices {
                 if voice.active && voice.note == note && voice.channel == channel {
-                    voice.damp(restrike, thud_coefficient, thud_decay, release_gain);
+                    voice.damp(restrike, thud_coefficient, thud_decay, 0.0);
                 }
             }
         }

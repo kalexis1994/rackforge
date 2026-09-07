@@ -860,6 +860,18 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**FIXED (0.171.1): a repeated note under a half pedal knocked.** The
+"pequeño popeo" the user heard on the Op. 9 No. 2 file, at 1:11.10 and
+1:11.4: both are re-strikes of note 70 under a moving pedal. A re-strike
+merges into the living voice only when that voice is held or free; under
+a half pedal `damper_applied` is above zero, so every repeated note took
+the legacy path — ease the old voice out over 250 ms and strike fresh —
+and that path called `damp` with the release noise, which is the felt
+meeting a moving string. No damper lands on a re-strike. Neither a voice
+steal (none within a second of either pop, logged by the lab) nor a step
+(none in the samples); the score named it. The ease-out stays, the knock
+goes.
+
 **Thirty-two voices, and the stack that holds them (0.171).** Thirteen
 voices were enough for a hand and not for a pedal: the Op. 9 No. 2 file
 keeps up to 34 notes alive at once, and with thirteen slots 89 % of its

@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn packs_and_checks_api_versions() {
         assert_eq!(version_major(ABI_VERSION), 1);
-        assert_eq!(version_minor(ABI_VERSION), 11);
+        assert_eq!(version_minor(ABI_VERSION), 12);
         assert!(is_compatible(pack_version(1, 0)));
         assert!(is_compatible(pack_version(1, 1)));
         assert!(is_compatible(pack_version(1, 2)));
@@ -395,6 +395,7 @@ mod tests {
         // 11 adds `taper` to a float parameter. A package declaring it needs a
         // host that knows the field; every older minor keeps loading.
         assert!(is_compatible(pack_version(1, 11)));
+        assert!(is_compatible(pack_version(1, 12)));
         assert!(!is_compatible(pack_version(1, 12)));
         assert!(is_program_extension_compatible(pack_version(1, 0)));
         assert!(is_program_extension_compatible(pack_version(1, 1)));

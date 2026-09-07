@@ -860,6 +860,18 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The last damper is on F6 (0.171.12).** The user, with the boundary at
+E6: "es muy evidente, F6 en adelante las notas duran mucho más ...
+pareciera como si tuviera el pedal de sustain". Measured: F♯6 released
+rings three seconds to −79 dBFS, and the reference's held F♯6 rings three
+seconds to −67 — the model's free treble is shorter and quieter than the
+real one, and the sympathetic feed adds under a decibel to it. What is
+heard is the boundary itself, and that is the instrument: Kawai answers
+the same question in its own FAQ ("why do the upper 18 notes sustain
+without using the damper pedal"). The boundary moves one key up on the
+sources: the last damper on the 69th key, F6, on many medium grands.
+`LAST_DAMPER_NOTE` 88 → 89.
+
 **The strings take their places on the bridge, and the pair hears the
 board (0.171.11).** Until now every string entered one mono point and a
 board mode was one number with one random level pan. Measured first on

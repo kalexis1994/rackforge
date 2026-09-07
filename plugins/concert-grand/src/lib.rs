@@ -2191,10 +2191,15 @@ pub static FELT_EXPONENT_TREBLE: Knob = Knob::new(0.0);
 /// See `felt_floor_ratio`.
 const FELT_FLOOR_TOP: f32 = 1.05;
 /// The last key with a damper. Above it the strings ring until they die,
-/// whatever the key and the pedal do: a grand's dampers stop somewhere
-/// between E6 and G6, and the reference's own release-resonance regions
-/// end at key 88 -- the sample set's author recorded a release for every
-/// key that has one and none above.
+/// whatever the key and the pedal do. On many medium grands the last
+/// damper sits on the 69th key, F6 (Mark Goodwin Pianos on the Yamaha
+/// range: "roughly an octave and a half from the high treble end, around
+/// note #69"); Kawai's own FAQ tells owners of its digital pianos that
+/// "the upper 18 notes sustain without using the damper pedal" because the
+/// acoustic instrument they copy has no dampers there; the reference's
+/// release-resonance regions end at key 88. 89: F6 keeps its damper, F#6
+/// and up ring free. The user, at 88: "pareciera como si tuviera el pedal
+/// de sustain" -- which is exactly what Kawai's FAQ answers.
 ///
 /// Until 0.171.9 every note took a damper at key-up. Measured on E7 with a
 /// 50 ms key press: -32.9 dBFS at 10 ms, -65 at 100 ms without the pedal,
@@ -2203,7 +2208,7 @@ const FELT_FLOOR_TOP: f32 = 1.05;
 /// "un golpeteo de mosquito, como si vibraran alambres finos tocándose":
 /// three-kilohertz strings gated at the repetition rate by a damper the
 /// instrument does not have.
-const LAST_DAMPER_NOTE: u8 = 88;
+const LAST_DAMPER_NOTE: u8 = 89;
 /// The dephased aftersound of the top octave radiates more than the
 /// slow stage's share says: measured (2026-09-07, Salamander C7/D#7/C8 at
 /// v92) with the unison clean and the prompt life at two, the model's

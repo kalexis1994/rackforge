@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 125;
+pub const KNOB_COUNT: usize = 128;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -724,6 +724,21 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         &BOARD_MEASURED_MODES,
         "The measured low modes' share against the drawn ones below 250 Hz (1 = measured, 0 = drawn).",
     ),
+    (
+        "FELT_EXPONENT_TREBLE",
+        &FELT_EXPONENT_TREBLE,
+        "Extra felt hardening exponent at C8, ramped in from A4, at constant force.",
+    ),
+    (
+        "SIM_MIN_MODES",
+        &SIM_MIN_MODES,
+        "Partials a note needs under SIM_TOP_HZ before its strike is integrated rather than drawn.",
+    ),
+    (
+        "COMB_FLOOR_LOW",
+        &COMB_FLOOR_LOW,
+        "The strike-point comb's floor through the eighth partial; it rises to COMB_FLOOR by the sixteenth.",
+    ),
 ];
 
 /// Applies `NAME = value` lines (blank lines and `#` comments ignored;
@@ -823,6 +838,25 @@ pub static RADIATION_CORNER_HZ: Knob = Knob::new(45.0);
 /// ninth partial sits right on the ideal comb's zero: the real instrument has
 /// it only 12 dB down, this model had it 39 dB down and gone.
 pub static COMB_FLOOR: Knob = Knob::new(0.26);
+/// The comb's floor at the eighth partial and below, where the bass action's
+/// one-eighth strike puts its node.
+///
+/// Measured against the reference (2026-09-07, `comb0.13/0.065/0.03` against
+/// `span12`): the real bass notches partial EIGHT to -33 dB under the
+/// strongest (pp -36) and leaves partial sixteen at -28 (pp -39), while one
+/// floor for every partial cannot do both -- at 0.26 the eighth sat at -21,
+/// at 0.065 it landed on -32 and the sixteenth fell to -35 / -65. A finite
+/// hammer and a bridge with admittance blur the higher nodes more than the
+/// lower: the floor is this at n <= 8 and rises to COMB_FLOOR by n = 16.
+pub static COMB_FLOOR_LOW: Knob = Knob::new(0.065);
+
+/// The strike-point comb's floor for partial `n` (1-based): COMB_FLOOR_LOW
+/// through the eighth, rising linearly to `high` (COMB_FLOOR, or the sweep's
+/// override) by the sixteenth.
+fn comb_floor_at(n: usize, high: f32) -> f32 {
+    let low = COMB_FLOOR_LOW.get();
+    low + (high - low) * ((n as f32 - 8.0) / 8.0).clamp(0.0, 1.0)
+}
 /// How long the string's own losses let a partial ring, at the bottom of the
 /// curve, and where that curve turns over.
 ///
@@ -1851,6 +1885,17 @@ pub static CONTACT_SWING_BASE: Knob = Knob::new(1.0);
 pub static CONTACT_SWING_PER_DYNAMICS: Knob = Knob::new(1.2);
 pub static FELT_EXPONENT_MIN: Knob = Knob::new(1.2);
 pub static FELT_EXPONENT_MAX: Knob = Knob::new(3.5);
+/// Extra hardening exponent at C8, ramped in from the end of the tenor
+/// (position 0.55), at constant force. The line's rise from the bass is the
+/// fortissimo lever for the treble's ladder (measured: rise 1.2 took the
+/// treble's ff ladder from +7.6 to +1.2 dB against the reference) but it
+/// takes the tenor's pianissimo down with it (-13 dB); this is the same
+/// lever confined to the register that needs it.
+pub static FELT_EXPONENT_TREBLE: Knob = Knob::new(0.0);
+/// How many partials a note must have under SIM_TOP_HZ before its strike is
+/// integrated rather than drawn. Four leaves everything above G#6 to the
+/// recipe; one strikes every note.
+pub static SIM_MIN_MODES: Knob = Knob::new(4.0);
 
 /// Amplitude T60 of a board mode: `ln(10^3) / (π·f·η)`.
 fn board_t60(frequency: f32, loss: f32) -> f32 {
@@ -3737,7 +3782,8 @@ fn simulate_strike(
         // pitch.
         let ideal = sincosf(core::f32::consts::PI * nf * x0).0;
         let comb =
-            if ideal < 0.0 { -1.0 } else { 1.0 } * sqrtf(ideal * ideal + comb_floor * comb_floor);
+            if ideal < 0.0 { -1.0 } else { 1.0 }
+                * sqrtf(ideal * ideal + comb_floor_at(n + 1, comb_floor) * comb_floor_at(n + 1, comb_floor));
         shape[n] = comb * expf(-1.2 * spread * spread);
     }
     let mut q = [0.0f32; SIM_MODES];
@@ -5102,7 +5148,7 @@ impl ConcertGrand {
             // things in that band -- its densest, and the growl of a concert
             // grand's bottom octave.
             let comb = if ideal_comb < 0.0 { -1.0 } else { 1.0 }
-                * sqrtf(ideal_comb * ideal_comb + COMB_FLOOR.get() * COMB_FLOOR.get());
+                * sqrtf(ideal_comb * ideal_comb + comb_floor_at(n, COMB_FLOOR.get()) * comb_floor_at(n, COMB_FLOOR.get()));
             // Finite contact width. The felt's force distribution is smooth,
             // so its transform is a Gaussian-like rolloff with no nulls — a
             // sinc (the rectangle's transform) put its first null at partial
@@ -5181,7 +5227,7 @@ impl ConcertGrand {
             // the strike and the recipe are wrong in the same place, and the
             // recipe is cheaper. The treble's hammer is the open item, not
             // this gate.
-            if sim_modes >= 4 && self.strike_budget > 0 {
+            if sim_modes >= SIM_MIN_MODES.get().max(1.0) as usize && self.strike_budget > 0 {
                 self.strike_budget -= 1;
                 // Everything the contact needs, in physical units.
                 //
@@ -5291,15 +5337,23 @@ impl ConcertGrand {
                         * ((position - 0.448) / (1.0 - 0.448)).clamp(0.0, 1.0);
                 let house = FELT_EXPONENT_AT_BASS.get() + FELT_EXPONENT_RISE.get() * felt_position;
                 let reach = self.controls.felt_corner_travel();
-                let exponent = if reach < 0.0 {
+                // The top's own hardening, on top of the line: from the end
+                // of the tenor (position 0.55, about A4) to C8. It rides in
+                // `exponent`, not in `house`, so the constant-force
+                // compensation below holds the felt's force at the reference
+                // compression and only the hardening moves -- put into
+                // `house` it would soften the felt forty-fold at half a
+                // millimetre, the trap the comment below describes.
+                let treble_ramp = ((position - 0.55) / 0.45).clamp(0.0, 1.0);
+                let exponent = (if reach < 0.0 {
                     house + reach * (house - FELT_EXPONENT_MIN.get())
                 } else {
                     house + reach * (FELT_EXPONENT_MAX.get() - house)
-                }
-                .clamp(
-                    FELT_EXPONENT_MIN.get().min(FELT_EXPONENT_MAX.get()),
-                    FELT_EXPONENT_MIN.get().max(FELT_EXPONENT_MAX.get()),
-                );
+                } + FELT_EXPONENT_TREBLE.get() * treble_ramp)
+                    .clamp(
+                        FELT_EXPONENT_MIN.get().min(FELT_EXPONENT_MAX.get()),
+                        FELT_EXPONENT_MIN.get().max(FELT_EXPONENT_MAX.get()),
+                    );
                 // K carries units of N/m^p, so moving p without moving K
                 // changes the FORCE, not the hardness. At the half millimetre
                 // a real hammer compresses, x^p collapses as p grows: raising
@@ -10403,7 +10457,10 @@ mod tests {
     #[test]
     #[ignore]
     fn what_the_strike_hands_over() {
-        let note: u8 = std::env::var("CG_NOTE").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+        let note: u8 = std::env::var("CG_NOTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60);
         for velocity in [36u8, 117u8] {
             let mut piano = prepared();
             render(&mut piano, 64, &[note_on(note, velocity)]);

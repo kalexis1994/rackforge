@@ -687,6 +687,31 @@ took the treble's ff ladder from +7.6 to +1.2 dB — but it rises from the
 bass and took the tenor's pianissimo with it (−13 dB), so it needs a
 register-local form before it is a fix. That is the next item.
 
+Two more levers tried on the treble after that (0.166): a register-local
+felt exponent (`FELT_EXPONENT_TREBLE`, ramped in from A4 at constant force,
+0.5 to 2.0) and integrating the top octave's strike instead of drawing it
+(`SIM_MIN_MODES`, the gate as a knob, at one) with the top felt at a tenth
+and a thirtieth. None moves the treble's second partial: it sits at −17 to
+−18 dB under the first at both blows whatever the felt, and a felt thirty
+times softer renders the same as one three times softer. The exponent's
+line from the bass had moved it only by softening the felt at small
+compressions (the units trap), which is not a hardening at all. Both knobs
+ship at their old behaviour (0 and 4). What fixes the treble's second
+partial is not in the hammer's stiffness; the emergent contact at the top
+(C7: 1.0 ms pp, 0.64 ms ff) is multi-reflection — the string's round trip
+is 0.48 ms — and the force pulse it produces carries the partials, so the
+next look is at that regime, not at K.
+
+**The bass comb, two floors (0.166).** The reference notches the bass's
+eighth partial to −33 dB under its strongest (pp −36) and leaves the
+sixteenth at −28 (pp −39); the model at one floor of 0.26 had the eighth at
+−21, and at 0.065 landed it but sank the sixteenth to −35 / −65. A finite
+hammer and a bridge with admittance blur the higher nodes more than the
+lower, so the floor is now `COMB_FLOOR_LOW` (0.065) through the eighth,
+rising to `COMB_FLOOR` (0.26) by the sixteenth, in the recipe and in the
+integration's mode shapes alike. After: eighth −32 / −38, sixteenth −27 /
+−41 against −33 / −36 and −28 / −39.
+
 What the same survey said was NOT the chain: the tenor's pianissimo was
 thirty to forty decibels darker than the reference above 1 kHz (n8 at
 −76 dB against −40) while its fortissimo was close, so the model's touch

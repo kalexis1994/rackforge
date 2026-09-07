@@ -860,6 +860,14 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The ear on the thump, a third time (0.171.7).** With the thump a noise
+the user took the Thud Colour fader to 0.26 again — "bajé el thud a 0.26
+y ahí se corrigió, tenía ruido todavía" — the same −11.6 dB off the
+recentred 0.24 that 0.171 took off 0.9. `THUMP_BASE` 0.24 → 0.063, the
+fader back at its centre. What the reference's close pair records as the
+keybed, a player wants twenty-three decibels under; the register law, the
+velocity law and the ring stay as measured.
+
 **The thump is a noise, and the pedal is a thump (0.171.6).** The user,
 on the Campanella: "sigo escuchando como el sonido mecánico grave en las
 notas altas", heard as release noise, and the pedal's noise asked down.

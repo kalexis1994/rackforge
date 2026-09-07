@@ -1935,7 +1935,13 @@ pub static THUMP_VELOCITY_POWER: Knob = Knob::new(3.0);
 /// reference's floor is a close pair twelve centimetres over the strings
 /// hearing the keybed at arm's length, which is not where a player sits.
 /// The register law, the velocity law and the ring stay as measured.
-pub static THUMP_BASE: Knob = Knob::new(0.24);
+///
+/// 0.063 since 0.171.7: with the thump a noise (0.171.6) the same ear took
+/// the same fader to the same 0.26 -- "bajé el thud a 0.26 y ahí se
+/// corrigió" -- which is the same -11.6 dB again, off the recentred 0.24.
+/// Twice is a measurement of the listener: what the close pair hears as
+/// the keybed, a player wants twenty-three decibels under.
+pub static THUMP_BASE: Knob = Knob::new(0.063);
 /// ... rising by this much at C8. Measured: the reference's knock stands
 /// -26 dB under a C2's attack, -20 under a C3, -14 under a C4, -8 under a
 /// C6 and a C7 -- the mechanism is the same size everywhere and the tone

@@ -1932,7 +1932,7 @@ pub static BOARD_MEAN_MOBILITY: Knob = Knob::new(0.5);
 /// with 24 Hz of bandwidth, where opposite signs notch. A fix is a
 /// re-derivation of the mean transfer with the signs settled, not a knob,
 /// and it must be heard on the bass first.
-pub static BOARD_SIGN_TOP_HZ: Knob = Knob::new(11_200.0);
+pub static BOARD_SIGN_TOP_HZ: Knob = Knob::new(700.0);
 /// The MEASURED mean transfer of the board-and-microphones chain, relative
 /// to the flat Skudrzyk mean the bank is normalised to: third-octave centres
 /// in hertz and the correction in decibels, zero-mean over 200 Hz to 4 kHz
@@ -1968,29 +1968,29 @@ pub static BOARD_SIGN_TOP_HZ: Knob = Knob::new(11_200.0);
 /// denominator -- stayed six decibels short while the rest of the compass
 /// came out level.
 const BOARD_TRANSFER_DB: &[(f32, f32)] = &[
-    (50.0, -2.0),
-    (63.0, -1.0),
-    (80.0, 2.0),
-    (100.0, 6.5),
-    (125.0, 7.5),
-    (160.0, 6.0),
-    (200.0, 3.0),
-    (250.0, -5.5),
-    (315.0, -6.5),
-    (400.0, -2.8),
-    (500.0, -0.9),
-    (630.0, 0.2),
-    (800.0, 0.3),
-    (1000.0, 1.0),
-    (1250.0, 1.8),
-    (1600.0, 1.5),
-    (2000.0, 1.8),
-    (2500.0, 3.5),
-    (3150.0, 3.9),
-    (4000.0, 3.0),
-    (5000.0, 1.3),
-    (6300.0, 0.0),
-    (8000.0, 0.0),
+    (50.0, 0.1),
+    (63.0, 1.5),
+    (80.0, 7.1),
+    (100.0, 12.8),
+    (125.0, 13.3),
+    (160.0, 10.7),
+    (200.0, 7.3),
+    (250.0, -4.1),
+    (315.0, -5.9),
+    (400.0, -0.8),
+    (500.0, -0.2),
+    (630.0, -1.3),
+    (800.0, -2.1),
+    (1000.0, -0.4),
+    (1250.0, 1.0),
+    (1600.0, 0.6),
+    (2000.0, 0.4),
+    (2500.0, 2.1),
+    (3150.0, 2.2),
+    (4000.0, 1.1),
+    (5000.0, -0.3),
+    (6300.0, -1.0),
+    (8000.0, -1.0),
 ];
 /// How much of the measured transfer the bank applies: one is the table as
 /// measured, a sixteenth is as good as off, above one over-corrects.
@@ -2073,7 +2073,12 @@ pub static BOARD_RADIATION_ORDER: Knob = Knob::new(1.0);
 /// knee ("si toco un acorde medio-agudo saturan los auriculares"). Halved,
 /// the chord peaks at -2.8 dBFS, under the knee, and the single note at
 /// -12.8: a recording's headroom for chords, not a single note's.
-pub static HEADROOM: Knob = Knob::new(0.072);
+/// 0.072 until the board's signs settled above 700 Hz (0.167): the
+/// same-sign sum above the knee adds coherently and the ten-note ff chord
+/// went from -3.0 to -0.5 dBFS. Five and a half decibels back put it at
+/// -3.5, which keeps the policy -- the chord under -3 dBFS -- and the
+/// desktop's gain has the rest.
+pub static HEADROOM: Knob = Knob::new(0.038);
 /// The preamplifier fader's span in decibels: 0 at the bottom, this at the top.
 pub static PREAMP_RANGE_DB: Knob = Knob::new(30.0);
 /// Where the input stage stops being linear, as a fraction of full scale.

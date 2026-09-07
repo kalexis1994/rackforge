@@ -1972,10 +1972,10 @@
       "order": 9,
       "kind": {
         "type": "float",
-        "minimum": 0.0045,
-        "maximum": 1.152,
+        "minimum": 0.002375,
+        "maximum": 0.608,
         "step": 0.0007199999999999999,
-        "default": 0.072,
+        "default": 0.038,
         "taper": "logarithmic"
       },
       "flags": {
@@ -3467,10 +3467,10 @@
       "order": 17,
       "kind": {
         "type": "float",
-        "minimum": 700.0,
-        "maximum": 179200.0,
+        "minimum": 43.75,
+        "maximum": 11200.0,
         "step": 10.0,
-        "default": 11200.0,
+        "default": 700.0,
         "taper": "logarithmic"
       },
       "flags": {

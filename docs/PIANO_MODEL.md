@@ -724,6 +724,31 @@ the ceiling (signs everywhere, the bank unchanged). The fix is the
 mean transfer with them settled, then hear the bass phrase before
 anything ships.
 
+**Signs settled above 700 Hz, table re-derived (0.167).** Done in the
+order the entry above asked for. Three knees were tried — one sign
+everywhere, above 400 Hz, above 700 Hz — and all three brought the
+treble's note-to-note spread down the same amount (n2 against n1: 16 →
+14 dB about the reference; n3: 21 → 15), so the notches that matter are
+above 700 Hz and the bass modes keep their signs. With the signs settled
+the same-sign sum above the knee adds coherently: relative to 500 Hz the
+low end fell 9–14 dB, so `BOARD_TRANSFER_DB` was re-derived from that
+render by the same procedure (the fixed part of the third-octave delta,
+smoothed, subtracted from the table in place): +7 to +13 dB from 80 to
+200 Hz now, the 250–315 Hz cut kept, the 2.5–4 kHz rise halved. Then
+`HEADROOM` 0.072 → 0.038, because the ten-note ff chord had gone from −3.0
+to −0.5 dBFS and the policy is under −3.
+
+Measured (`signfix` against `comb2`): bass 5.39 → 5.13, tenor 5.17 →
+4.93, treble 7.63 → 8.06 — the treble's ladder mean rose four decibels
+while its spread fell. The fundamentals tell the rest: read note by note
+in absolute level, the model's C5, F#5, C6, F#6 and C7 sat 15–20 dB under
+their neighbours before (C5 at −49 dB against D#5's −35: the "dead note"
+the ear reported as B6 on another build), and sit 8–11 under now. The
+reference's own fundamentals swing 10.9 dB about their mean, the model's
+8.1, and the model's deviation from the reference's pattern went from 12.0
+to 9.3 dB. What remains of the pattern is the drawn bank's strength
+lottery and the reference's own board, which no drawn bank can copy.
+
 **The bass comb, two floors (0.166).** The reference notches the bass's
 eighth partial to −33 dB under its strongest (pp −36) and leaves the
 sixteenth at −28 (pp −39); the model at one floor of 0.26 had the eighth at

@@ -300,9 +300,10 @@ mod lab {
         }
         write_wav_stereo(wav, rate, &output).expect("cannot write the wav");
         println!(
-            "rendered {} s to {}",
+            "rendered {} s to {} ({} voice steals)",
             total as f32 / rate as f32,
-            wav.display()
+            wav.display(),
+            rackforge_concert_grand::STEALS.load(std::sync::atomic::Ordering::Relaxed)
         );
     }
 
@@ -321,7 +322,15 @@ mod lab {
         }
         ensure_tuning_file(&options.tuning);
         if let Some((score, wav)) = &options.render {
-            render(score, wav, &options.tuning);
+            // On a thread with room: the instrument is built by value, and
+            // thirty-two voices of it overflow the main thread's megabyte.
+            let (score, wav, tuning) = (score.clone(), wav.clone(), options.tuning.clone());
+            std::thread::Builder::new()
+                .stack_size(32 << 20)
+                .spawn(move || render(&score, &wav, &tuning))
+                .expect("render thread")
+                .join()
+                .expect("render thread panicked");
             return;
         }
         if !options.list && !options.foreground {

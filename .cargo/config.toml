@@ -4,5 +4,11 @@
 # baseline since 2021. The Concert Grand's hot loop is thousands of
 # independent 2-D phasor rotations per sample; letting LLVM vectorize them
 # is the difference between a Pi that keeps up and one that does not.
+# And an 8 MiB shadow stack (the default is 1 MiB). The Concert Grand's
+# processor is built by value before it is written into its static, and a
+# voice pool of thirty-two strings is 400 KiB of that value: at thirteen
+# voices it fit the default stack with nothing to spare, and the twenty
+# voices a pedalled nocturne needs did not. The stack lives in linear
+# memory, so this is eight megabytes of memory and no more.
 [target.wasm32-unknown-unknown]
-rustflags = ["-C", "target-feature=+simd128"]
+rustflags = ["-C", "target-feature=+simd128", "-C", "link-arg=-zstack-size=8388608"]

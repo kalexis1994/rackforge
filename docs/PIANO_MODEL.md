@@ -860,6 +860,26 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**Thirty-two voices, and the stack that holds them (0.171).** Thirteen
+voices were enough for a hand and not for a pedal: the Op. 9 No. 2 file
+keeps up to 34 notes alive at once, and with thirteen slots 89 % of its
+note-ons had to steal the quietest sounding voice, which replaces a
+ringing string's state in one sample — a step in the output. With
+thirty-two the whole piece steals 199 times and its first fifteen seconds
+never (the lab prints the count after a render). The cost is bounded by
+`PARTIAL_BUDGET` at the strike and by what actually rings after: twenty
+notes under the pedal went from 2.7 to 4.3 ms worst per 512-frame block
+on this machine (19 % of the deadline; the wasm fuel from 26 % to 48 % of
+its budget). The catch was memory, not time: the processor is built by
+value before it is written into its static, and 400 KiB of voices
+overflowed both the wasm's default 1 MiB shadow stack (an out-of-bounds
+trap at instantiation) and the lab's main thread. The wasm links with an
+8 MiB stack now (`.cargo/config.toml`, eight megabytes of linear memory
+and no more, against the runtime's 64) and the lab renders on a 32 MiB
+thread. The soft "pop" the user reported on the nocturne was NOT this —
+the opening has no steals at either count — and is still open; the next
+thing to read is the host's deadline counter while it is played live.
+
 **FIXED (0.170.1): a half pedal could wind a string up.** Found the first
 time a whole piece went through the model instead of single notes: the
 Op. 9 No. 2 file, 1498 notes and 3031 pedal positions, rendered through

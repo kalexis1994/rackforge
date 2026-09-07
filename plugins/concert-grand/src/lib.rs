@@ -848,7 +848,21 @@ const NOTE_COUNT: usize = 88;
 /// fifth and the guard test tripped again -- this time BEFORE anything
 /// shipped, which is what it is for. Thirteen voices of five-component
 /// partials occupy the same bytes sixteen four-component voices did.
-const MAX_VOICES: usize = 13;
+/// Thirty-two, from thirteen (0.171). Thirteen was enough for a hand; it
+/// was not enough for a pedal. The Op. 9 No. 2 file keeps up to 34 notes
+/// alive at once under its pedal, and 89 % of its note-ons arrived with
+/// more than thirteen sounding -- each one stealing the quietest voice,
+/// which replaces a ringing string's state in one sample: a step in the
+/// output, heard as "un pequeño popeo" on every soft note (a single soft
+/// note rendered alone has no such step; the pop is the piece's). The
+/// arithmetic is bounded by PARTIAL_BUDGET, not by this: more voices cost
+/// memory and a little per-voice overhead, and thin the newest notes under
+/// a dense pedal instead of cutting old ones off.
+const MAX_VOICES: usize = 32;
+/// How many strikes have had to steal a sounding voice, natively: the lab
+/// reports it after a render, since a steal is a step in the output.
+#[cfg(not(target_arch = "wasm32"))]
+pub static STEALS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// Room for the full transverse ladder of the lowest notes plus their
 /// nonlinear extras — A0 alone fills ~120 slots with real partials.
 const MAX_PARTIALS: usize = 144;
@@ -6535,6 +6549,8 @@ impl ConcertGrand {
             return Some(&mut self.voices[index]);
         }
         // All busy: steal the quietest, refunding its partials to the budget.
+        #[cfg(not(target_arch = "wasm32"))]
+        STEALS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let index = self
             .voices
             .iter()

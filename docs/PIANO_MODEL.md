@@ -608,6 +608,405 @@ bone-dry direct-injected tone is precisely what an electric piano is, the
 comparison samples are recordings made in a room, and direct A/B listening
 named the missing tail as the single largest audible difference.
 
+**FIXED (0.165): the ceiling stood at the microphones.** In `tune_room` the
+pair's height shadowed the room's `height`, so the ceiling's mirror image
+was taken about the plane of the capsules: its path equalled the direct one,
+the `direct + 0.1 m` clamp pushed it to 0.29 ms behind, and every note went
+through a comb whose first notch sits at 343 / (2 × 0.1) = 1.7 kHz. Measured
+on the partial envelope of all thirty grid notes against Salamander (each
+partial of each note as a (frequency, level) point, medians per half octave,
+each source relative to its own 500–707 Hz bin): a fixed 15 dB hole from
+1.4 to 2 kHz, the same in the bass's high partials, the tenor's middle ones
+and the treble's low ones — which is what "fixed in frequency" means — that
+vanished with the air chain off and survived the lid and the chamber being
+turned down one at a time. With the ceiling where the room's height puts it
+the hole is gone (−15 → −0.1 dB at 1.4–2 kHz) and the output drops about
+4 dB, which is the coherent copy that was being added.
+
+### The chain as measured, against one reference (0.165)
+
+From 2026-09-07 the model is judged against ONE instrument — the Salamander
+Grand Piano V3 (a Yamaha C5 under a close AB pair, sixteen velocity layers)
+— by `tools/scorecard-salamander.py`: thirty notes in minor thirds from A0
+at four blows, every level relative inside its own source, one distance in
+points per register and every gap listed by size, plus a listening set from
+the same build. The YDP and Pianoteq comparisons stay in the history; every
+correction against a different piano had pulled toward a different piano.
+
+The first thing the survey showed, once the ceiling was fixed, was the
+chain's remaining fixed colour: relative to 500 Hz the reference carries
+six to nine decibels more at 80–200 Hz (its release taps, averaged over all
+88 keys, peak there too), six less at 250–315 Hz where this bank happens to
+hump, and three to four more from 2.5 to 4 kHz — the rise toward
+coincidence that a flat Skudrzyk mean leaves out. `BOARD_TRANSFER_DB` is
+that table, third-octave centres in dB, zero-mean over 200 Hz–4 kHz,
+applied to each mode's drive after the mean-mobility normalisation, and
+`BOARD_TRANSFER` (knob, param 164) is how much of it applies. It keeps only
+the part of the difference the fortissimo and pianissimo renders agree on
+below 1 kHz and the three registers agree on from 1 to 5 kHz; above 5 kHz
+the two blows disagree by twenty decibels, which is the hammer, and the
+table is flat there. After it, the model's partial envelope sits within
+±4 dB of the reference from 63 Hz to 5.6 kHz in every register. The fine
+structure of the low modes — the taps put the reference's at about 84,
+174, 198 and 237 Hz — is not in the bank yet; it is the next thing to take
+from them, separately switchable, and heard on the bass phrase before it
+ships (the lesson of 0.150).
+
+**The low modes, tried and parked.** The same taps, peak-listed per key and
+histogrammed, name the modes a dozen or more keys share: 65, 84, 102, 112,
+125, 137, 153, 174, 195 and 232 Hz, each with the average tap's ripple
+about its own trend (`BOARD_LOW_MODES`). Placing them in the bank under
+250 Hz in place of the drawn modes — `BOARD_MEASURED_MODES`, param 165, a
+linear share nought to one — measured WORSE: the grid's bass partials at
+63–177 Hz sat four to five decibels further under the reference than the
+drawn bank does, because ten sparse modes leave the low fundamentals in the
+gaps between them and nothing sits under 65 Hz, where the taps could not
+agree on a mode. It ships at zero and stays as a fader for the ear. What
+the taps give reliably is the mean, and the mean is in the table. (A
+confound found on the way: the drawn modes took their hash seed from their
+slot, so inserting modes in front re-rolled every drawn mode's jitter, pan,
+strength and sign; they seed from their own counter now, and the bank at
+share zero is bit-identical to the bank before.)
+
+**The treble, measured (0.165.1, open).** Above its second partial the
+treble runs six to eight decibels bright at ff and its pianissimo is nearly
+as bright as its fortissimo (n2 at −18 dB under n1 at both blows; the
+reference has −21 and −29). Ruled out by ablation on the grid, each
+alone and all together: the action, release and pedal noises, the impact
+burst, the knock, the duplex, the undamped and open banks, the halo, the
+bloom, the clang and the phantoms — none moves the ladder by a decibel.
+Ruled out as a lever: softening the top felt to a quarter (a decibel); the
+Stulov hysteresis at 0.9 (nothing); simulating the top octave instead of
+drawing it (0.2 points worse, same shape). What the strike itself hands
+over at C6 (`what_the_strike_hands_over`, now taking CG_NOTE) is n2 at
+−17.6 dB under n1 at velocity 36 and −14.6 at 117, from contacts of 1.40
+and 1.08 ms: the integration's pianissimo at the top does not lengthen the
+contact the way the reference's ladder says a real one does (about two to
+one). The felt's exponent is the fortissimo lever — FELT_EXPONENT_RISE 1.2
+took the treble's ff ladder from +7.6 to +1.2 dB — but it rises from the
+bass and took the tenor's pianissimo with it (−13 dB), so it needs a
+register-local form before it is a fix. That is the next item.
+
+Two more levers tried on the treble after that (0.166): a register-local
+felt exponent (`FELT_EXPONENT_TREBLE`, ramped in from A4 at constant force,
+0.5 to 2.0) and integrating the top octave's strike instead of drawing it
+(`SIM_MIN_MODES`, the gate as a knob, at one) with the top felt at a tenth
+and a thirtieth. None moves the treble's second partial: it sits at −17 to
+−18 dB under the first at both blows whatever the felt, and a felt thirty
+times softer renders the same as one three times softer. The exponent's
+line from the bass had moved it only by softening the felt at small
+compressions (the units trap), which is not a hardening at all. Both knobs
+ship at their old behaviour (0 and 4). What fixes the treble's second
+partial is not in the hammer's stiffness; the emergent contact at the top
+(C7: 1.0 ms pp, 0.64 ms ff) is multi-reflection — the string's round trip
+is 0.48 ms — and the force pulse it produces carries the partials, so the
+next look is at that regime, not at K.
+
+**The treble is a lottery of the bank, not a law of the hammer (0.166,
+open).** Read note by note instead of as a register mean, the model's
+second partial against the first swings from +8 dB (C7) to −37 (A6) between
+adjacent grid notes, where the reference runs −5 to −39 with a spread of
+ten; the model's spread against it is sixteen. Every hammer lever
+(stiffness to a thirtieth, exponent, relaxation to 1 ms, hammer speed,
+mode ceiling to 21 kHz, the strike gate) leaves each note where it was.
+Moving the bank's density or damping re-rolls the whole column — C5's
+second partial goes from +4 to −27 dB — which is the signature of the
+board bank's fine structure: the treble's first and second partials sit
+under 1.5 kHz among modes spaced 17 Hz with 24 Hz of bandwidth, drawn
+with random strengths and signs, and two neighbours of opposite sign
+notch whatever lands between them. `BOARD_SIGN_TOP_HZ` (param 169) makes
+the sign knee a fader: one sign above 700 Hz brings the treble's spread
+down (16 → 14 dB on n2, 21 → 15 on n3) but lifts the bass and tenor
+ladders 3–4 dB, because the same-sign sum adds coherently and the mean
+transfer table was derived with the signs as they were. It ships above
+the ceiling (signs everywhere, the bank unchanged). The fix is the
+0.149 shape done in the right order: settle the signs, re-derive the
+mean transfer with them settled, then hear the bass phrase before
+anything ships.
+
+**Signs settled above 700 Hz, table re-derived (0.167).** Done in the
+order the entry above asked for. Three knees were tried — one sign
+everywhere, above 400 Hz, above 700 Hz — and all three brought the
+treble's note-to-note spread down the same amount (n2 against n1: 16 →
+14 dB about the reference; n3: 21 → 15), so the notches that matter are
+above 700 Hz and the bass modes keep their signs. With the signs settled
+the same-sign sum above the knee adds coherently: relative to 500 Hz the
+low end fell 9–14 dB, so `BOARD_TRANSFER_DB` was re-derived from that
+render by the same procedure (the fixed part of the third-octave delta,
+smoothed, subtracted from the table in place): +7 to +13 dB from 80 to
+200 Hz now, the 250–315 Hz cut kept, the 2.5–4 kHz rise halved. Then
+`HEADROOM` 0.072 → 0.038, because the ten-note ff chord had gone from −3.0
+to −0.5 dBFS and the policy is under −3.
+
+Measured (`signfix` against `comb2`): bass 5.39 → 5.13, tenor 5.17 →
+4.93, treble 7.63 → 8.06 — the treble's ladder mean rose four decibels
+while its spread fell. The fundamentals tell the rest: read note by note
+in absolute level, the model's C5, F#5, C6, F#6 and C7 sat 15–20 dB under
+their neighbours before (C5 at −49 dB against D#5's −35: the "dead note"
+the ear reported as B6 on another build), and sit 8–11 under now. The
+reference's own fundamentals swing 10.9 dB about their mean, the model's
+8.1, and the model's deviation from the reference's pattern went from 12.0
+to 9.3 dB. What remains of the pattern is the drawn bank's strength
+lottery and the reference's own board, which no drawn bank can copy.
+
+**The damped strings, humming anyway (0.168).** The floor under every
+fundamental — the 15 to 40 dB every register measured short — is, as far
+as it is strings, the other strings under their dampers. Measured on the
+reference: under a C6 at ff, in its sustain from 0.5 to 1.5 s, the lines
+are E2, G2, B2, D3, G#1, F#2 and C#3 at −31 to −36 dB below the note's
+strongest partial, with the board's own 84, 100 and 125 Hz beside them;
+under a C5 the same set at −37 to −48. They sit ten to twenty decibels
+above the recording's own tail, so they are the instrument. A damper is
+felt on a wound string: it takes the string down in seconds, not at once,
+and the strike's knock reaches every string through the bridge. The
+model's sympathy reached only strings that were sounding and its undamped
+bank started at 1.9 kHz, so under a treble note there was nothing at all.
+
+`bed`: forty resonators at the instrument's own fundamentals from A0 up,
+listening to the bridge like the undamped bank, with a damped string's ring
+(`BED_T60_S`, 5 s) at `BED_MIX`, scaled by Sympathy. A string that is
+sounding on its own is gated out of the bed for as long as its voice lives,
+so no note seeds a second copy of its own onset. The level is large (2.5,
+against the undamped bank's 0.12) because a treble note's bridge signal has
+almost nothing at a bass string's pitch and only its knock reaches down
+there; 3.5 put the bass's floor three decibels over the reference, since a
+bass note drives its neighbours' bed strings at resonance with its own
+partials, and 2.5 lands it.
+
+Measured (`bed` at 3.5 against `v167`): bass 5.13 → 4.73, tenor 4.94 →
+4.16, treble 8.03 → 6.55 — the largest single move of the survey; at the
+shipped 2.5 (`bed2`): 4.49 / 4.28 / 6.69, the bass's floor within a decibel
+of the reference in the sustain. The
+floor under the fundamental in the sustain went from −13 to +3 dB (bass),
+−28 to −7 (tenor) and −32 to −7 (treble) against the reference, and the
+treble's envelope at four seconds from −49 to −20 dB: the tail the treble
+had no mechanism for is the bed. Still short: the floor in the ATTACK, 12
+to 16 dB in every register at ff, which is the knock itself and is next.
+
+**The knock, measured and given its own law (0.169).** With the bed in
+place the floor under the fundamental was still 12 to 16 dB short in the
+ATTACK. Measured on the reference, under 0.7 f0 in the first 40 ms against
+the note's own attack energy: −26 dB under a C2, −20 under a C3, −14 under
+a C4, −16 under a C5, −8 under a C6 and a C7 — the mechanism is the same
+size everywhere and the tone thins toward the top. It is as loud at
+velocity 36 as at 117, and three to seven decibels louder at the soft blow
+on C3 and C7: the key reaches the keybed at every dynamic. It keeps
+radiating: the 40–120 ms window sits two to ten decibels under the first
+forty, the 120–300 ms window fifteen under that. And it is broadband, flat
+within a few decibels from 40 to 400 Hz and seven down by 630.
+
+The model's thump was five components to 214 Hz falling fourteen decibels,
+ringing 60 ms, at a level that FELL toward the treble, on the shank tick's
+velocity law — the fourth power under the knee the ear had asked for,
+because a tick that stays loud at a soft blow is a typewriter. The thump
+is the other thing. It now has its own law (`THUMP_VELOCITY_POWER` 2.0
+against a tone that grows as the 2.2nd, which leaves the ratio near flat),
+a level that rises `THUMP_RISE_DB` (12) across the bass and holds from C4
+up (measured with the rise running to the top, C4 landed and C5–C7
+overshot by eight to ten), a ring of 150 ms, and eight components to 650 Hz
+weighted toward the bottom so that what the board radiates is flat. The
+tick keeps its fourth power.
+
+Measured (`knock3` against `bed3`): the attack floor under the fundamental
+went from −12 / −13 / −13 dB against the reference (bass / tenor / treble,
+ff) to −12 / −3 / +6, and from −11 / −14 / −31 at pp to −7 / 0 / +2;
+distances 4.41 / 4.39 / 6.77 → 4.42 / 3.32 / 4.84. Note by note, C4 sits
+within three decibels of the reference in every window of the decay; C5
+to C7 run three to four over. The bass's number does not move because its
+band is 30–46 Hz, where the board radiates nothing and the reference's
+−26 is its room. What the thump still lacks is the reference's body from
+250 to 630 Hz on the treble notes, which is the shank and the case rather
+than the keybed, and lives where the ear placed the tick.
+
+**The ear on the knock (0.169.1).** The same afternoon, the user took Thud
+Colour from 0.5 to 0.26 — "se escucha mucho el ruido" — which on that
+fader's 256^(x − 0.5) law is −11.6 dB. `THUMP_BASE` goes 0.9 → 0.24 so
+the centre of the fader is that level: a travel's centre is what someone
+wants, not what a reference measured (0.081's lesson, again). The
+reference's knock is a close pair twelve centimetres over the strings
+hearing the keybed at arm's length, which is not where a player sits. The
+register law, the velocity law and the ring stay as measured; the metric
+gives back part of what 0.169 took, and that is the ear's call.
+
+**The treble's contact, read from the pulse (0.170, open).** The raw force
+trace of the integration (`strike_profile` now writes it with
+`CG_TRACE_OUT`), Fourier-read at the partials: at C6 the pulse is a clean
+Hann-like bell of 1.04 ms at velocity 36 and 0.69 ms at 117, with its
+second partial 22 and 20 dB under its first. The strike-point comb hands
+the second partial six back, which is the −16 to −18 the strike hands over
+and the render shows; the reference wants −29 at pp and −21 at ff, so the
+pulse would need its second partial at −35 and −27 — a pulse nearly twice
+as long, or one whose n-weighting the slope law does not add. Every felt
+sweep of the day had read as saturated because `FELT_TREBLE_GAIN` ramps
+linearly from C4 and "a thirtieth at C8" is a half at C6; measured with a
+decade-scale law (`FELT_TREBLE_DECADES`, 1.0 / 1.5 / 2.0), the treble's
+fortissimo ladder comes down from +11 dB over the reference to +8, +7, +6
+while its pianissimo goes UP from +7 to +7, +8, +9. A softer felt brightens
+the soft blow at the top: at C6 the pianissimo contact (1.04 ms) is one
+round trip (0.96), the far reflection ends it whatever the felt does, and
+the pulse's length is the string's. One decade ships, where the two blows
+meet. What the treble still needs is in the contact's physics — the near
+reflection from the agraffe, 2·x₀/c ≈ 0.07 ms at C6, lives above the 8 kHz
+the integration carries modes for — and in whether bridge force is the
+slope for a string this short, not in K.
+
+**The ear on the knock, again (0.170.2).** With the thump at the second
+power the user heard "un pick mecánico" on soft notes: the knock standing
+out of a pianissimo the way the reference's close pair hears it and a
+player does not. `THUMP_VELOCITY_POWER` 2 → 3 (6.5 dB off velocity 36,
+3 off 60, nothing off a forte) and the 310–650 Hz components halved — they
+are what a soft knock reads as a "pick". The metric gives back what it
+must: the attack floor at pp goes from −7 / −7 dB under the reference
+(tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
+The ear's call, recorded as such.
+
+**The merge was the last of the pops (0.171.5).** With the contact ramp
+on fresh voices the user heard two or three pops left in the 1:52–2:03
+passage, and none with the re-strike merge off — "ahora no se escuchan
+pops". A living voice cannot be ramped from rest, and a blow pushed into
+its phasors in one sample is the step the ramp removes from a fresh note.
+`RESTRIKE_MERGE` ships at zero: a repeated note eases the old voice out
+and enters as a fresh, ramped voice. The ease-out is 30 ms now, from 250:
+the new voice covers the sound from its first cycle, and at 250 ms every
+repeated note left a ghost that lingered 1.7 s before the cull took it
+(1351 voice steals on the nocturne against 185 with the merge; 628 at
+30 ms, most of them of near-dead voices). The merge — the flutter of a
+fast repetition — waits behind the switch until the push itself can be
+spread over the contact. A footnote for the tests: the knob registry is
+process-global and the suite runs in parallel, so a test that depends on a
+knob must not set it — the merge is a per-instance field read at prepare
+and retune, and the merge test sets the field.
+
+**The contact's ramp (0.171.4, unverified by ear).** With the phases
+dispersed the user heard the pick LOUDER, which says what it is: a voice
+that jumps in one sample from rest to the state the integration hands
+over at the end of the contact, and with the phases in step that jump
+happened to cancel in the output where the dispersed one does not. A
+fresh voice now fades in over `ATTACK_RAMP_S` (1.5 ms, a smoothstep) —
+the string builds up under the hammer — and the merge is back to pushing
+magnitude into the cosine quadrature only, because a living voice cannot
+be ramped from rest. Measured, the ramp removes no sample step the
+detector can see (there was none it could see), and the crest comes back
+up (A3 +9): the pulse is delayed, not gone. The ear is the instrument
+here; every knob of this family is on the panel (`ATTACK_DISPERSION`,
+`ATTACK_RAMP_S`, `RESTRIKE_MERGE`) so it can be heard one at a time.
+
+**The attack was a pulse (0.171.3, partly fixed).** With the FLAC of the
+render heard on another machine, the "pick" was in the samples, and every
+attack component switched off in turn left it in place; the merge and the
+drawn strike too. What the A/B could not say, the reference did: measured
+as the attack's CREST — the peak RMS of the first 1.5 ms against the mean
+of 4 to 7.5 ms — Salamander's A3 sits 10 to 14 dB below its own body in
+that window and rises into it, its A4 27 below, its A2 7; the model's A3
+sat 12 dB ABOVE, its A2 at velocity 60 16 above. Every partial started in
+step, and a ladder in step is a pulse at the top of every note. That is
+the pick. `ATTACK_DISPERSION` turns each partial's initial phase back by
+0.8 radians per harmonic — what a stiff string and a bridge with delay do
+to a strike's phases; the bass already had a hand-drawn version of it on
+its first six partials — and the A3 comes out at −5 dB, the A2 at
+velocity 90 at −1. The merge now takes the fresh phasor in both
+quadratures so a repeated note keeps the dispersion (pushing magnitude
+into the cosine alone put every merged partial back in step); a re-struck
+A3 measures +4.6 against a fresh one's −4.8, with no larger sample step.
+Still open, and named: the A2 at velocity 60 keeps a +14 dB crest that
+goes away with the impact burst off (the tension kick's 1.5 ms pulse), and
+the A4 and A5 keep +4 and 0 against −27 and −26 whatever the phases —
+those two spike from something that is not phase and not an extra.
+
+**FIXED (0.171.2): a re-struck note arrived without its bloom.** The
+"pequeño popeo" survived the thud fix, and the synthetic case said why the
+thud was never it: at 1:11 the pedal had already been relieved to zero, so
+the repeated B-flats took the MERGE path, not the legacy one. In the merge
+every fresh lane is pushed into the living partial's cosine quadrature —
+but the living voice's bloom lane is retired within tens of milliseconds
+of any strike (the cull zeroes its rotation), and a push into a phasor
+that no longer turns is silence. So a merged blow had no negative bloom at
+all: measured on a re-strike under the pedal, the note reached −42 dB in
+half a millisecond where a fresh note takes three to bloom (−48, −44, −45,
+−43, −39). A hard edge on every repeated melody note. A retired lane now
+takes the fresh strike's lane whole — rotation and magnitude, the output
+quadrature at zero so nothing steps — and the re-strike blooms like a
+first strike (−49, −48, −44, −41). A long-decayed voice's retired vertical
+lanes come back the same way, so a re-struck note has its high partials.
+Re-strikes under a HALF pedal now relieve the voice's own damper and merge
+too, instead of easing out and starting a stranger. The synthetic pair
+lives in `target/scorecard/restrike-half*.wav`.
+
+**FIXED (0.171.1): a repeated note under a half pedal knocked.** The
+"pequeño popeo" the user heard on the Op. 9 No. 2 file, at 1:11.10 and
+1:11.4: both are re-strikes of note 70 under a moving pedal. A re-strike
+merges into the living voice only when that voice is held or free; under
+a half pedal `damper_applied` is above zero, so every repeated note took
+the legacy path — ease the old voice out over 250 ms and strike fresh —
+and that path called `damp` with the release noise, which is the felt
+meeting a moving string. No damper lands on a re-strike. Neither a voice
+steal (none within a second of either pop, logged by the lab) nor a step
+(none in the samples); the score named it. The ease-out stays, the knock
+goes.
+
+**Thirty-two voices, and the stack that holds them (0.171).** Thirteen
+voices were enough for a hand and not for a pedal: the Op. 9 No. 2 file
+keeps up to 34 notes alive at once, and with thirteen slots 89 % of its
+note-ons had to steal the quietest sounding voice, which replaces a
+ringing string's state in one sample — a step in the output. With
+thirty-two the whole piece steals 199 times and its first fifteen seconds
+never (the lab prints the count after a render). The cost is bounded by
+`PARTIAL_BUDGET` at the strike and by what actually rings after: twenty
+notes under the pedal went from 2.7 to 4.3 ms worst per 512-frame block
+on this machine (19 % of the deadline; the wasm fuel from 26 % to 48 % of
+its budget). The catch was memory, not time: the processor is built by
+value before it is written into its static, and 400 KiB of voices
+overflowed both the wasm's default 1 MiB shadow stack (an out-of-bounds
+trap at instantiation) and the lab's main thread. The wasm links with an
+8 MiB stack now (`.cargo/config.toml`, eight megabytes of linear memory
+and no more, against the runtime's 64) and the lab renders on a 32 MiB
+thread. The soft "pop" the user reported on the nocturne was NOT this —
+the opening has no steals at either count — and is still open; the next
+thing to read is the host's deadline counter while it is played live.
+
+**FIXED (0.170.1): a half pedal could wind a string up.** Found the first
+time a whole piece went through the model instead of single notes: the
+Op. 9 No. 2 file, 1498 notes and 3031 pedal positions, rendered through
+the lab (`tools/midi-to-score.py`, and `--render` now takes pedal lines).
+From 96 s in the output grew for two seconds, sat on the ceiling for eight
+and went non-finite; the same passage with the pedal quantised to on/off
+was fine, which named the path. `press_damper` scales a partial's rotation
+by the damper factor raised to the pressure's change, negative to relieve,
+and the factor came from a firmness drawn PER PEDAL EVENT: a press through a
+firm damper relieved through a soft one leaves the rotation's modulus above
+where it started, and three thousand positions walked it past one — a
+784 Hz partial growing at 14 dB/s with every other mechanism switched off.
+The release-into-half-pedal path did the same with its own per-event
+draw. Each voice now carries its own damper's firmness from the strike,
+and every press and relief goes through it, so the walk cancels;
+`a_half_pedal_never_adds_energy` holds a chord under three hundred random
+pedal positions and demands it end quieter than it began and finite.
+
+**The bass comb, two floors (0.166).** The reference notches the bass's
+eighth partial to −33 dB under its strongest (pp −36) and leaves the
+sixteenth at −28 (pp −39); the model at one floor of 0.26 had the eighth at
+−21, and at 0.065 landed it but sank the sixteenth to −35 / −65. A finite
+hammer and a bridge with admittance blur the higher nodes more than the
+lower, so the floor is now `COMB_FLOOR_LOW` (0.065) through the eighth,
+rising to `COMB_FLOOR` (0.26) by the sixteenth, in the recipe and in the
+integration's mode shapes alike. After: eighth −32 / −38, sixteenth −27 /
+−41 against −33 / −36 and −28 / −39.
+
+What the same survey said was NOT the chain: the tenor's pianissimo was
+thirty to forty decibels darker than the reference above 1 kHz (n8 at
+−76 dB against −40) while its fortissimo was close, so the model's touch
+swung brightness twenty-odd decibels too far. That was the action's span
+— see the hammer-speed row of the literature table — and one pair of knobs
+took the tenor's pianissimo ladder from −13 dB to −0.3. Still open: the
+treble is six to eight decibels too bright above its second partial at ff
+and carries fourteen decibels too much 4–8 kHz at pp (softening the top
+felt by four barely moves it, so it is not the felt's stiffness); the
+treble dies by 4 s where the reference keeps a −51 dB tail of undamped
+strings and room; the bass's strike-point comb at n8 is twenty decibels
+shallower than the reference's; and under every fundamental the reference
+carries fifteen to forty decibels more floor (knock, board, room) than the
+model, which is the un-modelled broadband knock the list below names.
+
 ### The preamplifier (tested by measurement)
 
 A console channel's input stage after the capsules and before Level: a
@@ -914,7 +1313,7 @@ ambiguous or the measurement said no, it did not, and the reason is here.
 
 | Quantity | Model | Published | Source | Outcome |
 |---|---|---|---|---|
-| Hammer speed pp .. ff | 0.9 .. 6.0 m/s (span 14) | 0.11 .. 6.83 m/s (span ~60) | Boutillon, via Euphonics 12.2 | **Moved**: HAMMER_V_FF 6.8, ACTION_SPAN 15 + 66·dynamics. Pianissimo centroids land on the references (bass 197 Hz vs 166-172, tenor 385 vs 393-394), fortissimo untouched. |
+| Hammer speed pp .. ff | 1.1 .. 5.4 m/s at velocities 36 .. 117 (span 12) | 0.11 .. 6.83 m/s (span ~60) | Boutillon, via Euphonics 12.2 | **Moved, then moved back (0.165)**: HAMMER_V_FF 6.8 stays; ACTION_SPAN went 15 + 66·dynamics (span 44.7, velocity 36 at 0.45 m/s) and, against the single reference, back to 4 + 17.7·dynamics. The published extremes are the ends of a travel, and the reference's third velocity layer is not a 0.45 m/s blow: at span 44.7 the tenor's pianissimo ladder ran 13 dB dark and the pp-to-ff swing 20 dB wide; at 12 they are −0.3 and +0.5 dB, the fortissimo unchanged. The centroid had said the pianissimo matched — it is dominated by the first three partials and hid the ladder. |
 | Felt stiffness and exponent | C2 4e8 / 2.3, C4 4.5e9 / 2.5, C7 1e12 / 3.0 log-linear | Same figures | Hall & Askenfelt; Chaigne & Askenfelt 1994; Euphonics 12.2 | Kept at C2 and C4; C7 a decade softer (FELT_K_DECADES 4.0): at the table's value a C5's tenth partial sat 26 dB above both references. |
 | Stulov hysteresis | epsilon 0.5, tau 0.2 ms | epsilon 0.992, tau 2 us | Stulov 1995, SMAC 03 | Now knobs (STULOV_EPSILON, STULOV_TAU_S). Tried at his values with the stiffness rescaled: fortissimo darker, treble unchanged; shipped unchanged. |
 | Hammer head mass | 11 g (A0) .. 3.5 g (C8) | ~11 g bass, ~3.5 g treble; effective point masses 1-3 g per string | Conklin Part I; Euphonics | Matches. |
@@ -1580,6 +1979,16 @@ code and is far beyond audibility at control rate).
   in contact longer and speaks darker, which is why a bass note is dark.
   At the control's centre the mass is the nominal one, so the default voice
   is unchanged -- the score is 19.95 before and after, to the digit.
+
+* **RESOLVED since `RECIPE_FLOOR` went to zero — the two entries that follow
+  describe a build that no longer exists.** The simulated strike now SETS
+  every partial below `SIM_TOP_HZ`; the recipe only supplies the
+  normalisation peak and the partials above 8 kHz (scaled by the seam), and
+  the level is imposed afterwards as `0.28 · cal(level) · v^2.2` by energy
+  normalisation. What remains of the concern is that the strike's own
+  velocity-to-level law is discarded by that normalisation, and that `cal`
+  is still fitted to the YDP; both are refit items against the single
+  reference, not structural ones. Kept below for the record.
 
 * **The `max` blend is the binding constraint, and testing it needs a refit.**
   Confirmed by measurement rather than argument: the two hammer *weights*

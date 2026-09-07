@@ -112,6 +112,11 @@ jobs:
         # plugin reached three releases before.
         env:
           RACKFORGE_REQUIRE_WASM_CC: "1"
+          # The Concert Grand is built by value before it is written into
+          # its static, and thirty-two voices of it are 400 KiB of that
+          # value; a debug build keeps the temporaries, and the harness's
+          # 2 MiB thread overflowed at 0.171. Sixteen is room.
+          RUST_MIN_STACK: "16777216"
         run: |
           cargo test --locked \
             -p rackforge-audio-api \

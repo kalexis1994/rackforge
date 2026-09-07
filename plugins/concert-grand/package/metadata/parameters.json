@@ -1718,10 +1718,10 @@
       "order": 13,
       "kind": {
         "type": "float",
-        "minimum": 0.00375,
-        "maximum": 0.96,
-        "step": 0.0006,
-        "default": 0.06,
+        "minimum": 0.009375,
+        "maximum": 2.4,
+        "step": 0.0015,
+        "default": 0.15,
         "taper": "logarithmic",
         "unit": "s"
       },
@@ -1782,10 +1782,10 @@
       "order": 16,
       "kind": {
         "type": "float",
-        "minimum": 0.9375,
-        "maximum": 240.0,
+        "minimum": 0.25,
+        "maximum": 64.0,
         "step": 0.15,
-        "default": 15.0,
+        "default": 4.0,
         "taper": "logarithmic"
       },
       "flags": {
@@ -1803,10 +1803,10 @@
       "order": 17,
       "kind": {
         "type": "float",
-        "minimum": 4.125,
-        "maximum": 1056.0,
+        "minimum": 1.10625,
+        "maximum": 283.2,
         "step": 0.66,
-        "default": 66.0,
+        "default": 17.7,
         "taper": "logarithmic"
       },
       "flags": {
@@ -1972,10 +1972,10 @@
       "order": 9,
       "kind": {
         "type": "float",
-        "minimum": 0.0045,
-        "maximum": 1.152,
+        "minimum": 0.002375,
+        "maximum": 0.608,
         "step": 0.0007199999999999999,
-        "default": 0.072,
+        "default": 0.038,
         "taper": "logarithmic"
       },
       "flags": {
@@ -3347,6 +3347,318 @@
         "maximum": 96.0,
         "step": 0.06,
         "default": 6.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 164,
+      "id": "knob_board_transfer",
+      "name": "BOARD_TRANSFER",
+      "page": "model_board",
+      "order": 15,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 165,
+      "id": "knob_board_measured_modes",
+      "name": "BOARD_MEASURED_MODES",
+      "page": "model_board",
+      "order": 16,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.0
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 166,
+      "id": "knob_felt_exponent_treble",
+      "name": "FELT_EXPONENT_TREBLE",
+      "page": "model_hammer",
+      "order": 35,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.0
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 167,
+      "id": "knob_sim_min_modes",
+      "name": "SIM_MIN_MODES",
+      "page": "model_hammer",
+      "order": 36,
+      "kind": {
+        "type": "float",
+        "minimum": 0.25,
+        "maximum": 64.0,
+        "step": 0.04,
+        "default": 4.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 168,
+      "id": "knob_comb_floor_low",
+      "name": "COMB_FLOOR_LOW",
+      "page": "model_hammer",
+      "order": 37,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0040625,
+        "maximum": 1.04,
+        "step": 0.001,
+        "default": 0.065,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 169,
+      "id": "knob_board_sign_top_hz",
+      "name": "BOARD_SIGN_TOP_HZ",
+      "page": "model_board",
+      "order": 17,
+      "kind": {
+        "type": "float",
+        "minimum": 43.75,
+        "maximum": 11200.0,
+        "step": 10.0,
+        "default": 700.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 170,
+      "id": "knob_bed_t60_s",
+      "name": "BED_T60_S",
+      "page": "model_air",
+      "order": 35,
+      "kind": {
+        "type": "float",
+        "minimum": 0.3125,
+        "maximum": 80.0,
+        "step": 0.05,
+        "default": 5.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 171,
+      "id": "knob_bed_mix",
+      "name": "BED_MIX",
+      "page": "model_air",
+      "order": 36,
+      "kind": {
+        "type": "float",
+        "minimum": 0.15625,
+        "maximum": 40.0,
+        "step": 0.025,
+        "default": 2.5,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 172,
+      "id": "knob_thump_velocity_power",
+      "name": "THUMP_VELOCITY_POWER",
+      "page": "model_hammer",
+      "order": 38,
+      "kind": {
+        "type": "float",
+        "minimum": 0.1875,
+        "maximum": 48.0,
+        "step": 0.03,
+        "default": 3.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 173,
+      "id": "knob_thump_base",
+      "name": "THUMP_BASE",
+      "page": "model_hammer",
+      "order": 39,
+      "kind": {
+        "type": "float",
+        "minimum": 0.015,
+        "maximum": 3.84,
+        "step": 0.0024,
+        "default": 0.24,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 174,
+      "id": "knob_thump_rise_db",
+      "name": "THUMP_RISE_DB",
+      "page": "model_hammer",
+      "order": 40,
+      "kind": {
+        "type": "float",
+        "minimum": 0.75,
+        "maximum": 192.0,
+        "step": 0.12,
+        "default": 12.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 175,
+      "id": "knob_felt_treble_decades",
+      "name": "FELT_TREBLE_DECADES",
+      "page": "model_hammer",
+      "order": 41,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 176,
+      "id": "knob_restrike_merge",
+      "name": "RESTRIKE_MERGE",
+      "page": "model_hammer",
+      "order": 42,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.0
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 177,
+      "id": "knob_attack_dispersion",
+      "name": "ATTACK_DISPERSION",
+      "page": "model_hammer",
+      "order": 43,
+      "kind": {
+        "type": "float",
+        "minimum": 0.05,
+        "maximum": 12.8,
+        "step": 0.01,
+        "default": 0.8,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 178,
+      "id": "knob_attack_ramp_s",
+      "name": "ATTACK_RAMP_S",
+      "page": "model_hammer",
+      "order": 44,
+      "kind": {
+        "type": "float",
+        "minimum": 9.375e-05,
+        "maximum": 0.024,
+        "step": 1e-05,
+        "default": 0.0015,
         "taper": "logarithmic"
       },
       "flags": {

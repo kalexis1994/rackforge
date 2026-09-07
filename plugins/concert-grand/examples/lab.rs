@@ -229,7 +229,27 @@ mod lab {
         let mut last_ms = 0u64;
         for line in text.lines() {
             let f: Vec<&str> = line.split_whitespace().collect();
-            if f.len() < 4 || f[0].starts_with('#') {
+            if f.is_empty() || f[0].starts_with('#') {
+                continue;
+            }
+            // A pedal POSITION: "onset_ms pedal 0..127" (CC 64), and the
+            // same for "sostenuto" (CC 66) and "soft" (CC 67) -- a MIDI file
+            // of a nocturne is mostly pedal, and a score that drops it is a
+            // different piece.
+            if f.len() == 3 {
+                let onset: u64 = f[0].parse().expect("onset_ms");
+                let controller = match f[1] {
+                    "pedal" => 64,
+                    "sostenuto" => 66,
+                    "soft" => 67,
+                    other => panic!("unknown control {other}"),
+                };
+                let level: u8 = f[2].parse().expect("control 0..127");
+                events.push((onset, [0xB0, controller, level.min(127)]));
+                last_ms = last_ms.max(onset);
+                continue;
+            }
+            if f.len() < 4 {
                 continue;
             }
             let onset: u64 = f[0].parse().expect("onset_ms");
@@ -250,6 +270,8 @@ mod lab {
         let mut next = 0;
         let mut frame = 0usize;
         let mut block = vec![0.0f32; BLOCK * 2];
+        let mut steals_seen =
+            rackforge_concert_grand::STEALS.load(std::sync::atomic::Ordering::Relaxed);
         while frame < total {
             let frames = BLOCK.min(total - frame);
             let mut midi = Vec::new();
@@ -276,13 +298,26 @@ mod lab {
                 2,
             );
             output.extend_from_slice(&block[..frames * 2]);
+            // CG_STEAL_LOG: say when a strike had to steal a sounding voice.
+            let stolen = rackforge_concert_grand::STEALS.load(std::sync::atomic::Ordering::Relaxed);
+            if stolen != steals_seen {
+                if std::env::var("CG_STEAL_LOG").is_ok() {
+                    println!(
+                        "steal at {:.3} s (block of {} frames)",
+                        frame as f32 / rate as f32,
+                        frames
+                    );
+                }
+                steals_seen = stolen;
+            }
             frame += frames;
         }
         write_wav_stereo(wav, rate, &output).expect("cannot write the wav");
         println!(
-            "rendered {} s to {}",
+            "rendered {} s to {} ({} voice steals)",
             total as f32 / rate as f32,
-            wav.display()
+            wav.display(),
+            rackforge_concert_grand::STEALS.load(std::sync::atomic::Ordering::Relaxed)
         );
     }
 
@@ -301,7 +336,15 @@ mod lab {
         }
         ensure_tuning_file(&options.tuning);
         if let Some((score, wav)) = &options.render {
-            render(score, wav, &options.tuning);
+            // On a thread with room: the instrument is built by value, and
+            // thirty-two voices of it overflow the main thread's megabyte.
+            let (score, wav, tuning) = (score.clone(), wav.clone(), options.tuning.clone());
+            std::thread::Builder::new()
+                .stack_size(32 << 20)
+                .spawn(move || render(&score, &wav, &tuning))
+                .expect("render thread")
+                .join()
+                .expect("render thread panicked");
             return;
         }
         if !options.list && !options.foreground {

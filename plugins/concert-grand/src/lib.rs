@@ -1509,6 +1509,10 @@ struct Partial {
     c: [f32; LANES],
     rc: [f32; LANES],
     rs: [f32; LANES],
+    /// The bridge's drain on the coherent configuration, per SAMPLE: each
+    /// string lane loses this fraction of the weighted lane sum every tick,
+    /// the horizontal lane `HORIZONTAL_BRIDGE` times it. See `Partial::tick`.
+    drain: f32,
     /// Bridge radiation per control step, as the fraction of the coherent
     /// sum each string loses. Zero for components that bypass the bridge.
     coupling: f32,
@@ -1541,7 +1545,20 @@ impl Partial {
     /// lane-parallel -- and returns their sum in fixed lane order (the
     /// same order the old component-by-component sum used).
     #[inline(always)]
-    fn tick(&mut self) -> f32 {
+    /// One sample: every lane rotates and decays, then the bridge takes
+    /// its share of the coherent configuration.
+    ///
+    /// The drain used to be applied once per `CULL_INTERVAL` (256 samples)
+    /// as a step on the phasors. At the top of the compass the coherent
+    /// stage drains fast -- twenty decibels in a hundred milliseconds, a
+    /// decibel per step -- and a step every 256 samples is a sawtooth on
+    /// the amplitude at 187.5 Hz: measured on E7 (2026-09-07) as sidebands
+    /// at the fundamental +/-190 Hz and +/-380, 28 dB under it, which the
+    /// reference does not have and the user heard on the Campanella's
+    /// repeated top notes as "electricidad", "un golpeteo de mosquito".
+    /// Per sample the same eigenvalue is reached by the 256th root of the
+    /// step (`drain`), and there is no step to hear.
+    fn tick(&mut self, horizontal: f32) -> f32 {
         let mut out = [0.0f32; LANES];
         for (lane, output) in out.iter_mut().enumerate() {
             let s = self.s[lane] * self.rc[lane] + self.c[lane] * self.rs[lane];
@@ -1550,7 +1567,29 @@ impl Partial {
             self.c[lane] = c;
             *output = s;
         }
+        if self.drain > 0.0 {
+            let sum_s = self.s[0] + self.s[1] + self.s[2] + horizontal * self.s[LANE_HORIZONTAL];
+            let sum_c = self.c[0] + self.c[1] + self.c[2] + horizontal * self.c[LANE_HORIZONTAL];
+            let take_s = self.drain * sum_s;
+            let take_c = self.drain * sum_c;
+            self.s[0] -= take_s;
+            self.s[1] -= take_s;
+            self.s[2] -= take_s;
+            self.s[LANE_HORIZONTAL] -= horizontal * take_s;
+            self.c[0] -= take_c;
+            self.c[1] -= take_c;
+            self.c[2] -= take_c;
+            self.c[LANE_HORIZONTAL] -= horizontal * take_c;
+        }
         out[0] + out[1] + out[2] + out[3] + out[4]
+    }
+
+    /// The per-sample drain that reaches the same coherent-mode loss in
+    /// `CULL_INTERVAL` samples as the step `coupling` did in one.
+    fn drain_per_sample(coupling: f32, horizontal: f32) -> f32 {
+        let norm = 3.0 + horizontal * horizontal;
+        let per_step = (1.0 - coupling * norm).clamp(1e-6, 1.0);
+        (1.0 - powf(per_step, 1.0 / CULL_INTERVAL as f32)) / norm
     }
 }
 
@@ -2827,6 +2866,7 @@ impl Voice {
     #[inline(always)]
     fn tick(&mut self, sympathy: f32) -> f32 {
         let mut sum = 0.0;
+        let knob_horizontal_bridge = HORIZONTAL_BRIDGE.get();
         // The tension the string is under RIGHT NOW, taken from the partials
         // that carry the energy.
         //
@@ -2847,7 +2887,7 @@ impl Voice {
                 let push = sympathy * partial.coupling;
                 partial.s[0] += push;
             }
-            let voice = partial.tick();
+            let voice = partial.tick(knob_horizontal_bridge);
             slope += voice * partial.slope;
             sum += voice;
         }
@@ -3035,7 +3075,6 @@ impl Voice {
     fn cull(&mut self) -> usize {
         // Knobs read once per call, not per sample.
         let knob_dead_magnitude_squared = DEAD_MAGNITUDE_SQUARED.get();
-        let knob_horizontal_bridge = HORIZONTAL_BRIDGE.get();
         // Tension modulation settles here, at control rate: each step nudges
         // every component's rotation by a small angle proportional to its own
         // frequency (d ~ rate·sin w), so the whole ladder glides together.
@@ -3096,23 +3135,7 @@ impl Voice {
         // it costs nothing: dephasing traps energy instead of spending it,
         // which is what the real instrument does and what "the bass dies too
         // fast when the unison is spread" was pointing at all along.
-        for partial in &mut self.partials[..self.partial_count] {
-            let k = partial.coupling;
-            if k > 0.0 {
-                let mut sum_s = knob_horizontal_bridge * partial.s[LANE_HORIZONTAL];
-                let mut sum_c = knob_horizontal_bridge * partial.c[LANE_HORIZONTAL];
-                for lane in 0..3 {
-                    sum_s += partial.s[lane];
-                    sum_c += partial.c[lane];
-                }
-                for lane in 0..3 {
-                    partial.s[lane] -= k * sum_s;
-                    partial.c[lane] -= k * sum_c;
-                }
-                partial.s[LANE_HORIZONTAL] -= knob_horizontal_bridge * k * sum_s;
-                partial.c[LANE_HORIZONTAL] -= knob_horizontal_bridge * k * sum_c;
-            }
-        }
+        // The bridge's drain lives in `Partial::tick` now, per sample.
         let mut removed = 0;
         let mut energy = 0.0;
         let mut index = 0;
@@ -6285,6 +6308,7 @@ impl ConcertGrand {
                 ),
             );
             built.coupling = coupling;
+            built.drain = Partial::drain_per_sample(coupling, HORIZONTAL_BRIDGE.get());
             built.slope = {
                 let h = (n + 1) as f32;
                 let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
@@ -6636,6 +6660,7 @@ impl ConcertGrand {
                         existing.c[lane] += if fresh.c[lane] < 0.0 { -energy } else { energy };
                     }
                     existing.coupling = fresh.coupling;
+                    existing.drain = fresh.drain;
                 } else if voice.partial_count < MAX_PARTIALS {
                     voice.partials[voice.partial_count] = *fresh;
                     voice.partial_count += 1;

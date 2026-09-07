@@ -860,6 +860,27 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The bridge's drain, per sample (0.171.10).** Still there after 0.171.9:
+"un ruido latoso que suena luego de tocar", in every A/B of the passage
+with a noise or a resonance removed — and absent from the same passage
+rendered from the Salamander samples themselves
+(`tools/salamander-render.py`), which put it in the string voice. Louder,
+"con más cuerpo", with the HF floor at zero, which is a ladder whose
+fundamental dominates. Measured on a staccato E7: sidebands at the
+fundamental ±190 Hz and ±380 Hz, 28 and 34 dB under it, in the model and
+not in the reference. 187.5 Hz is 48 000 / 256: the bridge's drain on the
+coherent configuration was applied once per `CULL_INTERVAL` as a step on
+the phasors, and at the top of the compass the coherent stage drains fast
+— a decibel a step — so the step was a sawtooth on every top note's
+amplitude, a buzz that scales with the note. The drain now runs in
+`Partial::tick`, per sample, at the 256th root of the step's eigenvalue
+(`Partial::drain_per_sample`), so the two-stage decay is exactly what it
+was and the step is gone: the ±190 Hz sidebands fall to −51 and −54 dB,
+the ±380 to −61 and −64, into the line's own skirt. The Campanella renders
+in the same time. What remains 94 Hz off the line is the early
+reflections' comb — the room's, and the reference's room would have its
+own.
+
 **The top octave has no dampers (0.171.9).** After 0.171.8 the user still
 heard, at the Campanella's 2:37 (D7, D#7, E7 repeated at twelve a second
 under a pumped pedal), "un golpeteo de mosquito, como si vibraran alambres

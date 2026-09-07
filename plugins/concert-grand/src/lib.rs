@@ -3781,9 +3781,10 @@ fn simulate_strike(
         // and no middle harmonics is heard as a thinner string at the same
         // pitch.
         let ideal = sincosf(core::f32::consts::PI * nf * x0).0;
-        let comb =
-            if ideal < 0.0 { -1.0 } else { 1.0 }
-                * sqrtf(ideal * ideal + comb_floor_at(n + 1, comb_floor) * comb_floor_at(n + 1, comb_floor));
+        let comb = if ideal < 0.0 { -1.0 } else { 1.0 }
+            * sqrtf(
+                ideal * ideal + comb_floor_at(n + 1, comb_floor) * comb_floor_at(n + 1, comb_floor),
+            );
         shape[n] = comb * expf(-1.2 * spread * spread);
     }
     let mut q = [0.0f32; SIM_MODES];
@@ -5148,7 +5149,10 @@ impl ConcertGrand {
             // things in that band -- its densest, and the growl of a concert
             // grand's bottom octave.
             let comb = if ideal_comb < 0.0 { -1.0 } else { 1.0 }
-                * sqrtf(ideal_comb * ideal_comb + comb_floor_at(n, COMB_FLOOR.get()) * comb_floor_at(n, COMB_FLOOR.get()));
+                * sqrtf(
+                    ideal_comb * ideal_comb
+                        + comb_floor_at(n, COMB_FLOOR.get()) * comb_floor_at(n, COMB_FLOOR.get()),
+                );
             // Finite contact width. The felt's force distribution is smooth,
             // so its transform is a Gaussian-like rolloff with no nulls — a
             // sinc (the rectangle's transform) put its first null at partial

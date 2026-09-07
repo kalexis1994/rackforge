@@ -860,6 +860,23 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The merge was the last of the pops (0.171.5).** With the contact ramp
+on fresh voices the user heard two or three pops left in the 1:52–2:03
+passage, and none with the re-strike merge off — "ahora no se escuchan
+pops". A living voice cannot be ramped from rest, and a blow pushed into
+its phasors in one sample is the step the ramp removes from a fresh note.
+`RESTRIKE_MERGE` ships at zero: a repeated note eases the old voice out
+and enters as a fresh, ramped voice. The ease-out is 30 ms now, from 250:
+the new voice covers the sound from its first cycle, and at 250 ms every
+repeated note left a ghost that lingered 1.7 s before the cull took it
+(1351 voice steals on the nocturne against 185 with the merge; 628 at
+30 ms, most of them of near-dead voices). The merge — the flutter of a
+fast repetition — waits behind the switch until the push itself can be
+spread over the contact. A footnote for the tests: the knob registry is
+process-global and the suite runs in parallel, so a test that depends on a
+knob must not set it — the merge is a per-instance field read at prepare
+and retune, and the merge test sets the field.
+
 **The contact's ramp (0.171.4, unverified by ear).** With the phases
 dispersed the user heard the pick LOUDER, which says what it is: a voice
 that jumps in one sample from rest to the state the integration hands

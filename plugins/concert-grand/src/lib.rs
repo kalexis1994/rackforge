@@ -2034,7 +2034,16 @@ pub static FELT_EXPONENT_TREBLE: Knob = Knob::new(0.0);
 pub static SIM_MIN_MODES: Knob = Knob::new(4.0);
 /// Whether a re-strike merges into the living voice (1) or eases it out and
 /// strikes fresh (0) -- a switch for the ear, not a voicing.
-pub static RESTRIKE_MERGE: Knob = Knob::new(1.0);
+///
+/// Off since 0.171.5. The merge was the last of the pops: with the contact
+/// ramp on fresh voices the user heard two or three left in the 1:52-2:03
+/// passage, and none with the merge off ("ahora no se escuchan pops").
+/// A living voice cannot be ramped from rest, and a blow pushed into its
+/// phasors in one sample is the same step the ramp removes from a fresh
+/// note. The flutter of a fast repetition the merge was written for stays
+/// here behind the switch until the push itself can be spread over the
+/// contact.
+pub static RESTRIKE_MERGE: Knob = Knob::new(0.0);
 /// Initial-phase dispersion of a strike, radians per harmonic -- see the
 /// note where it is applied.
 ///
@@ -3490,6 +3499,11 @@ pub struct ConcertGrand {
     soft: f32,
     /// Live count of active partials, the budget the callback answers to.
     active_partials: usize,
+    /// Whether a re-strike merges into the living voice, read from
+    /// RESTRIKE_MERGE at prepare and at every retune -- a field and not a
+    /// live knob read, so a test can set it without racing the knob
+    /// registry the round-trip test writes.
+    restrike_merge: bool,
     /// Delay line feeding the lid/rim early reflections.
     /// Tap offsets in samples and gains, per side.
     /// The lid's image of the board, per capsule: delay, gain, and the
@@ -3594,6 +3608,7 @@ impl Default for ConcertGrand {
             pedal: false,
             soft: 0.0,
             active_partials: 0,
+            restrike_merge: RESTRIKE_MERGE.compiled() >= 0.5,
             // Per-note calibration fitted against the YDP samples: ten
             // anchors from A0 to C8, nine multipliers each (felt, HF floor,
             // thump, chiff, decay, clang, phantoms, level, treble life).
@@ -5275,7 +5290,7 @@ impl ConcertGrand {
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
         for (slot, voice) in self.voices.iter_mut().enumerate() {
-            if RESTRIKE_MERGE.get() >= 0.5
+            if self.restrike_merge
                 && voice.active
                 && !voice.halo
                 && voice.note == note
@@ -5292,7 +5307,12 @@ impl ConcertGrand {
             }
         }
         if restrike_target.is_none() {
-            let restrike = expf(-1.0 / (0.25 * self.sample_rate));
+            // Thirty milliseconds, from 250: the new voice covers the sound
+            // from its first cycle, and at 250 ms the old one lingered 1.7 s
+            // before the cull took it -- a ghost per repeated note, and on
+            // the Op. 9 No. 2 file 1351 voice steals against 185 with the
+            // merge. Thirty is still forty cycles of an A4, nothing steps.
+            let restrike = expf(-1.0 / (0.03 * self.sample_rate));
             let (thud_coefficient, thud_decay) = self.damper_thud();
             // WITHOUT the release thud. `damp` is the damper landing, and
             // its thud is the felt meeting a moving string; here no damper
@@ -7174,6 +7194,7 @@ impl ConcertGrand {
         if self.sample_rate <= 0.0 {
             return;
         }
+        self.restrike_merge = RESTRIKE_MERGE.get() >= 0.5;
         self.tune();
         self.tune_board();
         self.tune_undamped();
@@ -7194,6 +7215,7 @@ impl Processor for ConcertGrand {
             return false;
         }
         self.sample_rate = sample_rate as f32;
+        self.restrike_merge = RESTRIKE_MERGE.get() >= 0.5;
         self.tune_board();
         self.tune_open_strings();
         self.tune_undamped();
@@ -11061,7 +11083,11 @@ mod tests {
         // Striking a held note again must reinforce the RINGING voice, not
         // stand a second voice next to it: one non-halo voice for the note,
         // and more energy in it than the moment before the second blow.
+        //
+        // The merge is a switch, off by default since 0.171.5; this test is
+        // about the merge itself, so it turns it on for its own instance.
         let mut piano = prepared();
+        piano.restrike_merge = true;
         render(&mut piano, 64, &[note_on(48, 100)]);
         render(&mut piano, (FS * 0.15) as usize, &[]);
         let before: f32 = piano

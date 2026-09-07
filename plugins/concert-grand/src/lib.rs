@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 131;
+pub const KNOB_COUNT: usize = 134;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -753,6 +753,21 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "BED_MIX",
         &BED_MIX,
         "The damped strings' bed against the bridge signal, scaled by Sympathy.",
+    ),
+    (
+        "THUMP_VELOCITY_POWER",
+        &THUMP_VELOCITY_POWER,
+        "How the key-bottom thump follows the blow, as a power of velocity.",
+    ),
+    (
+        "THUMP_BASE",
+        &THUMP_BASE,
+        "The thump's level against the calibrated one, as a factor at A0.",
+    ),
+    (
+        "THUMP_RISE_DB",
+        &THUMP_RISE_DB,
+        "How much the thump rises against the note from A0 to C8, in decibels.",
     ),
 ];
 
@@ -1843,7 +1858,63 @@ pub static CLACK_SCATTER: Knob = Knob::new(0.14);
 /// from the piano. What is wrong is the duration. A key meeting its bed is a
 /// wooden knock and wooden knocks are short, so this is now sixty
 /// milliseconds and the level stays where the reference wants it.
-pub static THUMP_T60_S: Knob = Knob::new(0.06);
+/// Was 0.06. Measured on the reference (2026-09-07, `knock.py` in the
+/// session): under the fundamental, the first 40 ms and the next 80 sit
+/// within two to ten decibels of each other and the 120-300 ms window
+/// fifteen below that -- a knock that keeps radiating for a quarter of a
+/// second, where a 60 ms ring was gone before the second window opened
+/// (the model fell eleven to eighteen decibels between the two).
+pub static THUMP_T60_S: Knob = Knob::new(0.15);
+/// How the key-bottom thump follows the blow, as a power of velocity.
+///
+/// It used to share `action_noise_dynamic` with the shank's tick -- the
+/// fourth power under the knee that the ear asked for, because a tick that
+/// stays loud at a soft blow is a typewriter. The thump is the other thing:
+/// measured against the note it sits under, the reference's sub-fundamental
+/// floor is as loud at velocity 36 as at 117 in the tenor and treble, and
+/// three to seven decibels LOUDER at the soft blow on C3 and C7 -- the key
+/// reaches the keybed at every dynamic. Against a tone that grows as the
+/// 2.2nd power, this is what leaves the ratio near flat.
+pub static THUMP_VELOCITY_POWER: Knob = Knob::new(2.0);
+/// The thump's level against the calibrated one, as a factor at A0 (a
+/// factor and not decibels: a knob compiled below zero cannot ride the
+/// fader's sixteen-fold sweep, and -1 dB is 0.9) ...
+pub static THUMP_BASE: Knob = Knob::new(0.9);
+/// ... rising by this much at C8. Measured: the reference's knock stands
+/// -26 dB under a C2's attack, -20 under a C3, -14 under a C4, -8 under a
+/// C6 and a C7 -- the mechanism is the same size everywhere and the tone
+/// above it thins toward the top, so relative to the note the knock rises
+/// about thirty decibels across the compass. The model had it falling
+/// (1 - 0.35 * position) and sat four decibels short at C2, thirteen at C7.
+///
+/// The rise stops at C4 (`THUMP_RISE_TO`): measured with it running to the
+/// top, C4 landed on the reference and C5 to C7 overshot by eight to ten
+/// decibels -- from the tenor up the tone thins no faster than the knock
+/// is masked, and the ratio holds.
+pub static THUMP_RISE_DB: Knob = Knob::new(12.0);
+const THUMP_RISE_TO: f32 = 0.45;
+/// The thump's components: the keybed, the case and the board's low modes
+/// as the reference's first 60 ms show them -- flat within a few decibels
+/// from 40 to 400 Hz and seven down by 630 (C6 at ff: 40:-1, 63:-5, 100:-3,
+/// 160:-1, 250:0, 400:-1, 630:-7). Five components to 214 Hz falling
+/// fourteen decibels was a thud with no body above it. (Hz, level, seed.)
+///
+/// The levels are what the STRING side hands the board, and the board's
+/// radiation corner and its mobility then tilt them: written flat, the
+/// render came out fifteen decibels light at 40-63 Hz and heavy from 250 up,
+/// and the treble's sub-fundamental band (which reaches 700 Hz and more)
+/// overshot by eight decibels while C4's landed. Weighted toward the bottom
+/// so that what radiates is flat.
+const THUMP_COMPONENTS: [(f32, f32, u32); 8] = [
+    (46.0, 2.0, 17),
+    (71.0, 1.6, 23),
+    (103.0, 1.0, 31),
+    (149.0, 0.8, 37),
+    (214.0, 0.6, 41),
+    (310.0, 0.3, 43),
+    (450.0, 0.25, 47),
+    (650.0, 0.18, 53),
+];
 /// The felt's hardening exponent across the compass, before any voicing.
 ///
 /// In `F = K*x^p`, p is how sharply the felt stiffens as it is squashed, so it
@@ -6025,7 +6096,7 @@ impl ConcertGrand {
         // mid and treble notes than strings alone can explain. Three short
         // dark components stand in for it.
         {
-            let thump_level = action_noise_dynamic(velocity)
+            let thump_level = powf(velocity.max(0.01), THUMP_VELOCITY_POWER.get())
                 * 0.095
                 // Shortening the thud from 300 ms to 60 ms takes its energy
                 // with it, and that energy is wanted: the model already sits
@@ -6035,18 +6106,13 @@ impl ConcertGrand {
                 // it had while losing the tail that made it stack.
                 * 0.32
                 * sqrtf(0.30 / THUMP_T60_S.get())
-                * (1.0 - 0.35 * position)
+                * THUMP_BASE.get()
+                * powf(10.0, THUMP_RISE_DB.get() * position.min(THUMP_RISE_TO) / 20.0)
                 * Controls::noise_gain(self.controls.action_noise)
                 * self.controls.lab(2)
                 * self.cal(note, 2);
             let rise = expf(-1.0 / (0.004 * sample_rate));
-            for (freq, level, seed) in [
-                (46.0_f32, 1.0_f32, 17u32),
-                (71.0, 0.7, 23),
-                (103.0, 0.45, 31),
-                (149.0, 0.30, 37),
-                (214.0, 0.20, 41),
-            ] {
+            for (freq, level, seed) in THUMP_COMPONENTS {
                 if placed >= MAX_PARTIALS {
                     break;
                 }

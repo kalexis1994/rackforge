@@ -783,6 +783,41 @@ treble's envelope at four seconds from −49 to −20 dB: the tail the treble
 had no mechanism for is the bed. Still short: the floor in the ATTACK, 12
 to 16 dB in every register at ff, which is the knock itself and is next.
 
+**The knock, measured and given its own law (0.169).** With the bed in
+place the floor under the fundamental was still 12 to 16 dB short in the
+ATTACK. Measured on the reference, under 0.7 f0 in the first 40 ms against
+the note's own attack energy: −26 dB under a C2, −20 under a C3, −14 under
+a C4, −16 under a C5, −8 under a C6 and a C7 — the mechanism is the same
+size everywhere and the tone thins toward the top. It is as loud at
+velocity 36 as at 117, and three to seven decibels louder at the soft blow
+on C3 and C7: the key reaches the keybed at every dynamic. It keeps
+radiating: the 40–120 ms window sits two to ten decibels under the first
+forty, the 120–300 ms window fifteen under that. And it is broadband, flat
+within a few decibels from 40 to 400 Hz and seven down by 630.
+
+The model's thump was five components to 214 Hz falling fourteen decibels,
+ringing 60 ms, at a level that FELL toward the treble, on the shank tick's
+velocity law — the fourth power under the knee the ear had asked for,
+because a tick that stays loud at a soft blow is a typewriter. The thump
+is the other thing. It now has its own law (`THUMP_VELOCITY_POWER` 2.0
+against a tone that grows as the 2.2nd, which leaves the ratio near flat),
+a level that rises `THUMP_RISE_DB` (12) across the bass and holds from C4
+up (measured with the rise running to the top, C4 landed and C5–C7
+overshot by eight to ten), a ring of 150 ms, and eight components to 650 Hz
+weighted toward the bottom so that what the board radiates is flat. The
+tick keeps its fourth power.
+
+Measured (`knock3` against `bed3`): the attack floor under the fundamental
+went from −12 / −13 / −13 dB against the reference (bass / tenor / treble,
+ff) to −12 / −3 / +6, and from −11 / −14 / −31 at pp to −7 / 0 / +2;
+distances 4.41 / 4.39 / 6.77 → 4.42 / 3.32 / 4.84. Note by note, C4 sits
+within three decibels of the reference in every window of the decay; C5
+to C7 run three to four over. The bass's number does not move because its
+band is 30–46 Hz, where the board radiates nothing and the reference's
+−26 is its room. What the thump still lacks is the reference's body from
+250 to 630 Hz on the treble notes, which is the shank and the case rather
+than the keybed, and lives where the ear placed the tick.
+
 **The bass comb, two floors (0.166).** The reference notches the bass's
 eighth partial to −33 dB under its strongest (pp −36) and leaves the
 sixteenth at −28 (pp −39); the model at one floor of 0.26 had the eighth at

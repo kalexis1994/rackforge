@@ -1718,10 +1718,10 @@
       "order": 13,
       "kind": {
         "type": "float",
-        "minimum": 0.00375,
-        "maximum": 0.96,
-        "step": 0.0006,
-        "default": 0.06,
+        "minimum": 0.009375,
+        "maximum": 2.4,
+        "step": 0.0015,
+        "default": 0.15,
         "taper": "logarithmic",
         "unit": "s"
       },
@@ -3513,6 +3513,69 @@
         "maximum": 40.0,
         "step": 0.025,
         "default": 2.5,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 172,
+      "id": "knob_thump_velocity_power",
+      "name": "THUMP_VELOCITY_POWER",
+      "page": "model_hammer",
+      "order": 38,
+      "kind": {
+        "type": "float",
+        "minimum": 0.125,
+        "maximum": 32.0,
+        "step": 0.02,
+        "default": 2.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 173,
+      "id": "knob_thump_base",
+      "name": "THUMP_BASE",
+      "page": "model_hammer",
+      "order": 39,
+      "kind": {
+        "type": "float",
+        "minimum": 0.05625,
+        "maximum": 14.4,
+        "step": 0.009,
+        "default": 0.9,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 174,
+      "id": "knob_thump_rise_db",
+      "name": "THUMP_RISE_DB",
+      "page": "model_hammer",
+      "order": 40,
+      "kind": {
+        "type": "float",
+        "minimum": 0.75,
+        "maximum": 192.0,
+        "step": 0.12,
+        "default": 12.0,
         "taper": "logarithmic"
       },
       "flags": {

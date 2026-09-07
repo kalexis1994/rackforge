@@ -749,6 +749,40 @@ reference's own fundamentals swing 10.9 dB about their mean, the model's
 to 9.3 dB. What remains of the pattern is the drawn bank's strength
 lottery and the reference's own board, which no drawn bank can copy.
 
+**The damped strings, humming anyway (0.168).** The floor under every
+fundamental — the 15 to 40 dB every register measured short — is, as far
+as it is strings, the other strings under their dampers. Measured on the
+reference: under a C6 at ff, in its sustain from 0.5 to 1.5 s, the lines
+are E2, G2, B2, D3, G#1, F#2 and C#3 at −31 to −36 dB below the note's
+strongest partial, with the board's own 84, 100 and 125 Hz beside them;
+under a C5 the same set at −37 to −48. They sit ten to twenty decibels
+above the recording's own tail, so they are the instrument. A damper is
+felt on a wound string: it takes the string down in seconds, not at once,
+and the strike's knock reaches every string through the bridge. The
+model's sympathy reached only strings that were sounding and its undamped
+bank started at 1.9 kHz, so under a treble note there was nothing at all.
+
+`bed`: forty resonators at the instrument's own fundamentals from A0 up,
+listening to the bridge like the undamped bank, with a damped string's ring
+(`BED_T60_S`, 5 s) at `BED_MIX`, scaled by Sympathy. A string that is
+sounding on its own is gated out of the bed for as long as its voice lives,
+so no note seeds a second copy of its own onset. The level is large (2.5,
+against the undamped bank's 0.12) because a treble note's bridge signal has
+almost nothing at a bass string's pitch and only its knock reaches down
+there; 3.5 put the bass's floor three decibels over the reference, since a
+bass note drives its neighbours' bed strings at resonance with its own
+partials, and 2.5 lands it.
+
+Measured (`bed` at 3.5 against `v167`): bass 5.13 → 4.73, tenor 4.94 →
+4.16, treble 8.03 → 6.55 — the largest single move of the survey; at the
+shipped 2.5 (`bed2`): 4.49 / 4.28 / 6.69, the bass's floor within a decibel
+of the reference in the sustain. The
+floor under the fundamental in the sustain went from −13 to +3 dB (bass),
+−28 to −7 (tenor) and −32 to −7 (treble) against the reference, and the
+treble's envelope at four seconds from −49 to −20 dB: the tail the treble
+had no mechanism for is the bed. Still short: the floor in the ATTACK, 12
+to 16 dB in every register at ff, which is the knock itself and is next.
+
 **The bass comb, two floors (0.166).** The reference notches the bass's
 eighth partial to −33 dB under its strongest (pp −36) and leaves the
 sixteenth at −28 (pp −39); the model at one floor of 0.26 had the eighth at

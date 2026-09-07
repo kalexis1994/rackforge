@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 129;
+pub const KNOB_COUNT: usize = 131;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -743,6 +743,16 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "BOARD_SIGN_TOP_HZ",
         &BOARD_SIGN_TOP_HZ,
         "Below this the board's modes draw a sign by hash; above it they share one.",
+    ),
+    (
+        "BED_T60_S",
+        &BED_T60_S,
+        "How long a damped bass string hums after the bridge stops driving it.",
+    ),
+    (
+        "BED_MIX",
+        &BED_MIX,
+        "The damped strings' bed against the bridge signal, scaled by Sympathy.",
     ),
 ];
 
@@ -2206,6 +2216,38 @@ pub static UNDAMPED_T60_LOW_S: Knob = Knob::new(2.6);
 pub static UNDAMPED_T60_HIGH_S: Knob = Knob::new(0.9);
 pub static UNDAMPED_MIX: Knob = Knob::new(0.12);
 
+/// The damped strings, ringing anyway: the bed under every note.
+///
+/// Measured on the reference (2026-09-07): under a C6's fundamental, in its
+/// sustain from 0.5 to 1.5 s, the lines are E2, G2, B2, D3, G#1, F#2, C#3 --
+/// bass and tenor strings under their dampers, rung through the bridge by
+/// the strike and humming on at -31 to -36 dB below the note's strongest
+/// partial, together with the board's low modes at 84, 100 and 125 Hz. A
+/// damper is felt on a wound string; it takes the string down in seconds,
+/// not at once. The model had nothing there: its sympathy reaches only
+/// strings that are sounding, and its undamped bank starts at 1.9 kHz. So
+/// forty resonators at the instrument's own fundamentals from A0 up, each
+/// listening to the bridge like the undamped bank does, with a damped
+/// string's ring. This is the floor under the fundamental that every
+/// register measured 15 to 40 dB short, as far as it is strings.
+const BED_COUNT: usize = 40;
+/// How long a damped bass string hums after the bridge stops driving it.
+pub static BED_T60_S: Knob = Knob::new(5.0);
+/// The bed's level against the bridge signal, scaled by Sympathy.
+///
+/// Large, because the bridge signal of a treble note carries almost nothing
+/// at a bass string's pitch -- only the onset's knock reaches down there --
+/// and the reference's hum sits at -31 dB under a C6's strongest partial
+/// nonetheless. Calibrated on C5 and C6 at ff against the lines under
+/// 0.7 f0 in the 0.5-1.5 s window (2026-09-07: 0.05 gave -47 dB of band
+/// against the reference's -21 and -31; 1.5 gave -27 and -41).
+/// 3.5 put the bass's floor three decibels OVER the reference (a bass note
+/// drives its neighbours' bed strings at resonance with its own partials,
+/// where a treble note has only its knock) and the treble seven under; 2.5
+/// lands the bass and leaves the treble ten short, which is the knock's to
+/// close, not the bed's.
+pub static BED_MIX: Knob = Knob::new(2.5);
+
 /// The open register as a statistic: twenty undamped strings with their
 /// partial ladders behave collectively like a short, dense, undamped
 /// high-frequency reverberator. Four short lines, input high-passed at
@@ -3319,6 +3361,8 @@ pub struct ConcertGrand {
     /// The undamped top-octave strings, always listening to the bridge.
     open_strings: [BodyMode; OPEN_STRINGS.len()],
     undamped: [BodyMode; UNDAMPED_COUNT],
+    /// The damped strings' bed: forty fundamentals, A0 up, humming under everything.
+    bed: [BodyMode; BED_COUNT],
     /// The open-register shimmer: short undamped HF feedback delay network.
     halo: [[f32; HALO_BUFFER]; 4],
     halo_len: [usize; 4],
@@ -3454,6 +3498,7 @@ impl Default for ConcertGrand {
             board_count: 0,
             open_strings: [BodyMode::default(); OPEN_STRINGS.len()],
             undamped: [BodyMode::default(); UNDAMPED_COUNT],
+            bed: [BodyMode::default(); BED_COUNT],
             halo: [[0.0; HALO_BUFFER]; 4],
             halo_len: [1; 4],
             halo_gain: [0.0; 4],
@@ -4185,7 +4230,27 @@ impl ConcertGrand {
     /// it by up to a third of the gap to its neighbour. Even spacing in log
     /// frequency would beat against the partial ladder of every note in the
     /// same way and read as a chord; scattered spacing reads as a mat.
+    /// Retunes the damped strings' bed to the instrument's own fundamentals.
+    fn tune_bed(&mut self) {
+        let t60_bottom = BED_T60_S.get().max(0.05);
+        for (i, string) in self.bed.iter_mut().enumerate() {
+            let hz = self.fundamental[i.min(NOTE_COUNT - 1)].max(20.0);
+            // A damper is the same felt on every string, but a wound bass
+            // string carries ten times the mass per metre of a plain tenor
+            // one, so the felt takes seconds to stop it and under a second
+            // to stop a plain string. The ring falls from BED_T60_S at A0 to
+            // a fifth of it at the top of the bed, log-linear -- which is
+            // also what keeps a damped chord's tail a tail
+            // (`the_staging_leaves_a_tail_that_dies`).
+            let t60 = t60_bottom * powf(0.2, i as f32 / (BED_COUNT - 1) as f32);
+            // Along the bridge, bass to the left as the pair hears it.
+            let pan = 0.3 + 0.4 * i as f32 / (BED_COUNT - 1) as f32;
+            *string = BodyMode::tune(hz, t60, pan, self.sample_rate);
+        }
+    }
+
     fn tune_undamped(&mut self) {
+        self.tune_bed();
         let span = UNDAMPED_HIGH_HZ.get() / UNDAMPED_LOW_HZ.get();
         let step = powf(span, 1.0 / (UNDAMPED_COUNT - 1) as f32);
         let mut frequency = UNDAMPED_LOW_HZ.get();
@@ -6854,6 +6919,10 @@ impl Processor for ConcertGrand {
             string.y1 = 0.0;
             string.y2 = 0.0;
         }
+        for string in &mut self.bed {
+            string.y1 = 0.0;
+            string.y2 = 0.0;
+        }
         for string in &mut self.open_strings {
             string.y1 = 0.0;
             string.y2 = 0.0;
@@ -7536,6 +7605,7 @@ impl Processor for ConcertGrand {
         let knob_room_mix = ROOM_MIX.get();
         let knob_sympathy_rate = SYMPATHY_RATE.get();
         let knob_undamped_mix = UNDAMPED_MIX.get();
+        let knob_bed_mix = BED_MIX.get();
         let channels = output_channels as usize;
         // Every note-on in the buffer gets the full hammer-string integration.
         //
@@ -7569,6 +7639,7 @@ impl Processor for ConcertGrand {
         if self.scale_dirty {
             self.scale_dirty = false;
             self.tune();
+            self.tune_bed();
         }
         let level = self.controls.level_gain();
         let preamp_gain = self.preamp_gain();
@@ -7585,6 +7656,12 @@ impl Processor for ConcertGrand {
         let mut midi_index = 0;
         let mut midi2_index = 0;
         let mut parameter_index = 0;
+        // Which bed strings are sounding on their own right now: those are
+        // not damped, and their voice already carries the sympathy; the bed
+        // must not seed a second copy of a note's own onset and ring it for
+        // seconds. Refreshed whenever a MIDI event lands.
+        let mut bed_busy = [false; BED_COUNT];
+        let mut refresh_busy = true;
 
         for frame in 0..frames as usize {
             while let Some(event) = midi.get(midi_index) {
@@ -7593,6 +7670,7 @@ impl Processor for ConcertGrand {
                 }
                 self.handle_midi(event);
                 midi_index += 1;
+                refresh_busy = true;
             }
             while let Some(event) = midi2.get(midi2_index) {
                 if event.frame as usize != frame {
@@ -7600,6 +7678,7 @@ impl Processor for ConcertGrand {
                 }
                 self.handle_wide(event);
                 midi2_index += 1;
+                refresh_busy = true;
             }
             while let Some(event) = parameters.get(parameter_index) {
                 if event.frame as usize != frame {
@@ -7609,6 +7688,18 @@ impl Processor for ConcertGrand {
                 parameter_index += 1;
             }
 
+            if refresh_busy {
+                refresh_busy = false;
+                bed_busy = [false; BED_COUNT];
+                for voice in &self.voices {
+                    if voice.active {
+                        let slot = voice.note.saturating_sub(LOW_NOTE) as usize;
+                        if slot < BED_COUNT {
+                            bed_busy[slot] = true;
+                        }
+                    }
+                }
+            }
             let mut strings_total = 0.0f32;
             let mut bridge_drive = 0.0f32;
             for voice in &mut self.voices {
@@ -7685,6 +7776,16 @@ impl Processor for ConcertGrand {
                 undamped_right += y * string.pan_right;
             }
             let undamped_gain = knob_undamped_mix * self.controls.lab(15);
+            // The damped strings' bed, listening to the bridge like the
+            // undamped lengths do -- see BED_MIX.
+            let mut bed_left = 0.0;
+            let mut bed_right = 0.0;
+            for (string, busy) in self.bed.iter_mut().zip(bed_busy) {
+                let y = string.tick(if busy { 0.0 } else { excitation });
+                bed_left += y * string.pan_left;
+                bed_right += y * string.pan_right;
+            }
+            let bed_gain = knob_bed_mix * self.controls.lab(15);
 
             // The shimmer: everything above ~1.8 kHz feeds the undamped
             // open register and rings on.
@@ -7715,6 +7816,7 @@ impl Processor for ConcertGrand {
             // through the bridge and the board.
             let staged = (board_left + board_right) * knob_board_mix
                 + (undamped_left + undamped_right) * undamped_gain
+                + (bed_left + bed_right) * bed_gain
                 + (open_left + open_right) * knob_open_mix * sympathy
                 + halo_left
                 + halo_right;
@@ -7852,11 +7954,13 @@ impl Processor for ConcertGrand {
             let (near_left, near_right) = (self.direct_gain[0], self.direct_gain[1]);
             let mut direct_left = board_left * board_mix * near_left
                 + undamped_left * undamped_gain * knob_headroom * near_left
+                + bed_left * bed_gain * knob_headroom * near_left
                 + open_left * knob_open_mix * sympathy * knob_headroom
                 + halo_left * knob_headroom
                 + lid_left * air * knob_headroom;
             let mut direct_right = board_right * board_mix * near_right
                 + undamped_right * undamped_gain * knob_headroom * near_right
+                + bed_right * bed_gain * knob_headroom * near_right
                 + open_right * knob_open_mix * sympathy * knob_headroom
                 + halo_right * knob_headroom
                 + lid_right * air * knob_headroom;

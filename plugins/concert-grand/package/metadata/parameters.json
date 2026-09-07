@@ -3479,6 +3479,48 @@
         "read_only": false,
         "advanced": true
       }
+    },
+    {
+      "index": 170,
+      "id": "knob_bed_t60_s",
+      "name": "BED_T60_S",
+      "page": "model_air",
+      "order": 35,
+      "kind": {
+        "type": "float",
+        "minimum": 0.3125,
+        "maximum": 80.0,
+        "step": 0.05,
+        "default": 5.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 171,
+      "id": "knob_bed_mix",
+      "name": "BED_MIX",
+      "page": "model_air",
+      "order": 36,
+      "kind": {
+        "type": "float",
+        "minimum": 0.15625,
+        "maximum": 40.0,
+        "step": 0.025,
+        "default": 2.5,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
     }
   ]
 }

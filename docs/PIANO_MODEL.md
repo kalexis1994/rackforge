@@ -850,6 +850,24 @@ reflection from the agraffe, 2·x₀/c ≈ 0.07 ms at C6, lives above the 8 kHz
 the integration carries modes for — and in whether bridge force is the
 slope for a string this short, not in K.
 
+**FIXED (0.170.1): a half pedal could wind a string up.** Found the first
+time a whole piece went through the model instead of single notes: the
+Op. 9 No. 2 file, 1498 notes and 3031 pedal positions, rendered through
+the lab (`tools/midi-to-score.py`, and `--render` now takes pedal lines).
+From 96 s in the output grew for two seconds, sat on the ceiling for eight
+and went non-finite; the same passage with the pedal quantised to on/off
+was fine, which named the path. `press_damper` scales a partial's rotation
+by the damper factor raised to the pressure's change, negative to relieve,
+and the factor came from a firmness drawn PER PEDAL EVENT: a press through a
+firm damper relieved through a soft one leaves the rotation's modulus above
+where it started, and three thousand positions walked it past one — a
+784 Hz partial growing at 14 dB/s with every other mechanism switched off.
+The release-into-half-pedal path did the same with its own per-event
+draw. Each voice now carries its own damper's firmness from the strike,
+and every press and relief goes through it, so the walk cancels;
+`a_half_pedal_never_adds_energy` holds a chord under three hundred random
+pedal positions and demands it end quieter than it began and finite.
+
 **The bass comb, two floors (0.166).** The reference notches the bass's
 eighth partial to −33 dB under its strongest (pp −36) and leaves the
 sixteenth at −28 (pp −39); the model at one floor of 0.26 had the eighth at

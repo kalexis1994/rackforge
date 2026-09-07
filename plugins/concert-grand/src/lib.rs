@@ -2542,6 +2542,10 @@ struct Voice {
     /// A sympathetic halo shadow, not a struck note: never a re-strike
     /// target.
     halo: bool,
+    /// This string's own damper: how firmly its felt seats, drawn once at
+    /// the strike. A half pedal presses and relieves through the SAME
+    /// damper, so every relief undoes exactly the press it answers.
+    firmness: f32,
     partials: [Partial; MAX_PARTIALS],
     partial_count: usize,
     /// Hammer/soundboard thump: a decaying low-passed noise burst whose
@@ -2615,6 +2619,7 @@ impl Default for Voice {
             sostenuto: false,
             damper_applied: 0.0,
             halo: false,
+            firmness: 1.0,
             partials: [Partial::default(); MAX_PARTIALS],
             partial_count: 0,
             noise_amp: 0.0,
@@ -6342,6 +6347,7 @@ impl ConcertGrand {
         // Read before the voice is borrowed: this consults the scale, and the
         // borrow checker is right that the two cannot overlap.
         let clang_register = self.clang_register(position);
+        let firmness = Self::damper_firmness(self.strike_serial, note);
         let Some(voice) = self.allocate_voice() else {
             return;
         };
@@ -6353,6 +6359,7 @@ impl ConcertGrand {
         voice.halo = false;
         voice.sostenuto = false;
         voice.damper_applied = 0.0;
+        voice.firmness = firmness;
         voice.partials = partials;
         voice.partial_count = placed;
         voice.duplex = duplex;
@@ -6686,6 +6693,8 @@ impl ConcertGrand {
         let (thud_coefficient, thud_decay) = self.damper_thud();
         let release_gain = Controls::noise_gain(self.controls.release_noise) * firmness * knock;
         let pressure = self.pedal_pressure;
+        let rate = self.sample_rate;
+        let grip = self.controls.damper_grip();
         for voice in &mut self.voices {
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
                 if self.sostenuto && voice.sostenuto {
@@ -6700,7 +6709,12 @@ impl ConcertGrand {
                     voice.held = false;
                     voice.sustained = true;
                     voice.damper_applied = pressure;
-                    voice.press_damper(damper, pressure);
+                    // Through the voice's OWN damper: the half pedal will
+                    // relieve this press through the same one, and a press
+                    // through one damper relieved through another is the
+                    // energy walk `a_half_pedal_never_adds_energy` guards.
+                    let own = Self::damper_for(note, rate, grip * voice.firmness, span);
+                    voice.press_damper(own, pressure);
                 } else {
                     voice.damp(damper, thud_coefficient, thud_decay, release_gain);
                 }
@@ -6742,7 +6756,19 @@ impl ConcertGrand {
             if self.sostenuto && voice.sostenuto {
                 continue;
             }
-            let firmness = Self::damper_firmness(serial, voice.note);
+            // The voice's own damper, not one drawn per pedal event. Drawn
+            // per event, a press through a firm damper and its relief
+            // through a soft one left the string's decay factor ABOVE where
+            // it started, and a nocturne's three thousand pedal positions
+            // walked it past one: measured on the Op. 9 No. 2 file, the
+            // output grew for two seconds from 96 s in, sat on the ceiling
+            // for eight and went non-finite. Quantised to on/off the same
+            // passage was fine, which is what named the path.
+            let firmness = if pressure >= 0.98 {
+                Self::damper_firmness(serial, voice.note)
+            } else {
+                voice.firmness
+            };
             if pressure >= 0.98 {
                 // Seated: the legacy full damp, note over.
                 let damper = Self::damper_for(voice.note, rate, grip * firmness, 1.0);
@@ -8859,6 +8885,56 @@ mod tests {
         assert!(
             early_slope > late_slope * 1.5,
             "early {early_slope} vs late {late_slope}"
+        );
+    }
+
+    #[test]
+    fn a_half_pedal_never_adds_energy() {
+        // Three thousand pedal positions under a held chord walked the
+        // strings' decay factors past one and the instrument grew until it
+        // went non-finite (found on the Op. 9 No. 2 file). Every press and
+        // every relief now go through the string's own damper, so the walk
+        // cancels: six seconds of half-pedalling must end quieter than it
+        // began, and finite.
+        let mut piano = prepared();
+        let chord: Vec<MidiEvent> = [48u8, 52, 55, 60, 64]
+            .iter()
+            .map(|n| note_on(*n, 100))
+            .collect();
+        render(&mut piano, (FS * 0.3) as usize, &chord);
+        let mut seed = 7u32;
+        let pedal = |value: u8| MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, value],
+            length: 3,
+        };
+        // Pedal HALF down, keys up: the chord now hangs on a partly lifted
+        // rail, so each release presses through the string's own damper and
+        // every later position relieves and presses it again -- the
+        // release-into-half-pedal path was the second walk (the first
+        // press through a per-event damper, its relief through the voice's).
+        render(&mut piano, 64, &[pedal(60)]);
+        let offs: Vec<MidiEvent> = [48u8, 52, 55, 60, 64]
+            .iter()
+            .map(|n| note_off(*n))
+            .collect();
+        render(&mut piano, 64, &offs);
+        let first = energy(&render(&mut piano, (FS * 0.5) as usize, &[]));
+        let mut worst = 0.0f32;
+        for _ in 0..300 {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let value = 20 + ((seed >> 8) % 90) as u8;
+            let block = render(&mut piano, (FS * 0.02) as usize, &[pedal(value)]);
+            assert!(
+                block.iter().all(|x| x.is_finite()),
+                "non-finite output under a half pedal"
+            );
+            worst = worst.max(energy(&block));
+        }
+        let last = energy(&render(&mut piano, (FS * 0.5) as usize, &[]));
+        assert!(
+            last < first,
+            "half-pedalling added energy: {first} -> {last} (worst block {worst})"
         );
     }
 

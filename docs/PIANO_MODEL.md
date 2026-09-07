@@ -702,6 +702,28 @@ partial is not in the hammer's stiffness; the emergent contact at the top
 is 0.48 ms — and the force pulse it produces carries the partials, so the
 next look is at that regime, not at K.
 
+**The treble is a lottery of the bank, not a law of the hammer (0.166,
+open).** Read note by note instead of as a register mean, the model's
+second partial against the first swings from +8 dB (C7) to −37 (A6) between
+adjacent grid notes, where the reference runs −5 to −39 with a spread of
+ten; the model's spread against it is sixteen. Every hammer lever
+(stiffness to a thirtieth, exponent, relaxation to 1 ms, hammer speed,
+mode ceiling to 21 kHz, the strike gate) leaves each note where it was.
+Moving the bank's density or damping re-rolls the whole column — C5's
+second partial goes from +4 to −27 dB — which is the signature of the
+board bank's fine structure: the treble's first and second partials sit
+under 1.5 kHz among modes spaced 17 Hz with 24 Hz of bandwidth, drawn
+with random strengths and signs, and two neighbours of opposite sign
+notch whatever lands between them. `BOARD_SIGN_TOP_HZ` (param 169) makes
+the sign knee a fader: one sign above 700 Hz brings the treble's spread
+down (16 → 14 dB on n2, 21 → 15 on n3) but lifts the bass and tenor
+ladders 3–4 dB, because the same-sign sum adds coherently and the mean
+transfer table was derived with the signs as they were. It ships above
+the ceiling (signs everywhere, the bank unchanged). The fix is the
+0.149 shape done in the right order: settle the signs, re-derive the
+mean transfer with them settled, then hear the bass phrase before
+anything ships.
+
 **The bass comb, two floors (0.166).** The reference notches the bass's
 eighth partial to −33 dB under its strongest (pp −36) and leaves the
 sixteenth at −28 (pp −39); the model at one floor of 0.26 had the eighth at

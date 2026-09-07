@@ -3458,6 +3458,27 @@
         "read_only": false,
         "advanced": true
       }
+    },
+    {
+      "index": 169,
+      "id": "knob_board_sign_top_hz",
+      "name": "BOARD_SIGN_TOP_HZ",
+      "page": "model_board",
+      "order": 17,
+      "kind": {
+        "type": "float",
+        "minimum": 700.0,
+        "maximum": 179200.0,
+        "step": 10.0,
+        "default": 11200.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
     }
   ]
 }

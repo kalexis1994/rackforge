@@ -216,7 +216,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 128;
+pub const KNOB_COUNT: usize = 129;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -738,6 +738,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "COMB_FLOOR_LOW",
         &COMB_FLOOR_LOW,
         "The strike-point comb's floor through the eighth partial; it rises to COMB_FLOOR by the sixteenth.",
+    ),
+    (
+        "BOARD_SIGN_TOP_HZ",
+        &BOARD_SIGN_TOP_HZ,
+        "Below this the board's modes draw a sign by hash; above it they share one.",
     ),
 ];
 
@@ -1912,6 +1917,22 @@ const BOARD_MODES: usize = 256;
 /// mode falls toward zero at BOARD_RADIATION_ORDER times 6 dB per octave.
 /// Scale on the Skudrzyk normalisation of the board's mean mobility.
 pub static BOARD_MEAN_MOBILITY: Knob = Knob::new(0.5);
+/// Below this the bank's modes draw a sign by hash, above it they share
+/// one -- see `board_mode`. Compiled above the bank's ceiling, so the
+/// shipped bank draws signs everywhere as it always did; the fader reaches
+/// down to 700 Hz.
+///
+/// Tried (2026-09-07, `sign1477` and `sign700` against `comb2`): one sign
+/// above 1477 Hz made every register brighter (the same-sign sum above the
+/// knee adds coherently, +3-6 dB in the upper ladder) and the treble's
+/// note-to-note swing no better; above 700 Hz the treble's swing came down
+/// (n2 std 16 -> 14 dB, n3 21 -> 15) but the bass and tenor ladders rose
+/// 3-4 dB with it. The swing that matters is in the treble notes' first
+/// and second partials, which sit UNDER 1477 Hz among modes spaced 17 Hz
+/// with 24 Hz of bandwidth, where opposite signs notch. A fix is a
+/// re-derivation of the mean transfer with the signs settled, not a knob,
+/// and it must be heard on the bass first.
+pub static BOARD_SIGN_TOP_HZ: Knob = Knob::new(11_200.0);
 /// The MEASURED mean transfer of the board-and-microphones chain, relative
 /// to the flat Skudrzyk mean the bank is normalised to: third-octave centres
 /// in hertz and the correction in decibels, zero-mean over 200 Hz to 4 kHz
@@ -4111,7 +4132,17 @@ impl ConcertGrand {
         // partial 8.4 dB below the naked string sum, its twelfth 10, in a
         // fixed-in-Hz patchwork that gave every note a different ragged
         // ladder -- the bell-like strike the ear reported.
-        if hash01(0x51C4 ^ seed << 9) < 0.5 {
+        //
+        // Only below BOARD_SIGN_TOP_HZ. Above the ribbed-plate transition
+        // the modes are sparse against their bandwidth (at 4 kHz the spacing
+        // is 113 Hz and the bandwidth 92), and two neighbours of opposite
+        // sign notch the transfer between them by twenty decibels or more.
+        // Measured on the grid (2026-09-07): the treble's second partial
+        // swung +-30 dB from note to note and re-rolled entirely when the
+        // bank's density moved -- a lottery, not a board. A real plate up
+        // there has heavy modal overlap and a smooth, ragged-by-5-dB
+        // transfer; one sign with the strength swing kept gives that.
+        if placed < BOARD_SIGN_TOP_HZ.get() && hash01(0x51C4 ^ seed << 9) < 0.5 {
             mode.drive = -mode.drive;
         }
         // And the board does not radiate its own lowest modes any more
@@ -9542,7 +9573,17 @@ mod tests {
             "{:>5} {:>4} {:>9} {:>9} {:>9} {:>8} {:>8} {:>9}",
             "note", "vel", "contacto", "t(pico)", "F(pico)", "rebotes", "F fin/2", "v fin/v0"
         );
-        for (note, velocity) in [(21u8, 60u8), (21, 127), (36, 127), (48, 127), (60, 127)] {
+        for (note, velocity) in [
+            (21u8, 60u8),
+            (21, 127),
+            (36, 127),
+            (48, 127),
+            (60, 127),
+            (84, 36),
+            (84, 117),
+            (96, 36),
+            (96, 117),
+        ] {
             CONTACT_TRACE.lock().unwrap().clear();
             CONTACT_TRACE_ARMED.store(true, core::sync::atomic::Ordering::Relaxed);
             let mut piano = prepared();

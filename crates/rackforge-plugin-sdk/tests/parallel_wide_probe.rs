@@ -67,8 +67,8 @@ impl ParallelProcessor for Probe {
         // A unit sees the report through the shared payload, as it would on
         // a worker instance.
         output.fill(0.0);
-        for (word, chunk) in context.shared.chunks_exact(4).enumerate() {
-            output[word] = f32::from_le_bytes(chunk.try_into().expect("four bytes"));
+        for (word, chunk) in context.shared.as_chunks::<4>().0.iter().enumerate() {
+            output[word] = f32::from_le_bytes(*chunk);
         }
     }
 

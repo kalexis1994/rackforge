@@ -1373,6 +1373,16 @@ macro_rules! export_parallel_processor {
         }
 
         impl RackForgeParallelExport {
+            /// The coordinator, for tests and tools that reach past the ABI
+            /// to the processor's own methods.
+            pub fn coordinator(&self) -> &$processor {
+                &self.inner
+            }
+
+            pub fn coordinator_mut(&mut self) -> &mut $processor {
+                &mut self.inner
+            }
+
             /// Serial pre-stage over the shared plan/dispatch statics.
             /// Returns the number of planned units.
             #[allow(clippy::too_many_arguments)]

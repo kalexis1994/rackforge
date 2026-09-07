@@ -860,6 +860,21 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The top octave has no dampers (0.171.9).** After 0.171.8 the user still
+heard, at the Campanella's 2:37 (D7, D#7, E7 repeated at twelve a second
+under a pumped pedal), "un golpeteo de mosquito, como si vibraran alambres
+finos tocándose, como electricidad". The re-strike merge changed nothing
+measurable; a steady full pedal changed nothing; but E7 with a 50 ms key
+and no pedal fell from −32.9 dBFS at 10 ms to −65 at 100 ms, and with the
+pedal to −47 — the model dropped a damper on every key of the compass, and
+a grand's dampers stop between E6 and G6 (the reference's own
+release-resonance regions end at key 88). Under a pedal riding between 0
+and 127 the top notes were gated at the repetition rate by a felt that is
+not there. `LAST_DAMPER_NOTE` 88: above it a voice is `undamped` — key-up
+leaves it ringing, the pedal's press and relief skip it, the sostenuto's
+release skips it — and a test holds E7 released to E7 pedalled and C6
+released apart from C6 pedalled.
+
 **The top octave, against the reference (0.171.8).** The user, with the
 pedal: "los agudos con sustain tienen como una estridencia, como un
 trasteo finito que queda resonando ... si son varias notas chilla mucho".

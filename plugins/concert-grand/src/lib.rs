@@ -2060,6 +2060,20 @@ pub static FELT_EXPONENT_MAX: Knob = Knob::new(3.5);
 pub static FELT_EXPONENT_TREBLE: Knob = Knob::new(0.0);
 /// See `felt_floor_ratio`.
 const FELT_FLOOR_TOP: f32 = 1.05;
+/// The last key with a damper. Above it the strings ring until they die,
+/// whatever the key and the pedal do: a grand's dampers stop somewhere
+/// between E6 and G6, and the reference's own release-resonance regions
+/// end at key 88 -- the sample set's author recorded a release for every
+/// key that has one and none above.
+///
+/// Until 0.171.9 every note took a damper at key-up. Measured on E7 with a
+/// 50 ms key press: -32.9 dBFS at 10 ms, -65 at 100 ms without the pedal,
+/// -47 with it -- a string stopped by a felt that is not there. On the
+/// Campanella's repeated D7-E7 under a pumped pedal (2:37) the user heard
+/// "un golpeteo de mosquito, como si vibraran alambres finos tocándose":
+/// three-kilohertz strings gated at the repetition rate by a damper the
+/// instrument does not have.
+const LAST_DAMPER_NOTE: u8 = 88;
 /// The dephased aftersound of the top octave radiates more than the
 /// slow stage's share says: measured (2026-09-07, Salamander C7/D#7/C8 at
 /// v92) with the unison clean and the prompt life at two, the model's
@@ -2635,6 +2649,9 @@ struct Voice {
     /// Held by the key, or by the sustain pedal after release.
     held: bool,
     sustained: bool,
+    /// Above `LAST_DAMPER_NOTE`: no felt ever lands on this string. Key-up
+    /// and pedal-up leave it ringing; only its own losses end it.
+    undamped: bool,
     /// Captured by the sostenuto pedal: this voice's damper stays lifted
     /// regardless of CC64, until CC66 releases it.
     sostenuto: bool,
@@ -2747,6 +2764,7 @@ impl Default for Voice {
             channel: 0,
             held: false,
             sustained: false,
+            undamped: false,
             sostenuto: false,
             damper_applied: 0.0,
             halo: false,
@@ -6671,6 +6689,7 @@ impl ConcertGrand {
         voice.channel = channel;
         voice.held = true;
         voice.sustained = false;
+        voice.undamped = note > LAST_DAMPER_NOTE;
         voice.halo = false;
         voice.sostenuto = false;
         voice.damper_applied = 0.0;
@@ -7042,6 +7061,16 @@ impl ConcertGrand {
         let grip = self.controls.damper_grip();
         for voice in &mut self.voices {
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
+                if voice.undamped {
+                    // No felt lands: the key comes up and the string goes
+                    // on ringing exactly as it was. `sustained` keeps it
+                    // out of the re-strike's damper path; the pedal loops
+                    // skip it by the flag.
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = 0.0;
+                    continue;
+                }
                 if self.sostenuto && voice.sostenuto {
                     // The sostenuto rod holds THIS damper clear, whatever
                     // the sustain pedal does.
@@ -7098,7 +7127,7 @@ impl ConcertGrand {
         self.damp_serial = self.damp_serial.wrapping_add(1);
         let serial = self.damp_serial;
         for voice in &mut self.voices {
-            if !(voice.active && voice.sustained) {
+            if !(voice.active && voice.sustained) || voice.undamped {
                 continue;
             }
             if self.sostenuto && voice.sostenuto {
@@ -7166,7 +7195,7 @@ impl ConcertGrand {
                 continue;
             }
             voice.sostenuto = false;
-            if voice.held || !voice.sustained {
+            if voice.held || !voice.sustained || voice.undamped {
                 continue;
             }
             if self.pedal && pressure < 0.98 {
@@ -9246,6 +9275,43 @@ mod tests {
         assert!(
             early_slope > late_slope * 1.5,
             "early {early_slope} vs late {late_slope}"
+        );
+    }
+
+    #[test]
+    fn the_top_octave_has_no_dampers() {
+        // Above LAST_DAMPER_NOTE a key-up is nothing: the string rings on
+        // as if the pedal were down. Below it the key-up is a damper. E7
+        // released must match E7 pedalled; C6 released must not match C6
+        // pedalled. Measured before the flag: E7 fell to -65 dBFS at 100 ms
+        // without the pedal and to -47 with it -- the mosquito on the
+        // Campanella's repeated top notes under a pumped pedal.
+        let window = |note: u8, pedal: bool| {
+            let mut piano = prepared();
+            if pedal {
+                render(
+                    &mut piano,
+                    64,
+                    &[MidiEvent {
+                        frame: 0,
+                        data: [0xB0, 64, 127],
+                        length: 3,
+                    }],
+                );
+            }
+            render(&mut piano, (FS * 0.05) as usize, &[note_on(note, 100)]);
+            render(&mut piano, (FS * 0.1) as usize, &[note_off(note)]);
+            energy(&render(&mut piano, (FS * 0.3) as usize, &[]))
+        };
+        let top = window(100, false) / window(100, true);
+        let mid = window(84, false) / window(84, true);
+        assert!(
+            (0.5..2.0).contains(&top),
+            "E7 released carries {top:.3} of E7 pedalled; there is no damper up there"
+        );
+        assert!(
+            mid < 0.1,
+            "C6 released carries {mid:.3} of C6 pedalled; its damper should have landed"
         );
     }
 

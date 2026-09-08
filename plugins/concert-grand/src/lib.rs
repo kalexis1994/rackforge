@@ -8107,15 +8107,16 @@ fn relaid_state(state: &[u8]) -> Option<[u8; STATE_COUNT * 4]> {
     if !state.len().is_multiple_of(4) || state.len() == STATE_COUNT * 4 {
         return None;
     }
-    let words: Vec<f32> = state
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|c| f32::from_le_bytes(*c))
-        .collect();
-    let n = words.len();
-    if n < 4 {
+    // No allocation: the plugin is `no_std` on wasm. A state longer than
+    // this bank could ever have written is not ours.
+    const LONGEST: usize = STATE_COUNT + 256;
+    let n = state.len() / 4;
+    if !(4..=LONGEST).contains(&n) {
         return None;
+    }
+    let mut words = [0.0f32; LONGEST];
+    for (word, chunk) in words.iter_mut().zip(state.as_chunks::<4>().0) {
+        *word = f32::from_le_bytes(*chunk);
     }
     // The era word is last (before the layout word) or last of all.
     let (era_at, layout) = if words[n - 2].to_bits() == STATE_ERA_UNITS {

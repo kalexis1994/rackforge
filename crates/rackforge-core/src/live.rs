@@ -3,9 +3,8 @@ use crate::audio::{
     open_audio_output_from_inventory,
 };
 use crate::control::{
-    PlayChainEffectRuntimeSpec, PreparedChainVoice,
-    self, AudioControlCommand, MAX_EVENTS_PER_BLOCK, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec,
-    RackSlotStateLoad,
+    self, AudioControlCommand, MAX_EVENTS_PER_BLOCK, PlayChainEffectRuntimeSpec,
+    PreparedChainVoice, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec, RackSlotStateLoad,
 };
 use crate::isolated_state::parameter_value_is_valid;
 use crate::live_midi_state::{MidiControllerStates, ReservedMidiControls, plugin_midi_event};
@@ -848,8 +847,7 @@ fn lay_chain_input(
         let destination_frame =
             &mut destination[frame * destination_channels..(frame + 1) * destination_channels];
         if destination_channels == 1 {
-            destination_frame[0] =
-                source_frame.iter().sum::<f32>() / source_channels.max(1) as f32;
+            destination_frame[0] = source_frame.iter().sum::<f32>() / source_channels.max(1) as f32;
         } else {
             for (channel, sample) in destination_frame.iter_mut().enumerate() {
                 *sample = source_frame[channel.min(source_channels - 1)];
@@ -864,7 +862,10 @@ fn any_voice_mut<'voices, 'plugin>(
     chain: &'voices mut [StandaloneVoice<'plugin>],
     instance_id: &InstanceId,
 ) -> Result<&'voices mut StandaloneVoice<'plugin>, String> {
-    if standalone.iter().any(|voice| &voice.instance_id == instance_id) {
+    if standalone
+        .iter()
+        .any(|voice| &voice.instance_id == instance_id)
+    {
         return standalone_voice_mut(standalone, instance_id);
     }
     chain
@@ -1597,8 +1598,9 @@ pub fn run(config: LiveConfig) -> Result<()> {
     };
     let initial_chain_voices = match session.play_chain(&active_instance_id) {
         Some(chain) => {
-            let specs =
-                control::play_chain_runtime_specs(chain, |plugin_id| plugins.contains_key(plugin_id));
+            let specs = control::play_chain_runtime_specs(chain, |plugin_id| {
+                plugins.contains_key(plugin_id)
+            });
             create_chain_voices(
                 &plugins,
                 &specs,
@@ -2362,9 +2364,11 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     reply,
                 } => {
                     let result = match prepared {
-                        Some(prepared) => {
-                            Ok(chain_voices_from_prepared(prepared, period_frames, channels))
-                        }
+                        Some(prepared) => Ok(chain_voices_from_prepared(
+                            prepared,
+                            period_frames,
+                            channels,
+                        )),
                         None => create_chain_voices(
                             plugins,
                             &effects,
@@ -2424,21 +2428,18 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     let is_chain_effect = chain_voices
                         .iter()
                         .any(|voice| voice.instance_id == instance_id);
-                    let result =
-                        any_voice_mut(standalone_voices, &mut chain_voices, &instance_id)
-                            .and_then(|voice| {
-                                voice
-                                    .mirror_control(|instance| instance.load_preset(&sound_id))
-                                    .map_err(|error| error.to_string())?;
-                                voice.process_faulted = false;
-                                live_parameter_writer.clear(voice.live_parameter_target);
-                                Ok(())
-                            })
-                            .map(|()| {
-                                println!(
-                                    "LIVE_SOUND_SELECTED instance={instance_id} id={sound_id}"
-                                );
-                            });
+                    let result = any_voice_mut(standalone_voices, &mut chain_voices, &instance_id)
+                        .and_then(|voice| {
+                            voice
+                                .mirror_control(|instance| instance.load_preset(&sound_id))
+                                .map_err(|error| error.to_string())?;
+                            voice.process_faulted = false;
+                            live_parameter_writer.clear(voice.live_parameter_target);
+                            Ok(())
+                        })
+                        .map(|()| {
+                            println!("LIVE_SOUND_SELECTED instance={instance_id} id={sound_id}");
+                        });
                     if result.is_ok() && !is_chain_effect {
                         active_instance_id = instance_id;
                         render_mode = AudioRenderMode::Plugin;

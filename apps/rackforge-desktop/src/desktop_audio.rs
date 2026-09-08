@@ -2707,8 +2707,7 @@ fn lay_chain_input(
         let destination_frame =
             &mut destination[frame * destination_channels..(frame + 1) * destination_channels];
         if destination_channels == 1 {
-            destination_frame[0] =
-                source_frame.iter().sum::<f32>() / source_channels.max(1) as f32;
+            destination_frame[0] = source_frame.iter().sum::<f32>() / source_channels.max(1) as f32;
         } else {
             for (channel, sample) in destination_frame.iter_mut().enumerate() {
                 *sample = source_frame[channel.min(source_channels - 1)];

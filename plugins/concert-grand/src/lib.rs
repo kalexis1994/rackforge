@@ -7470,9 +7470,8 @@ impl ConcertGrand {
                 energy += amplitude * amplitude;
             }
         }
-        let scale =
-            0.28 * self.cal(note, 7) * powf(velocity.max(0.01), LEVEL_VELOCITY_POWER.get())
-                / sqrtf(energy.max(1e-9));
+        let scale = 0.28 * self.cal(note, 7) * powf(velocity.max(0.01), LEVEL_VELOCITY_POWER.get())
+            / sqrtf(energy.max(1e-9));
 
         // Everything a partial needs, computed before a voice is borrowed:
         // both components draw their decay from the same loss curve, read at
@@ -7507,8 +7506,8 @@ impl ConcertGrand {
                 // and pitch, which no smooth law carries. The law's own
                 // controls (the Decay fader, the treble life) stay on top
                 // of it: the table is the mechanism, not the setting.
-                let controls = (0.5 + 1.5 * self.controls.decay)
-                    * self.hf_life(frequency * string_scale);
+                let controls =
+                    (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency * string_scale);
                 let measured = measured_prompt_t60(note) * controls;
                 t60 *= powf(
                     measured / t60.max(1e-3),
@@ -8065,9 +8064,8 @@ impl ConcertGrand {
                     // from nought, its output quadrature already at rest.
                     let mut arriving = *fresh;
                     for lane in 0..LANES {
-                        let energy = sqrtf(
-                            fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane],
-                        );
+                        let energy =
+                            sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
                         let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
                         arriving.push[lane] = signed / merge_ramp as f32;
                         arriving.push_s[lane] = 0.0;
@@ -11065,7 +11063,12 @@ mod tests {
             let mut piano = prepared();
             render(&mut piano, 1, &[note_on(note, 90)]);
             let out = render(&mut piano, FS as usize, &[]);
-            let mono: Vec<f32> = out.as_chunks::<2>().0.iter().map(|p| 0.5 * (p[0] + p[1])).collect();
+            let mono: Vec<f32> = out
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| 0.5 * (p[0] + p[1]))
+                .collect();
             let f0 = 440.0 * powf(2.0, (note as f32 - 69.0) / 12.0);
             let window = |centre: f32| {
                 let from = ((centre - 0.05) * FS as f32) as usize;
@@ -11075,9 +11078,18 @@ mod tests {
         };
         let c3 = slope(48);
         let d_sharp3 = slope(51);
-        assert!(c3 > 18.0, "C3's fundamental falls {c3:.1} dB/s in its prompt stage");
-        assert!(d_sharp3 < 16.0, "D#3's fundamental falls {d_sharp3:.1} dB/s in its prompt stage");
-        assert!(c3 > d_sharp3 + 5.0, "C3 {c3:.1} against D#3 {d_sharp3:.1} dB/s");
+        assert!(
+            c3 > 18.0,
+            "C3's fundamental falls {c3:.1} dB/s in its prompt stage"
+        );
+        assert!(
+            d_sharp3 < 16.0,
+            "D#3's fundamental falls {d_sharp3:.1} dB/s in its prompt stage"
+        );
+        assert!(
+            c3 > d_sharp3 + 5.0,
+            "C3 {c3:.1} against D#3 {d_sharp3:.1} dB/s"
+        );
     }
 
     #[test]
@@ -11092,15 +11104,28 @@ mod tests {
             render(&mut piano, 1, &[note_on(note, 90)]);
             render(&mut piano, (FS * 0.35) as usize, &[]);
             let out = render(&mut piano, (FS * 0.4) as usize, &[]);
-            let mono: Vec<f32> = out.as_chunks::<2>().0.iter().map(|p| 0.5 * (p[0] + p[1])).collect();
+            let mono: Vec<f32> = out
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| 0.5 * (p[0] + p[1]))
+                .collect();
             let f0 = 440.0 * powf(2.0, (note as f32 - 69.0) / 12.0);
-            let partials = tone_db(&mono, 2.0 * f0).max(tone_db(&mono, 3.0 * f0)).max(tone_db(&mono, 4.0 * f0));
+            let partials = tone_db(&mono, 2.0 * f0)
+                .max(tone_db(&mono, 3.0 * f0))
+                .max(tone_db(&mono, 4.0 * f0));
             tone_db(&mono, f0) - partials
         };
         let a0 = balance(21);
         let c2 = balance(36);
-        assert!(a0 < -30.0, "A0's fundamental sits {a0:.1} dB against its partials");
-        assert!(c2 > -20.0, "C2's fundamental sits {c2:.1} dB against its partials");
+        assert!(
+            a0 < -30.0,
+            "A0's fundamental sits {a0:.1} dB against its partials"
+        );
+        assert!(
+            c2 > -20.0,
+            "C2's fundamental sits {c2:.1} dB against its partials"
+        );
     }
 
     #[test]
@@ -11290,19 +11315,30 @@ mod tests {
                 render(&mut piano, 16, &[pedal]);
                 render(&mut piano, (FS * 0.001) as usize, &[note_on(60, 100)]);
                 render(&mut piano, (FS * 0.099) as usize, &[note_off(60)]);
-                let events: Vec<MidiEvent> = if blow { vec![note_on(60, 100)] } else { Vec::new() };
+                let events: Vec<MidiEvent> = if blow {
+                    vec![note_on(60, 100)]
+                } else {
+                    Vec::new()
+                };
                 render(&mut piano, (FS * 0.02) as usize, &events);
                 render(&mut piano, (FS * 0.04) as usize, &[])
             };
             let (with, without) = (run(true), run(false));
-            let energy: f32 = with.iter().zip(without.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+            let energy: f32 = with
+                .iter()
+                .zip(without.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum();
             sqrtf(energy / with.len() as f32)
         };
         let step = blow_rms(0.0);
         let contact = blow_rms(0.004);
         MERGE_RAMP_S.set(0.0);
         let ratio = 20.0 * log2f(contact / step.max(1e-9)) * core::f32::consts::LOG10_2;
-        assert!(ratio.abs() < 1.5, "the blow over a 4 ms contact reads {ratio:.1} dB against the one-sample push");
+        assert!(
+            ratio.abs() < 1.5,
+            "the blow over a 4 ms contact reads {ratio:.1} dB against the one-sample push"
+        );
     }
 
     #[test]

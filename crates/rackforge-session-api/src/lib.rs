@@ -435,8 +435,7 @@ impl PlayChainState {
             ));
         }
         for (position, effect) in self.effects.iter().enumerate() {
-            validate_identifier(&effect.id)
-                .map_err(|error| format!("effect id {error}"))?;
+            validate_identifier(&effect.id).map_err(|error| format!("effect id {error}"))?;
             self.effect_instance_id(&effect.id)?;
             if effect.plugin_id.trim().is_empty() {
                 return Err(format!("effect {} names no plugin", effect.id));
@@ -523,9 +522,10 @@ impl SessionState {
         self.play_chains
             .iter()
             .find(|chain| {
-                chain.effects.iter().any(|effect| {
-                    chain.effect_instance_id(&effect.id).as_ref() == Ok(instance_id)
-                })
+                chain
+                    .effects
+                    .iter()
+                    .any(|effect| chain.effect_instance_id(&effect.id).as_ref() == Ok(instance_id))
             })
             .map(|chain| &chain.instrument_id)
     }
@@ -1108,18 +1108,38 @@ mod tests {
                 event: SessionEvent::PlayChainChanged { chain },
             })
         };
-        assert_eq!(apply(&mut state, chain(vec![("fx-1", "org.rackforge.rf-dls")])), Ok(()));
+        assert_eq!(
+            apply(&mut state, chain(vec![("fx-1", "org.rackforge.rf-dls")])),
+            Ok(())
+        );
         assert_eq!(state.play_chain(&instrument).unwrap().effects.len(), 1);
         assert_eq!(
-            state.play_chain(&instrument).unwrap().effect_instance_id("fx-1").unwrap().as_str(),
+            state
+                .play_chain(&instrument)
+                .unwrap()
+                .effect_instance_id("fx-1")
+                .unwrap()
+                .as_str(),
             format!("{DEFAULT_LIVE_INSTANCE_ID}.fx.fx-1")
         );
         assert!(apply(&mut state, chain(vec![("fx-1", "org.rackforge.nowhere")])).is_err());
         assert!(
-            apply(&mut state, chain(vec![("fx-1", "org.rackforge.rf-dls"), ("fx-1", "org.rackforge.rf-dls")]))
-                .is_err()
+            apply(
+                &mut state,
+                chain(vec![
+                    ("fx-1", "org.rackforge.rf-dls"),
+                    ("fx-1", "org.rackforge.rf-dls")
+                ])
+            )
+            .is_err()
         );
-        assert!(apply(&mut state, chain(vec![("Not An Id", "org.rackforge.rf-dls")])).is_err());
+        assert!(
+            apply(
+                &mut state,
+                chain(vec![("Not An Id", "org.rackforge.rf-dls")])
+            )
+            .is_err()
+        );
         assert_eq!(apply(&mut state, chain(Vec::new())), Ok(()));
         assert!(state.play_chain(&instrument).is_none());
         let other = PlayChainState {

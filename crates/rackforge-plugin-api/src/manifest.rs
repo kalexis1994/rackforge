@@ -529,10 +529,17 @@ impl PluginManifest {
         }
         for (position, entry) in self.suggested_chain.iter().enumerate() {
             if validate_identifier(&entry.plugin, true).is_err() || entry.plugin == self.id {
-                return Err(ManifestError::InvalidSuggestedChainEntry(entry.plugin.clone()));
+                return Err(ManifestError::InvalidSuggestedChainEntry(
+                    entry.plugin.clone(),
+                ));
             }
-            if self.suggested_chain[..position].iter().any(|earlier| earlier.plugin == entry.plugin) {
-                return Err(ManifestError::DuplicateSuggestedChainEntry(entry.plugin.clone()));
+            if self.suggested_chain[..position]
+                .iter()
+                .any(|earlier| earlier.plugin == entry.plugin)
+            {
+                return Err(ManifestError::DuplicateSuggestedChainEntry(
+                    entry.plugin.clone(),
+                ));
             }
         }
         if self.schema_version >= 3 && self.short_name.is_none() {
@@ -1065,7 +1072,10 @@ mod tests {
             plugin: "org.rackforge.limiter".into(),
             preset: Some("Stage".into()),
         }];
-        assert_eq!(candidate.validate(), Err(ManifestError::SuggestedChainRequiresInstrument));
+        assert_eq!(
+            candidate.validate(),
+            Err(ManifestError::SuggestedChainRequiresInstrument)
+        );
         candidate.kind = PluginKind::Instrument;
         candidate.capabilities = vec![Capability::MidiInput, Capability::AudioOutput];
         assert_eq!(candidate.validate(), Ok(()));
@@ -1073,11 +1083,20 @@ mod tests {
             plugin: "org.rackforge.limiter".into(),
             preset: None,
         });
-        assert!(matches!(candidate.validate(), Err(ManifestError::DuplicateSuggestedChainEntry(_))));
+        assert!(matches!(
+            candidate.validate(),
+            Err(ManifestError::DuplicateSuggestedChainEntry(_))
+        ));
         candidate.suggested_chain[1].plugin = candidate.id.clone();
-        assert!(matches!(candidate.validate(), Err(ManifestError::InvalidSuggestedChainEntry(_))));
+        assert!(matches!(
+            candidate.validate(),
+            Err(ManifestError::InvalidSuggestedChainEntry(_))
+        ));
         let text = toml::to_string(&manifest()).expect("serialises");
-        assert!(!text.contains("suggested_chain"), "an empty chain is not written: {text}");
+        assert!(
+            !text.contains("suggested_chain"),
+            "an empty chain is not written: {text}"
+        );
     }
 
     #[test]

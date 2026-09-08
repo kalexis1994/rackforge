@@ -3279,7 +3279,11 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 effects,
             };
             if let Err(message) = chain.validate() {
-                return error_response(ControlErrorCode::Rejected, message, Some(snapshot.revision));
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    message,
+                    Some(snapshot.revision),
+                );
             }
             for effect in &chain.effects {
                 match context.plugin_manifests.get(&effect.plugin_id) {
@@ -3308,7 +3312,11 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             {
                 return failure.into_response();
             }
-            record_command_event(context, command_ref, SessionEvent::PlayChainChanged { chain })
+            record_command_event(
+                context,
+                command_ref,
+                SessionEvent::PlayChainChanged { chain },
+            )
         }
         SessionCommand::SetLiveBrowseMode { mode } => record_command_event(
             context,
@@ -3536,9 +3544,11 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 && let Some(chain) = snapshot.play_chain(&owner).cloned()
             {
                 let mut chain = chain;
-                let Some(effect) = chain.effects.iter_mut().find(|effect| {
-                    chain_effect_matches(&owner, effect, &instance_id)
-                }) else {
+                let Some(effect) = chain
+                    .effects
+                    .iter_mut()
+                    .find(|effect| chain_effect_matches(&owner, effect, &instance_id))
+                else {
                     return error_response(
                         ControlErrorCode::NotFound,
                         format!("unknown effect {instance_id} in the PLAY chain"),
@@ -4439,10 +4449,13 @@ fn apply_play_chain_of(
     snapshot: &SessionState,
     instrument_id: &InstanceId,
 ) -> Result<(), ControlFailure> {
-    let chain = snapshot.play_chain(instrument_id).cloned().unwrap_or(PlayChainState {
-        instrument_id: instrument_id.clone(),
-        effects: Vec::new(),
-    });
+    let chain = snapshot
+        .play_chain(instrument_id)
+        .cloned()
+        .unwrap_or(PlayChainState {
+            instrument_id: instrument_id.clone(),
+            effects: Vec::new(),
+        });
     apply_play_chain(context, snapshot.revision, &chain)
 }
 
@@ -4489,8 +4502,9 @@ fn apply_play_chain(
     revision: Revision,
     chain: &PlayChainState,
 ) -> Result<(), ControlFailure> {
-    let effects =
-        play_chain_runtime_specs(chain, |plugin_id| context.plugin_manifests.contains_key(plugin_id));
+    let effects = play_chain_runtime_specs(chain, |plugin_id| {
+        context.plugin_manifests.contains_key(plugin_id)
+    });
     let prepared = prepare_portable_chain_voices(context, revision, &effects)?;
     let (reply_sender, reply_receiver) = sync_channel(1);
     send_audio(
@@ -4502,7 +4516,11 @@ fn apply_play_chain(
             reply: reply_sender,
         },
     )?;
-    receive_audio_with_timeout(reply_receiver, "set PLAY effects", AUDIO_RECONFIGURE_TIMEOUT)
+    receive_audio_with_timeout(
+        reply_receiver,
+        "set PLAY effects",
+        AUDIO_RECONFIGURE_TIMEOUT,
+    )
 }
 
 /// The chain's effects built, activated and warmed on this thread, when

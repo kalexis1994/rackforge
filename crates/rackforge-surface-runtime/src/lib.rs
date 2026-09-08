@@ -309,6 +309,18 @@ impl PlaySound {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayChainEffectItem {
+    /// The effect's id inside the chain.
+    pub id: String,
+    /// The instance its panel addresses, as the host names it.
+    pub instance_id: String,
+    pub plugin_id: String,
+    pub name: String,
+    pub short_name: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlayPlugin {
     pub instance_id: String,
     pub plugin_id: String,
@@ -470,6 +482,19 @@ pub enum MenuCommand {
         instance_id: String,
         parameter_index: u32,
         value: f64,
+    },
+    /// Puts one more effect at the end of the instrument's PLAY chain.
+    AddPlayChainEffect {
+        plugin_id: String,
+    },
+    /// Turns one effect of the chain on or off in place.
+    SetPlayChainEffectEnabled {
+        effect_id: String,
+        enabled: bool,
+    },
+    /// Takes one effect out of the chain.
+    RemovePlayChainEffect {
+        effect_id: String,
     },
     TriggerPluginParameter {
         instance_id: String,
@@ -655,6 +680,9 @@ enum Page {
     LiveSetlists,
     LiveSetlistEntries,
     Play,
+    PlayEffects,
+    PlayEffectAdd,
+    PlayEffect,
     Config,
     ConfigRacks,
     ConfigRackEditor,
@@ -845,6 +873,18 @@ pub struct Menu {
     keyboard_split_quick_action: bool,
     play_index: usize,
     play_plugins: Vec<PlayPlugin>,
+    /// The instrument's PLAY chain, and the effects that could join it.
+    play_chain: Vec<PlayChainEffectItem>,
+    play_effect_plugins: Vec<PlayPlugin>,
+    play_effects_index: usize,
+    play_effect_add_index: usize,
+    /// Which effect of the chain is open, by id: an index would follow the
+    /// wrong effect the moment the chain is reordered under it.
+    play_effect_open: Option<String>,
+    play_effect_menu_index: usize,
+    /// Whose parameters the parameter pages are showing. `None` is the
+    /// instrument on stage; an effect's instance id while its panel is open.
+    parameter_target: Option<String>,
     config_index: usize,
     plugin_index: usize,
     active_plugin_instance_id: Option<String>,
@@ -1090,6 +1130,13 @@ impl Default for Menu {
             keyboard_split_quick_action: false,
             play_index: 0,
             play_plugins: Vec::new(),
+            play_chain: Vec::new(),
+            play_effect_plugins: Vec::new(),
+            play_effects_index: 0,
+            play_effect_add_index: 0,
+            play_effect_open: None,
+            play_effect_menu_index: 0,
+            parameter_target: None,
             config_index: 0,
             plugin_index: 0,
             active_plugin_instance_id: None,
@@ -1237,6 +1284,54 @@ impl Menu {
                 .find(|plugin| plugin.plugin_id == self.active_plugin_id)
                 .map(|plugin| plugin.instance_id.clone());
         }
+    }
+
+    /// The instrument's chain, as the host holds it.
+    pub fn set_play_chain(&mut self, effects: Vec<PlayChainEffectItem>) {
+        self.play_chain = effects;
+        self.play_effects_index = self.play_effects_index.min(self.play_chain.len());
+        if let Some(open) = self.play_effect_open.clone()
+            && !self.play_chain.iter().any(|effect| effect.id == open)
+        {
+            // The effect the panel was on has left the chain.
+            self.play_effect_open = None;
+            self.parameter_target = None;
+            if matches!(self.page, Page::PlayEffect) {
+                self.page = Page::PlayEffects;
+            }
+        }
+    }
+
+    /// The installed effects, offered by ADD NEW.
+    pub fn set_play_effect_plugins(&mut self, plugins: Vec<PlayPlugin>) {
+        self.play_effect_plugins = plugins;
+        self.play_effect_add_index = self
+            .play_effect_add_index
+            .min(self.play_effect_plugins.len().saturating_sub(1));
+    }
+
+    /// Whose parameters LITTLE is showing: an effect of the chain while its
+    /// panel is open, and the instrument on stage otherwise. The host reads
+    /// this to know which instance to publish parameters for.
+    pub fn parameter_target_instance_id(&self) -> Option<&str> {
+        self.parameter_target.as_deref()
+    }
+
+    /// The effect whose panel or menu is open, if any.
+    pub fn open_play_effect_id(&self) -> Option<&str> {
+        self.play_effect_open.as_deref()
+    }
+
+    fn open_play_effect(&self) -> Option<&PlayChainEffectItem> {
+        let id = self.play_effect_open.as_deref()?;
+        self.play_chain.iter().find(|effect| effect.id == id)
+    }
+
+    /// The instance a parameter edit addresses.
+    fn parameter_instance_id(&self) -> Option<String> {
+        self.parameter_target
+            .clone()
+            .or_else(|| self.active_plugin_instance_id.clone())
     }
 
     pub fn set_play_plugins(&mut self, plugins: Vec<PlayPlugin>, active_instance_id: Option<&str>) {
@@ -3806,10 +3901,27 @@ impl Menu {
                     Page::PluginPlay | Page::PluginPresets | Page::PluginPrograms => {
                         Page::PluginLibrary
                     }
+                    // An effect's panel goes back to that effect, and hands
+                    // the parameter pages back to the instrument on stage.
+                    Page::PluginParameters | Page::PluginParameterPages
+                        if self.parameter_target.is_some() =>
+                    {
+                        self.parameter_target = None;
+                        self.plugin_parameter_schema = None;
+                        self.plugin_parameter_values.clear();
+                        self.plugin_parameter_editor = None;
+                        Page::PlayEffect
+                    }
                     Page::PluginParameters if self.plugin_parameter_pages().len() > 1 => {
                         Page::PluginParameterPages
                     }
                     Page::PluginParameters | Page::PluginParameterPages => Page::PluginLibrary,
+                    Page::PlayEffect => {
+                        self.play_effect_open = None;
+                        Page::PlayEffects
+                    }
+                    Page::PlayEffectAdd => Page::PlayEffects,
+                    Page::PlayEffects => Page::Play,
                     Page::PluginLibrary
                         if self.plugin_play_context == PluginPlayContext::RackSlot =>
                     {
@@ -3922,6 +4034,75 @@ impl Menu {
                         }
                         _ => Page::Config,
                     },
+                    Page::Play if self.play_index >= self.play_plugins.len() => {
+                        self.play_effects_index = 0;
+                        Page::PlayEffects
+                    }
+                    Page::PlayEffects if self.play_effects_index == 0 => {
+                        self.play_effect_add_index = 0;
+                        Page::PlayEffectAdd
+                    }
+                    Page::PlayEffects => {
+                        match self
+                            .play_effects_index
+                            .checked_sub(1)
+                            .and_then(|index| self.play_chain.get(index))
+                        {
+                            Some(effect) => {
+                                self.play_effect_open = Some(effect.id.clone());
+                                self.play_effect_menu_index = 0;
+                                Page::PlayEffect
+                            }
+                            None => Page::PlayEffects,
+                        }
+                    }
+                    Page::PlayEffectAdd => {
+                        if let Some(plugin) =
+                            self.play_effect_plugins.get(self.play_effect_add_index)
+                        {
+                            self.pending_command = Some(MenuCommand::AddPlayChainEffect {
+                                plugin_id: plugin.plugin_id.clone(),
+                            });
+                        }
+                        Page::PlayEffects
+                    }
+                    Page::PlayEffect if self.play_effect_menu_index == 0 => {
+                        if let Some(effect) = self.open_play_effect() {
+                            self.pending_command = Some(MenuCommand::SetPlayChainEffectEnabled {
+                                effect_id: effect.id.clone(),
+                                enabled: !effect.enabled,
+                            });
+                        }
+                        Page::PlayEffect
+                    }
+                    Page::PlayEffect if self.play_effect_menu_index == 1 => {
+                        // The panel is the plugin's own parameter pages, read
+                        // and written at the effect's instance. The schema is
+                        // dropped here so nothing of the instrument's is shown
+                        // while the host answers with the effect's.
+                        match self.open_play_effect() {
+                            Some(effect) => {
+                                self.parameter_target = Some(effect.instance_id.clone());
+                                self.plugin_parameter_schema = None;
+                                self.plugin_parameter_values.clear();
+                                self.plugin_parameter_editor = None;
+                                self.plugin_parameter_page_index = 0;
+                                self.plugin_parameter_index = 0;
+                                Page::PluginParameters
+                            }
+                            None => Page::PlayEffects,
+                        }
+                    }
+                    Page::PlayEffect => {
+                        if let Some(effect) = self.open_play_effect() {
+                            self.pending_command = Some(MenuCommand::RemovePlayChainEffect {
+                                effect_id: effect.id.clone(),
+                            });
+                        }
+                        self.play_effect_open = None;
+                        self.play_effects_index = 0;
+                        Page::PlayEffects
+                    }
                     Page::Play if !self.play_plugins.is_empty() => {
                         if let Some(plugin) = self.play_plugins.get(self.play_index).cloned()
                             && self.active_plugin_instance_id.as_deref()
@@ -4208,15 +4389,31 @@ impl Menu {
             Page::LiveSongParts => self.render_live_song_parts(),
             Page::LiveSetlists => self.render_live_setlists(),
             Page::LiveSetlistEntries => self.render_live_setlist_entries(),
-            Page::Play => Screen::with_header(
-                indexed_title("PLAY", self.play_index, self.play_plugins.len().max(1)),
-                self.play_plugins
-                    .get(self.play_index)
-                    .map_or(self.active_plugin_name.as_str(), |plugin| {
-                        plugin.name.as_str()
-                    }),
-                "Plugin PLAY",
-            ),
+            Page::Play => {
+                // The instruments, and after them the chain that plays after
+                // whichever one is on stage.
+                let count = self.play_plugins.len() + 1;
+                if self.play_index >= self.play_plugins.len() {
+                    Screen::with_header(
+                        indexed_title("PLAY", self.play_index, count),
+                        "EFFECTS",
+                        self.play_chain_summary(),
+                    )
+                } else {
+                    Screen::with_header(
+                        indexed_title("PLAY", self.play_index, count),
+                        self.play_plugins
+                            .get(self.play_index)
+                            .map_or(self.active_plugin_name.as_str(), |plugin| {
+                                plugin.name.as_str()
+                            }),
+                        "Plugin PLAY",
+                    )
+                }
+            }
+            Page::PlayEffects => self.render_play_effects(),
+            Page::PlayEffectAdd => self.render_play_effect_add(),
+            Page::PlayEffect => self.render_play_effect(),
             Page::Config => {
                 let detail = if self.config_index == 4 {
                     self.audio_device_name()
@@ -5938,8 +6135,20 @@ impl Menu {
                 }
                 (&mut self.live_setlist_entry_index, len)
             }
-            Page::Play if self.play_plugins.is_empty() => return,
-            Page::Play => (&mut self.play_index, self.play_plugins.len()),
+            // EFFECTS sits after the instruments, and is there even when no
+            // instrument is installed.
+            Page::Play => (&mut self.play_index, self.play_plugins.len() + 1),
+            Page::PlayEffects => {
+                let len = self.play_chain.len() + 1;
+                (&mut self.play_effects_index, len)
+            }
+            Page::PlayEffectAdd if self.play_effect_plugins.is_empty() => return,
+            Page::PlayEffectAdd => {
+                let len = self.play_effect_plugins.len();
+                (&mut self.play_effect_add_index, len)
+            }
+            Page::PlayEffect if self.play_effect_open.is_none() => return,
+            Page::PlayEffect => (&mut self.play_effect_menu_index, 3),
             Page::Config => (&mut self.config_index, CONFIG_ITEMS.len()),
             Page::Plugins => (&mut self.plugin_index, 1),
             Page::PluginConfigUnavailable => return,
@@ -6654,6 +6863,83 @@ impl Menu {
         )
     }
 
+    /// What the PLAY list says under EFFECTS.
+    fn play_chain_summary(&self) -> String {
+        if self.play_chain.is_empty() {
+            return "No effects".into();
+        }
+        let on = self
+            .play_chain
+            .iter()
+            .filter(|effect| effect.enabled)
+            .count();
+        let total = self.play_chain.len();
+        let noun = if total == 1 { "effect" } else { "effects" };
+        format!("{total} {noun}, {on} on")
+    }
+
+    /// ADD NEW first, then the chain in the order the audio takes it.
+    fn render_play_effects(&self) -> Screen {
+        let count = self.play_chain.len() + 1;
+        let (line, detail) = match self.play_effects_index.checked_sub(1) {
+            None => (
+                "ADD NEW".to_owned(),
+                if self.play_effect_plugins.is_empty() {
+                    "No effects installed".to_owned()
+                } else {
+                    format!("{} available", self.play_effect_plugins.len())
+                },
+            ),
+            Some(index) => match self.play_chain.get(index) {
+                Some(effect) => (
+                    effect.name.clone(),
+                    if effect.enabled { "ON" } else { "BYPASSED" }.to_owned(),
+                ),
+                None => ("EFFECTS".to_owned(), self.play_chain_summary()),
+            },
+        };
+        Screen::with_header(
+            indexed_title("EFFECTS", self.play_effects_index, count),
+            line,
+            detail,
+        )
+    }
+
+    fn render_play_effect_add(&self) -> Screen {
+        if self.play_effect_plugins.is_empty() {
+            return Screen::with_header("ADD EFFECT", "NONE INSTALLED", " ");
+        }
+        let plugin = self.play_effect_plugins.get(self.play_effect_add_index);
+        Screen::with_header(
+            indexed_title(
+                "ADD EFFECT",
+                self.play_effect_add_index,
+                self.play_effect_plugins.len(),
+            ),
+            plugin.map_or("EFFECT", |plugin| plugin.name.as_str()),
+            plugin.map_or(" ", |plugin| plugin.short_name.as_str()),
+        )
+    }
+
+    fn render_play_effect(&self) -> Screen {
+        let Some(effect) = self.open_play_effect() else {
+            return Screen::with_header("EFFECT", "GONE", " ");
+        };
+        let (line, detail) = match self.play_effect_menu_index {
+            0 => (
+                "ENABLED",
+                if effect.enabled { "ON" } else { "OFF" }.to_owned(),
+            ),
+            1 => ("PANEL", "Its controls".to_owned()),
+            _ => ("REMOVE", "Out of the chain".to_owned()),
+        };
+        Screen::with_header(
+            indexed_title(&effect.short_name, self.play_effect_menu_index, 3),
+            line,
+            detail,
+        )
+    }
+
     fn render_plugin_play(&self) -> Screen {
         let sounds = self.filtered_sounds();
         if sounds.is_empty() {
@@ -7056,7 +7342,7 @@ impl Menu {
             return;
         }
         if matches!(parameter.kind, ParameterKind::Trigger) {
-            if let Some(instance_id) = self.active_plugin_instance_id.clone() {
+            if let Some(instance_id) = self.parameter_instance_id() {
                 self.pending_command = Some(MenuCommand::TriggerPluginParameter {
                     instance_id,
                     parameter_index: parameter.index,
@@ -7139,8 +7425,7 @@ impl Menu {
             }),
             _ => item.value().as_f64(),
         };
-        let (Some(instance_id), Some(value)) = (self.active_plugin_instance_id.clone(), value)
-        else {
+        let (Some(instance_id), Some(value)) = (self.parameter_instance_id(), value) else {
             return;
         };
         self.plugin_parameter_values.insert(parameter.index, value);
@@ -9897,10 +10182,87 @@ mod tests {
         menu.apply_input(Input::EncoderRight);
         assert_eq!(menu.render().line_1, "  LIVE    [ PLAY ]");
         menu.apply_input(Input::EncoderPress);
+        // One plugin, and EFFECTS after it.
         assert_eq!(
             menu.render().header,
-            Header::Visible("PLAY           1/1".into())
+            Header::Visible("PLAY           1/2".into())
         );
+    }
+
+    #[test]
+    fn play_reaches_the_effects_chain_and_an_effect_panel() {
+        let mut menu = plugin_menu();
+        menu.set_play_plugins(
+            vec![PlayPlugin::new(
+                "play.piano",
+                "org.rackforge.piano",
+                "PIANO",
+            )],
+            Some("play.piano"),
+        );
+        menu.set_play_effect_plugins(vec![PlayPlugin::new(
+            "play.eq",
+            "org.rackforge.rf-eq",
+            "RF-EQ",
+        )]);
+        menu.apply_input(Input::EncoderRight);
+        menu.apply_input(Input::EncoderPress);
+        // Past the instrument sits EFFECTS, with the chain's own count.
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1.trim(), "EFFECTS");
+        assert_eq!(menu.render().line_2.trim(), "No effects");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "ADD NEW");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "RF-EQ");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::AddPlayChainEffect {
+                plugin_id: "org.rackforge.rf-eq".into(),
+            })
+        );
+
+        // The host answers with the chain it now holds.
+        menu.set_play_chain(vec![PlayChainEffectItem {
+            id: "fx-1".into(),
+            instance_id: "play.piano.fx.fx-1".into(),
+            plugin_id: "org.rackforge.rf-eq".into(),
+            name: "RF-EQ".into(),
+            short_name: "RF-EQ".into(),
+            enabled: true,
+        }]);
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1.trim(), "RF-EQ");
+        assert_eq!(menu.render().line_2.trim(), "ON");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "ENABLED");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetPlayChainEffectEnabled {
+                effect_id: "fx-1".into(),
+                enabled: false,
+            })
+        );
+
+        // PANEL reads and writes the effect's own instance, not the stage's.
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1.trim(), "PANEL");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.parameter_target_instance_id(),
+            Some("play.piano.fx.fx-1")
+        );
+        // Back leaves the panel and the effect's menu is where it was.
+        menu.apply(Action::Back);
+        assert_eq!(menu.parameter_target_instance_id(), None);
+        assert_eq!(menu.render().line_1.trim(), "PANEL");
+        // And the chain page is left on the effect that was open.
+        menu.apply(Action::Back);
+        assert_eq!(menu.render().line_1.trim(), "RF-EQ");
+        menu.apply(Action::Back);
+        assert_eq!(menu.render().line_1.trim(), "EFFECTS");
     }
 
     #[test]
@@ -9910,7 +10272,7 @@ mod tests {
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
-            Header::Visible("PLAY           1/1".into())
+            Header::Visible("PLAY           1/2".into())
         );
         menu.apply(Action::Select);
         assert_plugin_header(&menu.render(), "RF-DLS", "PLAY 1/2");
@@ -9926,7 +10288,7 @@ mod tests {
         menu.apply(Action::Back);
         assert_eq!(
             menu.render().header,
-            Header::Visible("PLAY           1/1".into())
+            Header::Visible("PLAY           1/2".into())
         );
 
         menu.apply(Action::Back);

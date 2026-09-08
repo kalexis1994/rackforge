@@ -217,7 +217,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 151;
+pub const KNOB_COUNT: usize = 153;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -854,6 +854,16 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "MERGE_RAMP_S",
         &MERGE_RAMP_S,
         "The contact time a re-strike's momentum is spread over on a string still moving, s.",
+    ),
+    (
+        "KEY_AFTERTOUCH_MM",
+        &KEY_AFTERTOUCH_MM,
+        "The key's travel after let-off before it lands on the bed, mm.",
+    ),
+    (
+        "ACTION_RATIO",
+        &ACTION_RATIO,
+        "How much faster the hammer moves than the key at let-off: the lever ratio.",
     ),
 ];
 
@@ -3215,6 +3225,17 @@ struct Voice {
     damper_thud: [f32; 3],
     /// Samples of a merged blow's momentum still to arrive.
     push_in: u32,
+    /// Samples until the key reaches its bed: the thump waits this long
+    /// after the string is struck. See `ACTION_RATIO`.
+    thump_in: u32,
+    /// A merged blow's knock rising over the contact, as a fresh voice's
+    /// rises under its onset: 1 at the blow, falling by `noise_rise_step`.
+    noise_rise: f32,
+    noise_rise_step: f32,
+    /// How much of the knock and of the pulse the merged blow ADDED, so
+    /// the rise holds back only that and not what the voice already had.
+    noise_hold: f32,
+    clang_hold: f32,
     /// Rough loudness, refreshed at cull time; used to steal the quietest.
     energy: f32,
     /// Tension-modulation glide: relative frequency step per cull, and how
@@ -3313,6 +3334,11 @@ impl Default for Voice {
             damper_pressed: false,
             damper_thud: [0.0; 3],
             push_in: 0,
+            thump_in: 0,
+            noise_rise: 0.0,
+            noise_rise_step: 0.0,
+            noise_hold: 0.0,
+            clang_hold: 0.0,
             energy: 0.0,
             glide_rate: 0.0,
             glide_steps: 0,
@@ -3398,8 +3424,10 @@ impl Voice {
         let upper = 1.0 + (self.longitudinal_upper - 1.0) * self.upper_env;
         // The strike's own tension pulse, added AFTER the surplus scaling:
         // its level answers to the Impact Burst fader alone.
-        let kick = self.clang_feed;
+        // A merged blow's pulse rises over the contact like its knock.
+        let kick = self.clang_feed - self.clang_hold * self.noise_rise;
         self.clang_feed *= self.clang_feed_decay;
+        self.clang_hold *= self.clang_feed_decay;
         sum += self.longitudinal[0].tick(drive + kick);
         for mode in self.longitudinal[1..].iter_mut() {
             sum += mode.tick(drive * upper + kick);
@@ -3416,7 +3444,10 @@ impl Voice {
             // end a bass one does; without this the knock is a thud at every
             // pitch — a bag being hit rather than an action working.
             self.noise_body += self.noise_body_coefficient * (self.noise_lp - self.noise_body);
-            let burst = (self.noise_lp - self.noise_body) * self.noise_amp;
+            let burst = (self.noise_lp - self.noise_body)
+                * (self.noise_amp - self.noise_hold * self.noise_rise);
+            self.noise_rise *= self.noise_rise_step;
+            self.noise_hold *= self.noise_decay;
             if self.thump_keybed {
                 self.keybed_out += burst;
             } else {
@@ -3427,7 +3458,10 @@ impl Voice {
             // low-pass whose bandwidth contracts over time.
             self.noise_coefficient *= self.noise_shrink;
         }
-        if self.thump_amp > 1e-7 {
+        if self.thump_in > 0 {
+            // The hammer has struck; the key is still on its way to the bed.
+            self.thump_in -= 1;
+        } else if self.thump_amp > 1e-7 {
             self.thump_seed = self
                 .thump_seed
                 .wrapping_mul(1_664_525)
@@ -4741,6 +4775,15 @@ pub static SIM_TOP_HZ: Knob = Knob::new(8_000.0);
 /// at 385 against 393-394 (2026-09-02), fortissimo untouched.
 pub static HAMMER_V_FF: Knob = Knob::new(6.8);
 
+/// Samples between the string being struck and the key reaching its bed:
+/// the key's aftertouch at the key's speed, less the hammer's flight at
+/// the hammer's. Never negative: a key that lands before its hammer flies
+/// is a regulation fault, not a case.
+fn keybed_delay(letoff: f32, sample_rate: f32) -> u32 {
+    let travel_mm = KEY_AFTERTOUCH_MM.get() * ACTION_RATIO.get() - LETOFF_DISTANCE_MM.get();
+    (travel_mm.max(0.0) * 1.0e-3 / letoff.max(0.05) * sample_rate) as u32
+}
+
 /// The hammer's free flight: the let-off distance, in millimetres. The jack
 /// lets the hammer go this far short of the string and it flies the rest
 /// on its own, against gravity, so a hammer let off with less energy than
@@ -4817,11 +4860,31 @@ pub static KEY_REPETITION_POINT: Knob = Knob::new(0.33);
 /// full one as the key returns the rest of the way.
 pub static REPETITION_FROM_CHECK: Knob = Knob::new(0.75);
 
-/// The contact time a merged blow is spread over, s. A hammer meets a
-/// string that is already moving for one to three milliseconds, and the
-/// momentum it gives arrives over that time, not in one sample -- which
-/// is what the merge did before, and was the pop that switched it off.
-pub static MERGE_RAMP_S: Knob = Knob::new(0.002);
+/// The contact time a merged blow's momentum is spread over, s; nought
+/// puts it into the cosine quadrature in one sample, which leaves the
+/// output continuous on its own. A hammer meets a string that is already
+/// moving for one to three milliseconds, so the spread is the physical
+/// shape -- but measured on the blow's own contribution (the render with
+/// the blow less the render without, first millisecond, 0.171.26), the
+/// spread push came out four times ROUGHER than the one-sample push
+/// (0.021 against 0.005 largest step) for every length from eight samples
+/// up, and the cause was not found. Nought until it is; the machinery
+/// stays for the ear to try.
+pub static MERGE_RAMP_S: Knob = Knob::new(0.0);
+
+/// The key's travel after let-off, mm: the aftertouch. The key lands on
+/// its bed this far past the point where the jack lets the hammer go.
+/// Regulation practice, about a millimetre on a grand.
+pub static KEY_AFTERTOUCH_MM: Knob = Knob::new(1.0);
+
+/// How much faster the hammer moves than the key at let-off: the action's
+/// lever ratio, five to six on a grand. With the aftertouch and the
+/// let-off distance it gives the time between the string being struck
+/// and the key reaching the bed, `(aftertouch * ratio - letoff) / v_letoff`:
+/// three millimetres' worth, five milliseconds at pianissimo and under
+/// half a millisecond at fortissimo. RF-73's key landed 1.0 ms after
+/// let-off at its strong drive with a 1 mm aftertouch.
+pub static ACTION_RATIO: Knob = Knob::new(5.5);
 /// How much longer the integration runs than the nominal contact time. The
 /// hammer is still in contact when it stops, so this sets how heavily it
 /// pushes the low modes: measured on C2's first 30 ms, stretching it puts
@@ -6545,7 +6608,7 @@ impl ConcertGrand {
         // The escapement: the hammer flies the let-off on its own, and a
         // hammer let off too slowly turns back short of the string. The key
         // is down and its damper is up; the string is free and silent.
-        let (_, at_string) = self.hammer_speeds(velocity);
+        let (letoff, at_string) = self.hammer_speeds(velocity);
         if at_string <= 0.0 {
             self.hold_silent(note);
             return;
@@ -7805,15 +7868,27 @@ impl ConcertGrand {
             }
             self.active_partials += appended;
             voice.push_in = merge_ramp;
+            // The key bottoms out on every blow, this one included, the
+            // aftertouch after the strike.
+            voice.thump_amp = voice.thump_amp.max(thump_amp);
+            voice.thump_rise = 1.0;
+            voice.thump_in = keybed_delay(letoff, sample_rate);
             for (mine, theirs) in voice.duplex.iter_mut().zip(duplex.iter()) {
-                mine.s += theirs.s;
-                mine.c += theirs.c;
+                // Into the cosine quadrature alone, as the partials: the
+                // output quadrature stays continuous across the blow.
+                let magnitude = sqrtf(theirs.s * theirs.s + theirs.c * theirs.c);
+                mine.c += if theirs.c < 0.0 {
+                    -magnitude
+                } else {
+                    magnitude
+                };
             }
             voice.held = true;
             voice.sustained = false;
             voice.damper_applied = 0.0;
             voice.energy = 1.0;
             // The mechanism knocks again in full.
+            let knock_before = voice.noise_amp;
             voice.noise_amp = voice.noise_amp.max(
                 action_noise_dynamic(velocity)
                     * KNOCK_LEVEL.get()
@@ -7821,10 +7896,16 @@ impl ConcertGrand {
                     * chiff_mult
                     * Controls::noise_gain(self.controls.action_noise),
             );
+            voice.noise_hold = voice.noise_amp - knock_before;
             voice.noise_decay = noise_decay;
             voice.noise_coefficient = noise_coefficient;
             voice.noise_body_coefficient = noise_body_coefficient;
             voice.noise_shrink = noise_shrink;
+            // And rises over the contact, as a fresh voice's knock rises
+            // under its onset: a living voice cannot be ramped from rest,
+            // so the knock carries its own rise.
+            voice.noise_rise = 1.0;
+            voice.noise_rise_step = expf(-1.0 / (MERGE_RAMP_S.get().max(1e-4) * sample_rate));
             // The impact's tension pulse fires again on the wire it finds.
             let clang_kick = IMPACT_CLANG.get()
                 * impact_dynamic(velocity)
@@ -7832,6 +7913,7 @@ impl ConcertGrand {
                 * self.clang_register(position)
                 * impact_gain;
             self.voices[slot].clang_feed += clang_kick;
+            self.voices[slot].clang_hold = clang_kick;
             self.voices[slot].clang_feed_decay =
                 expf(-1.0 / (IMPACT_PULSE_TAU_S.get() * sample_rate));
             // The re-struck wire is full of fresh high partials again.
@@ -7866,6 +7948,10 @@ impl ConcertGrand {
         voice.damper_phase = 0;
         voice.damper_pressed = false;
         voice.push_in = 0;
+        voice.noise_rise = 0.0;
+        voice.noise_rise_step = 0.0;
+        voice.noise_hold = 0.0;
+        voice.clang_hold = 0.0;
         // The string is tuned at rest, so the stretch it carries once the
         // note has died away must pull it nowhere: the rest value is zero and
         // everything above it is the note sharpening itself.
@@ -7968,6 +8054,9 @@ impl ConcertGrand {
         voice.noise_lp = 0.0;
         voice.noise_seed = 0x9E37_79B9 ^ (note as u32).wrapping_mul(2_654_435_761);
         voice.thump_amp = thump_amp;
+        // The string is struck first; the key lands on its bed the
+        // aftertouch later, the hammer's flight sooner. See ACTION_RATIO.
+        voice.thump_in = keybed_delay(letoff, sample_rate);
         voice.thump_keybed = false;
         voice.thump_decay = thump_decay;
         voice.thump_rise = 1.0;
@@ -10718,6 +10807,46 @@ mod tests {
     }
 
     #[test]
+    fn the_key_bottoms_out_after_the_string_at_pianissimo() {
+        // After let-off the key has a millimetre of aftertouch to travel
+        // and the hammer two and a half to fly; the key is five and a half
+        // times slower. At pianissimo the string is struck three
+        // milliseconds and more before the key lands; at fortissimo the
+        // two nearly coincide. The thump waits exactly that long.
+        let delay_at = |velocity: u8| {
+            let mut piano = prepared();
+            render(&mut piano, 1, &[note_on(60, velocity)]);
+            let voice = piano
+                .voices
+                .iter()
+                .find(|voice| voice.active && voice.note == 60)
+                .unwrap();
+            voice.thump_in as f32 / FS as f32 * 1000.0
+        };
+        let soft = delay_at(20);
+        let loud = delay_at(120);
+        assert!(
+            soft > 3.0 && soft < 8.0,
+            "pianissimo: the key landed {soft:.1} ms after the string"
+        );
+        assert!(
+            loud < 1.0,
+            "fortissimo: the key landed {loud:.2} ms after the string"
+        );
+        // And the thump does arrive once the key lands.
+        let mut piano = prepared();
+        render(&mut piano, 1, &[note_on(60, 20)]);
+        render(&mut piano, (FS * 0.02) as usize, &[]);
+        let voice = piano
+            .voices
+            .iter()
+            .find(|voice| voice.active && voice.note == 60)
+            .unwrap();
+        assert_eq!(voice.thump_in, 0);
+        assert!(voice.thump_amp > 0.0 && voice.thump_amp < 1.0);
+    }
+
+    #[test]
     fn a_key_pressed_before_it_returned_does_not_strike() {
         // Key up, key down again five milliseconds later: the key has risen
         // an eighth of its return, the jack has not reset, and the hammer
@@ -10789,42 +10918,54 @@ mod tests {
     #[test]
     fn a_repeated_note_on_a_moving_string_does_not_step() {
         // Under the pedal the second blow lands on a string still moving and
-        // merges into it. Its momentum arrives over the contact, so the
-        // largest sample-to-sample step in the first five milliseconds of
-        // the second blow is no worse than the first blow's own; pushed in
-        // one sample it was the pop that switched the merge off.
-        let steps = |merge: bool| {
+        // merges into it: momentum into the cosine quadrature, the output
+        // quadrature continuous, so the largest sample-to-sample step of
+        // the blow's own contribution in its first millisecond stays well
+        // under the ringing note's own slope.
+        // The blow's own contribution: the same instrument rendered twice,
+        // with and without the second note-on, and the two subtracted --
+        // the renders are deterministic.
+        let ringing = |blow: bool| {
             let mut piano = prepared();
-            piano.restrike_merge = merge;
             let pedal = MidiEvent {
                 frame: 0,
                 data: [0xB0, 64, 127],
                 length: 3,
             };
             render(&mut piano, 16, &[pedal]);
-            let first = render(&mut piano, (FS * 0.005) as usize, &[note_on(60, 100)]);
-            render(&mut piano, (FS * 0.1) as usize, &[note_off(60)]);
-            let second = render(&mut piano, (FS * 0.005) as usize, &[note_on(60, 100)]);
-            let biggest = |x: &[f32]| {
-                x.windows(2)
-                    .map(|pair| (pair[1] - pair[0]).abs())
-                    .fold(0.0f32, f32::max)
+            render(&mut piano, (FS * 0.001) as usize, &[note_on(60, 100)]);
+            render(&mut piano, (FS * 0.099) as usize, &[note_off(60)]);
+            let before = render(&mut piano, (FS * 0.001) as usize, &[]);
+            // The first millisecond of the blow: the contact, before the key
+            // reaches its bed (the thump is a knock of its own).
+            let events: Vec<MidiEvent> = if blow {
+                vec![note_on(60, 100)]
+            } else {
+                Vec::new()
             };
-            (biggest(&first), biggest(&second), piano.strike_serial)
+            let window = render(&mut piano, (FS * 0.001) as usize, &events);
+            (before, window, piano.strike_serial)
         };
-        let (first, second, strikes) = steps(true);
+        let biggest = |x: &[f32]| {
+            x.windows(2)
+                .map(|pair| (pair[1] - pair[0]).abs())
+                .fold(0.0f32, f32::max)
+        };
+        let steps = |_merge: bool| {
+            let (before, with, strikes) = ringing(true);
+            let (_, without, _) = ringing(false);
+            let blow: Vec<f32> = with
+                .iter()
+                .zip(without.iter())
+                .map(|(a, b)| a - b)
+                .collect();
+            (biggest(&before), biggest(&blow), strikes)
+        };
+        let (before, second, strikes) = steps(true);
         assert_eq!(strikes, 2);
-        // The same blow pushed in one sample, for the comparison.
-        MERGE_RAMP_S.set(0.5 / FS as f32);
-        let (_, instant, _) = steps(true);
-        MERGE_RAMP_S.set(MERGE_RAMP_S.compiled());
         assert!(
-            second < 2.0 * first,
-            "the merged blow stepped: {second} against the first blow's {first}"
-        );
-        assert!(
-            second < 0.9 * instant,
-            "the ramp did not soften the push: {second} against {instant} in one sample"
+            second < 0.3 * before,
+            "the merged blow stepped: {second} against the ringing note's own slope {before}"
         );
     }
 

@@ -860,6 +860,33 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The key bottoms out after the string, and the merge's push in one
+sample (0.171.26).** After let-off the key still has its aftertouch to
+travel and the hammer its flight; the key is the action's ratio slower.
+So the thump waits `(KEY_AFTERTOUCH_MM · ACTION_RATIO − LETOFF_DISTANCE_MM)
+/ v_letoff` -- three millimetres' worth: 5 ms at pianissimo, under half a
+millisecond at fortissimo (RF-73's key landed 1.0 ms after let-off at its
+strong drive with a 1 mm aftertouch), one countdown per voice
+(`thump_in`), and a merged blow bottoms out again the same way. The
+thump's level stays the measured law in MIDI velocity: read as a power of
+the key's speed through the action's exponential map it would be 3.5 dB
+lighter at mezzo-forte than the reference's knocks were measured to be,
+and the measurement wins over the assumed square. And a correction to
+0.171.25: the merged blow's momentum goes into the cosine quadrature in
+one sample again (`MERGE_RAMP_S` = 0). Measured on the blow's own
+contribution -- the render with the blow less the same render without it,
+the first millisecond -- the push spread over the contact came out four
+times rougher than the one-sample push (0.021 against 0.005 largest
+sample step) for every length from eight samples up, and the cause was
+not found; the one-sample push into `c` leaves the output continuous on
+its own, which the test now holds it to (under 0.3 of the ringing note's
+own slope). The machinery stays behind the knob for the ear. A merged
+blow's knock and tension pulse hold back only what they added while the
+rise runs, never what the voice already had. Tested: the pianissimo key
+lands 3-8 ms after the string and the fortissimo one under 1 ms, and the
+thump arrives once it has. The Campanella: 531 steals; the nocturne 254
+against 1294 before the merge came back.
+
 **Repetition with the key's state, and the merge back on (0.171.25).**
 MIDI carries no key position, so the time since a key's last key-up
 against how long that key takes to come back (`KEY_RETURN_MS` = 40, scaled

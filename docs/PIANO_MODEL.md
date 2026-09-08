@@ -860,6 +860,37 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**Repetition with the key's state, and the merge back on (0.171.25).**
+MIDI carries no key position, so the time since a key's last key-up
+against how long that key takes to come back (`KEY_RETURN_MS` = 40, scaled
+by the release speed like the damper's landing) is the model's reading of
+where the key is when it is pressed again. Below the repetition point
+(`KEY_REPETITION_POINT` = 0.33 of the return) the jack has not reset: no
+blow -- the strike count does not move -- but the key goes down and lifts
+its damper again, catching a felt on its way down, holding a string the
+pedal had, or taking a silent key. Above it the hammer is thrown from the
+back check, a third of the way up: the let-off speed is
+`REPETITION_FROM_CHECK` = 0.75 of the full blow's just past the point
+(sqrt(1/3) = 0.58 for a constant push over a third of the travel, more for
+the repetition spring that holds the hammer there), growing back to the
+full blow as the key returns the rest of the way. All regulation geometry,
+stated as such; RF-73 measured that a second blow's strength is the state
+the first left behind, and a grand's lever and check exist to make that
+repeatable. And the merge of a re-strike into the living voice, off since
+0.171.5 for the pop of a momentum pushed into the phasors in one sample,
+is on again: the push is spread over the contact (`MERGE_RAMP_S` = 2 ms,
+`Partial::push` added to the cosine quadrature for `push_in` samples), and
+the partials the living voice did not have arrive the same way, their
+velocity quadrature pushed in from nought. The switch is `RESTRIKE_FRESH`
+now, nought for the merge. Tested: a key pressed again five milliseconds
+after its key-up strikes nothing and holds its note with the felt caught;
+the blow from check is 0.75 just past the point, between half-way, and
+the full blow once returned; a note repeated under the pedal steps less
+than twice the first blow's largest sample step and less than the same
+push in one sample. The Campanella: 524 voice steals against 1899 with
+every repeated note struck fresh beside its ghost. Rendered:
+`10-renders/liszt-la-campanella-cg0.171.25-concert-308.wav`.
+
 **The felt lands late, and bounces (0.171.24).** Until now a key-up seated
 the damper in its own sample. In a grand the key lets the damper down: the
 felt meets the string when the returning key passes back through the

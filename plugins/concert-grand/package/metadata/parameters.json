@@ -3665,8 +3665,8 @@
     },
     {
       "index": 177,
-      "id": "knob_restrike_merge",
-      "name": "RESTRIKE_MERGE",
+      "id": "knob_restrike_fresh",
+      "name": "RESTRIKE_FRESH",
       "page": "model_hammer",
       "order": 42,
       "kind": {
@@ -3905,6 +3905,90 @@
         "maximum": 16.0,
         "step": 0.01,
         "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 189,
+      "id": "knob_key_return_ms",
+      "name": "KEY_RETURN_MS",
+      "page": "model_hammer",
+      "order": 47,
+      "kind": {
+        "type": "float",
+        "minimum": 2.5,
+        "maximum": 640.0,
+        "step": 0.4,
+        "default": 40.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 190,
+      "id": "knob_key_repetition_point",
+      "name": "KEY_REPETITION_POINT",
+      "page": "model_hammer",
+      "order": 48,
+      "kind": {
+        "type": "float",
+        "minimum": 0.020625,
+        "maximum": 5.28,
+        "step": 0.0033,
+        "default": 0.33,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 191,
+      "id": "knob_repetition_from_check",
+      "name": "REPETITION_FROM_CHECK",
+      "page": "model_hammer",
+      "order": 49,
+      "kind": {
+        "type": "float",
+        "minimum": 0.046875,
+        "maximum": 12.0,
+        "step": 0.0075,
+        "default": 0.75,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 192,
+      "id": "knob_merge_ramp_s",
+      "name": "MERGE_RAMP_S",
+      "page": "model_hammer",
+      "order": 50,
+      "kind": {
+        "type": "float",
+        "minimum": 0.000125,
+        "maximum": 0.032,
+        "step": 2e-05,
+        "default": 0.002,
         "taper": "logarithmic"
       },
       "flags": {

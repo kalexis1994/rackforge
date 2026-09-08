@@ -217,7 +217,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 147;
+pub const KNOB_COUNT: usize = 151;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -776,8 +776,8 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "A further softening of the top felt, in decades at C8, log-linear from C4.",
     ),
     (
-        "RESTRIKE_MERGE",
-        &RESTRIKE_MERGE,
+        "RESTRIKE_FRESH",
+        &RESTRIKE_FRESH,
         "Whether a re-strike merges into the living voice (1) or eases it out and strikes fresh (0).",
     ),
     (
@@ -834,6 +834,26 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "DAMPER_DWELL_MS",
         &DAMPER_DWELL_MS,
         "How long each bounce's contact holds the string, ms.",
+    ),
+    (
+        "KEY_RETURN_MS",
+        &KEY_RETURN_MS,
+        "How long a key takes to come all the way back up, ms; the release speed scales it.",
+    ),
+    (
+        "KEY_REPETITION_POINT",
+        &KEY_REPETITION_POINT,
+        "The fraction of the key's return at which the jack resets; pressed again below it, no blow.",
+    ),
+    (
+        "REPETITION_FROM_CHECK",
+        &REPETITION_FROM_CHECK,
+        "The hammer's let-off speed from the back check, as a fraction of the full blow's.",
+    ),
+    (
+        "MERGE_RAMP_S",
+        &MERGE_RAMP_S,
+        "The contact time a re-strike's momentum is spread over on a string still moving, s.",
     ),
 ];
 
@@ -1592,6 +1612,9 @@ struct Partial {
     coupling: f32,
     /// This partial's weight in the string's slope at the bridge.
     slope: f32,
+    /// A re-strike's momentum still arriving: added to `c` each sample
+    /// while the voice's `push_in` runs. See `MERGE_RAMP_S`.
+    push: [f32; LANES],
 }
 
 impl Partial {
@@ -2415,7 +2438,12 @@ pub static SIM_MIN_MODES: Knob = Knob::new(4.0);
 /// note. The flutter of a fast repetition the merge was written for stays
 /// here behind the switch until the push itself can be spread over the
 /// contact.
-pub static RESTRIKE_MERGE: Knob = Knob::new(0.0);
+///
+/// Since 0.171.25 the switch reads the other way and the merge is the
+/// shipped path: the push is spread over the contact (`MERGE_RAMP_S`),
+/// which is what the step needed. Nought merges; one eases out and
+/// strikes fresh.
+pub static RESTRIKE_FRESH: Knob = Knob::new(0.0);
 /// Initial-phase dispersion of a strike, radians per harmonic -- see the
 /// note where it is applied.
 ///
@@ -3185,6 +3213,8 @@ struct Voice {
     damper_pressed: bool,
     /// The felt's thud at the landing: coefficient, decay, release gain.
     damper_thud: [f32; 3],
+    /// Samples of a merged blow's momentum still to arrive.
+    push_in: u32,
     /// Rough loudness, refreshed at cull time; used to steal the quietest.
     energy: f32,
     /// Tension-modulation glide: relative frequency step per cull, and how
@@ -3282,6 +3312,7 @@ impl Default for Voice {
             damper_dwell: 1,
             damper_pressed: false,
             damper_thud: [0.0; 3],
+            push_in: 0,
             energy: 0.0,
             glide_rate: 0.0,
             glide_steps: 0,
@@ -3307,6 +3338,11 @@ impl Voice {
     fn tick(&mut self, sympathy: f32) -> f32 {
         let mut sum = 0.0;
         self.keybed_out = 0.0;
+        // A merged blow's momentum, arriving over the contact.
+        let pushing = self.push_in > 0;
+        if pushing {
+            self.push_in -= 1;
+        }
         let knob_horizontal_bridge = HORIZONTAL_BRIDGE.get();
         // The tension the string is under RIGHT NOW, taken from the partials
         // that carry the energy.
@@ -3327,6 +3363,11 @@ impl Voice {
             if sympathy != 0.0 {
                 let push = sympathy * partial.coupling;
                 partial.s[0] += push;
+            }
+            if pushing {
+                for lane in 0..LANES {
+                    partial.c[lane] += partial.push[lane];
+                }
             }
             let voice = partial.tick(knob_horizontal_bridge);
             slope += voice * partial.slope;
@@ -4338,6 +4379,15 @@ pub struct ConcertGrand {
     silent_state: [u8; SILENT_SLOTS],
     /// Samples left before a damped silent string gives its slot back.
     silent_in: [u32; SILENT_SLOTS],
+    /// The sample clock, for the time since a key's last key-up.
+    clock: u32,
+    key_up_at: [u32; NOTE_COUNT],
+    /// How long that key takes to come all the way back, in samples; 0
+    /// for a key that has never been released.
+    key_return: [u32; NOTE_COUNT],
+    /// The blow's scale for the strike under way: 1 from rest, less from
+    /// the back check. See `REPETITION_FROM_CHECK`.
+    repetition_scale: f32,
     /// The damped strings' bed: forty fundamentals, A0 up, humming under everything.
     bed: [BodyMode; BED_COUNT],
     /// The open-register shimmer: short undamped HF feedback delay network.
@@ -4417,7 +4467,7 @@ impl Default for ConcertGrand {
             pedal: false,
             soft: 0.0,
             active_partials: 0,
-            restrike_merge: RESTRIKE_MERGE.compiled() >= 0.5,
+            restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
             // Per-note calibration fitted against the YDP samples: ten
             // anchors from A0 to C8, nine multipliers each (felt, HF floor,
             // thump, chiff, decay, clang, phantoms, level, treble life).
@@ -4491,6 +4541,10 @@ impl Default for ConcertGrand {
             silent_note: [0; SILENT_SLOTS],
             silent_state: [SILENT_FREE; SILENT_SLOTS],
             silent_in: [0; SILENT_SLOTS],
+            clock: 0,
+            key_up_at: [0; NOTE_COUNT],
+            key_return: [0; NOTE_COUNT],
+            repetition_scale: 1.0,
             bed: [BodyMode::default(); BED_COUNT],
             halo: [[0.0; HALO_BUFFER]; 4],
             halo_len: [1; 4],
@@ -4739,6 +4793,35 @@ pub static DAMPER_RESTITUTION: Knob = Knob::new(0.5);
 /// How long each bounce's contact holds the string, in milliseconds. RF-73's
 /// felt was in contact for a tenth to a third of its bouncing.
 pub static DAMPER_DWELL_MS: Knob = Knob::new(1.0);
+
+/// How long a key takes to come all the way back up after a key-up at an
+/// unknown release speed, ms; the release speed scales it (`damper_span`).
+/// A grand's key returns under its own weight and the lead in it, forty
+/// to sixty milliseconds from the bottom. Regulation geometry, stated as
+/// such: MIDI carries no key position, so the time since the key-up is the
+/// only reading of where the key is.
+pub static KEY_RETURN_MS: Knob = Knob::new(40.0);
+
+/// The repetition point, as a fraction of the key's return: the height the
+/// key must rise to for the jack to reset under the hammer. About a third
+/// of the dip on a regulated grand. Pressed again below it, the key goes
+/// down and lifts its damper but pushes a hammer the jack is not under:
+/// no blow.
+pub static KEY_REPETITION_POINT: Knob = Knob::new(0.33);
+
+/// The blow from check. A key pressed again just past the repetition point
+/// throws the hammer from the back check, a third of the way up, so the
+/// same key speed makes a slower hammer: with a constant push over a third
+/// of the travel, sqrt(1/3) = 0.58; the repetition spring, which holds the
+/// hammer up for exactly this, makes it more. The blow grows back to the
+/// full one as the key returns the rest of the way.
+pub static REPETITION_FROM_CHECK: Knob = Knob::new(0.75);
+
+/// The contact time a merged blow is spread over, s. A hammer meets a
+/// string that is already moving for one to three milliseconds, and the
+/// momentum it gives arrives over that time, not in one sample -- which
+/// is what the merge did before, and was the pop that switched it off.
+pub static MERGE_RAMP_S: Knob = Knob::new(0.002);
 /// How much longer the integration runs than the nominal contact time. The
 /// hammer is still in contact when it stops, so this sets how heavily it
 /// pushes the low modes: measured on C2's first 30 ms, stretching it puts
@@ -5423,7 +5506,7 @@ impl ConcertGrand {
     /// flight's toll between the two. See `LETOFF_DISTANCE_MM`.
     fn hammer_speeds(&self, velocity: f32) -> (f32, f32) {
         let span = ACTION_SPAN_BASE.get() + ACTION_SPAN_PER_DYNAMICS.get() * self.controls.dynamics;
-        let mut letoff = HAMMER_V_FF.get() * powf(span, velocity - 1.0);
+        let mut letoff = HAMMER_V_FF.get() * powf(span, velocity - 1.0) * self.repetition_scale;
         let knee = (LETOFF_KNEE.get() / 127.0).clamp(0.0, 1.0);
         if knee > 0.0 && velocity < knee {
             letoff *= velocity / knee;
@@ -5455,6 +5538,35 @@ impl ConcertGrand {
         self.silent_note[slot] = note;
         self.silent_state[slot] = SILENT_HELD;
         self.silent_in[slot] = 0;
+    }
+
+    /// A key pressed again before the jack reset: no blow, but the key is
+    /// down and its damper is up again. A felt on its way down is caught;
+    /// a string under the pedal is held by the key from here; a string with
+    /// no voice is a silent key.
+    fn catch_key(&mut self, channel: u8, note: u8) {
+        let rate = self.sample_rate;
+        let grip = self.controls.damper_grip();
+        let mut caught = false;
+        for voice in &mut self.voices {
+            if !(voice.active && !voice.halo && voice.note == note && voice.channel == channel) {
+                continue;
+            }
+            if voice.damper_phase != 0 {
+                voice.cancel_damper();
+            }
+            if voice.sustained && voice.damper_applied > 0.0 {
+                let own = Self::damper_for(note, rate, grip * voice.firmness, 1.0);
+                voice.press_damper(own, -voice.damper_applied);
+                voice.damper_applied = 0.0;
+            }
+            voice.held = true;
+            voice.sustained = false;
+            caught = true;
+        }
+        if !caught {
+            self.hold_silent(note);
+        }
     }
 
     fn silent_slot_of(&self, note: u8) -> Option<usize> {
@@ -6410,6 +6522,26 @@ impl ConcertGrand {
 
         // The key is down from here, whether or not the hammer arrives.
         self.key_down[index] = true;
+        // Where the key was when it was pressed again: all the way up, or
+        // still on its way back from the last key-up. Below the repetition
+        // point the jack has not reset -- the key goes down and lifts its
+        // damper again, and the hammer stays where it is. Above it the blow
+        // comes from the back check, lighter, growing back to the full one
+        // as the key returns the rest of the way.
+        let since = self.clock.wrapping_sub(self.key_up_at[index]);
+        let returned = if self.key_return[index] == 0 {
+            1.0
+        } else {
+            (since as f32 / self.key_return[index] as f32).min(1.0)
+        };
+        let point = KEY_REPETITION_POINT.get().clamp(0.0, 0.99);
+        if returned < point {
+            self.catch_key(channel, note);
+            return;
+        }
+        let from_check = REPETITION_FROM_CHECK.get().clamp(0.1, 1.0);
+        self.repetition_scale =
+            from_check + (1.0 - from_check) * (returned - point) / (1.0 - point);
         // The escapement: the hammer flies the let-off on its own, and a
         // hammer let off too slowly turns back short of the string. The key
         // is down and its damper is up; the string is free and silent.
@@ -7550,6 +7682,10 @@ impl ConcertGrand {
                 }
             }
             let mut appended = 0usize;
+            let merge_ramp = ((MERGE_RAMP_S.get() * sample_rate) as u32).max(1);
+            for partial in voice.partials[..voice.partial_count].iter_mut() {
+                partial.push = [0.0; LANES];
+            }
             for fresh in partials[..placed].iter() {
                 let target = if fresh.slope != 0.0 {
                     let h = roundf(fresh.slope.abs() * 16.0) as usize;
@@ -7641,19 +7777,34 @@ impl ConcertGrand {
                         // the output, and only the cosine quadrature keeps
                         // `s` continuous. The repeated note starts more in
                         // step than a fresh one; it does not click.
+                        //
+                        // And over the contact, not in one sample: the
+                        // momentum arrives in `push_in` equal steps
+                        // (MERGE_RAMP_S), which is what the step that
+                        // switched the merge off needed.
                         let energy =
                             sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
-                        existing.c[lane] += if fresh.c[lane] < 0.0 { -energy } else { energy };
+                        let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
+                        existing.push[lane] = signed / merge_ramp as f32;
                     }
                     existing.coupling = fresh.coupling;
                     existing.drain = fresh.drain;
                 } else if voice.partial_count < MAX_PARTIALS {
-                    voice.partials[voice.partial_count] = *fresh;
+                    // A partial the living voice did not have arrives over
+                    // the contact too: its velocity quadrature pushed in
+                    // from nought, its output quadrature already at rest.
+                    let mut arriving = *fresh;
+                    for lane in 0..LANES {
+                        arriving.push[lane] = arriving.c[lane] / merge_ramp as f32;
+                        arriving.c[lane] = 0.0;
+                    }
+                    voice.partials[voice.partial_count] = arriving;
                     voice.partial_count += 1;
                     appended += 1;
                 }
             }
             self.active_partials += appended;
+            voice.push_in = merge_ramp;
             for (mine, theirs) in voice.duplex.iter_mut().zip(duplex.iter()) {
                 mine.s += theirs.s;
                 mine.c += theirs.c;
@@ -7714,6 +7865,7 @@ impl ConcertGrand {
         voice.tension_in = TENSION_INTERVAL;
         voice.damper_phase = 0;
         voice.damper_pressed = false;
+        voice.push_in = 0;
         // The string is tuned at rest, so the stretch it carries once the
         // note has died away must pull it nowhere: the rest value is zero and
         // everything above it is the note sharpening itself.
@@ -8086,6 +8238,10 @@ impl ConcertGrand {
             && slot < NOTE_COUNT
         {
             self.key_down[slot] = false;
+            // Where the key is from here is the time since now against
+            // how long it takes to come back, a key let go fast sooner.
+            self.key_up_at[slot] = self.clock;
+            self.key_return[slot] = ((KEY_RETURN_MS.get() * 0.001 * rate * span) as u32).max(1);
         }
         // A silent key coming up: its damper lands as any other's, unless
         // the pedal is holding the rail.
@@ -8486,7 +8642,7 @@ impl ConcertGrand {
         if self.sample_rate <= 0.0 {
             return;
         }
-        self.restrike_merge = RESTRIKE_MERGE.get() >= 0.5;
+        self.restrike_merge = RESTRIKE_FRESH.get() < 0.5;
         self.tune();
         self.tune_board();
         self.tune_undamped();
@@ -8614,7 +8770,7 @@ impl Processor for ConcertGrand {
             return false;
         }
         self.sample_rate = sample_rate as f32;
-        self.restrike_merge = RESTRIKE_MERGE.get() >= 0.5;
+        self.restrike_merge = RESTRIKE_FRESH.get() < 0.5;
         self.tune_board();
         self.tune_open_strings();
         self.tune_undamped();
@@ -9397,6 +9553,7 @@ impl Processor for ConcertGrand {
         let mut refresh_busy = true;
 
         for frame in 0..frames as usize {
+            self.clock = self.clock.wrapping_add(1);
             while let Some(event) = midi.get(midi_index) {
                 if event.frame as usize != frame {
                     break;
@@ -10557,6 +10714,117 @@ mod tests {
         assert!(
             early_slope > late_slope * 1.5,
             "early {early_slope} vs late {late_slope}"
+        );
+    }
+
+    #[test]
+    fn a_key_pressed_before_it_returned_does_not_strike() {
+        // Key up, key down again five milliseconds later: the key has risen
+        // an eighth of its return, the jack has not reset, and the hammer
+        // stays where it is. No blow -- the strike count does not move --
+        // but the key is down and the felt that was falling is caught: the
+        // note goes on as a held note.
+        let mut piano = prepared();
+        render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 90)]);
+        let strikes = piano.strike_serial;
+        render(&mut piano, (FS * 0.005) as usize, &[note_off(60)]);
+        render(&mut piano, 16, &[note_on(60, 90)]);
+        assert_eq!(
+            piano.strike_serial, strikes,
+            "the hammer struck below the repetition point"
+        );
+        let voice = piano
+            .voices
+            .iter()
+            .find(|voice| voice.active && voice.note == 60)
+            .unwrap();
+        assert!(
+            voice.held && !voice.sustained,
+            "the caught key is not holding its note"
+        );
+        assert_eq!(voice.damper_phase, 0, "the felt is still falling");
+        assert!(piano.key_down[60 - LOW_NOTE as usize]);
+        // Pressed again after the key has come all the way back: a blow.
+        render(&mut piano, (FS * 0.2) as usize, &[note_off(60)]);
+        render(&mut piano, 16, &[note_on(60, 90)]);
+        assert_eq!(
+            piano.strike_serial,
+            strikes + 1,
+            "a returned key did not strike"
+        );
+        assert!((piano.repetition_scale - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_blow_from_check_is_lighter_and_grows_back() {
+        // Just past the repetition point the hammer is thrown from the back
+        // check and the let-off speed is REPETITION_FROM_CHECK of the full
+        // blow's; half-way back it is between; all the way back it is the
+        // full blow.
+        let scale_at = |wait: f32| {
+            let mut piano = prepared();
+            render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 90)]);
+            render(&mut piano, 16, &[note_off(60)]);
+            let full_return = piano.key_return[60 - LOW_NOTE as usize] as f32;
+            render(&mut piano, (wait * full_return) as usize, &[]);
+            render(&mut piano, 16, &[note_on(60, 90)]);
+            piano.repetition_scale
+        };
+        let from_check = REPETITION_FROM_CHECK.get();
+        let point = KEY_REPETITION_POINT.get();
+        let just_past = scale_at(point + 0.02);
+        let half_way = scale_at(0.5 * (1.0 + point));
+        let returned = scale_at(1.5);
+        assert!(
+            just_past < from_check + 0.05 && just_past >= from_check,
+            "just past: {just_past}"
+        );
+        assert!(
+            half_way > just_past && half_way < returned,
+            "half way: {half_way}"
+        );
+        assert!((returned - 1.0).abs() < 1e-6, "returned: {returned}");
+    }
+
+    #[test]
+    fn a_repeated_note_on_a_moving_string_does_not_step() {
+        // Under the pedal the second blow lands on a string still moving and
+        // merges into it. Its momentum arrives over the contact, so the
+        // largest sample-to-sample step in the first five milliseconds of
+        // the second blow is no worse than the first blow's own; pushed in
+        // one sample it was the pop that switched the merge off.
+        let steps = |merge: bool| {
+            let mut piano = prepared();
+            piano.restrike_merge = merge;
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
+            render(&mut piano, 16, &[pedal]);
+            let first = render(&mut piano, (FS * 0.005) as usize, &[note_on(60, 100)]);
+            render(&mut piano, (FS * 0.1) as usize, &[note_off(60)]);
+            let second = render(&mut piano, (FS * 0.005) as usize, &[note_on(60, 100)]);
+            let biggest = |x: &[f32]| {
+                x.windows(2)
+                    .map(|pair| (pair[1] - pair[0]).abs())
+                    .fold(0.0f32, f32::max)
+            };
+            (biggest(&first), biggest(&second), piano.strike_serial)
+        };
+        let (first, second, strikes) = steps(true);
+        assert_eq!(strikes, 2);
+        // The same blow pushed in one sample, for the comparison.
+        MERGE_RAMP_S.set(0.5 / FS as f32);
+        let (_, instant, _) = steps(true);
+        MERGE_RAMP_S.set(MERGE_RAMP_S.compiled());
+        assert!(
+            second < 2.0 * first,
+            "the merged blow stepped: {second} against the first blow's {first}"
+        );
+        assert!(
+            second < 0.9 * instant,
+            "the ramp did not soften the push: {second} against {instant} in one sample"
         );
     }
 

@@ -27,12 +27,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-106.rfplugin",
         "plugin_id": "org.rackforge.rf-106",
-        "version": "0.2.12",
+        "version": "0.2.19",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-106/"
-            "releases/download/v0.2.12/RF-106.rfplugin"
+            "releases/download/v0.2.19/RF-106.rfplugin"
         ),
-        "sha256": "6fa0ece966773f6a56616b0fba9fe390b1a61e6b666627615d36a02d4e93e304",
+        "sha256": "6428a8240c5f982e34d231db68140ea760f4a912e2cd422ecee09327f5d0dbfd",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -95,6 +95,78 @@ OFFICIAL_PLUGINS = (
             "web/app.js",
             "web/app_bg.wasm",
             "web/style.css",
+        ),
+    },
+    {
+        "filename": "RF-Limiter.rfplugin",
+        "plugin_id": "org.rackforge.rf-limiter",
+        "version": "0.1.0",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-limiter/"
+            "releases/download/v0.1.0/RF-Limiter.rfplugin"
+        ),
+        "sha256": "185a498e9e748f435322927a770a581e5e8c6afd14e813fd3a1583e839899fd7",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/play.js",
+        ),
+    },
+    {
+        "filename": "RF-EQ.rfplugin",
+        "plugin_id": "org.rackforge.rf-eq",
+        "version": "0.1.0",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-eq/"
+            "releases/download/v0.1.0/RF-EQ.rfplugin"
+        ),
+        "sha256": "8bd974d71dd8f2955173dde1a3cebca8e8a281fdf790fa66c296e7e16c4891c7",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/play.js",
+        ),
+    },
+    {
+        "filename": "RF-Comp.rfplugin",
+        "plugin_id": "org.rackforge.rf-comp",
+        "version": "0.1.0",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-comp/"
+            "releases/download/v0.1.0/RF-Comp.rfplugin"
+        ),
+        "sha256": "4a41650ca5155d7b9fedaf197320558c1fbeb816a915793007901e8b94060c4b",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/play.js",
         ),
     },
 )

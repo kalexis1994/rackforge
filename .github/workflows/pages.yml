@@ -54,7 +54,15 @@ jobs:
           cp -r web/public/demo/rackforge/. "$storage"
           python3 tools/make-probe-package.py \
             web/public/demo/rackforge/plugins/concert-grand "$RUNNER_TEMP/probe.rfplugin"
-          CHECK_TRACE_CALLS=1 node tools/check-browser-host.mjs \
+          # The check drives the host from JavaScript: every plugin in
+          # storage is compiled, instantiated and called from inside a wasm
+          # frame, and the demo carries six of them now. A default node
+          # process runs out of stack doing that and dies with SIGSEGV on an
+          # arbitrary call rather than raising anything. Both limits go up
+          # together -- the thread's, and V8's own, which has to stay under
+          # it or the overflow happens for real instead of being reported.
+          ulimit -s 65536
+          node --stack-size=60000 tools/check-browser-host.mjs \
             web/public/demo/rackforge-browser.wasm "$storage" "$RUNNER_TEMP/probe.rfplugin"
 
       - name: Install the interface dependencies

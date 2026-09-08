@@ -860,6 +860,24 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The felt grips sideways barely (0.171.16).** The user, against
+Pianoteq: "toca y el release baja suave; acá toco, se apaga y luego se
+alza un release latoso". The reference's release samples say how a
+damped note ends: the sound drops twenty-five to thirty decibels within
+twenty milliseconds of the key and then decays slowly, nine to fourteen
+per hundred milliseconds, in the note's own band — the string itself,
+sideways, under a felt that lands from above and grips the vertical
+polarisation, not the horizontal. The model damped every lane alike: a
+note stopped dead in thirty milliseconds and what remained was the free
+strings' ring at other pitches, exposed the moment the note vanished.
+`DAMPER_HORIZONTAL_GRIP` 0.15: the horizontal lane takes that share of
+the felt's grip, so its tail decays forty decibels a second at E6 and
+twenty-six at C4 (the reference's forty-seven and twenty-seven from 0.1
+to 0.4 s). A C5's own band after the key now reads −43/−49/−55/−64/−71
+dBFS at 0.02/0.05/0.1/0.2/0.4 s where it read −44/−51/−62/−79/−89, and
+the residue sits within three to six decibels of the reference through
+the tenor; the treble's remains six to ten low.
+
 **The last damper is the preset's (0.171.15).** The user checked
 Pianoteq and found the same free treble after F6; the sources say where
 each maker stops the row: Yamaha's grands carry 69 dampers, the last on

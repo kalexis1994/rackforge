@@ -2149,6 +2149,12 @@ const PEDAL_NOISE_T60_S: f32 = 1.0;
 /// with the thump.
 const KEYOFF_KNOCK: f32 = 0.09;
 const KEYOFF_T60_S: f32 = 0.22;
+/// See `Voice::damp`: the felt's grip on the horizontal polarisation as a
+/// share of its grip on the vertical. With the damper's stopping time
+/// `t` (33 ms at E6, 50 at C4) the sideways tail decays 8.7 * grip / t
+/// decibels per second: 0.15 is forty per second at E6, twenty-six at C4,
+/// against the reference's forty-seven and twenty-seven from 0.1 to 0.4 s.
+const DAMPER_HORIZONTAL_GRIP: f32 = 0.15;
 /// The click in the key-off: the reference's 1-3 kHz sits thirty-three
 /// decibels under its 30-150, and the dark burst alone had it at
 /// fifty-five. A short bright burst on the voice's action-noise path, as
@@ -3461,10 +3467,27 @@ impl Voice {
     }
 
     fn damp(&mut self, factor: f32, thud_coefficient: f32, thud_decay: f32, release_gain: f32) {
+        // The felt lands from above: it grips the vertical polarisation and
+        // barely the horizontal. Measured on the reference's release samples
+        // (`harmL*`): after a key-up the sound drops twenty-five to thirty
+        // decibels within twenty milliseconds and then decays SLOWLY, nine
+        // to fourteen decibels per hundred milliseconds, in the note's own
+        // band -- the string itself, sideways, under the felt. The model
+        // damped every lane alike, so a note stopped dead in thirty
+        // milliseconds and what came after was the free strings' ring at
+        // other pitches, heard as "se apaga y luego se alza un release
+        // latoso". The horizontal lane takes `DAMPER_HORIZONTAL_GRIP` of the
+        // felt's grip, and the release is the note fading, as it is.
+        let sideways = powf(factor, DAMPER_HORIZONTAL_GRIP);
         for partial in &mut self.partials[..self.partial_count] {
             for lane in 0..LANES {
-                partial.rc[lane] *= factor;
-                partial.rs[lane] *= factor;
+                let grip = if lane == LANE_HORIZONTAL {
+                    sideways
+                } else {
+                    factor
+                };
+                partial.rc[lane] *= grip;
+                partial.rs[lane] *= grip;
             }
         }
         // The key coming back and the damper landing make a small knock of

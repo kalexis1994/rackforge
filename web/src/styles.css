@@ -529,6 +529,452 @@ textarea {
   transform: translateY(1px) scale(0.98);
 }
 
+.play-plugin-actions {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.play-header-button > span.fx-button-mark {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* The chain drawer: a row of explicit height, like the touch controller's
+   dock (see PlayChainDrawer). Open and close are the height going to and
+   from nought; the stage below is a flex sibling and follows by layout,
+   frame by frame, so the plugin never pops to a new size. */
+.play-chain-drawer {
+  position: relative;
+  height: var(--play-chain-height, 0px);
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  z-index: 3;
+  transition: height var(--rf-motion-emphasized) var(--rf-ease-emphasized);
+}
+
+.play-chain-drawer.closed,
+.play-chain-drawer.closing {
+  height: 0;
+}
+
+.play-chain-drawer.closed {
+  visibility: hidden;
+}
+
+.play-chain-drawer.resizing {
+  transition: none;
+}
+
+.play-chain-panel {
+  min-height: 0;
+  display: grid;
+  /* Rows at their content's height whatever the row above allows: the
+     automatic height is read off this panel's scrollHeight, and a
+     shrinkable row would report the clamp back as the content. */
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: var(--rf-space-3);
+  padding: var(--rf-space-3) clamp(12px, 2.5vw, 26px) var(--rf-space-2);
+  color: var(--ink);
+  /* The same band the toolbar above is: one chrome around the plugin's own
+     panel, not a second surface with its own colour. */
+  background: rgba(7, 18, 27, 0.94);
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.play-chain-grip {
+  width: 100%;
+  height: 14px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(3, 11, 17, 0.99);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+/* Nothing on this faceplate is a pill (see `--rf-radius-*`): the grip is a
+   machined bar, and its colour is the accent, not a cyan of its own. */
+.play-chain-grip > span {
+  width: 46px;
+  height: 4px;
+  display: block;
+  background: color-mix(in srgb, var(--acid) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--acid) 70%, var(--line));
+  border-radius: var(--rf-radius-small);
+  transition:
+    width var(--rf-motion-fast) var(--rf-ease-standard),
+    background var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.play-chain-grip:hover > span,
+.play-chain-grip:focus-visible > span,
+.play-chain-drawer.resizing .play-chain-grip > span {
+  width: 64px;
+  background: var(--acid);
+}
+
+.play-chain-grip:focus-visible {
+  outline: none;
+}
+
+.play-chain-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.play-chain-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.play-chain-close {
+  width: var(--rf-target-compact);
+  height: var(--rf-target-compact);
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  background: rgba(111, 219, 239, 0.06);
+  border: 1px solid var(--line);
+  border-radius: var(--rf-radius-control);
+  box-shadow: var(--rf-elevation-control);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.play-chain-close:hover,
+.play-chain-close:focus-visible {
+  color: #021016;
+  background: var(--acid);
+  border-color: var(--acid);
+  outline: none;
+}
+
+.play-chain-nodes {
+  margin: 0;
+  padding: 2px 0;
+  display: flex;
+  align-items: stretch;
+  gap: var(--rf-space-3);
+  list-style: none;
+  overflow-x: auto;
+}
+
+.play-chain-node {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 52px;
+  padding: var(--rf-space-2) var(--rf-space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--rf-space-2);
+  background: rgba(111, 219, 239, 0.06);
+  border: 1px solid var(--line);
+  border-radius: var(--rf-radius-card);
+  box-shadow: var(--rf-elevation-control);
+}
+
+.play-chain-node + .play-chain-node::before {
+  content: "→";
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 0;
+  text-align: center;
+}
+
+.play-chain-node.instrument {
+  border-color: color-mix(in srgb, var(--entity-instrument, var(--acid)) 55%, var(--line));
+}
+
+.play-chain-node.effect.bypassed .play-chain-copy,
+.play-chain-node.effect.bypassed .play-chain-icon {
+  opacity: 0.45;
+}
+
+.play-chain-node.effect.missing {
+  border-style: dashed;
+}
+
+.play-chain-node.effect.open {
+  border-color: var(--acid);
+}
+
+/* An effect's own panel, in the drawer: a band as tall as the panel's
+   content, read from its document; when the screen is too short for the
+   whole drawer, the drawer scrolls rather than cut the panel. */
+.play-chain-drawer.with-panel .play-chain-panel {
+  overflow-y: auto;
+}
+
+.play-chain-effect-panel {
+  flex: 0 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--rf-radius-card);
+  box-shadow: var(--rf-elevation-card);
+  overflow: hidden;
+}
+
+.play-chain-effect-panel .plugin-frame-stage {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.play-chain-node.output {
+  border-style: dashed;
+}
+
+.play-chain-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border-radius: var(--rf-radius-small);
+}
+
+.play-chain-icon.plugin-icon-fallback {
+  display: grid;
+  place-items: center;
+  color: var(--acid-ink, #031018);
+  background: var(--acid);
+  font: 800 9px/1 var(--display-font);
+}
+
+.play-chain-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.play-chain-copy small {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.play-chain-copy strong {
+  font: 800 12px/1.2 var(--display-font);
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.play-chain-copy em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.play-chain-tools {
+  margin-left: var(--rf-space-1);
+  display: flex;
+  align-items: center;
+  gap: var(--rf-space-1);
+}
+
+/* The house control, `.rf-button--compact` in everything but the class:
+   these live inside a node and carry their own on-state. */
+.play-chain-tools button {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 var(--rf-space-2);
+  color: var(--ink);
+  background: rgba(111, 219, 239, 0.06);
+  border: 1px solid var(--line);
+  border-radius: var(--rf-radius-control);
+  box-shadow: var(--rf-elevation-control);
+  cursor: pointer;
+  font: 800 10px/1 var(--display-font);
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  transition:
+    color var(--rf-motion-fast) var(--rf-ease-standard),
+    background var(--rf-motion-fast) var(--rf-ease-standard),
+    border-color var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.play-chain-tools button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.play-chain-tools button:not(:disabled):hover,
+.play-chain-tools button:focus-visible {
+  border-color: var(--acid);
+  outline: none;
+}
+
+.play-chain-tools button.on {
+  color: var(--acid-ink, #021016);
+  background: var(--acid);
+  border-color: var(--acid);
+}
+
+.play-chain-add {
+  display: flex;
+  align-items: center;
+  gap: var(--rf-space-2);
+  padding: 0;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: 800 10px/1 var(--display-font);
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.play-chain-add > span {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--acid-ink, #031017);
+  background: var(--acid);
+  border-radius: var(--rf-radius-small);
+  font: 800 16px/1 var(--display-font);
+}
+
+.play-chain-node.add {
+  border-style: dashed;
+}
+
+.play-chain-node.add:hover,
+.play-chain-node.add:focus-within {
+  border-color: var(--acid);
+}
+
+.play-chain-node.add.active {
+  border-color: var(--acid);
+}
+
+.play-chain-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.play-chain-picker > small,
+.play-chain-picker-empty {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.play-chain-picker-empty {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+
+.play-chain-picker button {
+  padding: var(--rf-space-1) var(--rf-space-3) var(--rf-space-1) var(--rf-space-1);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rf-space-2);
+  color: var(--ink);
+  background: rgba(111, 219, 239, 0.06);
+  border: 1px solid var(--line);
+  border-radius: var(--rf-radius-control);
+  box-shadow: var(--rf-elevation-control);
+  cursor: pointer;
+}
+
+.play-chain-picker button:hover,
+.play-chain-picker button:focus-visible {
+  border-color: var(--acid);
+  outline: none;
+}
+
+.play-chain-picker button .play-chain-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.play-chain-picker strong {
+  font: 800 12px/1.2 var(--display-font);
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.play-chain-picker em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.play-chain-suggested {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.play-chain-suggested > small {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.play-chain-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--rf-radius-control);
+  font-size: 11px;
+}
+
+.play-chain-suggestion.missing {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.play-chain-suggestion em,
+.play-chain-suggestion i {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.play-chain-suggestion button {
+  padding: var(--rf-space-1) var(--rf-space-2);
+  color: var(--acid-ink, #021016);
+  background: var(--acid);
+  border: 0;
+  border-radius: var(--rf-radius-control);
+  cursor: pointer;
+  font: 800 10px/1 var(--display-font);
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
 .play-header-button.presets {
   justify-self: end;
 }

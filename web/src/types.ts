@@ -103,6 +103,23 @@ export interface SessionSnapshot {
   audition?: AuditionState;
   program_draft?: ProgramDraftState;
   parameter_links?: ParameterLink[];
+  /** One chain per instrument that has one; the host routes PLAY through it. */
+  play_chains?: PlayChainState[];
+}
+
+/** One effect in an instrument's PLAY chain; `id` is unique within the chain. */
+export interface PlayChainEffect {
+  id: string;
+  plugin_id: string;
+  enabled: boolean;
+  /** The program this effect is on, chosen from its panel in the chain. */
+  program_id?: string | null;
+}
+
+/** The effects after one instrument in PLAY, in order. */
+export interface PlayChainState {
+  instrument_id: string;
+  effects: PlayChainEffect[];
 }
 
 export interface OutputMeterSnapshot {
@@ -644,6 +661,8 @@ export interface PluginWebDescriptor {
     entry_url: string;
   }>;
   resources: PluginResourceRequirement[];
+  /** The effects the instrument suggests after itself in the PLAY chain. */
+  suggested_chain?: Array<{ plugin: string; preset?: string | null }>;
 }
 
 export interface PluginResourceRequirement {

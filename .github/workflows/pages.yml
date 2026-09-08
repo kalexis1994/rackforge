@@ -54,7 +54,15 @@ jobs:
           cp -r web/public/demo/rackforge/. "$storage"
           python3 tools/make-probe-package.py \
             web/public/demo/rackforge/plugins/concert-grand "$RUNNER_TEMP/probe.rfplugin"
-          node tools/check-browser-host.mjs \
+          # The host is a wasm module that calls back into JavaScript to
+          # compile and run each plugin, so one install nests node's stack
+          # several wasm/JS frames deep for every package in storage. V8's
+          # default stack here is about a megabyte and the demo's set
+          # crosses it: the process died with SIGSEGV rather than an error,
+          # right after the install probe instantiated the second plugin,
+          # with every check before it green. A browser worker has far more,
+          # which is why the page itself runs.
+          node --stack-size=4000 tools/check-browser-host.mjs \
             web/public/demo/rackforge-browser.wasm "$storage" "$RUNNER_TEMP/probe.rfplugin"
 
       - name: Install the interface dependencies

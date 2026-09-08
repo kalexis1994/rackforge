@@ -119,11 +119,24 @@ def db(x):
 
 def read_wav_head(path, seconds):
     """The first `seconds` of a WAV as mono float64, channel 0, plus rate."""
+    return read_wav_span(path, seconds, from_end=False)
+
+
+def read_wav_tail(path, seconds):
+    """The last `seconds` of a WAV, the same way: where the recording's own
+    noise floor is, once the note has gone."""
+    return read_wav_span(path, seconds, from_end=True)
+
+
+def read_wav_span(path, seconds, from_end):
     with wave.open(path, "rb") as handle:
         channels = handle.getnchannels()
         width = handle.getsampwidth()
         rate = handle.getframerate()
-        frames = handle.readframes(min(handle.getnframes(), int(seconds * rate)))
+        count = min(handle.getnframes(), int(seconds * rate))
+        if from_end:
+            handle.setpos(handle.getnframes() - count)
+        frames = handle.readframes(count)
     if width == 2:
         data = np.frombuffer(frames, dtype="<i2").astype(np.float64) / 32768.0
     elif width == 3:
@@ -291,6 +304,16 @@ def band_energy_db(freqs, mag, lo, hi):
     return 10.0 * math.log10(max(float((mag[m] ** 2).sum()), 1e-24))
 
 
+def above_noise(level_db, noise_db, margin_db=3.0):
+    """`level_db` with `noise_db` taken out in power; NaN when the level is
+    within `margin_db` of the noise, where nothing was measured."""
+    if not math.isfinite(noise_db):
+        return level_db
+    if level_db < noise_db + margin_db:
+        return float("nan")
+    return 10.0 * math.log10(10 ** (level_db / 10) - 10 ** (noise_db / 10))
+
+
 def relief_and_density(x, rate, t0, lo=2000.0, hi=4000.0):
     """How far the partials stand out of the floor in 2-4 kHz, and how many."""
     freqs, mag = spectrum(x, rate, t0 + 0.1, t0 + 0.6, pad_power=17)
@@ -336,6 +359,16 @@ def analyse(path, note):
         milestones[str(t)] = float(env_db[i] - peak_db) if i < len(env_db) else float("nan")
     fa, ma = spectrum(x, rate, t0 + 0.02, t0 + 0.15, pad_power=16)
     fb, mb = spectrum(x, rate, t0 + 0.5, t0 + 0.8, pad_power=16)
+    # The file's own noise floor, over windows the length of the two above
+    # so the band sums compare like with like.
+    tail, _ = read_wav_tail(path, 1.0)
+    tail_s = len(tail) / rate
+    noise_a = noise_b = float("-inf")
+    if tail_s >= 0.35:
+        fn, mn = spectrum(tail, rate, tail_s - 0.13, tail_s, pad_power=16)
+        noise_a = band_energy_db(fn, mn, 30, max(31.0, 0.7 * f0)) if fn is not None else float("-inf")
+        fn, mn = spectrum(tail, rate, tail_s - 0.30, tail_s, pad_power=16)
+        noise_b = band_energy_db(fn, mn, 30, max(31.0, 0.7 * f0)) if fn is not None else float("-inf")
     # Bands are fractions of the note's WHOLE energy (50 Hz - 10 kHz), not of
     # 100-1000 Hz: for a treble note that band holds no tone, only the knock
     # and the room, and a ratio against it measures the floor, not the colour.
@@ -360,8 +393,21 @@ def analyse(path, note):
         "attack_over_sustain": band_energy_db(fa, ma, 500, 4000) - band_energy_db(fb, mb, 500, 4000),
         # What sits under the tone: everything below 0.7 f0 (the knock, the
         # board, the room), relative to the whole. A gap the treble exposes.
-        "floor_below_f0_attack": band_energy_db(fa, ma, 30, max(31.0, 0.7 * f0)) - ref_a,
-        "floor_below_f0_body": band_energy_db(fb, mb, 30, max(31.0, 0.7 * f0)) - ref_b,
+        #
+        # Above the recording's own noise. The reference's samples carry a
+        # constant -72 dBFS between 20 and 200 Hz, five seconds after the
+        # note when nothing else is left (2026-09-08), and a treble note's
+        # body floor sits on it: C7's 20-200 Hz at 0.55-0.85 s IS that
+        # noise, C6's is 10 dB above it. A model with no noise floor was
+        # scored 30-40 dB under a hiss, and a sub-bass rumble it should
+        # not have had was matching the number. The noise is read from the
+        # last second of each file, over a window the length of the one
+        # being corrected, and subtracted in power; a floor within 3 dB
+        # of the noise is no measurement and drops out of the mean.
+        "floor_below_f0_attack": above_noise(band_energy_db(fa, ma, 30, max(31.0, 0.7 * f0)),
+                                             noise_a) - ref_a,
+        "floor_below_f0_body": above_noise(band_energy_db(fb, mb, 30, max(31.0, 0.7 * f0)),
+                                           noise_b) - ref_b,
         "relief_2_4k": relief,
         "density_2_4k": density,
         "t60": partial_decays(spec_db, times, win, rate, t0, f0, B),

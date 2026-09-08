@@ -16,7 +16,7 @@
 
 import { WASI } from "node:wasi";
 import { readFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeSync } from "node:fs";
 
 /**
  * Plugin exports addressed by index, in the order shared with the browser
@@ -92,6 +92,7 @@ const call = (handle, index, ...args) => {
 const pluginHost = {
   rf_compile: (pointer, length) =>
     guard(-1, () => {
+      trail(`compile ${length} bytes`);
       const module = new WebAssembly.Module(hostBytes(pointer, length).slice());
       if (WebAssembly.Module.imports(module).length > 0) {
         throw new Error("wasm-v1 modules may not import host functions");
@@ -103,6 +104,7 @@ const pluginHost = {
   rf_module_release: (module) => modules.delete(module),
   rf_instantiate: (module) =>
     guard(-1, () => {
+      trail(`instantiate module ${module}`);
       const instance = new WebAssembly.Instance(modules.get(module), {});
       const handle = nextHandle++;
       instances.set(handle, { exports: instance.exports, memory: instance.exports.memory });
@@ -206,6 +208,13 @@ const PAGE_SIDE = new Map([
 ]);
 
 const failures = [];
+// stdout to a pipe is buffered, so a hard crash loses whatever it was
+// holding and the log stops in the wrong place. The trail goes out
+// synchronously, and says what was being attempted rather than what last
+// succeeded.
+const trail = (what) => writeSync(2, `--> ${what}
+`);
+
 const check = (description, condition, detail) => {
   if (condition) {
     console.log(`ok   ${description}`);
@@ -349,9 +358,12 @@ const PROBES = {
   plugin_install: () => {
     if (!packagePath) return "no .rfplugin was given to install";
     const archive = new Uint8Array(readFileSync(packagePath));
+    trail(`install: ${archive.length} bytes to inspect`);
     const inspected = JSON.parse(withArchive(archive, host.rf_inspect_plugin));
     if (!inspected.ok) return inspected.error;
+    trail("install: inspected, installing");
     const installed = JSON.parse(withArchive(archive, host.rf_install_plugin));
+    trail("install: installed");
     if (!installed.ok) return installed.error;
     installedPluginId = installed.installed.plugin_id;
     const listed = JSON.parse(readResponse(host.rf_plugin_catalog()));
@@ -392,6 +404,7 @@ let nextCommandId = 1;
 
 function withArchive(bytes, call) {
   const pointer = host.rf_alloc(bytes.length);
+  trail(`archive at ${pointer}, host memory ${hostMemory.buffer.byteLength} bytes`);
   new Uint8Array(hostMemory.buffer, pointer, bytes.length).set(bytes);
   try {
     return readResponse(call(pointer, bytes.length));
@@ -410,6 +423,7 @@ for (const capability of declared.capabilities ?? []) {
     );
     continue;
   }
+  trail(`probe ${capability.id}`);
   const probe = PROBES[capability.id];
   if (!probe) {
     const reason = PAGE_SIDE.get(capability.id);
@@ -424,4 +438,5 @@ for (const capability of declared.capabilities ?? []) {
   check(`${capability.id} does what it claims`, failure === null, failure ?? undefined);
 }
 
+trail("every probe returned");
 process.exit(failures.length === 0 ? 0 : 1);

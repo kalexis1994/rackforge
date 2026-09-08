@@ -860,6 +860,598 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The merge ramp as the blow's own contact, each program its own
+(0.171.32).** The user, on the in-phase ramp: "ahora se escucha genial",
+and 4 ms sounds right — what is the realistic value? Not one value. A
+hammer stays on the string 3–4 ms in the bass, 1.5–2 in the middle, under
+1 in the treble, and less the harder the felt is pressed (Askenfelt and
+Jansson); the Campanella's repeated notes are treble, where 4 ms is four
+to eight times the contact. The model already has that law,
+`contact_time`: 2 ms in the bass at fortissimo to under half a
+millisecond at the top, stretched for a soft blow, the law the felt's
+cutoff is read from. `MERGE_RAMP_CONTACT` spreads a re-strike's momentum
+over that many of the blow's own contacts, beside the fixed `MERGE_RAMP_S`;
+and the contact is read through the program's Felt control, since a
+cutoff is one over a contact time: a program with a softer felt has its
+hammers on the string longer. So each piano has its own without a table:
+at one contact and fortissimo the Bösendorfer 280 holds D#6 for 1.06 ms,
+C4 1.58, A1 2.51; the Steinway D 274 0.80 / 1.20 / 1.90; Concert 308
+0.46 / 0.69 / 1.09; the uprights 0.41–0.51 in the treble; Mellow 1.00 /
+1.50 / 2.37. Both knobs ship at zero, today's sound; the excerpts at 0,
+4 ms fixed and one, two, four and eight contacts are for the ear.
+
+**The merge ramp lands in phase (0.171.31).** The user, on 40 s excerpts
+of the Campanella at 0, 1, 2 and 4 ms: the repeated note sounds like a
+mechanism and then goes quiet, at 1 ms noticeably softer, at 4 ms "el
+ruido mecánico nomás y la nota ni suena". Right: the push entered in a
+fixed phase, one part per sample, while each partial turned; for any
+partial whose period is shorter than the contact the parts cancel, a box
+on the excitation, and at 4 ms nothing above ~250 Hz was left. The felt's
+contact time does shape the spectrum, but the hammer simulation already
+did that when it built the blow; this filtered it twice. Now the push is
+a phasor that turns with its lane between adds, so every part lands in
+the phase the whole would have reached: the added phasor's amplitude
+ramps, its spectrum does not change. Tested: the blow's own contribution
+20–60 ms after the merge reads the same within 1.5 dB at one sample and at
+4 ms, and the first-millisecond step at 4 ms still holds under 0.3 of the
+ringing note's slope. One sample is unchanged, today's sound. On the
+question of digital pianos' hammers: they are weight and escapement for
+the hand, two or three sensors read the key's speed and send a number;
+nothing strikes anything that sounds, so whatever the mechanism does at
+the string is the model's to do.
+
+**The merge ramp's puzzle, and the level's power as a knob (0.171.30).**
+Two things behind knobs, today's sound at their compiled values. The
+ramp: 0.171.25 spread a merged blow's momentum over the contact and found
+it four times rougher than the one-sample push, from two samples up,
+cause unknown. Found: a fresh onset is click-free by cancellation ACROSS
+its lanes and partials — the bloom lane negative, the phases dispersed —
+and a one-sample push into `c` reproduces a fresh onset exactly, so it is
+smooth for the same reason. The ramp spread only the living lanes; the
+retired lanes (the bloom, dead within tens of ms of every strike) and
+the partials the living voice lacked arrived whole, and the bloom's
+negative energy landed alone: the blow's own contribution started at
+−0.0048 on its first sample where the one-sample push started at
++0.0004, whatever the ramp's length. Now every part the blow adds arrives
+the same way, magnitude into `c` over `push_in` samples, and the largest
+step of the blow's first millisecond falls with the ramp as it should:
+0.0045 (one sample) → 0.0033 (2) → 0.0017 (8) → 0.0007 (32), against the
+ringing note's own 0.035. `MERGE_RAMP_S` stays at 0 — one sample, today's
+sound, the appended partials now magnitude-into-`c` like the rest (the
+one-sample step reads 0.004488 either way) — and the knob is honest for
+the ear: a hammer's contact is one to four milliseconds. The power: the
+level has always grown as velocity^2.2, a literal; it is
+`LEVEL_VELOCITY_POWER` now, at 2.2. Measured on the Salamander's sixteen
+layers, peak level per layer, C2 to C6: the reference rises 11–16 dB from
+v3 to v15 (velocity 35 to 117), a power of 1.1–1.5; this model rises
+23–26 dB over the same span. The scorecard's dynamics lines say where the
+spectrum goes with it: the bass's 2–4 kHz attack rises 19 dB more from pp
+to ff than the reference's, the tenor's 4–8 kHz 14 more, while the
+treble's 2–4 kHz rises 7 dB less. This is the fifth point of the action
+study — the hammer that mostly brightens — and it is the ear's refit, on
+the lab, with this knob and the felt's beside it; nothing recentred.
+
+**The fundamental's prompt stage, as the reference measured it at each
+key (0.171.29).** C2's and C3's fundamentals sat +11 and +28 dB over the
+reference against their partials 2–4 from 0.35 s on, with D#2, F#2 and A2
+between them at −3, −9 and −11: not a register, a note. Every semitone
+A1–A3 rendered and read (`semitone_balance.py`), then the reference's
+fundamental followed in 100 ms steps: C3's falls from −19 to −71 dB in
+750 ms and holds at −58, F#3's from −39 to −65 in 400 ms; D#3 and A3 a
+decibel every hundred milliseconds. The prompt decay of the fundamental
+over 80–300 ms, all 30 grid notes, layers v12 and v8 agreeing within a
+few dB/s (`prompt_table.py`): A0 41, C1 87, D#1 83, A1 76, C2 2, D#2 13,
+F#2 10, A2 1, C3 42, D#3 17, F#3 80, A3 7, C4 20 dB/s. The bridge's
+conductance at that key's point at that key's pitch — a string whose
+pitch sits on a mobile board mode gives its coherent motion to the bridge
+fast and is left with the aftersound — which no smooth law carries and
+which the release taps could not resolve (their 1/3-octave ripple at
+131 Hz is +2.4 dB at C3 and +3.2 at D#3). The model's fundamental at C3
+fell 1 dB per 100 ms and its fast stage read 8.5 s from the law.
+`BRIDGE_PROMPT_DB_S` is that table; the fundamental's fast-stage T60 is
+60 over the rate read at the note (log-linear between grid notes, floored
+at 3 dB/s where the slope is the aftersound's), under the same Decay and
+treble-life controls the law wears, `PROMPT_MEASURED_POWER` the share.
+Held to C2–C5 with fades either side: the bottom octave's rows (41–87
+dB/s, single strings on the most mobile part of the board) took A0–A1
+from within 2 dB of the reference's late balance to 12 under, because
+their fundamentals already start 10–14 dB under the reference's early
+level at A0 and D#1 and the rim sets them — the early level down there is
+the open question; and the treble's rows, though the model's fundamentals
+there read 1.5–2.4× faster than them, made the scorecard's body ladder
+3–5 dB worse and the 1 s envelope 2.4 dB louder — the treble's 80–300 ms
+slope is its attack, not its string. After: the tenor's realised prompt
+rates track the reference (F#3 11 → 48 against 80, D#3 22 against 17, A3
+4 against 7, C4 15 against 20, A4 25 against 26); C3's reads 11 because
+the board's modes near 131 Hz take ~200 ms to fill and hold the radiated
+level flat that long while the string itself, with the board muted, falls
+at the table's rate from the first sample. Late balance: C3 +28.5 → +18.7,
+F#3 +38.9 → +22.5, D#3 +9.9 → +7.0; scorecard bass 4.85 → 4.80, tenor
+5.41 → 5.37, treble 7.18 → 7.27. What remains at C3/F#3/C4 is two things
+measured and not touched: the model's aftersound plateau sits ~20 dB
+higher against the prompt than the reference's (its C3 holds 39 dB under
+where it started; `HORIZONTAL_SHARE` and the unison's unbalance set the
+model's), and the second partial of C4–D#5 (520–1250 Hz) decays 2–4×
+faster in the model than in the reference (C4 42 against 17 dB/s, F#4 73
+against 19, A4 89 against 22), which is the same table's second row and
+the next measurement. C2's +11.8 is different: its second partial at
+130.8 Hz, the strongest thing in the reference's note, is 13 dB down in
+the model — the reference board's mode at 129.6 Hz (109 of 88 keys' taps
+put a peak there). `BOARD_MEASURED_MODES` at 0.5 gives C2's second
+partial +6 dB and takes the excess to +6, but the ten measured modes leave
+gaps the drawn bank fills (D#2 at 77.8 and F#2 at 92.5 sit between them
+and lose 12 and 7 dB at a full share), so it ships where it was, for the
+ear to try.
+
+**The rim: the board radiates nothing below its first mode, on the bus
+(0.171.28).** The user: the bass is good but so deep it covers everything,
+and it stays, pronounced, in the sustains. Measured against the Salamander
+from 0.35 s on, once the thump has gone, the fundamental against the
+strongest of partials 2–4: the reference has A0's 44 dB under, C1's 45,
+D#1's 39; the model had them 20, 26 and 34 under — 24, 19 and 5 dB of
+excess, the excess vanishing at F#1 and above. The law was already in the
+model: `RADIATION_CORNER_HZ`, sixth-order at 45 Hz, "below the board's
+first mode the board radiates almost nothing", calibrated on the YDP.
+But it was a factor on each board mode's *drive*, and the bank starts at
+50 Hz: a 27 Hz fundamental leaves through the tail of the 50 Hz mode and
+was scaled by the mode's frequency, not its own. It is now a filter on
+the board's sum, three Butterworth biquads per channel, 36 dB an octave
+below the corner. Half the excess lived elsewhere: the damped bed and the
+undamped lengths reach the output beside the board, and with the pedal
+down every bass string rings by sympathy at a fundamental the board could
+not have radiated — the bed alone held A0's fundamental 12 dB over its
+partials with the board silenced. They go through the rim too: every
+string reaches the air through the board. After: A0 −1.2 dB against the
+reference's balance, C1 −0.4, D#1 −1.8, F#1 −1.3 (was +24.5 / +18.7 /
++4.7 / −5.9). Bass decay rates are unchanged. The scorecard's "floor
+below f0" lines fall 5–12 dB in every register: that floor in the model
+was the 27–45 Hz sympathetic rumble now removed, while the reference's
+is 20–400 Hz room and board — the model was matching the number with the
+wrong thing, and the lines say so now (bass 4.21 → 4.85, treble 5.94 →
+7.18 on that metric). C2's +11 dB and C3's +28 dB fundamental excess are
+above the corner and another matter, not touched.
+
+**The keybed, eleven decibels down a third time (0.171.27).** With the
+action a mechanism the ear took Thud Colour from 0.5 to 0.28, −10.6 dB on
+the fader's law, the third time it has asked for eleven decibels off the
+keybed; `THUMP_BASE` 0.11 → 0.0325 and the fader back to its centre. The
+ear's call, recorded as such.
+
+**The key bottoms out after the string, and the merge's push in one
+sample (0.171.26).** After let-off the key still has its aftertouch to
+travel and the hammer its flight; the key is the action's ratio slower.
+So the thump waits `(KEY_AFTERTOUCH_MM · ACTION_RATIO − LETOFF_DISTANCE_MM)
+/ v_letoff` -- three millimetres' worth: 5 ms at pianissimo, under half a
+millisecond at fortissimo (RF-73's key landed 1.0 ms after let-off at its
+strong drive with a 1 mm aftertouch), one countdown per voice
+(`thump_in`), and a merged blow bottoms out again the same way. The
+thump's level stays the measured law in MIDI velocity: read as a power of
+the key's speed through the action's exponential map it would be 3.5 dB
+lighter at mezzo-forte than the reference's knocks were measured to be,
+and the measurement wins over the assumed square. And a correction to
+0.171.25: the merged blow's momentum goes into the cosine quadrature in
+one sample again (`MERGE_RAMP_S` = 0). Measured on the blow's own
+contribution -- the render with the blow less the same render without it,
+the first millisecond -- the push spread over the contact came out four
+times rougher than the one-sample push (0.021 against 0.005 largest
+sample step) for every length from eight samples up, and the cause was
+not found; the one-sample push into `c` leaves the output continuous on
+its own, which the test now holds it to (under 0.3 of the ringing note's
+own slope). The machinery stays behind the knob for the ear. A merged
+blow's knock and tension pulse hold back only what they added while the
+rise runs, never what the voice already had. Tested: the pianissimo key
+lands 3-8 ms after the string and the fortissimo one under 1 ms, and the
+thump arrives once it has. The Campanella: 531 steals; the nocturne 254
+against 1294 before the merge came back.
+
+**Repetition with the key's state, and the merge back on (0.171.25).**
+MIDI carries no key position, so the time since a key's last key-up
+against how long that key takes to come back (`KEY_RETURN_MS` = 40, scaled
+by the release speed like the damper's landing) is the model's reading of
+where the key is when it is pressed again. Below the repetition point
+(`KEY_REPETITION_POINT` = 0.33 of the return) the jack has not reset: no
+blow -- the strike count does not move -- but the key goes down and lifts
+its damper again, catching a felt on its way down, holding a string the
+pedal had, or taking a silent key. Above it the hammer is thrown from the
+back check, a third of the way up: the let-off speed is
+`REPETITION_FROM_CHECK` = 0.75 of the full blow's just past the point
+(sqrt(1/3) = 0.58 for a constant push over a third of the travel, more for
+the repetition spring that holds the hammer there), growing back to the
+full blow as the key returns the rest of the way. All regulation geometry,
+stated as such; RF-73 measured that a second blow's strength is the state
+the first left behind, and a grand's lever and check exist to make that
+repeatable. And the merge of a re-strike into the living voice, off since
+0.171.5 for the pop of a momentum pushed into the phasors in one sample,
+is on again: the push is spread over the contact (`MERGE_RAMP_S` = 2 ms,
+`Partial::push` added to the cosine quadrature for `push_in` samples), and
+the partials the living voice did not have arrive the same way, their
+velocity quadrature pushed in from nought. The switch is `RESTRIKE_FRESH`
+now, nought for the merge. Tested: a key pressed again five milliseconds
+after its key-up strikes nothing and holds its note with the felt caught;
+the blow from check is 0.75 just past the point, between half-way, and
+the full blow once returned; a note repeated under the pedal steps less
+than twice the first blow's largest sample step and less than the same
+push in one sample. The Campanella: 524 voice steals against 1899 with
+every repeated note struck fresh beside its ghost. Rendered:
+`10-renders/liszt-la-campanella-cg0.171.25-concert-308.wav`.
+
+**The felt lands late, and bounces (0.171.24).** Until now a key-up seated
+the damper in its own sample. In a grand the key lets the damper down: the
+felt meets the string when the returning key passes back through the
+height that lifted it, tens of milliseconds on, lands with a speed, and
+bounces. The reference cannot say how long -- its release-resonance
+samples (`harmL*`, `harmS*`) start with the note's band *rising* for a
+hundred milliseconds, so they carry no key-up to measure from (script
+`damper_landing.py`, every note from A2 to C6 tried). So the timing is
+regulation geometry stated as such, and the shape is RF-73's, whose action
+solved as bodies landed its felt 22-32 ms after every key-up at 0.18-0.38
+m/s and bounced 4-9 times over 17-31 ms with a restitution of 0.5-0.55; a
+grand's trigger is the key and not the hammer, so the delay follows the
+release speed here where the Rhodes' did not. `DAMPER_LAND_MS` = 22,
+scaled by `damper_span` (a key let go fast lands sooner), `DAMPER_BOUNCES`
+= 5, `DAMPER_HANG_MS` = 6 with `DAMPER_RESTITUTION` = 0.5, `DAMPER_DWELL_MS`
+= 1. Per voice a state machine (`arm_damper`, `advance_damper`), one
+countdown ticked beside the cull's: the landing is the felt's thud and a
+press through the voice's own damper (`press_damper`, the half pedal's
+ledger), each flight the relief of that press, the last contact the seat
+(`damp`, silent). The pedal coming up catches a falling felt and the note
+sustains; the sostenuto keeps a key it caught while the felt was still up.
+The key-off knock stays at the key-up; the thud moves to the landing.
+Tested: the first 15 ms after a key-up sound like the held note (within 15
+%); after the landing and the bounces the partials' decay rates are the
+ones `damp()` alone would have set, matched by harmonic within 2e-4 --
+every press relieved through its own damper; the note is down more than
+17 dB 200 ms later; a pedal five milliseconds after the key-up leaves
+more than 20× the sound of the seated note. `all_notes_off` and the
+pedal's fall still seat at once. Rendered for the ear:
+`10-renders/liszt-la-campanella-cg0.171.24-concert-308.wav`.
+
+**The escapement, and the silent key (0.171.23).** The hammer flies the
+let-off on its own now. The action's calibrated law, `HAMMER_V_FF ·
+span^(v − 1)`, is read as the speed at let-off, and the string gets what is
+left after the flight's toll, `v_string² = v_letoff² − 2 g d` with
+`LETOFF_DISTANCE_MM` = 2.5 (regulation practice, 1.5-3 mm). RF-73's action,
+solved as coupled bodies, found the toll to be an energy fixed by the
+distance, not a fraction of the hammer's, and the curve above it nearly
+vertical; that shape is carried, the number is a grand's. The reference has
+no silent layer to anchor a threshold on and the law's bottom (0.58 m/s at
+velocity 1) still reached the string, so under `LETOFF_KNEE` (12 steps) the
+let-off speed falls linearly to nought, continuous at the knee -- the
+keyboard's convention, stated as such -- and the first velocity that
+strikes is 4. Below it the key goes down, its damper comes up and nothing
+sounds: the silent key, the pianist's silent re-take, which the model had
+no state for. `key_down[88]` says which keys are down; a pool of sixteen
+free strings (`SILENT_SLOTS`, eight unison pairs each, tuned as the
+undamped bank's are but ringing by the voices' own slow-stage law) takes a
+silent key's string on the key-down, listens to the bridge like the top
+octave does, is muted while the note's own voice sounds, seats its damper
+through `BodyMode::damp` (the pole radius scaled once, as a partial's
+phasor is) on the key-up or on the pedal's fall, and gives its slot back
+half a second later. A key that is down is also out of the damped bed.
+Tested: velocity 1 strikes nothing and leaves the key down; the speed at
+the string is monotone and continuous, 0.97 of the let-off speed at
+velocity 36 and 0.999 at 117; G4 held silently over a fortissimo C3 leaves
+more than 1.3× the sound behind once the C3 is damped, and the key coming
+up takes it away. Scorecard, the same build with the toll and the knee at
+nought against with them: 4.14/5.26/5.93 → 4.21/5.30/5.94, within the noise
+(velocity 36 arrives 1.9 % slower). Not done here: the key-bottom thump of
+a silent key, and the sostenuto's hold on a silent string.
+
+**Width reaches the pair, and the keys lose their brands (0.171.22).**
+`Stereo Width` sets the pair's spacing (`half = 0.5 · MIC_SPACING_M ·
+width`), but only a room or board change re-ran `tune_pair` and the free
+strings' places, so the fader moved the voices' pans and nothing the ear
+could hold -- "no noto que aumente la separación de estéreo". It now
+marks the room and the scale dirty. Measured on the thirty-note image
+(`model_image.py`, 1-4 kHz coherence / 1-3 kHz ILD std): width 0.0 →
+0.92 / 1.9 dB, 0.35 → 0.52 / 3.0 dB, 1.0 → 0.34 / 2.8 dB; before, all
+three widths measured the same. The `Last Damper` keys are named as keys
+(D♯6, F6, G6) and no longer for who stops there; the sources stay here
+and in the code. A row of more than four plates is drawn dense (10 px,
+one line) so it stands no taller than the fader beside it.
+
+**The last damper on the panel, and a session that survives a new
+control (0.171.20).** `Last Damper` is a stepped control on the panel,
+one key per step from C6 to C7, each named for who stops there (D♯6 the
+small Steinways, F6 Yamaha, F♯6 Kawai, G6 the Steinway D); the preset
+sets it and the panel may move it; the free-string bank follows. And
+what adding it exposed: the saved state was read by position with the
+era word at a fixed slot, so every build that added a knob — five this
+week — read the previous session's units as nought-to-one faders, found
+them out of range and opened the factory instrument. The user's Thud
+Colour came back at 0.5 four times, and each time the ear took it down
+again. The state now ends with a layout word (panel count, knob count);
+a state from another layout is re-laid before it is read: panel values
+keep their positions, knobs come along when the registry's fingerprint
+and count match, and a control the old layout lacked takes the factory
+value. A test writes the previous layout and reads it back.
+
+**The keyboard is not the soundboard (0.171.19).** The user, on the
+key-off knock: "no creo que esté fuerte el volumen sino que le falta
+atenuación, pareciera que lo estuviesen grabando cerca de las teclas".
+Right in the mechanism: the knock entered the voice's sum and went
+through the bridge, the board (+13 dB at 100 Hz) and the pair's near
+field exactly as a string does, so it had the tone's distance law and the
+board's colour and ring. The reference's pair sits 12 cm over the strings
+(its README) and the keyboard is the better part of a metre in front of
+that point. The knock now leaves the voice on its own bus, reaches each
+capsule over its own path, `√(distance² + 0.9²)`, off the capsule's
+axis, and goes to the room as the board's sound does; it has its own dark
+corner (200 Hz; the strike's knock climbs to 1400 at the top, the
+key-off is dark on every key in the reference), its own ring (T60 0.4 s,
+the board's gone) and a softer click. Isolated at the house pair:
+−63 to −67 dBFS, tail −9/−14/−20/−37 (reference −7/−14/−20/−30),
+30–150 / 150–300 / 300–1000 Hz at −1 to −3 / −3 to −6 / −10 to −24
+(reference −1 / −7 / −14). What physics says about distance, and the
+ear may not expect: with the pair over the strings the keyboard is the
+farther source, so the knock is weakest against the tone at a close pair
+and grows toward it as the pair backs off — six decibels from 0.5 m to
+2 m, then flat. It is the close pair that hears the least keyboard.
+
+**The knock's body under the treble (0.171.18).** The user: "noto un golpe
+más pulido y lindo en Pianoteq". Measured on the first 60 ms of the
+reference against the note's strongest partial: under a C6 at pianissimo
+the 300–600 Hz band sits at −9 dB and 600–1000 at −7, under a C7 at −11
+and −12 — a wooden body the width of the board's mid modes, as loud as
+the tone's neighbours — where the model, its knock a 260 Hz four-pole
+for every key, had −40 and −26 under the C6 and −46 and −52 under the
+C7; and the 30–300 Hz body twenty-two decibels under the reference's at
+C6, which is the thump the ear turned down. Under a C3 the reference's
+300–600 is −13 and the model's −8: the bass wants none of it. Two
+things, both by register: the knock's corner climbs log-linearly from
+260 Hz at A0 to 1400 at C8 (`THUMP_CORNER_TOP_HZ`; the 30–300 Hz level
+the ear set does not move with it), and the knock rises over the top
+half of the compass, 24 dB at C8 at rest and 20 less per unit velocity
+(`THUMP_TREBLE_DB`, `THUMP_TREBLE_FF_DROP_DB`): the reference's knock
+against the tone falls five decibels from pianissimo to fortissimo under
+a C6 and six under a C7, and a rise flat across velocity put the model
+ten to nineteen over at fortissimo. Now C6 pp −14/−16/−14/−14 against
+the reference's −7/−13/−9/−7 in 30–150/150–300/300–600/600–1000, C6 ff
+−15/−6/−15/−11 against −12/−15/−13/−15, C7 pp −18/−21/−18/−20 against
+−13/−24/−11/−12, C7 ff −19/−20/−21/−23 against −19/−30/−21/−24. Five to
+eight short at pianissimo, the ear's margin. Also found and left: the
+pianissimo ladder is too bright in the tenor and treble (A4's fifth
+partial 20 dB over the reference at pp, C6's fourth to sixth 12 to 20
+over; the attack centroid +1.9 and +3.3 octaves at pp) — the contact's
+velocity law, which the felt exponent cannot move without wrecking the
+bass (+0.8 on the exponent: bajo 4.14 → 12.85 on the card).
+
+**Where the ear put the release, and the level (0.171.17).** Release
+Noise: the ear took the fader to −15 dB; the centre moves the 5.4 dB
+instead (`KEYOFF_KNOCK` 0.09 → 0.048), as the thump's did, so a session
+from before keeps meaning what it meant. Thud Colour: the ear took the
+fader to 0.6, +4.8 dB on its law; `THUMP_BASE` 0.063 → 0.11. The felt's
+sideways grip by register (`DAMPER_HORIZONTAL_GRIP_BASS`): the
+reference's tails fall sixty decibels a second at C3 and seventy-three at
+C4 against forty-seven at C6, so the share runs from 0.45 at A0 to 0.15
+at C8. The scorecard, first run since the spatial board: bajo 4.40 →
+4.14, tenor 4.02 → 5.22, agudo 5.48 → 6.72. The bank's modes reaching
+the pair with their own phases sum less coherently than the one the
+transfer table was fitted through — the treble passage of the Campanella
+peaked at −26 dBFS against −11 — so the table was re-derived on the new
+renders (`rederive_table.py`): three to five decibels more from 1 to 5
+kHz and the 250–315 Hz hump seven lower, kept; the bottom's five to
+eight less refused, because taking them collapsed the floor under the
+treble's fundamentals by ten to eighteen (the thump and the low modes
+radiate there, which a partial survey does not see). What the tenor and
+treble lost on the card is the thump the ear turned down (the floor
+under f0) and the raggedness the pair now has (`relieve 2-4k`: the
+reference's own is ragged, the model's more so); what they gained is the
+treble ladder, from +11 dB over the reference to −1. And six decibels on
+the output (`OUTPUT_TRIM_DB`), under the Level fader: "sigo escuchando
+bajo el volumen comparado con pianoteq", measured at −17.8 dBFS on the
+passage and −8.7 on the piece with every fader at its centre.
+
+**The felt grips sideways barely (0.171.16).** The user, against
+Pianoteq: "toca y el release baja suave; acá toco, se apaga y luego se
+alza un release latoso". The reference's release samples say how a
+damped note ends: the sound drops twenty-five to thirty decibels within
+twenty milliseconds of the key and then decays slowly, nine to fourteen
+per hundred milliseconds, in the note's own band — the string itself,
+sideways, under a felt that lands from above and grips the vertical
+polarisation, not the horizontal. The model damped every lane alike: a
+note stopped dead in thirty milliseconds and what remained was the free
+strings' ring at other pitches, exposed the moment the note vanished.
+`DAMPER_HORIZONTAL_GRIP` 0.15: the horizontal lane takes that share of
+the felt's grip, so its tail decays forty decibels a second at E6 and
+twenty-six at C4 (the reference's forty-seven and twenty-seven from 0.1
+to 0.4 s). A C5's own band after the key now reads −43/−49/−55/−64/−71
+dBFS at 0.02/0.05/0.1/0.2/0.4 s where it read −44/−51/−62/−79/−89, and
+the residue sits within three to six decibels of the reference through
+the tenor; the treble's remains six to ten low.
+
+**The last damper is the preset's (0.171.15).** The user checked
+Pianoteq and found the same free treble after F6; the sources say where
+each maker stops the row: Yamaha's grands carry 69 dampers, the last on
+F6; the Steinway D 71, to G6; the Steinway M, L and B 67, to D♯6; Kawai
+leaves eighteen keys free. So `Controls::last_damper` is a property of
+the instrument, not of the model: Concert 274 (the D) keeps its dampers
+to G6, Baby 150 and Parlour 185 stop at D♯6 like the small Steinways, the
+house voicing and the Yamaha-class presets at F6. Not in the saved
+state: the host re-selects the preset at boot and the preset says. The
+free-string bank follows the preset's boundary and the scale. And two
+things the ear asked after 0.171.13 — "hay que bajarle al noise
+mecánico del release", "una resonancia rara al soltar": the key-off
+knock ten decibels under the reference's, the free strings' coupling six
+under and, for the strangeness, the free strings are now pairs a cent
+apart, as three strings are never in tune, so the residue shimmers
+instead of ringing as one sine; the click's share eased.
+
+**What sounds after a key comes up (0.171.13).** The user, with F6 on its
+damper: "por qué es el día y la noche en términos de sustain". The
+mechanism's boundary is a step — a key has a damper or it has not — but
+the sound after a key-up was never silence, and the model's was: a
+damped E6 sat at −93 dBFS 0.8 s after the key, where the reference's own
+release samples leave the instrument at −60 to −78 for a second. Two
+parts, both measured on those samples. (1) The key-off knock (`rel1..88`,
+the SFZ's "HammerNoise" group at −37 dB): −54 dBFS over five
+milliseconds on every key from E2 to C8, the undamped top included,
+falling 7 dB by 20 ms, 14 by 50, 20 by 100, 30 by 200, dark (30–150 Hz
+carries it, 1–3 kHz thirty-three under, above that fifty-five). The
+model's was −92. Now the strike's own dark burst rings again at key-up
+on every key (`KEYOFF_KNOCK`, T60 0.22 s) with a short click on the
+action path for the 1–3 kHz (`KEYOFF_CLICK`): isolated, −51 to −59 dBFS
+at C3, C4, E6, F♯6 and C7, tail −7/−12/−17/−24, bands within a few
+decibels. (2) The release resonance (`harmL*`): after a loud C6 the
+instrument keeps sounding at −60 dBFS 0.1 s after the key, −64 at 0.2,
+−74 at 0.4, −80 at 0.8, in the note's own band — the strings above the
+last damper catching the partials they share. The model's bank was
+forty-eight resonators at drawn frequencies, which a partial rarely met
+(a released C6 left −81 at 0.2 s and −97 at 0.8; thirty times the
+coupling moved it two decibels). The bank is now the free strings
+themselves: every note above the last damper with its partial ladder to
+7 kHz at its own inharmonicity, panned where it sits, its bank copy
+silent while its own voice sounds (it caught itself and swelled its note
+by seven decibels). `UNDAMPED_MIX` 0.12 → 4.5, from a sweep against the
+samples: the residue after an 80 ms key now sits within five decibels of
+the reference at C4, C5, A5, C6 and D♯6 from 0.1 to 0.8 s. E6 released
+against F♯6 released at 0.4 s: −76 against −46 dBFS, the reference's own
+thirty to thirty-seven.
+
+**The last damper is on F6 (0.171.12).** The user, with the boundary at
+E6: "es muy evidente, F6 en adelante las notas duran mucho más ...
+pareciera como si tuviera el pedal de sustain". Measured: F♯6 released
+rings three seconds to −79 dBFS, and the reference's held F♯6 rings three
+seconds to −67 — the model's free treble is shorter and quieter than the
+real one, and the sympathetic feed adds under a decibel to it. What is
+heard is the boundary itself, and that is the instrument: Kawai answers
+the same question in its own FAQ ("why do the upper 18 notes sustain
+without using the damper pedal"). The boundary moves one key up on the
+sources: the last damper on the 69th key, F6, on many medium grands.
+`LAST_DAMPER_NOTE` 88 → 89.
+
+**The strings take their places on the bridge, and the pair hears the
+board (0.171.11).** Until now every string entered one mono point and a
+board mode was one number with one random level pan. Measured first on
+the reference (`tools/salamander-image.py`, `tools/salamander-image.csv`):
+the pair's channels carry no time difference on any note (under 17 µs,
+GCC-PHAT on the attack's envelope) yet are decorrelated (coherence 0.1 in
+300–1000 Hz, 0.2–0.3 in 1–4 kHz), and the level difference is ragged
+note by note (F♯3 −9 dB, D♯6 +11, C6 −5, the same in the soft and the
+hard layer) — two capsules a hand over the board, each hearing its own
+mixture of the same modes. So: (1) each string drives the board at its
+point `x_i` of the bridge and a mode takes it with its shape's value
+there, `φ_k(x_i) = √2 cos(π q_k x_i + θ_k)`, a plate's cosine at a
+wavenumber from the dispersion (`q_k ∝ √f`, fifteen half-waves at 8 kHz
+over 1.4 m) and a phase drawn per mode; the wavenumber splits between the
+bridge's direction and the board's width per mode. Computed as sixteen
+drive points the voices interpolate into and a cosine and sine transform
+every mode reads — 512 multiplies for the transforms and three per mode,
+not 256 per voice (`BOARD_SHAPE`). Below 100 Hz the board breathes as a
+whole from every string; drawn shapes there made C1's fundamental a
+lottery. (2) Each mode reaches each capsule through the Rayleigh integral
+over the board, `G_km = ∫∫ φ_k D_m e^{−jω r_m/c} / r_m`, a level and a
+phase per mode per capsule, computed when the pair or the board moves
+(thirty-two modes a block) and applied as two multiplies on the mode's
+last two velocity samples (`BOARD_PAIR`). No delay line: the phase is
+the delay at the mode's frequency, and the capsules hear different
+mixtures, which is what was measured. Every mode keeps the power its pan
+gave it. Result, thirty notes at v92 by the reference's own measure: at
+the house pair (0.66 m, 6 cm) the level difference's spread across notes
+is 3.5 dB in 1–3 kHz (reference 3.9; was 1.6) and the coherence 0.53
+(was 0.91); at 0.5 m and 17 cm the coherence is 0.31 (reference 0.27).
+The rest of the reference's decorrelation is the board's own floor under
+the partials, thirty decibels stronger there than here. The Campanella
+renders in 27 s against 17.
+
+**The bridge's drain, per sample (0.171.10).** Still there after 0.171.9:
+"un ruido latoso que suena luego de tocar", in every A/B of the passage
+with a noise or a resonance removed — and absent from the same passage
+rendered from the Salamander samples themselves
+(`tools/salamander-render.py`), which put it in the string voice. Louder,
+"con más cuerpo", with the HF floor at zero, which is a ladder whose
+fundamental dominates. Measured on a staccato E7: sidebands at the
+fundamental ±190 Hz and ±380 Hz, 28 and 34 dB under it, in the model and
+not in the reference. 187.5 Hz is 48 000 / 256: the bridge's drain on the
+coherent configuration was applied once per `CULL_INTERVAL` as a step on
+the phasors, and at the top of the compass the coherent stage drains fast
+— a decibel a step — so the step was a sawtooth on every top note's
+amplitude, a buzz that scales with the note. The drain now runs in
+`Partial::tick`, per sample, at the 256th root of the step's eigenvalue
+(`Partial::drain_per_sample`), so the two-stage decay is exactly what it
+was and the step is gone: the ±190 Hz sidebands fall to −51 and −54 dB,
+the ±380 to −61 and −64, into the line's own skirt. The Campanella renders
+in the same time. What remains 94 Hz off the line is the early
+reflections' comb — the room's, and the reference's room would have its
+own.
+
+**The top octave has no dampers (0.171.9).** After 0.171.8 the user still
+heard, at the Campanella's 2:37 (D7, D#7, E7 repeated at twelve a second
+under a pumped pedal), "un golpeteo de mosquito, como si vibraran alambres
+finos tocándose, como electricidad". The re-strike merge changed nothing
+measurable; a steady full pedal changed nothing; but E7 with a 50 ms key
+and no pedal fell from −32.9 dBFS at 10 ms to −65 at 100 ms, and with the
+pedal to −47 — the model dropped a damper on every key of the compass, and
+a grand's dampers stop between E6 and G6 (the reference's own
+release-resonance regions end at key 88). Under a pedal riding between 0
+and 127 the top notes were gated at the repetition rate by a felt that is
+not there. `LAST_DAMPER_NOTE` 88: above it a voice is `undamped` — key-up
+leaves it ringing, the pedal's press and relief skip it, the sostenuto's
+release skips it — and a test holds E7 released to E7 pedalled and C6
+released apart from C6 pedalled.
+
+**The top octave, against the reference (0.171.8).** The user, with the
+pedal: "los agudos con sustain tienen como una estridencia, como un
+trasteo finito que queda resonando ... si son varias notas chilla mucho".
+Isolated first: none of the resonance paths carry it (sympathy, open
+strings, undamped bank, halo, duplex and bed each removed changed the
+pedalled treble ring by nothing); the ring is the struck strings. Measured
+on Salamander C7, D#7, F#7, A7 and C8 at four velocities against the
+model's same notes (`top.py`): from G#6 up the strike is drawn, not
+integrated, and the recipe's felt corner was pinned at 1.5 f0 — its second
+partial stood 6 to 17 dB under the fundamental where the reference's stands
+20 to 44 (around −32) and its third around −55; that partial at 4 to 6 kHz
+is the stridency. And the fundamental's envelope: the reference falls ten
+decibels in the first 50 ms and then in two slopes, monotonically; the
+model's fell twenty in 100 ms, came BACK five to eight by 0.3 s and fell
+again — a beat near the unison's 2 Hz cap, a wobble on every top note and,
+under the pedal, on all of them at once (the trasteo). Three changes,
+each ramped in over G#6..C7 (`top_octave`): the felt corner may fall to
+1.05 f0 (`FELT_FLOOR_TOP`; 0.95 measured at −46 average, too dark); the
+unison is tuned clean (a width of 0.05 left a slower beat at 1 s); the
+prompt life (`cal` column 8) goes to 1.5 at C6 and 2.0 at C7 and C8, and
+the slow stage radiates 1.6x there (`TOP_INCOHERENT_EXTRA`; 2x overshot
+the two-second mark by fifteen decibels). Result at v92: second partial
+−34 to −57 (reference −24 to −46), the fundamental's envelope within five
+decibels of the reference to one second at C7 and nine at C8, monotone.
+Open: the sixth octave (C6 integrated) is 10 to 22 dB too quiet through
+its decay and its second partial 17 to 36 too quiet — the integration's
+treble, the other half of this seam.
+
+**The ear on the thump, a third time (0.171.7).** With the thump a noise
+the user took the Thud Colour fader to 0.26 again — "bajé el thud a 0.26
+y ahí se corrigió, tenía ruido todavía" — the same −11.6 dB off the
+recentred 0.24 that 0.171 took off 0.9. `THUMP_BASE` 0.24 → 0.063, the
+fader back at its centre. What the reference's close pair records as the
+keybed, a player wants twenty-three decibels under; the register law, the
+velocity law and the ring stay as measured.
+
+**The thump is a noise, and the pedal is a thump (0.171.6).** The user,
+on the Campanella: "sigo escuchando como el sonido mecánico grave en las
+notas altas", heard as release noise, and the pedal's noise asked down.
+Measured on the isolated parts (a render minus the same render with one
+fader at its floor): the release knock is at −92 dBFS, thirty decibels
+under the reference's own key-off samples and not what anyone hears; the
+strike's thump under a treble note peaks at −51 dBFS with its centroid
+at 130–150 Hz, and its 30–150 / 150–400 Hz bands sit where the reference's
+do, four decibels under if anything. What differed was its nature: eight
+damped sinusoids, the same eight on every strike of the same key, and the
+model's first 120 ms at C7 showed them where the reference (Salamander
+C7 v10, D#7, C6) shows a broadband thump. The thump is now white noise
+through two cascaded two-pole low-passes at 260 Hz (the cliff the
+components had past 300 — the one the ear asked for in 0.170.2), a slow
+pole subtracted at 30 Hz, the same 4 ms rise, the same ring, the same
+velocity and register laws, seeded per strike; `THUMP_NOISE_GAIN` (22)
+puts its two low bands back on the components' within a decibel or two at
+notes 84, 96 and 100. The pedal's knock, measured on the reference's
+pedal samples as the SFZ mixes them, is a 125 Hz-centred thump half a
+second long; the model's was a 270 Hz single pole over white, 180 ms,
+centroid 700–830 Hz — quieter than the reference and three times
+brighter, which is why the little there was read as much. Two poles at
+100 and 600 Hz, a slow one subtracted at 30, a one-second T60, and four
+decibels off the level. The Campanella renders with each part removed
+(thump, bed, pedal noise, release noise) went to the ear.
+
 **The merge was the last of the pops (0.171.5).** With the contact ramp
 on fresh voices the user heard two or three pops left in the 1:52–2:03
 passage, and none with the re-strike merge off — "ahora no se escuchan
@@ -2067,6 +2659,12 @@ Stated so nobody mistakes silence for coverage:
   the pedal down. Still not modelled: strings with NO sounding voice (a
   silent key or a late pedal wakes nothing discrete — the open-register
   statistics still cover that wash).
+* **The action as a mechanism.** No escapement threshold (velocity 1
+  strikes), no silent key, the damper seated in the note-off's own sample
+  with no landing delay or bounce, repetition without key state, and the
+  key-bottom knock in the strike's own sample. Each is per-event logic and
+  costs nothing on the sample path; what each needs measured, and the
+  order, is in [PIANO_ACTION_MECHANICS.md](PIANO_ACTION_MECHANICS.md).
 
 A broad survey of these techniques and their trade-offs: B. Bank, F. Avanzini,
 G. Borin, G. De Poli, F. Fontana, D. Rocchesso, "Physically informed signal

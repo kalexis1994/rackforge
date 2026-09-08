@@ -715,22 +715,79 @@
       "suggested_control": "list"
     },
     {
-      "index": 200,
-      "id": "preamp",
-      "name": "Preamp",
-      "page": "room",
-      "order": 7,
+      "index": 41,
+      "id": "last_damper",
+      "name": "Last Damper",
+      "page": "sound",
+      "order": 10,
       "kind": {
-        "type": "float",
-        "minimum": 0.0,
-        "maximum": 30.0,
-        "step": 0.1,
-        "default": 4.5,
-        "unit": "dB"
-      }
+        "type": "enum",
+        "default": 89,
+        "choices": [
+          {
+            "value": 84,
+            "name": "C6"
+          },
+          {
+            "value": 85,
+            "name": "C#6"
+          },
+          {
+            "value": 86,
+            "name": "D6"
+          },
+          {
+            "value": 87,
+            "name": "D#6"
+          },
+          {
+            "value": 88,
+            "name": "E6"
+          },
+          {
+            "value": 89,
+            "name": "F6"
+          },
+          {
+            "value": 90,
+            "name": "F#6"
+          },
+          {
+            "value": 91,
+            "name": "G6"
+          },
+          {
+            "value": 92,
+            "name": "G#6"
+          },
+          {
+            "value": 93,
+            "name": "A6"
+          },
+          {
+            "value": 94,
+            "name": "A#6"
+          },
+          {
+            "value": 95,
+            "name": "B6"
+          },
+          {
+            "value": 96,
+            "name": "C7"
+          }
+        ]
+      },
+      "flags": {
+        "automatable": false,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "list"
     },
     {
-      "index": 41,
+      "index": 42,
       "id": "knob_radiation_corner_hz",
       "name": "RADIATION_CORNER_HZ",
       "page": "model_board",
@@ -752,7 +809,7 @@
       }
     },
     {
-      "index": 42,
+      "index": 43,
       "id": "knob_comb_floor",
       "name": "COMB_FLOOR",
       "page": "model_hammer",
@@ -773,7 +830,7 @@
       }
     },
     {
-      "index": 43,
+      "index": 44,
       "id": "knob_string_t60_s",
       "name": "STRING_T60_S",
       "page": "model_strings",
@@ -795,7 +852,7 @@
       }
     },
     {
-      "index": 44,
+      "index": 45,
       "id": "knob_slow_stage_ratio",
       "name": "SLOW_STAGE_RATIO",
       "page": "model_strings",
@@ -816,7 +873,7 @@
       }
     },
     {
-      "index": 45,
+      "index": 46,
       "id": "knob_incoherent_radiation",
       "name": "INCOHERENT_RADIATION",
       "page": "model_strings",
@@ -837,7 +894,7 @@
       }
     },
     {
-      "index": 46,
+      "index": 47,
       "id": "knob_slow_wire_share",
       "name": "SLOW_WIRE_SHARE",
       "page": "model_strings",
@@ -858,7 +915,7 @@
       }
     },
     {
-      "index": 47,
+      "index": 48,
       "id": "knob_string_knee_hz",
       "name": "STRING_KNEE_HZ",
       "page": "model_strings",
@@ -880,7 +937,7 @@
       }
     },
     {
-      "index": 48,
+      "index": 49,
       "id": "knob_string_tilt",
       "name": "STRING_TILT",
       "page": "model_strings",
@@ -901,7 +958,7 @@
       }
     },
     {
-      "index": 49,
+      "index": 50,
       "id": "knob_scatter_knee_hz",
       "name": "SCATTER_KNEE_HZ",
       "page": "model_board",
@@ -923,7 +980,7 @@
       }
     },
     {
-      "index": 50,
+      "index": 51,
       "id": "knob_horizontal_bridge",
       "name": "HORIZONTAL_BRIDGE",
       "page": "model_strings",
@@ -944,7 +1001,7 @@
       }
     },
     {
-      "index": 51,
+      "index": 52,
       "id": "knob_horizontal_share",
       "name": "HORIZONTAL_SHARE",
       "page": "model_strings",
@@ -965,7 +1022,7 @@
       }
     },
     {
-      "index": 52,
+      "index": 53,
       "id": "knob_strike_skew_m",
       "name": "STRIKE_SKEW_M",
       "page": "model_hammer",
@@ -987,7 +1044,7 @@
       }
     },
     {
-      "index": 53,
+      "index": 54,
       "id": "knob_polarisation_cents",
       "name": "POLARISATION_CENTS",
       "page": "model_strings",
@@ -1009,7 +1066,7 @@
       }
     },
     {
-      "index": 54,
+      "index": 55,
       "id": "knob_longitudinal_ratio",
       "name": "LONGITUDINAL_RATIO",
       "page": "model_strings",
@@ -1030,7 +1087,7 @@
       }
     },
     {
-      "index": 55,
+      "index": 56,
       "id": "knob_longitudinal_mix",
       "name": "LONGITUDINAL_MIX",
       "page": "model_strings",
@@ -1051,7 +1108,7 @@
       }
     },
     {
-      "index": 56,
+      "index": 57,
       "id": "knob_tension_gain",
       "name": "TENSION_GAIN",
       "page": "model_strings",
@@ -1072,7 +1129,7 @@
       }
     },
     {
-      "index": 57,
+      "index": 58,
       "id": "knob_tension_max_shift",
       "name": "TENSION_MAX_SHIFT",
       "page": "model_strings",
@@ -1093,7 +1150,7 @@
       }
     },
     {
-      "index": 58,
+      "index": 59,
       "id": "knob_tension_smoothing",
       "name": "TENSION_SMOOTHING",
       "page": "model_strings",
@@ -1114,7 +1171,7 @@
       }
     },
     {
-      "index": 59,
+      "index": 60,
       "id": "knob_dead_magnitude_squared",
       "name": "DEAD_MAGNITUDE_SQUARED",
       "page": "model_strings",
@@ -1135,7 +1192,7 @@
       }
     },
     {
-      "index": 60,
+      "index": 61,
       "id": "knob_radiation_coincidence",
       "name": "RADIATION_COINCIDENCE",
       "page": "model_board",
@@ -1156,7 +1213,7 @@
       }
     },
     {
-      "index": 61,
+      "index": 62,
       "id": "knob_radiation_rolloff_hz",
       "name": "RADIATION_ROLLOFF_HZ",
       "page": "model_board",
@@ -1178,7 +1235,7 @@
       }
     },
     {
-      "index": 62,
+      "index": 63,
       "id": "knob_bridge_reference_speed",
       "name": "BRIDGE_REFERENCE_SPEED",
       "page": "model_strings",
@@ -1199,7 +1256,7 @@
       }
     },
     {
-      "index": 63,
+      "index": 64,
       "id": "knob_bridge_impedance_power",
       "name": "BRIDGE_IMPEDANCE_POWER",
       "page": "model_strings",
@@ -1220,7 +1277,7 @@
       }
     },
     {
-      "index": 64,
+      "index": 65,
       "id": "knob_bridge_reference_gauge_m",
       "name": "BRIDGE_REFERENCE_GAUGE_M",
       "page": "model_strings",
@@ -1242,7 +1299,7 @@
       }
     },
     {
-      "index": 65,
+      "index": 66,
       "id": "knob_bridge_length_power",
       "name": "BRIDGE_LENGTH_POWER",
       "page": "model_strings",
@@ -1263,7 +1320,7 @@
       }
     },
     {
-      "index": 66,
+      "index": 67,
       "id": "knob_bridge_reference_length_m",
       "name": "BRIDGE_REFERENCE_LENGTH_M",
       "page": "model_strings",
@@ -1285,7 +1342,7 @@
       }
     },
     {
-      "index": 67,
+      "index": 68,
       "id": "knob_bridge_factor_cap",
       "name": "BRIDGE_FACTOR_CAP",
       "page": "model_strings",
@@ -1306,7 +1363,7 @@
       }
     },
     {
-      "index": 68,
+      "index": 69,
       "id": "knob_slow_factor_cap",
       "name": "SLOW_FACTOR_CAP",
       "page": "model_strings",
@@ -1327,7 +1384,7 @@
       }
     },
     {
-      "index": 69,
+      "index": 70,
       "id": "knob_radiation_rate",
       "name": "RADIATION_RATE",
       "page": "model_board",
@@ -1348,7 +1405,7 @@
       }
     },
     {
-      "index": 70,
+      "index": 71,
       "id": "knob_kappa_loss",
       "name": "KAPPA_LOSS",
       "page": "model_strings",
@@ -1369,7 +1426,7 @@
       }
     },
     {
-      "index": 71,
+      "index": 72,
       "id": "knob_knock_level",
       "name": "KNOCK_LEVEL",
       "page": "model_hammer",
@@ -1390,7 +1447,7 @@
       }
     },
     {
-      "index": 72,
+      "index": 73,
       "id": "knob_board_loss_factor",
       "name": "BOARD_LOSS_FACTOR",
       "page": "model_board",
@@ -1411,7 +1468,7 @@
       }
     },
     {
-      "index": 73,
+      "index": 74,
       "id": "knob_house_felt_corner",
       "name": "HOUSE_FELT_CORNER",
       "page": "model_strings",
@@ -1432,7 +1489,7 @@
       }
     },
     {
-      "index": 74,
+      "index": 75,
       "id": "knob_house_hf_floor",
       "name": "HOUSE_HF_FLOOR",
       "page": "model_strings",
@@ -1453,7 +1510,7 @@
       }
     },
     {
-      "index": 75,
+      "index": 76,
       "id": "knob_hf_floor_corner_hz",
       "name": "HF_FLOOR_CORNER_HZ",
       "page": "model_strings",
@@ -1475,7 +1532,7 @@
       }
     },
     {
-      "index": 76,
+      "index": 77,
       "id": "knob_hf_floor_span",
       "name": "HF_FLOOR_SPAN",
       "page": "model_strings",
@@ -1496,7 +1553,7 @@
       }
     },
     {
-      "index": 77,
+      "index": 78,
       "id": "knob_felt_reference_compression_m",
       "name": "FELT_REFERENCE_COMPRESSION_M",
       "page": "model_hammer",
@@ -1518,7 +1575,7 @@
       }
     },
     {
-      "index": 78,
+      "index": 79,
       "id": "knob_scale_join",
       "name": "SCALE_JOIN",
       "page": "model_hammer",
@@ -1539,7 +1596,7 @@
       }
     },
     {
-      "index": 79,
+      "index": 80,
       "id": "knob_scale_break",
       "name": "SCALE_BREAK",
       "page": "model_hammer",
@@ -1560,7 +1617,7 @@
       }
     },
     {
-      "index": 80,
+      "index": 81,
       "id": "knob_gauge_a0_m",
       "name": "GAUGE_A0_M",
       "page": "model_hammer",
@@ -1582,7 +1639,7 @@
       }
     },
     {
-      "index": 81,
+      "index": 82,
       "id": "knob_gauge_break_m",
       "name": "GAUGE_BREAK_M",
       "page": "model_hammer",
@@ -1604,7 +1661,7 @@
       }
     },
     {
-      "index": 82,
+      "index": 83,
       "id": "knob_gauge_join_m",
       "name": "GAUGE_JOIN_M",
       "page": "model_hammer",
@@ -1626,7 +1683,7 @@
       }
     },
     {
-      "index": 83,
+      "index": 84,
       "id": "knob_gauge_top_m",
       "name": "GAUGE_TOP_M",
       "page": "model_hammer",
@@ -1648,7 +1705,7 @@
       }
     },
     {
-      "index": 84,
+      "index": 85,
       "id": "knob_gauge_constant",
       "name": "GAUGE_CONSTANT",
       "page": "model_hammer",
@@ -1669,7 +1726,7 @@
       }
     },
     {
-      "index": 85,
+      "index": 86,
       "id": "knob_clang_length_power",
       "name": "CLANG_LENGTH_POWER",
       "page": "model_hammer",
@@ -1690,7 +1747,7 @@
       }
     },
     {
-      "index": 86,
+      "index": 87,
       "id": "knob_clack_scatter",
       "name": "CLACK_SCATTER",
       "page": "model_hammer",
@@ -1711,7 +1768,7 @@
       }
     },
     {
-      "index": 87,
+      "index": 88,
       "id": "knob_thump_t60_s",
       "name": "THUMP_T60_S",
       "page": "model_hammer",
@@ -1733,7 +1790,7 @@
       }
     },
     {
-      "index": 88,
+      "index": 89,
       "id": "knob_felt_exponent_at_bass",
       "name": "FELT_EXPONENT_AT_BASS",
       "page": "model_hammer",
@@ -1754,7 +1811,7 @@
       }
     },
     {
-      "index": 89,
+      "index": 90,
       "id": "knob_felt_exponent_rise",
       "name": "FELT_EXPONENT_RISE",
       "page": "model_hammer",
@@ -1775,7 +1832,7 @@
       }
     },
     {
-      "index": 90,
+      "index": 91,
       "id": "knob_action_span_base",
       "name": "ACTION_SPAN_BASE",
       "page": "model_hammer",
@@ -1796,7 +1853,7 @@
       }
     },
     {
-      "index": 91,
+      "index": 92,
       "id": "knob_action_span_per_dynamics",
       "name": "ACTION_SPAN_PER_DYNAMICS",
       "page": "model_hammer",
@@ -1817,7 +1874,7 @@
       }
     },
     {
-      "index": 92,
+      "index": 93,
       "id": "knob_contact_swing_base",
       "name": "CONTACT_SWING_BASE",
       "page": "model_hammer",
@@ -1838,7 +1895,7 @@
       }
     },
     {
-      "index": 93,
+      "index": 94,
       "id": "knob_contact_swing_per_dynamics",
       "name": "CONTACT_SWING_PER_DYNAMICS",
       "page": "model_hammer",
@@ -1859,7 +1916,7 @@
       }
     },
     {
-      "index": 94,
+      "index": 95,
       "id": "knob_felt_exponent_min",
       "name": "FELT_EXPONENT_MIN",
       "page": "model_hammer",
@@ -1880,7 +1937,7 @@
       }
     },
     {
-      "index": 95,
+      "index": 96,
       "id": "knob_felt_exponent_max",
       "name": "FELT_EXPONENT_MAX",
       "page": "model_hammer",
@@ -1901,7 +1958,7 @@
       }
     },
     {
-      "index": 96,
+      "index": 97,
       "id": "knob_board_mean_mobility",
       "name": "BOARD_MEAN_MOBILITY",
       "page": "model_board",
@@ -1922,7 +1979,7 @@
       }
     },
     {
-      "index": 97,
+      "index": 98,
       "id": "knob_board_coincidence_hz",
       "name": "BOARD_COINCIDENCE_HZ",
       "page": "model_board",
@@ -1944,7 +2001,7 @@
       }
     },
     {
-      "index": 98,
+      "index": 99,
       "id": "knob_board_radiation_order",
       "name": "BOARD_RADIATION_ORDER",
       "page": "model_board",
@@ -1965,7 +2022,7 @@
       }
     },
     {
-      "index": 99,
+      "index": 100,
       "id": "knob_headroom",
       "name": "HEADROOM",
       "page": "model_board",
@@ -1986,7 +2043,7 @@
       }
     },
     {
-      "index": 100,
+      "index": 101,
       "id": "knob_preamp_range_db",
       "name": "PREAMP_RANGE_DB",
       "page": "model_air",
@@ -2008,7 +2065,7 @@
       }
     },
     {
-      "index": 101,
+      "index": 102,
       "id": "knob_preamp_knee",
       "name": "PREAMP_KNEE",
       "page": "model_air",
@@ -2029,7 +2086,7 @@
       }
     },
     {
-      "index": 102,
+      "index": 103,
       "id": "knob_preamp_asymmetry",
       "name": "PREAMP_ASYMMETRY",
       "page": "model_air",
@@ -2050,7 +2107,7 @@
       }
     },
     {
-      "index": 103,
+      "index": 104,
       "id": "knob_board_mix",
       "name": "BOARD_MIX",
       "page": "model_board",
@@ -2071,7 +2128,7 @@
       }
     },
     {
-      "index": 104,
+      "index": 105,
       "id": "knob_board_top_hz",
       "name": "BOARD_TOP_HZ",
       "page": "model_board",
@@ -2093,7 +2150,7 @@
       }
     },
     {
-      "index": 105,
+      "index": 106,
       "id": "knob_board_bottom_hz",
       "name": "BOARD_BOTTOM_HZ",
       "page": "model_board",
@@ -2115,7 +2172,7 @@
       }
     },
     {
-      "index": 106,
+      "index": 107,
       "id": "knob_open_mix",
       "name": "OPEN_MIX",
       "page": "model_air",
@@ -2136,7 +2193,7 @@
       }
     },
     {
-      "index": 107,
+      "index": 108,
       "id": "knob_undamped_low_hz",
       "name": "UNDAMPED_LOW_HZ",
       "page": "model_air",
@@ -2158,7 +2215,7 @@
       }
     },
     {
-      "index": 108,
+      "index": 109,
       "id": "knob_undamped_high_hz",
       "name": "UNDAMPED_HIGH_HZ",
       "page": "model_air",
@@ -2180,7 +2237,7 @@
       }
     },
     {
-      "index": 109,
+      "index": 110,
       "id": "knob_undamped_t60_low_s",
       "name": "UNDAMPED_T60_LOW_S",
       "page": "model_air",
@@ -2202,7 +2259,7 @@
       }
     },
     {
-      "index": 110,
+      "index": 111,
       "id": "knob_undamped_t60_high_s",
       "name": "UNDAMPED_T60_HIGH_S",
       "page": "model_air",
@@ -2224,17 +2281,17 @@
       }
     },
     {
-      "index": 111,
+      "index": 112,
       "id": "knob_undamped_mix",
       "name": "UNDAMPED_MIX",
       "page": "model_air",
       "order": 8,
       "kind": {
         "type": "float",
-        "minimum": 0.0075,
-        "maximum": 1.92,
-        "step": 0.0012,
-        "default": 0.12,
+        "minimum": 0.140625,
+        "maximum": 36.0,
+        "step": 0.0224,
+        "default": 2.25,
         "taper": "logarithmic"
       },
       "flags": {
@@ -2245,7 +2302,7 @@
       }
     },
     {
-      "index": 112,
+      "index": 113,
       "id": "knob_halo_rt60_s",
       "name": "HALO_RT60_S",
       "page": "model_air",
@@ -2267,7 +2324,7 @@
       }
     },
     {
-      "index": 113,
+      "index": 114,
       "id": "knob_halo_hp_hz",
       "name": "HALO_HP_HZ",
       "page": "model_air",
@@ -2289,7 +2346,7 @@
       }
     },
     {
-      "index": 114,
+      "index": 115,
       "id": "knob_halo_mix",
       "name": "HALO_MIX",
       "page": "model_air",
@@ -2310,7 +2367,7 @@
       }
     },
     {
-      "index": 115,
+      "index": 116,
       "id": "knob_lid_half_width_m",
       "name": "LID_HALF_WIDTH_M",
       "page": "model_air",
@@ -2332,7 +2389,7 @@
       }
     },
     {
-      "index": 116,
+      "index": 117,
       "id": "knob_lid_half_length_m",
       "name": "LID_HALF_LENGTH_M",
       "page": "model_air",
@@ -2354,7 +2411,7 @@
       }
     },
     {
-      "index": 117,
+      "index": 118,
       "id": "knob_mic_azimuth_rad",
       "name": "MIC_AZIMUTH_RAD",
       "page": "model_air",
@@ -2376,7 +2433,7 @@
       }
     },
     {
-      "index": 118,
+      "index": 119,
       "id": "knob_lid_closed_rad",
       "name": "LID_CLOSED_RAD",
       "page": "model_air",
@@ -2398,7 +2455,7 @@
       }
     },
     {
-      "index": 119,
+      "index": 120,
       "id": "knob_lid_open_rad",
       "name": "LID_OPEN_RAD",
       "page": "model_air",
@@ -2420,7 +2477,7 @@
       }
     },
     {
-      "index": 120,
+      "index": 121,
       "id": "knob_lid_reflect",
       "name": "LID_REFLECT",
       "page": "model_air",
@@ -2441,7 +2498,7 @@
       }
     },
     {
-      "index": 121,
+      "index": 122,
       "id": "knob_lid_closed_leak",
       "name": "LID_CLOSED_LEAK",
       "page": "model_air",
@@ -2462,7 +2519,7 @@
       }
     },
     {
-      "index": 122,
+      "index": 123,
       "id": "knob_lid_closed_hz",
       "name": "LID_CLOSED_HZ",
       "page": "model_air",
@@ -2484,7 +2541,7 @@
       }
     },
     {
-      "index": 123,
+      "index": 124,
       "id": "knob_lid_open_hz",
       "name": "LID_OPEN_HZ",
       "page": "model_air",
@@ -2506,7 +2563,7 @@
       }
     },
     {
-      "index": 124,
+      "index": 125,
       "id": "knob_sound_speed",
       "name": "SOUND_SPEED",
       "page": "model_air",
@@ -2527,7 +2584,7 @@
       }
     },
     {
-      "index": 125,
+      "index": 126,
       "id": "knob_room_volume_min_m3",
       "name": "ROOM_VOLUME_MIN_M3",
       "page": "model_air",
@@ -2549,7 +2606,7 @@
       }
     },
     {
-      "index": 126,
+      "index": 127,
       "id": "knob_room_volume_max_m3",
       "name": "ROOM_VOLUME_MAX_M3",
       "page": "model_air",
@@ -2571,7 +2628,7 @@
       }
     },
     {
-      "index": 127,
+      "index": 128,
       "id": "knob_mic_distance_min_m",
       "name": "MIC_DISTANCE_MIN_M",
       "page": "model_air",
@@ -2593,7 +2650,7 @@
       }
     },
     {
-      "index": 128,
+      "index": 129,
       "id": "knob_mic_distance_max_m",
       "name": "MIC_DISTANCE_MAX_M",
       "page": "model_air",
@@ -2615,7 +2672,7 @@
       }
     },
     {
-      "index": 129,
+      "index": 130,
       "id": "knob_mic_reference_m",
       "name": "MIC_REFERENCE_M",
       "page": "model_air",
@@ -2637,7 +2694,7 @@
       }
     },
     {
-      "index": 130,
+      "index": 131,
       "id": "knob_mic_near_cap",
       "name": "MIC_NEAR_CAP",
       "page": "model_air",
@@ -2658,7 +2715,7 @@
       }
     },
     {
-      "index": 131,
+      "index": 132,
       "id": "knob_mic_height_m",
       "name": "MIC_HEIGHT_M",
       "page": "model_air",
@@ -2680,7 +2737,7 @@
       }
     },
     {
-      "index": 132,
+      "index": 133,
       "id": "knob_air_absorb_4k_per_m",
       "name": "AIR_ABSORB_4K_PER_M",
       "page": "model_air",
@@ -2701,7 +2758,7 @@
       }
     },
     {
-      "index": 133,
+      "index": 134,
       "id": "knob_mic_spacing_m",
       "name": "MIC_SPACING_M",
       "page": "model_air",
@@ -2723,7 +2780,7 @@
       }
     },
     {
-      "index": 134,
+      "index": 135,
       "id": "knob_mic_preamp",
       "name": "MIC_PREAMP",
       "page": "model_air",
@@ -2732,7 +2789,7 @@
         "type": "float",
         "minimum": 0.098125,
         "maximum": 25.12,
-        "step": 0.015700000000000002,
+        "step": 0.0156,
         "default": 1.57,
         "taper": "logarithmic"
       },
@@ -2744,7 +2801,7 @@
       }
     },
     {
-      "index": 135,
+      "index": 136,
       "id": "knob_proximity_strength",
       "name": "PROXIMITY_STRENGTH",
       "page": "model_air",
@@ -2765,7 +2822,7 @@
       }
     },
     {
-      "index": 136,
+      "index": 137,
       "id": "knob_sympathy_rate",
       "name": "SYMPATHY_RATE",
       "page": "model_strings",
@@ -2786,7 +2843,7 @@
       }
     },
     {
-      "index": 137,
+      "index": 138,
       "id": "knob_impact_clang",
       "name": "IMPACT_CLANG",
       "page": "model_hammer",
@@ -2807,7 +2864,7 @@
       }
     },
     {
-      "index": 138,
+      "index": 139,
       "id": "knob_impact_pulse_tau_s",
       "name": "IMPACT_PULSE_TAU_S",
       "page": "model_hammer",
@@ -2829,7 +2886,7 @@
       }
     },
     {
-      "index": 139,
+      "index": 140,
       "id": "knob_air_highpass",
       "name": "AIR_HIGHPASS",
       "page": "model_air",
@@ -2850,7 +2907,7 @@
       }
     },
     {
-      "index": 140,
+      "index": 141,
       "id": "knob_room_mix",
       "name": "ROOM_MIX",
       "page": "model_air",
@@ -2871,7 +2928,7 @@
       }
     },
     {
-      "index": 141,
+      "index": 142,
       "id": "knob_hammer_mass_scale",
       "name": "HAMMER_MASS_SCALE",
       "page": "model_hammer",
@@ -2892,7 +2949,7 @@
       }
     },
     {
-      "index": 142,
+      "index": 143,
       "id": "knob_string_tension_n",
       "name": "STRING_TENSION_N",
       "page": "model_strings",
@@ -2914,7 +2971,7 @@
       }
     },
     {
-      "index": 143,
+      "index": 144,
       "id": "knob_felt_k_a0",
       "name": "FELT_K_A0",
       "page": "model_hammer",
@@ -2935,7 +2992,7 @@
       }
     },
     {
-      "index": 144,
+      "index": 145,
       "id": "knob_felt_k_decades",
       "name": "FELT_K_DECADES",
       "page": "model_hammer",
@@ -2956,7 +3013,7 @@
       }
     },
     {
-      "index": 145,
+      "index": 146,
       "id": "knob_felt_table_floor",
       "name": "FELT_TABLE_FLOOR",
       "page": "model_hammer",
@@ -2977,7 +3034,7 @@
       }
     },
     {
-      "index": 146,
+      "index": 147,
       "id": "knob_felt_bass_gain",
       "name": "FELT_BASS_GAIN",
       "page": "model_hammer",
@@ -2998,7 +3055,7 @@
       }
     },
     {
-      "index": 147,
+      "index": 148,
       "id": "knob_felt_treble_gain",
       "name": "FELT_TREBLE_GAIN",
       "page": "model_hammer",
@@ -3019,7 +3076,7 @@
       }
     },
     {
-      "index": 148,
+      "index": 149,
       "id": "knob_duplex_level",
       "name": "DUPLEX_LEVEL",
       "page": "model_strings",
@@ -3040,7 +3097,7 @@
       }
     },
     {
-      "index": 149,
+      "index": 150,
       "id": "knob_unison_beat_cap_hz",
       "name": "UNISON_BEAT_CAP_HZ",
       "page": "model_strings",
@@ -3062,7 +3119,7 @@
       }
     },
     {
-      "index": 150,
+      "index": 151,
       "id": "knob_unison_width",
       "name": "UNISON_WIDTH",
       "page": "model_strings",
@@ -3083,7 +3140,7 @@
       }
     },
     {
-      "index": 151,
+      "index": 152,
       "id": "knob_unison_jitter_spread",
       "name": "UNISON_JITTER_SPREAD",
       "page": "model_strings",
@@ -3104,7 +3161,7 @@
       }
     },
     {
-      "index": 152,
+      "index": 153,
       "id": "knob_stulov_epsilon",
       "name": "STULOV_EPSILON",
       "page": "model_hammer",
@@ -3125,7 +3182,7 @@
       }
     },
     {
-      "index": 153,
+      "index": 154,
       "id": "knob_stulov_tau_s",
       "name": "STULOV_TAU_S",
       "page": "model_hammer",
@@ -3147,7 +3204,7 @@
       }
     },
     {
-      "index": 154,
+      "index": 155,
       "id": "knob_string_hf_loss",
       "name": "STRING_HF_LOSS",
       "page": "model_strings",
@@ -3168,7 +3225,7 @@
       }
     },
     {
-      "index": 155,
+      "index": 156,
       "id": "knob_board_low_loss",
       "name": "BOARD_LOW_LOSS",
       "page": "model_board",
@@ -3189,7 +3246,7 @@
       }
     },
     {
-      "index": 156,
+      "index": 157,
       "id": "knob_board_mean_cap",
       "name": "BOARD_MEAN_CAP",
       "page": "model_board",
@@ -3210,7 +3267,7 @@
       }
     },
     {
-      "index": 157,
+      "index": 158,
       "id": "knob_sim_top_hz",
       "name": "SIM_TOP_HZ",
       "page": "model_hammer",
@@ -3232,7 +3289,7 @@
       }
     },
     {
-      "index": 158,
+      "index": 159,
       "id": "knob_hammer_v_ff",
       "name": "HAMMER_V_FF",
       "page": "model_hammer",
@@ -3253,7 +3310,7 @@
       }
     },
     {
-      "index": 159,
+      "index": 160,
       "id": "knob_contact_stretch",
       "name": "CONTACT_STRETCH",
       "page": "model_hammer",
@@ -3274,7 +3331,7 @@
       }
     },
     {
-      "index": 160,
+      "index": 161,
       "id": "knob_recipe_floor",
       "name": "RECIPE_FLOOR",
       "page": "model_misc",
@@ -3294,7 +3351,7 @@
       }
     },
     {
-      "index": 161,
+      "index": 162,
       "id": "knob_action_noise_velocity_power",
       "name": "ACTION_NOISE_VELOCITY_POWER",
       "page": "model_misc",
@@ -3315,7 +3372,7 @@
       }
     },
     {
-      "index": 162,
+      "index": 163,
       "id": "knob_attack_knee",
       "name": "ATTACK_KNEE",
       "page": "model_misc",
@@ -3336,7 +3393,7 @@
       }
     },
     {
-      "index": 163,
+      "index": 164,
       "id": "knob_impact_velocity_power",
       "name": "IMPACT_VELOCITY_POWER",
       "page": "model_misc",
@@ -3357,7 +3414,7 @@
       }
     },
     {
-      "index": 164,
+      "index": 165,
       "id": "knob_board_transfer",
       "name": "BOARD_TRANSFER",
       "page": "model_board",
@@ -3378,7 +3435,7 @@
       }
     },
     {
-      "index": 165,
+      "index": 166,
       "id": "knob_board_measured_modes",
       "name": "BOARD_MEASURED_MODES",
       "page": "model_board",
@@ -3398,7 +3455,7 @@
       }
     },
     {
-      "index": 166,
+      "index": 167,
       "id": "knob_felt_exponent_treble",
       "name": "FELT_EXPONENT_TREBLE",
       "page": "model_hammer",
@@ -3418,7 +3475,7 @@
       }
     },
     {
-      "index": 167,
+      "index": 168,
       "id": "knob_sim_min_modes",
       "name": "SIM_MIN_MODES",
       "page": "model_hammer",
@@ -3439,7 +3496,7 @@
       }
     },
     {
-      "index": 168,
+      "index": 169,
       "id": "knob_comb_floor_low",
       "name": "COMB_FLOOR_LOW",
       "page": "model_hammer",
@@ -3460,7 +3517,7 @@
       }
     },
     {
-      "index": 169,
+      "index": 170,
       "id": "knob_board_sign_top_hz",
       "name": "BOARD_SIGN_TOP_HZ",
       "page": "model_board",
@@ -3481,7 +3538,7 @@
       }
     },
     {
-      "index": 170,
+      "index": 171,
       "id": "knob_bed_t60_s",
       "name": "BED_T60_S",
       "page": "model_air",
@@ -3502,7 +3559,7 @@
       }
     },
     {
-      "index": 171,
+      "index": 172,
       "id": "knob_bed_mix",
       "name": "BED_MIX",
       "page": "model_air",
@@ -3523,7 +3580,7 @@
       }
     },
     {
-      "index": 172,
+      "index": 173,
       "id": "knob_thump_velocity_power",
       "name": "THUMP_VELOCITY_POWER",
       "page": "model_hammer",
@@ -3544,17 +3601,17 @@
       }
     },
     {
-      "index": 173,
+      "index": 174,
       "id": "knob_thump_base",
       "name": "THUMP_BASE",
       "page": "model_hammer",
       "order": 39,
       "kind": {
         "type": "float",
-        "minimum": 0.015,
-        "maximum": 3.84,
-        "step": 0.0024,
-        "default": 0.24,
+        "minimum": 0.00203125,
+        "maximum": 0.52,
+        "step": 0.000325,
+        "default": 0.0325,
         "taper": "logarithmic"
       },
       "flags": {
@@ -3565,7 +3622,7 @@
       }
     },
     {
-      "index": 174,
+      "index": 175,
       "id": "knob_thump_rise_db",
       "name": "THUMP_RISE_DB",
       "page": "model_hammer",
@@ -3586,7 +3643,7 @@
       }
     },
     {
-      "index": 175,
+      "index": 176,
       "id": "knob_felt_treble_decades",
       "name": "FELT_TREBLE_DECADES",
       "page": "model_hammer",
@@ -3607,9 +3664,9 @@
       }
     },
     {
-      "index": 176,
-      "id": "knob_restrike_merge",
-      "name": "RESTRIKE_MERGE",
+      "index": 177,
+      "id": "knob_restrike_fresh",
+      "name": "RESTRIKE_FRESH",
       "page": "model_hammer",
       "order": 42,
       "kind": {
@@ -3627,7 +3684,7 @@
       }
     },
     {
-      "index": 177,
+      "index": 178,
       "id": "knob_attack_dispersion",
       "name": "ATTACK_DISPERSION",
       "page": "model_hammer",
@@ -3648,7 +3705,7 @@
       }
     },
     {
-      "index": 178,
+      "index": 179,
       "id": "knob_attack_ramp_s",
       "name": "ATTACK_RAMP_S",
       "page": "model_hammer",
@@ -3666,6 +3723,398 @@
         "modulatable": false,
         "read_only": false,
         "advanced": true
+      }
+    },
+    {
+      "index": 180,
+      "id": "knob_board_shape",
+      "name": "BOARD_SHAPE",
+      "page": "model_board",
+      "order": 18,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 181,
+      "id": "knob_board_pair",
+      "name": "BOARD_PAIR",
+      "page": "model_board",
+      "order": 19,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 182,
+      "id": "knob_letoff_distance_mm",
+      "name": "LETOFF_DISTANCE_MM",
+      "page": "model_hammer",
+      "order": 45,
+      "kind": {
+        "type": "float",
+        "minimum": 0.15625,
+        "maximum": 40.0,
+        "step": 0.025,
+        "default": 2.5,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 183,
+      "id": "knob_letoff_knee",
+      "name": "LETOFF_KNEE",
+      "page": "model_hammer",
+      "order": 46,
+      "kind": {
+        "type": "float",
+        "minimum": 0.75,
+        "maximum": 192.0,
+        "step": 0.12,
+        "default": 12.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 184,
+      "id": "knob_damper_land_ms",
+      "name": "DAMPER_LAND_MS",
+      "page": "model_strings",
+      "order": 34,
+      "kind": {
+        "type": "float",
+        "minimum": 1.375,
+        "maximum": 352.0,
+        "step": 0.22,
+        "default": 22.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 185,
+      "id": "knob_damper_bounces",
+      "name": "DAMPER_BOUNCES",
+      "page": "model_strings",
+      "order": 35,
+      "kind": {
+        "type": "float",
+        "minimum": 0.3125,
+        "maximum": 80.0,
+        "step": 0.05,
+        "default": 5.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 186,
+      "id": "knob_damper_hang_ms",
+      "name": "DAMPER_HANG_MS",
+      "page": "model_strings",
+      "order": 36,
+      "kind": {
+        "type": "float",
+        "minimum": 0.375,
+        "maximum": 96.0,
+        "step": 0.06,
+        "default": 6.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 187,
+      "id": "knob_damper_restitution",
+      "name": "DAMPER_RESTITUTION",
+      "page": "model_strings",
+      "order": 37,
+      "kind": {
+        "type": "float",
+        "minimum": 0.03125,
+        "maximum": 8.0,
+        "step": 0.005,
+        "default": 0.5,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 188,
+      "id": "knob_damper_dwell_ms",
+      "name": "DAMPER_DWELL_MS",
+      "page": "model_strings",
+      "order": 38,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 189,
+      "id": "knob_key_return_ms",
+      "name": "KEY_RETURN_MS",
+      "page": "model_hammer",
+      "order": 47,
+      "kind": {
+        "type": "float",
+        "minimum": 2.5,
+        "maximum": 640.0,
+        "step": 0.4,
+        "default": 40.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 190,
+      "id": "knob_key_repetition_point",
+      "name": "KEY_REPETITION_POINT",
+      "page": "model_hammer",
+      "order": 48,
+      "kind": {
+        "type": "float",
+        "minimum": 0.020625,
+        "maximum": 5.28,
+        "step": 0.0033,
+        "default": 0.33,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 191,
+      "id": "knob_repetition_from_check",
+      "name": "REPETITION_FROM_CHECK",
+      "page": "model_hammer",
+      "order": 49,
+      "kind": {
+        "type": "float",
+        "minimum": 0.046875,
+        "maximum": 12.0,
+        "step": 0.0075,
+        "default": 0.75,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 192,
+      "id": "knob_merge_ramp_s",
+      "name": "MERGE_RAMP_S",
+      "page": "model_hammer",
+      "order": 50,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.0001,
+        "default": 0.0
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 193,
+      "id": "knob_key_aftertouch_mm",
+      "name": "KEY_AFTERTOUCH_MM",
+      "page": "model_hammer",
+      "order": 51,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 194,
+      "id": "knob_action_ratio",
+      "name": "ACTION_RATIO",
+      "page": "model_hammer",
+      "order": 52,
+      "kind": {
+        "type": "float",
+        "minimum": 0.34375,
+        "maximum": 88.0,
+        "step": 0.055,
+        "default": 5.5,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 195,
+      "id": "knob_prompt_measured_power",
+      "name": "PROMPT_MEASURED_POWER",
+      "page": "model_board",
+      "order": 20,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 196,
+      "id": "knob_level_velocity_power",
+      "name": "LEVEL_VELOCITY_POWER",
+      "page": "model_hammer",
+      "order": 53,
+      "kind": {
+        "type": "float",
+        "minimum": 0.1375,
+        "maximum": 35.2,
+        "step": 0.022,
+        "default": 2.2,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 197,
+      "id": "knob_merge_ramp_contact",
+      "name": "MERGE_RAMP_CONTACT",
+      "page": "model_hammer",
+      "order": 54,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.0,
+        "taper": "linear"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 200,
+      "id": "preamp",
+      "name": "Preamp",
+      "page": "room",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 30.0,
+        "step": 0.1,
+        "default": 4.5,
+        "unit": "dB"
       }
     }
   ]

@@ -55,15 +55,15 @@ use rackforge_repository::{
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
-    MasterLevel, MasterPan, ParameterLink, PluginInstanceState, ProgramDraftState,
-    RackForgeParameterMapper, RackForgeParameterValue, Revision, SESSION_SCHEMA_VERSION,
-    SemanticControlProfile, SessionCommand, SessionEvent, SessionId, SessionState, SoundSummary,
-    semantic_control_little_header,
+    MasterLevel, MasterPan, ParameterLink, PlayChainEffect, PlayChainState, PluginInstanceState,
+    ProgramDraftState, RackForgeParameterMapper, RackForgeParameterValue, Revision,
+    SESSION_SCHEMA_VERSION, SemanticControlProfile, SessionCommand, SessionEvent, SessionId,
+    SessionState, SoundSummary, semantic_control_little_header,
 };
 use rackforge_surface_api::{SurfaceActivationRequest, SurfaceMode};
 use rackforge_surface_runtime::{
-    ActiveMode, Header, Input, Menu, MenuCommand, PlayPlugin, PlayPreset, PlaySound,
-    ProgramExitDecision, ProgramExitDestination,
+    ActiveMode, Header, Input, Menu, MenuCommand, PlayChainEffectItem, PlayPlugin, PlayPreset,
+    PlaySound, ProgramExitDecision, ProgramExitDestination,
 };
 use semver::Version;
 use shutdown::DesktopShutdown;
@@ -626,6 +626,13 @@ impl DesktopApp {
                 warnings.push(format!("Could not restore MIDI parameter links: {error:#}"));
                 Vec::new()
             });
+        let restored_play_chains =
+            session_checkpoint
+                .play_chains(&session_id)
+                .unwrap_or_else(|error| {
+                    warnings.push(format!("Could not restore the PLAY effects: {error:#}"));
+                    Vec::new()
+                });
         let performance_repository = PerformanceRepository::load_or_empty(Some(&options.data_root))
             .context("loading Desktop performance library")?;
         *performance_revision_shared
@@ -690,17 +697,8 @@ impl DesktopApp {
             }
         };
         let mut menu = Menu::default();
-        menu.set_play_plugins(
-            plugins
-                .iter()
-                .map(|plugin| {
-                    PlayPlugin::new(&plugin.instance_id, &plugin.plugin_id, &plugin.name)
-                        .short_name(plugin.runtime.manifest().little_short_name())
-                        .config_available(plugin.config_available)
-                })
-                .collect(),
-            active_instance_id,
-        );
+        menu.set_play_plugins(little_play_plugins(&plugins, false), active_instance_id);
+        menu.set_play_effect_plugins(little_play_plugins(&plugins, true));
         if let Some(plugin) = active_instance_id
             .and_then(|active| plugins.iter().find(|plugin| plugin.instance_id == active))
         {
@@ -732,6 +730,7 @@ impl DesktopApp {
                 .map_err(anyhow::Error::msg)?;
             state.instances = plugins.iter().map(plugin_session_state).collect();
             state.parameter_links = restored_parameter_links.clone();
+            state.play_chains = prune_play_chains(restored_play_chains, &state.instances, &plugins);
             menu.sync_active_mode(active_mode_from_surface(state.active_mode));
         }
         #[cfg(windows)]
@@ -758,6 +757,16 @@ impl DesktopApp {
                 &performance_repository,
                 &controller_semantic_profiles,
             )?)?;
+            let active = session
+                .read()
+                .expect("session lock poisoned")
+                .active_instance_id
+                .clone();
+            if let Some(active) = active
+                && let Err(error) = apply_desktop_play_chain(audio, &session, &plugins, &active)
+            {
+                warnings.push(format!("Could not restore the PLAY effects: {error}"));
+            }
         }
         if let Err(error) =
             session_checkpoint.save(&session.read().expect("session lock poisoned").clone())
@@ -863,6 +872,7 @@ impl DesktopApp {
             controller_supervisor: None,
         };
         app.sync_little_plugin_parameters();
+        app.sync_little_play_chain();
         Ok(app)
     }
 
@@ -943,17 +953,8 @@ impl DesktopApp {
             }
         }
         let mut menu = Menu::default();
-        menu.set_play_plugins(
-            plugins
-                .iter()
-                .map(|plugin| {
-                    PlayPlugin::new(&plugin.instance_id, &plugin.plugin_id, &plugin.name)
-                        .short_name(plugin.runtime.manifest().little_short_name())
-                        .config_available(plugin.config_available)
-                })
-                .collect(),
-            active_instance_id,
-        );
+        menu.set_play_plugins(little_play_plugins(&plugins, false), active_instance_id);
+        menu.set_play_effect_plugins(little_play_plugins(&plugins, true));
         if let Some(plugin) = active_instance_id
             .and_then(|active| plugins.iter().find(|plugin| plugin.instance_id == active))
         {
@@ -976,6 +977,11 @@ impl DesktopApp {
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
             state.instances = plugins.iter().map(plugin_session_state).collect();
+            state.play_chains = prune_play_chains(
+                std::mem::take(&mut state.play_chains),
+                &state.instances,
+                &plugins,
+            );
             state.revision = Revision::new(state.revision.get().saturating_add(1));
         }
         self.menu = menu;
@@ -995,6 +1001,7 @@ impl DesktopApp {
                 }
             }
         }
+        self.sync_little_play_chain();
         self.sync_little_plugin_parameters();
         self.persist_session_checkpoint();
         Ok(warnings)
@@ -1936,9 +1943,15 @@ impl DesktopApp {
     }
 
     fn apply_input(&mut self, input: Input) {
+        let target_before = self.menu.parameter_target_instance_id().map(str::to_owned);
         self.menu.apply_input(input);
         while let Some(command) = self.menu.take_command() {
             self.apply_command(command);
+        }
+        // An effect's panel reads that effect's own instance: when the input
+        // moved LITTLE onto or off one, fetch what it is showing now.
+        if self.menu.parameter_target_instance_id().map(str::to_owned) != target_before {
+            self.sync_little_plugin_parameters();
         }
         #[cfg(windows)]
         self.render_controller_screen();
@@ -2481,14 +2494,22 @@ impl DesktopApp {
                 self.reload_plugins()
                     .map_err(|error| format!("Could not load the installed plugin: {error:#}"))?;
             }
-            let instance_id = self
+            let (instance_id, kind) = self
                 .plugins
                 .iter()
                 .find(|plugin| plugin.plugin_id == plugin_id)
-                .map(|plugin| plugin.instance_id.clone())
+                .map(|plugin| (plugin.instance_id.clone(), plugin.runtime.manifest().kind))
                 .ok_or_else(|| {
                     format!("Installed plugin {plugin_id:?} is not compatible with Desktop")
                 })?;
+            // An effect is enabled and loaded, and that is all: it has no
+            // place on the stage of its own. Selecting it there put the
+            // instrument's chain effects "not on stage" and left the test
+            // note with nothing to play through, measured 2026-09-08 when
+            // RF-EQ was activated over the piano.
+            if kind == PluginKind::Effect {
+                return Ok(());
+            }
             let instance_id = InstanceId::new(instance_id)
                 .map_err(|error| format!("Installed plugin has an invalid instance id: {error}"))?;
             self.select_plugin(&instance_id, None)?;
@@ -3324,6 +3345,10 @@ impl DesktopApp {
                 vec![SessionEvent::LiveBrowseModeChanged { mode }],
                 Some(command_ref),
             ),
+            SessionCommand::SetPlayChain {
+                instrument_id,
+                effects,
+            } => self.set_play_chain(&instrument_id, effects, Some(command_ref)),
             SessionCommand::ActivateLiveTarget { location } => {
                 self.activate_live_target(location, Some(command_ref))
             }
@@ -4272,10 +4297,14 @@ impl DesktopApp {
         let state = self.session.read().expect("session lock poisoned");
         let revision = state.revision;
         let mut instance_id = instance_id.clone();
-        if !self
-            .plugins
-            .iter()
-            .any(|plugin| plugin.instance_id == instance_id.as_str())
+        let chain_effect_on_stage = state
+            .play_chain_effect_owner(&instance_id)
+            .is_some_and(|owner| state.active_instance_id.as_ref() == Some(owner));
+        if !chain_effect_on_stage
+            && !self
+                .plugins
+                .iter()
+                .any(|plugin| plugin.instance_id == instance_id.as_str())
         {
             // The panel this came from may have been opened before its plugin
             // was reinstalled or reactivated, which mints a new instance id.
@@ -4326,15 +4355,67 @@ impl DesktopApp {
         }
     }
 
+    /// One edit to the chain of the instrument on stage, applied through the
+    /// same command the web uses, so both surfaces leave the same event.
+    fn edit_little_play_chain(
+        &mut self,
+        edit: impl FnOnce(&mut PlayChainState, &[DesktopPlugin]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let (instrument_id, mut chain) = {
+            let session = self.session.read().expect("session lock poisoned");
+            let Some(instrument_id) = session.active_instance_id.clone() else {
+                return Err("No instrument on stage".into());
+            };
+            let chain = session
+                .play_chain(&instrument_id)
+                .cloned()
+                .unwrap_or(PlayChainState {
+                    instrument_id: instrument_id.clone(),
+                    effects: Vec::new(),
+                });
+            (instrument_id, chain)
+        };
+        edit(&mut chain, &self.plugins)?;
+        self.set_play_chain(&instrument_id, chain.effects, None)?;
+        Ok(())
+    }
+
+    /// LITTLE's copy of the chain and of the effects it may add.
+    fn sync_little_play_chain(&mut self) {
+        let chain = {
+            let session = self.session.read().expect("session lock poisoned");
+            little_play_chain(&session, &self.plugins)
+        };
+        self.menu.set_play_chain(chain);
+        self.menu
+            .set_play_effect_plugins(little_play_plugins(&self.plugins, true));
+    }
+
     fn sync_little_plugin_parameters(&mut self) {
-        let active_id = self
-            .session
-            .read()
-            .expect("session lock poisoned")
-            .active_instance_id
-            .clone();
-        let Some(instance_id) = active_id else {
-            return;
+        // Whichever instance LITTLE is showing: an effect of the chain while
+        // its panel is open, the instrument on stage otherwise.
+        let target = self
+            .menu
+            .parameter_target_instance_id()
+            .map(str::to_owned)
+            .map(InstanceId::new)
+            .transpose()
+            .ok()
+            .flatten();
+        let instance_id = match target {
+            Some(instance_id) => instance_id,
+            None => {
+                let active_id = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .active_instance_id
+                    .clone();
+                let Some(instance_id) = active_id else {
+                    return;
+                };
+                instance_id
+            }
         };
         if let ControlResponse::PluginParameters { schema, values, .. } =
             self.plugin_parameters(&instance_id)
@@ -4354,7 +4435,11 @@ impl DesktopApp {
     ) -> ControlResponse {
         let state = self.session.read().expect("session lock poisoned");
         let revision = state.revision;
-        if state.active_instance_id.as_ref() != Some(instance_id) {
+        let on_stage = state.active_instance_id.as_ref() == Some(instance_id)
+            || state
+                .play_chain_effect_owner(instance_id)
+                .is_some_and(|owner| state.active_instance_id.as_ref() == Some(owner));
+        if !on_stage {
             return ControlResponse::Error {
                 code: ControlErrorCode::Rejected,
                 message: format!("Plugin instance {instance_id} is not the active Desktop plugin"),
@@ -4906,6 +4991,17 @@ impl DesktopApp {
             audio
                 .set_running(mode != SurfaceMode::Idle)
                 .map_err(|error| format!("Could not change Desktop audio mode: {error:#}"))?;
+            if mode == SurfaceMode::Play {
+                let active = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .active_instance_id
+                    .clone();
+                if let Some(active) = active {
+                    apply_desktop_play_chain(audio, &self.session, &self.plugins, &active)?;
+                }
+            }
             // Conducting is a LIVE gesture. A key-follow lane that kept
             // listening in PLAY did worse than linger: claiming a note keeps
             // it from the instrument, so notes vanished into a lane the
@@ -4982,6 +5078,50 @@ impl DesktopApp {
         Ok(events)
     }
 
+    /// The effects after an instrument in PLAY, replaced whole. Built for
+    /// the audio engine now when that instrument is on stage; kept for
+    /// later otherwise.
+    fn set_play_chain(
+        &mut self,
+        instrument_id: &InstanceId,
+        effects: Vec<PlayChainEffect>,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        let chain = PlayChainState {
+            instrument_id: instrument_id.clone(),
+            effects,
+        };
+        let active = {
+            let session = self.session.read().expect("session lock poisoned");
+            if session.instance(instrument_id).is_none() {
+                return Err(format!("Unknown plugin instance: {instrument_id}"));
+            }
+            session.active_instance_id.as_ref() == Some(instrument_id)
+        };
+        chain.validate()?;
+        for effect in &chain.effects {
+            let plugin = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == effect.plugin_id)
+                .ok_or_else(|| format!("Unknown plugin: {}", effect.plugin_id))?;
+            if plugin.runtime.manifest().kind != PluginKind::Effect {
+                return Err(format!("{} is not an effect plugin", plugin.name));
+            }
+        }
+        #[cfg(windows)]
+        if active && let Some(audio) = &self.audio {
+            apply_desktop_play_chain_state(audio, &chain, &self.plugins)?;
+        }
+        #[cfg(not(windows))]
+        let _ = active;
+        let events =
+            self.apply_program_events(vec![SessionEvent::PlayChainChanged { chain }], command)?;
+        self.sync_little_play_chain();
+        self.persist_session_checkpoint();
+        Ok(events)
+    }
+
     fn select_plugin(
         &mut self,
         instance_id: &InstanceId,
@@ -5010,6 +5150,9 @@ impl DesktopApp {
             audio
                 .select_plugin(instance_id.as_str())
                 .map_err(|error| format!("Could not select plugin audio: {error:#}"))?;
+            // The chain is the instrument's: the one that just left takes
+            // its effects with it, the new one brings its own.
+            apply_desktop_play_chain(audio, &self.session, &self.plugins, instance_id)?;
         }
 
         let event = {
@@ -5046,6 +5189,7 @@ impl DesktopApp {
                 .set_plugin_presets(little_host_presets(presets), None);
         }
         self.sync_little_plugin_parameters();
+        self.sync_little_play_chain();
         self.status = format!("{plugin_name} selected");
         self.persist_session_checkpoint();
         Ok(vec![event])
@@ -5057,6 +5201,57 @@ impl DesktopApp {
         sound_id: &str,
         command: Option<CommandRef>,
     ) -> Result<Vec<EventEnvelope>, String> {
+        // An effect of the chain takes its program in its own voice, and the
+        // chain remembers which: the same effect twice in a chain is two
+        // settings, and a voice rebuilt later comes up on the one its panel
+        // chose. The instrument's own path is below.
+        let chain = {
+            let session = self.session.read().expect("session lock poisoned");
+            session
+                .play_chain_effect_owner(instance_id)
+                .filter(|owner| session.active_instance_id.as_ref() == Some(*owner))
+                .and_then(|owner| session.play_chain(owner))
+                .cloned()
+        };
+        if let Some(mut chain) = chain {
+            let effect = chain
+                .effects
+                .iter_mut()
+                .find(|effect| {
+                    InstanceId::new(format!("{}.fx.{}", chain_owner_id(instance_id), effect.id))
+                        .as_ref()
+                        == Ok(instance_id)
+                })
+                .ok_or_else(|| format!("Unknown effect in the PLAY chain: {instance_id}"))?;
+            let plugin = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == effect.plugin_id)
+                .ok_or_else(|| format!("Unknown plugin: {}", effect.plugin_id))?;
+            if !plugin.sounds.iter().any(|sound| sound.id == sound_id) {
+                return Err(format!(
+                    "Unknown program {sound_id:?} for effect {}",
+                    plugin.name
+                ));
+            }
+            effect.program_id = Some(sound_id.to_owned());
+            #[cfg(windows)]
+            {
+                let audio = self
+                    .audio
+                    .as_ref()
+                    .ok_or_else(|| "Desktop audio is unavailable".to_owned())?;
+                audio
+                    .select_sound(instance_id.as_str(), sound_id)
+                    .map_err(|error| format!("Could not load {sound_id}: {error:#}"))?;
+            }
+            let events =
+                self.apply_program_events(vec![SessionEvent::PlayChainChanged { chain }], command)?;
+            self.status = format!("Loaded {sound_id}");
+            self.live_state_dirty = Some(Instant::now());
+            self.persist_session_checkpoint();
+            return Ok(events);
+        }
         {
             let session = self.session.read().expect("session lock poisoned");
             let instance = session
@@ -5664,6 +5859,59 @@ impl DesktopApp {
                     }
                 };
                 if let Err(error) = self.select_plugin(&instance_id, None) {
+                    self.status = error;
+                }
+            }
+            MenuCommand::AddPlayChainEffect { plugin_id } => {
+                if let Err(error) = self.edit_little_play_chain(|chain, plugins| {
+                    if !plugins.iter().any(|plugin| plugin.plugin_id == plugin_id) {
+                        return Err(format!("Unknown plugin: {plugin_id}"));
+                    }
+                    // A chain may hold the same effect twice, so the id counts
+                    // up rather than naming the plugin.
+                    let next = (1..)
+                        .map(|number| format!("fx-{number}"))
+                        .find(|candidate| {
+                            !chain.effects.iter().any(|effect| &effect.id == candidate)
+                        })
+                        .expect("an unused effect id exists");
+                    chain.effects.push(PlayChainEffect {
+                        id: next,
+                        plugin_id: plugin_id.clone(),
+                        enabled: true,
+                        program_id: None,
+                    });
+                    Ok(())
+                }) {
+                    self.status = error;
+                }
+            }
+            MenuCommand::SetPlayChainEffectEnabled { effect_id, enabled } => {
+                if let Err(error) = self.edit_little_play_chain(|chain, _| {
+                    match chain
+                        .effects
+                        .iter_mut()
+                        .find(|effect| effect.id == effect_id)
+                    {
+                        Some(effect) => {
+                            effect.enabled = enabled;
+                            Ok(())
+                        }
+                        None => Err(format!("Unknown effect: {effect_id}")),
+                    }
+                }) {
+                    self.status = error;
+                }
+            }
+            MenuCommand::RemovePlayChainEffect { effect_id } => {
+                if let Err(error) = self.edit_little_play_chain(|chain, _| {
+                    let before = chain.effects.len();
+                    chain.effects.retain(|effect| effect.id != effect_id);
+                    if chain.effects.len() == before {
+                        return Err(format!("Unknown effect: {effect_id}"));
+                    }
+                    Ok(())
+                }) {
                     self.status = error;
                 }
             }
@@ -6292,6 +6540,7 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
         plugin_short_name: plugin.runtime.manifest().little_short_name(),
         ui_layouts: vec!["little@1".into()],
         config_available: plugin.config_available,
+        effect: plugin.runtime.manifest().kind == PluginKind::Effect,
         banks: plugin.banks.clone(),
         sounds: plugin.sound_summaries.clone(),
         selected_sound_id: plugin.selected_sound_id.clone(),
@@ -6575,6 +6824,147 @@ fn declarative_semantic_profiles(
 }
 
 #[cfg(windows)]
+/// The chains that still make sense here: an instrument that exists, and
+/// only the effects whose plugins are installed and are effects.
+fn prune_play_chains(
+    chains: Vec<PlayChainState>,
+    instances: &[PluginInstanceState],
+    plugins: &[DesktopPlugin],
+) -> Vec<PlayChainState> {
+    chains
+        .into_iter()
+        .filter(|chain| {
+            instances
+                .iter()
+                .any(|instance| instance.instance_id == chain.instrument_id)
+        })
+        .map(|mut chain| {
+            chain.effects.retain(|effect| {
+                plugins.iter().any(|plugin| {
+                    plugin.plugin_id == effect.plugin_id
+                        && plugin.runtime.manifest().kind == PluginKind::Effect
+                })
+            });
+            chain
+        })
+        .filter(|chain| !chain.effects.is_empty() && chain.validate().is_ok())
+        .collect()
+}
+
+/// The chain the session holds for `instrument_id`, or none, handed to
+/// the audio engine.
+#[cfg(windows)]
+/// The instrument an effect instance belongs to: `<instrument>.fx.<id>`
+/// without its suffix. The caller has already established that it is one.
+fn chain_owner_id(instance_id: &InstanceId) -> String {
+    instance_id
+        .as_str()
+        .rsplit_once(".fx.")
+        .map(|(owner, _)| owner.to_owned())
+        .unwrap_or_else(|| instance_id.as_str().to_owned())
+}
+
+/// The plugins LITTLE offers, instruments for PLAY and effects for the
+/// chain: one list each, told apart by what the plugin says it is.
+fn little_play_plugins(plugins: &[DesktopPlugin], effects: bool) -> Vec<PlayPlugin> {
+    plugins
+        .iter()
+        .filter(|plugin| (plugin.runtime.manifest().kind == PluginKind::Effect) == effects)
+        .map(|plugin| {
+            PlayPlugin::new(&plugin.instance_id, &plugin.plugin_id, &plugin.name)
+                .short_name(plugin.runtime.manifest().little_short_name())
+                .config_available(plugin.config_available)
+        })
+        .collect()
+}
+
+/// The chain of the instrument on stage, as LITTLE shows it.
+fn little_play_chain(
+    session: &SessionState,
+    plugins: &[DesktopPlugin],
+) -> Vec<PlayChainEffectItem> {
+    let Some(instrument_id) = session.active_instance_id.as_ref() else {
+        return Vec::new();
+    };
+    let Some(chain) = session.play_chain(instrument_id) else {
+        return Vec::new();
+    };
+    chain
+        .effects
+        .iter()
+        .filter_map(|effect| {
+            let instance_id = chain.effect_instance_id(&effect.id).ok()?;
+            let plugin = plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == effect.plugin_id);
+            Some(PlayChainEffectItem {
+                id: effect.id.clone(),
+                instance_id: instance_id.as_str().to_owned(),
+                plugin_id: effect.plugin_id.clone(),
+                name: plugin.map_or_else(|| effect.plugin_id.clone(), |plugin| plugin.name.clone()),
+                short_name: plugin.map_or_else(
+                    || effect.plugin_id.clone(),
+                    |plugin| plugin.runtime.manifest().little_short_name().to_owned(),
+                ),
+                enabled: effect.enabled,
+            })
+        })
+        .collect()
+}
+
+fn apply_desktop_play_chain(
+    audio: &desktop_audio::DesktopAudio,
+    session: &Arc<RwLock<SessionState>>,
+    plugins: &[DesktopPlugin],
+    instrument_id: &InstanceId,
+) -> Result<(), String> {
+    let chain = session
+        .read()
+        .expect("session lock poisoned")
+        .play_chain(instrument_id)
+        .cloned()
+        .unwrap_or(PlayChainState {
+            instrument_id: instrument_id.clone(),
+            effects: Vec::new(),
+        });
+    apply_desktop_play_chain_state(audio, &chain, plugins)
+}
+
+#[cfg(windows)]
+fn apply_desktop_play_chain_state(
+    audio: &desktop_audio::DesktopAudio,
+    chain: &PlayChainState,
+    plugins: &[DesktopPlugin],
+) -> Result<(), String> {
+    let mut effects = Vec::with_capacity(chain.effects.len());
+    for effect in &chain.effects {
+        let Some(plugin) = plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == effect.plugin_id)
+        else {
+            eprintln!(
+                "PLAY_CHAIN_EFFECT_SKIPPED instrument={} effect={} plugin={} reason=not_loaded",
+                chain.instrument_id, effect.id, effect.plugin_id
+            );
+            continue;
+        };
+        let instance_id = chain.effect_instance_id(&effect.id)?;
+        effects.push((
+            desktop_audio::VoiceSpec {
+                instance_id: instance_id.as_str().to_owned(),
+                plugin: plugin.runtime,
+                preset_id: effect.program_id.clone(),
+                resources: plugin.resources.clone(),
+                initial_state: None,
+            },
+            effect.enabled,
+        ));
+    }
+    audio
+        .set_play_chain(effects)
+        .map_err(|error| format!("Could not apply the PLAY effects: {error:#}"))
+}
+
 fn sync_desktop_audio(
     audio: &desktop_audio::DesktopAudio,
     session: &Arc<RwLock<SessionState>>,
@@ -7406,6 +7796,7 @@ mod tests {
             plugin_short_name: "RF-106".into(),
             ui_layouts: vec!["little@1".into()],
             config_available: false,
+            effect: false,
             banks: Vec::new(),
             sounds: vec![SoundSummary {
                 id: "factory.rf106.002".into(),

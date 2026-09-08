@@ -253,6 +253,7 @@ impl BrowserHost {
             audition: None,
             program_draft: None,
             parameter_links: Vec::new(),
+            play_chains: Vec::new(),
             session_id,
         };
 
@@ -2528,6 +2529,7 @@ fn session_instance_state(plugin: &HostedPlugin) -> PluginInstanceState {
         plugin_short_name: manifest.little_short_name(),
         ui_layouts: manifest.ui_layouts.clone(),
         config_available: manifest.config_mode,
+        effect: manifest.kind == rackforge_plugin_api::PluginKind::Effect,
         banks: plugin
             .presets
             .banks

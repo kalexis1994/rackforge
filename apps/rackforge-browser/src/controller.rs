@@ -522,6 +522,7 @@ mod tests {
             plugin_short_name: name.to_owned(),
             ui_layouts: vec!["little@1".into()],
             config_available: false,
+            effect: false,
             banks: Vec::new(),
             sounds: Vec::new(),
             selected_sound_id: None,

@@ -39,8 +39,9 @@ use rackforge_plugin_api::{
 };
 use rackforge_session_api::{
     AuditionEndReason, ClientId, CommandEnvelope, CommandRef, HostActionBinding,
-    HostControlBinding, InstanceId, MasterLevel, MasterPan, ProgramDraftState, Revision,
-    SESSION_SCHEMA_VERSION, SemanticControlProfile, SessionCommand, SessionEvent, SoundSummary,
+    HostControlBinding, InstanceId, MasterLevel, MasterPan, PlayChainState, ProgramDraftState,
+    Revision, SESSION_SCHEMA_VERSION, SemanticControlProfile, SessionCommand, SessionEvent,
+    SessionState, SoundSummary,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -145,6 +146,15 @@ pub enum AudioControlCommand {
         instance_id: InstanceId,
         slots: Vec<RackSlotRuntimeSpec>,
         prepared_slots: Option<Vec<PreparedRackSlot>>,
+        reply: SyncSender<Result<(), String>>,
+    },
+    /// The effects after the PLAY instrument, replaced whole. `prepared`
+    /// carries them built and warmed when every one is portable; otherwise
+    /// the audio loop builds them from `effects`.
+    SetPlayChain {
+        instrument_id: InstanceId,
+        effects: Vec<PlayChainEffectRuntimeSpec>,
+        prepared: Option<Vec<PreparedChainVoice>>,
         reply: SyncSender<Result<(), String>>,
     },
     BeginAudition {
@@ -255,6 +265,31 @@ pub struct PreparedRackSlot {
 // which admits RackForge's immutable wasm-v1 backend. The instance has not
 // been published anywhere else and ownership moves once to the audio loop.
 unsafe impl Send for PreparedRackSlot {}
+
+/// One effect of the PLAY chain as the audio loop builds it.
+#[derive(Clone, Debug)]
+pub struct PlayChainEffectRuntimeSpec {
+    /// `<instrument instance>.fx.<effect id>`: what the panel addresses.
+    pub instance_id: InstanceId,
+    pub plugin_id: String,
+    pub enabled: bool,
+    /// The program the chain chose for this effect, loaded as the voice is
+    /// built. See `PlayChainEffect::program_id`.
+    pub program_id: Option<String>,
+}
+
+/// One effect of the PLAY chain built and warmed off the audio thread.
+pub struct PreparedChainVoice {
+    pub instance_id: InstanceId,
+    pub plugin: &'static LoadedPlugin,
+    pub instance: PreparedPluginInstance,
+    pub input_channels: usize,
+    pub enabled: bool,
+}
+
+// SAFETY: as for `PreparedRackSlot`: portable instances only, built on the
+// control worker, moved once to the audio loop.
+unsafe impl Send for PreparedChainVoice {}
 
 #[derive(Clone, Copy)]
 pub struct PortableControlPlugin(&'static LoadedPlugin);
@@ -3133,6 +3168,12 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             }
             match receive_audio(reply_receiver, "change render mode") {
                 Ok(()) => {
+                    if mode == rackforge_session_api::SurfaceMode::Play
+                        && let Some(active) = snapshot.active_instance_id.as_ref()
+                        && let Err(failure) = apply_play_chain_of(context, &snapshot, active)
+                    {
+                        return failure.into_response();
+                    }
                     let mut events = vec![SessionEvent::ActiveModeChanged { mode }];
                     if mode == rackforge_session_api::SurfaceMode::Play
                         && snapshot.live.active.is_some()
@@ -3207,13 +3248,75 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 return failure.into_response();
             }
             match receive_audio(reply_receiver, "select plugin") {
-                Ok(()) => record_command_event(
-                    context,
-                    command_ref,
-                    SessionEvent::ActiveInstanceChanged { instance_id },
-                ),
+                Ok(()) => {
+                    // The chain is the instrument's: the one that just left
+                    // takes its effects with it, the new one brings its own.
+                    if let Err(failure) = apply_play_chain_of(context, &snapshot, &instance_id) {
+                        return failure.into_response();
+                    }
+                    record_command_event(
+                        context,
+                        command_ref,
+                        SessionEvent::ActiveInstanceChanged { instance_id },
+                    )
+                }
                 Err(failure) => failure.into_response(),
             }
+        }
+        SessionCommand::SetPlayChain {
+            instrument_id,
+            effects,
+        } => {
+            if snapshot.instance(&instrument_id).is_none() {
+                return error_response(
+                    ControlErrorCode::NotFound,
+                    format!("unknown instance {instrument_id}"),
+                    Some(snapshot.revision),
+                );
+            }
+            let chain = PlayChainState {
+                instrument_id: instrument_id.clone(),
+                effects,
+            };
+            if let Err(message) = chain.validate() {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    message,
+                    Some(snapshot.revision),
+                );
+            }
+            for effect in &chain.effects {
+                match context.plugin_manifests.get(&effect.plugin_id) {
+                    None => {
+                        return error_response(
+                            ControlErrorCode::NotFound,
+                            format!("unknown plugin {}", effect.plugin_id),
+                            Some(snapshot.revision),
+                        );
+                    }
+                    Some(manifest) if manifest.kind != rackforge_plugin_api::PluginKind::Effect => {
+                        return error_response(
+                            ControlErrorCode::Rejected,
+                            format!("{} is not an effect plugin", effect.plugin_id),
+                            Some(snapshot.revision),
+                        );
+                    }
+                    Some(_) => {}
+                }
+            }
+            // Only the instrument on stage gets its effects built now;
+            // another instrument's chain is kept and built when it is
+            // selected.
+            if snapshot.active_instance_id.as_ref() == Some(&instrument_id)
+                && let Err(failure) = apply_play_chain(context, snapshot.revision, &chain)
+            {
+                return failure.into_response();
+            }
+            record_command_event(
+                context,
+                command_ref,
+                SessionEvent::PlayChainChanged { chain },
+            )
         }
         SessionCommand::SetLiveBrowseMode { mode } => record_command_event(
             context,
@@ -3432,6 +3535,47 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             instance_id,
             sound_id,
         } => {
+            // An effect of the chain takes its program in its own voice, and
+            // the chain remembers which: the same effect twice in a chain is
+            // two settings, and a voice rebuilt later comes up on the one its
+            // panel chose. The instrument's own path is below.
+            if let Some(owner) = snapshot.play_chain_effect_owner(&instance_id).cloned()
+                && snapshot.active_instance_id.as_ref() == Some(&owner)
+                && let Some(chain) = snapshot.play_chain(&owner).cloned()
+            {
+                let mut chain = chain;
+                let Some(effect) = chain
+                    .effects
+                    .iter_mut()
+                    .find(|effect| chain_effect_matches(&owner, effect, &instance_id))
+                else {
+                    return error_response(
+                        ControlErrorCode::NotFound,
+                        format!("unknown effect {instance_id} in the PLAY chain"),
+                        Some(snapshot.revision),
+                    );
+                };
+                effect.program_id = Some(sound_id.clone());
+                let (reply_sender, reply_receiver) = sync_channel(1);
+                if let Err(failure) = send_audio(
+                    context,
+                    AudioControlCommand::SelectSound {
+                        instance_id: instance_id.clone(),
+                        sound_id: sound_id.clone(),
+                        reply: reply_sender,
+                    },
+                ) {
+                    return failure.into_response();
+                }
+                return match receive_audio(reply_receiver, "apply effect program") {
+                    Ok(()) => record_command_event(
+                        context,
+                        command_ref,
+                        SessionEvent::PlayChainChanged { chain },
+                    ),
+                    Err(failure) => failure.into_response(),
+                };
+            }
             let instance = match require_active_instance(&snapshot, &instance_id) {
                 Ok(instance) => instance,
                 Err(failure) => return failure.into_response(),
@@ -4245,10 +4389,27 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
     }
 }
 
+/// Whether this effect of `owner`'s chain is the one the instance id names.
+fn chain_effect_matches(
+    owner: &InstanceId,
+    effect: &rackforge_session_api::PlayChainEffect,
+    instance_id: &InstanceId,
+) -> bool {
+    InstanceId::new(format!("{owner}.fx.{}", effect.id)).as_ref() == Ok(instance_id)
+}
+
 fn require_active_instance<'a>(
     snapshot: &'a rackforge_session_api::SessionState,
     instance_id: &InstanceId,
 ) -> Result<&'a rackforge_session_api::PluginInstanceState, ControlFailure> {
+    // A chain effect of the instrument on stage is as reachable as the
+    // instrument: its voice runs beside it.
+    if let Some(owner) = snapshot.play_chain_effect_owner(instance_id)
+        && snapshot.active_instance_id.as_ref() == Some(owner)
+        && let Some(instrument) = snapshot.instance(owner)
+    {
+        return Ok(instrument);
+    }
     let instance = snapshot.instance(instance_id).ok_or_else(|| {
         control_failure(
             ControlErrorCode::NotFound,
@@ -4280,6 +4441,190 @@ fn prepare_rack_runtime(
         )
     })?;
     prepare_compiled_rack_runtime(snapshot, rack_id.as_str(), compiled_slots, state_store)
+}
+
+/// The chain an instrument has in the session, or none, built and sent.
+fn apply_play_chain_of(
+    context: &ControlContext,
+    snapshot: &SessionState,
+    instrument_id: &InstanceId,
+) -> Result<(), ControlFailure> {
+    let chain = snapshot
+        .play_chain(instrument_id)
+        .cloned()
+        .unwrap_or(PlayChainState {
+            instrument_id: instrument_id.clone(),
+            effects: Vec::new(),
+        });
+    apply_play_chain(context, snapshot.revision, &chain)
+}
+
+/// Every effect of the chain the audio loop can run, as a runtime spec. An
+/// effect whose plugin is not loaded (a checkpoint from before it was
+/// removed) is left out and logged, not fatal.
+pub fn play_chain_runtime_specs(
+    chain: &PlayChainState,
+    is_loaded: impl Fn(&str) -> bool,
+) -> Vec<PlayChainEffectRuntimeSpec> {
+    chain
+        .effects
+        .iter()
+        .filter_map(|effect| {
+            if !is_loaded(&effect.plugin_id) {
+                eprintln!(
+                    "PLAY_CHAIN_EFFECT_SKIPPED instrument={} effect={} plugin={} reason=not_loaded",
+                    chain.instrument_id, effect.id, effect.plugin_id
+                );
+                return None;
+            }
+            let instance_id = match chain.effect_instance_id(&effect.id) {
+                Ok(instance_id) => instance_id,
+                Err(error) => {
+                    eprintln!(
+                        "PLAY_CHAIN_EFFECT_SKIPPED instrument={} effect={} reason={error}",
+                        chain.instrument_id, effect.id
+                    );
+                    return None;
+                }
+            };
+            Some(PlayChainEffectRuntimeSpec {
+                instance_id,
+                plugin_id: effect.plugin_id.clone(),
+                enabled: effect.enabled,
+                program_id: effect.program_id.clone(),
+            })
+        })
+        .collect()
+}
+
+fn apply_play_chain(
+    context: &ControlContext,
+    revision: Revision,
+    chain: &PlayChainState,
+) -> Result<(), ControlFailure> {
+    let effects = play_chain_runtime_specs(chain, |plugin_id| {
+        context.plugin_manifests.contains_key(plugin_id)
+    });
+    let prepared = prepare_portable_chain_voices(context, revision, &effects)?;
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    send_audio(
+        context,
+        AudioControlCommand::SetPlayChain {
+            instrument_id: chain.instrument_id.clone(),
+            effects,
+            prepared,
+            reply: reply_sender,
+        },
+    )?;
+    receive_audio_with_timeout(
+        reply_receiver,
+        "set PLAY effects",
+        AUDIO_RECONFIGURE_TIMEOUT,
+    )
+}
+
+/// The chain's effects built, activated and warmed on this thread, when
+/// every one of them is portable; `None` sends the audio loop to build
+/// them itself (native instances keep their thread affinity).
+fn prepare_portable_chain_voices(
+    context: &ControlContext,
+    revision: Revision,
+    specs: &[PlayChainEffectRuntimeSpec],
+) -> Result<Option<Vec<PreparedChainVoice>>, ControlFailure> {
+    if specs
+        .iter()
+        .any(|spec| !context.portable_plugins.contains_key(&spec.plugin_id))
+    {
+        return Ok(None);
+    }
+    let mut prepared = Vec::with_capacity(specs.len());
+    let mut warmup_output = vec![
+        0.0_f32;
+        context.plugin_maximum_frames as usize
+            * context.plugin_output_channels as usize
+    ];
+    for spec in specs {
+        let plugin = context.portable_plugins[&spec.plugin_id].0;
+        let audio = plugin.manifest().resolved_audio_contract();
+        let input_channels = audio.input_channels() as usize;
+        if input_channels == 0
+            || input_channels > rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS
+            || audio.output_channels() != context.plugin_output_channels
+        {
+            return Err(control_failure(
+                ControlErrorCode::Rejected,
+                format!(
+                    "effect {} has unsupported audio layout: {} input / {} output channels",
+                    spec.instance_id,
+                    input_channels,
+                    audio.output_channels()
+                ),
+                Some(revision),
+            ));
+        }
+        let mut instance = plugin.create_instance().map_err(|error| {
+            control_failure(
+                ControlErrorCode::Internal,
+                format!("preparing effect {}: {error:#}", spec.instance_id),
+                Some(revision),
+            )
+        })?;
+        // The chain's own program, before the voice is activated: a rebuilt
+        // effect comes up on the setting the panel chose, not on defaults.
+        if let Some(program_id) = spec.program_id.as_deref() {
+            instance.load_preset(program_id).map_err(|error| {
+                control_failure(
+                    ControlErrorCode::Rejected,
+                    format!(
+                        "loading program {program_id:?} for effect {}: {error:#}",
+                        spec.instance_id
+                    ),
+                    Some(revision),
+                )
+            })?;
+        }
+        instance
+            .activate(
+                context.plugin_sample_rate,
+                context.plugin_maximum_frames,
+                input_channels as u32,
+                context.plugin_output_channels,
+            )
+            .map_err(|error| {
+                control_failure(
+                    ControlErrorCode::Rejected,
+                    format!("activating effect {}: {error:#}", spec.instance_id),
+                    Some(revision),
+                )
+            })?;
+        warmup_output.fill(0.0);
+        let warmup_input = vec![0.0_f32; context.plugin_maximum_frames as usize * input_channels];
+        instance
+            .process_interleaved(
+                &warmup_input,
+                &mut warmup_output,
+                context.plugin_maximum_frames,
+                input_channels as u32,
+                context.plugin_output_channels,
+                &[],
+                &[],
+            )
+            .map_err(|error| {
+                control_failure(
+                    ControlErrorCode::Rejected,
+                    format!("warming effect {}: {error:#}", spec.instance_id),
+                    Some(revision),
+                )
+            })?;
+        prepared.push(PreparedChainVoice {
+            instance_id: spec.instance_id.clone(),
+            plugin,
+            instance: PreparedPluginInstance(instance),
+            input_channels,
+            enabled: spec.enabled,
+        });
+    }
+    Ok(Some(prepared))
 }
 
 fn prepare_portable_rack_slots(
@@ -4691,6 +5036,7 @@ fn record_command_events(
                 | SessionEvent::ProgramSaved { .. }
                 | SessionEvent::ParameterLinkUpserted { .. }
                 | SessionEvent::ParameterLinkRemoved { .. }
+                | SessionEvent::PlayChainChanged { .. }
         )
     });
     let (events, revision, checkpoint_state) = match context.store.lock() {
@@ -4924,6 +5270,7 @@ mod tests {
                 plugin_short_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
+                effect: false,
                 banks: Vec::new(),
                 sounds: vec![SoundSummary {
                     id: "piano".into(),
@@ -4939,6 +5286,7 @@ mod tests {
             audition: None,
             program_draft: None,
             parameter_links: Vec::new(),
+            play_chains: Vec::new(),
         };
         let (sender, receiver) = sync_channel(4);
         let (_midi_sender, midi_receiver) = sync_channel(4);
@@ -5400,12 +5748,23 @@ mod tests {
     #[test]
     fn changes_active_mode_and_the_audio_render_path_together() {
         let (context, receiver) = context();
-        let worker = thread::spawn(move || match receiver.recv().unwrap() {
-            AudioControlCommand::SetRenderMode { mode, reply } => {
-                assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
-                reply.send(Ok(())).unwrap();
+        let worker = thread::spawn(move || {
+            // PLAY brings the instrument's chain with it: the render mode
+            // first, then the effects that play after it.
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetRenderMode { mode, reply } => {
+                    assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected render-mode change"),
             }
-            _ => panic!("expected render-mode change"),
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetPlayChain { effects, reply, .. } => {
+                    assert!(effects.is_empty());
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected the PLAY chain to follow the mode"),
+            }
         });
         let response = dispatch_command(
             &context,
@@ -5453,12 +5812,21 @@ mod tests {
             .unwrap()
             .record(None, SessionEvent::LiveStateReconciled { live })
             .unwrap();
-        let worker = thread::spawn(move || match receiver.recv().unwrap() {
-            AudioControlCommand::SetRenderMode { mode, reply } => {
-                assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
-                reply.send(Ok(())).unwrap();
+        let worker = thread::spawn(move || {
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetRenderMode { mode, reply } => {
+                    assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected render-mode change"),
             }
-            _ => panic!("expected render-mode change"),
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetPlayChain { effects, reply, .. } => {
+                    assert!(effects.is_empty());
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected the PLAY chain to follow the mode"),
+            }
         });
 
         let response = dispatch_command(

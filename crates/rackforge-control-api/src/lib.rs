@@ -1036,6 +1036,7 @@ mod tests {
                     plugin_short_name: "RF-DLS".into(),
                     ui_layouts: vec!["little@1".into()],
                     config_available: true,
+                    effect: false,
                     banks: Vec::new(),
                     sounds: vec![SoundSummary {
                         id: "dls.b00000000.p00000000".into(),
@@ -1051,6 +1052,7 @@ mod tests {
                 audition: None,
                 program_draft: None,
                 parameter_links: Vec::new(),
+                play_chains: Vec::new(),
             }),
         };
         assert_eq!(

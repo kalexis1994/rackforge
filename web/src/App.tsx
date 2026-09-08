@@ -75,6 +75,9 @@ import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import { ModalDialog } from "./components/ModalDialog";
 import { ParameterLinkHost } from "./components/ParameterLinkHost";
 import { ToggleSwitch } from "./components/ToggleSwitch";
+import { PluginIcon } from "./components/PluginIcon";
+import { PlayChainDrawer } from "./components/PlayChainDrawer";
+import { chainOf, sameChain, type PlayChain } from "./playChain";
 import { AsyncNotice, AsyncStateBoundary } from "./components/AsyncStateBoundary";
 import { RfButton } from "./ui/RfButton";
 import { useSurfaceTransition } from "./ui/useSurfaceTransition";
@@ -200,24 +203,6 @@ function BrandMark() {
           <path d="M720 174L762 200L720 226Z" fill="var(--mark-arm)" stroke="none" />
         </g>
       </svg>
-    </span>
-  );
-}
-
-function PluginIcon({
-  plugin,
-  name,
-  className = "plugin-icon",
-}: {
-  plugin?: PluginWebDescriptor;
-  name: string;
-  className?: string;
-}) {
-  return plugin?.branding ? (
-    <img className={className} src={plugin.branding.icon_url} alt="" />
-  ) : (
-    <span className={`${className} plugin-icon-fallback`} aria-hidden="true">
-      {name.slice(0, 2).toUpperCase()}
     </span>
   );
 }
@@ -2729,6 +2714,68 @@ function PlayPage({
   const activeSurfaceInfo =
     surfaceInfo?.instanceId === active?.instance_id ? surfaceInfo : null;
   const activeInstanceId = active?.instance_id;
+  // The chain is the instrument's and the host's: the session holds one
+  // per instrument and routes PLAY through it. An edit shows at once and
+  // is sent; it stands until the session answers -- with the same chain,
+  // or with another (refused, or changed elsewhere), which then wins.
+  const [chainOpen, setChainOpen] = useState(false);
+  const [pendingChain, setPendingChain] = useState<{
+    chain: PlayChain;
+    revision: number;
+  } | null>(null);
+  const snapshotChains = snapshot?.play_chains;
+  const snapshotRevision = snapshot?.revision;
+  const sessionChain = useMemo(
+    () => (activeInstanceId ? chainOf(snapshotChains, activeInstanceId) : null),
+    [activeInstanceId, snapshotChains],
+  );
+  const chain =
+    pendingChain
+    && sessionChain
+    && pendingChain.chain.instrument_id === sessionChain.instrument_id
+    && (pendingChain.revision === snapshotRevision || sameChain(pendingChain.chain, sessionChain))
+      ? pendingChain.chain
+      : sessionChain;
+  // One effect's panel at a time, inside the drawer. The frame addresses
+  // the effect's own instance, which both hosts run beside the instrument
+  // and let through their parameter gates while it is on stage.
+  const [openEffectId, setOpenEffectId] = useState<string | null>(null);
+  const openEffect = chain?.effects.find((effect) => effect.id === openEffectId) ?? null;
+  const openEffectInstance = openEffect
+    ? instances.find((instance) => instance.plugin_id === openEffect.plugin_id) ?? null
+    : null;
+  const effectPanel =
+    active && openEffect && openEffectInstance ? (
+      <PluginFrame
+        key={`${active.instance_id}.fx.${openEffect.id}`}
+        instance={{
+          ...openEffectInstance,
+          instance_id: `${active.instance_id}.fx.${openEffect.id}`,
+          // The program is the chain's, not the standalone instance's: the
+          // same effect can sit in the chain twice on two settings.
+          selected_sound_id: openEffect.program_id
+            ?? openEffectInstance.selected_sound_id,
+        }}
+        surface="play"
+        onSelectSound={(soundId) =>
+          dispatchCommandAwait({
+            type: "select_sound",
+            instance_id: `${active.instance_id}.fx.${openEffect.id}`,
+            sound_id: soundId,
+          })}
+      />
+    ) : null;
+  const handleChainChange = useCallback(
+    (next: PlayChain) => {
+      setPendingChain({ chain: next, revision: snapshotRevision ?? -1 });
+      void dispatchCommandAwait({
+        type: "set_play_chain",
+        instrument_id: next.instrument_id,
+        effects: next.effects,
+      }).catch(() => setPendingChain(null));
+    },
+    [snapshotRevision],
+  );
   const handleSurfaceInfo = useCallback(
     (info: { label: string; value: string } | null) => {
       if (!activeInstanceId) return;
@@ -2776,18 +2823,46 @@ function PlayPage({
             ) : null
           }
         />
-        <button
-          className={`play-header-button presets${presetsOpen ? " active" : ""}`}
-          disabled={!active}
-          onClick={() => {
-            onOverlayChange(presetsOpen ? null : "presets");
-          }}
-          aria-expanded={presetsOpen}
-        >
-          <span className="preset-button-mark" aria-hidden="true">P</span>
-          <strong>Presets</strong>
-        </button>
+        <div className="play-plugin-actions">
+          <button
+            className={`play-header-button chain${chainOpen ? " active" : ""}`}
+            disabled={!active}
+            onClick={() => setChainOpen((state) => !state)}
+            aria-expanded={chainOpen}
+            aria-controls="play-chain"
+          >
+            <span className="fx-button-mark" aria-hidden="true">FX</span>
+            <strong>Effects</strong>
+          </button>
+          <button
+            className={`play-header-button presets${presetsOpen ? " active" : ""}`}
+            disabled={!active}
+            onClick={() => {
+              onOverlayChange(presetsOpen ? null : "presets");
+            }}
+            aria-expanded={presetsOpen}
+          >
+            <span className="preset-button-mark" aria-hidden="true">P</span>
+            <strong>Presets</strong>
+          </button>
+        </div>
       </div>
+      {/* Always in the tree and always before the stage: opening it never moves the iframe. */}
+      <PlayChainDrawer
+        open={chainOpen && chain !== null}
+        chain={chain ?? { instrument_id: "", effects: [] }}
+        plugins={installedPlugins}
+        instances={instances}
+        instrumentName={active?.plugin_name ?? "Instrument"}
+        instrumentVersion={activeVersion}
+        instrumentDescriptor={activeDescriptor}
+        suggested={activeDescriptor?.suggested_chain}
+        onChange={handleChainChange}
+        onClose={() => setChainOpen(false)}
+        openEffectId={openEffectId}
+        onOpenEffect={setOpenEffectId}
+        effectPanel={effectPanel}
+      />
       {active ? (
         <PluginFrame
           key={active.instance_id}
@@ -2925,9 +3000,13 @@ function PluginPickerModal({
   const [pendingPlugin, setPendingPlugin] = useState<PluginWebDescriptor | null>(null);
   const [pendingActivation, setPendingActivation] = useState<PluginWebDescriptor | null>(null);
   const activePluginId = active?.plugin_id;
+  // PLAY plays instruments. An effect belongs after one, in the FX drawer,
+  // and a MIDI processor in a Rack; neither can be the instance on stage,
+  // so neither is offered here.
+  const instruments = plugins.filter((plugin) => plugin.kind === "instrument");
   const orderedPlugins = [
-    ...plugins.filter((plugin) => plugin.plugin_id === activePluginId),
-    ...plugins.filter((plugin) => plugin.plugin_id !== activePluginId),
+    ...instruments.filter((plugin) => plugin.plugin_id === activePluginId),
+    ...instruments.filter((plugin) => plugin.plugin_id !== activePluginId),
   ];
   const activate = async (
     plugin: PluginWebDescriptor,

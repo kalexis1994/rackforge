@@ -376,6 +376,11 @@ pub struct PluginInstanceState {
     pub ui_layouts: Vec<String>,
     #[serde(default)]
     pub config_available: bool,
+    /// Whether this instance is an effect rather than an instrument. A
+    /// surface that reads only the session -- LITTLE on the bridge -- tells
+    /// the PLAY list from the chain's candidates by this.
+    #[serde(default)]
+    pub effect: bool,
     /// The banks the sounds are grouped into, in the plugin's own order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub banks: Vec<BankSummary>,
@@ -383,6 +388,72 @@ pub struct PluginInstanceState {
     pub sounds: Vec<SoundSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_sound_id: Option<String>,
+}
+
+/// One effect in an instrument's PLAY chain. `id` is unique within the
+/// chain (the same plugin may be in it twice) and names the effect's
+/// running instance: `<instrument instance>.fx.<id>`.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayChainEffect {
+    pub id: String,
+    pub plugin_id: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// The effect's chosen program, if its panel picked one. It belongs to
+    /// the chain and not to the plugin: the same effect twice in a chain is
+    /// two settings, and a rebuilt voice loads this before it plays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_id: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// The most effects a PLAY chain carries: serial stages, each a full block
+/// of a plugin, on the same deadline as the instrument.
+pub const MAX_PLAY_CHAIN_EFFECTS: usize = 8;
+
+/// The effects after one instrument in PLAY, in order. The audio path is
+/// the instrument, then every enabled effect in turn, then the output.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayChainState {
+    pub instrument_id: InstanceId,
+    #[serde(default)]
+    pub effects: Vec<PlayChainEffect>,
+}
+
+impl PlayChainState {
+    /// The instance id an effect of this chain runs under.
+    pub fn effect_instance_id(&self, effect_id: &str) -> Result<InstanceId, String> {
+        InstanceId::new(format!("{}.fx.{effect_id}", self.instrument_id))
+    }
+
+    /// Well-formed on its own: not too long, every id an identifier that
+    /// names an instance, none twice.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.effects.len() > MAX_PLAY_CHAIN_EFFECTS {
+            return Err(format!(
+                "a PLAY chain holds at most {MAX_PLAY_CHAIN_EFFECTS} effects"
+            ));
+        }
+        for (position, effect) in self.effects.iter().enumerate() {
+            validate_identifier(&effect.id).map_err(|error| format!("effect id {error}"))?;
+            self.effect_instance_id(&effect.id)?;
+            if effect.plugin_id.trim().is_empty() {
+                return Err(format!("effect {} names no plugin", effect.id));
+            }
+            if self.effects[..position]
+                .iter()
+                .any(|earlier| earlier.id == effect.id)
+            {
+                return Err(format!("effect id {} appears twice", effect.id));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -435,9 +506,35 @@ pub struct SessionState {
     pub program_draft: Option<ProgramDraftState>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameter_links: Vec<ParameterLink>,
+    /// One chain per instrument that has one; an instrument absent here
+    /// plays straight to the output.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub play_chains: Vec<PlayChainState>,
 }
 
 impl SessionState {
+    /// The chain after `instrument_id`, if the player lined one up.
+    pub fn play_chain(&self, instrument_id: &InstanceId) -> Option<&PlayChainState> {
+        self.play_chains
+            .iter()
+            .find(|chain| &chain.instrument_id == instrument_id)
+    }
+
+    /// The instrument whose chain runs the effect instance `instance_id`,
+    /// when it is one: a chain effect's panel addresses the effect's own
+    /// instance, and the hosts let it through as they let the instrument's.
+    pub fn play_chain_effect_owner(&self, instance_id: &InstanceId) -> Option<&InstanceId> {
+        self.play_chains
+            .iter()
+            .find(|chain| {
+                chain
+                    .effects
+                    .iter()
+                    .any(|effect| chain.effect_instance_id(&effect.id).as_ref() == Ok(instance_id))
+            })
+            .map(|chain| &chain.instrument_id)
+    }
+
     pub fn new(session_id: SessionId) -> Self {
         Self {
             schema_version: SESSION_SCHEMA_VERSION,
@@ -452,6 +549,7 @@ impl SessionState {
             audition: None,
             program_draft: None,
             parameter_links: Vec::new(),
+            play_chains: Vec::new(),
         }
     }
 
@@ -716,6 +814,26 @@ impl SessionState {
                     return Err(format!("unknown parameter link {link_id}"));
                 }
             }
+            SessionEvent::PlayChainChanged { chain } => {
+                if self.instance(&chain.instrument_id).is_none() {
+                    return Err(format!("unknown instance {}", chain.instrument_id));
+                }
+                chain.validate()?;
+                for effect in &chain.effects {
+                    if !self
+                        .instances
+                        .iter()
+                        .any(|instance| instance.plugin_id == effect.plugin_id)
+                    {
+                        return Err(format!("unknown plugin {}", effect.plugin_id));
+                    }
+                }
+                self.play_chains
+                    .retain(|existing| existing.instrument_id != chain.instrument_id);
+                if !chain.effects.is_empty() {
+                    self.play_chains.push(chain.clone());
+                }
+            }
         }
         self.revision = envelope.revision;
         Ok(())
@@ -816,6 +934,13 @@ pub enum SessionCommand {
     },
     RemoveParameterLink {
         link_id: ParameterLinkId,
+    },
+    /// Replaces the effects after an instrument in PLAY. An empty list
+    /// takes the chain away.
+    SetPlayChain {
+        instrument_id: InstanceId,
+        #[serde(default)]
+        effects: Vec<PlayChainEffect>,
     },
 }
 
@@ -930,6 +1055,9 @@ pub enum SessionEvent {
     ParameterLinkRemoved {
         link_id: ParameterLinkId,
     },
+    PlayChainChanged {
+        chain: PlayChainState,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -959,6 +1087,72 @@ fn validate_identifier(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_play_chain_is_the_instruments_and_names_loaded_plugins() {
+        let mut state = session();
+        let instrument = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
+        let chain = |effects: Vec<(&str, &str)>| PlayChainState {
+            instrument_id: instrument.clone(),
+            effects: effects
+                .into_iter()
+                .map(|(id, plugin)| PlayChainEffect {
+                    id: id.into(),
+                    plugin_id: plugin.into(),
+                    enabled: true,
+                    program_id: None,
+                })
+                .collect(),
+        };
+        let apply = |state: &mut SessionState, chain: PlayChainState| {
+            let revision = state.revision.next().unwrap();
+            state.apply(&EventEnvelope {
+                schema_version: SESSION_SCHEMA_VERSION,
+                revision,
+                command: None,
+                event: SessionEvent::PlayChainChanged { chain },
+            })
+        };
+        assert_eq!(
+            apply(&mut state, chain(vec![("fx-1", "org.rackforge.rf-dls")])),
+            Ok(())
+        );
+        assert_eq!(state.play_chain(&instrument).unwrap().effects.len(), 1);
+        assert_eq!(
+            state
+                .play_chain(&instrument)
+                .unwrap()
+                .effect_instance_id("fx-1")
+                .unwrap()
+                .as_str(),
+            format!("{DEFAULT_LIVE_INSTANCE_ID}.fx.fx-1")
+        );
+        assert!(apply(&mut state, chain(vec![("fx-1", "org.rackforge.nowhere")])).is_err());
+        assert!(
+            apply(
+                &mut state,
+                chain(vec![
+                    ("fx-1", "org.rackforge.rf-dls"),
+                    ("fx-1", "org.rackforge.rf-dls")
+                ])
+            )
+            .is_err()
+        );
+        assert!(
+            apply(
+                &mut state,
+                chain(vec![("Not An Id", "org.rackforge.rf-dls")])
+            )
+            .is_err()
+        );
+        assert_eq!(apply(&mut state, chain(Vec::new())), Ok(()));
+        assert!(state.play_chain(&instrument).is_none());
+        let other = PlayChainState {
+            instrument_id: InstanceId::new("play.other").unwrap(),
+            effects: Vec::new(),
+        };
+        assert!(apply(&mut state, other).is_err());
+    }
     use rackforge_midi_api::{
         MidiSourceId, PARAMETER_LINK_SCHEMA_VERSION, ParameterLinkChannel, ParameterLinkMessage,
         ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
@@ -1019,6 +1213,7 @@ mod tests {
                 plugin_short_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
+                effect: false,
                 banks: Vec::new(),
                 sounds: vec![SoundSummary {
                     id: "dls.piano-1".into(),
@@ -1034,6 +1229,7 @@ mod tests {
             audition: None,
             program_draft: None,
             parameter_links: Vec::new(),
+            play_chains: Vec::new(),
         }
     }
 
@@ -1204,6 +1400,7 @@ mod tests {
             plugin_short_name: "RF-KR106".into(),
             ui_layouts: vec!["little@1".into()],
             config_available: false,
+            effect: false,
             banks: Vec::new(),
             sounds: Vec::new(),
             selected_sound_id: None,

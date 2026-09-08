@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use rackforge_session_api::{
-    LivePerformanceState, ParameterLink, SessionId, SessionState, SurfaceMode,
+    LivePerformanceState, ParameterLink, PlayChainState, SessionId, SessionState, SurfaceMode,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -34,6 +34,8 @@ struct SessionCheckpoint {
     selected_sounds: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     parameter_links: Vec<ParameterLink>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    play_chains: Vec<PlayChainState>,
 }
 
 impl SessionCheckpoint {
@@ -59,6 +61,7 @@ impl SessionCheckpoint {
                 })
                 .collect(),
             parameter_links: state.parameter_links.clone(),
+            play_chains: state.play_chains.clone(),
         }
     }
 }
@@ -128,6 +131,13 @@ impl SessionCheckpointStore {
         Ok(self
             .load(session_id)?
             .map(|checkpoint| checkpoint.parameter_links)
+            .unwrap_or_default())
+    }
+
+    pub fn play_chains(&self, session_id: &SessionId) -> Result<Vec<PlayChainState>> {
+        Ok(self
+            .load(session_id)?
+            .map(|checkpoint| checkpoint.play_chains)
             .unwrap_or_default())
     }
 
@@ -285,6 +295,7 @@ mod tests {
                 plugin_short_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
+                effect: false,
                 banks: Vec::new(),
                 sounds: vec![SoundSummary {
                     id: selected.into(),
@@ -300,6 +311,7 @@ mod tests {
             audition: None,
             program_draft: None,
             parameter_links: Vec::new(),
+            play_chains: Vec::new(),
         }
     }
 

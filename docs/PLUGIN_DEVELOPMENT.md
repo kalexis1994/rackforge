@@ -117,6 +117,20 @@ show the full `name`. `description` is optional for compatibility, but new plugi
 RackForge shows it with the validated banner, name, vendor, version, type, and
 package size in a confirmation preview before installation starts.
 
+An instrument may suggest what follows it in PLAY:
+
+```toml
+[[suggested_chain]]
+plugin = "org.rackforge.rf-rig"
+preset = "Clean"
+```
+
+The PLAY effects drawer offers each suggested plugin the player has installed
+and names the ones they have not. The field is instruments-only, each entry
+names another plugin once, and `preset` is optional. Because manifests deny
+unknown fields, a host older than the field refuses a package that carries it:
+add it once every host you ship to reads it (RackForge 0.1.18 and later).
+
 Schema 1 remains loadable so already published plugins do not break. RackForge
 uses its generic plugin identity for those packages; adding any branding field
 requires upgrading the whole manifest to schema 2.

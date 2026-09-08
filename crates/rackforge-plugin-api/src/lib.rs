@@ -14,7 +14,8 @@ pub use manifest::{
     ApiRequirement, AudioBus, AudioBusLayout, BrandingAssetKind, Capability, MAIN_AUDIO_BUS_ID,
     MAX_PLUGIN_AUDIO_CHANNELS, MidiInputBus, MidiProgramChangePolicy, PluginAudioContract,
     PluginBranding, PluginKind, PluginManifest, PluginMidiContract, PortableAbi, PortableComponent,
-    ResourceKind, ResourceRequirement, RuntimeDescriptor, WebSurface, WebSurfaceKind, WebUi,
+    ResourceKind, ResourceRequirement, RuntimeDescriptor, SuggestedChainEntry, WebSurface,
+    WebSurfaceKind, WebUi,
 };
 #[cfg(feature = "package-validation")]
 pub use manifest::{

@@ -3810,6 +3810,111 @@
       }
     },
     {
+      "index": 184,
+      "id": "knob_damper_land_ms",
+      "name": "DAMPER_LAND_MS",
+      "page": "model_strings",
+      "order": 34,
+      "kind": {
+        "type": "float",
+        "minimum": 1.375,
+        "maximum": 352.0,
+        "step": 0.22,
+        "default": 22.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 185,
+      "id": "knob_damper_bounces",
+      "name": "DAMPER_BOUNCES",
+      "page": "model_strings",
+      "order": 35,
+      "kind": {
+        "type": "float",
+        "minimum": 0.3125,
+        "maximum": 80.0,
+        "step": 0.05,
+        "default": 5.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 186,
+      "id": "knob_damper_hang_ms",
+      "name": "DAMPER_HANG_MS",
+      "page": "model_strings",
+      "order": 36,
+      "kind": {
+        "type": "float",
+        "minimum": 0.375,
+        "maximum": 96.0,
+        "step": 0.06,
+        "default": 6.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 187,
+      "id": "knob_damper_restitution",
+      "name": "DAMPER_RESTITUTION",
+      "page": "model_strings",
+      "order": 37,
+      "kind": {
+        "type": "float",
+        "minimum": 0.03125,
+        "maximum": 8.0,
+        "step": 0.005,
+        "default": 0.5,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 188,
+      "id": "knob_damper_dwell_ms",
+      "name": "DAMPER_DWELL_MS",
+      "page": "model_strings",
+      "order": 38,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
       "index": 200,
       "id": "preamp",
       "name": "Preamp",

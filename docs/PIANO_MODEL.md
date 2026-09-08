@@ -860,6 +860,37 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The felt lands late, and bounces (0.171.24).** Until now a key-up seated
+the damper in its own sample. In a grand the key lets the damper down: the
+felt meets the string when the returning key passes back through the
+height that lifted it, tens of milliseconds on, lands with a speed, and
+bounces. The reference cannot say how long -- its release-resonance
+samples (`harmL*`, `harmS*`) start with the note's band *rising* for a
+hundred milliseconds, so they carry no key-up to measure from (script
+`damper_landing.py`, every note from A2 to C6 tried). So the timing is
+regulation geometry stated as such, and the shape is RF-73's, whose action
+solved as bodies landed its felt 22-32 ms after every key-up at 0.18-0.38
+m/s and bounced 4-9 times over 17-31 ms with a restitution of 0.5-0.55; a
+grand's trigger is the key and not the hammer, so the delay follows the
+release speed here where the Rhodes' did not. `DAMPER_LAND_MS` = 22,
+scaled by `damper_span` (a key let go fast lands sooner), `DAMPER_BOUNCES`
+= 5, `DAMPER_HANG_MS` = 6 with `DAMPER_RESTITUTION` = 0.5, `DAMPER_DWELL_MS`
+= 1. Per voice a state machine (`arm_damper`, `advance_damper`), one
+countdown ticked beside the cull's: the landing is the felt's thud and a
+press through the voice's own damper (`press_damper`, the half pedal's
+ledger), each flight the relief of that press, the last contact the seat
+(`damp`, silent). The pedal coming up catches a falling felt and the note
+sustains; the sostenuto keeps a key it caught while the felt was still up.
+The key-off knock stays at the key-up; the thud moves to the landing.
+Tested: the first 15 ms after a key-up sound like the held note (within 15
+%); after the landing and the bounces the partials' decay rates are the
+ones `damp()` alone would have set, matched by harmonic within 2e-4 --
+every press relieved through its own damper; the note is down more than
+17 dB 200 ms later; a pedal five milliseconds after the key-up leaves
+more than 20× the sound of the seated note. `all_notes_off` and the
+pedal's fall still seat at once. Rendered for the ear:
+`10-renders/liszt-la-campanella-cg0.171.24-concert-308.wav`.
+
 **The escapement, and the silent key (0.171.23).** The hammer flies the
 let-off on its own now. The action's calibrated law, `HAMMER_V_FF ·
 span^(v − 1)`, is read as the speed at let-off, and the string gets what is

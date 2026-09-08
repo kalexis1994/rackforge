@@ -217,7 +217,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 142;
+pub const KNOB_COUNT: usize = 147;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -809,6 +809,31 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "LETOFF_KNEE",
         &LETOFF_KNEE,
         "MIDI step below which the let-off speed falls linearly to nought, so a slow key can miss the string.",
+    ),
+    (
+        "DAMPER_LAND_MS",
+        &DAMPER_LAND_MS,
+        "The felt lands this long after the key-up at an unknown release speed, ms; the release speed scales it.",
+    ),
+    (
+        "DAMPER_BOUNCES",
+        &DAMPER_BOUNCES,
+        "How many times the felt bounces before it seats.",
+    ),
+    (
+        "DAMPER_HANG_MS",
+        &DAMPER_HANG_MS,
+        "The felt's first flight after landing, ms; each next one is this times the restitution.",
+    ),
+    (
+        "DAMPER_RESTITUTION",
+        &DAMPER_RESTITUTION,
+        "How much of each bounce's flight the next one keeps.",
+    ),
+    (
+        "DAMPER_DWELL_MS",
+        &DAMPER_DWELL_MS,
+        "How long each bounce's contact holds the string, ms.",
     ),
 ];
 
@@ -3143,6 +3168,23 @@ struct Voice {
     duplex: [Component; 2],
     /// Samples until the next audibility cull.
     cull_in: u32,
+    /// Where the felt is after a key-up: 0 seated or lifted, 1 falling,
+    /// 2 in the air between bounces, 3 in a bounce's contact. See
+    /// `DAMPER_LAND_MS` and `advance_damper`.
+    damper_phase: u8,
+    /// Samples to the felt's next move.
+    damper_in: u32,
+    /// The voice's own damper at this release, for the transient presses,
+    /// and the seat factor for the final one.
+    damper_own: f32,
+    damper_seat: f32,
+    damper_bounces: u8,
+    damper_hang: f32,
+    damper_restitution: f32,
+    damper_dwell: u32,
+    damper_pressed: bool,
+    /// The felt's thud at the landing: coefficient, decay, release gain.
+    damper_thud: [f32; 3],
     /// Rough loudness, refreshed at cull time; used to steal the quietest.
     energy: f32,
     /// Tension-modulation glide: relative frequency step per cull, and how
@@ -3230,6 +3272,16 @@ impl Default for Voice {
             last_out: 0.0,
             duplex: [Component::default(); 2],
             cull_in: CULL_INTERVAL,
+            damper_phase: 0,
+            damper_in: 0,
+            damper_own: 1.0,
+            damper_seat: 1.0,
+            damper_bounces: 0,
+            damper_hang: 0.0,
+            damper_restitution: 0.5,
+            damper_dwell: 1,
+            damper_pressed: false,
+            damper_thud: [0.0; 3],
             energy: 0.0,
             glide_rate: 0.0,
             glide_steps: 0,
@@ -3583,6 +3635,107 @@ impl Voice {
     /// upper partials first and lets the fundamental sing on, which is why
     /// half-pedalling exists at all. The harmonic number rides in the
     /// slope weight every ladder partial already carries.
+    /// The key has come up; the felt is on its way. Nothing happens to the
+    /// string until it lands, `delay` samples from now, and then the
+    /// bounces: each contact a press through the voice's own damper, each
+    /// flight the relief of that press, and the last contact the seat --
+    /// `damp` with the full grip -- so every transient press is undone by
+    /// its own relief and the ledger `a_half_pedal_never_adds_energy`
+    /// guards stays balanced.
+    #[allow(clippy::too_many_arguments)]
+    fn arm_damper(
+        &mut self,
+        delay: u32,
+        seat: f32,
+        own: f32,
+        bounces: u8,
+        hang: f32,
+        restitution: f32,
+        dwell: u32,
+        thud: [f32; 3],
+    ) {
+        self.damper_phase = 1;
+        self.damper_in = delay.max(1);
+        self.damper_seat = seat;
+        self.damper_own = own;
+        self.damper_bounces = bounces;
+        self.damper_hang = hang.max(1.0);
+        self.damper_restitution = restitution.clamp(0.0, 0.95);
+        self.damper_dwell = dwell.max(1);
+        self.damper_pressed = false;
+        self.damper_thud = thud;
+    }
+
+    /// The felt's next move, when `damper_in` runs out. True once seated.
+    fn advance_damper(&mut self) -> bool {
+        match self.damper_phase {
+            1 => {
+                // The landing: the loudest contact, and the knock.
+                self.felt_thud(self.damper_thud);
+                if self.damper_bounces == 0 {
+                    self.seat_damper();
+                    return true;
+                }
+                self.press_damper(self.damper_own, 1.0);
+                self.damper_pressed = true;
+                self.damper_phase = 3;
+                self.damper_in = self.damper_dwell;
+            }
+            3 => {
+                // The contact is over; the felt is in the air.
+                self.press_damper(self.damper_own, -1.0);
+                self.damper_pressed = false;
+                self.damper_bounces = self.damper_bounces.saturating_sub(1);
+                self.damper_phase = 2;
+                self.damper_in = (self.damper_hang as u32).max(1);
+                self.damper_hang *= self.damper_restitution;
+            }
+            2 => {
+                // The felt comes back down: another contact, or the seat.
+                if self.damper_bounces == 0 {
+                    self.seat_damper();
+                    return true;
+                }
+                self.press_damper(self.damper_own, 1.0);
+                self.damper_pressed = true;
+                self.damper_phase = 3;
+                self.damper_in = self.damper_dwell;
+            }
+            _ => {}
+        }
+        false
+    }
+
+    fn seat_damper(&mut self) {
+        let [coefficient, decay, _] = self.damper_thud;
+        // The knock was the landing's; the seat is silent.
+        self.damp(self.damper_seat, coefficient, decay, 0.0);
+        self.damper_phase = 0;
+    }
+
+    /// The pedal, or a re-strike, catching the felt on its way down: any
+    /// press still standing is relieved through the same damper.
+    fn cancel_damper(&mut self) {
+        if self.damper_pressed {
+            self.press_damper(self.damper_own, -1.0);
+            self.damper_pressed = false;
+        }
+        self.damper_phase = 0;
+    }
+
+    /// The felt landing makes a small knock of its own, whether or not
+    /// the string still carries energy: release a silent key on a real
+    /// action and it still says something.
+    fn felt_thud(&mut self, [thud_coefficient, thud_decay, release_gain]: [f32; 3]) {
+        let thud = ((0.004 + 0.10 * sqrtf(self.energy)) * release_gain).min(0.045);
+        if thud > self.noise_amp {
+            self.noise_amp = thud;
+            self.noise_coefficient = thud_coefficient;
+            self.noise_decay = thud_decay;
+            self.noise_shrink = 1.0;
+        }
+    }
+
     fn press_damper(&mut self, full_factor: f32, delta: f32) {
         if delta.abs() < 1e-4 {
             return;
@@ -4558,6 +4711,34 @@ pub static LETOFF_DISTANCE_MM: Knob = Knob::new(2.5);
 /// toll decides where the sound stops. This is the keyboard's convention,
 /// stated as such; the toll above is the piano's.
 pub static LETOFF_KNEE: Knob = Knob::new(12.0);
+
+/// The damper's landing, in milliseconds after the key-up at an unknown
+/// release speed. Until 0.171.24 the felt seated in the note-off's own
+/// sample. In a grand the key lets the damper down: the felt meets the
+/// string when the returning key passes back through the height that
+/// lifted it, about half its travel, and a key coming up under its own
+/// weight takes tens of milliseconds to get there. RF-73's action, solved as
+/// bodies, landed its felt 22-32 ms after every key-up; a grand's trigger is
+/// the key rather than the hammer, so the delay follows the release speed
+/// here (`damper_span`: a key let go fast lands sooner) and this is the
+/// figure at the middle. The reference's release samples cannot say -- their
+/// envelopes rise for a hundred milliseconds after they start -- so this is
+/// regulation geometry, stated as such.
+pub static DAMPER_LAND_MS: Knob = Knob::new(22.0);
+
+/// How many times the felt bounces before it seats. RF-73 measured 4-9
+/// contacts over 17-31 ms with a restitution of 0.5-0.55; a grand's damper
+/// head is heavier and its felt softer, so fewer.
+pub static DAMPER_BOUNCES: Knob = Knob::new(5.0);
+
+/// The first flight after the landing, in milliseconds; each one after it
+/// is the previous times the restitution.
+pub static DAMPER_HANG_MS: Knob = Knob::new(6.0);
+pub static DAMPER_RESTITUTION: Knob = Knob::new(0.5);
+
+/// How long each bounce's contact holds the string, in milliseconds. RF-73's
+/// felt was in contact for a tenth to a third of its bouncing.
+pub static DAMPER_DWELL_MS: Knob = Knob::new(1.0);
 /// How much longer the integration runs than the nominal contact time. The
 /// hammer is still in contact when it stops, so this sets how heavily it
 /// pushes the low modes: measured on C2's first 30 ms, stretching it puts
@@ -7531,6 +7712,8 @@ impl ConcertGrand {
         voice.duplex = duplex;
         voice.cull_in = CULL_INTERVAL;
         voice.tension_in = TENSION_INTERVAL;
+        voice.damper_phase = 0;
+        voice.damper_pressed = false;
         // The string is tuned at rest, so the stretch it carries once the
         // note has died away must pull it nowhere: the rest value is zero and
         // everything above it is the note sharpening itself.
@@ -7955,7 +8138,20 @@ impl ConcertGrand {
                     let own = Self::damper_for(note, rate, grip * voice.firmness, span);
                     voice.press_damper(own, pressure);
                 } else {
-                    voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+                    // The felt is on its way, not down: see DAMPER_LAND_MS.
+                    // A key let go fast lands it sooner (`span` < 1), a key
+                    // eased up later.
+                    let own = Self::damper_for(note, rate, grip * voice.firmness, span);
+                    voice.arm_damper(
+                        (DAMPER_LAND_MS.get() * 0.001 * rate * span) as u32,
+                        damper,
+                        own,
+                        DAMPER_BOUNCES.get().clamp(0.0, 12.0) as u8,
+                        DAMPER_HANG_MS.get() * 0.001 * rate,
+                        DAMPER_RESTITUTION.get(),
+                        (DAMPER_DWELL_MS.get() * 0.001 * rate) as u32,
+                        [thud_coefficient, thud_decay, release_gain],
+                    );
                 }
             }
         }
@@ -7980,12 +8176,28 @@ impl ConcertGrand {
                 * Controls::noise_gain(self.controls.pedal_noise);
             self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
         }
+        let rail_lifted = down && !self.pedal;
         self.pedal = down;
         self.pedal_pressure = pressure;
         let (thud_coefficient, thud_decay) = self.damper_thud();
         let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
+        if rail_lifted {
+            // The rail coming up catches every felt still on its way down:
+            // that string is sustained from here, its press relieved through
+            // the same damper it was made with.
+            for voice in &mut self.voices {
+                if voice.active && voice.damper_phase != 0 {
+                    voice.cancel_damper();
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = pressure;
+                    let own = voice.damper_own;
+                    voice.press_damper(own, pressure);
+                }
+            }
+        }
         if !down {
             // The rail coming down seats the silent strings whose keys
             // are already up.
@@ -9272,6 +9484,21 @@ impl Processor for ConcertGrand {
                 drive_points[voice.drive_index] += force * (1.0 - voice.drive_frac);
                 drive_points[voice.drive_index + 1] += force * voice.drive_frac;
 
+                if voice.damper_phase != 0 {
+                    voice.damper_in -= 1;
+                    if voice.damper_in == 0 {
+                        if self.sostenuto && voice.sostenuto {
+                            // The middle pedal caught this key while its
+                            // felt was still up: it stays up.
+                            voice.cancel_damper();
+                            voice.held = false;
+                            voice.sustained = true;
+                            voice.damper_applied = 0.0;
+                        } else {
+                            voice.advance_damper();
+                        }
+                    }
+                }
                 voice.tension_in -= 1;
                 if voice.tension_in == 0 {
                     voice.tension_in = TENSION_INTERVAL;
@@ -10330,6 +10557,129 @@ mod tests {
         assert!(
             early_slope > late_slope * 1.5,
             "early {early_slope} vs late {late_slope}"
+        );
+    }
+
+    #[test]
+    fn the_felt_lands_late_and_the_ledger_balances() {
+        // After a key-up the string is free until the felt lands, about
+        // twenty milliseconds on: the sound in the first fifteen ms after
+        // the key-off is the sound of a held note. A hundred and fifty ms
+        // on, the felt has bounced and seated and the note is down by the
+        // damper's full grip -- the same grip the old instantaneous seat
+        // applied, so a partial's decay rate ends exactly where damp()
+        // alone would have put it: every bounce's press relieved through
+        // the same damper.
+        let first_window = |release: bool| {
+            let mut piano = prepared();
+            render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 90)]);
+            let events: Vec<MidiEvent> = if release {
+                vec![note_off(60)]
+            } else {
+                Vec::new()
+            };
+            energy(&render(&mut piano, (FS * 0.015) as usize, &events))
+        };
+        let held = first_window(false);
+        let released = first_window(true);
+        assert!(
+            released > 0.85 * held && released < 1.15 * held,
+            "the string changed in the first 15 ms after the key-up: {released:e} against {held:e} held"
+        );
+
+        let mut piano = prepared();
+        render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 90)]);
+        render(&mut piano, 16, &[note_off(60)]);
+        let voice = piano
+            .voices
+            .iter()
+            .position(|voice| voice.active && voice.note == 60)
+            .unwrap();
+        assert_eq!(piano.voices[voice].damper_phase, 1, "the felt is falling");
+        // Run the felt through its landing and bounces.
+        render(&mut piano, (FS * 0.15) as usize, &[]);
+        assert_eq!(piano.voices[voice].damper_phase, 0, "the felt has seated");
+        assert!(!piano.voices[voice].held && !piano.voices[voice].sustained);
+
+        // The same voice damped at once, for the ledger.
+        let mut at_once = prepared();
+        render(&mut at_once, (FS * 0.3) as usize, &[note_on(60, 90)]);
+        let slot = at_once
+            .voices
+            .iter()
+            .position(|voice| voice.active && voice.note == 60)
+            .unwrap();
+        let firmness = piano.voices[voice].firmness;
+        at_once.voices[slot].firmness = firmness;
+        let grip = at_once.controls.damper_grip();
+        let damper = ConcertGrand::damper_for(60, FS as f32, grip * firmness, 1.0);
+        let (coefficient, decay) = at_once.damper_thud();
+        at_once.voices[slot].damp(damper, coefficient, decay, 0.0);
+        let late = &piano.voices[voice];
+        let now = &at_once.voices[slot];
+        // Matched by harmonic number: the cull reorders a voice's partials.
+        let mut compared = 0;
+        for a in &late.partials[..late.partial_count] {
+            let harmonic = roundf(a.slope.abs() * 16.0);
+            let Some(b) = now.partials[..now.partial_count]
+                .iter()
+                .find(|b| roundf(b.slope.abs() * 16.0) == harmonic)
+            else {
+                continue;
+            };
+            // A lane a partial does not use carries no radius; compare the
+            // lanes both voices use.
+            for lane in 0..LANES {
+                let ra = sqrtf(a.rc[lane] * a.rc[lane] + a.rs[lane] * a.rs[lane]);
+                let rb = sqrtf(b.rc[lane] * b.rc[lane] + b.rs[lane] * b.rs[lane]);
+                if ra == 0.0 || rb == 0.0 {
+                    continue;
+                }
+                assert!(
+                    (ra - rb).abs() < 2.0e-4 * rb,
+                    "a partial's decay rate drifted through the bounces: {ra} against {rb}"
+                );
+                compared += 1;
+            }
+        }
+        assert!(compared >= 8, "only {compared} partials could be matched");
+        // And the sound is down.
+        let tail = energy(&render(&mut piano, (FS * 0.2) as usize, &[]));
+        assert!(
+            tail < 0.02 * held,
+            "the note is still up after the felt seated: {tail:e} against {held:e}"
+        );
+    }
+
+    #[test]
+    fn the_pedal_catches_a_falling_felt() {
+        // Key up, pedal down five milliseconds later: on a grand the rail
+        // lifts the felt before it lands and the note sustains. Its sound a
+        // third of a second on must be the sound of the pedalled note, not
+        // of a damped one.
+        let tail = |pedal_after: bool| {
+            let mut piano = prepared();
+            render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 90)]);
+            render(&mut piano, (FS * 0.005) as usize, &[note_off(60)]);
+            if pedal_after {
+                render(
+                    &mut piano,
+                    16,
+                    &[MidiEvent {
+                        frame: 0,
+                        data: [0xB0, 64, 127],
+                        length: 3,
+                    }],
+                );
+            }
+            render(&mut piano, (FS * 0.3) as usize, &[]);
+            energy(&render(&mut piano, (FS * 0.1) as usize, &[]))
+        };
+        let caught = tail(true);
+        let seated = tail(false);
+        assert!(
+            caught > 20.0 * seated,
+            "the pedal did not catch the felt: {caught:e} against {seated:e} seated"
         );
     }
 
@@ -13037,6 +13387,8 @@ mod tests {";
             + voice.partials[0].rs[0] * voice.partials[0].rs[0];
         let duplex_before = decay_squared(&voice.duplex[0]);
         render(&mut piano, 8, &[note_off(84)]);
+        // The felt lands late (DAMPER_LAND_MS) and bounces before it seats.
+        render(&mut piano, (FS * 0.15) as usize, &[]);
         let voice = piano.voices.iter().find(|v| v.active).unwrap();
         let string_after = voice.partials[0].rc[0] * voice.partials[0].rc[0]
             + voice.partials[0].rs[0] * voice.partials[0].rs[0];

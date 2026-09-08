@@ -2382,6 +2382,12 @@ Stated so nobody mistakes silence for coverage:
   the pedal down. Still not modelled: strings with NO sounding voice (a
   silent key or a late pedal wakes nothing discrete — the open-register
   statistics still cover that wash).
+* **The action as a mechanism.** No escapement threshold (velocity 1
+  strikes), no silent key, the damper seated in the note-off's own sample
+  with no landing delay or bounce, repetition without key state, and the
+  key-bottom knock in the strike's own sample. Each is per-event logic and
+  costs nothing on the sample path; what each needs measured, and the
+  order, is in [PIANO_ACTION_MECHANICS.md](PIANO_ACTION_MECHANICS.md).
 
 A broad survey of these techniques and their trade-offs: B. Bank, F. Avanzini,
 G. Borin, G. De Poli, F. Fontana, D. Rocchesso, "Physically informed signal

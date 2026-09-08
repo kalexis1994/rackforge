@@ -914,6 +914,8 @@ impl DesktopAudio {
         let mut processor = AudioProcessor {
             voices,
             active_voice,
+            chain: Vec::new(),
+            chain_scratch: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
             midi_receiver,
             command_receiver,
             events: Vec::with_capacity(
@@ -1215,6 +1217,40 @@ impl DesktopAudio {
         receive_control_response(receiver, "restore plugin state")
     }
 
+    /// The effects after the PLAY instrument, built here and handed over
+    /// whole. Each effect records its live parameters under its plugin, as
+    /// the instrument voices do, so a knob set on an effect is where the
+    /// player left it next time.
+    pub fn set_play_chain(&self, effects: Vec<(VoiceSpec, bool)>) -> Result<()> {
+        self._live_parameter_writer.handle().flush();
+        let store = LiveParameterStateStore::open(Some(&self.data_root))?;
+        let mut voices = Vec::with_capacity(effects.len());
+        for (spec, enabled) in effects {
+            let target = self
+                ._live_parameter_writer
+                .handle()
+                .register(LiveParameterTarget {
+                    plugin_id: spec.plugin.manifest().id.clone(),
+                    plugin_version: spec.plugin.manifest().version.to_string(),
+                    schema: spec.plugin.parameters().clone(),
+                })
+                .context("registering PLAY effect live state")?;
+            let audio = spec.plugin.manifest().resolved_audio_contract();
+            if audio.input_channels() == 0 {
+                bail!(
+                    "effect {} declares no audio input; nothing would reach it",
+                    spec.instance_id
+                );
+            }
+            let mut voice = prepare_audio_voice(spec, self.sample_rate, target, &store)?;
+            voice.bypassed = !enabled;
+            voices.push(voice);
+        }
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::SetPlayChain { voices, reply })?;
+        receive_control_response(receiver, "set PLAY effects")
+    }
+
     pub fn replace_voice(&self, spec: VoiceSpec) -> Result<()> {
         self._live_parameter_writer.handle().flush();
         let store = LiveParameterStateStore::open(Some(&self.data_root))?;
@@ -1482,6 +1518,12 @@ enum AudioCommand {
     SetConducting(bool),
     EmergencyStop,
     ReplaceVoice(AudioVoice),
+    /// The effects after the PLAY instrument, replaced whole; built and
+    /// warmed on the caller's thread, bypass flags set.
+    SetPlayChain {
+        voices: Vec<AudioVoice>,
+        reply: SyncSender<std::result::Result<(), String>>,
+    },
 }
 
 fn receive_control_response<T>(receiver: Receiver<Result<T, String>>, action: &str) -> Result<T> {
@@ -1607,6 +1649,8 @@ struct AudioVoice {
     /// entry takes MIDI 1.0 events.
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
+    /// A chain effect the player switched off: the signal passes it by.
+    bypassed: bool,
 }
 
 impl AudioVoice {
@@ -1816,6 +1860,11 @@ impl MasterBalance {
 struct AudioProcessor {
     voices: Vec<AudioVoice>,
     active_voice: usize,
+    /// The effects after the active instrument, in order.
+    chain: Vec<AudioVoice>,
+    /// The block on its way down the chain: each stage reads it and leaves
+    /// its own in its place.
+    chain_scratch: Vec<f32>,
     midi_receiver: Receiver<MidiPacket>,
     command_receiver: Receiver<AudioCommand>,
     /// The block's events in the host's vocabulary, width and all.
@@ -2050,7 +2099,45 @@ impl AudioProcessor {
                 voice.instance_id
             );
         }
-        let plugin_output = &voice.output[..frames * output_channels];
+        // Down the chain: every enabled effect in turn, each fed the last
+        // one's block. A stage that faults is passed by, not silenced: the
+        // instrument keeps sounding through the rest.
+        let mut stage_channels = output_channels;
+        self.chain_scratch[..frames * output_channels]
+            .copy_from_slice(&voice.output[..frames * output_channels]);
+        for stage in self.chain.iter_mut() {
+            if stage.bypassed || stage.process_faulted {
+                continue;
+            }
+            lay_chain_input(
+                &self.chain_scratch,
+                stage_channels,
+                &mut stage.input,
+                stage.input_channels,
+                frames,
+            );
+            stage.events.clear();
+            stage.parameter_events.clear();
+            let stage_output_channels = stage.output_channels as u32;
+            process_slots_sequential(
+                std::slice::from_mut(stage),
+                frames as u32,
+                stage_output_channels,
+                &self.render_telemetry,
+            );
+            if stage.process_faulted {
+                eprintln!(
+                    "PLUGIN_PROCESS_QUARANTINED context=desktop-chain:{} action=bypass",
+                    stage.instance_id
+                );
+                continue;
+            }
+            stage_channels = stage.output_channels;
+            self.chain_scratch[..frames * stage_channels]
+                .copy_from_slice(&stage.output[..frames * stage_channels]);
+        }
+        let plugin_output = &self.chain_scratch[..frames * stage_channels];
+        let output_channels = stage_channels;
         let output = &mut self.output[..samples];
         for frame in 0..frames {
             output[frame * 2] = plugin_output[frame * output_channels];
@@ -2308,6 +2395,7 @@ impl AudioProcessor {
                     let result = self
                         .voices
                         .iter_mut()
+                        .chain(self.chain.iter_mut())
                         .find(|voice| voice.instance_id == instance_id)
                         .ok_or_else(|| format!("unknown audio plugin instance {instance_id}"))
                         .and_then(|voice| {
@@ -2340,6 +2428,7 @@ impl AudioProcessor {
                     let result = self
                         .voices
                         .iter_mut()
+                        .chain(self.chain.iter_mut())
                         .find(|voice| voice.instance_id == instance_id)
                         .ok_or_else(|| format!("unknown audio plugin instance {instance_id}"))
                         .and_then(|voice| {
@@ -2424,11 +2513,16 @@ impl AudioProcessor {
                     self.velocity_curves = per_source;
                 }
                 AudioCommand::EmergencyStop => {
-                    for voice in &mut self.voices {
+                    for voice in self.voices.iter_mut().chain(self.chain.iter_mut()) {
                         voice.mirror_control(|instance| instance.reset())?;
                         voice.process_faulted = false;
                     }
                     self.stopped = true;
+                }
+                AudioCommand::SetPlayChain { voices, reply } => {
+                    let retired = std::mem::replace(&mut self.chain, voices);
+                    self.deferred_retire.extend(retired);
+                    let _ = reply.try_send(Ok(()));
                 }
                 AudioCommand::ReplaceVoice(voice) => {
                     let index = self
@@ -2574,7 +2668,37 @@ fn prepare_audio_voice(
         events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
         parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
         process_faulted: false,
+        bypassed: false,
     })
+}
+
+/// The previous stage's block, laid into the next stage's input: copied
+/// when the widths agree, summed to one channel or spread to two when not.
+fn lay_chain_input(
+    source: &[f32],
+    source_channels: usize,
+    destination: &mut [f32],
+    destination_channels: usize,
+    frames: usize,
+) {
+    if source_channels == destination_channels {
+        destination[..frames * destination_channels]
+            .copy_from_slice(&source[..frames * source_channels]);
+        return;
+    }
+    for frame in 0..frames {
+        let source_frame = &source[frame * source_channels..(frame + 1) * source_channels];
+        let destination_frame =
+            &mut destination[frame * destination_channels..(frame + 1) * destination_channels];
+        if destination_channels == 1 {
+            destination_frame[0] =
+                source_frame.iter().sum::<f32>() / source_channels.max(1) as f32;
+        } else {
+            for (channel, sample) in destination_frame.iter_mut().enumerate() {
+                *sample = source_frame[channel.min(source_channels - 1)];
+            }
+        }
+    }
 }
 
 /// The clock writer: owns every MIDI output port and forwards realtime

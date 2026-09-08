@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { PluginWebDescriptor } from "../types";
+import type { PluginInstance, PluginWebDescriptor } from "../types";
 import {
   effectPlugins,
   suggestedEffects,
@@ -57,6 +57,7 @@ export function PlayChainDrawer({
   open,
   chain,
   plugins,
+  instances,
   instrumentName,
   instrumentVersion,
   instrumentDescriptor,
@@ -67,6 +68,8 @@ export function PlayChainDrawer({
   open: boolean;
   chain: PlayChain;
   plugins: PluginWebDescriptor[];
+  /** The session's instances: an effect the host has not loaded cannot join. */
+  instances?: PluginInstance[];
   instrumentName: string;
   instrumentVersion?: string;
   instrumentDescriptor?: PluginWebDescriptor;
@@ -162,7 +165,7 @@ export function PlayChainDrawer({
     setChosenHeight(clampHeight(height + direction * (event.shiftKey ? 40 : 10)));
   };
 
-  const available = effectPlugins(plugins);
+  const available = effectPlugins(plugins, instances);
   const suggestions = suggestedEffects(suggested, plugins, chain);
   const byId = (pluginId: string) => plugins.find((plugin) => plugin.plugin_id === pluginId);
   const shown = phase !== "closed";
@@ -190,7 +193,7 @@ export function PlayChainDrawer({
         <div className="play-chain-head">
           <span className="eyebrow accent">Effects</span>
           <span className="play-chain-status">
-            Audio path today: instrument → output. Effects in this chain are not routed yet.
+            Audio path: instrument → every effect that is on, in order → output.
           </span>
           <button
             type="button"

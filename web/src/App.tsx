@@ -77,7 +77,7 @@ import { ParameterLinkHost } from "./components/ParameterLinkHost";
 import { ToggleSwitch } from "./components/ToggleSwitch";
 import { PluginIcon } from "./components/PluginIcon";
 import { PlayChainDrawer } from "./components/PlayChainDrawer";
-import { readStoredChain, storeChain, type PlayChain } from "./playChain";
+import { chainOf, sameChain, type PlayChain } from "./playChain";
 import { AsyncNotice, AsyncStateBoundary } from "./components/AsyncStateBoundary";
 import { RfButton } from "./ui/RfButton";
 import { useSurfaceTransition } from "./ui/useSurfaceTransition";
@@ -2714,20 +2714,39 @@ function PlayPage({
   const activeSurfaceInfo =
     surfaceInfo?.instanceId === active?.instance_id ? surfaceInfo : null;
   const activeInstanceId = active?.instance_id;
-  const activePluginId = active?.plugin_id;
-  // The chain is the instrument's: stored under its id, read back when the
-  // player returns to it. Edits are held here and written through.
+  // The chain is the instrument's and the host's: the session holds one
+  // per instrument and routes PLAY through it. An edit shows at once and
+  // is sent; it stands until the session answers -- with the same chain,
+  // or with another (refused, or changed elsewhere), which then wins.
   const [chainOpen, setChainOpen] = useState(false);
-  const [editedChain, setEditedChain] = useState<PlayChain | null>(null);
-  const storedChain = useMemo(
-    () => (activePluginId ? readStoredChain(activePluginId) : null),
-    [activePluginId],
+  const [pendingChain, setPendingChain] = useState<{
+    chain: PlayChain;
+    revision: number;
+  } | null>(null);
+  const snapshotChains = snapshot?.play_chains;
+  const snapshotRevision = snapshot?.revision;
+  const sessionChain = useMemo(
+    () => (activeInstanceId ? chainOf(snapshotChains, activeInstanceId) : null),
+    [activeInstanceId, snapshotChains],
   );
-  const chain = editedChain?.instrument_id === activePluginId ? editedChain : storedChain;
-  const handleChainChange = useCallback((next: PlayChain) => {
-    setEditedChain(next);
-    storeChain(next);
-  }, []);
+  const chain =
+    pendingChain
+    && sessionChain
+    && pendingChain.chain.instrument_id === sessionChain.instrument_id
+    && (pendingChain.revision === snapshotRevision || sameChain(pendingChain.chain, sessionChain))
+      ? pendingChain.chain
+      : sessionChain;
+  const handleChainChange = useCallback(
+    (next: PlayChain) => {
+      setPendingChain({ chain: next, revision: snapshotRevision ?? -1 });
+      void dispatchCommandAwait({
+        type: "set_play_chain",
+        instrument_id: next.instrument_id,
+        effects: next.effects,
+      }).catch(() => setPendingChain(null));
+    },
+    [snapshotRevision],
+  );
   const handleSurfaceInfo = useCallback(
     (info: { label: string; value: string } | null) => {
       if (!activeInstanceId) return;
@@ -2804,6 +2823,7 @@ function PlayPage({
         open={chainOpen && chain !== null}
         chain={chain ?? { instrument_id: "", effects: [] }}
         plugins={installedPlugins}
+        instances={instances}
         instrumentName={active?.plugin_name ?? "Instrument"}
         instrumentVersion={activeVersion}
         instrumentDescriptor={activeDescriptor}

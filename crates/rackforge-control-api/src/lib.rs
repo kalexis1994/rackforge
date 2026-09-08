@@ -1051,6 +1051,7 @@ mod tests {
                 audition: None,
                 program_draft: None,
                 parameter_links: Vec::new(),
+                play_chains: Vec::new(),
             }),
         };
         assert_eq!(

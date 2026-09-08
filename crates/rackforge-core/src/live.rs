@@ -3,6 +3,7 @@ use crate::audio::{
     open_audio_output_from_inventory,
 };
 use crate::control::{
+    PlayChainEffectRuntimeSpec, PreparedChainVoice,
     self, AudioControlCommand, MAX_EVENTS_PER_BLOCK, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec,
     RackSlotStateLoad,
 };
@@ -44,8 +45,8 @@ use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_plugin_api::{ParameterKind, PluginKind};
 use rackforge_session_api::{
     BankSummary, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId, MasterLevel,
-    MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionId, SessionState,
-    SoundSummary, SurfaceMode,
+    MasterPan, PlayChainState, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionId,
+    SessionState, SoundSummary, SurfaceMode,
 };
 use semver::Version;
 use std::collections::{BTreeMap, BTreeSet};
@@ -496,7 +497,14 @@ struct StandaloneVoice<'plugin> {
     /// The events as the parallel scheduler takes them, rebuilt each block.
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
+    /// A chain effect the player switched off: the signal passes it by.
+    bypassed: bool,
 }
+
+/// Chain effects record no live parameters: they have no target of their
+/// own in the writer, and this index tells the arms that handle both kinds
+/// of voice to leave the writer alone.
+const CHAIN_LIVE_PARAMETER_TARGET: usize = usize::MAX;
 
 impl<'plugin> StandaloneVoice<'plugin> {
     /// Applies one control-plane operation to the coordinator and mirrors
@@ -709,6 +717,154 @@ fn create_rack_voices<'plugin>(
     }
     resolve_rack_voice_graph(&mut voices);
     Ok(voices)
+}
+
+/// One effect of the PLAY chain, built where the caller stands: the boot
+/// thread, the audio loop for a native plugin.
+fn create_chain_voice<'plugin>(
+    plugin: &'plugin LoadedPlugin,
+    spec: &PlayChainEffectRuntimeSpec,
+    sample_rate_hz: u32,
+    period_frames: u32,
+    channels: u32,
+) -> Result<StandaloneVoice<'plugin>> {
+    let (input_channels, output_channels) = plugin_audio_channels(plugin)?;
+    if output_channels != channels as usize {
+        bail!(
+            "effect {} exposes {output_channels} output channels; runtime requires {channels}",
+            spec.instance_id
+        );
+    }
+    if input_channels == 0 {
+        bail!(
+            "effect {} declares no audio input; nothing would reach it",
+            spec.instance_id
+        );
+    }
+    let mut instance = plugin.create_instance()?;
+    instance
+        .activate(
+            f64::from(sample_rate_hz),
+            period_frames,
+            input_channels as u32,
+            output_channels as u32,
+        )
+        .with_context(|| format!("activating effect {}", spec.instance_id))?;
+    Ok(StandaloneVoice {
+        instance_id: spec.instance_id.clone(),
+        plugin,
+        instance,
+        parallel: None,
+        input_channels,
+        live_parameter_target: CHAIN_LIVE_PARAMETER_TARGET,
+        input: vec![0.0; period_frames as usize * input_channels],
+        output: vec![0.0; period_frames as usize * channels as usize],
+        events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+        parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+        process_faulted: false,
+        bypassed: !spec.enabled,
+    })
+}
+
+fn create_chain_voices<'plugin>(
+    plugins: &BTreeMap<String, &'plugin LoadedPlugin>,
+    specs: &[PlayChainEffectRuntimeSpec],
+    sample_rate_hz: u32,
+    period_frames: u32,
+    channels: u32,
+) -> Result<Vec<StandaloneVoice<'plugin>>> {
+    specs
+        .iter()
+        .map(|spec| {
+            let plugin = plugins
+                .get(&spec.plugin_id)
+                .with_context(|| format!("plugin {} is not loaded", spec.plugin_id))?;
+            create_chain_voice(plugin, spec, sample_rate_hz, period_frames, channels)
+        })
+        .collect()
+}
+
+fn chain_voices_from_prepared(
+    prepared: Vec<PreparedChainVoice>,
+    period_frames: usize,
+    channels: usize,
+) -> Vec<StandaloneVoice<'static>> {
+    prepared
+        .into_iter()
+        .map(|prepared| StandaloneVoice {
+            instance_id: prepared.instance_id,
+            plugin: prepared.plugin,
+            instance: prepared.instance.0,
+            parallel: None,
+            input_channels: prepared.input_channels,
+            live_parameter_target: CHAIN_LIVE_PARAMETER_TARGET,
+            input: vec![0.0; period_frames * prepared.input_channels],
+            output: vec![0.0; period_frames * channels],
+            events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+            parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+            process_faulted: false,
+            bypassed: !prepared.enabled,
+        })
+        .collect()
+}
+
+/// Portable effects leave for the reclaimer thread; a native one is
+/// dropped here, as its thread affinity asks.
+fn retire_chain_voices(
+    voices: Vec<StandaloneVoice<'static>>,
+    deferred: &mut Vec<RetiredAudioRuntime>,
+) {
+    for voice in voices {
+        if voice.plugin.manifest().portable_component().is_some() {
+            deferred.push(RetiredAudioRuntime::Standalone(
+                control::PreparedPluginInstance(voice.instance),
+            ));
+        }
+    }
+}
+
+/// The previous stage's block, laid into the next stage's input: copied
+/// when the widths agree, summed to one channel or spread to two when not.
+fn lay_chain_input(
+    source: &[f32],
+    source_channels: usize,
+    destination: &mut [f32],
+    destination_channels: usize,
+    frames: usize,
+) {
+    if source_channels == destination_channels {
+        destination[..frames * destination_channels]
+            .copy_from_slice(&source[..frames * source_channels]);
+        return;
+    }
+    for frame in 0..frames {
+        let source_frame = &source[frame * source_channels..(frame + 1) * source_channels];
+        let destination_frame =
+            &mut destination[frame * destination_channels..(frame + 1) * destination_channels];
+        if destination_channels == 1 {
+            destination_frame[0] =
+                source_frame.iter().sum::<f32>() / source_channels.max(1) as f32;
+        } else {
+            for (channel, sample) in destination_frame.iter_mut().enumerate() {
+                *sample = source_frame[channel.min(source_channels - 1)];
+            }
+        }
+    }
+}
+
+/// A voice by id among the instruments and the chain's effects.
+fn any_voice_mut<'voices, 'plugin>(
+    standalone: &'voices mut [StandaloneVoice<'plugin>],
+    chain: &'voices mut [StandaloneVoice<'plugin>],
+    instance_id: &InstanceId,
+) -> Result<&'voices mut StandaloneVoice<'plugin>, String> {
+    if standalone.iter().any(|voice| &voice.instance_id == instance_id) {
+        return standalone_voice_mut(standalone, instance_id);
+    }
+    chain
+        .iter_mut()
+        .find(|voice| &voice.instance_id == instance_id)
+        .ok_or_else(|| format!("unknown plugin instance {instance_id}"))
 }
 
 fn rack_voices_from_prepared(
@@ -1155,6 +1311,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
+            bypassed: false,
         });
     }
     let live_parameter_writer =
@@ -1390,6 +1547,33 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 .any(|instance| instance.instance_id == *id)
         })
         .unwrap_or_else(|| primary_instance_id.clone());
+    // The chains the checkpoint kept, less any instrument or effect that
+    // is no longer here: a plugin removed since is left out of its chain,
+    // and a chain with nothing left in it is forgotten.
+    let persisted_play_chains: Vec<PlayChainState> = checkpoint
+        .as_ref()
+        .and_then(|store| match store.play_chains(&session_id) {
+            Ok(chains) => Some(chains),
+            Err(error) => {
+                eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
+                None
+            }
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|chain| {
+            session_instances
+                .iter()
+                .any(|instance| instance.instance_id == chain.instrument_id)
+        })
+        .map(|mut chain| {
+            chain
+                .effects
+                .retain(|effect| plugins.contains_key(&effect.plugin_id));
+            chain
+        })
+        .filter(|chain| !chain.effects.is_empty() && chain.validate().is_ok())
+        .collect();
     let session = SessionState {
         schema_version: SESSION_SCHEMA_VERSION,
         session_id,
@@ -1403,6 +1587,22 @@ pub fn run(config: LiveConfig) -> Result<()> {
         audition: None,
         program_draft: None,
         parameter_links: persisted_parameter_links,
+        play_chains: persisted_play_chains,
+    };
+    let initial_chain_voices = match session.play_chain(&active_instance_id) {
+        Some(chain) => {
+            let specs =
+                control::play_chain_runtime_specs(chain, |plugin_id| plugins.contains_key(plugin_id));
+            create_chain_voices(
+                &plugins,
+                &specs,
+                output_rate,
+                period_frames as u32,
+                channels as u32,
+            )
+            .context("building the PLAY chain restored from the checkpoint")?
+        }
+        None => Vec::new(),
     };
     if let Some(checkpoint) = &checkpoint {
         checkpoint
@@ -1471,6 +1671,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         standalone_voices: &mut standalone_voices,
         active_instance_id,
         rack_voices,
+        chain_voices: initial_chain_voices,
         parameter_links: initial_parameter_links,
         play_route: &play_route,
         virtual_play_route: &virtual_play_route,
@@ -1759,6 +1960,8 @@ struct AudioLoopContext<'a> {
     standalone_voices: &'a mut [StandaloneVoice<'static>],
     active_instance_id: InstanceId,
     rack_voices: Vec<RackSlotVoice<'static>>,
+    /// The effects after the active instrument, in order.
+    chain_voices: Vec<StandaloneVoice<'static>>,
     parameter_links: Vec<CompiledParameterLink>,
     play_route: &'a CompiledMidiRoute,
     virtual_play_route: &'a CompiledMidiRoute,
@@ -1784,6 +1987,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         standalone_voices,
         mut active_instance_id,
         mut rack_voices,
+        mut chain_voices,
         mut parameter_links,
         play_route,
         virtual_play_route,
@@ -1834,6 +2038,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         vec![0.0_f32; period_frames * rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS];
     let mut plugin_output = vec![0.0_f32; period_frames * channels];
     let mut mix_output = vec![0.0_f32; period_frames * channels];
+    // The block on its way down the chain: each stage reads it and leaves
+    // its own in its place.
+    let mut chain_scratch = vec![0.0_f32; period_frames * channels];
     let mut device_output = vec![0_i32; period_frames * channels];
     let mut events = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
     let mut sequencer_events: Vec<MidiEventV1> = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
@@ -2013,6 +2220,25 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 .resize(period_frames * voice.input_channels, 0.0);
                             voice.output.resize(period_frames * channels, 0.0);
                         }
+                        chain_scratch.resize(period_frames * channels, 0.0);
+                        for voice in &mut chain_voices {
+                            voice
+                                .input
+                                .resize(period_frames * voice.input_channels, 0.0);
+                            voice.output.resize(period_frames * channels, 0.0);
+                            if let Err(error) = voice.instance.activate(
+                                output_rate as f64,
+                                period_frames as u32,
+                                voice.input_channels as u32,
+                                channels as u32,
+                            ) {
+                                eprintln!(
+                                    "PLAY_CHAIN_REACTIVATE_FAILED instance={} error={error:#}",
+                                    voice.instance_id
+                                );
+                                voice.process_faulted = true;
+                            }
+                        }
                         device_output.resize(period_frames * channels, 0);
                         meter_frames = 0;
                         meter_peak = 0.0;
@@ -2093,6 +2319,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         let result = if render_mode == AudioRenderMode::Silent {
                             if pending_emergency_stop {
                                 pending_emergency_stop = false;
+                                retire_chain_voices(
+                                    std::mem::take(&mut chain_voices),
+                                    &mut deferred_retire,
+                                );
                                 if let Err(error) =
                                     stop_all_plugin_runtimes(standalone_voices, &mut rack_voices)
                                 {
@@ -2118,6 +2348,35 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         }
                         let _ = reply.send(result);
                     }
+                }
+                AudioControlCommand::SetPlayChain {
+                    instrument_id,
+                    effects,
+                    prepared,
+                    reply,
+                } => {
+                    let result = match prepared {
+                        Some(prepared) => {
+                            Ok(chain_voices_from_prepared(prepared, period_frames, channels))
+                        }
+                        None => create_chain_voices(
+                            plugins,
+                            &effects,
+                            output_rate as u32,
+                            period_frames as u32,
+                            channels as u32,
+                        ),
+                    }
+                    .map(|voices| {
+                        let retired = std::mem::replace(&mut chain_voices, voices);
+                        retire_chain_voices(retired, &mut deferred_retire);
+                        println!(
+                            "PLAY_CHAIN_APPLIED instrument={instrument_id} effects={}",
+                            chain_voices.len()
+                        );
+                    })
+                    .map_err(|error| format!("{error:#}"));
+                    let _ = reply.send(result);
                 }
                 AudioControlCommand::EmergencyStop { reply } => {
                     render_mode = AudioRenderMode::Silent;
@@ -2222,8 +2481,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     let _ = reply.send(result);
                 }
                 AudioControlCommand::PluginParameters { instance_id, reply } => {
-                    let result =
-                        standalone_voice_mut(standalone_voices, &instance_id).and_then(|voice| {
+                    let result = any_voice_mut(standalone_voices, &mut chain_voices, &instance_id)
+                        .and_then(|voice| {
                             let schema = voice.plugin.parameters().clone();
                             let values = schema
                                 .parameters
@@ -2249,8 +2508,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     value,
                     reply,
                 } => {
-                    let result =
-                        standalone_voice_mut(standalone_voices, &instance_id).and_then(|voice| {
+                    let result = any_voice_mut(standalone_voices, &mut chain_voices, &instance_id)
+                        .and_then(|voice| {
                             let parameter = voice
                                 .plugin
                                 .parameters()
@@ -2283,11 +2542,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 .instance
                                 .get_parameter(parameter_index)
                                 .map_err(|error| error.to_string())?;
-                            live_parameter_writer.try_record(
-                                voice.live_parameter_target,
-                                parameter_index,
-                                canonical,
-                            );
+                            if voice.live_parameter_target != CHAIN_LIVE_PARAMETER_TARGET {
+                                live_parameter_writer.try_record(
+                                    voice.live_parameter_target,
+                                    parameter_index,
+                                    canonical,
+                                );
+                            }
                             Ok(canonical)
                         });
                     // A parameter set from the screen detaches the controls
@@ -2993,7 +3254,40 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     }
                     render_mode = AudioRenderMode::Silent;
                 } else {
-                    mix_output.copy_from_slice(&voice.output);
+                    // Down the chain: every enabled effect in turn, each
+                    // fed the last one's block. A stage that faults is
+                    // passed by, not silenced: the instrument keeps
+                    // sounding through the rest.
+                    chain_scratch.copy_from_slice(&voice.output);
+                    for stage in chain_voices.iter_mut() {
+                        if stage.bypassed || stage.process_faulted {
+                            continue;
+                        }
+                        lay_chain_input(
+                            &chain_scratch,
+                            channels,
+                            &mut stage.input,
+                            stage.input_channels,
+                            period_frames,
+                        );
+                        stage.events.clear();
+                        stage.parameter_events.clear();
+                        process_slots_sequential(
+                            std::slice::from_mut(stage),
+                            period_frames as u32,
+                            channels as u32,
+                            &render_telemetry,
+                        );
+                        if stage.process_faulted {
+                            eprintln!(
+                                "PLUGIN_PROCESS_QUARANTINED context=chain:{} action=bypass",
+                                stage.instance_id
+                            );
+                            continue;
+                        }
+                        chain_scratch.copy_from_slice(&stage.output);
+                    }
+                    mix_output.copy_from_slice(&chain_scratch);
                 }
             }
             AudioRenderMode::Rack => {
@@ -3166,6 +3460,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
 
         if pending_emergency_stop {
             pending_emergency_stop = false;
+            retire_chain_voices(std::mem::take(&mut chain_voices), &mut deferred_retire);
             if let Err(error) = stop_all_plugin_runtimes(standalone_voices, &mut rack_voices) {
                 eprintln!("EMERGENCY_STOP_RUNTIME_FAILED error={error}");
             }

@@ -168,6 +168,7 @@ mod tests {
             audition: None,
             program_draft: None,
             parameter_links: Vec::new(),
+            play_chains: Vec::new(),
         };
         SessionStore::with_capacity(state, capacity).unwrap()
     }

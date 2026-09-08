@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  chainStorageKey,
+  MAX_PLAY_CHAIN_EFFECTS,
+  chainOf,
   effectPlugins,
   emptyChain,
-  readStoredChain,
-  storeChain,
+  sameChain,
   suggestedEffects,
   withEffect,
   withEffectEnabled,
   withEffectMoved,
   withoutEffect,
 } from "./playChain";
-import type { PluginWebDescriptor } from "./types";
+import type { PluginInstance, PluginWebDescriptor } from "./types";
 
 function descriptor(
   id: string,
@@ -31,91 +31,87 @@ function descriptor(
   };
 }
 
-function memoryStorage() {
-  const map = new Map<string, string>();
+function instance(pluginId: string): PluginInstance {
   return {
-    getItem: (key: string) => map.get(key) ?? null,
-    setItem: (key: string, value: string) => void map.set(key, value),
-    map,
-  };
+    instance_id: `play.${pluginId}`,
+    plugin_id: pluginId,
+    plugin_name: pluginId,
+    ui_layouts: [],
+    config_available: false,
+    sounds: [],
+  } as unknown as PluginInstance;
 }
 
 describe("the PLAY chain", () => {
   it("appends effects under ids no other effect holds", () => {
-    let chain = withEffect(emptyChain("org.rackforge.piano"), "org.rackforge.rig");
+    let chain = withEffect(emptyChain("live.main.instrument.1"), "org.rackforge.rig");
     chain = withEffect(chain, "org.rackforge.rig");
-    expect(chain.effects.map((effect) => effect.id)).toEqual([
-      "org.rackforge.rig#1",
-      "org.rackforge.rig#2",
-    ]);
-    chain = withoutEffect(chain, "org.rackforge.rig#1");
+    expect(chain.effects.map((effect) => effect.id)).toEqual(["fx-1", "fx-2"]);
+    chain = withoutEffect(chain, "fx-1");
     chain = withEffect(chain, "org.rackforge.rig");
-    expect(chain.effects.map((effect) => effect.id)).toEqual([
-      "org.rackforge.rig#2",
-      "org.rackforge.rig#1",
-    ]);
+    expect(chain.effects.map((effect) => effect.id)).toEqual(["fx-2", "fx-1"]);
+  });
+
+  it("stops at the host's ceiling", () => {
+    let chain = emptyChain("p");
+    for (let n = 0; n < MAX_PLAY_CHAIN_EFFECTS + 2; n += 1) chain = withEffect(chain, "a");
+    expect(chain.effects).toHaveLength(MAX_PLAY_CHAIN_EFFECTS);
   });
 
   it("moves an effect one place and stays put at the ends", () => {
     let chain = withEffect(withEffect(emptyChain("p"), "a"), "b");
-    chain = withEffectMoved(chain, "b#1", -1);
-    expect(chain.effects.map((effect) => effect.id)).toEqual(["b#1", "a#1"]);
-    expect(withEffectMoved(chain, "b#1", -1)).toBe(chain);
-    expect(withEffectMoved(chain, "a#1", 1)).toBe(chain);
+    chain = withEffectMoved(chain, "fx-2", -1);
+    expect(chain.effects.map((effect) => effect.plugin_id)).toEqual(["b", "a"]);
+    expect(withEffectMoved(chain, "fx-2", -1)).toBe(chain);
+    expect(withEffectMoved(chain, "fx-1", 1)).toBe(chain);
     expect(withEffectMoved(chain, "missing", 1)).toBe(chain);
   });
 
   it("toggles an effect without touching the others", () => {
     const chain = withEffectEnabled(
       withEffect(withEffect(emptyChain("p"), "a"), "b"),
-      "a#1",
+      "fx-1",
       false,
     );
     expect(chain.effects.map((effect) => effect.enabled)).toEqual([false, true]);
   });
 
-  it("round-trips through storage and drops what is not a chain", () => {
-    const storage = memoryStorage();
-    const chain = withEffectEnabled(
-      withEffect(emptyChain("org.rackforge.piano"), "a"),
-      "a#1",
-      false,
-    );
-    storeChain(chain, storage);
-    expect(readStoredChain("org.rackforge.piano", storage)).toEqual(chain);
-    expect(readStoredChain("org.rackforge.other", storage)).toEqual(
-      emptyChain("org.rackforge.other"),
-    );
-    storage.map.set(chainStorageKey("broken"), "{not json");
-    expect(readStoredChain("broken", storage)).toEqual(emptyChain("broken"));
-    storage.map.set(
-      chainStorageKey("odd"),
-      JSON.stringify({
-        effects: [{ id: "x", plugin_id: "a" }, { id: "x", plugin_id: "b" }, 4, { id: 1 }],
-      }),
-    );
-    expect(readStoredChain("odd", storage).effects).toEqual([
-      { id: "x", plugin_id: "a", enabled: true },
-    ]);
-    expect(readStoredChain("none", null)).toEqual(emptyChain("none"));
+  it("finds the instrument's chain in the session, or none", () => {
+    const chains = [withEffect(emptyChain("a"), "x"), withEffect(emptyChain("b"), "y")];
+    expect(chainOf(chains, "b").effects[0].plugin_id).toBe("y");
+    expect(chainOf(chains, "c")).toEqual(emptyChain("c"));
+    expect(chainOf(undefined, "a")).toEqual(emptyChain("a"));
   });
 
-  it("offers only the installed, enabled effects, by name", () => {
+  it("knows when two chains would sound the same", () => {
+    const chain = withEffect(withEffect(emptyChain("p"), "a"), "b");
+    expect(sameChain(chain, { ...chain, effects: [...chain.effects] })).toBe(true);
+    expect(sameChain(chain, withEffectEnabled(chain, "fx-1", false))).toBe(false);
+    expect(sameChain(chain, withEffectMoved(chain, "fx-2", -1))).toBe(false);
+    expect(sameChain(chain, withoutEffect(chain, "fx-2"))).toBe(false);
+  });
+
+  it("offers only the installed, enabled effects the host has loaded, by name", () => {
     const plugins = [
       descriptor("org.rackforge.zeta", "effect"),
       descriptor("org.rackforge.piano", "instrument"),
       descriptor("org.rackforge.alpha", "effect"),
       descriptor("org.rackforge.off", "effect", false),
+      descriptor("org.rackforge.unloaded", "effect"),
     ];
-    expect(effectPlugins(plugins).map((plugin) => plugin.plugin_id)).toEqual([
+    const instances = [instance("org.rackforge.zeta"), instance("org.rackforge.alpha")];
+    expect(effectPlugins(plugins, instances).map((plugin) => plugin.plugin_id)).toEqual([
       "org.rackforge.alpha",
       "org.rackforge.zeta",
     ]);
+    expect(effectPlugins(plugins).map((plugin) => plugin.plugin_id)).toContain(
+      "org.rackforge.unloaded",
+    );
   });
 
   it("resolves the instrument's suggestions against the catalog and the chain", () => {
     const plugins = [descriptor("org.rackforge.rig", "effect")];
-    const chain = withEffect(emptyChain("org.rackforge.piano"), "org.rackforge.rig");
+    const chain = withEffect(emptyChain("p"), "org.rackforge.rig");
     const resolved = suggestedEffects(
       [{ plugin: "org.rackforge.rig", preset: "Clean" }, { plugin: "org.rackforge.limiter" }],
       plugins,

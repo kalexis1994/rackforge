@@ -1,21 +1,13 @@
-import type { PluginWebDescriptor } from "./types";
+import type { PlayChainEffect, PlayChainState, PluginInstance, PluginWebDescriptor } from "./types";
 
 /**
  * The PLAY chain: the instrument the player is on, then the effects lined
- * up after it, in order. It is what the chain drawer edits and what the
- * host will route audio through; until it does, the drawer says so.
+ * up after it, in order. The host holds it in the session (one chain per
+ * instrument, `snapshot.play_chains`) and routes the instrument's audio
+ * through every enabled effect; these helpers shape the next chain the
+ * drawer sends with `set_play_chain`.
  */
-export interface PlayChainEffect {
-  /** Unique within the chain: the same plugin may be in it twice. */
-  id: string;
-  plugin_id: string;
-  enabled: boolean;
-}
-
-export interface PlayChain {
-  instrument_id: string;
-  effects: PlayChainEffect[];
-}
+export type PlayChain = PlayChainState;
 
 /** What an instrument's manifest suggests after itself. */
 export interface SuggestedChainEntry {
@@ -31,80 +23,30 @@ export interface SuggestedEffect {
   inChain: boolean;
 }
 
-type ChainStorage = Pick<Storage, "getItem" | "setItem">;
-
-const STORAGE_PREFIX = "rackforge.play.chain.";
-
-export function chainStorageKey(instrumentId: string): string {
-  return STORAGE_PREFIX + instrumentId;
-}
+/** The most effects a chain carries; the host refuses more. */
+export const MAX_PLAY_CHAIN_EFFECTS = 8;
 
 export function emptyChain(instrumentId: string): PlayChain {
   return { instrument_id: instrumentId, effects: [] };
 }
 
-function browserStorage(): ChainStorage | null {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
-
-/** A stored chain read back, or the empty chain when there is none or it is not one. */
-export function readStoredChain(
+/** The chain the session holds for the instrument, or the empty one. */
+export function chainOf(
+  chains: PlayChainState[] | undefined,
   instrumentId: string,
-  storage: ChainStorage | null = browserStorage(),
 ): PlayChain {
-  const empty = emptyChain(instrumentId);
-  if (!storage) return empty;
-  try {
-    const raw = storage.getItem(chainStorageKey(instrumentId));
-    if (!raw) return empty;
-    return normaliseChain(instrumentId, JSON.parse(raw));
-  } catch {
-    return empty;
-  }
-}
-
-export function storeChain(
-  chain: PlayChain,
-  storage: ChainStorage | null = browserStorage(),
-): void {
-  try {
-    storage?.setItem(chainStorageKey(chain.instrument_id), JSON.stringify(chain));
-  } catch {
-    /* a full or blocked store loses the chain for next time, not for now */
-  }
-}
-
-function normaliseChain(instrumentId: string, parsed: unknown): PlayChain {
-  const chain = emptyChain(instrumentId);
-  if (typeof parsed !== "object" || parsed === null) return chain;
-  const effects = (parsed as { effects?: unknown }).effects;
-  if (!Array.isArray(effects)) return chain;
-  const seen = new Set<string>();
-  for (const candidate of effects) {
-    if (typeof candidate !== "object" || candidate === null) continue;
-    const { id, plugin_id, enabled } = candidate as Record<string, unknown>;
-    if (typeof id !== "string" || typeof plugin_id !== "string" || seen.has(id)) continue;
-    seen.add(id);
-    chain.effects.push({ id, plugin_id, enabled: enabled !== false });
-  }
-  return chain;
+  return chains?.find((chain) => chain.instrument_id === instrumentId) ?? emptyChain(instrumentId);
 }
 
 /** The chain with `pluginId` appended, under an id no other effect holds. */
 export function withEffect(chain: PlayChain, pluginId: string): PlayChain {
+  if (chain.effects.length >= MAX_PLAY_CHAIN_EFFECTS) return chain;
   const taken = new Set(chain.effects.map((effect) => effect.id));
   let ordinal = 1;
-  while (taken.has(`${pluginId}#${ordinal}`)) ordinal += 1;
+  while (taken.has(`fx-${ordinal}`)) ordinal += 1;
   return {
     ...chain,
-    effects: [
-      ...chain.effects,
-      { id: `${pluginId}#${ordinal}`, plugin_id: pluginId, enabled: true },
-    ],
+    effects: [...chain.effects, { id: `fx-${ordinal}`, plugin_id: pluginId, enabled: true }],
   };
 }
 
@@ -140,10 +82,39 @@ export function withEffectMoved(
   return { ...chain, effects };
 }
 
-/** The installed, enabled effect plugins, by name. */
-export function effectPlugins(plugins: PluginWebDescriptor[]): PluginWebDescriptor[] {
+/** Two chains that would sound the same. */
+export function sameChain(a: PlayChain, b: PlayChain): boolean {
+  return (
+    a.instrument_id === b.instrument_id
+    && a.effects.length === b.effects.length
+    && a.effects.every((effect, index) => {
+      const other = b.effects[index];
+      return (
+        effect.id === other.id
+        && effect.plugin_id === other.plugin_id
+        && effect.enabled === other.enabled
+      );
+    })
+  );
+}
+
+/**
+ * The effect plugins the chain can take, by name: installed, enabled, and
+ * loaded by the host (an instance in the session), which is what lets the
+ * host build one for the chain.
+ */
+export function effectPlugins(
+  plugins: PluginWebDescriptor[],
+  instances?: PluginInstance[],
+): PluginWebDescriptor[] {
   return plugins
-    .filter((plugin) => plugin.kind === "effect" && plugin.active)
+    .filter(
+      (plugin) =>
+        plugin.kind === "effect"
+        && plugin.active
+        && (instances === undefined
+          || instances.some((instance) => instance.plugin_id === plugin.plugin_id)),
+    )
     .sort((a, b) => a.plugin_name.localeCompare(b.plugin_name));
 }
 
@@ -160,3 +131,5 @@ export function suggestedEffects(
     inChain: chain.effects.some((effect) => effect.plugin_id === entry.plugin),
   }));
 }
+
+export type { PlayChainEffect };

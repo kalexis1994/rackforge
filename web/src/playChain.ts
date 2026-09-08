@@ -114,8 +114,9 @@ export function sameChain(a: PlayChain, b: PlayChain): boolean {
 
 /**
  * The effect plugins the chain can take, by name: installed, enabled, and
- * loaded by the host (an instance in the session), which is what lets the
- * host build one for the chain.
+ * something the host can actually build -- either because it has the plugin
+ * loaded already (an instance in the session) or because it says it builds
+ * one on demand out of its store.
  */
 export function effectPlugins(
   plugins: PluginWebDescriptor[],
@@ -126,7 +127,8 @@ export function effectPlugins(
       (plugin) =>
         plugin.kind === "effect"
         && plugin.active
-        && (instances === undefined
+        && (plugin.chainable === true
+          || instances === undefined
           || instances.some((instance) => instance.plugin_id === plugin.plugin_id)),
     )
     .sort((a, b) => a.plugin_name.localeCompare(b.plugin_name));

@@ -37,6 +37,8 @@ pub enum Capability {
     PlayInstrument,
     /// Choose the program an instrument is playing.
     SelectProgram,
+    /// Play through the effects lined up after the instrument in PLAY.
+    PlayEffectsChain,
     /// Set master level and pan while playing.
     MasterLevelAndPan,
     /// Save, load, rename, delete, import and export host presets.
@@ -91,6 +93,7 @@ impl Capability {
     pub const ALL: &'static [Self] = &[
         Self::PlayInstrument,
         Self::SelectProgram,
+        Self::PlayEffectsChain,
         Self::MasterLevelAndPan,
         Self::VirtualMidi,
         Self::MidiInput,
@@ -121,6 +124,7 @@ impl Capability {
         match self {
             Self::PlayInstrument => "play_instrument",
             Self::SelectProgram => "select_program",
+            Self::PlayEffectsChain => "play_effects_chain",
             Self::MasterLevelAndPan => "master_level_and_pan",
             Self::HostPresets => "host_presets",
             Self::PluginParameters => "plugin_parameters",
@@ -151,6 +155,7 @@ impl Capability {
         match self {
             Self::PlayInstrument => "Choose an instrument and play it",
             Self::SelectProgram => "Choose the program an instrument plays",
+            Self::PlayEffectsChain => "Play through an instrument's effects chain",
             Self::MasterLevelAndPan => "Set master level and pan",
             Self::HostPresets => "Save, load, rename, delete, import and export host presets",
             Self::PluginParameters => "Read and write plugin parameters",
@@ -304,6 +309,7 @@ mod why {
 const WINDOWS: &[(Capability, Support)] = &[
     (Capability::PlayInstrument, Support::Yes),
     (Capability::SelectProgram, Support::Yes),
+    (Capability::PlayEffectsChain, Support::Yes),
     (Capability::MasterLevelAndPan, Support::Yes),
     (Capability::VirtualMidi, Support::Yes),
     (Capability::MidiInput, Support::Yes),
@@ -331,6 +337,7 @@ const WINDOWS: &[(Capability, Support)] = &[
 const ANDROID: &[(Capability, Support)] = &[
     (Capability::PlayInstrument, Support::Yes),
     (Capability::SelectProgram, Support::Yes),
+    (Capability::PlayEffectsChain, Support::Yes),
     (Capability::MasterLevelAndPan, Support::Yes),
     (Capability::VirtualMidi, Support::Yes),
     (Capability::MidiInput, Support::Yes),
@@ -364,6 +371,7 @@ const LINUX_X86_64: &[(Capability, Support)] = RASPBERRY_PI;
 const RASPBERRY_PI: &[(Capability, Support)] = &[
     (Capability::PlayInstrument, Support::Yes),
     (Capability::SelectProgram, Support::Yes),
+    (Capability::PlayEffectsChain, Support::Yes),
     (Capability::MasterLevelAndPan, Support::Yes),
     (Capability::VirtualMidi, Support::Yes),
     (Capability::MidiInput, Support::Yes),
@@ -391,6 +399,7 @@ const RASPBERRY_PI: &[(Capability, Support)] = &[
 const BROWSER: &[(Capability, Support)] = &[
     (Capability::PlayInstrument, Support::Yes),
     (Capability::SelectProgram, Support::Yes),
+    (Capability::PlayEffectsChain, Support::Yes),
     (Capability::MasterLevelAndPan, Support::Yes),
     (Capability::VirtualMidi, Support::Yes),
     (Capability::MidiInput, Support::Yes),

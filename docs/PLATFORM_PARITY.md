@@ -13,6 +13,7 @@ cannot exist on that host, and `unaudited` means nobody has checked yet.
 | --- | --- | --- | --- | --- | --- |
 | Choose an instrument and play it | yes | yes | yes | yes | yes |
 | Choose the program an instrument plays | yes | yes | yes | yes | yes |
+| Play through an instrument's effects chain | yes | yes | yes | yes | yes |
 | Set master level and pan | yes | yes | yes | yes | yes |
 | Play from an on-screen keyboard or pads | yes | yes | yes | yes | yes |
 | Play from a connected MIDI controller | yes | yes | yes | yes | yes |

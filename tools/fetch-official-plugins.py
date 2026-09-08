@@ -97,6 +97,78 @@ OFFICIAL_PLUGINS = (
             "web/style.css",
         ),
     },
+    {
+        "filename": "RF-Limiter.rfplugin",
+        "plugin_id": "org.rackforge.rf-limiter",
+        "version": "0.1.0",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-limiter/"
+            "releases/download/v0.1.0/RF-Limiter.rfplugin"
+        ),
+        "sha256": "185a498e9e748f435322927a770a581e5e8c6afd14e813fd3a1583e839899fd7",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/play.js",
+        ),
+    },
+    {
+        "filename": "RF-EQ.rfplugin",
+        "plugin_id": "org.rackforge.rf-eq",
+        "version": "0.1.0",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-eq/"
+            "releases/download/v0.1.0/RF-EQ.rfplugin"
+        ),
+        "sha256": "8bd974d71dd8f2955173dde1a3cebca8e8a281fdf790fa66c296e7e16c4891c7",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/play.js",
+        ),
+    },
+    {
+        "filename": "RF-Comp.rfplugin",
+        "plugin_id": "org.rackforge.rf-comp",
+        "version": "0.1.0",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-comp/"
+            "releases/download/v0.1.0/RF-Comp.rfplugin"
+        ),
+        "sha256": "4a41650ca5155d7b9fedaf197320558c1fbeb816a915793007901e8b94060c4b",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/play.js",
+        ),
+    },
 )
 
 

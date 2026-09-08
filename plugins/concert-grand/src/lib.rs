@@ -2165,7 +2165,8 @@ const KEYOFF_T60_S: f32 = 0.22;
 /// (0.171.11) took six decibels of coherent gain the old bank had, and
 /// the re-derived transfer gives back what the survey can see; this is
 /// the rest, in the one place that moves nothing but the level. The fader
-/// keeps its travel and reads what it read.
+/// keeps its travel and reads what it read, and its top is still unity:
+/// the trim sits beside it in the block, not inside its law.
 const OUTPUT_TRIM_DB: f32 = 6.0;
 /// See `Voice::damp`: the felt's grip on the horizontal polarisation as a
 /// share of its grip on the vertical. With the damper's stopping time
@@ -3704,7 +3705,7 @@ impl Controls {
         if self.level <= LEVEL_FLOOR_DB {
             return 0.0;
         }
-        powf(10.0, (self.level + OUTPUT_TRIM_DB) / 20.0)
+        powf(10.0, self.level / 20.0)
     }
 
     /// The board's loss factor. Centre is Ege & Boutillon's measured 2.3%;
@@ -8705,7 +8706,7 @@ impl Processor for ConcertGrand {
             self.tune();
             self.tune_undamped();
         }
-        let level = self.controls.level_gain();
+        let level = self.controls.level_gain() * powf(10.0, OUTPUT_TRIM_DB / 20.0);
         let preamp_gain = self.preamp_gain();
         let knee_positive = PREAMP_KNEE.get().clamp(0.1, 0.95);
         // The asymmetry: the negative half bends a little later.

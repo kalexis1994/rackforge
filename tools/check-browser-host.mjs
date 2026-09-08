@@ -504,6 +504,36 @@ if (effect) {
     parameters.status === "plugin_parameters" && (parameters.values?.length ?? 0) > 0,
     parameters.message,
   );
+  // And its programs are its own: the panel picks one, the chain remembers.
+  const programs = catalog.find((plugin) => plugin.plugin_id === effect.plugin_id);
+  const program = parameters.status === "plugin_parameters"
+    ? (request({ op: "snapshot" }).snapshot?.instances ?? [])
+      .find((instance) => instance.plugin_id === effect.plugin_id)
+      ?.sounds?.at(-1)?.id
+    : undefined;
+  if (program) {
+    const chosen = dispatch({
+      type: "select_sound",
+      instance_id: `${instanceId}.fx.fx-1`,
+      sound_id: program,
+    });
+    check(
+      "an effect in the chain takes a program",
+      chosen.status === "command_applied",
+      chosen.message,
+    );
+    const held = request({ op: "snapshot" }).snapshot?.play_chains
+      ?.find((chain) => chain.instrument_id === instanceId)
+      ?.effects?.[0]?.program_id;
+    check(
+      "the chain remembers which program",
+      held === program,
+      `the chain holds ${held ?? "nothing"} rather than ${program}`,
+    );
+  } else {
+    check("an effect in the chain takes a program", false, `no program to try (${programs?.plugin_name})`);
+  }
+
   const cleared = dispatch({
     type: "set_play_chain",
     instrument_id: instanceId,

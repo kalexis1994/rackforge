@@ -3,7 +3,7 @@ id = "org.rackforge.concert-grand"
 name = "RF - Concert Grand"
 short_name = "RF-GRAND"
 vendor = "RackForge"
-version = "0.171.32"
+version = "0.171.33"
 description = "Physically modelled grand piano: stiff strings, derived stretch tuning, hammer felt and two-stage decay, with no samples"
 kind = "instrument"
 state_version = 1
@@ -39,3 +39,15 @@ path = "component.wasm"
 runtime_descriptor = "metadata/runtime.json"
 parameter_schema = "metadata/parameters.json"
 preset_catalog = "metadata/presets.json"
+
+# What the instrument would like after it, in order, for the player to take
+# or leave. A physical model is voiced already: the compressor is for holding
+# it together in a mix, and the limiter is a ceiling that does nothing until
+# something would clip.
+[[suggested_chain]]
+plugin = "org.rackforge.rf-comp"
+preset = "piano_glue"
+
+[[suggested_chain]]
+plugin = "org.rackforge.rf-limiter"
+preset = "transparent"

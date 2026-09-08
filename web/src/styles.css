@@ -571,6 +571,12 @@ textarea {
 
 .play-chain-panel {
   min-height: 0;
+  /* A grid item is `min-width: auto`, which is its content's width: the row
+     of nodes then laid the whole panel out at its own length -- 456 px inside
+     a 390 px phone -- and every child overflowed the padding rather than
+     scrolling inside it, which is the missing right margin on a small
+     screen. The panel and its rows may shrink; the strip scrolls. */
+  min-width: 0;
   display: grid;
   /* Rows at their content's height whatever the row above allows: the
      automatic height is read off this panel's scrollHeight, and a
@@ -625,10 +631,14 @@ textarea {
   outline: none;
 }
 
+.play-chain-panel > * {
+  min-width: 0;
+}
+
 .play-chain-head {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--rf-space-3);
 }
 
 .play-chain-status {
@@ -667,6 +677,7 @@ textarea {
 
 .play-chain-nodes {
   margin: 0;
+  min-width: 0;
   padding: 2px 0;
   display: flex;
   align-items: stretch;
@@ -868,6 +879,39 @@ textarea {
 
 .play-chain-node.add.active {
   border-color: var(--acid);
+}
+
+/* On a phone the drawer keeps what it is for -- the chain, and the panel of
+   whichever effect is open -- and drops what it cannot show. The sentence
+   about the audio path is the first to go: at this width it is an ellipsis
+   holding a line to itself. */
+@media (max-width: 560px) {
+  .play-chain-status {
+    display: none;
+  }
+
+  .play-chain-node {
+    padding: var(--rf-space-2);
+    gap: var(--rf-space-1);
+  }
+
+  .play-chain-copy em {
+    display: none;
+  }
+}
+
+/* Fingers, not a mouse: the node's controls take the compact target the rest
+   of the faceplate uses rather than the 28 px a pointer can hit. */
+@media (pointer: coarse) {
+  .play-chain-tools button,
+  .play-chain-add > span {
+    min-width: var(--rf-target-compact);
+    height: var(--rf-target-compact);
+  }
+
+  .play-chain-picker button {
+    min-height: var(--rf-target-compact);
+  }
 }
 
 .play-chain-picker {

@@ -438,7 +438,8 @@ export function PlayChainDrawer({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => onChange(withEffect(chain, suggestion.plugin_id))}
+                      onClick={() =>
+                        onChange(withEffect(chain, suggestion.plugin_id, suggestion.preset))}
                       tabIndex={tab}
                     >
                       Add

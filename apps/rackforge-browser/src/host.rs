@@ -1218,18 +1218,56 @@ impl BrowserHost {
                 instance_id,
                 sound_id,
             } => {
-                let plugin = self.plugin_mut(&instance_id)?;
-                plugin.instance.load_preset(&sound_id).map_err(|error| {
-                    Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
-                })?;
-                plugin.selected_sound_id = Some(sound_id.clone());
-                let plugin_id = plugin.plugin_id.clone();
-                self.live_parameter_store.clear_plugin(&plugin_id);
-                self.live_parameter_dirty_at = Some(Instant::now());
-                self.flush_live_parameters(true);
-                SessionEvent::SoundSelected {
-                    instance_id,
-                    sound_id,
+                // An effect of the chain takes its program in its own voice,
+                // and the chain remembers which: the same effect twice is two
+                // settings, and a voice rebuilt later comes up on the one its
+                // panel chose. The instrument's own path is below.
+                if let Some(mut chain) = self
+                    .store
+                    .state()
+                    .play_chain_effect_owner(&instance_id)
+                    .filter(|owner| self.store.state().active_instance_id.as_ref() == Some(*owner))
+                    .and_then(|owner| self.store.state().play_chain(owner))
+                    .cloned()
+                {
+                    let Some(effect) = chain.effects.iter_mut().find(|effect| {
+                        chain_effect_instance(&chain_owner_of(&instance_id), effect).as_deref()
+                            == Some(instance_id.as_str())
+                    }) else {
+                        return Err(Failure::new(
+                            ControlErrorCode::NotFound,
+                            format!("unknown effect {instance_id} in the PLAY chain"),
+                        ));
+                    };
+                    effect.program_id = Some(sound_id.clone());
+                    let Some(voice) = self
+                        .chain
+                        .iter_mut()
+                        .find(|voice| voice.instance_id == instance_id)
+                    else {
+                        return Err(Failure::new(
+                            ControlErrorCode::NotFound,
+                            format!("effect {instance_id} is not running"),
+                        ));
+                    };
+                    voice.instance.load_preset(&sound_id).map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                    SessionEvent::PlayChainChanged { chain }
+                } else {
+                    let plugin = self.plugin_mut(&instance_id)?;
+                    plugin.instance.load_preset(&sound_id).map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                    plugin.selected_sound_id = Some(sound_id.clone());
+                    let plugin_id = plugin.plugin_id.clone();
+                    self.live_parameter_store.clear_plugin(&plugin_id);
+                    self.live_parameter_dirty_at = Some(Instant::now());
+                    self.flush_live_parameters(true);
+                    SessionEvent::SoundSelected {
+                        instance_id,
+                        sound_id,
+                    }
                 }
             }
             SessionCommand::SetPlayChain {
@@ -2737,6 +2775,26 @@ fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<Ho
         selected_sound_id,
         managed,
     })
+}
+
+/// The instrument an effect instance belongs to: `<instrument>.fx.<id>`
+/// without its suffix.
+fn chain_owner_of(instance_id: &InstanceId) -> String {
+    instance_id
+        .as_str()
+        .rsplit_once(".fx.")
+        .map(|(owner, _)| owner.to_owned())
+        .unwrap_or_else(|| instance_id.as_str().to_owned())
+}
+
+/// What that effect's instance is called, or nothing if the id is malformed.
+fn chain_effect_instance(
+    owner: &str,
+    effect: &rackforge_session_api::PlayChainEffect,
+) -> Option<String> {
+    InstanceId::new(format!("{owner}.fx.{}", effect.id))
+        .ok()
+        .map(|id| id.as_str().to_owned())
 }
 
 fn session_instance_state(plugin: &HostedPlugin) -> PluginInstanceState {

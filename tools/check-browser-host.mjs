@@ -83,9 +83,17 @@ const instanceOf = (handle) => {
   if (!instance) throw new Error(`no plugin instance ${handle}`);
   return instance;
 };
+// Set CHECK_TRACE_CALLS=1 to see every call into a plugin. A crash inside
+// one of them leaves the last line it wrote, which is the only way to know
+// which call it was.
+const traceCalls = process.env.CHECK_TRACE_CALLS === "1";
 const call = (handle, index, ...args) => {
   const call = instanceOf(handle).exports[EXPORTS[index]];
   if (typeof call !== "function") throw new Error(`missing export ${EXPORTS[index]}`);
+  if (traceCalls) {
+    writeSync(2, `    call ${EXPORTS[index]} on ${handle}(${args.join(",")})
+`);
+  }
   return call(...args);
 };
 

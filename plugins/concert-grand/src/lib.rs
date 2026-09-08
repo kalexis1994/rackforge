@@ -217,7 +217,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 155;
+pub const KNOB_COUNT: usize = 156;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -874,6 +874,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "LEVEL_VELOCITY_POWER",
         &LEVEL_VELOCITY_POWER,
         "The power of velocity the level grows with; the reference measures 1.1-1.5, this ships at 2.2.",
+    ),
+    (
+        "MERGE_RAMP_CONTACT",
+        &MERGE_RAMP_CONTACT,
+        "How much of the blow's own contact time a re-strike's momentum is spread over: 1 the contact itself, 0 off.",
     ),
 ];
 
@@ -4972,6 +4977,19 @@ pub static PROMPT_MEASURED_POWER: Knob = Knob::new(1.0);
 /// beside the felt's own knobs, before anything is recentred.
 pub static LEVEL_VELOCITY_POWER: Knob = Knob::new(2.2);
 
+/// How much of the blow's OWN contact time a merged blow's momentum is
+/// spread over, on top of `MERGE_RAMP_S`. The contact is the model's law
+/// (`contact_time`): two milliseconds in the bass at fortissimo, under
+/// half a millisecond at the top, longer for a soft blow -- measured on
+/// real pianos at 3-4 ms in the bass, 1.5-2 in the middle, under 1 in
+/// the treble, shorter the harder the felt is pressed. One is the blow's
+/// contact itself; zero, with `MERGE_RAMP_S` at zero, is one sample.
+/// The user's ear, on the Campanella's repeated treble notes, liked a
+/// fixed 4 ms -- four to eight times that register's contact -- so both
+/// knobs stay, and this one is the physical one. The contact is read
+/// through the program's Felt control, so each voicing has its own.
+pub static MERGE_RAMP_CONTACT: Knob = Knob::new(0.0);
+
 /// The reference's fundamentals' prompt decay, dB/s, on the scorecard grid
 /// (A0, C1, D#1 ... C8, every three semitones): the slope of the
 /// fundamental's level from 80 to 300 ms after the strike, least squares
@@ -6872,6 +6890,13 @@ impl ConcertGrand {
         let string_scale = powf(f0 / 220.0, 0.55).clamp(0.35, 1.8);
         let treble_life = self.cal(note, 8) * self.controls.lab(1);
         let contact = self.contact_time(note, velocity);
+        // The contact as THIS program voices it: the Felt control scales
+        // the felt's cutoff, and a cutoff is one over a contact time, so a
+        // program with a softer felt (Mellow, the Bösendorfer) has its
+        // hammers on the string longer and a brighter one (Concert 308,
+        // the uprights) shorter. One knob, and each piano its own time.
+        let ramp_s = MERGE_RAMP_S.get()
+            + MERGE_RAMP_CONTACT.get() * contact / self.controls.lab(0).max(0.05);
         // The nonlinear forest keeps the bass ladder open far above what the
         // soft bass hammer alone would give; the felt corner widens with it.
         let bass_top = 1.0 + 2.2 * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0);
@@ -7910,7 +7935,8 @@ impl ConcertGrand {
                 }
             }
             let mut appended = 0usize;
-            let merge_ramp = ((MERGE_RAMP_S.get() * sample_rate) as u32).max(1);
+            // The contact, as the fixed time and the blow's own, added.
+            let merge_ramp = ((ramp_s * sample_rate) as u32).max(1);
             for partial in voice.partials[..voice.partial_count].iter_mut() {
                 partial.push = [0.0; LANES];
                 partial.push_s = [0.0; LANES];

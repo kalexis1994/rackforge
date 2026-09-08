@@ -4082,6 +4082,27 @@
       }
     },
     {
+      "index": 197,
+      "id": "knob_merge_ramp_contact",
+      "name": "MERGE_RAMP_CONTACT",
+      "page": "model_hammer",
+      "order": 54,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.0,
+        "taper": "linear"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
       "index": 200,
       "id": "preamp",
       "name": "Preamp",

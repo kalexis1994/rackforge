@@ -860,6 +860,26 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The merge ramp as the blow's own contact, each program its own
+(0.171.32).** The user, on the in-phase ramp: "ahora se escucha genial",
+and 4 ms sounds right — what is the realistic value? Not one value. A
+hammer stays on the string 3–4 ms in the bass, 1.5–2 in the middle, under
+1 in the treble, and less the harder the felt is pressed (Askenfelt and
+Jansson); the Campanella's repeated notes are treble, where 4 ms is four
+to eight times the contact. The model already has that law,
+`contact_time`: 2 ms in the bass at fortissimo to under half a
+millisecond at the top, stretched for a soft blow, the law the felt's
+cutoff is read from. `MERGE_RAMP_CONTACT` spreads a re-strike's momentum
+over that many of the blow's own contacts, beside the fixed `MERGE_RAMP_S`;
+and the contact is read through the program's Felt control, since a
+cutoff is one over a contact time: a program with a softer felt has its
+hammers on the string longer. So each piano has its own without a table:
+at one contact and fortissimo the Bösendorfer 280 holds D#6 for 1.06 ms,
+C4 1.58, A1 2.51; the Steinway D 274 0.80 / 1.20 / 1.90; Concert 308
+0.46 / 0.69 / 1.09; the uprights 0.41–0.51 in the treble; Mellow 1.00 /
+1.50 / 2.37. Both knobs ship at zero, today's sound; the excerpts at 0,
+4 ms fixed and one, two, four and eight contacts are for the ear.
+
 **The merge ramp lands in phase (0.171.31).** The user, on 40 s excerpts
 of the Campanella at 0, 1, 2 and 4 ms: the repeated note sounds like a
 mechanism and then goes quiet, at 1 ms noticeably softer, at 4 ms "el

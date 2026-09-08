@@ -54,7 +54,7 @@ jobs:
           cp -r web/public/demo/rackforge/. "$storage"
           python3 tools/make-probe-package.py \
             web/public/demo/rackforge/plugins/concert-grand "$RUNNER_TEMP/probe.rfplugin"
-          node tools/check-browser-host.mjs \
+          CHECK_TRACE_CALLS=1 node tools/check-browser-host.mjs \
             web/public/demo/rackforge-browser.wasm "$storage" "$RUNNER_TEMP/probe.rfplugin"
 
       - name: Install the interface dependencies

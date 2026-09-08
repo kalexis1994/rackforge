@@ -239,7 +239,11 @@ impl BrowserHost {
             .ok()
             .flatten()
             .and_then(|id| InstanceId::new(id).ok())
-            .filter(|id| instruments.iter().any(|instance| instance.instance_id == *id));
+            .filter(|id| {
+                instruments
+                    .iter()
+                    .any(|instance| instance.instance_id == *id)
+            });
         let active_instance_id = restored_instance.or_else(|| {
             rackforge_core::choose_opening_instrument(&instruments, |instance| {
                 instance.plugin_id.as_str()
@@ -826,7 +830,10 @@ impl BrowserHost {
     ///
     /// Each one is a fresh instance of its plugin: the same effect may sit in
     /// a chain twice, on its own program and its own settings.
-    fn build_chain(&mut self, chain: &rackforge_session_api::PlayChainState) -> Result<(), Failure> {
+    fn build_chain(
+        &mut self,
+        chain: &rackforge_session_api::PlayChainState,
+    ) -> Result<(), Failure> {
         let mut voices = Vec::with_capacity(chain.effects.len());
         for effect in &chain.effects {
             let instance_id = chain
@@ -895,9 +902,7 @@ impl BrowserHost {
                 chain
                     .effects
                     .iter()
-                    .find(|effect| {
-                        chain.effect_instance_id(&effect.id).as_ref() == Ok(instance_id)
-                    })
+                    .find(|effect| chain.effect_instance_id(&effect.id).as_ref() == Ok(instance_id))
                     .map(|effect| effect.plugin_id.clone())
             })?;
         let runtime = self
@@ -953,13 +958,11 @@ impl BrowserHost {
         // is not kept in the live-parameter store: that store is per plugin,
         // and a chain may hold the same effect twice on different settings.
         if let Some((runtime, instance)) = self.chain_voice_mut(instance_id) {
-            let value = rackforge_core::set_plugin_parameter(
-                runtime,
-                instance,
-                parameter_index,
-                value,
-            )
-            .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+            let value =
+                rackforge_core::set_plugin_parameter(runtime, instance, parameter_index, value)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
             return Ok(ControlResponse::PluginParameterSet {
                 instance_id: instance_id.clone(),
                 parameter_index,
@@ -1959,7 +1962,11 @@ impl BrowserHost {
         let previous_active_instance_id = previous.active_instance_id.clone();
         let active_instance_id = previous_active_instance_id
             .clone()
-            .filter(|id| instruments.iter().any(|instance| instance.instance_id == *id))
+            .filter(|id| {
+                instruments
+                    .iter()
+                    .any(|instance| instance.instance_id == *id)
+            })
             .or_else(|| {
                 rackforge_core::choose_opening_instrument(&instruments, |instance| {
                     instance.plugin_id.as_str()
@@ -2710,10 +2717,14 @@ fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<Ho
             .load_preset(id)
             .with_context(|| format!("loading initial program {id:?}"))?;
     }
+    // With the channels the package declares, not none: an instrument takes
+    // no audio in, an effect takes a stereo pair, and activating one with
+    // nothing to read failed the load and left it out of the catalog.
+    let audio = loaded.manifest().resolved_audio_contract();
     instance.activate(
         stream.sample_rate_hz,
         stream.maximum_frames,
-        0,
+        audio.input_channels(),
         stream.channels,
     )?;
 

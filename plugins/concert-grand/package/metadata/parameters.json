@@ -4040,6 +4040,27 @@
       }
     },
     {
+      "index": 195,
+      "id": "knob_prompt_measured_power",
+      "name": "PROMPT_MEASURED_POWER",
+      "page": "model_board",
+      "order": 20,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0625,
+        "maximum": 16.0,
+        "step": 0.01,
+        "default": 1.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
       "index": 200,
       "id": "preamp",
       "name": "Preamp",

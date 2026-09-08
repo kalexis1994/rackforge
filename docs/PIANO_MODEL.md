@@ -860,6 +860,58 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The fundamental's prompt stage, as the reference measured it at each
+key (0.171.29).** C2's and C3's fundamentals sat +11 and +28 dB over the
+reference against their partials 2–4 from 0.35 s on, with D#2, F#2 and A2
+between them at −3, −9 and −11: not a register, a note. Every semitone
+A1–A3 rendered and read (`semitone_balance.py`), then the reference's
+fundamental followed in 100 ms steps: C3's falls from −19 to −71 dB in
+750 ms and holds at −58, F#3's from −39 to −65 in 400 ms; D#3 and A3 a
+decibel every hundred milliseconds. The prompt decay of the fundamental
+over 80–300 ms, all 30 grid notes, layers v12 and v8 agreeing within a
+few dB/s (`prompt_table.py`): A0 41, C1 87, D#1 83, A1 76, C2 2, D#2 13,
+F#2 10, A2 1, C3 42, D#3 17, F#3 80, A3 7, C4 20 dB/s. The bridge's
+conductance at that key's point at that key's pitch — a string whose
+pitch sits on a mobile board mode gives its coherent motion to the bridge
+fast and is left with the aftersound — which no smooth law carries and
+which the release taps could not resolve (their 1/3-octave ripple at
+131 Hz is +2.4 dB at C3 and +3.2 at D#3). The model's fundamental at C3
+fell 1 dB per 100 ms and its fast stage read 8.5 s from the law.
+`BRIDGE_PROMPT_DB_S` is that table; the fundamental's fast-stage T60 is
+60 over the rate read at the note (log-linear between grid notes, floored
+at 3 dB/s where the slope is the aftersound's), under the same Decay and
+treble-life controls the law wears, `PROMPT_MEASURED_POWER` the share.
+Held to C2–C5 with fades either side: the bottom octave's rows (41–87
+dB/s, single strings on the most mobile part of the board) took A0–A1
+from within 2 dB of the reference's late balance to 12 under, because
+their fundamentals already start 10–14 dB under the reference's early
+level at A0 and D#1 and the rim sets them — the early level down there is
+the open question; and the treble's rows, though the model's fundamentals
+there read 1.5–2.4× faster than them, made the scorecard's body ladder
+3–5 dB worse and the 1 s envelope 2.4 dB louder — the treble's 80–300 ms
+slope is its attack, not its string. After: the tenor's realised prompt
+rates track the reference (F#3 11 → 48 against 80, D#3 22 against 17, A3
+4 against 7, C4 15 against 20, A4 25 against 26); C3's reads 11 because
+the board's modes near 131 Hz take ~200 ms to fill and hold the radiated
+level flat that long while the string itself, with the board muted, falls
+at the table's rate from the first sample. Late balance: C3 +28.5 → +18.7,
+F#3 +38.9 → +22.5, D#3 +9.9 → +7.0; scorecard bass 4.85 → 4.80, tenor
+5.41 → 5.37, treble 7.18 → 7.27. What remains at C3/F#3/C4 is two things
+measured and not touched: the model's aftersound plateau sits ~20 dB
+higher against the prompt than the reference's (its C3 holds 39 dB under
+where it started; `HORIZONTAL_SHARE` and the unison's unbalance set the
+model's), and the second partial of C4–D#5 (520–1250 Hz) decays 2–4×
+faster in the model than in the reference (C4 42 against 17 dB/s, F#4 73
+against 19, A4 89 against 22), which is the same table's second row and
+the next measurement. C2's +11.8 is different: its second partial at
+130.8 Hz, the strongest thing in the reference's note, is 13 dB down in
+the model — the reference board's mode at 129.6 Hz (109 of 88 keys' taps
+put a peak there). `BOARD_MEASURED_MODES` at 0.5 gives C2's second
+partial +6 dB and takes the excess to +6, but the ten measured modes leave
+gaps the drawn bank fills (D#2 at 77.8 and F#2 at 92.5 sit between them
+and lose 12 and 7 dB at a full share), so it ships where it was, for the
+ear to try.
+
 **The rim: the board radiates nothing below its first mode, on the bus
 (0.171.28).** The user: the bass is good but so deep it covers everything,
 and it stays, pronounced, in the sustains. Measured against the Salamander

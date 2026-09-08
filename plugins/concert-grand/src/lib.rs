@@ -217,7 +217,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 153;
+pub const KNOB_COUNT: usize = 154;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -864,6 +864,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "ACTION_RATIO",
         &ACTION_RATIO,
         "How much faster the hammer moves than the key at let-off: the lever ratio.",
+    ),
+    (
+        "PROMPT_MEASURED_POWER",
+        &PROMPT_MEASURED_POWER,
+        "How far the fundamental's prompt decay follows the reference's measured table: 1 the table, 0 the law.",
     ),
 ];
 
@@ -4931,6 +4936,79 @@ pub static KEY_AFTERTOUCH_MM: Knob = Knob::new(1.0);
 /// half a millisecond at fortissimo. RF-73's key landed 1.0 ms after
 /// let-off at its strong drive with a 1 mm aftertouch.
 pub static ACTION_RATIO: Knob = Knob::new(5.5);
+
+/// How far the fundamental's prompt decay follows the reference's own
+/// measurement instead of the smooth law: one is the measured table, zero
+/// the law, the power the table's ratio is raised to. See
+/// `BRIDGE_PROMPT_DB_S`.
+pub static PROMPT_MEASURED_POWER: Knob = Knob::new(1.0);
+
+/// The reference's fundamentals' prompt decay, dB/s, on the scorecard grid
+/// (A0, C1, D#1 ... C8, every three semitones): the slope of the
+/// fundamental's level from 80 to 300 ms after the strike, least squares
+/// over 100 ms windows, layer v12. Layer v8 gives the same numbers within
+/// a few dB/s on every note, so this is the instrument and not the blow:
+/// the bridge's conductance at that key's point at that key's pitch, as
+/// the string itself reports it (2026-09-08, `prompt_table.py`).
+///
+/// It is ragged where a smooth law is not, and the raggedness is the
+/// point. C3's fundamental falls from -19 to -71 dB in 750 ms and then
+/// holds at -58, F#3's from -39 to -65 in 400 ms; D#3 and A3 between them
+/// fall a decibel every hundred milliseconds. A string whose pitch sits on
+/// a mobile board mode gives its coherent motion to the bridge fast and is
+/// left with the aftersound; its neighbours a semitone and a half away are
+/// not on it. The taps could not show which keys sit on which modes; the
+/// notes can. Below a few decibels a second the slope is the aftersound's
+/// and no prompt stage is visible; the table is floored there.
+const BRIDGE_PROMPT_DB_S: [f32; 30] = [
+    41.0, 86.8, 82.5, 12.1, 76.1, 2.4, 12.5, 9.6, 1.4, 42.2, // A0 .. C3
+    17.0, 80.5, 6.9, 20.1, 27.9, 20.0, 26.4, 7.6, 18.6, 45.9, // D#3 .. F#5
+    33.0, 58.2, 72.7, 57.1, 38.7, 62.9, 63.5, 49.0, 78.4, 67.6, // A5 .. C8
+];
+const BRIDGE_PROMPT_FLOOR_DB_S: f32 = 3.0;
+/// The table is followed from C2 up, fading in over the fourth below it.
+/// The bottom octave's prompt is measured too -- 41 to 87 dB/s, single
+/// strings on the most mobile part of the board -- but the model's
+/// fundamentals there already start 10-14 dB under the reference's at A0
+/// and D#1 before any decay (the rim sets them), and following the table
+/// took their late balance from within 2 dB of the reference to 12 under.
+/// The early level down there is the open question; until it is answered
+/// the law keeps the bottom.
+const BRIDGE_PROMPT_FROM_NOTE: f32 = 36.0;
+const BRIDGE_PROMPT_FADE_SEMITONES: f32 = 5.0;
+/// And it is held to the tenor: from C5 up it fades out again over a
+/// fifth. The treble's rows are measured the same way, and the model's
+/// fundamentals there read 1.5-2.4 times faster than them over 80-300 ms
+/// -- but following the table up there made the scorecard's body ladder
+/// 3-5 dB worse and the 1 s envelope 2.4 dB louder: the treble's early
+/// slope is its attack transient, not its string's prompt stage, and a
+/// window that separates the two is a measurement still to make.
+const BRIDGE_PROMPT_TO_NOTE: f32 = 72.0;
+const BRIDGE_PROMPT_FADE_OUT_SEMITONES: f32 = 7.0;
+
+/// How far the table applies at this note: 0 below the fade in and above
+/// the fade out, 1 from C2 to C5.
+fn measured_prompt_share(note: u8) -> f32 {
+    let rise = ((note as f32 - BRIDGE_PROMPT_FROM_NOTE + BRIDGE_PROMPT_FADE_SEMITONES)
+        / BRIDGE_PROMPT_FADE_SEMITONES)
+        .clamp(0.0, 1.0);
+    let fall = ((BRIDGE_PROMPT_TO_NOTE + BRIDGE_PROMPT_FADE_OUT_SEMITONES - note as f32)
+        / BRIDGE_PROMPT_FADE_OUT_SEMITONES)
+        .clamp(0.0, 1.0);
+    rise * fall
+}
+
+/// The measured prompt T60 of a note's fundamental, seconds: the table
+/// read at the note, log-linear in rate between grid notes, floored.
+fn measured_prompt_t60(note: u8) -> f32 {
+    let position = (note.clamp(LOW_NOTE, 108) - LOW_NOTE) as f32 / 3.0;
+    let i = (position as usize).min(BRIDGE_PROMPT_DB_S.len() - 2);
+    let t = position - i as f32;
+    let lo = BRIDGE_PROMPT_DB_S[i].max(BRIDGE_PROMPT_FLOOR_DB_S);
+    let hi = BRIDGE_PROMPT_DB_S[i + 1].max(BRIDGE_PROMPT_FLOOR_DB_S);
+    let rate = lo * powf(hi / lo, t);
+    60.0 / rate
+}
 /// How much longer the integration runs than the nominal contact time. The
 /// hammer is still in contact when it stops, so this sets how heavily it
 /// pushes the low modes: measured on C2's first 30 ms, stretching it puts
@@ -7367,10 +7445,22 @@ impl ConcertGrand {
             // A4 holds nearly level from 1 s to 2 s while a shared decay
             // curve kept falling. ×1.8 on the slow stage matches the
             // measured plateau.
-            let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life)
-                * board_decay
-                * self.cal(note, 4)
-                * string_life;
+            let mut t60 = self.t60_seconds(frequency, f0, string_scale, treble_life);
+            if n == 0 {
+                // The fundamental's prompt stage as the reference measured
+                // it at this key -- the bridge's conductance at this point
+                // and pitch, which no smooth law carries. The law's own
+                // controls (the Decay fader, the treble life) stay on top
+                // of it: the table is the mechanism, not the setting.
+                let controls = (0.5 + 1.5 * self.controls.decay)
+                    * self.hf_life(frequency * string_scale);
+                let measured = measured_prompt_t60(note) * controls;
+                t60 *= powf(
+                    measured / t60.max(1e-3),
+                    PROMPT_MEASURED_POWER.get() * measured_prompt_share(note),
+                );
+            }
+            let t60 = t60 * board_decay * self.cal(note, 4) * string_life;
             // Geometric, and WIDE. The linear x0.55-1.45 spread kept every
             // cluster's beat rate within a factor 2.6, so with rate
             // proportional to frequency the FIRST nulls of every 2-4 kHz
@@ -10881,6 +10971,35 @@ mod tests {
             best = best.max(sqrtf(re * re + im * im));
         }
         20.0 * log2f(best.max(1e-12)) * core::f32::consts::LOG10_2
+    }
+
+    #[test]
+    fn the_fundamental_prompts_as_the_reference_measured() {
+        // C3's fundamental sits on a mobile board mode in the reference and
+        // gives its coherent motion to the bridge at 42 dB/s; D#3's, a
+        // semitone and a half up, at 17. The model's fundamental at C3 did
+        // not fall at all in the first second. Slope of the fundamental's
+        // level between 0.3 and 0.9 s, 100 ms Hann windows: the string
+        // itself falls at the table's rate from the first sample (muting
+        // the board shows it), but the board's modes near 131 Hz take
+        // some 200 ms to fill and hold the radiated level flat that long.
+        let slope = |note: u8| {
+            let mut piano = prepared();
+            render(&mut piano, 1, &[note_on(note, 90)]);
+            let out = render(&mut piano, FS as usize, &[]);
+            let mono: Vec<f32> = out.as_chunks::<2>().0.iter().map(|p| 0.5 * (p[0] + p[1])).collect();
+            let f0 = 440.0 * powf(2.0, (note as f32 - 69.0) / 12.0);
+            let window = |centre: f32| {
+                let from = ((centre - 0.05) * FS as f32) as usize;
+                tone_db(&mono[from..from + (0.1 * FS as f32) as usize], f0)
+            };
+            (window(0.3) - window(0.9)) / 0.6
+        };
+        let c3 = slope(48);
+        let d_sharp3 = slope(51);
+        assert!(c3 > 18.0, "C3's fundamental falls {c3:.1} dB/s in its prompt stage");
+        assert!(d_sharp3 < 16.0, "D#3's fundamental falls {d_sharp3:.1} dB/s in its prompt stage");
+        assert!(c3 > d_sharp3 + 5.0, "C3 {c3:.1} against D#3 {d_sharp3:.1} dB/s");
     }
 
     #[test]

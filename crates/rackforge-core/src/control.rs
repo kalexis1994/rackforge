@@ -5748,12 +5748,23 @@ mod tests {
     #[test]
     fn changes_active_mode_and_the_audio_render_path_together() {
         let (context, receiver) = context();
-        let worker = thread::spawn(move || match receiver.recv().unwrap() {
-            AudioControlCommand::SetRenderMode { mode, reply } => {
-                assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
-                reply.send(Ok(())).unwrap();
+        let worker = thread::spawn(move || {
+            // PLAY brings the instrument's chain with it: the render mode
+            // first, then the effects that play after it.
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetRenderMode { mode, reply } => {
+                    assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected render-mode change"),
             }
-            _ => panic!("expected render-mode change"),
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetPlayChain { effects, reply, .. } => {
+                    assert!(effects.is_empty());
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected the PLAY chain to follow the mode"),
+            }
         });
         let response = dispatch_command(
             &context,
@@ -5801,12 +5812,21 @@ mod tests {
             .unwrap()
             .record(None, SessionEvent::LiveStateReconciled { live })
             .unwrap();
-        let worker = thread::spawn(move || match receiver.recv().unwrap() {
-            AudioControlCommand::SetRenderMode { mode, reply } => {
-                assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
-                reply.send(Ok(())).unwrap();
+        let worker = thread::spawn(move || {
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetRenderMode { mode, reply } => {
+                    assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected render-mode change"),
             }
-            _ => panic!("expected render-mode change"),
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetPlayChain { effects, reply, .. } => {
+                    assert!(effects.is_empty());
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected the PLAY chain to follow the mode"),
+            }
         });
 
         let response = dispatch_command(

@@ -860,6 +860,34 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The rim: the board radiates nothing below its first mode, on the bus
+(0.171.28).** The user: the bass is good but so deep it covers everything,
+and it stays, pronounced, in the sustains. Measured against the Salamander
+from 0.35 s on, once the thump has gone, the fundamental against the
+strongest of partials 2–4: the reference has A0's 44 dB under, C1's 45,
+D#1's 39; the model had them 20, 26 and 34 under — 24, 19 and 5 dB of
+excess, the excess vanishing at F#1 and above. The law was already in the
+model: `RADIATION_CORNER_HZ`, sixth-order at 45 Hz, "below the board's
+first mode the board radiates almost nothing", calibrated on the YDP.
+But it was a factor on each board mode's *drive*, and the bank starts at
+50 Hz: a 27 Hz fundamental leaves through the tail of the 50 Hz mode and
+was scaled by the mode's frequency, not its own. It is now a filter on
+the board's sum, three Butterworth biquads per channel, 36 dB an octave
+below the corner. Half the excess lived elsewhere: the damped bed and the
+undamped lengths reach the output beside the board, and with the pedal
+down every bass string rings by sympathy at a fundamental the board could
+not have radiated — the bed alone held A0's fundamental 12 dB over its
+partials with the board silenced. They go through the rim too: every
+string reaches the air through the board. After: A0 −1.2 dB against the
+reference's balance, C1 −0.4, D#1 −1.8, F#1 −1.3 (was +24.5 / +18.7 /
++4.7 / −5.9). Bass decay rates are unchanged. The scorecard's "floor
+below f0" lines fall 5–12 dB in every register: that floor in the model
+was the 27–45 Hz sympathetic rumble now removed, while the reference's
+is 20–400 Hz room and board — the model was matching the number with the
+wrong thing, and the lines say so now (bass 4.21 → 4.85, treble 5.94 →
+7.18 on that metric). C2's +11 dB and C3's +28 dB fundamental excess are
+above the corner and another matter, not touched.
+
 **The keybed, eleven decibels down a third time (0.171.27).** With the
 action a mechanism the ear took Thud Colour from 0.5 to 0.28, −10.6 dB on
 the fader's law, the third time it has asked for eleven decibels off the

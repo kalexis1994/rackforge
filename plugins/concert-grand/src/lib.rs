@@ -976,10 +976,40 @@ const MAX_PARTIALS: usize = 144;
 /// leaves the headroom the strike simulation and the boards also need.
 const PARTIAL_BUDGET: usize = 900;
 
+/// Sections of the rim high-pass and their Butterworth Q: a sixth-order
+/// corner is three pole pairs at 15, 45 and 75 degrees.
+const RIM_SECTIONS: usize = 3;
+const RIM_Q: [f32; RIM_SECTIONS] = [0.517_638_1, core::f32::consts::FRAC_1_SQRT_2, 1.931_851_7];
+
+/// One sample through the three sections, transposed direct form II.
+#[inline]
+fn rim_pass(states: &mut [[f32; 2]; RIM_SECTIONS], coef: &[[f32; 5]; RIM_SECTIONS], x: f32) -> f32 {
+    let mut y = x;
+    for (state, c) in states.iter_mut().zip(coef.iter()) {
+        let input = y;
+        y = c[0] * input + state[0];
+        state[0] = c[1] * input - c[3] * y + state[1];
+        state[1] = c[2] * input - c[4] * y;
+    }
+    y
+}
+
 /// Below the soundboard's first mode the board radiates almost nothing.
 /// Calibrated against the YDP Grand samples: A0's fundamental measures
 /// ~-40 dB against its strongest partial, 46 Hz ~-25 dB, 78 Hz ~0 dB — a
-/// steep transition this sixth-order corner reproduces.
+/// steep transition this sixth-order corner reproduces. The Salamander
+/// says the same: A0's fundamental 46 dB under its second to fourth
+/// partials, C1's 32, D#1's 22, and from F#1 up the fundamental holds.
+///
+/// It is a filter on the board's output, not a factor on each mode's
+/// drive. The bank starts at 50 Hz, and a fundamental below that leaves
+/// through the tail of the lowest mode; a factor on the mode's drive
+/// scaled that tail by the mode's own frequency and let the 27 Hz of A0
+/// out at the level of 50 Hz. Measured, that put A0's fundamental 27 dB
+/// over the reference against its partials, C1's 13, D#1's 7: the deep
+/// bass that covered everything in a sustain. A sixth-order Butterworth
+/// high-pass at the corner, on the sum, is the rim: below the first mode
+/// the two faces of the board cancel each other and the case is open.
 pub static RADIATION_CORNER_HZ: Knob = Knob::new(45.0);
 /// How deep the strike-point comb can cut. A finite bridge admittance keeps a
 /// real one to 10-20 dB dips, never a null. Measured on the YDP C2, whose
@@ -4447,6 +4477,13 @@ pub struct ConcertGrand {
     room_len: [usize; ROOM_LINES],
     /// Two-pole state for the high-pass feeding the lid and the chamber.
     air_dc: [f32; 2],
+    /// The rim: three second-order sections per channel, the board's
+    /// radiation below its first mode, for the board, the undamped
+    /// lengths and the damped bed -- every string reaches the air through
+    /// the board. See `RADIATION_CORNER_HZ`.
+    rim: [[[f32; 2]; RIM_SECTIONS]; 6],
+    /// Their coefficients, `[b0, b1, b2, a1, a2]`, set in `tune_board`.
+    rim_coef: [[f32; 5]; RIM_SECTIONS],
     /// Counts strikes, so per-strike randomness never repeats a note's exact
     /// mechanical fingerprint twice in a row.
     strike_serial: u32,
@@ -4599,6 +4636,8 @@ impl Default for ConcertGrand {
             room: [[0.0; ROOM_BUFFER]; ROOM_LINES],
             room_len: [1; ROOM_LINES],
             air_dc: [0.0; 2],
+            rim: [[[0.0; 2]; RIM_SECTIONS]; 6],
+            rim_coef: [[1.0, 0.0, 0.0, 0.0, 0.0]; RIM_SECTIONS],
             strike_serial: 0,
             damp_serial: 0,
             pedal_noise_amp: 0.0,
@@ -5272,6 +5311,22 @@ impl ConcertGrand {
     /// regular.
     fn tune_board(&mut self) {
         self.board_dirty = false;
+        // The rim: a sixth-order Butterworth high-pass at the radiation
+        // corner, three biquads whose Q are the Butterworth pole pairs.
+        // Below the corner it falls at 36 dB an octave, the measured law.
+        let corner = RADIATION_CORNER_HZ.get().clamp(5.0, self.sample_rate * 0.2);
+        let (sin, cos) = sincosf(core::f32::consts::PI * corner / self.sample_rate);
+        let k = sin / cos;
+        for (section, q) in RIM_Q.iter().enumerate() {
+            let norm = 1.0 / (1.0 + k / q + k * k);
+            self.rim_coef[section] = [
+                norm,
+                -2.0 * norm,
+                norm,
+                2.0 * (k * k - 1.0) * norm,
+                (1.0 - k / q + k * k) * norm,
+            ];
+        }
         for q in 0..BOARD_DRIVE_POINTS {
             for j in 0..BOARD_DRIVE_POINTS {
                 let x = j as f32 / (BOARD_DRIVE_POINTS - 1) as f32;
@@ -5517,22 +5572,14 @@ impl ConcertGrand {
                 mode.shape_c = -depth * core::f32::consts::SQRT_2 * sin_theta;
             }
         }
-        // And the board does not radiate its own lowest modes any more
-        // than it radiates a string's lowest partials.
-        //
-        // The bank starts at 50 Hz, and every note in the compass kicks
-        // that mode -- a treble note hardest of all, because its strike
-        // is the sharpest and so the broadest in spectrum. Measured, a
-        // 49.8 Hz tone sat under every single note, at -75.8 dB under G2
-        // and rising to -68.9 dB under C4, at a fixed pitch that follows
-        // nothing being played. Six voices of a chord each contribute it
-        // and it sums into an audible drone an octave and a half below
-        // the music, which is what the user heard the moment they played
-        // chords on the packaged build and called an octave discrepancy.
-        //
-        // Nothing in the test suite could catch it: every render this
-        // model is measured against is one note, and one note buries it.
-        mode.drive *= Self::board_radiation(placed);
+        // The board does not radiate its own lowest modes any more than it
+        // radiates a string's lowest partials -- and it radiates a string's
+        // partials below its lowest mode less still. That is the rim, a
+        // filter on the bank's sum (`RADIATION_CORNER_HZ`), where it also
+        // reaches the tail of the 50 Hz mode that a 27 Hz fundamental
+        // leaves through. It used to be a factor here, on each mode's
+        // drive: it held the 49.8 Hz drone every treble strike kicked, and
+        // it could not hold A0.
         // Below coincidence a plate radiates poorly: the near-field of
         // neighbouring antinodes cancels. A first-order rise toward the
         // corner keeps the bass fundamental where the references put it,
@@ -6215,15 +6262,6 @@ impl ConcertGrand {
             self.controls.clang_plain
         };
         powf(reach, falloff) * wound
-    }
-
-    fn board_radiation(frequency: f32) -> f32 {
-        let ratio = frequency / RADIATION_CORNER_HZ.get();
-        let u = {
-            let r2 = ratio * ratio;
-            r2 * r2 * r2
-        };
-        u / (1.0 + u)
     }
 
     /// How readily this string gives its energy to the bridge, against the
@@ -9792,6 +9830,9 @@ impl Processor for ConcertGrand {
                 board_left += left;
                 board_right += right;
             }
+            // The rim: below its first mode the board radiates almost nothing.
+            board_left = rim_pass(&mut self.rim[0], &self.rim_coef, board_left);
+            board_right = rim_pass(&mut self.rim[1], &self.rim_coef, board_right);
             // The open top octave listens to the bridge and rings on.
             let mut open_left = 0.0;
             let mut open_right = 0.0;
@@ -9826,6 +9867,8 @@ impl Processor for ConcertGrand {
                     undamped_right += y * string.pan_right;
                 }
             }
+            undamped_left = rim_pass(&mut self.rim[2], &self.rim_coef, undamped_left);
+            undamped_right = rim_pass(&mut self.rim[3], &self.rim_coef, undamped_right);
             let undamped_gain = knob_undamped_mix * self.controls.lab(15);
             // The damped strings' bed, listening to the bridge like the
             // undamped lengths do -- see BED_MIX.
@@ -9836,6 +9879,13 @@ impl Processor for ConcertGrand {
                 bed_left += y * string.pan_left;
                 bed_right += y * string.pan_right;
             }
+            // The bed reaches the air through the board too: with the pedal
+            // down every bass string rings by sympathy, and below the
+            // board's first mode the rim cancels their fundamentals as it
+            // cancels the struck string's. Measured, the bed alone put A0's
+            // fundamental 12 dB over its partials, past the board.
+            bed_left = rim_pass(&mut self.rim[4], &self.rim_coef, bed_left);
+            bed_right = rim_pass(&mut self.rim[5], &self.rim_coef, bed_right);
             let bed_gain = knob_bed_mix * self.controls.lab(15);
 
             // The shimmer: everything above ~1.8 kHz feeds the undamped
@@ -10811,6 +10861,49 @@ mod tests {
             early_slope > late_slope * 1.5,
             "early {early_slope} vs late {late_slope}"
         );
+    }
+
+    /// Level of one tone in a stretch of samples, dB, Hann-windowed, the
+    /// best of a two-percent search around the frequency for inharmonicity.
+    fn tone_db(samples: &[f32], frequency: f32) -> f32 {
+        let mut best = 0.0f32;
+        for step in -4..=4 {
+            let f = frequency * (1.0 + 0.005 * step as f32);
+            let (mut re, mut im) = (0.0f32, 0.0f32);
+            let n = samples.len() as f32;
+            for (i, &x) in samples.iter().enumerate() {
+                let (_, window) = sincosf(core::f32::consts::TAU * i as f32 / n);
+                let w = 0.5 - 0.5 * window;
+                let (s, c) = sincosf(core::f32::consts::TAU * f * i as f32 / FS as f32);
+                re += x * w * c;
+                im -= x * w * s;
+            }
+            best = best.max(sqrtf(re * re + im * im));
+        }
+        20.0 * log2f(best.max(1e-12)) * core::f32::consts::LOG10_2
+    }
+
+    #[test]
+    fn the_board_radiates_almost_nothing_below_its_first_mode() {
+        // A0's 27.5 Hz leaves through the tail of the board's lowest mode,
+        // and the rim cancels it. In the Salamander it sits 46 dB under
+        // its second to fourth partials from 0.35 s on, once the thump has
+        // gone; this model had it 19 dB under until the corner became a
+        // filter on the bus. C2's 65 Hz is above the corner and holds.
+        let balance = |note: u8| {
+            let mut piano = prepared();
+            render(&mut piano, 1, &[note_on(note, 90)]);
+            render(&mut piano, (FS * 0.35) as usize, &[]);
+            let out = render(&mut piano, (FS * 0.4) as usize, &[]);
+            let mono: Vec<f32> = out.as_chunks::<2>().0.iter().map(|p| 0.5 * (p[0] + p[1])).collect();
+            let f0 = 440.0 * powf(2.0, (note as f32 - 69.0) / 12.0);
+            let partials = tone_db(&mono, 2.0 * f0).max(tone_db(&mono, 3.0 * f0)).max(tone_db(&mono, 4.0 * f0));
+            tone_db(&mono, f0) - partials
+        };
+        let a0 = balance(21);
+        let c2 = balance(36);
+        assert!(a0 < -30.0, "A0's fundamental sits {a0:.1} dB against its partials");
+        assert!(c2 > -20.0, "C2's fundamental sits {c2:.1} dB against its partials");
     }
 
     #[test]

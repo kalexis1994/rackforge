@@ -534,6 +534,15 @@ if (effect) {
     check("an effect in the chain takes a program", false, `no program to try (${programs?.plugin_name})`);
   }
 
+  // The instrument's own suggestion reaches the drawer through the catalog.
+  const instrument = catalog.find((plugin) => plugin.kind === "instrument"
+    && (plugin.suggested_chain?.length ?? 0) > 0);
+  check(
+    "an instrument's suggested chain reaches the catalog",
+    Boolean(instrument),
+    "no instrument in the catalog names one",
+  );
+
   const cleared = dispatch({
     type: "set_play_chain",
     instrument_id: instanceId,

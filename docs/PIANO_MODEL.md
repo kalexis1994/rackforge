@@ -860,6 +860,37 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The merge ramp's puzzle, and the level's power as a knob (0.171.30).**
+Two things behind knobs, today's sound at their compiled values. The
+ramp: 0.171.25 spread a merged blow's momentum over the contact and found
+it four times rougher than the one-sample push, from two samples up,
+cause unknown. Found: a fresh onset is click-free by cancellation ACROSS
+its lanes and partials — the bloom lane negative, the phases dispersed —
+and a one-sample push into `c` reproduces a fresh onset exactly, so it is
+smooth for the same reason. The ramp spread only the living lanes; the
+retired lanes (the bloom, dead within tens of ms of every strike) and
+the partials the living voice lacked arrived whole, and the bloom's
+negative energy landed alone: the blow's own contribution started at
+−0.0048 on its first sample where the one-sample push started at
++0.0004, whatever the ramp's length. Now every part the blow adds arrives
+the same way, magnitude into `c` over `push_in` samples, and the largest
+step of the blow's first millisecond falls with the ramp as it should:
+0.0045 (one sample) → 0.0033 (2) → 0.0017 (8) → 0.0007 (32), against the
+ringing note's own 0.035. `MERGE_RAMP_S` stays at 0 — one sample, today's
+sound, the appended partials now magnitude-into-`c` like the rest (the
+one-sample step reads 0.004488 either way) — and the knob is honest for
+the ear: a hammer's contact is one to four milliseconds. The power: the
+level has always grown as velocity^2.2, a literal; it is
+`LEVEL_VELOCITY_POWER` now, at 2.2. Measured on the Salamander's sixteen
+layers, peak level per layer, C2 to C6: the reference rises 11–16 dB from
+v3 to v15 (velocity 35 to 117), a power of 1.1–1.5; this model rises
+23–26 dB over the same span. The scorecard's dynamics lines say where the
+spectrum goes with it: the bass's 2–4 kHz attack rises 19 dB more from pp
+to ff than the reference's, the tenor's 4–8 kHz 14 more, while the
+treble's 2–4 kHz rises 7 dB less. This is the fifth point of the action
+study — the hammer that mostly brightens — and it is the ear's refit, on
+the lab, with this knob and the felt's beside it; nothing recentred.
+
 **The fundamental's prompt stage, as the reference measured it at each
 key (0.171.29).** C2's and C3's fundamentals sat +11 and +28 dB over the
 reference against their partials 2–4 from 0.35 s on, with D#2, F#2 and A2

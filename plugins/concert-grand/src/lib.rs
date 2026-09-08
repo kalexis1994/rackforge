@@ -217,7 +217,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 154;
+pub const KNOB_COUNT: usize = 155;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -869,6 +869,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "PROMPT_MEASURED_POWER",
         &PROMPT_MEASURED_POWER,
         "How far the fundamental's prompt decay follows the reference's measured table: 1 the table, 0 the law.",
+    ),
+    (
+        "LEVEL_VELOCITY_POWER",
+        &LEVEL_VELOCITY_POWER,
+        "The power of velocity the level grows with; the reference measures 1.1-1.5, this ships at 2.2.",
     ),
 ];
 
@@ -4943,6 +4948,17 @@ pub static ACTION_RATIO: Knob = Knob::new(5.5);
 /// `BRIDGE_PROMPT_DB_S`.
 pub static PROMPT_MEASURED_POWER: Knob = Knob::new(1.0);
 
+/// The power of MIDI velocity the note's level grows with. Ships at the
+/// 2.2 it has always been, which is today's sound. Measured against the
+/// Salamander's sixteen layers (2026-09-08, peak level of the sample per
+/// layer, C2 to C6): the reference rises 11-16 dB from layer v3 to v15
+/// (velocity 35 to 117), which is a power of 1.1-1.5; this model rises
+/// 23-26 dB over the same span, the power 2.2 says. Sound pressure is
+/// not the hammer's speed squared once the felt is in the way; on the
+/// reference the blow mostly BRIGHTENS. For the ear to try at 1.3-1.5,
+/// beside the felt's own knobs, before anything is recentred.
+pub static LEVEL_VELOCITY_POWER: Knob = Knob::new(2.2);
+
 /// The reference's fundamentals' prompt decay, dB/s, on the scorecard grid
 /// (A0, C1, D#1 ... C8, every three semitones): the slope of the
 /// fundamental's level from 80 to 300 ms after the strike, least squares
@@ -7417,7 +7433,8 @@ impl ConcertGrand {
             }
         }
         let scale =
-            0.28 * self.cal(note, 7) * powf(velocity.max(0.01), 2.2) / sqrtf(energy.max(1e-9));
+            0.28 * self.cal(note, 7) * powf(velocity.max(0.01), LEVEL_VELOCITY_POWER.get())
+                / sqrtf(energy.max(1e-9));
 
         // Everything a partial needs, computed before a voice is borrowed:
         // both components draw their decay from the same loss curve, read at
@@ -7950,12 +7967,25 @@ impl ConcertGrand {
                         // thud, steal or step explained. A long-decayed
                         // voice's retired vertical lanes come back the same
                         // way, so a re-struck note has its high partials.
+                        //
+                        // And over the contact like every other lane. A fresh
+                        // onset is click-free by cancellation ACROSS its lanes
+                        // and partials -- the bloom lane negative, the phases
+                        // dispersed -- and a one-sample push reproduces a
+                        // fresh onset exactly. Spreading only the living lanes
+                        // while the retired ones and the appended partials
+                        // arrived whole broke that cancellation: the ramp
+                        // measured four times rougher than the step, from two
+                        // samples up, and the roughness was the bloom lane's
+                        // negative energy landing alone (2026-09-08).
                         if existing.rc[lane] == 0.0 && existing.rs[lane] == 0.0 {
                             let energy = sqrtf(
                                 fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane],
                             );
+                            let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
                             existing.s[lane] = 0.0;
-                            existing.c[lane] = if fresh.c[lane] < 0.0 { -energy } else { energy };
+                            existing.c[lane] = 0.0;
+                            existing.push[lane] = signed / merge_ramp as f32;
                             existing.rc[lane] = fresh.rc[lane];
                             existing.rs[lane] = fresh.rs[lane];
                             continue;
@@ -7993,7 +8023,12 @@ impl ConcertGrand {
                     // from nought, its output quadrature already at rest.
                     let mut arriving = *fresh;
                     for lane in 0..LANES {
-                        arriving.push[lane] = arriving.c[lane] / merge_ramp as f32;
+                        let energy = sqrtf(
+                            fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane],
+                        );
+                        let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
+                        arriving.push[lane] = signed / merge_ramp as f32;
+                        arriving.s[lane] = 0.0;
                         arriving.c[lane] = 0.0;
                     }
                     voice.partials[voice.partial_count] = arriving;

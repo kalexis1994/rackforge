@@ -4061,6 +4061,27 @@
       }
     },
     {
+      "index": 196,
+      "id": "knob_level_velocity_power",
+      "name": "LEVEL_VELOCITY_POWER",
+      "page": "model_hammer",
+      "order": 53,
+      "kind": {
+        "type": "float",
+        "minimum": 0.1375,
+        "maximum": 35.2,
+        "step": 0.022,
+        "default": 2.2,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
       "index": 200,
       "id": "preamp",
       "name": "Preamp",

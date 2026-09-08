@@ -83,9 +83,17 @@ const instanceOf = (handle) => {
   if (!instance) throw new Error(`no plugin instance ${handle}`);
   return instance;
 };
+// Set CHECK_TRACE_CALLS=1 to see every call into a plugin. A crash inside
+// one of them leaves the last line it wrote, which is the only way to know
+// which call it was.
+const traceCalls = process.env.CHECK_TRACE_CALLS === "1";
 const call = (handle, index, ...args) => {
   const call = instanceOf(handle).exports[EXPORTS[index]];
   if (typeof call !== "function") throw new Error(`missing export ${EXPORTS[index]}`);
+  if (traceCalls) {
+    writeSync(2, `    call ${EXPORTS[index]} on ${handle}(${args.join(",")})
+`);
+  }
   return call(...args);
 };
 
@@ -171,9 +179,32 @@ const wasi = new WASI({
   preopens: { "/rackforge": storagePath },
   returnOnExit: true,
 });
+// With the call trace on, every WASI call names itself too: the host reads
+// and writes its storage through node's WASI, which is native code, and a
+// crash in there looks exactly like a crash in a plugin from the outside.
+const wasiImports = wasi.getImportObject();
+const tracedWasi = traceCalls
+  ? Object.fromEntries(
+      Object.entries(wasiImports).map(([namespace, functions]) => [
+        namespace,
+        Object.fromEntries(
+          Object.entries(functions).map(([name, fn]) => [
+            name,
+            typeof fn === "function"
+              ? (...args) => {
+                  writeSync(2, `    wasi ${name}(${args.join(",")})
+`);
+                  return fn(...args);
+                }
+              : fn,
+          ]),
+        ),
+      ]),
+    )
+  : wasiImports;
 const module = await WebAssembly.compile(await readFile(hostPath));
 const instance = new WebAssembly.Instance(module, {
-  ...wasi.getImportObject(),
+  ...tracedWasi,
   rackforge_plugin_host: pluginHost,
 });
 wasi.initialize(instance);
@@ -212,8 +243,13 @@ const failures = [];
 // holding and the log stops in the wrong place. The trail goes out
 // synchronously, and says what was being attempted rather than what last
 // succeeded.
-const trail = (what) => writeSync(2, `--> ${what}
+const trail = (what) => {
+  // The resident size travels with the trail: a crash that is the process
+  // running out of memory looks nothing like one that is not.
+  const rss = Math.round(process.memoryUsage().rss / 1048576);
+  writeSync(2, `--> ${what} [rss ${rss} MB, ${modules.size} modules, ${instances.size} instances]
 `);
+};
 
 const check = (description, condition, detail) => {
   if (condition) {
@@ -439,4 +475,41 @@ for (const capability of declared.capabilities ?? []) {
 }
 
 trail("every probe returned");
+
+// PLAY plays through its effects here as it does on the other hosts: the
+// chain the FX drawer edits has to load, apply and reach the effect's own
+// parameters. The page had none of this while the host refused every
+// package that was not an instrument.
+trail("probe the PLAY chain");
+const catalog = JSON.parse(readResponse(host.rf_plugin_catalog())).catalog ?? [];
+const effect = catalog.find((plugin) => plugin.kind === "effect");
+check("an effect plugin is loaded", Boolean(effect), "the catalog holds no effect");
+if (effect) {
+  const applied = dispatch({
+    type: "set_play_chain",
+    instrument_id: instanceId,
+    effects: [{ id: "fx-1", plugin_id: effect.plugin_id, enabled: true }],
+  });
+  check(
+    "PLAY takes a chain of effects",
+    applied.status === "command_applied",
+    applied.message,
+  );
+  const parameters = request({
+    op: "plugin_parameters",
+    instance_id: `${instanceId}.fx.fx-1`,
+  });
+  check(
+    "the effect in the chain has its own parameters",
+    parameters.status === "plugin_parameters" && (parameters.values?.length ?? 0) > 0,
+    parameters.message,
+  );
+  const cleared = dispatch({
+    type: "set_play_chain",
+    instrument_id: instanceId,
+    effects: [],
+  });
+  check("the chain can be taken away", cleared.status === "command_applied", cleared.message);
+}
+
 process.exit(failures.length === 0 ? 0 : 1);

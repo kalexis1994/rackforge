@@ -38,7 +38,9 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          # 22 dies with SIGSEGV inside its own WASI file handling while
+          # the check reads the demo's storage; see the step below.
+          node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
@@ -54,6 +56,8 @@ jobs:
           cp -r web/public/demo/rackforge/. "$storage"
           python3 tools/make-probe-package.py \
             web/public/demo/rackforge/plugins/concert-grand "$RUNNER_TEMP/probe.rfplugin"
+          # CHECK_TRACE_CALLS=1 names every plugin and WASI call, for when
+          # this dies somewhere that leaves no other trace.
           node tools/check-browser-host.mjs \
             web/public/demo/rackforge-browser.wasm "$storage" "$RUNNER_TEMP/probe.rfplugin"
 

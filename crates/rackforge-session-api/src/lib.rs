@@ -376,6 +376,11 @@ pub struct PluginInstanceState {
     pub ui_layouts: Vec<String>,
     #[serde(default)]
     pub config_available: bool,
+    /// Whether this instance is an effect rather than an instrument. A
+    /// surface that reads only the session -- LITTLE on the bridge -- tells
+    /// the PLAY list from the chain's candidates by this.
+    #[serde(default)]
+    pub effect: bool,
     /// The banks the sounds are grouped into, in the plugin's own order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub banks: Vec<BankSummary>,
@@ -1208,6 +1213,7 @@ mod tests {
                 plugin_short_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
+                effect: false,
                 banks: Vec::new(),
                 sounds: vec![SoundSummary {
                     id: "dls.piano-1".into(),
@@ -1394,6 +1400,7 @@ mod tests {
             plugin_short_name: "RF-KR106".into(),
             ui_layouts: vec!["little@1".into()],
             config_available: false,
+            effect: false,
             banks: Vec::new(),
             sounds: Vec::new(),
             selected_sound_id: None,

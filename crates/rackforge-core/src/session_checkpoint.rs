@@ -295,6 +295,7 @@ mod tests {
                 plugin_short_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
+                effect: false,
                 banks: Vec::new(),
                 sounds: vec![SoundSummary {
                     id: selected.into(),

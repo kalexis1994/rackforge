@@ -1240,6 +1240,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             plugin_short_name: plugin.manifest().little_short_name(),
             ui_layouts: plugin.manifest().ui_layouts.clone(),
             config_available: plugin.manifest().config_mode,
+            effect: plugin.manifest().kind == rackforge_plugin_api::PluginKind::Effect,
             banks: presets
                 .banks
                 .iter()

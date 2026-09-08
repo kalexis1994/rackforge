@@ -6540,6 +6540,7 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
         plugin_short_name: plugin.runtime.manifest().little_short_name(),
         ui_layouts: vec!["little@1".into()],
         config_available: plugin.config_available,
+        effect: plugin.runtime.manifest().kind == PluginKind::Effect,
         banks: plugin.banks.clone(),
         sounds: plugin.sound_summaries.clone(),
         selected_sound_id: plugin.selected_sound_id.clone(),
@@ -7795,6 +7796,7 @@ mod tests {
             plugin_short_name: "RF-106".into(),
             ui_layouts: vec!["little@1".into()],
             config_available: false,
+            effect: false,
             banks: Vec::new(),
             sounds: vec![SoundSummary {
                 id: "factory.rf106.002".into(),

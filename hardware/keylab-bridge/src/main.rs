@@ -1921,9 +1921,19 @@ fn play_plugins(snapshot: &SessionState) -> Vec<menu::PlayPlugin> {
     // its own `little@1` layout to participate: the host already owns the
     // plugin name, sound catalog and selection commands required by this
     // compact browser. `ui_layouts` only describes plugin-provided surfaces.
+    session_plugins(snapshot, false)
+}
+
+/// The effects LITTLE may add to the chain.
+fn effect_plugins(snapshot: &SessionState) -> Vec<menu::PlayPlugin> {
+    session_plugins(snapshot, true)
+}
+
+fn session_plugins(snapshot: &SessionState, effects: bool) -> Vec<menu::PlayPlugin> {
     snapshot
         .instances
         .iter()
+        .filter(|candidate| candidate.effect == effects)
         .map(|candidate| {
             menu::PlayPlugin::new(
                 candidate.instance_id.as_str(),
@@ -1938,6 +1948,72 @@ fn play_plugins(snapshot: &SessionState) -> Vec<menu::PlayPlugin> {
             .config_available(candidate.config_available)
         })
         .collect()
+}
+
+/// The chain of the instrument on stage, as LITTLE shows it.
+fn play_chain_items(snapshot: &SessionState) -> Vec<menu::PlayChainEffectItem> {
+    let Some(instrument_id) = snapshot.active_instance_id.as_ref() else {
+        return Vec::new();
+    };
+    let Some(chain) = snapshot.play_chain(instrument_id) else {
+        return Vec::new();
+    };
+    chain
+        .effects
+        .iter()
+        .filter_map(|effect| {
+            let instance_id = chain.effect_instance_id(&effect.id).ok()?;
+            let instance = snapshot
+                .instances
+                .iter()
+                .find(|candidate| candidate.plugin_id == effect.plugin_id);
+            Some(menu::PlayChainEffectItem {
+                id: effect.id.clone(),
+                instance_id: instance_id.as_str().to_owned(),
+                plugin_id: effect.plugin_id.clone(),
+                name: instance.map_or_else(
+                    || effect.plugin_id.clone(),
+                    |instance| instance.plugin_name.clone(),
+                ),
+                short_name: instance.map_or_else(
+                    || effect.plugin_id.clone(),
+                    |instance| {
+                        if instance.plugin_short_name.is_empty() {
+                            instance.plugin_name.clone()
+                        } else {
+                            instance.plugin_short_name.clone()
+                        }
+                    },
+                ),
+                enabled: effect.enabled,
+            })
+        })
+        .collect()
+}
+
+/// One edit to the chain of the instrument on stage, sent as the whole chain.
+fn edit_play_chain(
+    menu: &mut menu::Menu,
+    edit: impl FnOnce(&mut Vec<rackforge_session_api::PlayChainEffect>) -> Result<(), String>,
+) -> Result<bool, String> {
+    let snapshot = live_snapshot()?;
+    let instrument_id = snapshot
+        .active_instance_id
+        .clone()
+        .ok_or_else(|| "no instrument on stage".to_owned())?;
+    let mut effects = snapshot
+        .play_chain(&instrument_id)
+        .map(|chain| chain.effects.clone())
+        .unwrap_or_default();
+    edit(&mut effects)?;
+    dispatch_session_command(SessionCommand::SetPlayChain {
+        instrument_id,
+        effects,
+    })?;
+    let snapshot = live_snapshot()?;
+    menu.set_play_chain(play_chain_items(&snapshot));
+    menu.set_play_effect_plugins(effect_plugins(&snapshot));
+    Ok(true)
 }
 
 fn active_plugin_instance_id() -> Result<InstanceId, String> {
@@ -2028,6 +2104,8 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         play_plugins(&snapshot),
         snapshot.active_instance_id.as_ref().map(InstanceId::as_str),
     );
+    menu.set_play_chain(play_chain_items(&snapshot));
+    menu.set_play_effect_plugins(effect_plugins(&snapshot));
     let instance = active_plugin_instance(&snapshot)?;
     let selected = instance.selected_sound_id.clone();
     let audition_lease_id = snapshot
@@ -2505,6 +2583,44 @@ fn apply_pending_menu_command(
                     Ok(true)
                 }
             }
+        }
+        menu::MenuCommand::AddPlayChainEffect { plugin_id } => {
+            edit_play_chain(menu, |effects| {
+                // A chain may hold the same effect twice, so the id counts up
+                // rather than naming the plugin.
+                let id = (1..)
+                    .map(|number| format!("fx-{number}"))
+                    .find(|candidate| !effects.iter().any(|effect| &effect.id == candidate))
+                    .expect("an unused effect id exists");
+                effects.push(rackforge_session_api::PlayChainEffect {
+                    id,
+                    plugin_id,
+                    enabled: true,
+                    program_id: None,
+                });
+                Ok(())
+            })
+        }
+        menu::MenuCommand::SetPlayChainEffectEnabled { effect_id, enabled } => {
+            edit_play_chain(menu, |effects| {
+                match effects.iter_mut().find(|effect| effect.id == effect_id) {
+                    Some(effect) => {
+                        effect.enabled = enabled;
+                        Ok(())
+                    }
+                    None => Err(format!("unknown effect {effect_id}")),
+                }
+            })
+        }
+        menu::MenuCommand::RemovePlayChainEffect { effect_id } => {
+            edit_play_chain(menu, |effects| {
+                let before = effects.len();
+                effects.retain(|effect| effect.id != effect_id);
+                if effects.len() == before {
+                    return Err(format!("unknown effect {effect_id}"));
+                }
+                Ok(())
+            })
         }
         menu::MenuCommand::SetPluginParameter {
             instance_id,
@@ -3530,6 +3646,7 @@ mod tests {
             plugin_short_name: name.into(),
             ui_layouts: ui_layouts.iter().map(|layout| (*layout).into()).collect(),
             config_available: false,
+            effect: false,
             banks: Vec::new(),
             sounds: Vec::new(),
             selected_sound_id: None,

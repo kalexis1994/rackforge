@@ -860,6 +860,32 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**Where the ear put the release, and the level (0.171.17).** Release
+Noise: the ear took the fader to −15 dB; the centre moves the 5.4 dB
+instead (`KEYOFF_KNOCK` 0.09 → 0.048), as the thump's did, so a session
+from before keeps meaning what it meant. Thud Colour: the ear took the
+fader to 0.6, +4.8 dB on its law; `THUMP_BASE` 0.063 → 0.11. The felt's
+sideways grip by register (`DAMPER_HORIZONTAL_GRIP_BASS`): the
+reference's tails fall sixty decibels a second at C3 and seventy-three at
+C4 against forty-seven at C6, so the share runs from 0.45 at A0 to 0.15
+at C8. The scorecard, first run since the spatial board: bajo 4.40 →
+4.14, tenor 4.02 → 5.22, agudo 5.48 → 6.72. The bank's modes reaching
+the pair with their own phases sum less coherently than the one the
+transfer table was fitted through — the treble passage of the Campanella
+peaked at −26 dBFS against −11 — so the table was re-derived on the new
+renders (`rederive_table.py`): three to five decibels more from 1 to 5
+kHz and the 250–315 Hz hump seven lower, kept; the bottom's five to
+eight less refused, because taking them collapsed the floor under the
+treble's fundamentals by ten to eighteen (the thump and the low modes
+radiate there, which a partial survey does not see). What the tenor and
+treble lost on the card is the thump the ear turned down (the floor
+under f0) and the raggedness the pair now has (`relieve 2-4k`: the
+reference's own is ragged, the model's more so); what they gained is the
+treble ladder, from +11 dB over the reference to −1. And six decibels on
+the output (`OUTPUT_TRIM_DB`), under the Level fader: "sigo escuchando
+bajo el volumen comparado con pianoteq", measured at −17.8 dBFS on the
+passage and −8.7 on the piece with every fader at its centre.
+
 **The felt grips sideways barely (0.171.16).** The user, against
 Pianoteq: "toca y el release baja suave; acá toco, se apaga y luego se
 alza un release latoso". The reference's release samples say how a

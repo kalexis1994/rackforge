@@ -2072,9 +2072,10 @@ pub static THUMP_VELOCITY_POWER: Knob = Knob::new(3.0);
 /// Twice is a measurement of the listener: what the close pair hears as
 /// the keybed, a player wants twenty-three decibels under.
 ///
-/// 0.2 since 0.171.17: with the release at -15 the ear asked the thump
-/// ten decibels back up -- "el thump podes subirle 10".
-pub static THUMP_BASE: Knob = Knob::new(0.2);
+/// 0.11 since 0.171.17: with the release at -15 the ear took Thud Colour
+/// from 0.5 to 0.6, which on the fader's law is +4.8 dB; the centre
+/// moves there and the fader goes back to its centre.
+pub static THUMP_BASE: Knob = Knob::new(0.11);
 /// ... rising by this much at C8. Measured: the reference's knock stands
 /// -26 dB under a C2's attack, -20 under a C3, -14 under a C4, -8 under a
 /// C6 and a C7 -- the mechanism is the same size everywhere and the tone
@@ -2150,14 +2151,37 @@ const PEDAL_NOISE_T60_S: f32 = 1.0;
 /// ear -- "hay que bajarle al noise mecánico del release" -- takes ten
 /// decibels off it, the close pair's keyboard against the player's, as
 /// with the thump.
-const KEYOFF_KNOCK: f32 = 0.09;
+/// And 0.048 since 0.171.17: the ear took the Release Noise fader from
+/// -9.6 to -15 dB; the centre moves the 5.4 dB instead, as the thump's
+/// did, so a session from before keeps meaning what it meant.
+const KEYOFF_KNOCK: f32 = 0.048;
 const KEYOFF_T60_S: f32 = 0.22;
+/// Six decibels on the output, under the Level fader. "Sigo escuchando
+/// bajo el volumen si toco en rackforge comparado con pianoteq":
+/// measured with every fader at its centre, the Campanella's repeated-
+/// treble passage peaked at -17.8 dBFS and the whole piece at -8.7,
+/// where a physical-model piano of the same kind sits near -3 at
+/// fortissimo. The board's modes reaching the pair with their own phases
+/// (0.171.11) took six decibels of coherent gain the old bank had, and
+/// the re-derived transfer gives back what the survey can see; this is
+/// the rest, in the one place that moves nothing but the level. The fader
+/// keeps its travel and reads what it read.
+const OUTPUT_TRIM_DB: f32 = 6.0;
 /// See `Voice::damp`: the felt's grip on the horizontal polarisation as a
 /// share of its grip on the vertical. With the damper's stopping time
 /// `t` (33 ms at E6, 50 at C4) the sideways tail decays 8.7 * grip / t
 /// decibels per second: 0.15 is forty per second at E6, twenty-six at C4,
 /// against the reference's forty-seven and twenty-seven from 0.1 to 0.4 s.
+///
+/// By register since 0.171.17: the reference's tails fall sixty decibels
+/// a second at C3 and seventy-three at C4 against forty-seven at C6 and
+/// fifty-two at D#6 -- the felt on a heavy wound string bites its sideways
+/// motion harder than the felt on a short one -- so the share runs from
+/// `DAMPER_HORIZONTAL_GRIP + DAMPER_HORIZONTAL_GRIP_BASS` at A0 to the
+/// bare value at C8: fifty-two per second at C3, fifty-five at C4, fifty-
+/// eight at C6, fifty-five at D#6.
 const DAMPER_HORIZONTAL_GRIP: f32 = 0.15;
+const DAMPER_HORIZONTAL_GRIP_BASS: f32 = 0.3;
 /// The click in the key-off: the reference's 1-3 kHz sits thirty-three
 /// decibels under its 30-150, and the dark burst alone had it at
 /// fifty-five. A short bright burst on the voice's action-noise path, as
@@ -2421,6 +2445,18 @@ const PAIR_MODES_PER_BLOCK: usize = 32;
 /// bass notes' strongest partials -- the ones that set every band ratio's
 /// denominator -- stayed six decibels short while the rest of the compass
 /// came out level.
+/// Re-derived 2026-09-08 (`rederive_table.py` on the `spatial17` grid)
+/// after the strings took their places on the bridge and the pair took
+/// the board through the Rayleigh integral (0.171.11): a bank whose modes
+/// reach the capsules with their own phases sums less coherently than
+/// the one this table was first fitted through, three to six decibels
+/// less from 1.6 to 4 kHz, and the 250-315 Hz hump stood seven over. The
+/// table carries the difference from 250 Hz up, as it did after the signs
+/// settled in 0.167. Below 200 Hz the re-derivation also asked for five
+/// to eight decibels less, and taking them collapsed the floor under the
+/// treble's fundamentals by ten to eighteen on the scorecard (the thump
+/// and the board's low modes radiate there, which the partial survey
+/// does not see); the bottom keeps its 0.167 values.
 const BOARD_TRANSFER_DB: &[(f32, f32)] = &[
     (50.0, 0.1),
     (63.0, 1.5),
@@ -2429,22 +2465,22 @@ const BOARD_TRANSFER_DB: &[(f32, f32)] = &[
     (125.0, 13.3),
     (160.0, 10.7),
     (200.0, 7.3),
-    (250.0, -4.1),
-    (315.0, -5.9),
-    (400.0, -0.8),
-    (500.0, -0.2),
-    (630.0, -1.3),
-    (800.0, -2.1),
-    (1000.0, -0.4),
-    (1250.0, 1.0),
-    (1600.0, 0.6),
-    (2000.0, 0.4),
-    (2500.0, 2.1),
-    (3150.0, 2.2),
-    (4000.0, 1.1),
-    (5000.0, -0.3),
-    (6300.0, -1.0),
-    (8000.0, -1.0),
+    (250.0, -10.9),
+    (315.0, -11.2),
+    (400.0, -2.5),
+    (500.0, -0.6),
+    (630.0, -1.0),
+    (800.0, -0.9),
+    (1000.0, 1.4),
+    (1250.0, 3.5),
+    (1600.0, 3.9),
+    (2000.0, 3.0),
+    (2500.0, 4.0),
+    (3150.0, 5.3),
+    (4000.0, 4.8),
+    (5000.0, 2.1),
+    (6300.0, -2.1),
+    (8000.0, -2.1),
 ];
 /// How much of the measured transfer the bank applies: one is the table as
 /// measured, a sixteenth is as good as off, above one over-corrects.
@@ -3481,7 +3517,13 @@ impl Voice {
         // other pitches, heard as "se apaga y luego se alza un release
         // latoso". The horizontal lane takes `DAMPER_HORIZONTAL_GRIP` of the
         // felt's grip, and the release is the note fading, as it is.
-        let sideways = powf(factor, DAMPER_HORIZONTAL_GRIP);
+        let position = (self.note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE)
+            as f32
+            / (NOTE_COUNT - 1) as f32;
+        let sideways = powf(
+            factor,
+            DAMPER_HORIZONTAL_GRIP + DAMPER_HORIZONTAL_GRIP_BASS * (1.0 - position),
+        );
         for partial in &mut self.partials[..self.partial_count] {
             for lane in 0..LANES {
                 let grip = if lane == LANE_HORIZONTAL {
@@ -3618,7 +3660,7 @@ impl Default for Controls {
             mic_distance: 0.6598,
             mic_pattern: 0.6,
             action_noise: -5.298128,
-            release_noise: -15.0,
+            release_noise: -9.63296,
             pedal_noise: 0.0,
             // The subtle level the user's ear chose, eleven and a half
             // decibels under the calibrated burst.
@@ -3662,7 +3704,7 @@ impl Controls {
         if self.level <= LEVEL_FLOOR_DB {
             return 0.0;
         }
-        powf(10.0, self.level / 20.0)
+        powf(10.0, (self.level + OUTPUT_TRIM_DB) / 20.0)
     }
 
     /// The board's loss factor. Centre is Ege & Boutillon's measured 2.3%;
@@ -12286,17 +12328,20 @@ mod tests {";
         for index in [15u32, 16] {
             assert!(piano.set_parameter(6 + index, 0.0));
         }
+        // The whole second after the key: since 0.171.16 a damped string
+        // keeps a sideways tail of its own, and in a 33 ms slice 0.2 s out
+        // that tail is what there is, with or without the room. Over the
+        // second, the room's tail and the sympathetic halo are the
+        // difference, and they must be there to be turned off.
         let wet = {
             let mut on = prepared();
             render(&mut on, (FS * 0.3) as usize, &[note_on(60, 110)]);
             render(&mut on, 64, &[note_off(60)]);
-            render(&mut on, (FS * 0.2) as usize, &[]);
-            energy(&render(&mut on, 1600, &[]))
+            energy(&render(&mut on, FS as usize, &[]))
         };
         render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 110)]);
         render(&mut piano, 64, &[note_off(60)]);
-        render(&mut piano, (FS * 0.2) as usize, &[]);
-        let dry = energy(&render(&mut piano, 1600, &[]));
+        let dry = energy(&render(&mut piano, FS as usize, &[]));
         assert!(dry < wet, "staging at zero is not drier: {dry} vs {wet}");
     }
     #[test]

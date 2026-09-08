@@ -212,8 +212,13 @@ const failures = [];
 // holding and the log stops in the wrong place. The trail goes out
 // synchronously, and says what was being attempted rather than what last
 // succeeded.
-const trail = (what) => writeSync(2, `--> ${what}
+const trail = (what) => {
+  // The resident size travels with the trail: a crash that is the process
+  // running out of memory looks nothing like one that is not.
+  const rss = Math.round(process.memoryUsage().rss / 1048576);
+  writeSync(2, `--> ${what} [rss ${rss} MB, ${modules.size} modules, ${instances.size} instances]
 `);
+};
 
 const check = (description, condition, detail) => {
   if (condition) {

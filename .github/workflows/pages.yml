@@ -62,7 +62,7 @@ jobs:
           # together -- the thread's, and V8's own, which has to stay under
           # it or the overflow happens for real instead of being reported.
           ulimit -s 65536
-          node --stack-size=60000 tools/check-browser-host.mjs \
+          CHECK_TRACE_CALLS=1 node --stack-size=60000 tools/check-browser-host.mjs \
             web/public/demo/rackforge-browser.wasm "$storage" "$RUNNER_TEMP/probe.rfplugin"
 
       - name: Install the interface dependencies

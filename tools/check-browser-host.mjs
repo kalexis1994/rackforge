@@ -179,9 +179,32 @@ const wasi = new WASI({
   preopens: { "/rackforge": storagePath },
   returnOnExit: true,
 });
+// With the call trace on, every WASI call names itself too: the host reads
+// and writes its storage through node's WASI, which is native code, and a
+// crash in there looks exactly like a crash in a plugin from the outside.
+const wasiImports = wasi.getImportObject();
+const tracedWasi = traceCalls
+  ? Object.fromEntries(
+      Object.entries(wasiImports).map(([namespace, functions]) => [
+        namespace,
+        Object.fromEntries(
+          Object.entries(functions).map(([name, fn]) => [
+            name,
+            typeof fn === "function"
+              ? (...args) => {
+                  writeSync(2, `    wasi ${name}(${args.join(",")})
+`);
+                  return fn(...args);
+                }
+              : fn,
+          ]),
+        ),
+      ]),
+    )
+  : wasiImports;
 const module = await WebAssembly.compile(await readFile(hostPath));
 const instance = new WebAssembly.Instance(module, {
-  ...wasi.getImportObject(),
+  ...tracedWasi,
   rackforge_plugin_host: pluginHost,
 });
 wasi.initialize(instance);

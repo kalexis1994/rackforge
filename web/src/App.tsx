@@ -2992,9 +2992,13 @@ function PluginPickerModal({
   const [pendingPlugin, setPendingPlugin] = useState<PluginWebDescriptor | null>(null);
   const [pendingActivation, setPendingActivation] = useState<PluginWebDescriptor | null>(null);
   const activePluginId = active?.plugin_id;
+  // PLAY plays instruments. An effect belongs after one, in the FX drawer,
+  // and a MIDI processor in a Rack; neither can be the instance on stage,
+  // so neither is offered here.
+  const instruments = plugins.filter((plugin) => plugin.kind === "instrument");
   const orderedPlugins = [
-    ...plugins.filter((plugin) => plugin.plugin_id === activePluginId),
-    ...plugins.filter((plugin) => plugin.plugin_id !== activePluginId),
+    ...instruments.filter((plugin) => plugin.plugin_id === activePluginId),
+    ...instruments.filter((plugin) => plugin.plugin_id !== activePluginId),
   ];
   const activate = async (
     plugin: PluginWebDescriptor,

@@ -2179,7 +2179,14 @@ const PEDAL_NOISE_T60_S: f32 = 1.0;
 /// -9.6 to -15 dB; the centre moves the 5.4 dB instead, as the thump's
 /// did, so a session from before keeps meaning what it meant.
 const KEYOFF_KNOCK: f32 = 0.048;
-const KEYOFF_T60_S: f32 = 0.22;
+/// 0.4 since 0.171.19: through the board the knock borrowed the board's
+/// ring; on its own path the tail is its own, and the reference's is
+/// -20 dB at 100 ms and -30 at 200.
+const KEYOFF_T60_S: f32 = 0.4;
+/// The key-off's own corner: the reference's key-off is dark on every
+/// key (30-150 Hz carries it, 300-1000 fourteen under) where the strike's
+/// knock climbs to 1400 Hz at the top; the two are different sounds.
+const KEYOFF_CORNER_HZ: f32 = 200.0;
 /// Six decibels on the output, under the Level fader. "Sigo escuchando
 /// bajo el volumen si toco en rackforge comparado con pianoteq":
 /// measured with every fader at its centre, the Campanella's repeated-
@@ -2211,9 +2218,22 @@ const DAMPER_HORIZONTAL_GRIP_BASS: f32 = 0.3;
 /// decibels under its 30-150, and the dark burst alone had it at
 /// fifty-five. A short bright burst on the voice's action-noise path, as
 /// a share of the knock's amplitude, its corner and its ring.
-const KEYOFF_CLICK: f32 = 0.2;
-const KEYOFF_CLICK_HZ: f32 = 1200.0;
+const KEYOFF_CLICK: f32 = 0.06;
+const KEYOFF_CLICK_HZ: f32 = 700.0;
 const KEYOFF_CLICK_T60_S: f32 = 0.03;
+/// The keyboard is not the soundboard. The key-off knock used to enter
+/// the voice's sum and go through the bridge, the board and the pair's
+/// near field exactly as a string does, so it kept the tone's distance
+/// law and the board's colour (+13 dB at 100 Hz) -- "pareciera que lo
+/// estuviesen grabando cerca de las teclas": the user. The reference's
+/// pair sits 12 cm over the strings (its README), the keyboard roughly
+/// this far in front of that point; the knock is radiated from there,
+/// through the case, and reaches each capsule over its own path,
+/// `sqrt(distance^2 + KEYBED_OFFSET_M^2)`, off the capsule's axis. It
+/// goes to the room as the board's sound does. With the pair over the
+/// strings the keyboard is the farther source, and the closer the pair,
+/// the more the board wins.
+const KEYBED_OFFSET_M: f32 = 0.9;
 /// The felt's hardening exponent across the compass, before any voicing.
 ///
 /// In `F = K*x^p`, p is how sharply the felt stiffens as it is squashed, so it
@@ -3036,6 +3056,10 @@ struct Voice {
     thump_floor: f32,
     thump_c0: f32,
     thump_seed: u32,
+    /// The burst is the keyboard's, not the string's: it leaves through
+    /// `keybed_out` instead of the sum that drives the bridge.
+    thump_keybed: bool,
+    keybed_out: f32,
     pan_left: f32,
     pan_right: f32,
     /// Where on the bridge this string drives the board: the drive point
@@ -3130,6 +3154,8 @@ impl Default for Voice {
             thump_floor: 0.0,
             thump_c0: 0.0,
             thump_seed: 1,
+            thump_keybed: false,
+            keybed_out: 0.0,
             pan_left: 0.0,
             drive_index: 0,
             drive_frac: 0.0,
@@ -3161,6 +3187,7 @@ impl Voice {
     #[inline(always)]
     fn tick(&mut self, sympathy: f32) -> f32 {
         let mut sum = 0.0;
+        self.keybed_out = 0.0;
         let knob_horizontal_bridge = HORIZONTAL_BRIDGE.get();
         // The tension the string is under RIGHT NOW, taken from the partials
         // that carry the energy.
@@ -3229,7 +3256,12 @@ impl Voice {
             // end a bass one does; without this the knock is a thud at every
             // pitch — a bag being hit rather than an action working.
             self.noise_body += self.noise_body_coefficient * (self.noise_lp - self.noise_body);
-            sum += (self.noise_lp - self.noise_body) * self.noise_amp;
+            let burst = (self.noise_lp - self.noise_body) * self.noise_amp;
+            if self.thump_keybed {
+                self.keybed_out += burst;
+            } else {
+                sum += burst;
+            }
             self.noise_amp *= self.noise_decay;
             // The knock darkens as it dies: a tapped soundboard's noise is a
             // low-pass whose bandwidth contracts over time.
@@ -3259,7 +3291,12 @@ impl Voice {
             self.thump_z2 = self.thump_z1;
             self.thump_z1 = z;
             self.thump_floor += self.thump_c0 * (z - self.thump_floor);
-            sum += (z - self.thump_floor) * self.thump_amp * (1.0 - self.thump_rise);
+            let knock = (z - self.thump_floor) * self.thump_amp * (1.0 - self.thump_rise);
+            if self.thump_keybed {
+                self.keybed_out += knock;
+            } else {
+                sum += knock;
+            }
             self.thump_rise *= self.thump_rise_step;
             self.thump_amp *= self.thump_decay;
         }
@@ -3519,6 +3556,18 @@ impl Voice {
         self.thump_z2 = 0.0;
         self.thump_floor = 0.0;
         self.thump_seed = seed | 1;
+        self.thump_keybed = true;
+        {
+            let w0 = core::f32::consts::TAU * KEYOFF_CORNER_HZ / sample_rate;
+            let (sin_w0, cos_w0) = sincosf(w0);
+            let alpha = sin_w0 / (2.0 * THUMP_Q);
+            let a0 = 1.0 + alpha;
+            self.thump_b0 = (1.0 - cos_w0) * 0.5 / a0;
+            self.thump_b1 = (1.0 - cos_w0) / a0;
+            self.thump_a1 = -2.0 * cos_w0 / a0;
+            self.thump_a2 = (1.0 - alpha) / a0;
+            self.thump_c0 = 1.0 - expf(-core::f32::consts::TAU * THUMP_FLOOR_HZ / sample_rate);
+        }
         let click = amplitude * KEYOFF_CLICK;
         if click > self.noise_amp {
             self.noise_amp = click;
@@ -4107,6 +4156,9 @@ pub struct ConcertGrand {
     early_taps: [[(usize, f32); 6]; 2],
     /// The microphone chain, retuned whenever a room control moves.
     direct_gain: [f32; 2],
+    /// What each capsule hears of the keyboard, by its own path. See
+    /// `KEYBED_OFFSET_M`.
+    keybed_gain: [f32; 2],
     reverb_gain: f32,
     early_gain: f32,
     proximity_gain: [f32; 2],
@@ -4233,6 +4285,7 @@ impl Default for ConcertGrand {
             early_write: 0,
             early_taps: [[(1, 0.0); 6]; 2],
             direct_gain: [1.0; 2],
+            keybed_gain: [1.0; 2],
             reverb_gain: 1.0,
             early_gain: 0.0,
             proximity_gain: [0.0; 2],
@@ -5308,6 +5361,14 @@ impl ConcertGrand {
             let near = (MIC_REFERENCE_M.get() / direct_path).clamp(0.12, MIC_NEAR_CAP.get())
                 * MIC_PREAMP.get();
             self.direct_gain[side] = near * direct_response;
+            // The keyboard: farther by its offset, and further off the
+            // capsule's axis by the same geometry.
+            let keybed_path = sqrtf(direct_path * direct_path + KEYBED_OFFSET_M * KEYBED_OFFSET_M);
+            let keybed_response = (1.0 - b)
+                + b * (direct_response - (1.0 - b)) / b.max(1e-3) * (direct_path / keybed_path);
+            self.keybed_gain[side] = (MIC_REFERENCE_M.get() / keybed_path).min(MIC_NEAR_CAP.get())
+                * MIC_PREAMP.get()
+                * keybed_response;
             // Proximity: the pressure-gradient term rises as c/(2*pi*f*r).
             // Felt below ~ c/(2*pi*r); rendered as a 120 Hz shelf whose gain
             // follows b/r, and each capsule has its own r.
@@ -7347,6 +7408,7 @@ impl ConcertGrand {
         voice.noise_lp = 0.0;
         voice.noise_seed = 0x9E37_79B9 ^ (note as u32).wrapping_mul(2_654_435_761);
         voice.thump_amp = thump_amp;
+        voice.thump_keybed = false;
         voice.thump_decay = thump_decay;
         voice.thump_rise = 1.0;
         voice.thump_rise_step = thump_rise_step;
@@ -8799,6 +8861,8 @@ impl Processor for ConcertGrand {
             let mut strings_total = 0.0f32;
             let mut bridge_drive = 0.0f32;
             let mut drive_points = [0.0f32; BOARD_DRIVE_POINTS];
+            let mut keybed_left = 0.0f32;
+            let mut keybed_right = 0.0f32;
             for voice in &mut self.voices {
                 if !voice.active {
                     continue;
@@ -8817,6 +8881,8 @@ impl Processor for ConcertGrand {
                 let sample = voice.tick(sympathy);
                 voice.last_out = sample;
                 strings_total += sample;
+                keybed_left += voice.keybed_out * voice.pan_left;
+                keybed_right += voice.keybed_out * voice.pan_right;
                 // What drives the BODY is the bridge. The strings used to
                 // pass through a per-voice "spaced pair" -- one write read at
                 // two delays, panned, then summed -- and that sum was this
@@ -8934,6 +9000,7 @@ impl Processor for ConcertGrand {
             // not the string's own motion: the string reaches the air only
             // through the bridge and the board.
             let staged = (board_left + board_right) * knob_board_mix
+                + (keybed_left + keybed_right) * knob_board_mix
                 + (undamped_left + undamped_right) * undamped_gain
                 + (bed_left + bed_right) * bed_gain
                 + (open_left + open_right) * knob_open_mix * sympathy
@@ -9072,12 +9139,14 @@ impl Processor for ConcertGrand {
             let board_mix = knob_board_mix * self.controls.lab(14) * knob_headroom;
             let (near_left, near_right) = (self.direct_gain[0], self.direct_gain[1]);
             let mut direct_left = board_left * board_mix * near_left
+                + keybed_left * board_mix * self.keybed_gain[0]
                 + undamped_left * undamped_gain * knob_headroom * near_left
                 + bed_left * bed_gain * knob_headroom * near_left
                 + open_left * knob_open_mix * sympathy * knob_headroom
                 + halo_left * knob_headroom
                 + lid_left * air * knob_headroom;
             let mut direct_right = board_right * board_mix * near_right
+                + keybed_right * board_mix * self.keybed_gain[1]
                 + undamped_right * undamped_gain * knob_headroom * near_right
                 + bed_right * bed_gain * knob_headroom * near_right
                 + open_right * knob_open_mix * sympathy * knob_headroom

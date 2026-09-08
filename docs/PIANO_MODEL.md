@@ -860,6 +860,28 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The keyboard is not the soundboard (0.171.19).** The user, on the
+key-off knock: "no creo que esté fuerte el volumen sino que le falta
+atenuación, pareciera que lo estuviesen grabando cerca de las teclas".
+Right in the mechanism: the knock entered the voice's sum and went
+through the bridge, the board (+13 dB at 100 Hz) and the pair's near
+field exactly as a string does, so it had the tone's distance law and the
+board's colour and ring. The reference's pair sits 12 cm over the strings
+(its README) and the keyboard is the better part of a metre in front of
+that point. The knock now leaves the voice on its own bus, reaches each
+capsule over its own path, `√(distance² + 0.9²)`, off the capsule's
+axis, and goes to the room as the board's sound does; it has its own dark
+corner (200 Hz; the strike's knock climbs to 1400 at the top, the
+key-off is dark on every key in the reference), its own ring (T60 0.4 s,
+the board's gone) and a softer click. Isolated at the house pair:
+−63 to −67 dBFS, tail −9/−14/−20/−37 (reference −7/−14/−20/−30),
+30–150 / 150–300 / 300–1000 Hz at −1 to −3 / −3 to −6 / −10 to −24
+(reference −1 / −7 / −14). What physics says about distance, and the
+ear may not expect: with the pair over the strings the keyboard is the
+farther source, so the knock is weakest against the tone at a close pair
+and grows toward it as the pair backs off — six decibels from 0.5 m to
+2 m, then flat. It is the close pair that hears the least keyboard.
+
 **The knock's body under the treble (0.171.18).** The user: "noto un golpe
 más pulido y lindo en Pianoteq". Measured on the first 60 ms of the
 reference against the note's strongest partial: under a C6 at pianissimo

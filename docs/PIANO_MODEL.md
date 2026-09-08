@@ -860,6 +860,34 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The knock's body under the treble (0.171.18).** The user: "noto un golpe
+más pulido y lindo en Pianoteq". Measured on the first 60 ms of the
+reference against the note's strongest partial: under a C6 at pianissimo
+the 300–600 Hz band sits at −9 dB and 600–1000 at −7, under a C7 at −11
+and −12 — a wooden body the width of the board's mid modes, as loud as
+the tone's neighbours — where the model, its knock a 260 Hz four-pole
+for every key, had −40 and −26 under the C6 and −46 and −52 under the
+C7; and the 30–300 Hz body twenty-two decibels under the reference's at
+C6, which is the thump the ear turned down. Under a C3 the reference's
+300–600 is −13 and the model's −8: the bass wants none of it. Two
+things, both by register: the knock's corner climbs log-linearly from
+260 Hz at A0 to 1400 at C8 (`THUMP_CORNER_TOP_HZ`; the 30–300 Hz level
+the ear set does not move with it), and the knock rises over the top
+half of the compass, 24 dB at C8 at rest and 20 less per unit velocity
+(`THUMP_TREBLE_DB`, `THUMP_TREBLE_FF_DROP_DB`): the reference's knock
+against the tone falls five decibels from pianissimo to fortissimo under
+a C6 and six under a C7, and a rise flat across velocity put the model
+ten to nineteen over at fortissimo. Now C6 pp −14/−16/−14/−14 against
+the reference's −7/−13/−9/−7 in 30–150/150–300/300–600/600–1000, C6 ff
+−15/−6/−15/−11 against −12/−15/−13/−15, C7 pp −18/−21/−18/−20 against
+−13/−24/−11/−12, C7 ff −19/−20/−21/−23 against −19/−30/−21/−24. Five to
+eight short at pianissimo, the ear's margin. Also found and left: the
+pianissimo ladder is too bright in the tenor and treble (A4's fifth
+partial 20 dB over the reference at pp, C6's fourth to sixth 12 to 20
+over; the attack centroid +1.9 and +3.3 octaves at pp) — the contact's
+velocity law, which the felt exponent cannot move without wrecking the
+bass (+0.8 on the exponent: bajo 4.14 → 12.85 on the card).
+
 **Where the ear put the release, and the level (0.171.17).** Release
 Noise: the ear took the fader to −15 dB; the centre moves the 5.4 dB
 instead (`KEYOFF_KNOCK` 0.09 → 0.048), as the thump's did, so a session

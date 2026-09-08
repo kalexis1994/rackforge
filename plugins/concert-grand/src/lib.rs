@@ -2111,6 +2111,30 @@ const THUMP_RISE_TO: f32 = 0.45;
 /// the isolated knock (a render minus the same render with the action
 /// noise at its floor) at notes 72, 84, 96 and 100.
 const THUMP_CORNER_HZ: f32 = 260.0;
+/// The knock's corner climbs toward the top of the compass. Measured on the
+/// reference's first 60 ms, relative to the note's strongest partial: under
+/// a C6 at pianissimo the 300-600 Hz band sits at -9 dB and 600-1000 at
+/// -7, under a C7 at -11 and -12 -- a wooden body the width of the board's
+/// mid modes, as loud as the tone's neighbours -- where the model, with the
+/// corner at 260 Hz for every key, had -40 and -26 under the C6 and -46 and
+/// -52 under the C7. Under a C3 the reference's 300-600 is -13 and the
+/// model's -8: the bass wants none of it. So the corner runs from
+/// `THUMP_CORNER_HZ` at A0 to this at C8, log-linear in position; the
+/// 30-300 Hz level, which the ear set, does not move with it.
+const THUMP_CORNER_TOP_HZ: f32 = 1400.0;
+/// And the knock climbs in level over the top half of the compass, on top
+/// of `THUMP_RISE_DB` (which stops at C4): measured, the reference's knock
+/// under a C6 stands at -7 dB against the note's strongest partial at
+/// pianissimo and -12 at fortissimo, under a C7 at -13 and -19, where the
+/// model with the ear's level had -29 and -19, -35 and -23. The tone
+/// thins toward the top faster than the ear's thump does; this ramps
+/// from nothing at C4 to this at C8 -- less of it at a hard blow
+/// (`THUMP_TREBLE_FF_DROP_DB` per unit velocity): the reference's knock
+/// against the tone falls five decibels from pianissimo to fortissimo
+/// under a C6 and six under a C7, and with the treble rise flat across
+/// velocity the model's rose five, ten to nineteen over at fortissimo.
+const THUMP_TREBLE_DB: f32 = 24.0;
+const THUMP_TREBLE_FF_DROP_DB: f32 = 20.0;
 const THUMP_Q: f32 = 0.7;
 const THUMP_FLOOR_HZ: f32 = 30.0;
 const THUMP_NOISE_GAIN: f32 = 22.0;
@@ -6974,6 +6998,12 @@ impl ConcertGrand {
                 * sqrtf(0.30 / THUMP_T60_S.get())
                 * THUMP_BASE.get()
                 * powf(10.0, THUMP_RISE_DB.get() * position.min(THUMP_RISE_TO) / 20.0)
+                * powf(
+                    10.0,
+                    (THUMP_TREBLE_DB - THUMP_TREBLE_FF_DROP_DB * velocity)
+                        * ((position - 0.5) / 0.5).clamp(0.0, 1.0)
+                        / 20.0,
+                )
                 * Controls::noise_gain(self.controls.action_noise)
                 * self.controls.lab(2)
                 * self.cal(note, 2);
@@ -7327,8 +7357,9 @@ impl ConcertGrand {
         voice.thump_z1 = 0.0;
         voice.thump_z2 = 0.0;
         {
-            // RBJ low-pass at THUMP_CORNER_HZ with quality THUMP_Q.
-            let w0 = core::f32::consts::TAU * THUMP_CORNER_HZ / sample_rate;
+            // RBJ low-pass at the register's corner with quality THUMP_Q.
+            let corner = THUMP_CORNER_HZ * powf(THUMP_CORNER_TOP_HZ / THUMP_CORNER_HZ, position);
+            let w0 = core::f32::consts::TAU * corner / sample_rate;
             let (sin_w0, cos_w0) = sincosf(w0);
             let alpha = sin_w0 / (2.0 * THUMP_Q);
             let a0 = 1.0 + alpha;

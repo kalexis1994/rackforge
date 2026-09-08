@@ -710,9 +710,15 @@ textarea {
   border-color: var(--acid);
 }
 
-/* An effect's own panel, in the drawer: a fixed band the grip can grow. */
+/* An effect's own panel, in the drawer: a band as tall as the panel's
+   content, read from its document; when the screen is too short for the
+   whole drawer, the drawer scrolls rather than cut the panel. */
+.play-chain-drawer.with-panel .play-chain-panel {
+  overflow-y: auto;
+}
+
 .play-chain-effect-panel {
-  height: 380px;
+  flex: 0 0 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;

@@ -23,20 +23,62 @@ import {
 import { PluginIcon } from "./PluginIcon";
 
 const HEIGHT_STORAGE_KEY = "rackforge.play.chain-height.v1";
+/** The height the player chose with an effect's panel open: its own memory. */
+const PANEL_HEIGHT_STORAGE_KEY = "rackforge.play.chain-height-panel.v1";
 /** The head and the grip alone. */
 const MINIMUM_HEIGHT = 64;
 /** What the plugin keeps below the drawer at the drawer's tallest. */
 const STAGE_MINIMUM = 160;
+/** With an effect's panel open the drawer may take nearly everything: the
+ * panel is shown whole and it is the instrument that is pushed down. */
+const STAGE_SLIVER = 40;
+/** An effect's panel is never shorter than this. */
+const PANEL_MINIMUM = 380;
+/** How often an open panel's content height is read back from its document. */
+const PANEL_MEASURE_MS = 400;
 /** A close whose `transitionend` never came (a hidden tab, a 0 ms motion) still settles. */
 const SETTLE_FALLBACK_MS = 600;
 
-function storedHeight(): number | undefined {
+function storedHeight(key: string): number | undefined {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(HEIGHT_STORAGE_KEY) ?? "null");
+    const stored = JSON.parse(window.localStorage.getItem(key) ?? "null");
     return typeof stored === "number" && Number.isFinite(stored) ? stored : undefined;
   } catch {
     return undefined;
   }
+}
+
+function storeHeight(key: string, height: number | undefined) {
+  try {
+    if (height === undefined) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, JSON.stringify(height));
+  } catch {
+    // Persistent sizing is optional in hardened or ephemeral WebViews.
+  }
+}
+
+/**
+ * The height a plugin's surface wants: its document's content, not the
+ * viewport it was given. A surface that fills its window (`html, body
+ * { height: 100% }`) reports the window back as its scrollHeight, so the
+ * body's children are summed instead -- a scrolling `main` inside such a
+ * surface reports its whole content that way. Same-origin, so readable.
+ */
+function surfaceContentHeight(frame: HTMLIFrameElement | null): number | null {
+  const body = frame?.contentDocument?.body;
+  const view = frame?.contentWindow;
+  if (!body || !view || body.children.length === 0) return null;
+  const style = view.getComputedStyle(body);
+  let children = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  for (const child of body.children) {
+    if (child.tagName === "SCRIPT" || child.tagName === "STYLE") continue;
+    const childStyle = view.getComputedStyle(child);
+    children +=
+      child.scrollHeight
+      + (parseFloat(childStyle.marginTop) || 0)
+      + (parseFloat(childStyle.marginBottom) || 0);
+  }
+  return Math.ceil(Math.max(children, body.scrollHeight));
 }
 
 type Phase = "closed" | "open" | "closing";
@@ -97,7 +139,12 @@ export function PlayChainDrawer({
     setSettled(false);
   }
   const phase: Phase = open ? "open" : settled ? "closed" : "closing";
-  const [chosenHeight, setChosenHeight] = useState<number | undefined>(storedHeight);
+  const [chosenHeight, setChosenHeight] = useState<number | undefined>(() =>
+    storedHeight(HEIGHT_STORAGE_KEY));
+  const [chosenPanelHeight, setChosenPanelHeight] = useState<number | undefined>(() =>
+    storedHeight(PANEL_HEIGHT_STORAGE_KEY));
+  const [panelHeight, setPanelHeight] = useState(PANEL_MINIMUM);
+  const bandRef = useRef<HTMLDivElement | null>(null);
   const [naturalHeight, setNaturalHeight] = useState(MINIMUM_HEIGHT);
   const [maximumHeight, setMaximumHeight] = useState(Number.POSITIVE_INFINITY);
   const [resizing, setResizing] = useState(false);
@@ -113,32 +160,62 @@ export function PlayChainDrawer({
   // The automatic height is the content's own; the ceiling leaves the
   // plugin its minimum. Both are re-measured when the content or the
   // window changes.
+  const panelOpen = effectPanel != null;
   const measure = useCallback(() => {
     const content = contentRef.current;
     const host = hostRef.current;
     if (content) setNaturalHeight(Math.max(MINIMUM_HEIGHT, content.scrollHeight + GRIP_HEIGHT));
     const shell = host?.parentElement;
     if (shell) {
-      setMaximumHeight(Math.max(MINIMUM_HEIGHT, shell.clientHeight - STAGE_MINIMUM));
+      // The shell is the toolbar, this row and the stage: the ceiling is
+      // what the toolbar leaves, less the strip the stage keeps.
+      const toolbar = host.previousElementSibling?.clientHeight ?? 0;
+      const stage = panelOpen ? STAGE_SLIVER : STAGE_MINIMUM;
+      setMaximumHeight(Math.max(MINIMUM_HEIGHT, shell.clientHeight - toolbar - stage));
     }
-  }, []);
-  useLayoutEffect(measure, [measure, chain, plugins, suggested, open, pickerOpen, openEffectId]);
+  }, [panelOpen]);
+  useLayoutEffect(measure, [
+    measure,
+    chain,
+    plugins,
+    suggested,
+    open,
+    pickerOpen,
+    openEffectId,
+    panelHeight,
+  ]);
+  // An open panel is shown whole: its document's content height is read
+  // back while it is open (it changes as the surface loads, and as the
+  // player changes what it shows), and the band follows.
+  useEffect(() => {
+    if (!panelOpen) return;
+    const read = () => {
+      const measured = surfaceContentHeight(bandRef.current?.querySelector("iframe") ?? null);
+      if (measured === null) return;
+      const next = Math.max(PANEL_MINIMUM, measured);
+      setPanelHeight((current) => (Math.abs(current - next) > 2 ? next : current));
+    };
+    read();
+    const timer = window.setInterval(read, PANEL_MEASURE_MS);
+    return () => window.clearInterval(timer);
+  }, [panelOpen, openEffectId]);
   useEffect(() => {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [measure]);
-  useEffect(() => {
-    try {
-      if (chosenHeight === undefined) window.localStorage.removeItem(HEIGHT_STORAGE_KEY);
-      else window.localStorage.setItem(HEIGHT_STORAGE_KEY, JSON.stringify(chosenHeight));
-    } catch {
-      // Persistent sizing is optional in hardened or ephemeral WebViews.
-    }
-  }, [chosenHeight]);
+  useEffect(() => storeHeight(HEIGHT_STORAGE_KEY, chosenHeight), [chosenHeight]);
+  useEffect(
+    () => storeHeight(PANEL_HEIGHT_STORAGE_KEY, chosenPanelHeight),
+    [chosenPanelHeight],
+  );
 
   const clampHeight = (height: number) =>
     Math.min(maximumHeight, Math.max(MINIMUM_HEIGHT, height));
-  const height = clampHeight(chosenHeight ?? naturalHeight);
+  // With a panel open the drawer has its own chosen height, so the height
+  // the player likes for the bare chain never cuts a panel short.
+  const chosen = panelOpen ? chosenPanelHeight : chosenHeight;
+  const setChosen = panelOpen ? setChosenPanelHeight : setChosenHeight;
+  const height = clampHeight(chosen ?? naturalHeight);
 
   const beginResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
@@ -154,7 +231,7 @@ export function PlayChainDrawer({
     event.preventDefault();
     event.stopPropagation();
     // The grip is on the drawer's lower edge: dragging down grows it.
-    setChosenHeight(clampHeight(gesture.height + event.clientY - gesture.startY));
+    setChosen(clampHeight(gesture.height + event.clientY - gesture.startY));
   };
   const finishResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (gestureRef.current?.pointerId !== event.pointerId) return;
@@ -171,7 +248,7 @@ export function PlayChainDrawer({
     if (!direction) return;
     event.preventDefault();
     event.stopPropagation();
-    setChosenHeight(clampHeight(height + direction * (event.shiftKey ? 40 : 10)));
+    setChosen(clampHeight(height + direction * (event.shiftKey ? 40 : 10)));
   };
 
   const available = effectPlugins(plugins, instances);
@@ -183,7 +260,9 @@ export function PlayChainDrawer({
   return (
     <div
       ref={hostRef}
-      className={`play-chain-drawer ${phase}${resizing ? " resizing" : ""}`}
+      className={`play-chain-drawer ${phase}${resizing ? " resizing" : ""}${
+        panelOpen ? " with-panel" : ""
+      }`}
       style={{ "--play-chain-height": `${height}px` } as CSSProperties}
       onTransitionEnd={(event) => {
         if (event.target === event.currentTarget && event.propertyName === "height" && !open) {
@@ -338,7 +417,11 @@ export function PlayChainDrawer({
             )}
           </div>
         ) : null}
-        {effectPanel ? <div className="play-chain-effect-panel">{effectPanel}</div> : null}
+        {effectPanel ? (
+          <div ref={bandRef} className="play-chain-effect-panel" style={{ height: panelHeight }}>
+            {effectPanel}
+          </div>
+        ) : null}
         {suggestions.length > 0 ? (
           <div className="play-chain-suggested">
             <small>{instrumentName} suggests</small>
@@ -390,7 +473,7 @@ export function PlayChainDrawer({
         }}
         onDoubleClick={(event) => {
           event.preventDefault();
-          setChosenHeight(undefined);
+          setChosen(undefined);
         }}
         onKeyDown={resizeWithKeyboard}
       >

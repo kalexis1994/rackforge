@@ -2071,7 +2071,10 @@ pub static THUMP_VELOCITY_POWER: Knob = Knob::new(3.0);
 /// corrigió" -- which is the same -11.6 dB again, off the recentred 0.24.
 /// Twice is a measurement of the listener: what the close pair hears as
 /// the keybed, a player wants twenty-three decibels under.
-pub static THUMP_BASE: Knob = Knob::new(0.063);
+///
+/// 0.2 since 0.171.17: with the release at -15 the ear asked the thump
+/// ten decibels back up -- "el thump podes subirle 10".
+pub static THUMP_BASE: Knob = Knob::new(0.2);
 /// ... rising by this much at C8. Measured: the reference's knock stands
 /// -26 dB under a C2's attack, -20 under a C3, -14 under a C4, -8 under a
 /// C6 and a C7 -- the mechanism is the same size everywhere and the tone
@@ -3615,7 +3618,7 @@ impl Default for Controls {
             mic_distance: 0.6598,
             mic_pattern: 0.6,
             action_noise: -5.298128,
-            release_noise: -9.63296,
+            release_noise: -15.0,
             pedal_noise: 0.0,
             // The subtle level the user's ear chose, eleven and a half
             // decibels under the calibrated burst.

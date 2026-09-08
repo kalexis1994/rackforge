@@ -511,7 +511,7 @@
         "minimum": -24.082401275634766,
         "maximum": 24.082401275634766,
         "step": 0.240824,
-        "default": -9.632960319519043,
+        "default": -15.0,
         "taper": "linear",
         "unit": "dB"
       }
@@ -3536,10 +3536,10 @@
       "order": 39,
       "kind": {
         "type": "float",
-        "minimum": 0.0039375,
-        "maximum": 1.008,
-        "step": 0.00063,
-        "default": 0.063,
+        "minimum": 0.0125,
+        "maximum": 3.2,
+        "step": 0.00199,
+        "default": 0.2,
         "taper": "logarithmic"
       },
       "flags": {

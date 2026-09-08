@@ -2216,10 +2216,10 @@
       "order": 8,
       "kind": {
         "type": "float",
-        "minimum": 0.28125,
-        "maximum": 72.0,
-        "step": 0.0448,
-        "default": 4.5,
+        "minimum": 0.140625,
+        "maximum": 36.0,
+        "step": 0.0224,
+        "default": 2.25,
         "taper": "logarithmic"
       },
       "flags": {

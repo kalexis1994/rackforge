@@ -2143,7 +2143,11 @@ const PEDAL_NOISE_T60_S: f32 = 1.0;
 /// with this level at release velocity 64 and this ring, on every key.
 /// `KEYOFF_KNOCK` is calibrated on the isolated knock (a render minus the
 /// same render with Release Noise at its floor) at E6, F#6 and C4.
-const KEYOFF_KNOCK: f32 = 0.28;
+/// 0.28 put the isolated knock on the reference's -54 dBFS; the user's
+/// ear -- "hay que bajarle al noise mecánico del release" -- takes ten
+/// decibels off it, the close pair's keyboard against the player's, as
+/// with the thump.
+const KEYOFF_KNOCK: f32 = 0.09;
 const KEYOFF_T60_S: f32 = 0.22;
 /// The click in the key-off: the reference's 1-3 kHz sits thirty-three
 /// decibels under its 30-150, and the dark burst alone had it at
@@ -2661,7 +2665,10 @@ pub static UNDAMPED_HIGH_HZ: Knob = Knob::new(7000.0);
 /// Undamped, but not endless: these are short, light, well-terminated lengths.
 pub static UNDAMPED_T60_LOW_S: Knob = Knob::new(2.6);
 pub static UNDAMPED_T60_HIGH_S: Knob = Knob::new(0.9);
-pub static UNDAMPED_MIX: Knob = Knob::new(4.5);
+/// 4.5 landed the residue after a key-up on the reference's release
+/// resonance within five decibels; the ear heard "una resonancia rara al
+/// soltar" and six decibels come off, the same discount.
+pub static UNDAMPED_MIX: Knob = Knob::new(2.25);
 
 /// The damped strings, ringing anyway: the bed under every note.
 ///

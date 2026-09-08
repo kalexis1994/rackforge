@@ -3170,7 +3170,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 Ok(()) => {
                     if mode == rackforge_session_api::SurfaceMode::Play
                         && let Some(active) = snapshot.active_instance_id.as_ref()
-                        && let Err(failure) = apply_play_chain_of(context, snapshot, active)
+                        && let Err(failure) = apply_play_chain_of(context, &snapshot, active)
                     {
                         return failure.into_response();
                     }
@@ -3251,7 +3251,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 Ok(()) => {
                     // The chain is the instrument's: the one that just left
                     // takes its effects with it, the new one brings its own.
-                    if let Err(failure) = apply_play_chain_of(context, snapshot, &instance_id) {
+                    if let Err(failure) = apply_play_chain_of(context, &snapshot, &instance_id) {
                         return failure.into_response();
                     }
                     record_command_event(

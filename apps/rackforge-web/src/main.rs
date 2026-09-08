@@ -3120,7 +3120,11 @@ mod tests {
         let (auth, path) = fresh_auth();
         auth.set_pin("4271", None).unwrap();
         let text = fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("4271"), "the PIN itself is not on disk");
+        // Quoted: the salt and the hash are random text, and a bare search
+        // for four digits in them is a lottery this test used to lose about
+        // once in a few hundred runs. Stored in the clear, the PIN would be
+        // a JSON string, and that is what this looks for.
+        assert!(!text.contains("\"4271\""), "the PIN itself is not on disk");
         let stored: AuthStore = serde_json::from_str(&text).unwrap();
         let pin = stored.pin.unwrap();
         assert_eq!(pin.rounds, PIN_ROUNDS);

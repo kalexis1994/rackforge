@@ -66,6 +66,9 @@ pub struct AudioEngine {
     /// Silence handed to instruments, which take no audio input.
     input: Vec<f32>,
     output: Vec<f32>,
+    /// What the stage before an effect wrote, so each one reads a whole
+    /// block while writing over the same output.
+    chain_scratch: Vec<f32>,
     midi: Vec<MidiEventV1>,
     parameters: Vec<ParameterEventV1>,
     level: Smoothed,
@@ -89,6 +92,7 @@ impl AudioEngine {
             channels,
             input: Vec::new(),
             output: vec![0.0; samples],
+            chain_scratch: vec![0.0; samples],
             midi: Vec::with_capacity(MIDI_QUEUE_CAPACITY),
             parameters: Vec::with_capacity(PARAMETER_QUEUE_CAPACITY),
             level: Smoothed::new(level.amplitude()),
@@ -151,6 +155,18 @@ impl AudioEngine {
     /// previous block's contents: a repeated buffer is far more unpleasant
     /// than a gap.
     pub fn render(&mut self, request: RenderRequest, instance: &mut PluginInstance<'_>) -> &[f32] {
+        self.render_through(request, instance, &mut [])
+    }
+
+    /// The instrument, then every effect of the PLAY chain in order, then
+    /// master level and balance. An effect that fails is passed by, not
+    /// silenced: the note keeps playing without it.
+    pub fn render_through(
+        &mut self,
+        request: RenderRequest,
+        instance: &mut PluginInstance<'_>,
+        chain: &mut [&mut PluginInstance<'_>],
+    ) -> &[f32] {
         let frames = request.frames.min(self.maximum_frames);
         let samples = self.block_samples(request);
         self.midi.sort_by_key(|event| event.frame);
@@ -172,6 +188,25 @@ impl AudioEngine {
         if rendered.is_err() {
             self.output[..samples].fill(0.0);
             return &self.output[..samples];
+        }
+
+        // Each effect reads what the stage before it wrote. Effects take no
+        // MIDI: they are not played, they are passed through.
+        for effect in chain.iter_mut() {
+            self.chain_scratch.resize(samples, 0.0);
+            self.chain_scratch[..samples].copy_from_slice(&self.output[..samples]);
+            let processed = effect.process_interleaved(
+                &self.chain_scratch[..samples],
+                &mut self.output[..samples],
+                frames,
+                self.channels,
+                self.channels,
+                &[],
+                &[],
+            );
+            if processed.is_err() {
+                self.output[..samples].copy_from_slice(&self.chain_scratch[..samples]);
+            }
         }
 
         let channels = self.channels as usize;

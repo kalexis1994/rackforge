@@ -105,11 +105,21 @@ struct HostedPlugin {
     managed: bool,
 }
 
+/// One effect of the PLAY chain, built and ready to render.
+struct ChainVoice {
+    /// `<instrument instance>.fx.<effect id>`: what a panel addresses.
+    instance_id: InstanceId,
+    instance: PluginInstance<'static>,
+    enabled: bool,
+}
+
 pub struct BrowserHost {
     /// How the page opened its output, kept so plugins loaded later can be
     /// activated the same way the first ones were.
     stream: StreamFormat,
     store: SessionStore,
+    /// The effects after the instrument on stage, in the order they play.
+    chain: Vec<ChainVoice>,
     /// Where the session is written after every change, so the next visit
     /// opens on the instrument, program and mix that were left playing.
     checkpoint: SessionCheckpointStore,
@@ -217,14 +227,21 @@ impl BrowserHost {
         }
         let instances: Vec<PluginInstanceState> =
             plugins.iter().map(session_instance_state).collect();
+        // PLAY opens on an instrument. The effects are loaded beside them,
+        // for the chain, and are never what the page starts playing.
+        let instruments: Vec<PluginInstanceState> = instances
+            .iter()
+            .filter(|instance| !instance.effect)
+            .cloned()
+            .collect();
         let restored_instance = checkpoint
             .active_instance_id(&session_id)
             .ok()
             .flatten()
             .and_then(|id| InstanceId::new(id).ok())
-            .filter(|id| instances.iter().any(|instance| instance.instance_id == *id));
+            .filter(|id| instruments.iter().any(|instance| instance.instance_id == *id));
         let active_instance_id = restored_instance.or_else(|| {
-            rackforge_core::choose_opening_instrument(&instances, |instance| {
+            rackforge_core::choose_opening_instrument(&instruments, |instance| {
                 instance.plugin_id.as_str()
             })
             .map(|instance| instance.instance_id.clone())
@@ -253,7 +270,7 @@ impl BrowserHost {
             audition: None,
             program_draft: None,
             parameter_links: Vec::new(),
-            play_chains: Vec::new(),
+            play_chains: checkpoint.play_chains(&session_id).unwrap_or_default(),
             session_id,
         };
 
@@ -272,6 +289,7 @@ impl BrowserHost {
         let mut host = Self {
             stream,
             checkpoint,
+            chain: Vec::new(),
             store: SessionStore::new(session)?,
             performance,
             sequencer,
@@ -291,6 +309,17 @@ impl BrowserHost {
             warnings,
         };
         host.rebuild_parameter_links()?;
+        // The chain the last visit left after the instrument now on stage.
+        if let Some(chain) = host
+            .store
+            .state()
+            .active_instance_id
+            .clone()
+            .and_then(|id| host.store.state().play_chain(&id).cloned())
+            && let Err(failure) = host.build_chain(&chain)
+        {
+            eprintln!("PLAY_CHAIN_RESTORE_FAILED reason={}", failure.message);
+        }
         host.sync_controller();
         host.save_checkpoint();
         Ok(host)
@@ -793,7 +822,109 @@ impl BrowserHost {
         })
     }
 
+    /// The chain's effects, built and activated in the order they play.
+    ///
+    /// Each one is a fresh instance of its plugin: the same effect may sit in
+    /// a chain twice, on its own program and its own settings.
+    fn build_chain(&mut self, chain: &rackforge_session_api::PlayChainState) -> Result<(), Failure> {
+        let mut voices = Vec::with_capacity(chain.effects.len());
+        for effect in &chain.effects {
+            let instance_id = chain
+                .effect_instance_id(&effect.id)
+                .map_err(|message| Failure::new(ControlErrorCode::Rejected, message))?;
+            let Some(plugin) = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == effect.plugin_id)
+            else {
+                // A chain restored from a visit where the effect was installed
+                // and this one where it is not: the rest still plays.
+                eprintln!(
+                    "PLAY_CHAIN_EFFECT_SKIPPED effect={} plugin={} reason=not_loaded",
+                    effect.id, effect.plugin_id
+                );
+                continue;
+            };
+            let mut instance = plugin
+                .runtime
+                .create_instance()
+                .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+            if let Some(program_id) = effect.program_id.as_deref()
+                && let Err(error) = instance.load_preset(program_id)
+            {
+                eprintln!(
+                    "PLAY_CHAIN_PROGRAM_SKIPPED effect={} program={program_id} reason={error:#}",
+                    effect.id
+                );
+            }
+            let audio = plugin.runtime.manifest().resolved_audio_contract();
+            instance
+                .activate(
+                    self.stream.sample_rate_hz,
+                    self.stream.maximum_frames,
+                    audio.input_channels(),
+                    self.stream.channels,
+                )
+                .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+            voices.push(ChainVoice {
+                instance_id,
+                instance,
+                enabled: effect.enabled,
+            });
+        }
+        self.chain = voices;
+        Ok(())
+    }
+
+    /// The plugin an effect of the chain is an instance of, and where its
+    /// voice sits: a panel addresses the voice, whose schema is its plugin's.
+    fn chain_voice_mut(
+        &mut self,
+        instance_id: &InstanceId,
+    ) -> Option<(&'static LoadedPlugin, &mut PluginInstance<'static>)> {
+        let position = self
+            .chain
+            .iter()
+            .position(|effect| effect.instance_id == *instance_id)?;
+        let plugin_id = self
+            .store
+            .state()
+            .play_chain_effect_owner(instance_id)
+            .and_then(|owner| self.store.state().play_chain(owner))
+            .and_then(|chain| {
+                chain
+                    .effects
+                    .iter()
+                    .find(|effect| {
+                        chain.effect_instance_id(&effect.id).as_ref() == Ok(instance_id)
+                    })
+                    .map(|effect| effect.plugin_id.clone())
+            })?;
+        let runtime = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)?
+            .runtime;
+        Some((runtime, &mut self.chain[position].instance))
+    }
+
     fn plugin_parameters(&mut self, instance_id: &InstanceId) -> Result<ControlResponse, Failure> {
+        if let Some((runtime, instance)) = self.chain_voice_mut(instance_id) {
+            let schema = runtime.parameters().clone();
+            let mut values = Vec::with_capacity(schema.parameters.len());
+            for parameter in &schema.parameters {
+                let index = parameter.index;
+                let value = instance.get_parameter(index).map_err(|error| {
+                    Failure::new(ControlErrorCode::Internal, format!("{error:#}"))
+                })?;
+                values.push(PluginParameterValue { index, value });
+            }
+            return Ok(ControlResponse::PluginParameters {
+                instance_id: instance_id.clone(),
+                schema: Box::new(schema),
+                values,
+            });
+        }
         let plugin = self.plugin_mut(instance_id)?;
         let schema = plugin.runtime.parameters().clone();
         let mut values = Vec::with_capacity(schema.parameters.len());
@@ -818,6 +949,23 @@ impl BrowserHost {
         parameter_index: u32,
         value: f64,
     ) -> Result<ControlResponse, Failure> {
+        // An effect of the chain takes the write in its own voice. Its value
+        // is not kept in the live-parameter store: that store is per plugin,
+        // and a chain may hold the same effect twice on different settings.
+        if let Some((runtime, instance)) = self.chain_voice_mut(instance_id) {
+            let value = rackforge_core::set_plugin_parameter(
+                runtime,
+                instance,
+                parameter_index,
+                value,
+            )
+            .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+            return Ok(ControlResponse::PluginParameterSet {
+                instance_id: instance_id.clone(),
+                parameter_index,
+                value,
+            });
+        }
         let index = self
             .plugins
             .iter()
@@ -1054,6 +1202,13 @@ impl BrowserHost {
             SessionCommand::SelectPlugin { instance_id } => {
                 self.plugin_mut(&instance_id)?;
                 self.audio.silence();
+                // The instrument that leaves takes its effects with it, and
+                // the one arriving brings its own.
+                let chain = self.store.state().play_chain(&instance_id).cloned();
+                match chain {
+                    Some(chain) => self.build_chain(&chain)?,
+                    None => self.chain.clear(),
+                }
                 SessionEvent::ActiveInstanceChanged { instance_id }
             }
             SessionCommand::SelectSound {
@@ -1073,6 +1228,40 @@ impl BrowserHost {
                     instance_id,
                     sound_id,
                 }
+            }
+            SessionCommand::SetPlayChain {
+                instrument_id,
+                effects,
+            } => {
+                let chain = rackforge_session_api::PlayChainState {
+                    instrument_id,
+                    effects,
+                };
+                chain
+                    .validate()
+                    .map_err(|message| Failure::new(ControlErrorCode::Rejected, message))?;
+                for effect in &chain.effects {
+                    let Some(plugin) = self
+                        .plugins
+                        .iter()
+                        .find(|plugin| plugin.plugin_id == effect.plugin_id)
+                    else {
+                        return Err(Failure::new(
+                            ControlErrorCode::NotFound,
+                            format!("unknown plugin {}", effect.plugin_id),
+                        ));
+                    };
+                    if plugin.runtime.manifest().kind != PluginKind::Effect {
+                        return Err(Failure::new(
+                            ControlErrorCode::Rejected,
+                            format!("{} is not an effect plugin", effect.plugin_id),
+                        ));
+                    }
+                }
+                if self.store.state().active_instance_id.as_ref() == Some(&chain.instrument_id) {
+                    self.build_chain(&chain)?;
+                }
+                SessionEvent::PlayChainChanged { chain }
             }
             SessionCommand::UpsertParameterLink { link } => {
                 let plugin = self
@@ -1761,12 +1950,18 @@ impl BrowserHost {
         prefer_installed(&mut plugins);
         let instances: Vec<PluginInstanceState> =
             plugins.iter().map(session_instance_state).collect();
+        // As at boot: the stage is an instrument's, effects are for the chain.
+        let instruments: Vec<PluginInstanceState> = instances
+            .iter()
+            .filter(|instance| !instance.effect)
+            .cloned()
+            .collect();
         let previous_active_instance_id = previous.active_instance_id.clone();
         let active_instance_id = previous_active_instance_id
             .clone()
-            .filter(|id| instances.iter().any(|instance| instance.instance_id == *id))
+            .filter(|id| instruments.iter().any(|instance| instance.instance_id == *id))
             .or_else(|| {
-                rackforge_core::choose_opening_instrument(&instances, |instance| {
+                rackforge_core::choose_opening_instrument(&instruments, |instance| {
                     instance.plugin_id.as_str()
                 })
                 .map(|instance| instance.instance_id.clone())
@@ -2226,7 +2421,15 @@ impl BrowserHost {
             return self.audio.render_silence(request);
         };
         let plugin = &mut self.plugins[index];
-        self.audio.render(request, &mut plugin.instance)
+        // The instrument, then the effects that are on, in order.
+        let mut chain: Vec<&mut PluginInstance<'static>> = self
+            .chain
+            .iter_mut()
+            .filter(|effect| effect.enabled)
+            .map(|effect| &mut effect.instance)
+            .collect();
+        self.audio
+            .render_through(request, &mut plugin.instance, &mut chain)
     }
 
     fn flush_live_parameters(&mut self, force: bool) {
@@ -2475,9 +2678,14 @@ fn manifest_roots(directory: &Path) -> Result<Vec<PathBuf>> {
 fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<HostedPlugin> {
     let managed = root.starts_with(data_root.join(STORE_DIRECTORY));
     let package = PluginPackage::open(root)?;
-    if package.manifest().kind != PluginKind::Instrument {
+    // Instruments to play and effects to play through: the chain is part of
+    // PLAY here as it is on the other hosts. Anything else is refused.
+    if !matches!(
+        package.manifest().kind,
+        PluginKind::Instrument | PluginKind::Effect
+    ) {
         bail!(
-            "the browser host currently plays instruments, found {:?}",
+            "the browser host plays instruments through effects, found {:?}",
             package.manifest().kind
         );
     }

@@ -439,4 +439,41 @@ for (const capability of declared.capabilities ?? []) {
 }
 
 trail("every probe returned");
+
+// PLAY plays through its effects here as it does on the other hosts: the
+// chain the FX drawer edits has to load, apply and reach the effect's own
+// parameters. The page had none of this while the host refused every
+// package that was not an instrument.
+trail("probe the PLAY chain");
+const catalog = JSON.parse(readResponse(host.rf_plugin_catalog())).catalog ?? [];
+const effect = catalog.find((plugin) => plugin.kind === "effect");
+check("an effect plugin is loaded", Boolean(effect), "the catalog holds no effect");
+if (effect) {
+  const applied = dispatch({
+    type: "set_play_chain",
+    instrument_id: instanceId,
+    effects: [{ id: "fx-1", plugin_id: effect.plugin_id, enabled: true }],
+  });
+  check(
+    "PLAY takes a chain of effects",
+    applied.status === "command_applied",
+    applied.message,
+  );
+  const parameters = request({
+    op: "plugin_parameters",
+    instance_id: `${instanceId}.fx.fx-1`,
+  });
+  check(
+    "the effect in the chain has its own parameters",
+    parameters.status === "plugin_parameters" && (parameters.values?.length ?? 0) > 0,
+    parameters.message,
+  );
+  const cleared = dispatch({
+    type: "set_play_chain",
+    instrument_id: instanceId,
+    effects: [],
+  });
+  check("the chain can be taken away", cleared.status === "command_applied", cleared.message);
+}
+
 process.exit(failures.length === 0 ? 0 : 1);

@@ -445,6 +445,17 @@ pub struct PluginMidiContract {
     pub program_change: MidiProgramChangePolicy,
 }
 
+/// One effect an instrument suggests after itself in the PLAY chain: a
+/// plugin id and, optionally, the preset to open it on. The host offers
+/// the entries the player has installed and names the ones they have not.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuggestedChainEntry {
+    pub plugin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
@@ -487,6 +498,12 @@ pub struct PluginManifest {
     pub component: Option<PortableComponent>,
     #[serde(default)]
     pub binaries: BTreeMap<String, String>,
+    /// The effects this instrument would like after itself in PLAY, in
+    /// order. Instruments only; a host older than the field refuses the
+    /// package outright (the manifest denies unknown fields), so a plugin
+    /// adds it once every host it ships to reads it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suggested_chain: Vec<SuggestedChainEntry>,
 }
 
 impl PluginManifest {
@@ -506,6 +523,17 @@ impl PluginManifest {
             .map_err(|_| ManifestError::InvalidPluginId(self.id.clone()))?;
         if self.name.trim().is_empty() {
             return Err(ManifestError::EmptyField("name"));
+        }
+        if !self.suggested_chain.is_empty() && self.kind != PluginKind::Instrument {
+            return Err(ManifestError::SuggestedChainRequiresInstrument);
+        }
+        for (position, entry) in self.suggested_chain.iter().enumerate() {
+            if validate_identifier(&entry.plugin, true).is_err() || entry.plugin == self.id {
+                return Err(ManifestError::InvalidSuggestedChainEntry(entry.plugin.clone()));
+            }
+            if self.suggested_chain[..position].iter().any(|earlier| earlier.plugin == entry.plugin) {
+                return Err(ManifestError::DuplicateSuggestedChainEntry(entry.plugin.clone()));
+            }
         }
         if self.schema_version >= 3 && self.short_name.is_none() {
             return Err(ManifestError::MissingShortName);
@@ -905,6 +933,12 @@ pub enum ManifestError {
     UnsupportedRuntimeSchema(u32),
     #[error("invalid plugin id {0:?}")]
     InvalidPluginId(String),
+    #[error("only an instrument may suggest a chain")]
+    SuggestedChainRequiresInstrument,
+    #[error("suggested chain entry must name another plugin: {0:?}")]
+    InvalidSuggestedChainEntry(String),
+    #[error("suggested chain names {0:?} twice")]
+    DuplicateSuggestedChainEntry(String),
     #[error("{0} must not be empty")]
     EmptyField(&'static str),
     #[error("invalid semantic version {0:?}")]
@@ -1015,12 +1049,35 @@ mod tests {
             audio: None,
             component: None,
             binaries: BTreeMap::from([("linux-aarch64".into(), "lib/librackforge_gain.so".into())]),
+            suggested_chain: Vec::new(),
         }
     }
 
     #[test]
     fn validates_a_well_formed_manifest() {
         assert_eq!(manifest().validate(), Ok(()));
+    }
+
+    #[test]
+    fn an_instrument_may_suggest_its_chain() {
+        let mut candidate = manifest();
+        candidate.suggested_chain = vec![SuggestedChainEntry {
+            plugin: "org.rackforge.limiter".into(),
+            preset: Some("Stage".into()),
+        }];
+        assert_eq!(candidate.validate(), Err(ManifestError::SuggestedChainRequiresInstrument));
+        candidate.kind = PluginKind::Instrument;
+        candidate.capabilities = vec![Capability::MidiInput, Capability::AudioOutput];
+        assert_eq!(candidate.validate(), Ok(()));
+        candidate.suggested_chain.push(SuggestedChainEntry {
+            plugin: "org.rackforge.limiter".into(),
+            preset: None,
+        });
+        assert!(matches!(candidate.validate(), Err(ManifestError::DuplicateSuggestedChainEntry(_))));
+        candidate.suggested_chain[1].plugin = candidate.id.clone();
+        assert!(matches!(candidate.validate(), Err(ManifestError::InvalidSuggestedChainEntry(_))));
+        let text = toml::to_string(&manifest()).expect("serialises");
+        assert!(!text.contains("suggested_chain"), "an empty chain is not written: {text}");
     }
 
     #[test]

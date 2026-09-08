@@ -75,6 +75,9 @@ import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import { ModalDialog } from "./components/ModalDialog";
 import { ParameterLinkHost } from "./components/ParameterLinkHost";
 import { ToggleSwitch } from "./components/ToggleSwitch";
+import { PluginIcon } from "./components/PluginIcon";
+import { PlayChainDrawer } from "./components/PlayChainDrawer";
+import { readStoredChain, storeChain, type PlayChain } from "./playChain";
 import { AsyncNotice, AsyncStateBoundary } from "./components/AsyncStateBoundary";
 import { RfButton } from "./ui/RfButton";
 import { useSurfaceTransition } from "./ui/useSurfaceTransition";
@@ -200,24 +203,6 @@ function BrandMark() {
           <path d="M720 174L762 200L720 226Z" fill="var(--mark-arm)" stroke="none" />
         </g>
       </svg>
-    </span>
-  );
-}
-
-function PluginIcon({
-  plugin,
-  name,
-  className = "plugin-icon",
-}: {
-  plugin?: PluginWebDescriptor;
-  name: string;
-  className?: string;
-}) {
-  return plugin?.branding ? (
-    <img className={className} src={plugin.branding.icon_url} alt="" />
-  ) : (
-    <span className={`${className} plugin-icon-fallback`} aria-hidden="true">
-      {name.slice(0, 2).toUpperCase()}
     </span>
   );
 }
@@ -2729,6 +2714,20 @@ function PlayPage({
   const activeSurfaceInfo =
     surfaceInfo?.instanceId === active?.instance_id ? surfaceInfo : null;
   const activeInstanceId = active?.instance_id;
+  const activePluginId = active?.plugin_id;
+  // The chain is the instrument's: stored under its id, read back when the
+  // player returns to it. Edits are held here and written through.
+  const [chainOpen, setChainOpen] = useState(false);
+  const [editedChain, setEditedChain] = useState<PlayChain | null>(null);
+  const storedChain = useMemo(
+    () => (activePluginId ? readStoredChain(activePluginId) : null),
+    [activePluginId],
+  );
+  const chain = editedChain?.instrument_id === activePluginId ? editedChain : storedChain;
+  const handleChainChange = useCallback((next: PlayChain) => {
+    setEditedChain(next);
+    storeChain(next);
+  }, []);
   const handleSurfaceInfo = useCallback(
     (info: { label: string; value: string } | null) => {
       if (!activeInstanceId) return;
@@ -2776,18 +2775,42 @@ function PlayPage({
             ) : null
           }
         />
-        <button
-          className={`play-header-button presets${presetsOpen ? " active" : ""}`}
-          disabled={!active}
-          onClick={() => {
-            onOverlayChange(presetsOpen ? null : "presets");
-          }}
-          aria-expanded={presetsOpen}
-        >
-          <span className="preset-button-mark" aria-hidden="true">P</span>
-          <strong>Presets</strong>
-        </button>
+        <div className="play-plugin-actions">
+          <button
+            className={`play-header-button chain${chainOpen ? " active" : ""}`}
+            disabled={!active}
+            onClick={() => setChainOpen((state) => !state)}
+            aria-expanded={chainOpen}
+            aria-controls="play-chain"
+          >
+            <span className="fx-button-mark" aria-hidden="true">FX</span>
+            <strong>Effects</strong>
+          </button>
+          <button
+            className={`play-header-button presets${presetsOpen ? " active" : ""}`}
+            disabled={!active}
+            onClick={() => {
+              onOverlayChange(presetsOpen ? null : "presets");
+            }}
+            aria-expanded={presetsOpen}
+          >
+            <span className="preset-button-mark" aria-hidden="true">P</span>
+            <strong>Presets</strong>
+          </button>
+        </div>
       </div>
+      {/* Always in the tree and always before the stage: opening it never moves the iframe. */}
+      <PlayChainDrawer
+        open={chainOpen && chain !== null}
+        chain={chain ?? { instrument_id: "", effects: [] }}
+        plugins={installedPlugins}
+        instrumentName={active?.plugin_name ?? "Instrument"}
+        instrumentVersion={activeVersion}
+        instrumentDescriptor={activeDescriptor}
+        suggested={activeDescriptor?.suggested_chain}
+        onChange={handleChainChange}
+        onClose={() => setChainOpen(false)}
+      />
       {active ? (
         <PluginFrame
           key={active.instance_id}

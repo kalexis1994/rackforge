@@ -644,6 +644,8 @@ export interface PluginWebDescriptor {
     entry_url: string;
   }>;
   resources: PluginResourceRequirement[];
+  /** The effects the instrument suggests after itself in the PLAY chain. */
+  suggested_chain?: Array<{ plugin: string; preset?: string | null }>;
 }
 
 export interface PluginResourceRequirement {

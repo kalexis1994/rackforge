@@ -193,6 +193,8 @@ struct PublicPluginWeb {
     branding: Option<PublicPluginBranding>,
     surfaces: Vec<PublicWebSurface>,
     resources: Vec<rackforge_plugin_api::ResourceRequirement>,
+    /// The effects the instrument suggests after itself in PLAY.
+    suggested_chain: Vec<rackforge_plugin_api::SuggestedChainEntry>,
 }
 
 #[derive(Clone)]
@@ -1044,6 +1046,7 @@ impl PluginWebRegistry {
                 plugin_name: manifest.name,
                 version: manifest.version,
                 kind: manifest.kind,
+                suggested_chain: manifest.suggested_chain,
                 active,
                 // Raspberry Pi packages may still live in the legacy
                 // `plugins/` directory. They are host-managed installations

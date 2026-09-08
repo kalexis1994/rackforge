@@ -16,7 +16,7 @@
 
 import { WASI } from "node:wasi";
 import { readFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeSync } from "node:fs";
 
 /**
  * Plugin exports addressed by index, in the order shared with the browser
@@ -206,6 +206,13 @@ const PAGE_SIDE = new Map([
 ]);
 
 const failures = [];
+// stdout to a pipe is buffered, so a hard crash loses whatever it was
+// holding and the log stops in the wrong place. The trail goes out
+// synchronously, and says what was being attempted rather than what last
+// succeeded.
+const trail = (what) => writeSync(2, `--> ${what}
+`);
+
 const check = (description, condition, detail) => {
   if (condition) {
     console.log(`ok   ${description}`);
@@ -410,6 +417,7 @@ for (const capability of declared.capabilities ?? []) {
     );
     continue;
   }
+  trail(`probe ${capability.id}`);
   const probe = PROBES[capability.id];
   if (!probe) {
     const reason = PAGE_SIDE.get(capability.id);
@@ -424,4 +432,5 @@ for (const capability of declared.capabilities ?? []) {
   check(`${capability.id} does what it claims`, failure === null, failure ?? undefined);
 }
 
+trail("every probe returned");
 process.exit(failures.length === 0 ? 0 : 1);

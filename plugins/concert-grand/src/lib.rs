@@ -2181,7 +2181,14 @@ pub static THUMP_VELOCITY_POWER: Knob = Knob::new(3.0);
 /// 0.11 since 0.171.17: with the release at -15 the ear took Thud Colour
 /// from 0.5 to 0.6, which on the fader's law is +4.8 dB; the centre
 /// moves there and the fader goes back to its centre.
-pub static THUMP_BASE: Knob = Knob::new(0.11);
+///
+/// 0.0325 since 0.171.27: with the action a mechanism (the felt landing
+/// late, the key bottoming out after the string, the repetition merged)
+/// the same ear took the same fader from 0.5 to 0.28, which is -10.6 dB
+/// -- the third time it has asked for eleven decibels off the keybed,
+/// and the third measurement of the same listener. The centre moves
+/// there; the fader goes back to its centre.
+pub static THUMP_BASE: Knob = Knob::new(0.0325);
 /// ... rising by this much at C8. Measured: the reference's knock stands
 /// -26 dB under a C2's attack, -20 under a C3, -14 under a C4, -8 under a
 /// C6 and a C7 -- the mechanism is the same size everywhere and the tone

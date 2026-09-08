@@ -860,6 +860,12 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The keybed, eleven decibels down a third time (0.171.27).** With the
+action a mechanism the ear took Thud Colour from 0.5 to 0.28, −10.6 dB on
+the fader's law, the third time it has asked for eleven decibels off the
+keybed; `THUMP_BASE` 0.11 → 0.0325 and the fader back to its centre. The
+ear's call, recorded as such.
+
 **The key bottoms out after the string, and the merge's push in one
 sample (0.171.26).** After let-off the key still has its aftertouch to
 travel and the hammer its flight; the key is the action's ratio slower.

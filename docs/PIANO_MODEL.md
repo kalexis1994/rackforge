@@ -860,6 +860,22 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The last damper on the panel, and a session that survives a new
+control (0.171.20).** `Last Damper` is a stepped control on the panel,
+one key per step from C6 to C7, each named for who stops there (D♯6 the
+small Steinways, F6 Yamaha, F♯6 Kawai, G6 the Steinway D); the preset
+sets it and the panel may move it; the free-string bank follows. And
+what adding it exposed: the saved state was read by position with the
+era word at a fixed slot, so every build that added a knob — five this
+week — read the previous session's units as nought-to-one faders, found
+them out of range and opened the factory instrument. The user's Thud
+Colour came back at 0.5 four times, and each time the ear took it down
+again. The state now ends with a layout word (panel count, knob count);
+a state from another layout is re-laid before it is read: panel values
+keep their positions, knobs come along when the registry's fingerprint
+and count match, and a control the old layout lacked takes the factory
+value. A test writes the previous layout and reads it back.
+
 **The keyboard is not the soundboard (0.171.19).** The user, on the
 key-off knock: "no creo que esté fuerte el volumen sino que le falta
 atenuación, pareciera que lo estuviesen grabando cerca de las teclas".

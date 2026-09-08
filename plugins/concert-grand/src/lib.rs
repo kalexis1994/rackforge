@@ -63,7 +63,7 @@ impl Knob {
 /// voice it: fader 0.5 is the compiled value, and each eighth of travel
 /// doubles or halves it (a sixteenth to sixteen times over the range). A
 /// knob compiled at zero has nothing to scale and takes the fader as it is.
-const KNOB_PARAM_BASE: u32 = (6 + LAB_COUNT + 18) as u32;
+const KNOB_PARAM_BASE: u32 = (6 + LAB_COUNT + 19) as u32;
 
 /// `clamp` with the bounds in whichever order the knobs left them: a fader
 /// can drive a minimum above its maximum, and Rust's `clamp` panics on that,
@@ -182,6 +182,7 @@ fn parameter_bounds(index: u32) -> (f64, f64) {
             (STRING_TENSION_N.compiled() * TENSION_HEAVIEST) as f64,
         ),
         PARAM_DAMPER => ((1.0 / DAMPER_GRIP_SPAN) as f64, DAMPER_GRIP_SPAN as f64),
+        PARAM_LAST_DAMPER => (LAST_DAMPER_MIN as f64, LAST_DAMPER_MAX as f64),
         PARAM_ROOM_SIZE => (
             ROOM_VOLUME_MIN_M3.compiled() as f64,
             ROOM_VOLUME_MAX_M3.compiled() as f64,
@@ -1277,7 +1278,14 @@ const PARAM_CLANG_PLAIN: u32 = 39;
 /// instrument: until this existed, `Upright 132`, `Upright 114` and
 /// `Player Upright` all answered CC67 with a mechanism they do not have.
 const PARAM_ACTION: u32 = 40;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 18 + KNOB_COUNT;
+/// The last key with a damper, as a key: a stepped control, one key per
+/// step, because a damper row ends on a key and not between two. The
+/// preset sets it (Yamaha's grands to F6, the Steinway D to G6, the small
+/// Steinways to D#6) and the panel may move it.
+const PARAM_LAST_DAMPER: u32 = 41;
+const LAST_DAMPER_MIN: u8 = 84;
+const LAST_DAMPER_MAX: u8 = 96;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 19 + KNOB_COUNT;
 /// The state carries every parameter, then the preamplifier, then a
 /// fingerprint of the knob registry. The knobs are stored by position, and
 /// a build that adds a knob in the middle of the registry moves every knob
@@ -1288,7 +1296,7 @@ const PARAM_COUNT: usize = 6 + LAB_COUNT + 18 + KNOB_COUNT;
 /// fingerprint is not this build's keeps its voicing and drops its knobs.
 /// A saved state, as this build writes it: every control, the preamp, the
 /// knob registry's fingerprint, and the era word.
-const STATE_COUNT: usize = PARAM_COUNT + 3;
+const STATE_COUNT: usize = PARAM_COUNT + 4;
 /// The same layout before the controls carried units, when every one of them
 /// was a nought-to-one fader position. Identical in shape to today's, which
 /// is the whole problem: without a word saying which it is, a session saved
@@ -1296,6 +1304,23 @@ const STATE_COUNT: usize = PARAM_COUNT + 3;
 const STATE_FADER_COUNT: usize = PARAM_COUNT + 2;
 /// The era word: "UNIT" in ASCII, in the slot a fader-era state does not have.
 const STATE_ERA_UNITS: u32 = 0x554E_4954;
+/// How many panel parameters precede the knobs in the state.
+const STATE_FADERS: usize = KNOB_PARAM_BASE as usize;
+/// The layout word: the panel's parameter count in the high half, the
+/// knob count in the low half. A state from another layout is re-laid
+/// before it is read: its panel values keep their positions (the panel
+/// only ever grows at its end), its knobs come along when the registry's
+/// fingerprint and count match, and everything the old layout did not
+/// have takes the factory value. States written before this word carry
+/// the era word last and had `STATE_FADERS_BEFORE_LAYOUT` panel values.
+/// Without this, every version that added a knob -- five this week --
+/// read the previous session's units as nought-to-one faders, found
+/// them out of range, and opened the factory instrument instead: the
+/// user's Thud Colour came back at 0.5 four times.
+const STATE_FADERS_BEFORE_LAYOUT: usize = 41;
+fn state_layout_word() -> u32 {
+    ((STATE_FADERS as u32) << 16) | KNOB_COUNT as u32
+}
 
 /// A control's value as an older build saved it, in the unit it carries now.
 ///
@@ -1330,6 +1355,9 @@ fn fader_to_units(index: usize, fader: f32) -> f32 {
             }
         }
         BOARD_DAMPING_SLOT => BOARD_LOSS_FACTOR.compiled() * 100.0 * powf(BOARD_LOSS_SPAN, signed),
+        LAST_DAMPER_SLOT => {
+            LAST_DAMPER_MIN as f32 + roundf(fader * (LAST_DAMPER_MAX - LAST_DAMPER_MIN) as f32)
+        }
         BOARD_DENSITY_SLOT => powf(BOARD_DENSITY_SPAN, signed),
         SIZE_SLOT => {
             let span = if fader < 0.5 {
@@ -1374,6 +1402,7 @@ const SIZE_SLOT: usize = 6 + LAB_COUNT + 10;
 const STRIKE_POINT_SLOT: usize = 6 + LAB_COUNT + 11;
 const TENSION_SLOT: usize = 6 + LAB_COUNT + 12;
 const LID_SLOT: usize = 6 + LAB_COUNT + 13;
+const LAST_DAMPER_SLOT: usize = 6 + LAB_COUNT + 18;
 const DAMPER_SLOT: usize = 6 + LAB_COUNT + 14;
 const PREAMP_SLOT: usize = PARAM_COUNT;
 
@@ -3669,8 +3698,8 @@ struct Controls {
     size: f32,
     /// The last key with a damper on THIS instrument. Yamaha's grands have
     /// 69 dampers, the last on F6; the Steinway D 71, to G6; the Steinway
-    /// M, L and B 67, to D#6. Not in the saved state: the host re-selects
-    /// the preset at boot, and the preset says.
+    /// M, L and B 67, to D#6. The preset sets it and the panel's stepped
+    /// control (`PARAM_LAST_DAMPER`) may move it; it is in the saved state.
     last_damper: u8,
     /// The action's strike point and the scale's tension: the rest of the
     /// instrument's design, centred on the calibrated one.
@@ -3953,6 +3982,7 @@ impl Controls {
             PARAM_CLANG_FALLOFF => self.clang_falloff,
             PARAM_CLANG_PLAIN => self.clang_plain,
             PARAM_ACTION => self.action,
+            PARAM_LAST_DAMPER => self.last_damper as f32,
             _ => {
                 let slot = knob_slot(index)?;
                 let (_, knob, _) = TUNABLES[slot];
@@ -4007,6 +4037,10 @@ impl Controls {
             PARAM_CLANG_FALLOFF => self.clang_falloff = value,
             PARAM_CLANG_PLAIN => self.clang_plain = value,
             PARAM_ACTION => self.action = value,
+            PARAM_LAST_DAMPER => {
+                self.last_damper =
+                    roundf(value).clamp(LAST_DAMPER_MIN as f32, LAST_DAMPER_MAX as f32) as u8
+            }
             _ => {
                 let Some(slot) = knob_slot(index) else {
                     return false;
@@ -8024,6 +8058,112 @@ impl ConcertGrand {
     }
 }
 
+/// Every word of a saved state for these controls and the knobs as they
+/// stand: the panel in its units, the knobs as fader positions, the
+/// preamp, the fingerprint, the era and the layout.
+fn state_words(controls: &Controls) -> [f32; STATE_COUNT] {
+    let mut values = [0.0f32; STATE_COUNT];
+    values[..6].copy_from_slice(&[
+        controls.brightness,
+        controls.dynamics,
+        controls.unison,
+        controls.decay,
+        controls.width,
+        controls.level,
+    ]);
+    values[6..6 + LAB_COUNT].copy_from_slice(&controls.lab);
+    values[6 + LAB_COUNT] = controls.room_size;
+    values[6 + LAB_COUNT + 1] = controls.room_hardness;
+    values[6 + LAB_COUNT + 2] = controls.mic_distance;
+    values[6 + LAB_COUNT + 3] = controls.mic_pattern;
+    values[6 + LAB_COUNT + 4] = controls.action_noise;
+    values[6 + LAB_COUNT + 5] = controls.release_noise;
+    values[6 + LAB_COUNT + 6] = controls.pedal_noise;
+    values[6 + LAB_COUNT + 7] = controls.impact;
+    values[6 + LAB_COUNT + 8] = controls.board_damping;
+    values[6 + LAB_COUNT + 9] = controls.board_density;
+    values[6 + LAB_COUNT + 10] = controls.size;
+    values[6 + LAB_COUNT + 11] = controls.strike_point;
+    values[6 + LAB_COUNT + 12] = controls.tension;
+    values[6 + LAB_COUNT + 13] = controls.lid;
+    values[6 + LAB_COUNT + 14] = controls.damper;
+    values[6 + LAB_COUNT + 15] = controls.clang_falloff;
+    values[6 + LAB_COUNT + 16] = controls.clang_plain;
+    values[6 + LAB_COUNT + 17] = controls.action;
+    values[6 + LAB_COUNT + 18] = controls.last_damper as f32;
+    for (slot, (_, knob, _)) in TUNABLES.iter().enumerate() {
+        values[KNOB_PARAM_BASE as usize + slot] = fader_from_knob(knob.compiled(), knob.get());
+    }
+    values[PARAM_COUNT] = controls.preamp;
+    values[PARAM_COUNT + 1] = f32::from_bits(knob_registry_fingerprint());
+    values[PARAM_COUNT + 2] = f32::from_bits(STATE_ERA_UNITS);
+    values[PARAM_COUNT + 3] = f32::from_bits(state_layout_word());
+    values
+}
+
+/// A units-era state from another layout, re-laid into this one. None
+/// when the state is not of the units era or is already this layout.
+fn relaid_state(state: &[u8]) -> Option<[u8; STATE_COUNT * 4]> {
+    if !state.len().is_multiple_of(4) || state.len() == STATE_COUNT * 4 {
+        return None;
+    }
+    let words: Vec<f32> = state
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
+        .collect();
+    let n = words.len();
+    if n < 4 {
+        return None;
+    }
+    // The era word is last (before the layout word) or last of all.
+    let (era_at, layout) = if words[n - 2].to_bits() == STATE_ERA_UNITS {
+        (n - 2, Some(words[n - 1].to_bits()))
+    } else if words[n - 1].to_bits() == STATE_ERA_UNITS {
+        (n - 1, None)
+    } else {
+        return None;
+    };
+    let old_param_count = era_at - 2;
+    let (old_faders, old_knobs) = match layout {
+        Some(word) => ((word >> 16) as usize, (word & 0xFFFF) as usize),
+        None => (
+            STATE_FADERS_BEFORE_LAYOUT,
+            old_param_count.saturating_sub(STATE_FADERS_BEFORE_LAYOUT),
+        ),
+    };
+    if old_faders + old_knobs != old_param_count {
+        return None;
+    }
+    let old_fingerprint = words[old_param_count + 1].to_bits();
+    // Every panel value at its factory setting first, then the old ones
+    // over it where the old layout had them.
+    let mut values = state_words(&Controls::default());
+    for (slot, value) in values
+        .iter_mut()
+        .enumerate()
+        .take(STATE_FADERS.min(old_faders))
+    {
+        *value = words[slot];
+    }
+    if old_knobs == KNOB_COUNT && old_fingerprint == knob_registry_fingerprint() {
+        values[STATE_FADERS..STATE_FADERS + KNOB_COUNT]
+            .copy_from_slice(&words[old_faders..old_faders + KNOB_COUNT]);
+        values[PARAM_COUNT + 1] = f32::from_bits(knob_registry_fingerprint());
+    } else {
+        values[PARAM_COUNT + 1] = f32::from_bits(0);
+    }
+    values[PARAM_COUNT] = words[old_param_count];
+    values[PARAM_COUNT + 2] = f32::from_bits(STATE_ERA_UNITS);
+    values[PARAM_COUNT + 3] = f32::from_bits(state_layout_word());
+    let mut out = [0u8; STATE_COUNT * 4];
+    for (chunk, value) in out.as_chunks_mut::<4>().0.iter_mut().zip(values) {
+        chunk.copy_from_slice(&value.to_le_bytes());
+    }
+    Some(out)
+}
+
 impl Processor for ConcertGrand {
     fn prepare(
         &mut self,
@@ -8085,6 +8225,9 @@ impl Processor for ConcertGrand {
         if accepted
             && ((PARAM_ROOM_SIZE..=PARAM_MIC_PATTERN).contains(&index) || index == PARAM_LID)
         {
+            self.room_dirty = true;
+        }
+        if accepted && index == PARAM_LAST_DAMPER {
             // The room is a handful of float derivations; retuning at the
             // next block is cheap and keeps every acoustic quantity honest
             // while the slider moves.
@@ -8479,40 +8622,7 @@ impl Processor for ConcertGrand {
     }
 
     fn save_state(&self, destination: &mut [u8]) -> Option<usize> {
-        let mut values = [0.0f32; STATE_COUNT];
-        values[..6].copy_from_slice(&[
-            self.controls.brightness,
-            self.controls.dynamics,
-            self.controls.unison,
-            self.controls.decay,
-            self.controls.width,
-            self.controls.level,
-        ]);
-        values[6..6 + LAB_COUNT].copy_from_slice(&self.controls.lab);
-        values[6 + LAB_COUNT] = self.controls.room_size;
-        values[6 + LAB_COUNT + 1] = self.controls.room_hardness;
-        values[6 + LAB_COUNT + 2] = self.controls.mic_distance;
-        values[6 + LAB_COUNT + 3] = self.controls.mic_pattern;
-        values[6 + LAB_COUNT + 4] = self.controls.action_noise;
-        values[6 + LAB_COUNT + 5] = self.controls.release_noise;
-        values[6 + LAB_COUNT + 6] = self.controls.pedal_noise;
-        values[6 + LAB_COUNT + 7] = self.controls.impact;
-        values[6 + LAB_COUNT + 8] = self.controls.board_damping;
-        values[6 + LAB_COUNT + 9] = self.controls.board_density;
-        values[6 + LAB_COUNT + 10] = self.controls.size;
-        values[6 + LAB_COUNT + 11] = self.controls.strike_point;
-        values[6 + LAB_COUNT + 12] = self.controls.tension;
-        values[6 + LAB_COUNT + 13] = self.controls.lid;
-        values[6 + LAB_COUNT + 14] = self.controls.damper;
-        values[6 + LAB_COUNT + 15] = self.controls.clang_falloff;
-        values[6 + LAB_COUNT + 16] = self.controls.clang_plain;
-        values[6 + LAB_COUNT + 17] = self.controls.action;
-        for (slot, (_, knob, _)) in TUNABLES.iter().enumerate() {
-            values[KNOB_PARAM_BASE as usize + slot] = fader_from_knob(knob.compiled(), knob.get());
-        }
-        values[PARAM_COUNT] = self.controls.preamp;
-        values[PARAM_COUNT + 1] = f32::from_bits(knob_registry_fingerprint());
-        values[PARAM_COUNT + 2] = f32::from_bits(STATE_ERA_UNITS);
+        let values = state_words(&self.controls);
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -8521,6 +8631,9 @@ impl Processor for ConcertGrand {
     }
 
     fn load_state(&mut self, state: &[u8]) -> bool {
+        if let Some(relaid) = relaid_state(state) {
+            return self.load_state(&relaid);
+        }
         // A state saved by an older build is shorter, because controls have
         // only ever been added to the end. Read what it has and leave the
         // rest at its default, rather than rejecting the whole thing: every
@@ -8575,6 +8688,7 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 15] = defaults.clang_falloff;
         values[6 + LAB_COUNT + 16] = defaults.clang_plain;
         values[6 + LAB_COUNT + 17] = defaults.action;
+        values[6 + LAB_COUNT + 18] = defaults.last_damper as f32;
         for (slot, (_, knob, _)) in TUNABLES.iter().enumerate() {
             values[KNOB_PARAM_BASE as usize + slot] =
                 fader_from_knob(knob.compiled(), knob.compiled());
@@ -8670,7 +8784,6 @@ impl Processor for ConcertGrand {
             board_damping: values[6 + LAB_COUNT + 8],
             board_density: values[6 + LAB_COUNT + 9],
             size: values[6 + LAB_COUNT + 10],
-            last_damper: self.controls.last_damper,
             strike_point: values[6 + LAB_COUNT + 11],
             tension: values[6 + LAB_COUNT + 12],
             lid: values[6 + LAB_COUNT + 13],
@@ -8678,6 +8791,9 @@ impl Processor for ConcertGrand {
             clang_falloff: values[6 + LAB_COUNT + 15],
             clang_plain: values[6 + LAB_COUNT + 16],
             action: values[6 + LAB_COUNT + 17],
+            last_damper: roundf(values[6 + LAB_COUNT + 18])
+                .clamp(LAST_DAMPER_MIN as f32, LAST_DAMPER_MAX as f32)
+                as u8,
             preamp: values[PARAM_COUNT],
         };
         // The knobs, only from a state this build wrote: by position, any
@@ -10230,6 +10346,62 @@ mod tests {
     /// the factory instrument of 0.160.0 must come back as the factory
     /// instrument of this build, control for control.
     #[test]
+    fn a_session_from_the_previous_layout_keeps_its_panel() {
+        // A units-era state as every build this week wrote it: 41 panel
+        // values, the knobs, the preamp, the fingerprint, the era word and
+        // no layout word. The panel's values must come back exactly, the
+        // knobs too when the registry matches, and the control that did
+        // not exist then takes the factory key.
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.set_parameter(PARAM_BRIGHTNESS, 0.61));
+        assert!(piano.set_parameter(6 + 2, 0.26)); // Thud Colour, where the ear put it
+        assert!(piano.set_parameter(PARAM_RELEASE_NOISE, -15.0));
+        let mut current = [0u8; STATE_COUNT * 4];
+        assert_eq!(piano.save_state(&mut current), Some(STATE_COUNT * 4));
+        let words: Vec<f32> = current
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
+            .collect();
+        // The previous layout: drop the Last Damper slot and the layout word.
+        let mut old: Vec<f32> = Vec::new();
+        old.extend_from_slice(&words[..STATE_FADERS_BEFORE_LAYOUT]);
+        old.extend_from_slice(&words[STATE_FADERS..STATE_FADERS + KNOB_COUNT]);
+        old.push(words[PARAM_COUNT]); // preamp
+        old.push(words[PARAM_COUNT + 1]); // fingerprint
+        old.push(f32::from_bits(STATE_ERA_UNITS));
+        let mut state = vec![0u8; old.len() * 4];
+        for (chunk, value) in state.as_chunks_mut::<4>().0.iter_mut().zip(&old) {
+            chunk.copy_from_slice(&value.to_le_bytes());
+        }
+        let mut again = Box::new(ConcertGrand::default());
+        assert!(again.load_state(&state), "the previous layout must open");
+        assert!((again.controls.brightness - 0.61).abs() < 1e-6);
+        assert!(
+            (again.controls.lab[2] - 0.26).abs() < 1e-6,
+            "Thud Colour came back at {}",
+            again.controls.lab[2]
+        );
+        assert!((again.controls.release_noise + 15.0).abs() < 1e-4);
+        assert_eq!(again.controls.last_damper, Controls::default().last_damper);
+        // With one knob fewer in the old registry the panel still holds and
+        // the knobs go to their compiled values.
+        let mut fewer = old.clone();
+        fewer.remove(STATE_FADERS_BEFORE_LAYOUT + KNOB_COUNT - 1);
+        let mut state = vec![0u8; fewer.len() * 4];
+        for (chunk, value) in state.as_chunks_mut::<4>().0.iter_mut().zip(&fewer) {
+            chunk.copy_from_slice(&value.to_le_bytes());
+        }
+        let mut third = Box::new(ConcertGrand::default());
+        assert!(
+            third.load_state(&state),
+            "an older registry's layout must open"
+        );
+        assert!((third.controls.lab[2] - 0.26).abs() < 1e-6);
+    }
+
+    #[test]
     fn a_session_from_before_the_units_comes_back_as_the_same_instrument() {
         // The faders exactly as 0.160.0's `Controls::default()` held them.
         let mut values = [0.5f32; STATE_FADER_COUNT];
@@ -10252,6 +10424,7 @@ mod tests {
         values[LID_SLOT + 2] = 0.5; // clang falloff
         values[LID_SLOT + 3] = 0.25; // clang plain
         values[LID_SLOT + 4] = 0.0; // action: a grand
+        values[LAST_DAMPER_SLOT] = 5.0 / 12.0; // last damper: F6 on the old fader's law
         for (slot, (_, knob, _)) in TUNABLES.iter().enumerate() {
             values[KNOB_PARAM_BASE as usize + slot] =
                 fader_from_knob(knob.compiled(), knob.compiled());

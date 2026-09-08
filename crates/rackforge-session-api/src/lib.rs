@@ -395,6 +395,11 @@ pub struct PlayChainEffect {
     pub plugin_id: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// The effect's chosen program, if its panel picked one. It belongs to
+    /// the chain and not to the plugin: the same effect twice in a chain is
+    /// two settings, and a rebuilt voice loads this before it plays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -1090,6 +1095,7 @@ mod tests {
                     id: id.into(),
                     plugin_id: plugin.into(),
                     enabled: true,
+                    program_id: None,
                 })
                 .collect(),
         };

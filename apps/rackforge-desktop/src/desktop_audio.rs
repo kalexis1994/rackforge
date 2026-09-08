@@ -2248,20 +2248,36 @@ impl AudioProcessor {
                     instance_id,
                     sound_id,
                 } => {
-                    let index = self
-                        .voices
-                        .iter()
-                        .position(|voice| voice.instance_id == instance_id)
-                        .with_context(|| format!("unknown audio plugin instance {instance_id}"))?;
-                    self.voices[index]
-                        .mirror_control(|instance| instance.load_preset(&sound_id))?;
-                    self.voices[index].process_faulted = false;
-                    self.live_parameter_writer
-                        .clear(self.voices[index].live_parameter_target);
-                    if index != self.active_voice {
-                        self.voices[self.active_voice]
-                            .mirror_control(|instance| instance.reset())?;
-                        self.active_voice = index;
+                    // An effect of the PLAY chain takes its program where it
+                    // stands: it is not an instrument, so the stage does not
+                    // move to it and nothing is reset around it.
+                    if let Some(effect) = self
+                        .chain
+                        .iter_mut()
+                        .find(|voice| voice.instance_id == instance_id)
+                    {
+                        effect.mirror_control(|instance| instance.load_preset(&sound_id))?;
+                        effect.process_faulted = false;
+                        let target = effect.live_parameter_target;
+                        self.live_parameter_writer.clear(target);
+                    } else {
+                        let index = self
+                            .voices
+                            .iter()
+                            .position(|voice| voice.instance_id == instance_id)
+                            .with_context(|| {
+                                format!("unknown audio plugin instance {instance_id}")
+                            })?;
+                        self.voices[index]
+                            .mirror_control(|instance| instance.load_preset(&sound_id))?;
+                        self.voices[index].process_faulted = false;
+                        self.live_parameter_writer
+                            .clear(self.voices[index].live_parameter_target);
+                        if index != self.active_voice {
+                            self.voices[self.active_voice]
+                                .mirror_control(|instance| instance.reset())?;
+                            self.active_voice = index;
+                        }
                     }
                 }
                 AudioCommand::ActivateSurface {

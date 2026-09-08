@@ -5156,6 +5156,57 @@ impl DesktopApp {
         sound_id: &str,
         command: Option<CommandRef>,
     ) -> Result<Vec<EventEnvelope>, String> {
+        // An effect of the chain takes its program in its own voice, and the
+        // chain remembers which: the same effect twice in a chain is two
+        // settings, and a voice rebuilt later comes up on the one its panel
+        // chose. The instrument's own path is below.
+        let chain = {
+            let session = self.session.read().expect("session lock poisoned");
+            session
+                .play_chain_effect_owner(instance_id)
+                .filter(|owner| session.active_instance_id.as_ref() == Some(*owner))
+                .and_then(|owner| session.play_chain(owner))
+                .cloned()
+        };
+        if let Some(mut chain) = chain {
+            let effect = chain
+                .effects
+                .iter_mut()
+                .find(|effect| {
+                    InstanceId::new(format!("{}.fx.{}", chain_owner_id(instance_id), effect.id))
+                        .as_ref()
+                        == Ok(instance_id)
+                })
+                .ok_or_else(|| format!("Unknown effect in the PLAY chain: {instance_id}"))?;
+            let plugin = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == effect.plugin_id)
+                .ok_or_else(|| format!("Unknown plugin: {}", effect.plugin_id))?;
+            if !plugin.sounds.iter().any(|sound| sound.id == sound_id) {
+                return Err(format!(
+                    "Unknown program {sound_id:?} for effect {}",
+                    plugin.name
+                ));
+            }
+            effect.program_id = Some(sound_id.to_owned());
+            #[cfg(windows)]
+            {
+                let audio = self
+                    .audio
+                    .as_ref()
+                    .ok_or_else(|| "Desktop audio is unavailable".to_owned())?;
+                audio
+                    .select_sound(instance_id.as_str(), sound_id)
+                    .map_err(|error| format!("Could not load {sound_id}: {error:#}"))?;
+            }
+            let events =
+                self.apply_program_events(vec![SessionEvent::PlayChainChanged { chain }], command)?;
+            self.status = format!("Loaded {sound_id}");
+            self.live_state_dirty = Some(Instant::now());
+            self.persist_session_checkpoint();
+            return Ok(events);
+        }
         {
             let session = self.session.read().expect("session lock poisoned");
             let instance = session
@@ -6704,6 +6755,16 @@ fn prune_play_chains(
 /// The chain the session holds for `instrument_id`, or none, handed to
 /// the audio engine.
 #[cfg(windows)]
+/// The instrument an effect instance belongs to: `<instrument>.fx.<id>`
+/// without its suffix. The caller has already established that it is one.
+fn chain_owner_id(instance_id: &InstanceId) -> String {
+    instance_id
+        .as_str()
+        .rsplit_once(".fx.")
+        .map(|(owner, _)| owner.to_owned())
+        .unwrap_or_else(|| instance_id.as_str().to_owned())
+}
+
 fn apply_desktop_play_chain(
     audio: &desktop_audio::DesktopAudio,
     session: &Arc<RwLock<SessionState>>,
@@ -6745,7 +6806,7 @@ fn apply_desktop_play_chain_state(
             desktop_audio::VoiceSpec {
                 instance_id: instance_id.as_str().to_owned(),
                 plugin: plugin.runtime,
-                preset_id: None,
+                preset_id: effect.program_id.clone(),
                 resources: plugin.resources.clone(),
                 initial_state: None,
             },

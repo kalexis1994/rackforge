@@ -2751,10 +2751,18 @@ function PlayPage({
         instance={{
           ...openEffectInstance,
           instance_id: `${active.instance_id}.fx.${openEffect.id}`,
+          // The program is the chain's, not the standalone instance's: the
+          // same effect can sit in the chain twice on two settings.
+          selected_sound_id: openEffect.program_id
+            ?? openEffectInstance.selected_sound_id,
         }}
         surface="play"
-        onSelectSound={() =>
-          Promise.reject(new Error("An effect's programs cannot be selected from the chain yet."))}
+        onSelectSound={(soundId) =>
+          dispatchCommandAwait({
+            type: "select_sound",
+            instance_id: `${active.instance_id}.fx.${openEffect.id}`,
+            sound_id: soundId,
+          })}
       />
     ) : null;
   const handleChainChange = useCallback(

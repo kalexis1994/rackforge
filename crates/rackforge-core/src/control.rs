@@ -273,6 +273,9 @@ pub struct PlayChainEffectRuntimeSpec {
     pub instance_id: InstanceId,
     pub plugin_id: String,
     pub enabled: bool,
+    /// The program the chain chose for this effect, loaded as the voice is
+    /// built. See `PlayChainEffect::program_id`.
+    pub program_id: Option<String>,
 }
 
 /// One effect of the PLAY chain built and warmed off the audio thread.
@@ -3524,6 +3527,45 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             instance_id,
             sound_id,
         } => {
+            // An effect of the chain takes its program in its own voice, and
+            // the chain remembers which: the same effect twice in a chain is
+            // two settings, and a voice rebuilt later comes up on the one its
+            // panel chose. The instrument's own path is below.
+            if let Some(owner) = snapshot.play_chain_effect_owner(&instance_id).cloned()
+                && snapshot.active_instance_id.as_ref() == Some(&owner)
+                && let Some(chain) = snapshot.play_chain(&owner).cloned()
+            {
+                let mut chain = chain;
+                let Some(effect) = chain.effects.iter_mut().find(|effect| {
+                    chain_effect_matches(&owner, effect, &instance_id)
+                }) else {
+                    return error_response(
+                        ControlErrorCode::NotFound,
+                        format!("unknown effect {instance_id} in the PLAY chain"),
+                        Some(snapshot.revision),
+                    );
+                };
+                effect.program_id = Some(sound_id.clone());
+                let (reply_sender, reply_receiver) = sync_channel(1);
+                if let Err(failure) = send_audio(
+                    context,
+                    AudioControlCommand::SelectSound {
+                        instance_id: instance_id.clone(),
+                        sound_id: sound_id.clone(),
+                        reply: reply_sender,
+                    },
+                ) {
+                    return failure.into_response();
+                }
+                return match receive_audio(reply_receiver, "apply effect program") {
+                    Ok(()) => record_command_event(
+                        context,
+                        command_ref,
+                        SessionEvent::PlayChainChanged { chain },
+                    ),
+                    Err(failure) => failure.into_response(),
+                };
+            }
             let instance = match require_active_instance(&snapshot, &instance_id) {
                 Ok(instance) => instance,
                 Err(failure) => return failure.into_response(),
@@ -4337,6 +4379,15 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
     }
 }
 
+/// Whether this effect of `owner`'s chain is the one the instance id names.
+fn chain_effect_matches(
+    owner: &InstanceId,
+    effect: &rackforge_session_api::PlayChainEffect,
+    instance_id: &InstanceId,
+) -> bool {
+    InstanceId::new(format!("{owner}.fx.{}", effect.id)).as_ref() == Ok(instance_id)
+}
+
 fn require_active_instance<'a>(
     snapshot: &'a rackforge_session_api::SessionState,
     instance_id: &InstanceId,
@@ -4427,6 +4478,7 @@ pub fn play_chain_runtime_specs(
                 instance_id,
                 plugin_id: effect.plugin_id.clone(),
                 enabled: effect.enabled,
+                program_id: effect.program_id.clone(),
             })
         })
         .collect()
@@ -4499,6 +4551,20 @@ fn prepare_portable_chain_voices(
                 Some(revision),
             )
         })?;
+        // The chain's own program, before the voice is activated: a rebuilt
+        // effect comes up on the setting the panel chose, not on defaults.
+        if let Some(program_id) = spec.program_id.as_deref() {
+            instance.load_preset(program_id).map_err(|error| {
+                control_failure(
+                    ControlErrorCode::Rejected,
+                    format!(
+                        "loading program {program_id:?} for effect {}: {error:#}",
+                        spec.instance_id
+                    ),
+                    Some(revision),
+                )
+            })?;
+        }
         instance
             .activate(
                 context.plugin_sample_rate,

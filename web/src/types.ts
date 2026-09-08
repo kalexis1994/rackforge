@@ -112,6 +112,8 @@ export interface PlayChainEffect {
   id: string;
   plugin_id: string;
   enabled: boolean;
+  /** The program this effect is on, chosen from its panel in the chain. */
+  program_id?: string | null;
 }
 
 /** The effects after one instrument in PLAY, in order. */

@@ -742,6 +742,12 @@ fn create_chain_voice<'plugin>(
         );
     }
     let mut instance = plugin.create_instance()?;
+    // The chain's own program for this effect, before it is activated.
+    if let Some(program_id) = spec.program_id.as_deref() {
+        instance
+            .load_preset(program_id)
+            .with_context(|| format!("loading program {program_id:?} for {}", spec.instance_id))?;
+    }
     instance
         .activate(
             f64::from(sample_rate_hz),
@@ -2412,19 +2418,28 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     sound_id,
                     reply,
                 } => {
-                    let result = standalone_voice_mut(standalone_voices, &instance_id)
-                        .and_then(|voice| {
-                            voice
-                                .mirror_control(|instance| instance.load_preset(&sound_id))
-                                .map_err(|error| error.to_string())?;
-                            voice.process_faulted = false;
-                            live_parameter_writer.clear(voice.live_parameter_target);
-                            Ok(())
-                        })
-                        .map(|()| {
-                            println!("LIVE_SOUND_SELECTED instance={instance_id} id={sound_id}");
-                        });
-                    if result.is_ok() {
+                    // An effect of the chain takes its program in place: it
+                    // is not the instrument, so the stage does not move to it
+                    // and the render mode is left alone.
+                    let is_chain_effect = chain_voices
+                        .iter()
+                        .any(|voice| voice.instance_id == instance_id);
+                    let result =
+                        any_voice_mut(standalone_voices, &mut chain_voices, &instance_id)
+                            .and_then(|voice| {
+                                voice
+                                    .mirror_control(|instance| instance.load_preset(&sound_id))
+                                    .map_err(|error| error.to_string())?;
+                                voice.process_faulted = false;
+                                live_parameter_writer.clear(voice.live_parameter_target);
+                                Ok(())
+                            })
+                            .map(|()| {
+                                println!(
+                                    "LIVE_SOUND_SELECTED instance={instance_id} id={sound_id}"
+                                );
+                            });
+                    if result.is_ok() && !is_chain_effect {
                         active_instance_id = instance_id;
                         render_mode = AudioRenderMode::Plugin;
                     }

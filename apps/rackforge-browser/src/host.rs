@@ -2682,6 +2682,14 @@ fn plugin_catalog_entry(
                 })
             }).collect::<Vec<_>>()
         }).unwrap_or_default(),
+        // What this instrument would like after it in PLAY, so the drawer can
+        // offer it here as it does on the other hosts.
+        "suggested_chain": manifest.suggested_chain.iter().map(|entry| {
+            serde_json::json!({
+                "plugin": entry.plugin,
+                "preset": entry.preset,
+            })
+        }).collect::<Vec<_>>(),
         "resources": manifest.resources.iter().map(|resource| {
             serde_json::json!({
                 "id": resource.id,

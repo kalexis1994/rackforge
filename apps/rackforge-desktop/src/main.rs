@@ -2501,14 +2501,22 @@ impl DesktopApp {
                 self.reload_plugins()
                     .map_err(|error| format!("Could not load the installed plugin: {error:#}"))?;
             }
-            let instance_id = self
+            let (instance_id, kind) = self
                 .plugins
                 .iter()
                 .find(|plugin| plugin.plugin_id == plugin_id)
-                .map(|plugin| plugin.instance_id.clone())
+                .map(|plugin| (plugin.instance_id.clone(), plugin.runtime.manifest().kind))
                 .ok_or_else(|| {
                     format!("Installed plugin {plugin_id:?} is not compatible with Desktop")
                 })?;
+            // An effect is enabled and loaded, and that is all: it has no
+            // place on the stage of its own. Selecting it there put the
+            // instrument's chain effects "not on stage" and left the test
+            // note with nothing to play through, measured 2026-09-08 when
+            // RF-EQ was activated over the piano.
+            if kind == PluginKind::Effect {
+                return Ok(());
+            }
             let instance_id = InstanceId::new(instance_id)
                 .map_err(|error| format!("Installed plugin has an invalid instance id: {error}"))?;
             self.select_plugin(&instance_id, None)?;

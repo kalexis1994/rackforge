@@ -12,15 +12,3 @@
 # memory, so this is eight megabytes of memory and no more.
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "target-feature=+simd128", "-C", "link-arg=-zstack-size=8388608"]
-
-# The browser host is the same kind of program with the same need. It holds a
-# session, a plugin catalog and every parameter schema it reads out of a
-# package -- the Concert Grand alone declares nearly two hundred parameters --
-# and it passes them between frames by value. A wasm shadow stack does not
-# trap when it runs out: it writes on past its end, into whatever linear
-# memory is below, and the corruption surfaces somewhere else entirely. It
-# surfaced as node dying with SIGSEGV in the middle of installing a package
-# (2026-09-08), after every capability check before it had passed, and it
-# moved as the demo gained plugins. Eight megabytes here as well.
-[target.wasm32-wasip1]
-rustflags = ["-C", "link-arg=-zstack-size=8388608"]

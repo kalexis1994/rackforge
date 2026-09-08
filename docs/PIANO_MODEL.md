@@ -860,6 +860,19 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**Width reaches the pair, and the keys lose their brands (0.171.22).**
+`Stereo Width` sets the pair's spacing (`half = 0.5 · MIC_SPACING_M ·
+width`), but only a room or board change re-ran `tune_pair` and the free
+strings' places, so the fader moved the voices' pans and nothing the ear
+could hold -- "no noto que aumente la separación de estéreo". It now
+marks the room and the scale dirty. Measured on the thirty-note image
+(`model_image.py`, 1-4 kHz coherence / 1-3 kHz ILD std): width 0.0 →
+0.92 / 1.9 dB, 0.35 → 0.52 / 3.0 dB, 1.0 → 0.34 / 2.8 dB; before, all
+three widths measured the same. The `Last Damper` keys are named as keys
+(D♯6, F6, G6) and no longer for who stops there; the sources stay here
+and in the code. A row of more than four plates is drawn dense (10 px,
+one line) so it stands no taller than the fader beside it.
+
 **The last damper on the panel, and a session that survives a new
 control (0.171.20).** `Last Damper` is a stepped control on the panel,
 one key per step from C6 to C7, each named for who stops there (D♯6 the

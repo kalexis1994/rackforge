@@ -183,7 +183,10 @@
         row.append(name, reading);
 
         const segment = document.createElement("div");
-        segment.className = "segment";
+        // A row of two or three plates reads at the tab's size; a row of
+        // thirteen keys wants smaller plates, or it stands twice as tall
+        // as the fader beside it for no reason.
+        segment.className = kind.choices.length > 4 ? "segment dense" : "segment";
         segment.setAttribute("role", "radiogroup");
         segment.setAttribute("aria-label", parameter.name);
         let chosen = Number(value ?? kind.default);

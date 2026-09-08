@@ -22,7 +22,7 @@ BANK = Path(r"C:\Users\kalex\Downloads\SalamanderGrandPianoV3_48khz24bit\48khz24
 NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 SAMPLED = [21 + 3 * i for i in range(30)]  # A0, C1, D#1 ... C8
 LAYER_TOP = [26, 34, 36, 43, 46, 50, 56, 64, 72, 80, 88, 96, 104, 112, 120, 127]
-LAST_DAMPER = 88
+LAST_DAMPER = 89
 RELEASE_S = 1.0
 TAIL_S = 3.0
 

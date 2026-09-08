@@ -8228,6 +8228,15 @@ impl Processor for ConcertGrand {
         {
             self.room_dirty = true;
         }
+        if accepted && index == PARAM_WIDTH {
+            // The pair's spacing is the Width fader's: the board's integral
+            // toward each capsule and the free strings' places follow it.
+            // Until 0.171.22 only a room or board change re-ran them, so
+            // the fader moved the voices' pans and nothing else -- "no
+            // noto que aumente la separación de estéreo".
+            self.room_dirty = true;
+            self.scale_dirty = true;
+        }
         if accepted && index == PARAM_LAST_DAMPER {
             // The room is a handful of float derivations; retuning at the
             // next block is cheap and keeps every acoustic quantity honest

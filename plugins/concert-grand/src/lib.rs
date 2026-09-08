@@ -2153,7 +2153,7 @@ const KEYOFF_T60_S: f32 = 0.22;
 /// decibels under its 30-150, and the dark burst alone had it at
 /// fifty-five. A short bright burst on the voice's action-noise path, as
 /// a share of the knock's amplitude, its corner and its ring.
-const KEYOFF_CLICK: f32 = 0.3;
+const KEYOFF_CLICK: f32 = 0.2;
 const KEYOFF_CLICK_HZ: f32 = 1200.0;
 const KEYOFF_CLICK_T60_S: f32 = 0.03;
 /// The felt's hardening exponent across the compass, before any voicing.
@@ -2230,7 +2230,8 @@ const FELT_FLOOR_TOP: f32 = 1.05;
 /// acoustic instrument they copy has no dampers there; the reference's
 /// release-resonance regions end at key 88. 89: F6 keeps its damper, F#6
 /// and up ring free. The user, at 88: "pareciera como si tuviera el pedal
-/// de sustain" -- which is exactly what Kawai's FAQ answers.
+/// de sustain" -- which is exactly what Kawai's FAQ answers. The house
+/// value; a preset carries its own (`Controls::last_damper`).
 ///
 /// Until 0.171.9 every note took a damper at key-up. Measured on E7 with a
 /// 50 ms key press: -32.9 dBFS at 10 ms, -65 at 100 ms without the pedal,
@@ -2642,7 +2643,7 @@ pub static OPEN_MIX: Knob = Knob::new(0.012);
 /// resonators is a glockenspiel. Real duplex lengths are set by where the
 /// duplex bar happens to cross each string, so their pitches are scattered,
 /// not scalar, and that is what makes them read as texture.
-const UNDAMPED_COUNT: usize = 96;
+const UNDAMPED_COUNT: usize = 192;
 /// The free strings' resonance after a key-up, measured on the reference's
 /// release-resonance samples (`harmL*`, struck at velocity 45 and up, the
 /// SFZ's -4 dB): after a C6 the instrument keeps sounding at -60 dBFS
@@ -2660,6 +2661,11 @@ const UNDAMPED_COUNT: usize = 96;
 /// `UNDAMPED_MIX` is then the coupling, calibrated on the residue after
 /// an 80 ms key at C5, A5, C6 and D#6 against those samples.
 const FREE_STRING_PARTIALS: usize = 8;
+/// A free note is three strings, and they are never exactly in tune: two
+/// resonators per partial, a cent or so apart, so the residue after a
+/// key-up shimmers as an instrument does instead of ringing as one sine
+/// -- the user heard the single resonator as "un release medio raro".
+const FREE_STRING_DETUNE_CENTS: f32 = 1.2;
 pub static UNDAMPED_LOW_HZ: Knob = Knob::new(1900.0);
 pub static UNDAMPED_HIGH_HZ: Knob = Knob::new(7000.0);
 /// Undamped, but not endless: these are short, light, well-terminated lengths.
@@ -3519,6 +3525,11 @@ struct Controls {
     board_density: f32,
     /// The scale's overall length. Centre is the calibrated concert grand.
     size: f32,
+    /// The last key with a damper on THIS instrument. Yamaha's grands have
+    /// 69 dampers, the last on F6; the Steinway D 71, to G6; the Steinway
+    /// M, L and B 67, to D#6. Not in the saved state: the host re-selects
+    /// the preset at boot, and the preset says.
+    last_damper: u8,
     /// The action's strike point and the scale's tension: the rest of the
     /// instrument's design, centred on the calibrated one.
     strike_point: f32,
@@ -3589,6 +3600,7 @@ impl Default for Controls {
             board_damping: 2.3,
             board_density: 1.0,
             size: 1.9000946,
+            last_damper: LAST_DAMPER_NOTE,
             strike_point: 0.125,
             tension: 850.0,
             lid: 24.35,
@@ -4976,7 +4988,7 @@ impl ConcertGrand {
             .max(low * 1.01)
             .min(0.45 * self.sample_rate);
         let mut index = 0;
-        for note in (LAST_DAMPER_NOTE + 1)..=(LOW_NOTE + NOTE_COUNT as u8 - 1) {
+        for note in (self.controls.last_damper + 1)..=(LOW_NOTE + NOTE_COUNT as u8 - 1) {
             let f0 = self.fundamental[(note - LOW_NOTE) as usize].max(20.0);
             let b = self.inharmonicity_for(note);
             let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
@@ -4994,9 +5006,20 @@ impl ConcertGrand {
                 let t = ((hz - low) / (high - low)).clamp(0.0, 1.0);
                 let t60 = UNDAMPED_T60_LOW_S.get()
                     + (UNDAMPED_T60_HIGH_S.get() - UNDAMPED_T60_LOW_S.get()) * t;
-                self.undamped[index] = BodyMode::tune(hz, t60, pan, self.sample_rate);
-                self.undamped_note[index] = note;
-                index += 1;
+                let spread = FREE_STRING_DETUNE_CENTS
+                    * (0.5 + hash01((note as u32) << 4 | k as u32))
+                    / 1200.0;
+                for side in [-0.5f32, 0.5] {
+                    if index >= UNDAMPED_COUNT {
+                        break;
+                    }
+                    let tuned = hz * powf(2.0, side * spread);
+                    let mut string = BodyMode::tune(tuned, t60, pan, self.sample_rate);
+                    string.drive *= 0.7;
+                    self.undamped[index] = string;
+                    self.undamped_note[index] = note;
+                    index += 1;
+                }
             }
         }
         for (string, owner) in self
@@ -6868,6 +6891,7 @@ impl ConcertGrand {
         // A different burst every time, and a different one per key: the
         // components this replaces rang the same note on every strike.
         let thump_seed = strike_salt.wrapping_add((note as u32).wrapping_mul(2_654_435_761)) | 1;
+        let undamped = note > self.controls.last_damper;
         let (thump_amp, thump_decay, thump_rise_step) = {
             let thump_level = powf(velocity.max(0.01), THUMP_VELOCITY_POWER.get())
                 * 0.095
@@ -7110,7 +7134,7 @@ impl ConcertGrand {
         voice.channel = channel;
         voice.held = true;
         voice.sustained = false;
-        voice.undamped = note > LAST_DAMPER_NOTE;
+        voice.undamped = undamped;
         voice.halo = false;
         voice.sostenuto = false;
         voice.damper_applied = 0.0;
@@ -8085,7 +8109,9 @@ impl Processor for ConcertGrand {
             },
             // Steinway D-274: rich and complex rather than bright, and most
             // itself at low velocities. A0 ~1.98 m.
+            // Steinway D: 71 dampers, the last on G6.
             "concert-274" => Controls {
+                last_damper: 91,
                 lab: voiced(&[(LAB_FELT, 0.50), (LAB_HF, 0.41)]),
                 size: 1.98,
                 brightness: 0.47,
@@ -8134,7 +8160,9 @@ impl Processor for ConcertGrand {
             },
             // A parlour grand around 1.85 m: the common six-foot instrument.
             // A0 ~1.45 m.
+            // The smaller Steinways carry 67 dampers, the last on D#6.
             "parlour-185" => Controls {
+                last_damper: 87,
                 lab: voiced(&[(LAB_FELT, 0.53), (LAB_HF, 0.31)]),
                 size: 1.44,
                 brightness: 0.53,
@@ -8150,6 +8178,7 @@ impl Processor for ConcertGrand {
             // A five-foot baby grand: a foreshortened bass under an ordinary
             // treble, which is the whole character of the thing. A0 ~1.09 m.
             "baby-150" => Controls {
+                last_damper: 87,
                 lab: voiced(&[(LAB_FELT, 0.55), (LAB_HF, 0.27)]),
                 size: 1.1,
                 brightness: 0.55,
@@ -8479,6 +8508,7 @@ impl Processor for ConcertGrand {
             board_damping: values[6 + LAB_COUNT + 8],
             board_density: values[6 + LAB_COUNT + 9],
             size: values[6 + LAB_COUNT + 10],
+            last_damper: self.controls.last_damper,
             strike_point: values[6 + LAB_COUNT + 11],
             tension: values[6 + LAB_COUNT + 12],
             lid: values[6 + LAB_COUNT + 13],
@@ -8605,7 +8635,7 @@ impl Processor for ConcertGrand {
         if self.scale_dirty {
             self.scale_dirty = false;
             self.tune();
-            self.tune_bed();
+            self.tune_undamped();
         }
         let level = self.controls.level_gain();
         let preamp_gain = self.preamp_gain();

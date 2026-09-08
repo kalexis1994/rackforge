@@ -860,6 +860,23 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The last damper is the preset's (0.171.15).** The user checked
+Pianoteq and found the same free treble after F6; the sources say where
+each maker stops the row: Yamaha's grands carry 69 dampers, the last on
+F6; the Steinway D 71, to G6; the Steinway M, L and B 67, to D♯6; Kawai
+leaves eighteen keys free. So `Controls::last_damper` is a property of
+the instrument, not of the model: Concert 274 (the D) keeps its dampers
+to G6, Baby 150 and Parlour 185 stop at D♯6 like the small Steinways, the
+house voicing and the Yamaha-class presets at F6. Not in the saved
+state: the host re-selects the preset at boot and the preset says. The
+free-string bank follows the preset's boundary and the scale. And two
+things the ear asked after 0.171.13 — "hay que bajarle al noise
+mecánico del release", "una resonancia rara al soltar": the key-off
+knock ten decibels under the reference's, the free strings' coupling six
+under and, for the strangeness, the free strings are now pairs a cent
+apart, as three strings are never in tune, so the residue shimmers
+instead of ringing as one sine; the click's share eased.
+
 **What sounds after a key comes up (0.171.13).** The user, with F6 on its
 damper: "por qué es el día y la noche en términos de sustain". The
 mechanism's boundary is a step — a key has a damper or it has not — but

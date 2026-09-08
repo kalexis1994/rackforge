@@ -860,6 +860,26 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The merge ramp lands in phase (0.171.31).** The user, on 40 s excerpts
+of the Campanella at 0, 1, 2 and 4 ms: the repeated note sounds like a
+mechanism and then goes quiet, at 1 ms noticeably softer, at 4 ms "el
+ruido mecánico nomás y la nota ni suena". Right: the push entered in a
+fixed phase, one part per sample, while each partial turned; for any
+partial whose period is shorter than the contact the parts cancel, a box
+on the excitation, and at 4 ms nothing above ~250 Hz was left. The felt's
+contact time does shape the spectrum, but the hammer simulation already
+did that when it built the blow; this filtered it twice. Now the push is
+a phasor that turns with its lane between adds, so every part lands in
+the phase the whole would have reached: the added phasor's amplitude
+ramps, its spectrum does not change. Tested: the blow's own contribution
+20–60 ms after the merge reads the same within 1.5 dB at one sample and at
+4 ms, and the first-millisecond step at 4 ms still holds under 0.3 of the
+ringing note's slope. One sample is unchanged, today's sound. On the
+question of digital pianos' hammers: they are weight and escapement for
+the hand, two or three sensors read the key's speed and send a number;
+nothing strikes anything that sounds, so whatever the mechanism does at
+the string is the model's to do.
+
 **The merge ramp's puzzle, and the level's power as a knob (0.171.30).**
 Two things behind knobs, today's sound at their compiled values. The
 ramp: 0.171.25 spread a merged blow's momentum over the contact and found

@@ -1662,9 +1662,12 @@ struct Partial {
     coupling: f32,
     /// This partial's weight in the string's slope at the bridge.
     slope: f32,
-    /// A re-strike's momentum still arriving: added to `c` each sample
-    /// while the voice's `push_in` runs. See `MERGE_RAMP_S`.
+    /// A re-strike's momentum still arriving: a phasor added to (s, c)
+    /// each sample while the voice's `push_in` runs, and turned with the
+    /// lane between adds so every part lands in the phase the whole would
+    /// have had. See `MERGE_RAMP_S`.
     push: [f32; LANES],
+    push_s: [f32; LANES],
 }
 
 impl Partial {
@@ -3438,8 +3441,18 @@ impl Voice {
                 partial.s[0] += push;
             }
             if pushing {
+                // Each part of the blow enters in the phase the blow has
+                // reached by now: the push phasor turns with the lane. Added
+                // in a fixed phase the parts of any partial whose period is
+                // shorter than the contact cancelled each other, and a 4 ms
+                // ramp left nothing above 250 Hz -- the user heard the
+                // repeated note as a mechanism with no note (2026-09-08).
                 for lane in 0..LANES {
-                    partial.c[lane] += partial.push[lane];
+                    let (ps, pc) = (partial.push_s[lane], partial.push[lane]);
+                    partial.s[lane] += ps;
+                    partial.c[lane] += pc;
+                    partial.push_s[lane] = ps * partial.rc[lane] + pc * partial.rs[lane];
+                    partial.push[lane] = pc * partial.rc[lane] - ps * partial.rs[lane];
                 }
             }
             let voice = partial.tick(knob_horizontal_bridge);
@@ -7900,6 +7913,7 @@ impl ConcertGrand {
             let merge_ramp = ((MERGE_RAMP_S.get() * sample_rate) as u32).max(1);
             for partial in voice.partials[..voice.partial_count].iter_mut() {
                 partial.push = [0.0; LANES];
+                partial.push_s = [0.0; LANES];
             }
             for fresh in partials[..placed].iter() {
                 let target = if fresh.slope != 0.0 {
@@ -7986,6 +8000,7 @@ impl ConcertGrand {
                             existing.s[lane] = 0.0;
                             existing.c[lane] = 0.0;
                             existing.push[lane] = signed / merge_ramp as f32;
+                            existing.push_s[lane] = 0.0;
                             existing.rc[lane] = fresh.rc[lane];
                             existing.rs[lane] = fresh.rs[lane];
                             continue;
@@ -8014,6 +8029,7 @@ impl ConcertGrand {
                             sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
                         let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
                         existing.push[lane] = signed / merge_ramp as f32;
+                        existing.push_s[lane] = 0.0;
                     }
                     existing.coupling = fresh.coupling;
                     existing.drain = fresh.drain;
@@ -8028,6 +8044,7 @@ impl ConcertGrand {
                         );
                         let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
                         arriving.push[lane] = signed / merge_ramp as f32;
+                        arriving.push_s[lane] = 0.0;
                         arriving.s[lane] = 0.0;
                         arriving.c[lane] = 0.0;
                     }
@@ -11171,6 +11188,7 @@ mod tests {
 
     #[test]
     fn a_repeated_note_on_a_moving_string_does_not_step() {
+        let _turn = MERGE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Under the pedal the second blow lands on a string still moving and
         // merges into it: momentum into the cosine quadrature, the output
         // quadrature continuous, so the largest sample-to-sample step of
@@ -11221,6 +11239,44 @@ mod tests {
             second < 0.3 * before,
             "the merged blow stepped: {second} against the ringing note's own slope {before}"
         );
+    }
+
+    /// The two merge tests read and set `MERGE_RAMP_S`, a process-wide
+    /// knob; they take turns.
+    static MERGE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn a_merged_blow_keeps_its_energy_over_the_contact() {
+        let _turn = MERGE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // The blow's own contribution, 20-60 ms after a merge, must not
+        // depend on how long the contact took: the parts of the push land
+        // in phase. Rendered with the same instrument twice, with and
+        // without the second blow, at a one-sample ramp and at four ms.
+        let blow_rms = |ramp_s: f32| {
+            MERGE_RAMP_S.set(ramp_s);
+            let run = |blow: bool| {
+                let mut piano = prepared();
+                let pedal = MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, 127],
+                    length: 3,
+                };
+                render(&mut piano, 16, &[pedal]);
+                render(&mut piano, (FS * 0.001) as usize, &[note_on(60, 100)]);
+                render(&mut piano, (FS * 0.099) as usize, &[note_off(60)]);
+                let events: Vec<MidiEvent> = if blow { vec![note_on(60, 100)] } else { Vec::new() };
+                render(&mut piano, (FS * 0.02) as usize, &events);
+                render(&mut piano, (FS * 0.04) as usize, &[])
+            };
+            let (with, without) = (run(true), run(false));
+            let energy: f32 = with.iter().zip(without.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+            sqrtf(energy / with.len() as f32)
+        };
+        let step = blow_rms(0.0);
+        let contact = blow_rms(0.004);
+        MERGE_RAMP_S.set(0.0);
+        let ratio = 20.0 * log2f(contact / step.max(1e-9)) * core::f32::consts::LOG10_2;
+        assert!(ratio.abs() < 1.5, "the blow over a 4 ms contact reads {ratio:.1} dB against the one-sample push");
     }
 
     #[test]

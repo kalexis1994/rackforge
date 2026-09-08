@@ -3768,6 +3768,48 @@
       }
     },
     {
+      "index": 182,
+      "id": "knob_letoff_distance_mm",
+      "name": "LETOFF_DISTANCE_MM",
+      "page": "model_hammer",
+      "order": 45,
+      "kind": {
+        "type": "float",
+        "minimum": 0.15625,
+        "maximum": 40.0,
+        "step": 0.025,
+        "default": 2.5,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 183,
+      "id": "knob_letoff_knee",
+      "name": "LETOFF_KNEE",
+      "page": "model_hammer",
+      "order": 46,
+      "kind": {
+        "type": "float",
+        "minimum": 0.75,
+        "maximum": 192.0,
+        "step": 0.12,
+        "default": 12.0,
+        "taper": "logarithmic"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
       "index": 200,
       "id": "preamp",
       "name": "Preamp",

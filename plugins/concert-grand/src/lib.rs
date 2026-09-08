@@ -217,7 +217,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 140;
+pub const KNOB_COUNT: usize = 142;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -799,6 +799,16 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "BOARD_PAIR",
         &BOARD_PAIR,
         "Whether each board mode reaches each capsule through the Rayleigh integral over the bridge (1) or through its old random level pan (0).",
+    ),
+    (
+        "LETOFF_DISTANCE_MM",
+        &LETOFF_DISTANCE_MM,
+        "The let-off: how far the hammer flies free to the string, mm. Its toll, 2 g d, is the soft threshold.",
+    ),
+    (
+        "LETOFF_KNEE",
+        &LETOFF_KNEE,
+        "MIDI step below which the let-off speed falls linearly to nought, so a slow key can miss the string.",
     ),
 ];
 
@@ -1771,6 +1781,15 @@ impl BodyMode {
         self.y2 = self.y1;
         self.y1 = y;
         out
+    }
+
+    /// A damper on this mode: its pole radius scaled by `factor` per sample
+    /// from here on, exactly what `Voice::damp` does to a partial's phasor.
+    /// `a1 = 2 r cos w` and `a2 = -r^2`, so the radius is scaled through
+    /// `a1` once and `a2` twice.
+    fn damp(&mut self, factor: f32) {
+        self.a1 *= factor;
+        self.a2 *= factor * factor;
     }
 }
 
@@ -2762,6 +2781,25 @@ pub static OPEN_MIX: Knob = Knob::new(0.012);
 /// resonators is a glockenspiel. Real duplex lengths are set by where the
 /// duplex bar happens to cross each string, so their pitches are scattered,
 /// not scalar, and that is what makes them read as texture.
+/// The silent keys: strings whose key is down without a strike -- pressed
+/// too slowly to reach the string (`LETOFF_DISTANCE_MM`) or taken down on
+/// purpose, the pianist's silent re-take -- have their damper up and ring by
+/// sympathy like the top octave does. A pool of this many, allocated on the
+/// key-down and given back when the felt has landed; a player rarely holds
+/// more than a handful. Each string is `FREE_STRING_PARTIALS` unison pairs,
+/// tuned as the undamped bank's are.
+const SILENT_SLOTS: usize = 16;
+const SILENT_MODES_PER_SLOT: usize = FREE_STRING_PARTIALS * 2;
+const SILENT_MODES: usize = SILENT_SLOTS * SILENT_MODES_PER_SLOT;
+/// How long a released silent string is kept ticking under its damper
+/// before its slot is given back: the felt's own decay is over by then.
+const SILENT_RELEASE_S: f32 = 0.5;
+
+const SILENT_FREE: u8 = 0;
+const SILENT_HELD: u8 = 1;
+const SILENT_SUSTAINED: u8 = 2;
+const SILENT_DAMPED: u8 = 3;
+
 const UNDAMPED_COUNT: usize = 192;
 /// The free strings' resonance after a key-up, measured on the reference's
 /// release-resonance samples (`harmL*`, struck at velocity 45 and up, the
@@ -4138,6 +4176,15 @@ pub struct ConcertGrand {
     /// decibels at 0.4 s.
     undamped_note: [u8; UNDAMPED_COUNT],
     note_sounding: [bool; NOTE_COUNT],
+    /// Which keys are down right now, struck or not. A key that is down
+    /// has its damper up whatever else is true of its string.
+    key_down: [bool; NOTE_COUNT],
+    /// The silent keys' strings; see `SILENT_SLOTS`.
+    silent: [BodyMode; SILENT_MODES],
+    silent_note: [u8; SILENT_SLOTS],
+    silent_state: [u8; SILENT_SLOTS],
+    /// Samples left before a damped silent string gives its slot back.
+    silent_in: [u32; SILENT_SLOTS],
     /// The damped strings' bed: forty fundamentals, A0 up, humming under everything.
     bed: [BodyMode; BED_COUNT],
     /// The open-register shimmer: short undamped HF feedback delay network.
@@ -4286,6 +4333,11 @@ impl Default for ConcertGrand {
             undamped: [BodyMode::default(); UNDAMPED_COUNT],
             undamped_note: [0; UNDAMPED_COUNT],
             note_sounding: [false; NOTE_COUNT],
+            key_down: [false; NOTE_COUNT],
+            silent: [BodyMode::default(); SILENT_MODES],
+            silent_note: [0; SILENT_SLOTS],
+            silent_state: [SILENT_FREE; SILENT_SLOTS],
+            silent_in: [0; SILENT_SLOTS],
             bed: [BodyMode::default(); BED_COUNT],
             halo: [[0.0; HALO_BUFFER]; 4],
             halo_len: [1; 4],
@@ -4481,6 +4533,31 @@ pub static SIM_TOP_HZ: Knob = Knob::new(8_000.0);
 /// centroid lands at 197 Hz against the references' 166-172 and the tenor's
 /// at 385 against 393-394 (2026-09-02), fortissimo untouched.
 pub static HAMMER_V_FF: Knob = Knob::new(6.8);
+
+/// The hammer's free flight: the let-off distance, in millimetres. The jack
+/// lets the hammer go this far short of the string and it flies the rest
+/// on its own, against gravity, so a hammer let off with less energy than
+/// `2 g d` turns back before the string -- the key goes down and nothing
+/// sounds. Regulation practice puts the let-off at 1.5-3 mm on a grand.
+/// The toll is an energy fixed by the distance, not a fraction of the
+/// hammer's: RF-73's action, solved as coupled bodies, took 1.74-2.21 mJ
+/// over the same 1.6 mm flight across a fivefold range of release energy.
+/// So `v_string^2 = v_letoff^2 - 2 g d`, nothing below the threshold and a
+/// curve that rises almost vertically just above it: 16.7 % more drive
+/// made that hammer arrive 6.8 times faster.
+pub static LETOFF_DISTANCE_MM: Knob = Knob::new(2.5);
+
+/// Where the keyboard's velocity scale stops being the action's, in MIDI
+/// steps. `HAMMER_V_FF * span^(v - 1)` is the let-off speed the calibration
+/// measured from the reference's layers, and its bottom, 0.58 m/s at
+/// velocity 1, is a hammer that still reaches the string: the reference
+/// has no silent layer to anchor a threshold on. A real key pressed slowly
+/// enough does not sound, and a keyboard that sends velocity 1 for its
+/// slowest press has to be able to say so. Below this step the let-off
+/// speed falls linearly to nought, continuous at the knee, and the flight's
+/// toll decides where the sound stops. This is the keyboard's convention,
+/// stated as such; the toll above is the piano's.
+pub static LETOFF_KNEE: Knob = Knob::new(12.0);
 /// How much longer the integration runs than the nominal contact time. The
 /// hammer is still in contact when it stops, so this sets how heavily it
 /// pushes the low modes: measured on C2's first 30 ms, stretching it puts
@@ -5157,6 +5234,106 @@ impl ConcertGrand {
             // Along the bridge, bass to the left as the pair hears it.
             let pan = 0.3 + 0.4 * i as f32 / (BED_COUNT - 1) as f32;
             *string = BodyMode::tune(hz, t60, pan, self.sample_rate);
+        }
+    }
+
+    /// The hammer's speed at let-off and at the string for a unit velocity:
+    /// the action's calibrated law, the keyboard's knee under it, and the
+    /// flight's toll between the two. See `LETOFF_DISTANCE_MM`.
+    fn hammer_speeds(&self, velocity: f32) -> (f32, f32) {
+        let span = ACTION_SPAN_BASE.get() + ACTION_SPAN_PER_DYNAMICS.get() * self.controls.dynamics;
+        let mut letoff = HAMMER_V_FF.get() * powf(span, velocity - 1.0);
+        let knee = (LETOFF_KNEE.get() / 127.0).clamp(0.0, 1.0);
+        if knee > 0.0 && velocity < knee {
+            letoff *= velocity / knee;
+        }
+        let toll = 2.0 * 9.81 * LETOFF_DISTANCE_MM.get().max(0.0) * 1.0e-3;
+        let at_string = sqrtf((letoff * letoff - toll).max(0.0));
+        (letoff, at_string)
+    }
+
+    /// A key down without a strike: its string, damper up, joins the
+    /// conversation the way the top octave's do.
+    fn hold_silent(&mut self, note: u8) {
+        if let Some(slot) = self.silent_slot_of(note) {
+            self.silent_state[slot] = SILENT_HELD;
+            return;
+        }
+        // A free slot, or the one closest to being given back.
+        let slot = (0..SILENT_SLOTS)
+            .find(|&slot| self.silent_state[slot] == SILENT_FREE)
+            .or_else(|| {
+                (0..SILENT_SLOTS)
+                    .filter(|&slot| self.silent_state[slot] == SILENT_DAMPED)
+                    .min_by_key(|&slot| self.silent_in[slot])
+            });
+        let Some(slot) = slot else {
+            return;
+        };
+        self.tune_silent(slot, note);
+        self.silent_note[slot] = note;
+        self.silent_state[slot] = SILENT_HELD;
+        self.silent_in[slot] = 0;
+    }
+
+    fn silent_slot_of(&self, note: u8) -> Option<usize> {
+        (0..SILENT_SLOTS)
+            .find(|&slot| self.silent_state[slot] != SILENT_FREE && self.silent_note[slot] == note)
+    }
+
+    fn free_silent(&mut self, note: u8) {
+        if let Some(slot) = self.silent_slot_of(note) {
+            self.silent_state[slot] = SILENT_FREE;
+            let base = slot * SILENT_MODES_PER_SLOT;
+            for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+                *mode = BodyMode::default();
+            }
+        }
+    }
+
+    /// The felt landing on a silent string: its modes' radii scaled from
+    /// here on, and the slot given back once the felt's work is done.
+    fn damp_silent(&mut self, slot: usize, factor: f32) {
+        let base = slot * SILENT_MODES_PER_SLOT;
+        for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+            mode.damp(factor);
+        }
+        self.silent_state[slot] = SILENT_DAMPED;
+        self.silent_in[slot] = (SILENT_RELEASE_S * self.sample_rate) as u32;
+    }
+
+    /// The silent string's partials, tuned as the undamped bank's are but
+    /// ringing as the string itself does at that pitch: the voices' own
+    /// slow-stage law, since a free string with no hammer on it is exactly
+    /// the tail of a note.
+    fn tune_silent(&mut self, slot: usize, note: u8) {
+        let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
+        let f0 = self.fundamental[index].max(20.0);
+        let b = self.inharmonicity_for(note);
+        let position = index as f32 / (NOTE_COUNT - 1) as f32;
+        let pan = (0.5 + 0.8 * (position - 0.5) * self.controls.width).clamp(0.05, 0.95);
+        let high = 0.45 * self.sample_rate;
+        let base = slot * SILENT_MODES_PER_SLOT;
+        let mut cursor = 0;
+        for k in 1..=FREE_STRING_PARTIALS {
+            let kf = k as f32;
+            let hz = kf * f0 * sqrtf(1.0 + b * kf * kf);
+            if hz >= high {
+                break;
+            }
+            let t60 = self.slow_t60_seconds(hz, f0, 1.0).max(0.05);
+            let spread =
+                FREE_STRING_DETUNE_CENTS * (0.5 + hash01((note as u32) << 4 | k as u32)) / 1200.0;
+            for side in [-0.5f32, 0.5] {
+                let tuned = hz * powf(2.0, side * spread);
+                let mut string = BodyMode::tune(tuned, t60, pan, self.sample_rate);
+                string.drive *= 0.7;
+                self.silent[base + cursor] = string;
+                cursor += 1;
+            }
+        }
+        for mode in &mut self.silent[base + cursor..base + SILENT_MODES_PER_SLOT] {
+            *mode = BodyMode::default();
         }
     }
 
@@ -6050,6 +6227,20 @@ impl ConcertGrand {
         let half_blow = self.soft * self.controls.action;
         velocity *= 1.0 - 0.22 * shift - 0.15 * half_blow;
 
+        // The key is down from here, whether or not the hammer arrives.
+        self.key_down[index] = true;
+        // The escapement: the hammer flies the let-off on its own, and a
+        // hammer let off too slowly turns back short of the string. The key
+        // is down and its damper is up; the string is free and silent.
+        let (_, at_string) = self.hammer_speeds(velocity);
+        if at_string <= 0.0 {
+            self.hold_silent(note);
+            return;
+        }
+        // A struck string is its voice; a silent string it may have been is
+        // that voice now.
+        self.free_silent(note);
+
         // A RE-STRUCK STRING IS THE SAME STRING. If this note is still
         // ringing free -- held, or sustained with its damper clear -- the
         // hammer meets a wire already in motion, and the new blow ADDS to
@@ -6394,9 +6585,9 @@ impl ConcertGrand {
                 // arrives at full velocity than at none. `dynamics` is the
                 // regulation -- a shallow action compresses the span, a deep
                 // one spreads it.
-                let span = ACTION_SPAN_BASE.get()
-                    + ACTION_SPAN_PER_DYNAMICS.get() * self.controls.dynamics;
-                let velocity0 = HAMMER_V_FF.get() * powf(span, velocity - 1.0);
+                // The speed at the string: the action's law at let-off, less
+                // the flight's toll -- see `LETOFF_DISTANCE_MM`.
+                let (_, velocity0) = self.hammer_speeds(velocity);
                 // The felt: K in N/m^p, hardening steeply toward the treble.
                 // Brightness and the Hammer Hard control are voicing -- the
                 // needle and the lacquer act on exactly this property.
@@ -7708,6 +7899,23 @@ impl ConcertGrand {
         let pressure = self.pedal_pressure;
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
+        if let Some(slot) = note.checked_sub(LOW_NOTE).map(usize::from)
+            && slot < NOTE_COUNT
+        {
+            self.key_down[slot] = false;
+        }
+        // A silent key coming up: its damper lands as any other's, unless
+        // the pedal is holding the rail.
+        if let Some(slot) = self.silent_slot_of(note)
+            && self.silent_state[slot] == SILENT_HELD
+        {
+            if self.pedal {
+                self.silent_state[slot] = SILENT_SUSTAINED;
+            } else {
+                let own = Self::damper_for(note, rate, grip * firmness, span);
+                self.damp_silent(slot, own);
+            }
+        }
         let key_off = KEYOFF_KNOCK * release_gain;
         let key_off_decay = expf(-LN_1000 / (KEYOFF_T60_S * rate));
         let key_off_rise = expf(-1.0 / (0.002 * rate));
@@ -7778,6 +7986,16 @@ impl ConcertGrand {
         let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
+        if !down {
+            // The rail coming down seats the silent strings whose keys
+            // are already up.
+            for slot in 0..SILENT_SLOTS {
+                if self.silent_state[slot] == SILENT_SUSTAINED {
+                    let own = Self::damper_for(self.silent_note[slot], rate, grip, 1.0);
+                    self.damp_silent(slot, own);
+                }
+            }
+        }
         // One pedal motion, but sixty dampers, and each one seats on its own
         // string. Sharing a single factor across the rail was audible as a
         // chord ending like a gate rather than like felt.
@@ -7876,6 +8094,13 @@ impl ConcertGrand {
             if voice.active {
                 let damper = Self::damper_for(voice.note, rate, grip, 1.0);
                 voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+            }
+        }
+        self.key_down = [false; NOTE_COUNT];
+        for slot in 0..SILENT_SLOTS {
+            if self.silent_state[slot] != SILENT_FREE {
+                let own = Self::damper_for(self.silent_note[slot], rate, grip, 1.0);
+                self.damp_silent(slot, own);
             }
         }
         self.pedal = false;
@@ -8868,6 +9093,18 @@ impl Processor for ConcertGrand {
         let knob_board_mix = BOARD_MIX.get();
         let knob_halo_mix = HALO_MIX.get();
         self.tune_pair();
+        for slot in 0..SILENT_SLOTS {
+            if self.silent_state[slot] == SILENT_DAMPED {
+                self.silent_in[slot] = self.silent_in[slot].saturating_sub(frames);
+                if self.silent_in[slot] == 0 {
+                    self.silent_state[slot] = SILENT_FREE;
+                    let base = slot * SILENT_MODES_PER_SLOT;
+                    for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+                        *mode = BodyMode::default();
+                    }
+                }
+            }
+        }
         self.note_sounding = [false; NOTE_COUNT];
         for voice in &self.voices {
             if !(voice.active && !voice.halo && voice.note >= LOW_NOTE) {
@@ -8983,6 +9220,13 @@ impl Processor for ConcertGrand {
                         }
                     }
                 }
+                // A key that is down has its damper up: its string is not
+                // in the damped bed, whether it was struck or not.
+                for (slot, busy) in bed_busy.iter_mut().enumerate() {
+                    if self.key_down[slot] {
+                        *busy = true;
+                    }
+                }
             }
             let mut strings_total = 0.0f32;
             let mut bridge_drive = 0.0f32;
@@ -9085,6 +9329,22 @@ impl Processor for ConcertGrand {
                 let y = string.tick(if sounding { 0.0 } else { excitation });
                 undamped_left += y * string.pan_left;
                 undamped_right += y * string.pan_right;
+            }
+            // The silent keys' strings, listening like the top octave's;
+            // one whose own voice is sounding is that voice.
+            for slot in 0..SILENT_SLOTS {
+                if self.silent_state[slot] == SILENT_FREE {
+                    continue;
+                }
+                let owner = self.silent_note[slot];
+                let sounding = owner >= LOW_NOTE && self.note_sounding[(owner - LOW_NOTE) as usize];
+                let feed = if sounding { 0.0 } else { excitation };
+                let base = slot * SILENT_MODES_PER_SLOT;
+                for string in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+                    let y = string.tick(feed);
+                    undamped_left += y * string.pan_left;
+                    undamped_right += y * string.pan_right;
+                }
             }
             let undamped_gain = knob_undamped_mix * self.controls.lab(15);
             // The damped strings' bed, listening to the bridge like the
@@ -10070,6 +10330,107 @@ mod tests {
         assert!(
             early_slope > late_slope * 1.5,
             "early {early_slope} vs late {late_slope}"
+        );
+    }
+
+    #[test]
+    fn a_key_below_the_escapement_threshold_stays_silent() {
+        // The hammer flies the let-off on its own, and one let off too
+        // slowly turns back short of the string. Velocity 1 is under the
+        // keyboard's knee and under the toll: the key goes down, the
+        // damper comes up, nothing sounds. Velocity 36, the softest layer
+        // the calibration is anchored on, still strikes.
+        let mut piano = prepared();
+        let quiet = render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 1)]);
+        assert!(
+            piano.voices.iter().all(|voice| !voice.active),
+            "velocity 1 struck a string"
+        );
+        assert!(piano.key_down[60 - LOW_NOTE as usize], "the key is down");
+        assert!(
+            piano.silent_slot_of(60).is_some(),
+            "the silent key's string is not in the pool"
+        );
+        assert!(
+            energy(&quiet) < 1.0e-9,
+            "a silent key made a sound: {:e}",
+            energy(&quiet)
+        );
+        let mut piano = prepared();
+        let struck = render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 36)]);
+        assert!(piano.voices.iter().any(|voice| voice.active));
+        assert!(energy(&struck) > 1.0e-6);
+        render(&mut piano, 16, &[note_off(60)]);
+        assert!(!piano.key_down[60 - LOW_NOTE as usize]);
+    }
+
+    #[test]
+    fn the_speed_at_the_string_rises_without_a_step() {
+        // The law is one curve: continuous at the keyboard's knee, nought
+        // below the toll, monotone above it, and at the calibrated layers
+        // within a few percent of the let-off speed -- the toll is small
+        // against a hammer that reaches the string at all.
+        let piano = prepared();
+        let mut previous = 0.0f32;
+        let mut first_sounding = None;
+        for velocity in 1..=127u8 {
+            let unit = velocity as f32 / 127.0;
+            let (letoff, at_string) = piano.hammer_speeds(unit);
+            assert!(
+                at_string >= previous,
+                "velocity {velocity} slowed the hammer"
+            );
+            assert!(at_string <= letoff);
+            if at_string > 0.0 && first_sounding.is_none() {
+                first_sounding = Some(velocity);
+            }
+            previous = at_string;
+        }
+        let first = first_sounding.expect("some velocity strikes");
+        assert!(
+            (2..=8).contains(&first),
+            "the first strike is at velocity {first}"
+        );
+        let (letoff, at_string) = piano.hammer_speeds(36.0 / 127.0);
+        assert!(
+            at_string > 0.97 * letoff,
+            "pp lost {:.1}%",
+            100.0 * (1.0 - at_string / letoff)
+        );
+        let (letoff, at_string) = piano.hammer_speeds(117.0 / 127.0);
+        assert!(at_string > 0.999 * letoff);
+    }
+
+    #[test]
+    fn a_silent_key_lets_its_string_ring_by_sympathy() {
+        // The pianist's silent re-take: a key taken down without sounding
+        // leaves its string free, and a loud note under it wakes it. G4
+        // held silently over a fortissimo C3 -- G4's fundamental is C3's
+        // third partial -- must leave more sound behind once the C3 has
+        // been damped than the same C3 alone; and the silent key coming up
+        // must take it away again.
+        let tail = |silent: bool, lift: bool| {
+            let mut piano = prepared();
+            if silent {
+                render(&mut piano, 16, &[note_on(67, 1)]);
+            }
+            render(&mut piano, (FS * 0.4) as usize, &[note_on(48, 120)]);
+            render(&mut piano, (FS * 0.3) as usize, &[note_off(48)]);
+            if lift {
+                render(&mut piano, (FS * 0.15) as usize, &[note_off(67)]);
+            }
+            energy(&render(&mut piano, (FS * 0.4) as usize, &[]))
+        };
+        let alone = tail(false, false);
+        let with_silent = tail(true, false);
+        let lifted = tail(true, true);
+        assert!(
+            with_silent > 1.3 * alone,
+            "the silent G4 left {with_silent:e} behind against {alone:e} alone"
+        );
+        assert!(
+            lifted < 0.5 * with_silent,
+            "the lifted G4 left {lifted:e} against {with_silent:e} held"
         );
     }
 

@@ -860,6 +860,37 @@ must: the attack floor at pp goes from −7 / −7 dB under the reference
 (tenor / treble) to −12 / −18, tenor 4.04 → 4.28, treble 5.36 → 5.91.
 The ear's call, recorded as such.
 
+**The escapement, and the silent key (0.171.23).** The hammer flies the
+let-off on its own now. The action's calibrated law, `HAMMER_V_FF ·
+span^(v − 1)`, is read as the speed at let-off, and the string gets what is
+left after the flight's toll, `v_string² = v_letoff² − 2 g d` with
+`LETOFF_DISTANCE_MM` = 2.5 (regulation practice, 1.5-3 mm). RF-73's action,
+solved as coupled bodies, found the toll to be an energy fixed by the
+distance, not a fraction of the hammer's, and the curve above it nearly
+vertical; that shape is carried, the number is a grand's. The reference has
+no silent layer to anchor a threshold on and the law's bottom (0.58 m/s at
+velocity 1) still reached the string, so under `LETOFF_KNEE` (12 steps) the
+let-off speed falls linearly to nought, continuous at the knee -- the
+keyboard's convention, stated as such -- and the first velocity that
+strikes is 4. Below it the key goes down, its damper comes up and nothing
+sounds: the silent key, the pianist's silent re-take, which the model had
+no state for. `key_down[88]` says which keys are down; a pool of sixteen
+free strings (`SILENT_SLOTS`, eight unison pairs each, tuned as the
+undamped bank's are but ringing by the voices' own slow-stage law) takes a
+silent key's string on the key-down, listens to the bridge like the top
+octave does, is muted while the note's own voice sounds, seats its damper
+through `BodyMode::damp` (the pole radius scaled once, as a partial's
+phasor is) on the key-up or on the pedal's fall, and gives its slot back
+half a second later. A key that is down is also out of the damped bed.
+Tested: velocity 1 strikes nothing and leaves the key down; the speed at
+the string is monotone and continuous, 0.97 of the let-off speed at
+velocity 36 and 0.999 at 117; G4 held silently over a fortissimo C3 leaves
+more than 1.3× the sound behind once the C3 is damped, and the key coming
+up takes it away. Scorecard, the same build with the toll and the knee at
+nought against with them: 4.14/5.26/5.93 → 4.21/5.30/5.94, within the noise
+(velocity 36 arrives 1.9 % slower). Not done here: the key-bottom thump of
+a silent key, and the sostenuto's hold on a silent string.
+
 **Width reaches the pair, and the keys lose their brands (0.171.22).**
 `Stereo Width` sets the pair's spacing (`half = 0.5 · MIC_SPACING_M ·
 width`), but only a room or board change re-ran `tune_pair` and the free

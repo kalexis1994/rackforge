@@ -2736,6 +2736,27 @@ function PlayPage({
     && (pendingChain.revision === snapshotRevision || sameChain(pendingChain.chain, sessionChain))
       ? pendingChain.chain
       : sessionChain;
+  // One effect's panel at a time, inside the drawer. The frame addresses
+  // the effect's own instance, which both hosts run beside the instrument
+  // and let through their parameter gates while it is on stage.
+  const [openEffectId, setOpenEffectId] = useState<string | null>(null);
+  const openEffect = chain?.effects.find((effect) => effect.id === openEffectId) ?? null;
+  const openEffectInstance = openEffect
+    ? instances.find((instance) => instance.plugin_id === openEffect.plugin_id) ?? null
+    : null;
+  const effectPanel =
+    active && openEffect && openEffectInstance ? (
+      <PluginFrame
+        key={`${active.instance_id}.fx.${openEffect.id}`}
+        instance={{
+          ...openEffectInstance,
+          instance_id: `${active.instance_id}.fx.${openEffect.id}`,
+        }}
+        surface="play"
+        onSelectSound={() =>
+          Promise.reject(new Error("An effect's programs cannot be selected from the chain yet."))}
+      />
+    ) : null;
   const handleChainChange = useCallback(
     (next: PlayChain) => {
       setPendingChain({ chain: next, revision: snapshotRevision ?? -1 });
@@ -2830,6 +2851,9 @@ function PlayPage({
         suggested={activeDescriptor?.suggested_chain}
         onChange={handleChainChange}
         onClose={() => setChainOpen(false)}
+        openEffectId={openEffectId}
+        onOpenEffect={setOpenEffectId}
+        effectPanel={effectPanel}
       />
       {active ? (
         <PluginFrame

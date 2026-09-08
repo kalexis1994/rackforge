@@ -7,6 +7,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import type { PluginInstance, PluginWebDescriptor } from "../types";
 import {
@@ -64,6 +65,9 @@ export function PlayChainDrawer({
   suggested,
   onChange,
   onClose,
+  openEffectId = null,
+  onOpenEffect,
+  effectPanel,
 }: {
   open: boolean;
   chain: PlayChain;
@@ -76,6 +80,11 @@ export function PlayChainDrawer({
   suggested?: SuggestedChainEntry[];
   onChange: (chain: PlayChain) => void;
   onClose: () => void;
+  /** The effect whose panel is open in the drawer, if one is. */
+  openEffectId?: string | null;
+  onOpenEffect?: (effectId: string | null) => void;
+  /** That effect's panel, mounted by the page (it owns the plugin frames). */
+  effectPanel?: ReactNode;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -113,7 +122,7 @@ export function PlayChainDrawer({
       setMaximumHeight(Math.max(MINIMUM_HEIGHT, shell.clientHeight - STAGE_MINIMUM));
     }
   }, []);
-  useLayoutEffect(measure, [measure, chain, plugins, suggested, open, pickerOpen]);
+  useLayoutEffect(measure, [measure, chain, plugins, suggested, open, pickerOpen, openEffectId]);
   useEffect(() => {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
@@ -223,8 +232,9 @@ export function PlayChainDrawer({
             const name = descriptor?.plugin_name ?? effect.plugin_id;
             const state = effect.enabled ? "" : " bypassed";
             const missing = descriptor ? "" : " missing";
+            const opened = openEffectId === effect.id ? " open" : "";
             return (
-              <li key={effect.id} className={`play-chain-node effect${state}${missing}`}>
+              <li key={effect.id} className={`play-chain-node effect${state}${missing}${opened}`}>
                 <PluginIcon plugin={descriptor} name={name} className="play-chain-icon" />
                 <span className="play-chain-copy">
                   <small>{descriptor ? "Effect" : "Not installed"}</small>
@@ -260,6 +270,18 @@ export function PlayChainDrawer({
                   >
                     {effect.enabled ? "On" : "Off"}
                   </button>
+                  {descriptor && onOpenEffect ? (
+                    <button
+                      type="button"
+                      className={openEffectId === effect.id ? "on" : ""}
+                      onClick={() => onOpenEffect(openEffectId === effect.id ? null : effect.id)}
+                      aria-expanded={openEffectId === effect.id}
+                      aria-label={`${name} panel`}
+                      tabIndex={tab}
+                    >
+                      Panel
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => onChange(withoutEffect(chain, effect.id))}
@@ -316,6 +338,7 @@ export function PlayChainDrawer({
             )}
           </div>
         ) : null}
+        {effectPanel ? <div className="play-chain-effect-panel">{effectPanel}</div> : null}
         {suggestions.length > 0 ? (
           <div className="play-chain-suggested">
             <small>{instrumentName} suggests</small>

@@ -39,14 +39,28 @@ export function chainOf(
 }
 
 /** The chain with `pluginId` appended, under an id no other effect holds. */
-export function withEffect(chain: PlayChain, pluginId: string): PlayChain {
+export function withEffect(
+  chain: PlayChain,
+  pluginId: string,
+  programId?: string | null,
+): PlayChain {
   if (chain.effects.length >= MAX_PLAY_CHAIN_EFFECTS) return chain;
   const taken = new Set(chain.effects.map((effect) => effect.id));
   let ordinal = 1;
   while (taken.has(`fx-${ordinal}`)) ordinal += 1;
   return {
     ...chain,
-    effects: [...chain.effects, { id: `fx-${ordinal}`, plugin_id: pluginId, enabled: true }],
+    effects: [
+      ...chain.effects,
+      {
+        id: `fx-${ordinal}`,
+        plugin_id: pluginId,
+        enabled: true,
+        // An instrument that names a program with its suggestion means that
+        // program: adding it from the drawer arrives on it, not on defaults.
+        ...(programId ? { program_id: programId } : {}),
+      },
+    ],
   };
 }
 

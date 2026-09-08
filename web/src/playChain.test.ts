@@ -124,3 +124,22 @@ describe("the PLAY chain", () => {
     expect(suggestedEffects(undefined, plugins, chain)).toEqual([]);
   });
 });
+
+it("adds a suggested effect on the program the instrument named", () => {
+  const chain = withEffect(
+    { instrument_id: "desktop.piano", effects: [] },
+    "org.rackforge.rf-comp",
+    "piano_glue",
+  );
+  expect(chain.effects).toEqual([
+    {
+      id: "fx-1",
+      plugin_id: "org.rackforge.rf-comp",
+      enabled: true,
+      program_id: "piano_glue",
+    },
+  ]);
+  // Added by hand from the picker, it arrives on the plugin's own default.
+  const plain = withEffect({ instrument_id: "desktop.piano", effects: [] }, "org.rackforge.rf-eq");
+  expect(plain.effects[0]).not.toHaveProperty("program_id");
+});

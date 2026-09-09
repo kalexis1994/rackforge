@@ -830,9 +830,12 @@ impl SessionState {
                 }
                 self.play_chains
                     .retain(|existing| existing.instrument_id != chain.instrument_id);
-                if !chain.effects.is_empty() {
-                    self.play_chains.push(chain.clone());
-                }
+                // An empty chain is kept, not forgotten. It is the player's
+                // answer for this instrument -- nothing after it -- and the
+                // hosts tell that apart from never having been told: an
+                // instrument with no chain here takes the one it asks for in
+                // its manifest, and one the player emptied stays empty.
+                self.play_chains.push(chain.clone());
             }
         }
         self.revision = envelope.revision;
@@ -1145,8 +1148,9 @@ mod tests {
             )
             .is_err()
         );
+        // Emptying a chain records the decision rather than erasing it.
         assert_eq!(apply(&mut state, chain(Vec::new())), Ok(()));
-        assert!(state.play_chain(&instrument).is_none());
+        assert!(state.play_chain(&instrument).unwrap().effects.is_empty());
         let other = PlayChainState {
             instrument_id: InstanceId::new("play.other").unwrap(),
             effects: Vec::new(),

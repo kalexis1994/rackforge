@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_PLAY_CHAIN_EFFECTS,
   chainOf,
+  chainToAdopt,
   effectPlugins,
   emptyChain,
   sameChain,
@@ -115,6 +116,44 @@ describe("the PLAY chain", () => {
     expect(effectPlugins(plugins, []).map((plugin) => plugin.plugin_id)).toEqual([
       "org.rackforge.comp",
     ]);
+  });
+
+  it("adopts what the instrument asks for when it has never had a chain", () => {
+    const plugins = [
+      descriptor("org.rackforge.comp", "effect"),
+      descriptor("org.rackforge.limiter", "effect"),
+      descriptor("org.rackforge.absent", "effect"),
+    ];
+    const instances = [instance("org.rackforge.comp"), instance("org.rackforge.limiter")];
+    const suggested = [
+      { plugin: "org.rackforge.comp", preset: "piano_glue" },
+      { plugin: "org.rackforge.absent" },
+      { plugin: "org.rackforge.limiter", preset: "transparent" },
+    ];
+    const adopted = chainToAdopt("play.piano", [], suggested, plugins, instances);
+    expect(adopted).toEqual({
+      instrument_id: "play.piano",
+      effects: [
+        { id: "fx-1", plugin_id: "org.rackforge.comp", enabled: true, program_id: "piano_glue" },
+        {
+          id: "fx-2",
+          plugin_id: "org.rackforge.limiter",
+          enabled: true,
+          program_id: "transparent",
+        },
+      ],
+    });
+  });
+
+  it("leaves the player's own answer alone, including an empty chain", () => {
+    const plugins = [descriptor("org.rackforge.comp", "effect")];
+    const instances = [instance("org.rackforge.comp")];
+    const suggested = [{ plugin: "org.rackforge.comp" }];
+    const decided = [emptyChain("play.piano")];
+    expect(chainToAdopt("play.piano", decided, suggested, plugins, instances)).toBeNull();
+    expect(chainToAdopt("play.piano", [], undefined, plugins, instances)).toBeNull();
+    // An instrument whose suggestions this host cannot build adopts nothing.
+    expect(chainToAdopt("play.piano", [], suggested, plugins, [])).toBeNull();
   });
 
   it("resolves the instrument's suggestions against the catalog and the chain", () => {

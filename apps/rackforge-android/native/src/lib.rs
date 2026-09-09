@@ -47,10 +47,10 @@ use rackforge_repository::{
     set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
-    InstanceId, MAX_PLAY_CHAIN_EFFECTS, MasterLevel, MasterPan, PlayChainEffect,
-    ProgramDraftState, RackForgeParameterMapper,
-    RackForgeParameterValue, SemanticControlInput, SemanticControlProfile,
-    rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
+    InstanceId, MAX_PLAY_CHAIN_EFFECTS, MasterLevel, MasterPan, PlayChainEffect, ProgramDraftState,
+    RackForgeParameterMapper, RackForgeParameterValue, SemanticControlInput,
+    SemanticControlProfile, rackforge_parameter_input, semantic_control_input,
+    semantic_control_little_header,
 };
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayChainEffectItem,
@@ -1450,10 +1450,13 @@ impl AndroidEngine {
                         })
                     })
                     .collect::<Vec<_>>();
-                let selected = voice
-                    .program_id
-                    .clone()
-                    .or_else(|| voice.catalog.presets.first().map(|preset| preset.id.clone()));
+                let selected = voice.program_id.clone().or_else(|| {
+                    voice
+                        .catalog
+                        .presets
+                        .first()
+                        .map(|preset| preset.id.clone())
+                });
                 serde_json::json!({
                     "instance_id": voice.instance_id,
                     "plugin_id": voice.plugin_id,
@@ -3247,8 +3250,12 @@ fn sync_menu_parameter_state(menu: &mut SurfaceMenu) -> Result<()> {
         let engine = guard
             .as_mut()
             .context("RackForge engine is not initialized")?;
-        let position = target
-            .and_then(|id| engine.chain.iter().position(|voice| voice.instance_id == id));
+        let position = target.and_then(|id| {
+            engine
+                .chain
+                .iter()
+                .position(|voice| voice.instance_id == id)
+        });
         match position {
             Some(position) => {
                 let runtime = engine.chain[position].runtime;

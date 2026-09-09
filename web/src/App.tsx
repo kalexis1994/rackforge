@@ -77,7 +77,7 @@ import { ParameterLinkHost } from "./components/ParameterLinkHost";
 import { ToggleSwitch } from "./components/ToggleSwitch";
 import { PluginIcon } from "./components/PluginIcon";
 import { PlayChainDrawer } from "./components/PlayChainDrawer";
-import { chainOf, sameChain, type PlayChain } from "./playChain";
+import { chainOf, chainToAdopt, sameChain, type PlayChain } from "./playChain";
 import { AsyncNotice, AsyncStateBoundary } from "./components/AsyncStateBoundary";
 import { RfButton } from "./ui/RfButton";
 import { useSurfaceTransition } from "./ui/useSurfaceTransition";
@@ -2642,7 +2642,9 @@ function PlayPage({
   onOverlayChange: (overlay: "plugins" | "presets" | null) => void;
   preferredInstanceId?: string | null;
 }) {
-  const instances = snapshot?.instances ?? [];
+  // The same array while the snapshot is the same one, so an effect that
+  // reads it does not run on every render.
+  const instances = useMemo(() => snapshot?.instances ?? [], [snapshot]);
   const active =
     instances.find((instance) => instance.instance_id === preferredInstanceId) ??
     instances.find(
@@ -2776,6 +2778,45 @@ function PlayPage({
     },
     [snapshotRevision],
   );
+  // An instrument that has never had a chain gets the one it asks for, so
+  // the piano arrives glued and limited instead of dry with two buttons to
+  // press. This is the same rule on every host: the session tells "never
+  // decided" (no chain at all) from "decided to have nothing" (an empty
+  // one), and only what this host can build is adopted.
+  const adoptedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !activeInstanceId
+      || pluginCatalog.status !== "ready"
+      || adoptedFor.current === activeInstanceId
+    ) {
+      return;
+    }
+    const adopt = chainToAdopt(
+      activeInstanceId,
+      snapshotChains,
+      activeDescriptor?.suggested_chain,
+      installedPlugins,
+      instances,
+    );
+    if (!adopt) return;
+    // Sent, not held: the session answers with the chain and the drawer
+    // shows it. A host that refuses keeps its empty chain, and this
+    // instrument is not asked again while the page stands.
+    adoptedFor.current = activeInstanceId;
+    void dispatchCommandAwait({
+      type: "set_play_chain",
+      instrument_id: adopt.instrument_id,
+      effects: adopt.effects,
+    }).catch(() => undefined);
+  }, [
+    activeInstanceId,
+    pluginCatalog.status,
+    snapshotChains,
+    activeDescriptor,
+    installedPlugins,
+    instances,
+  ]);
   const handleSurfaceInfo = useCallback(
     (info: { label: string; value: string } | null) => {
       if (!activeInstanceId) return;

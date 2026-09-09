@@ -148,4 +148,35 @@ export function suggestedEffects(
   }));
 }
 
+/**
+ * The chain to adopt for an instrument that has never had one.
+ *
+ * An instrument names the effects it would like after itself; a host that has
+ * never been told what to put there takes that as the answer, so the piano
+ * arrives glued and limited rather than dry with two things to press. The
+ * player's own answer always wins afterwards -- including an empty chain,
+ * which the session keeps as a decision -- and only effects this host can
+ * actually build are adopted.
+ */
+export function chainToAdopt(
+  instrumentId: string,
+  chains: PlayChain[] | undefined,
+  suggested: SuggestedChainEntry[] | undefined,
+  plugins: PluginWebDescriptor[],
+  instances?: PluginInstance[],
+): PlayChain | null {
+  if (chains?.some((chain) => chain.instrument_id === instrumentId)) return null;
+  const available = effectPlugins(plugins, instances);
+  const effects = (suggested ?? [])
+    .filter((entry) => available.some((plugin) => plugin.plugin_id === entry.plugin))
+    .slice(0, MAX_PLAY_CHAIN_EFFECTS)
+    .map((entry, index) => ({
+      id: `fx-${index + 1}`,
+      plugin_id: entry.plugin,
+      enabled: true,
+      ...(entry.preset ? { program_id: entry.preset } : {}),
+    }));
+  return effects.length > 0 ? { instrument_id: instrumentId, effects } : null;
+}
+
 export type { PlayChainEffect };

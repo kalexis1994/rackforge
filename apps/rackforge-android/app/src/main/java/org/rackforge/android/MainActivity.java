@@ -1753,13 +1753,17 @@ public final class MainActivity extends Activity {
                 .put("parameter_links", parameterLinks());
         // The chain is the player's; the instances are the effects the engine
         // could build out of it, and each is what a panel opens on.
-        JSONArray effects = context == null ? new JSONArray()
-                : persistedPlayChain(
-                        context.getJSONObject("instance").optString("plugin_id", ""));
-        if (effects.length() > 0) {
+        //
+        // A chain is published as soon as this instrument has one recorded,
+        // even when it is empty: an empty chain is the player's answer and an
+        // absent one means they have never been asked, which is what lets the
+        // interface adopt the chain the instrument suggests exactly once.
+        String activePlugin = context == null ? ""
+                : context.getJSONObject("instance").optString("plugin_id", "");
+        if (!activePlugin.isBlank() && preferences.contains(playChainKey(activePlugin))) {
             snapshot.put("play_chains", new JSONArray().put(new JSONObject()
                     .put("instrument_id", ANDROID_INSTANCE_ID)
-                    .put("effects", effects)));
+                    .put("effects", persistedPlayChain(activePlugin))));
             JSONArray voices = playChainInstances();
             for (int index = 0; index < voices.length(); index++) {
                 instances.put(voices.getJSONObject(index));

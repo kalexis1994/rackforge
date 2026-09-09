@@ -300,12 +300,92 @@ const sessionInstances = snapshot.snapshot.instances;
 const instanceId = snapshot.snapshot.active_instance_id;
 
 /**
+ * PLAY plays through its effects here as it does on the other hosts: the
+ * chain the FX drawer edits has to load, apply and reach the effect's own
+ * parameters. The page had none of this while the host refused every
+ * package that was not an instrument.
+ */
+function probePlayChain() {
+  const catalog = JSON.parse(readResponse(host.rf_plugin_catalog())).catalog ?? [];
+  const effect = catalog.find((plugin) => plugin.kind === "effect");
+  check("an effect plugin is loaded", Boolean(effect), "the catalog holds no effect");
+  if (effect) {
+    const applied = dispatch({
+      type: "set_play_chain",
+      instrument_id: instanceId,
+      effects: [{ id: "fx-1", plugin_id: effect.plugin_id, enabled: true }],
+    });
+    check(
+      "PLAY takes a chain of effects",
+      applied.status === "command_applied",
+      applied.message,
+    );
+    const parameters = request({
+      op: "plugin_parameters",
+      instance_id: `${instanceId}.fx.fx-1`,
+    });
+    check(
+      "the effect in the chain has its own parameters",
+      parameters.status === "plugin_parameters" && (parameters.values?.length ?? 0) > 0,
+      parameters.message,
+    );
+    // And its programs are its own: the panel picks one, the chain remembers.
+    const programs = catalog.find((plugin) => plugin.plugin_id === effect.plugin_id);
+    const program = parameters.status === "plugin_parameters"
+      ? (request({ op: "snapshot" }).snapshot?.instances ?? [])
+        .find((instance) => instance.plugin_id === effect.plugin_id)
+        ?.sounds?.at(-1)?.id
+      : undefined;
+    if (program) {
+      const chosen = dispatch({
+        type: "select_sound",
+        instance_id: `${instanceId}.fx.fx-1`,
+        sound_id: program,
+      });
+      check(
+        "an effect in the chain takes a program",
+        chosen.status === "command_applied",
+        chosen.message,
+      );
+      const held = request({ op: "snapshot" }).snapshot?.play_chains
+        ?.find((chain) => chain.instrument_id === instanceId)
+        ?.effects?.[0]?.program_id;
+      check(
+        "the chain remembers which program",
+        held === program,
+        `the chain holds ${held ?? "nothing"} rather than ${program}`,
+      );
+    } else {
+      check("an effect in the chain takes a program", false, `no program to try (${programs?.plugin_name})`);
+    }
+  
+    // The instrument's own suggestion reaches the drawer through the catalog.
+    const instrument = catalog.find((plugin) => plugin.kind === "instrument"
+      && (plugin.suggested_chain?.length ?? 0) > 0);
+    check(
+      "an instrument's suggested chain reaches the catalog",
+      Boolean(instrument),
+      "no instrument in the catalog names one",
+    );
+  
+    const cleared = dispatch({
+      type: "set_play_chain",
+      instrument_id: instanceId,
+      effects: [],
+    });
+    check("the chain can be taken away", cleared.status === "command_applied", cleared.message);
+  }
+  return null;
+}
+
+/**
  * One probe per capability the host claims. Each returns a message on failure
  * and nothing on success, so a claim is only as good as what it can do here.
  */
 const PROBES = {
   play_instrument: () =>
     sessionInstances.length > 0 && loudest > 0.001 ? null : "no instrument rendered any audio",
+  play_effects_chain: () => probePlayChain(),
   select_program: () => {
     const sound = sessionInstances.find((instance) => instance.instance_id === instanceId)
       ?.sounds?.[0];
@@ -475,80 +555,5 @@ for (const capability of declared.capabilities ?? []) {
 }
 
 trail("every probe returned");
-
-// PLAY plays through its effects here as it does on the other hosts: the
-// chain the FX drawer edits has to load, apply and reach the effect's own
-// parameters. The page had none of this while the host refused every
-// package that was not an instrument.
-trail("probe the PLAY chain");
-const catalog = JSON.parse(readResponse(host.rf_plugin_catalog())).catalog ?? [];
-const effect = catalog.find((plugin) => plugin.kind === "effect");
-check("an effect plugin is loaded", Boolean(effect), "the catalog holds no effect");
-if (effect) {
-  const applied = dispatch({
-    type: "set_play_chain",
-    instrument_id: instanceId,
-    effects: [{ id: "fx-1", plugin_id: effect.plugin_id, enabled: true }],
-  });
-  check(
-    "PLAY takes a chain of effects",
-    applied.status === "command_applied",
-    applied.message,
-  );
-  const parameters = request({
-    op: "plugin_parameters",
-    instance_id: `${instanceId}.fx.fx-1`,
-  });
-  check(
-    "the effect in the chain has its own parameters",
-    parameters.status === "plugin_parameters" && (parameters.values?.length ?? 0) > 0,
-    parameters.message,
-  );
-  // And its programs are its own: the panel picks one, the chain remembers.
-  const programs = catalog.find((plugin) => plugin.plugin_id === effect.plugin_id);
-  const program = parameters.status === "plugin_parameters"
-    ? (request({ op: "snapshot" }).snapshot?.instances ?? [])
-      .find((instance) => instance.plugin_id === effect.plugin_id)
-      ?.sounds?.at(-1)?.id
-    : undefined;
-  if (program) {
-    const chosen = dispatch({
-      type: "select_sound",
-      instance_id: `${instanceId}.fx.fx-1`,
-      sound_id: program,
-    });
-    check(
-      "an effect in the chain takes a program",
-      chosen.status === "command_applied",
-      chosen.message,
-    );
-    const held = request({ op: "snapshot" }).snapshot?.play_chains
-      ?.find((chain) => chain.instrument_id === instanceId)
-      ?.effects?.[0]?.program_id;
-    check(
-      "the chain remembers which program",
-      held === program,
-      `the chain holds ${held ?? "nothing"} rather than ${program}`,
-    );
-  } else {
-    check("an effect in the chain takes a program", false, `no program to try (${programs?.plugin_name})`);
-  }
-
-  // The instrument's own suggestion reaches the drawer through the catalog.
-  const instrument = catalog.find((plugin) => plugin.kind === "instrument"
-    && (plugin.suggested_chain?.length ?? 0) > 0);
-  check(
-    "an instrument's suggested chain reaches the catalog",
-    Boolean(instrument),
-    "no instrument in the catalog names one",
-  );
-
-  const cleared = dispatch({
-    type: "set_play_chain",
-    instrument_id: instanceId,
-    effects: [],
-  });
-  check("the chain can be taken away", cleared.status === "command_applied", cleared.message);
-}
 
 process.exit(failures.length === 0 ? 0 : 1);

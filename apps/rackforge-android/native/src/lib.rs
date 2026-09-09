@@ -47,14 +47,15 @@ use rackforge_repository::{
     set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
-    InstanceId, MasterLevel, MasterPan, ProgramDraftState, RackForgeParameterMapper,
-    RackForgeParameterValue, SemanticControlInput, SemanticControlProfile,
-    rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
+    InstanceId, MAX_PLAY_CHAIN_EFFECTS, MasterLevel, MasterPan, PlayChainEffect, ProgramDraftState,
+    RackForgeParameterMapper, RackForgeParameterValue, SemanticControlInput,
+    SemanticControlProfile, rackforge_parameter_input, semantic_control_input,
+    semantic_control_little_header,
 };
 use rackforge_surface_runtime::{
-    ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlayPreset,
-    PlaySound, ProgramExitDecision, ProgramExitDestination, ScreenCompositor, ScreenRegions,
-    SurfaceUpdatePriority,
+    ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayChainEffectItem,
+    PlayPlugin, PlayPreset, PlaySound, ProgramExitDecision, ProgramExitDestination,
+    ScreenCompositor, ScreenRegions, SurfaceUpdatePriority,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
@@ -515,6 +516,24 @@ impl AndroidControllerMenu {
                 "sound_id": selected_sound_id,
             })),
             MenuCommand::ForceHome => Some(serde_json::json!({ "type": "force_home" })),
+            // The chain belongs to the instrument and is kept by the Activity
+            // beside the rest of the session, so LITTLE's edits take the same
+            // road as its plugin and program edits.
+            MenuCommand::AddPlayChainEffect { plugin_id } => Some(serde_json::json!({
+                "type": "play_chain_add",
+                "plugin_id": plugin_id,
+            })),
+            MenuCommand::SetPlayChainEffectEnabled { effect_id, enabled } => {
+                Some(serde_json::json!({
+                    "type": "play_chain_enabled",
+                    "effect_id": effect_id,
+                    "enabled": enabled,
+                }))
+            }
+            MenuCommand::RemovePlayChainEffect { effect_id } => Some(serde_json::json!({
+                "type": "play_chain_remove",
+                "effect_id": effect_id,
+            })),
             _ => None,
         }
     }
@@ -757,6 +776,12 @@ struct AndroidEngine {
     render_pool: RenderPool,
     render_telemetry: std::sync::Arc<RenderTelemetry>,
     runtime: SendableLoadedPlugin,
+    /// The effects after the instrument, in the order they play. PLAY's
+    /// audio is the instrument, then every effect that is on, then output.
+    chain: Vec<ChainVoice>,
+    /// What the stage before an effect wrote, so an effect never reads the
+    /// block it is writing.
+    chain_scratch: Vec<f32>,
     midi: Vec<MidiEventV1>,
     /// The same block's MIDI in the host's vocabulary, for the pool's
     /// pre-stage, which cuts it by the families the plugin declared wide.
@@ -791,6 +816,30 @@ struct SendableParallelUnits(ParallelUnits<'static>);
 // unit is entered by at most one pool worker per block under the epoch
 // protocol.
 unsafe impl Send for SendableParallelUnits {}
+
+/// One effect of PLAY's chain: its own instance of the plugin, on its own
+/// program, addressed by a panel as `android-main.fx.<effect id>`.
+///
+/// The same plugin may sit in a chain twice; each is a voice of its own, and
+/// what the chain remembers of it is its program.
+struct ChainVoice {
+    effect_id: String,
+    instance_id: String,
+    plugin_id: String,
+    plugin_name: String,
+    plugin_short_name: String,
+    plugin_version: String,
+    config_available: bool,
+    enabled: bool,
+    program_id: Option<String>,
+    input_channels: u32,
+    catalog: PresetCatalog,
+    runtime: SendableLoadedPlugin,
+    instance: SendablePluginInstance,
+    /// A stage that faulted is passed over rather than played through, the
+    /// way the instrument's own quarantine silences it.
+    faulted: bool,
+}
 
 /// The engine's single PLAY voice, borrowed for one block so the shared
 /// worker pool can schedule its units. Android has no Rack engine, so this
@@ -1093,7 +1142,7 @@ impl AndroidEngine {
             .with_context(|| format!("opening {}", package_root.display()))?;
         let manifest = package.manifest();
         if manifest.kind != PluginKind::Instrument {
-            bail!("Android PLAY currently supports instrument plugins only");
+            bail!("PLAY's stage takes an instrument; an effect belongs to its chain");
         }
         manifest
             .portable_component()
@@ -1158,6 +1207,8 @@ impl AndroidEngine {
             render_pool,
             render_telemetry,
             runtime: SendableLoadedPlugin(plugin),
+            chain: Vec::new(),
+            chain_scratch: Vec::new(),
             midi: Vec::with_capacity(256),
             wide: Vec::with_capacity(256),
             parameter_events: Vec::with_capacity(256),
@@ -1180,6 +1231,247 @@ impl AndroidEngine {
             _live_parameter_writer: live_parameter_writer,
             live_parameter_writer_handle,
         })
+    }
+
+    /// Replaces the effects after the instrument.
+    ///
+    /// A stage whose id and plugin are unchanged keeps playing, and its tail
+    /// with it: only what the player actually changed is rebuilt.
+    fn set_play_chain(&mut self, effects: &[PlayChainEffect], store_root: &Path) -> Result<()> {
+        if effects.len() > MAX_PLAY_CHAIN_EFFECTS {
+            bail!("a PLAY chain holds at most {MAX_PLAY_CHAIN_EFFECTS} effects");
+        }
+        let mut previous = std::mem::take(&mut self.chain);
+        let mut built = Vec::with_capacity(effects.len());
+        for effect in effects {
+            if let Some(position) = previous.iter().position(|voice| {
+                voice.effect_id == effect.id && voice.plugin_id == effect.plugin_id
+            }) {
+                let mut voice = previous.remove(position);
+                voice.enabled = effect.enabled;
+                if voice.program_id != effect.program_id
+                    && let Some(program) = effect.program_id.as_deref()
+                    && let Err(error) = voice.instance.0.load_preset(program)
+                {
+                    eprintln!(
+                        "PLAY_CHAIN_PROGRAM_SKIPPED effect={} program={program} reason={error:#}",
+                        effect.id
+                    );
+                }
+                voice.program_id = effect.program_id.clone();
+                built.push(voice);
+                continue;
+            }
+            match Self::build_chain_voice(effect, store_root, &self.data_root) {
+                Ok(voice) => built.push(voice),
+                Err(error) => {
+                    // A chain kept from a session where the effect was
+                    // installed and this one where it is not: the rest of the
+                    // chain still plays.
+                    eprintln!(
+                        "PLAY_CHAIN_EFFECT_SKIPPED effect={} plugin={} reason={error:#}",
+                        effect.id, effect.plugin_id
+                    );
+                }
+            }
+        }
+        self.chain = built;
+        Ok(())
+    }
+
+    /// Builds one effect's voice: its package from the store, its program if
+    /// the chain named one, activated for the block the instrument plays.
+    fn build_chain_voice(
+        effect: &PlayChainEffect,
+        store_root: &Path,
+        data_root: &Path,
+    ) -> Result<ChainVoice> {
+        let instance_id = InstanceId::new(format!("{ANDROID_INSTANCE_ID}.fx.{}", effect.id))
+            .map_err(anyhow::Error::msg)?
+            .as_str()
+            .to_owned();
+        let package = installed_package(store_root, &effect.plugin_id)?;
+        let manifest = package.manifest();
+        if manifest.kind != PluginKind::Effect {
+            bail!("{} is not an effect", effect.plugin_id);
+        }
+        manifest
+            .portable_component()
+            .context("Android requires a portable wasm-v1 plugin")?;
+        let audio = manifest.resolved_audio_contract();
+        let input_channels = audio.input_channels();
+        if input_channels != 2 {
+            bail!("PLAY's chain is stereo and this effect takes {input_channels} channels");
+        }
+        let plugin_name = manifest.name.clone();
+        let plugin_short_name = manifest.little_short_name();
+        let plugin_version = manifest.version.clone();
+        let config_available = manifest.web_ui.as_ref().is_some_and(|web| {
+            web.surfaces
+                .iter()
+                .any(|surface| surface.kind == WebSurfaceKind::Config)
+        });
+        let runtime = cached_isolated_plugin_runtime(&package, data_root)?;
+        let mut instance = runtime.0.create_instance()?;
+        let catalog = instance.preset_catalog()?;
+        let mut program_id = effect.program_id.clone();
+        if let Some(program) = program_id.clone()
+            && let Err(error) = instance.load_preset(&program)
+        {
+            eprintln!(
+                "PLAY_CHAIN_PROGRAM_SKIPPED effect={} program={program} reason={error:#}",
+                effect.id
+            );
+            program_id = None;
+        }
+        instance
+            .activate(SAMPLE_RATE, MAX_FRAMES, input_channels, 2)
+            .with_context(|| format!("activating {}", effect.plugin_id))?;
+        Ok(ChainVoice {
+            effect_id: effect.id.clone(),
+            instance_id,
+            plugin_id: effect.plugin_id.clone(),
+            plugin_name,
+            plugin_short_name,
+            plugin_version,
+            config_available,
+            enabled: effect.enabled,
+            program_id,
+            input_channels,
+            catalog,
+            runtime,
+            instance: SendablePluginInstance(instance),
+            faulted: false,
+        })
+    }
+
+    /// The chain over one block: each effect reads what the stage before it
+    /// wrote. Effects take no MIDI -- they are not played, they are played
+    /// through.
+    fn render_chain(&mut self, frames: u32, output: &mut [f32]) {
+        let samples = frames as usize * 2;
+        let scratch = &mut self.chain_scratch;
+        for voice in &mut self.chain {
+            if !voice.enabled || voice.faulted {
+                continue;
+            }
+            if scratch.len() < samples {
+                scratch.resize(samples, 0.0);
+            }
+            scratch[..samples].copy_from_slice(&output[..samples]);
+            let processed = voice.instance.0.process_interleaved(
+                &scratch[..samples],
+                &mut output[..samples],
+                frames,
+                voice.input_channels,
+                2,
+                &[],
+                &[],
+            );
+            if processed.is_err() {
+                output[..samples].copy_from_slice(&scratch[..samples]);
+                voice.faulted = true;
+                eprintln!(
+                    "PLUGIN_PROCESS_QUARANTINED context=android:{} action=bypass",
+                    voice.plugin_id
+                );
+            }
+        }
+    }
+
+    /// An effect of the chain takes its program in its own voice, and the
+    /// chain remembers which: the same effect twice is two settings.
+    fn select_chain_sound(&mut self, instance_id: &str, sound_id: &str) -> Result<()> {
+        let voice = self
+            .chain
+            .iter_mut()
+            .find(|voice| voice.instance_id == instance_id)
+            .with_context(|| format!("effect {instance_id} is not in the PLAY chain"))?;
+        if !voice
+            .catalog
+            .presets
+            .iter()
+            .any(|preset| preset.id == sound_id)
+        {
+            bail!("effect does not expose program {sound_id:?}");
+        }
+        voice.instance.0.load_preset(sound_id)?;
+        voice.program_id = Some(sound_id.to_owned());
+        voice.faulted = false;
+        Ok(())
+    }
+
+    /// The chain as LITTLE lists it: what is playing, in order, each under
+    /// the instance its panel addresses.
+    fn little_chain_items(&self) -> Vec<PlayChainEffectItem> {
+        self.chain
+            .iter()
+            .map(|voice| PlayChainEffectItem {
+                id: voice.effect_id.clone(),
+                instance_id: voice.instance_id.clone(),
+                plugin_id: voice.plugin_id.clone(),
+                name: voice.plugin_name.clone(),
+                short_name: voice.plugin_short_name.clone(),
+                enabled: voice.enabled,
+            })
+            .collect()
+    }
+
+    /// The chain as the session sees it, with one instance for each effect
+    /// so a panel can open on it and read its programs.
+    fn play_chain_json(&self) -> serde_json::Value {
+        let effects = self
+            .chain
+            .iter()
+            .map(|voice| {
+                serde_json::json!({
+                    "id": voice.effect_id,
+                    "plugin_id": voice.plugin_id,
+                    "enabled": voice.enabled,
+                    "program_id": voice.program_id,
+                })
+            })
+            .collect::<Vec<_>>();
+        let instances = self
+            .chain
+            .iter()
+            .map(|voice| {
+                let sounds = voice
+                    .catalog
+                    .presets
+                    .iter()
+                    .map(|preset| {
+                        serde_json::json!({
+                            "id": preset.id,
+                            "name": preset.name,
+                            "bank": preset.bank,
+                            "detail": preset.description,
+                            "editable": preset.editable,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let selected = voice.program_id.clone().or_else(|| {
+                    voice
+                        .catalog
+                        .presets
+                        .first()
+                        .map(|preset| preset.id.clone())
+                });
+                serde_json::json!({
+                    "instance_id": voice.instance_id,
+                    "plugin_id": voice.plugin_id,
+                    "plugin_name": voice.plugin_name,
+                    "plugin_short_name": voice.plugin_short_name,
+                    "plugin_version": voice.plugin_version,
+                    "ui_layouts": ["little@1"],
+                    "config_available": voice.config_available,
+                    "effect": true,
+                    "sounds": sounds,
+                    "selected_sound_id": selected,
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({"effects": effects, "instances": instances})
     }
 
     fn select_sound(&mut self, sound_id: &str) -> Result<()> {
@@ -1278,6 +1570,16 @@ impl AndroidEngine {
         method: &str,
         params: &serde_json::Value,
     ) -> Result<serde_json::Value> {
+        // An effect's panel addresses the effect's own voice, whose schema is
+        // its plugin's. The instrument's own path is below.
+        if let Some(instance_id) = params.get("instance_id").and_then(|value| value.as_str())
+            && let Some(position) = self
+                .chain
+                .iter()
+                .position(|voice| voice.instance_id == instance_id)
+        {
+            return self.chain_parameter_command(method, params, position);
+        }
         let response =
             match parse_plugin_parameter_control_command(method, ANDROID_INSTANCE_ID, params)
                 .map_err(anyhow::Error::msg)?
@@ -1316,6 +1618,46 @@ impl AndroidEngine {
                     }
                 }
             };
+        serde_json::to_value(response).context("serializing plugin parameter response")
+    }
+
+    /// One parameter read or write on an effect of the chain. Its values
+    /// belong to the voice and are not persisted with the instrument's: a
+    /// chain carries its settings in its own programs.
+    fn chain_parameter_command(
+        &mut self,
+        method: &str,
+        params: &serde_json::Value,
+        position: usize,
+    ) -> Result<serde_json::Value> {
+        let expected = self.chain[position].instance_id.clone();
+        let runtime = self.chain[position].runtime;
+        let voice = &mut self.chain[position];
+        let response = match parse_plugin_parameter_control_command(method, &expected, params)
+            .map_err(anyhow::Error::msg)?
+        {
+            PluginParameterControlCommand::Read { instance_id } => {
+                let (schema, values) = plugin_parameters(runtime.0, &mut voice.instance.0)?;
+                ControlResponse::PluginParameters {
+                    instance_id,
+                    schema: Box::new(schema),
+                    values,
+                }
+            }
+            PluginParameterControlCommand::Set {
+                instance_id,
+                parameter_index,
+                value,
+            } => {
+                let value =
+                    set_plugin_parameter(runtime.0, &mut voice.instance.0, parameter_index, value)?;
+                ControlResponse::PluginParameterSet {
+                    instance_id,
+                    parameter_index,
+                    value,
+                }
+            }
+        };
         serde_json::to_value(response).context("serializing plugin parameter response")
     }
 
@@ -1843,7 +2185,7 @@ impl AndroidEngine {
         let mut slot = AndroidSlot {
             instance: &mut self.instance.0,
             parallel: self.parallel.as_mut().map(|parallel| &mut parallel.0),
-            output,
+            output: &mut *output,
             midi: &self.midi,
             wide: &self.wide,
             parameter_events: &self.parameter_events,
@@ -1872,6 +2214,7 @@ impl AndroidEngine {
                 self.plugin_id
             );
         }
+        self.render_chain(frames, output);
         self.midi.clear();
         self.parameter_events.clear();
         Ok(())
@@ -2594,14 +2937,17 @@ fn package_descriptor(package: &PluginPackage, active: bool) -> serde_json::Valu
     });
     let portable = manifest.portable_component().is_some();
     let compatible = manifest.kind == PluginKind::Instrument && portable && play_entry.is_some();
-    let incompatibility = if manifest.kind != PluginKind::Instrument {
-        Some("Android PLAY currently supports instrument plugins only")
+    // An effect never takes the stage, but PLAY's chain can hold it, and the
+    // two things it needs to be held are the two the stage asks for.
+    let chainable = manifest.kind == PluginKind::Effect && portable && play_entry.is_some();
+    let incompatibility = if compatible || chainable {
+        None
     } else if !portable {
         Some("Android requires a portable wasm-v1 component")
     } else if play_entry.is_none() {
         Some("The plugin does not provide a PLAY Web surface")
     } else {
-        None
+        Some("Android PLAY plays instruments and the effects after them")
     };
     let root = package.root();
     serde_json::json!({
@@ -2612,6 +2958,8 @@ fn package_descriptor(package: &PluginPackage, active: bool) -> serde_json::Valu
         "kind": manifest.kind,
         "portable": portable,
         "compatible": compatible,
+        "chainable": chainable,
+        "suggested_chain": manifest.suggested_chain,
         "incompatibility": incompatibility,
         "package_root": root.to_string_lossy(),
         "web_entry": play_entry,
@@ -2621,6 +2969,38 @@ fn package_descriptor(package: &PluginPackage, active: bool) -> serde_json::Valu
         "resources": manifest.resources,
         "active": active,
     })
+}
+
+/// The newest installed version of `plugin_id`, when the store has it and
+/// the player has not switched it off.
+///
+/// PLAY's chain names plugins, not packages: an effect is found here the way
+/// the catalog finds one, by reading each version's own manifest.
+fn installed_package(store_root: &Path, plugin_id: &str) -> Result<PluginPackage> {
+    if !plugin_is_enabled(store_root, plugin_id).unwrap_or(true) {
+        bail!("plugin {plugin_id} is switched off");
+    }
+    let versions = store_root.join("packages").join(plugin_id);
+    let mut newest: Option<(semver::Version, PathBuf)> = None;
+    for entry in std::fs::read_dir(&versions)
+        .with_context(|| format!("reading {}", versions.display()))?
+        .flatten()
+    {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let Ok(package) = PluginPackage::open(entry.path()) else {
+            continue;
+        };
+        let Ok(version) = semver::Version::parse(&package.manifest().version) else {
+            continue;
+        };
+        if newest.as_ref().is_none_or(|(newest, _)| version > *newest) {
+            newest = Some((version, entry.path()));
+        }
+    }
+    let (_, root) = newest.with_context(|| format!("plugin {plugin_id} is not installed"))?;
+    PluginPackage::open(&root).with_context(|| format!("opening {}", root.display()))
 }
 
 fn installed_plugins_json(store_root: &Path) -> Result<String> {
@@ -2823,6 +3203,21 @@ fn set_android_little_parameter(
     let engine = guard
         .as_mut()
         .context("RackForge engine is not initialized")?;
+    // An effect of the chain takes the write in its own voice; the value is
+    // the chain's, and is not persisted with the instrument's.
+    if let Some(position) = engine
+        .chain
+        .iter()
+        .position(|voice| voice.instance_id == instance_id)
+    {
+        let runtime = engine.chain[position].runtime;
+        return set_plugin_parameter(
+            runtime.0,
+            &mut engine.chain[position].instance.0,
+            parameter_index,
+            value,
+        );
+    }
     if instance_id != engine.plugin_id {
         bail!("LITTLE targeted inactive plugin instance {instance_id}");
     }
@@ -2845,6 +3240,9 @@ fn set_android_little_parameter(
 }
 
 fn sync_menu_parameter_state(menu: &mut SurfaceMenu) -> Result<()> {
+    // Whose parameters LITTLE is showing: an effect of the chain while its
+    // panel is open, and the instrument on stage otherwise.
+    let target = menu.parameter_target_instance_id().map(str::to_owned);
     let (schema, values) = {
         let mut guard = engine()
             .lock()
@@ -2852,7 +3250,19 @@ fn sync_menu_parameter_state(menu: &mut SurfaceMenu) -> Result<()> {
         let engine = guard
             .as_mut()
             .context("RackForge engine is not initialized")?;
-        plugin_parameters(engine.runtime.0, &mut engine.instance.0)?
+        let position = target.and_then(|id| {
+            engine
+                .chain
+                .iter()
+                .position(|voice| voice.instance_id == id)
+        });
+        match position {
+            Some(position) => {
+                let runtime = engine.chain[position].runtime;
+                plugin_parameters(runtime.0, &mut engine.chain[position].instance.0)?
+            }
+            None => plugin_parameters(engine.runtime.0, &mut engine.instance.0)?,
+        }
     };
     menu.sync_plugin_parameters(
         schema,
@@ -2913,6 +3323,33 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
                 presets,
             )
         });
+    let chain = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+        .as_ref()
+        .map(AndroidEngine::little_chain_items)
+        .unwrap_or_default();
+    // The effects PLAY's chain can take: installed, switched on, and of a
+    // kind this host builds a voice for.
+    let effect_plugins = catalog["plugins"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|plugin| {
+            plugin["chainable"].as_bool().unwrap_or(false)
+                && plugin["active"].as_bool().unwrap_or(false)
+        })
+        .filter_map(|descriptor| {
+            let plugin_id = descriptor["plugin_id"].as_str()?;
+            let name = descriptor["plugin_name"].as_str()?;
+            let short_name = descriptor["plugin_short_name"].as_str().unwrap_or(name);
+            Some(
+                PlayPlugin::new(plugin_id, plugin_id, name)
+                    .short_name(short_name)
+                    .config_available(false),
+            )
+        })
+        .collect::<Vec<_>>();
     let mut plugins = Vec::new();
     let mut metadata = BTreeMap::new();
     for descriptor in catalog["plugins"]
@@ -2961,6 +3398,8 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
     controller
         .menu
         .set_play_plugins(plugins, active_instance_id);
+    controller.menu.set_play_effect_plugins(effect_plugins);
+    controller.menu.set_play_chain(chain);
     if let Some((_root, plugin_id, name, catalog, selected_sound_id, _supports, presets)) = active {
         controller.menu.sync_active_plugin(
             plugin_id.clone(),
@@ -4023,6 +4462,93 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_selectPluginSound
             .as_mut()
             .context("RackForge engine is not initialized")?
             .select_sound(&sound_id)
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_setPlayChain(
+    mut env: JNIEnv,
+    _class: JClass,
+    chain_json: JString,
+    store_root: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let chain_json = java_string(&mut env, chain_json)?;
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        let effects: Vec<PlayChainEffect> = if chain_json.trim().is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&chain_json).context("reading the PLAY chain")?
+        };
+        // Compiling a plugin's runtime takes far longer than an audio block,
+        // so it happens before the engine is locked: what the audio thread
+        // waits for is the instances, not the compiler.
+        let data_root = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_ref()
+            .map(|engine| engine.data_root.clone());
+        if let Some(data_root) = data_root {
+            for effect in &effects {
+                if let Ok(package) = installed_package(&store_root, &effect.plugin_id) {
+                    let _ = cached_isolated_plugin_runtime(&package, &data_root);
+                }
+            }
+        }
+        let mut guard = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+        let engine = guard
+            .as_mut()
+            .context("RackForge engine is not initialized")?;
+        engine.set_play_chain(&effects, &store_root)?;
+        Ok(engine.play_chain_json().to_string())
+    })();
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_playChain(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        Ok(engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_ref()
+            .map_or_else(
+                || serde_json::json!({"effects": [], "instances": []}),
+                AndroidEngine::play_chain_json,
+            )
+            .to_string())
+    })();
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_selectChainSound(
+    mut env: JNIEnv,
+    _class: JClass,
+    instance_id: JString,
+    sound_id: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let instance_id = java_string(&mut env, instance_id)?;
+        let sound_id = java_string(&mut env, sound_id)?;
+        engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_mut()
+            .context("RackForge engine is not initialized")?
+            .select_chain_sound(&instance_id, &sound_id)
     })();
     match result {
         Ok(()) => JNI_TRUE,

@@ -101,6 +101,12 @@ public final class MainActivity extends Activity {
             "https://rackforge.local/rackforge/index.html";
     private static final String HOST_PROTOCOL = "rackforge.host@1";
     private static final String APP_HOST = "rackforge.local";
+    /** The one instance Android plays; PLAY's chain hangs off it. */
+    private static final String ANDROID_INSTANCE_ID = "android-main";
+    /** What separates an instrument's instance from one effect of its chain. */
+    private static final String CHAIN_INSTANCE_MARK = ".fx.";
+    /** As many effects as the session API lets a chain hold. */
+    private static final int MAX_PLAY_CHAIN_EFFECTS = 8;
     private static final String PLUGIN_HOST = "plugins.rackforge.local";
     private static volatile MainActivity activeActivity;
     private final String nativeHostToken = UUID.randomUUID().toString();
@@ -251,6 +257,9 @@ public final class MainActivity extends Activity {
     private static native String pluginWebContext();
     private static native String outputMeterSnapshot();
     private static native boolean selectPluginSound(String soundId);
+    private static native String setPlayChain(String chainJson, String storeRoot);
+    private static native String playChain();
+    private static native boolean selectChainSound(String instanceId, String soundId);
     private static native boolean restorePluginSound(String soundId);
     private static native String pluginProgramCommand(String method, String paramsJson);
     private static native String pluginParameterCommand(String method, String paramsJson);
@@ -699,7 +708,7 @@ public final class MainActivity extends Activity {
         for (int index = 0; index < installed.length(); index++) {
             JSONObject plugin = installed.getJSONObject(index);
             if (pluginId.equals(plugin.optString("plugin_id"))
-                    && plugin.optBoolean("compatible")) {
+                    && usableOnAndroid(plugin)) {
                 String packageRoot = plugin.optString("package_root", "");
                 return packageRoot.isBlank() ? null : new File(packageRoot);
             }
@@ -1216,6 +1225,15 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * A plugin this host can use: an instrument for PLAY's stage, or an
+     * effect for the chain after it. Anything else is listed as unavailable
+     * and never reaches a runtime.
+     */
+    private static boolean usableOnAndroid(JSONObject plugin) {
+        return plugin.optBoolean("compatible") || plugin.optBoolean("chainable");
+    }
+
     private JSONArray sharedPluginDescriptors() throws Exception {
         JSONArray installed = new JSONObject(
                 installedPlugins(pluginStoreRoot().getAbsolutePath()))
@@ -1223,7 +1241,7 @@ public final class MainActivity extends Activity {
         JSONArray descriptors = new JSONArray();
         for (int index = 0; index < installed.length(); index++) {
             JSONObject plugin = installed.getJSONObject(index);
-            if (!plugin.optBoolean("compatible")) continue;
+            if (!usableOnAndroid(plugin)) continue;
             descriptors.put(sharedPluginDescriptor(plugin));
         }
         return descriptors;
@@ -1231,8 +1249,7 @@ public final class MainActivity extends Activity {
 
     private JSONObject sharedPluginDescriptor(String pluginId) throws Exception {
         JSONObject plugin = installedPluginRecord(pluginId);
-        return plugin != null && plugin.optBoolean("compatible")
-                ? sharedPluginDescriptor(plugin) : null;
+        return plugin != null ? sharedPluginDescriptor(plugin) : null;
     }
 
     private JSONObject installedPluginRecord(String pluginId) throws Exception {
@@ -1242,7 +1259,7 @@ public final class MainActivity extends Activity {
         for (int index = 0; index < installed.length(); index++) {
             JSONObject plugin = installed.getJSONObject(index);
             if (pluginId.equals(plugin.optString("plugin_id"))
-                    && plugin.optBoolean("compatible")) {
+                    && usableOnAndroid(plugin)) {
                 return plugin;
             }
         }
@@ -1297,7 +1314,12 @@ public final class MainActivity extends Activity {
                 .put("api_version", plugin.optInt("web_api_version", 0))
                 .put("branding", branding == null ? JSONObject.NULL : branding)
                 .put("surfaces", surfaces)
-                .put("resources", resources == null ? new JSONArray() : resources);
+                .put("resources", resources == null ? new JSONArray() : resources)
+                // An effect is built here on demand out of the store, so the
+                // drawer may offer one this session has never loaded.
+                .put("chainable", plugin.optBoolean("chainable"))
+                .put("suggested_chain", plugin.optJSONArray("suggested_chain") == null
+                        ? new JSONArray() : plugin.optJSONArray("suggested_chain"));
     }
 
     private JSONObject uninstallPluginPackage(String pluginId,
@@ -1354,6 +1376,7 @@ public final class MainActivity extends Activity {
                     refreshActivePluginMetadata();
                     restoreActivePluginResources();
                     restorePersistedPluginSound();
+                    restorePersistedPlayChain();
                     preferences.edit().putString(
                             "plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
                     startAudio();
@@ -1727,9 +1750,23 @@ public final class MainActivity extends Activity {
                 .put("master_level", nativeMasterLevel())
                 .put("master_pan", nativeMasterPan())
                 .put("live", new JSONObject().put("mode", "rack"))
-                .put("instances", instances)
                 .put("parameter_links", parameterLinks());
-        if (instances.length() > 0) snapshot.put("active_instance_id", "android-main");
+        // The chain is the player's; the instances are the effects the engine
+        // could build out of it, and each is what a panel opens on.
+        JSONArray effects = context == null ? new JSONArray()
+                : persistedPlayChain(
+                        context.getJSONObject("instance").optString("plugin_id", ""));
+        if (effects.length() > 0) {
+            snapshot.put("play_chains", new JSONArray().put(new JSONObject()
+                    .put("instrument_id", ANDROID_INSTANCE_ID)
+                    .put("effects", effects)));
+            JSONArray voices = playChainInstances();
+            for (int index = 0; index < voices.length(); index++) {
+                instances.put(voices.getJSONObject(index));
+            }
+        }
+        snapshot.put("instances", instances);
+        if (instances.length() > 0) snapshot.put("active_instance_id", ANDROID_INSTANCE_ID);
         if (context != null && !context.isNull("program_draft")) {
             snapshot.put("program_draft", context.get("program_draft"));
         }
@@ -1960,7 +1997,15 @@ public final class MainActivity extends Activity {
                         envelope, () -> setSharedActiveMode(command.getString("mode"))));
                 case "select_plugin" -> runOnUiThread(() -> runConfirmedSharedCommand(
                         envelope, () -> selectSharedPlugin(command.getString("instance_id"))));
-                case "select_sound" -> selectControllerSound(command.optString("sound_id"));
+                case "select_sound" -> {
+                    String target = command.optString("instance_id", "");
+                    if (target.contains(CHAIN_INSTANCE_MARK)) {
+                        selectChainProgram(target, command.optString("sound_id"));
+                    } else {
+                        selectControllerSound(command.optString("sound_id"));
+                    }
+                }
+                case "set_play_chain" -> applySharedPlayChain(envelope, command);
                 case "upsert_parameter_link" -> {
                     upsertParameterLink(command.getJSONObject("link"));
                     confirmSharedCommand(envelope);
@@ -1983,6 +2028,197 @@ public final class MainActivity extends Activity {
                 // Logging above is the final fallback when even JSON encoding fails.
             }
         }
+    }
+
+    /** The plugin PLAY is on, or null before one is playing. */
+    private String activePluginId() {
+        try {
+            return new JSONObject(pluginWebContext())
+                    .getJSONObject("instance").getString("plugin_id");
+        } catch (Throwable error) {
+            return null;
+        }
+    }
+
+    /**
+     * Where the chain after an instrument is kept.
+     *
+     * It belongs to the instrument, not to the session: each instrument comes
+     * back with the effects that were left after it.
+     */
+    private static String playChainKey(String pluginId) {
+        return "session.play_chain." + pluginId;
+    }
+
+    private JSONArray persistedPlayChain(String pluginId) {
+        if (pluginId == null || pluginId.isBlank()) return new JSONArray();
+        try {
+            return new JSONArray(preferences.getString(playChainKey(pluginId), "[]"));
+        } catch (Throwable error) {
+            Log.e("RackForge", "Discarding a malformed persisted PLAY chain", error);
+            preferences.edit().remove(playChainKey(pluginId)).apply();
+            return new JSONArray();
+        }
+    }
+
+    /** Builds again the chain this instrument was left playing through. */
+    private void restorePersistedPlayChain() {
+        String pluginId = activePluginId();
+        JSONArray effects = persistedPlayChain(pluginId);
+        if (effects.length() == 0) return;
+        try {
+            setPlayChain(effects.toString(), pluginStoreRoot().getAbsolutePath());
+        } catch (Throwable error) {
+            // An effect that will not build is skipped by the engine and the
+            // rest of the chain still plays; only a refused chain lands here.
+            Log.w("RackForge", "Could not restore the PLAY effects chain", error);
+        }
+    }
+
+    /** The effects the engine actually built, as session instances. */
+    private JSONArray playChainInstances() {
+        try {
+            return new JSONObject(playChain()).getJSONArray("instances");
+        } catch (Throwable error) {
+            return new JSONArray();
+        }
+    }
+
+    /**
+     * Replaces the chain after the instrument.
+     *
+     * What is remembered is what the player asked for, not what could be
+     * built: an effect whose plugin is missing today stays in the chain and
+     * plays again when it is installed.
+     */
+    private void applySharedPlayChain(JSONObject envelope, JSONObject command) {
+        pluginParameterExecutor.execute(() -> {
+            try {
+                String instrument = command.optString("instrument_id", ANDROID_INSTANCE_ID);
+                if (!ANDROID_INSTANCE_ID.equals(instrument)) {
+                    throw new IllegalArgumentException(
+                            "Android plays one instrument, not " + instrument);
+                }
+                JSONArray effects = command.optJSONArray("effects");
+                if (effects == null) effects = new JSONArray();
+                setPlayChain(effects.toString(), pluginStoreRoot().getAbsolutePath());
+                String pluginId = activePluginId();
+                if (pluginId != null) {
+                    preferences.edit()
+                            .putString(playChainKey(pluginId), effects.toString())
+                            .apply();
+                }
+                runOnUiThread(() -> runConfirmedSharedCommand(envelope, () -> { }));
+            } catch (Throwable error) {
+                Log.e("RackForge", "Could not apply the PLAY effects chain", error);
+                emitSharedSessionError(error);
+            }
+        });
+    }
+
+    /**
+     * One effect of the chain takes its program. The chain remembers which:
+     * the same effect twice is two settings.
+     */
+    private void selectChainProgram(String instanceId, String soundId) {
+        if (soundId == null || soundId.isBlank()) return;
+        pluginParameterExecutor.execute(() -> {
+            try {
+                if (!selectChainSound(instanceId, soundId)) {
+                    throw new IllegalStateException("The effect rejected program " + soundId);
+                }
+                rememberChainProgram(instanceId, soundId);
+                runOnUiThread(this::emitSessionSnapshot);
+            } catch (Throwable error) {
+                Log.e("RackForge", "Could not select the effect program " + soundId, error);
+                emitSharedSessionError(error);
+            }
+        });
+    }
+
+    private void rememberChainProgram(String instanceId, String soundId) throws Exception {
+        String pluginId = activePluginId();
+        if (pluginId == null) return;
+        int mark = instanceId.lastIndexOf(CHAIN_INSTANCE_MARK);
+        if (mark < 0) return;
+        String effectId = instanceId.substring(mark + CHAIN_INSTANCE_MARK.length());
+        JSONArray effects = persistedPlayChain(pluginId);
+        for (int index = 0; index < effects.length(); index++) {
+            JSONObject effect = effects.getJSONObject(index);
+            if (effectId.equals(effect.optString("id"))) effect.put("program_id", soundId);
+        }
+        preferences.edit().putString(playChainKey(pluginId), effects.toString()).apply();
+    }
+
+    /**
+     * LITTLE edits the same chain the drawer does: the change is remembered
+     * for this instrument, built by the engine, and published back to both
+     * surfaces.
+     */
+    private void editControllerPlayChain(String type, JSONObject command) {
+        pluginParameterExecutor.execute(() -> {
+            try {
+                String pluginId = activePluginId();
+                if (pluginId == null) return;
+                JSONArray effects = persistedPlayChain(pluginId);
+                switch (type) {
+                    case "play_chain_add" -> {
+                        if (effects.length() >= MAX_PLAY_CHAIN_EFFECTS) return;
+                        effects.put(new JSONObject()
+                                .put("id", nextChainEffectId(effects))
+                                .put("plugin_id", command.getString("plugin_id"))
+                                .put("enabled", true));
+                    }
+                    case "play_chain_enabled" -> {
+                        String effectId = command.getString("effect_id");
+                        for (int index = 0; index < effects.length(); index++) {
+                            JSONObject effect = effects.getJSONObject(index);
+                            if (effectId.equals(effect.optString("id"))) {
+                                effect.put("enabled", command.optBoolean("enabled", true));
+                            }
+                        }
+                    }
+                    case "play_chain_remove" -> {
+                        String effectId = command.getString("effect_id");
+                        JSONArray kept = new JSONArray();
+                        for (int index = 0; index < effects.length(); index++) {
+                            JSONObject effect = effects.getJSONObject(index);
+                            if (!effectId.equals(effect.optString("id"))) kept.put(effect);
+                        }
+                        effects = kept;
+                    }
+                    default -> {
+                        return;
+                    }
+                }
+                setPlayChain(effects.toString(), pluginStoreRoot().getAbsolutePath());
+                preferences.edit().putString(playChainKey(pluginId), effects.toString()).apply();
+                keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
+                runOnUiThread(() -> {
+                    refreshKeyLabDisplay();
+                    emitSessionSnapshot();
+                });
+            } catch (Throwable error) {
+                Log.e("RackForge", "Could not edit the PLAY chain from LITTLE", error);
+            }
+        });
+    }
+
+    /** An id no effect of this chain holds, as the drawer names them. */
+    private static String nextChainEffectId(JSONArray effects) {
+        for (int candidate = 1; candidate <= MAX_PLAY_CHAIN_EFFECTS + 1; candidate++) {
+            String id = "fx-" + candidate;
+            boolean taken = false;
+            for (int index = 0; index < effects.length(); index++) {
+                JSONObject effect = effects.optJSONObject(index);
+                if (effect != null && id.equals(effect.optString("id"))) {
+                    taken = true;
+                    break;
+                }
+            }
+            if (!taken) return id;
+        }
+        return "fx-" + (effects.length() + 1);
     }
 
     private JSONArray parameterLinks() {
@@ -2653,6 +2889,7 @@ public final class MainActivity extends Activity {
     private View pluginPickerCard(AlertDialog dialog, JSONObject plugin) throws Exception {
         boolean active = plugin.optBoolean("active");
         boolean compatible = plugin.optBoolean("compatible");
+        boolean chainable = plugin.optBoolean("chainable");
         String name = plugin.getString("plugin_name");
         String version = plugin.getString("version");
 
@@ -2665,7 +2902,7 @@ public final class MainActivity extends Activity {
 
         TextView title = new TextView(this);
         title.setText(name);
-        title.setTextColor(compatible ? 0xFFF2FAFC : 0xFF718991);
+        title.setTextColor(compatible || chainable ? 0xFFF2FAFC : 0xFF718991);
         title.setTextSize(18);
         applyDisplayTypeface(title);
         title.setSingleLine(true);
@@ -2676,15 +2913,17 @@ public final class MainActivity extends Activity {
         TextView detail = new TextView(this);
         detail.setText(active ? "●  ACTIVE · " + versionLabel(version)
                 : compatible ? "TAP TO SELECT · " + versionLabel(version)
+                : chainable ? "EFFECT · ADD IT IN PLAY · " + versionLabel(version)
                 : "UNAVAILABLE · " + versionLabel(version));
-        detail.setTextColor(active ? 0xFF64DCB5 : compatible ? 0xFF91A9B1 : 0xFFF27777);
+        detail.setTextColor(active ? 0xFF64DCB5
+                : compatible || chainable ? 0xFF91A9B1 : 0xFFF27777);
         detail.setTextSize(11);
         detail.setPadding(0, dp(5), 0, 0);
         detail.setSingleLine(true);
         card.addView(detail, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        card.setAlpha(compatible ? 1f : 0.62f);
+        card.setAlpha(compatible || chainable ? 1f : 0.62f);
         card.setEnabled(compatible && !engineStarting);
         card.setContentDescription(name + " " + versionLabel(version) + (active ? ", active" : ""));
         if (compatible) {
@@ -4023,6 +4262,7 @@ public final class MainActivity extends Activity {
                 refreshActivePluginMetadata();
                 restoreActivePluginResources();
                 restorePersistedPluginSound();
+                restorePersistedPlayChain();
                 if (!keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath())) {
                     throw new IllegalStateException("The controller plugin catalog could not be synchronized");
                 }
@@ -4052,6 +4292,7 @@ public final class MainActivity extends Activity {
                         activePluginVersion = previousVersion;
                         restoreActivePluginResources();
                         restorePersistedPluginSound();
+                        restorePersistedPlayChain();
                         keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
                         startAudio();
                         refreshKeyLabDisplay();
@@ -4623,6 +4864,7 @@ public final class MainActivity extends Activity {
                 refreshActivePluginMetadata();
                 restoreActivePluginResources();
                 restorePersistedPluginSound();
+                restorePersistedPlayChain();
                 preferences.edit().putString(
                         "plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
                 startAudio();
@@ -5176,6 +5418,8 @@ public final class MainActivity extends Activity {
                 mainHandler.post(() -> showControllerMode(command.optString("mode")));
             }
             case "force_home" -> mainHandler.post(this::emergencyControllerHome);
+            case "play_chain_add", "play_chain_enabled", "play_chain_remove" ->
+                    editControllerPlayChain(type, command);
             default -> Log.d("RackForge", "Unsupported KeyLab menu command " + type);
         }
     }

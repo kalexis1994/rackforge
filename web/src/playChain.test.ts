@@ -109,6 +109,14 @@ describe("the PLAY chain", () => {
     );
   });
 
+  it("offers an effect a host builds on demand, loaded or not", () => {
+    const onDemand = { ...descriptor("org.rackforge.comp", "effect"), chainable: true };
+    const plugins = [onDemand, descriptor("org.rackforge.unloaded", "effect")];
+    expect(effectPlugins(plugins, []).map((plugin) => plugin.plugin_id)).toEqual([
+      "org.rackforge.comp",
+    ]);
+  });
+
   it("resolves the instrument's suggestions against the catalog and the chain", () => {
     const plugins = [descriptor("org.rackforge.rig", "effect")];
     const chain = withEffect(emptyChain("p"), "org.rackforge.rig");

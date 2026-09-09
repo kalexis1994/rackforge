@@ -663,6 +663,12 @@ export interface PluginWebDescriptor {
   resources: PluginResourceRequirement[];
   /** The effects the instrument suggests after itself in the PLAY chain. */
   suggested_chain?: Array<{ plugin: string; preset?: string | null }>;
+  /**
+   * The host builds this effect's voice on demand, out of the store, so the
+   * chain can take it without the session having loaded it first. Hosts that
+   * load every plugin up front leave it unset and are read by their instances.
+   */
+  chainable?: boolean;
 }
 
 export interface PluginResourceRequirement {

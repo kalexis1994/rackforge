@@ -219,8 +219,14 @@ mod tests {
             std::fs::write(path, &expected).expect("writing the performance wire document");
             return;
         }
-        let actual =
-            std::fs::read_to_string(path).expect("reading fixtures/performance-wire-v1.json");
+        // Compared without regard to line endings. The record is stored with
+        // newlines, and `text=auto` hands a Windows checkout the same bytes
+        // with carriage returns in them, so a contributor there would be told
+        // the record is out of date by a difference nobody made and
+        // regenerating cannot fix.
+        let actual = std::fs::read_to_string(path)
+            .expect("reading fixtures/performance-wire-v1.json")
+            .replace('\r', "");
         assert_eq!(
             actual, expected,
             "fixtures/performance-wire-v1.json is out of date; run \

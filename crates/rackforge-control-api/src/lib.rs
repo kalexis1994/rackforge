@@ -15,6 +15,9 @@ pub use rackforge_plugin_api::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// The sequencer wire shapes, recorded for the surfaces that build them.
+pub mod sequencer_wire;
+
 pub use rackforge_session_api::{
     AuditionEndReason, AuditionState, ClientId, CommandEnvelope, CommandRef, EventEnvelope,
     InstanceId, PluginInstanceState, ProgramDraftState, Revision, SESSION_SCHEMA_VERSION,

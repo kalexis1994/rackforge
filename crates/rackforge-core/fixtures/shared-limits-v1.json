@@ -15,6 +15,7 @@
     "MAX_PATTERN_TICKS": { "value": 245760, "owner": "rackforge-performance-api" },
     "MAX_NOTE_LOCKS": { "value": 4, "owner": "rackforge-performance-api" },
     "MIN_TEMPO_BPM": { "value": 20, "owner": "rackforge-core" },
-    "MAX_TEMPO_BPM": { "value": 400, "owner": "rackforge-core" }
+    "MAX_TEMPO_BPM": { "value": 400, "owner": "rackforge-core" },
+    "HOST_PROTOCOL": { "value": "rackforge.host@1", "owner": "rackforge-core" }
   }
 }

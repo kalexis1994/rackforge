@@ -137,7 +137,7 @@ impl IPlugViewTrait for RackForgeView {
                 .with_initialization_script(
                     format!(
                     "{}{}",
-                    super::web_host::INITIALIZATION_SCRIPT,
+                    super::web_host::initialization_script(),
                     r#"
                     (() => {
                       const report = (phase, detail) => {

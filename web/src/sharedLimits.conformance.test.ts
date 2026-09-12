@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_INSTRUMENT_ID } from "./firstRun";
+import { HOST_PROTOCOL } from "./host";
 import { MAX_PLAY_CHAIN_EFFECTS } from "./playChain";
 import { RACK_GRAPH_SCHEMA_VERSION } from "./rackGraph";
 import {
@@ -63,6 +64,7 @@ const HERE: Record<string, number | string> = {
   MAX_NOTE_LOCKS,
   MIN_TEMPO_BPM,
   MAX_TEMPO_BPM,
+  HOST_PROTOCOL,
 };
 
 describe(`the interface knows the host's limits (${contract})`, () => {

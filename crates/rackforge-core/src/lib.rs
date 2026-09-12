@@ -4,6 +4,10 @@ pub mod audio_reliability;
 #[cfg(target_os = "linux")]
 pub mod control;
 pub mod default_instrument;
+/// The handshake between the interface and the native shell holding it.
+/// Outside every platform gate: Android and the VST3 editor both stamp it,
+/// and the record that holds the other languages to it is built anywhere.
+pub mod host_bridge;
 pub mod hosted;
 pub mod isolated_state;
 #[cfg(target_os = "linux")]

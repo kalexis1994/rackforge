@@ -29,6 +29,14 @@ pub const MAX_PATTERN_TICKS: u32 = 256 * PATTERN_TICKS_PER_BEAT;
 /// Sequencer lanes a Part may bind — one per engine lane.
 pub const MAX_PART_PATTERN_BINDINGS: usize = 8;
 
+/// The performance wire shapes, recorded for the surface that mirrors them.
+///
+/// Test-only: the record is written by a test and read by one on the other
+/// side, and building it needs `serde_json`, which this crate deliberately
+/// keeps out of its runtime dependencies.
+#[cfg(test)]
+mod wire_shapes;
+
 macro_rules! performance_id {
     ($name:ident) => {
         #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

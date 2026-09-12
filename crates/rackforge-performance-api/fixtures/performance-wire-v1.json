@@ -1,0 +1,40 @@
+{
+  "contract": "performance-wire-v1",
+  "generated_by": "UPDATE_PERFORMANCE_WIRE=1 cargo test -p rackforge-performance-api",
+  "shapes": [
+    { "name": "LivePerformanceState", "fields": ["mode", "rack", "song", "setlist", "active", "active_rack_id"] },
+    { "name": "ParameterLockSpec", "fields": ["parameter", "value"] },
+    { "name": "PatternDefinition", "fields": ["id", "name", "length_ticks", "notes", "view", "swing_percent", "root_key", "follow_after", "follow_action"] },
+    { "name": "PatternNoteSpec", "fields": ["tick", "duration_ticks", "key", "velocity", "channel", "probability", "condition", "locks"] },
+    { "name": "PerformanceLibrary", "fields": ["schema_version", "racks", "songs", "setlists", "patterns", "sequencer_tabs"] },
+    { "name": "PerformanceSnapshot", "fields": ["schema_version", "revision", "library", "live"] },
+    { "name": "RackDefinition", "fields": ["schema_version", "id", "name", "enabled", "keyboard_parts", "items", "nodes", "slots", "graph"] },
+    { "name": "RackGraph", "fields": ["schema_version", "nodes", "edges", "labels"] },
+    { "name": "RackGraphEdge", "fields": ["id", "signal", "source", "target", "midi_transform"] },
+    { "name": "RackGraphEndpoint", "fields": ["node_id", "port_id"] },
+    { "name": "RackGraphLabel", "fields": ["id", "text", "kind", "tone", "position", "width", "height"] },
+    { "name": "RackGraphNode", "fields": ["id", "kind", "position"] },
+    { "name": "RackGraphPosition", "fields": ["x", "y"] },
+    { "name": "RackKeyboardPart", "fields": ["midi_channel", "transpose"] },
+    { "name": "RackKeyboardParts", "fields": ["split_key", "part_1", "part_2"] },
+    { "name": "RackMidiTransform", "fields": ["source_channels", "target_channel", "note_low", "note_high", "transpose", "notes_only", "velocity_input_low", "velocity_input_high", "velocity_output_low", "velocity_output_high"] },
+    { "name": "RackSlot", "fields": ["id", "name", "plugin_id", "state", "legacy_program_id", "plugin_state_id", "program_id", "enabled", "midi_input_channel", "midi_note_low", "midi_note_high", "midi_transpose", "midi_output", "audio_output_bus", "level_per_mille", "pan_per_mille"] },
+    { "name": "SequencerTabDefinition", "fields": ["lane", "view", "slot_ids", "active_slot"] },
+    { "name": "SetlistDefinition", "fields": ["schema_version", "id", "name", "enabled", "entries"] },
+    { "name": "SetlistEntry", "fields": ["id", "song_id"] },
+    { "name": "SongDefinition", "fields": ["schema_version", "id", "name", "enabled", "parts"] },
+    { "name": "SongPart", "fields": ["id", "name", "rack_id", "content", "patterns"] },
+    { "name": "SongPartGraph", "fields": ["keyboard_parts", "slots", "graph"] },
+    { "name": "SongPartPatternBinding", "fields": ["lane", "pattern_id"] }
+  ],
+  "vocabularies": [
+    { "name": "LiveBrowseMode", "variants": ["rack", "song", "setlist"] },
+    { "name": "LiveLocation", "variants": ["rack", "song", "setlist"] },
+    { "name": "MidiOutputRoute", "variants": ["none", "bus"] },
+    { "name": "PerformanceEdit", "variants": ["put_rack", "delete_rack", "put_song", "delete_song", "put_setlist", "delete_setlist", "put_pattern", "delete_pattern", "put_sequencer_tab", "delete_sequencer_tab"] },
+    { "name": "RackGraphLabelTone", "variants": ["neutral", "cyan", "green", "amber", "violet", "red"] },
+    { "name": "RackGraphNodeKind", "variants": ["midi_input", "audio_input", "plugin", "rack", "midi_output", "audio_output"] },
+    { "name": "RackGraphSignal", "variants": ["midi", "audio"] },
+    { "name": "TrigCondition", "variants": ["always", "cycle", "fill", "not_fill", "pre", "not_pre"] }
+  ]
+}

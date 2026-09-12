@@ -3,6 +3,14 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { SCALES } from "./sequencer";
+import {
+  interfaceProperties,
+  memberProperties,
+  stringLiterals,
+  typeBlock,
+  unionMembers,
+  type DeclaredProperty,
+} from "./wireSource";
 
 /**
  * The sequencer wire, from the side that builds it.
@@ -50,77 +58,22 @@ const wire: Wire = JSON.parse(
 );
 const source = read("./sequencer.ts");
 
-/** The members of a `|`-separated type union, split at the top level only. */
-function unionMembers(block: string): string[] {
-  const members: string[] = [];
-  let depth = 0;
-  let current = "";
-  for (const character of block) {
-    if (character === "{") depth += 1;
-    if (character === "}") depth -= 1;
-    if (character === "|" && depth === 0) {
-      if (current.trim()) members.push(current);
-      current = "";
-    } else {
-      current += character;
-    }
-  }
-  if (current.trim()) members.push(current);
-  return members;
-}
-
-/**
- * A type declaration, up to the semicolon that ends it — which is the one at
- * brace depth zero, not the first one seen. The members carry semicolons
- * between their own properties, and a reader that stops at the first of those
- * reads four of seventeen members and reports that all of them agree.
- */
-function typeBlock(name: string): string {
-  const start = source.indexOf(`export type ${name} =`);
-  if (start < 0) throw new Error(`${name} is not declared in sequencer.ts`);
-  let depth = 0;
-  const from = source.indexOf("=", start) + 1;
-  for (let end = from; end < source.length; end += 1) {
-    if (source[end] === "{") depth += 1;
-    if (source[end] === "}") depth -= 1;
-    if (source[end] === ";" && depth === 0) return source.slice(from, end);
-  }
-  throw new Error(`${name} is never terminated`);
-}
-
-/** Every property of an object type, and whether it is declared optional. */
-function properties(block: string): { name: string; optional: boolean }[] {
-  return [...block.matchAll(/(?:^|[;{\n])\s*([a-z_]+)(\??):/gm)]
-    .map((match) => ({ name: match[1], optional: match[2] === "?" }))
-    .filter((property) => property.name !== "kind");
-}
-
 /** The surface's own account of what it can send. */
-const declared = unionMembers(typeBlock("SequencerCommand")).map((member) => {
+const declared = unionMembers(typeBlock(source, "SequencerCommand")).map((member) => {
   const kind = /kind:\s*"([a-z_]+)"/.exec(member);
   if (!kind) throw new Error(`a SequencerCommand member has no kind: ${member}`);
-  return { kind: kind[1], properties: properties(member) };
+  return {
+    kind: kind[1],
+    properties: memberProperties(member).filter((property) => property.name !== "kind"),
+  };
 });
 
-function interfaceProperties(name: string): { name: string; optional: boolean }[] {
-  const start = source.indexOf(`export interface ${name} {`);
-  if (start < 0) throw new Error(`${name} is not declared in sequencer.ts`);
-  const open = source.indexOf("{", start);
-  let depth = 0;
-  let end = open;
-  for (; end < source.length; end += 1) {
-    if (source[end] === "{") depth += 1;
-    if (source[end] === "}") {
-      depth -= 1;
-      if (depth === 0) break;
-    }
-  }
-  return properties(source.slice(open + 1, end));
-}
-
-const names = (list: { name: string }[]) => list.map((entry) => entry.name).sort();
-const requiredNames = (list: { name: string; optional: boolean }[]) =>
-  list.filter((entry) => !entry.optional).map((entry) => entry.name).sort();
+const names = (list: DeclaredProperty[]) => list.map((entry) => entry.name).sort();
+const requiredNames = (list: DeclaredProperty[]) =>
+  list
+    .filter((entry) => !entry.optional)
+    .map((entry) => entry.name)
+    .sort();
 
 describe(`the sequencer wire, as this surface builds it (${wire.contract})`, () => {
   it("reads its own union", () => {
@@ -166,10 +119,9 @@ describe(`the sequencer wire, as this surface builds it (${wire.contract})`, () 
   }
 
   it("offers exactly the quantise boundaries the host resolves", () => {
-    const offered = [...typeBlock("SequencerQuantize").matchAll(/"([a-z_]+)"/g)].map(
-      (match) => match[1],
+    expect(stringLiterals(typeBlock(source, "SequencerQuantize")).sort()).toEqual(
+      [...wire.quantize].sort(),
     );
-    expect(offered.sort()).toEqual([...wire.quantize].sort());
   });
 
   it("offers exactly the scales the host can follow", () => {
@@ -177,7 +129,7 @@ describe(`the sequencer wire, as this surface builds it (${wire.contract})`, () 
   });
 
   it("reads only the status fields the host sends", () => {
-    const declaredStatus = interfaceProperties("SequencerStatus");
+    const declaredStatus = interfaceProperties(source, "SequencerStatus");
     for (const property of names(declaredStatus)) {
       expect(wire.status_fields, `SequencerStatus.${property} is never sent`).toContain(property);
     }
@@ -188,7 +140,7 @@ describe(`the sequencer wire, as this surface builds it (${wire.contract})`, () 
   });
 
   it("reads only the lane status fields the host sends", () => {
-    const declaredLane = interfaceProperties("SequencerLaneStatus");
+    const declaredLane = interfaceProperties(source, "SequencerLaneStatus");
     for (const property of names(declaredLane)) {
       expect(wire.lane_status_fields, `SequencerLaneStatus.${property} is never sent`).toContain(
         property,

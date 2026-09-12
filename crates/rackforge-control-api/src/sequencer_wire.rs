@@ -314,8 +314,12 @@ mod tests {
             std::fs::write(path, &expected).expect("writing the sequencer wire document");
             return;
         }
-        let actual =
-            std::fs::read_to_string(path).expect("reading fixtures/sequencer-wire-v1.json");
+        // Compared without regard to line endings: the record is stored with
+        // newlines and a Windows checkout receives carriage returns, which is
+        // a difference nobody made and regenerating cannot fix.
+        let actual = std::fs::read_to_string(path)
+            .expect("reading fixtures/sequencer-wire-v1.json")
+            .replace('\r', "");
         assert_eq!(
             actual, expected,
             "fixtures/sequencer-wire-v1.json is out of date; run \

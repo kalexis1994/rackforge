@@ -1,0 +1,23 @@
+{
+  "contract": "tap-tempo-v1",
+  "generated_by": "UPDATE_TAP_TEMPO=1 cargo test -p rackforge-core",
+  "sequences": [
+    { "name": "no taps at all", "taps_seconds": [], "bpm": null },
+    { "name": "one tap says nothing", "taps_seconds": [1], "bpm": null },
+    { "name": "two taps half a second apart", "taps_seconds": [0, 0.5], "bpm": 120 },
+    { "name": "four steady taps", "taps_seconds": [0, 0.5, 1, 1.5], "bpm": 120 },
+    { "name": "more than five taps keeps the last five", "taps_seconds": [0, 5, 10, 10.5, 11, 11.5, 12], "bpm": 120 },
+    { "name": "the fifth tap back still counts", "taps_seconds": [0, 0.4, 1, 1.5, 2, 2.5], "bpm": 114.28571428571428 },
+    { "name": "a gap mid-sequence starts over", "taps_seconds": [0, 0.5, 1, 4, 4.5], "bpm": 120 },
+    { "name": "a pause that is not a doubling still starts over", "taps_seconds": [0, 1.5, 4], "bpm": 24 },
+    { "name": "a leading gap is dropped by the halving rule", "taps_seconds": [0, 3, 3.5, 4], "bpm": 120 },
+    { "name": "a sudden doubling", "taps_seconds": [0, 0.25, 0.5, 1.5], "bpm": 60 },
+    { "name": "a sudden halving", "taps_seconds": [0, 1, 2, 2.25], "bpm": 240 },
+    { "name": "barely a doubling", "taps_seconds": [0, 0.4, 1.3], "bpm": 66.66666666666667 },
+    { "name": "barely a halving", "taps_seconds": [0, 1, 1.45], "bpm": 133.33333333333334 },
+    { "name": "taps that do not advance say nothing", "taps_seconds": [1, 1], "bpm": null },
+    { "name": "taps running backwards say nothing", "taps_seconds": [1, 0.5], "bpm": null },
+    { "name": "faster than the transport allows is held at the ceiling", "taps_seconds": [0, 0.1], "bpm": 400 },
+    { "name": "slower than the transport allows is held at the floor", "taps_seconds": [0, 4], "bpm": 20 }
+  ]
+}

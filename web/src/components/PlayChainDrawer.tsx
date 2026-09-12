@@ -12,8 +12,10 @@ import {
 import type { PluginInstance, PluginWebDescriptor } from "../types";
 import {
   effectPlugins,
+  isAddableSuggestion,
   suggestedEffects,
   withEffect,
+  withSuggestedEffects,
   withEffectEnabled,
   withEffectMoved,
   withoutEffect,
@@ -253,6 +255,10 @@ export function PlayChainDrawer({
 
   const available = effectPlugins(plugins, instances);
   const suggestions = suggestedEffects(suggested, plugins, chain);
+  // Offered only when the instrument is recommending more than one thing
+  // the player has not already taken: with a single one left, "Add all"
+  // is a second button for what the button beside it already does.
+  const addableSuggestions = suggestions.filter(isAddableSuggestion);
   const byId = (pluginId: string) => plugins.find((plugin) => plugin.plugin_id === pluginId);
   const shown = phase !== "closed";
   const tab = shown ? 0 : -1;
@@ -425,6 +431,16 @@ export function PlayChainDrawer({
         {suggestions.length > 0 ? (
           <div className="play-chain-suggested">
             <small>{instrumentName} suggests</small>
+            {addableSuggestions.length > 1 ? (
+              <button
+                type="button"
+                className="play-chain-suggest-all"
+                onClick={() => onChange(withSuggestedEffects(chain, suggestions))}
+                tabIndex={tab}
+              >
+                Add all
+              </button>
+            ) : null}
             {suggestions.map((suggestion) => (
               <span
                 key={suggestion.plugin_id}

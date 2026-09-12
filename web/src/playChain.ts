@@ -148,4 +148,37 @@ export function suggestedEffects(
   }));
 }
 
+/** A suggestion the player could still take: installed, and not already there. */
+export function isAddableSuggestion(suggestion: SuggestedEffect): boolean {
+  return suggestion.descriptor !== null && !suggestion.inChain;
+}
+
+/**
+ * The chain with every suggestion the player does not already have, in the
+ * order the instrument asked for them.
+ *
+ * An instrument suggesting a chain is making one recommendation, not a list
+ * of unrelated ones: the Concert Grand asks for glue and then a ceiling, in
+ * that order, each on a named preset. Taking the whole recommendation should
+ * cost what taking a recommendation costs, which is one decision.
+ *
+ * What it does not do is take it for the player. A suggestion is an opinion
+ * about where an instrument sits in a mix, and the instrument is already
+ * voiced without it — so this runs when somebody asks, and never on their
+ * behalf.
+ */
+export function withSuggestedEffects(
+  chain: PlayChain,
+  suggestions: SuggestedEffect[],
+): PlayChain {
+  return suggestions.filter(isAddableSuggestion).reduce((next, suggestion) => {
+    // Against the chain being built, not the one we started from: the room
+    // left by `MAX_PLAY_CHAIN_EFFECTS` shrinks as this goes.
+    if (next.effects.some((effect) => effect.plugin_id === suggestion.plugin_id)) {
+      return next;
+    }
+    return withEffect(next, suggestion.plugin_id, suggestion.preset);
+  }, chain);
+}
+
 export type { PlayChainEffect };

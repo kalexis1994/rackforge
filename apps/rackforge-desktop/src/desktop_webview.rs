@@ -1,9 +1,27 @@
 use anyhow::{Context, Result};
 use eframe::CreationContext;
 use wry::{
-    Rect, WebView, WebViewBuilder,
+    Rect, WebContext, WebView, WebViewBuilder,
     dpi::{LogicalPosition, LogicalSize},
 };
+
+/// Where the WebView keeps what it caches between runs.
+///
+/// Left to itself, WebView2 writes this beside the executable, in a folder
+/// named after it — seventy megabytes of browser profile appearing next to a
+/// self-contained binary, and unwritable at all if that binary lives anywhere
+/// a user cannot write, which on Windows is where installed programs live.
+/// The VST3 host has always placed it deliberately; this one had not, and the
+/// two now agree.
+#[cfg(windows)]
+fn webview_data_directory() -> std::path::PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("RackForge")
+        .join("Desktop")
+        .join("WebView2")
+}
 
 pub struct DesktopWebView {
     view: WebView,
@@ -14,7 +32,13 @@ pub struct DesktopWebView {
 
 impl DesktopWebView {
     pub fn new(creation: &CreationContext<'_>) -> Result<Self> {
-        let view = WebViewBuilder::new()
+        // Only borrowed while the view is built: what the context carries into
+        // the WebView is the directory above, and nothing after that reads it.
+        #[cfg(windows)]
+        let mut context = WebContext::new(Some(webview_data_directory()));
+        #[cfg(not(windows))]
+        let mut context = WebContext::new(None);
+        let view = WebViewBuilder::new_with_web_context(&mut context)
             // The chassis colour, not a near-white. This is what shows in the
             // gap whenever the WebView's bounds and the panel disagree by a
             // pixel, or before the interface has painted — at #e9e7e1 that

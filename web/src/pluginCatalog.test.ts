@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  canOpenInPlay,
   derivePluginRuntimeStates,
+  groupPluginsByKind,
+  pluginKind,
   type PluginOperation,
 } from "./pluginCatalog";
 import type {
@@ -124,5 +127,67 @@ describe("global plugin runtime state", () => {
     )["org.rackforge.synth"];
 
     expect(state).toMatchObject({ phase: "unhealthy", healthy: false });
+  });
+});
+
+function ofKind(
+  id: string,
+  kind: PluginWebDescriptor["kind"] | undefined,
+): PluginWebDescriptor {
+  return { ...plugin(), plugin_id: id, plugin_name: id, kind: kind as never };
+}
+
+/**
+ * The Plugin Manager listed instruments, effects and MIDI processors in one
+ * grid and offered every one of them a way into PLAY. PLAY is one instrument
+ * and its programs: an effect belongs to a chain behind one, and pressing
+ * that button moved the host into PLAY mode around a plugin that cannot be
+ * played.
+ */
+describe("what a plugin is", () => {
+  it("reads an unstated kind as an instrument", () => {
+    expect(pluginKind(ofKind("legacy", undefined))).toBe("instrument");
+    expect(canOpenInPlay(ofKind("legacy", undefined))).toBe(true);
+  });
+
+  it("lets PLAY open an instrument and nothing else", () => {
+    expect(canOpenInPlay(ofKind("piano", "instrument"))).toBe(true);
+    expect(canOpenInPlay(ofKind("reverb", "effect"))).toBe(false);
+    expect(canOpenInPlay(ofKind("arp", "midi_processor"))).toBe(false);
+  });
+
+  it("groups the library by kind, in listing order", () => {
+    const groups = groupPluginsByKind([
+      ofKind("reverb", "effect"),
+      ofKind("piano", "instrument"),
+      ofKind("arp", "midi_processor"),
+      ofKind("delay", "effect"),
+    ]);
+    expect(groups.map((group) => group.kind)).toEqual([
+      "instrument",
+      "effect",
+      "midi_processor",
+    ]);
+    expect(groups[1].plugins.map((entry) => entry.plugin_id)).toEqual([
+      "reverb",
+      "delay",
+    ]);
+  });
+
+  it("leaves out a kind nobody has installed", () => {
+    const groups = groupPluginsByKind([ofKind("piano", "instrument")]);
+    expect(groups.map((group) => group.kind)).toEqual(["instrument"]);
+  });
+
+  it("keeps every plugin, and keeps each one once", () => {
+    const library = [
+      ofKind("piano", "instrument"),
+      ofKind("reverb", "effect"),
+      ofKind("arp", "midi_processor"),
+      ofKind("legacy", undefined),
+    ];
+    const listed = groupPluginsByKind(library).flatMap((group) => group.plugins);
+    expect(listed).toHaveLength(library.length);
+    expect(new Set(listed.map((entry) => entry.plugin_id)).size).toBe(library.length);
   });
 });

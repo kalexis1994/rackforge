@@ -99,6 +99,8 @@ import {
 } from "./host";
 import {
   beginPluginOperation,
+  canOpenInPlay,
+  groupPluginsByKind,
   invalidatePluginCatalog,
   refreshPluginCatalog,
   synchronizePluginRuntime,
@@ -207,14 +209,23 @@ function BrandMark() {
   );
 }
 
+/**
+ * How a kind is named: on the tag a card wears, and on the heading above the
+ * group of them. An unstated kind reads as an instrument, which is what a
+ * package could only be before the field existed.
+ */
 function pluginKindPresentation(kind: PluginWebDescriptor["kind"] | undefined) {
   switch (kind) {
     case "effect":
-      return { label: "Effect", className: "effect" };
+      return { label: "Effect", plural: "Effects", className: "effect" };
     case "midi_processor":
-      return { label: "MIDI Processor", className: "midi-processor" };
+      return {
+        label: "MIDI Processor",
+        plural: "MIDI Processors",
+        className: "midi-processor",
+      };
     default:
-      return { label: "Instrument", className: "instrument" };
+      return { label: "Instrument", plural: "Instruments", className: "instrument" };
   }
 }
 
@@ -3908,7 +3919,10 @@ function PluginsPage({
     }
   };
   const openInPlay = async (plugin: PluginWebDescriptor) => {
-    if (!plugin.active) return;
+    // PLAY is one instrument. The card hides this action for anything else,
+    // but the refusal belongs here too: the button is presentation, and what
+    // follows moves the host into PLAY mode around whatever it is handed.
+    if (!plugin.active || !canOpenInPlay(plugin)) return;
     const finishOperation = beginPluginOperation(
       plugin.plugin_id,
       "open",
@@ -4014,8 +4028,15 @@ function PluginsPage({
         onRetry={() => void invalidatePluginCatalog()}
         loaderSize="large"
       >
-        <div className="plugin-grid expanded plugin-manager-grid">
-        {installed.map((plugin, index) => {
+        {groupPluginsByKind(installed).map((group) => (
+          <section className="plugin-kind-group" key={group.kind}>
+            <div className="plugin-section-heading">
+              <span className="card-kicker">
+                {pluginKindPresentation(group.kind).plural}
+              </span>
+            </div>
+            <div className="plugin-grid expanded plugin-manager-grid">
+        {group.plugins.map((plugin, index) => {
           const instance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
           const busy = changingPluginId === plugin.plugin_id;
           const configAvailable = plugin.surfaces.some((surface) => surface.kind === "config");
@@ -4053,13 +4074,15 @@ function PluginsPage({
                       : "Activate"}
                   </AsyncActionLabel>
                 </RfButton>
-                <RfButton
-                  variant="secondary"
-                  disabled={!plugin.active || busy}
-                  onClick={() => void openInPlay(plugin)}
-                >
-                  Go to PLAY
-                </RfButton>
+                {canOpenInPlay(plugin) ? (
+                  <RfButton
+                    variant="secondary"
+                    disabled={!plugin.active || busy}
+                    onClick={() => void openInPlay(plugin)}
+                  >
+                    Go to PLAY
+                  </RfButton>
+                ) : null}
                 <RfButton
                   variant="secondary"
                   disabled={!plugin.active || !configAvailable || !instance || busy}
@@ -4079,7 +4102,9 @@ function PluginsPage({
             </article>
           );
         })}
-      </div>
+            </div>
+          </section>
+        ))}
       {installed.length === 0 ? (
         <EmptyState title="No plugins installed" />
       ) : null}

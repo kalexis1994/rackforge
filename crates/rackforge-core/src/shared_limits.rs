@@ -18,13 +18,14 @@
 //! compared against on the other side.
 
 use rackforge_performance_api::{
-    MAX_PART_PATTERN_BINDINGS, PATTERN_SWING_MAX, PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT,
-    RACK_GRAPH_SCHEMA_VERSION,
+    MAX_NOTE_LOCKS, MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES, MAX_PATTERN_TICKS,
+    PATTERN_SWING_MAX, PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT, RACK_GRAPH_SCHEMA_VERSION,
 };
 use rackforge_session_api::{MAX_PLAY_CHAIN_EFFECTS, SESSION_SCHEMA_VERSION};
 
 use crate::default_instrument::DEFAULT_INSTRUMENT_ID;
 use crate::sequencer::LANE_SLOTS;
+use crate::transport::{MAX_TEMPO_BPM, MIN_TEMPO_BPM};
 
 /// One number, the crate that owns it, and the name the interface knows it by.
 struct SharedLimit {
@@ -82,6 +83,36 @@ fn shared_limits() -> Vec<SharedLimit> {
             name: "LANE_SLOTS",
             owner: "rackforge-core",
             value: LANE_SLOTS.to_string(),
+        },
+        // The surface builds pattern documents and the host compiles them.
+        // A document past any of these three is refused with a
+        // `PatternError`, which the player sees as a pattern that will not
+        // save and no reason why.
+        SharedLimit {
+            name: "MAX_PATTERN_NOTES",
+            owner: "rackforge-performance-api",
+            value: MAX_PATTERN_NOTES.to_string(),
+        },
+        SharedLimit {
+            name: "MAX_PATTERN_TICKS",
+            owner: "rackforge-performance-api",
+            value: MAX_PATTERN_TICKS.to_string(),
+        },
+        SharedLimit {
+            name: "MAX_NOTE_LOCKS",
+            owner: "rackforge-performance-api",
+            value: MAX_NOTE_LOCKS.to_string(),
+        },
+        // The tap-tempo fold clamps to these on both sides.
+        SharedLimit {
+            name: "MIN_TEMPO_BPM",
+            owner: "rackforge-core",
+            value: MIN_TEMPO_BPM.to_string(),
+        },
+        SharedLimit {
+            name: "MAX_TEMPO_BPM",
+            owner: "rackforge-core",
+            value: MAX_TEMPO_BPM.to_string(),
         },
     ]
 }

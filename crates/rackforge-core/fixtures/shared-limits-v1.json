@@ -10,6 +10,11 @@
     "MAX_SEQUENCER_LANES": { "value": 8, "owner": "rackforge-performance-api" },
     "SWING_STRAIGHT": { "value": 50, "owner": "rackforge-performance-api" },
     "SWING_MAX": { "value": 75, "owner": "rackforge-performance-api" },
-    "LANE_SLOTS": { "value": 4, "owner": "rackforge-core" }
+    "LANE_SLOTS": { "value": 4, "owner": "rackforge-core" },
+    "MAX_PATTERN_NOTES": { "value": 2048, "owner": "rackforge-performance-api" },
+    "MAX_PATTERN_TICKS": { "value": 245760, "owner": "rackforge-performance-api" },
+    "MAX_NOTE_LOCKS": { "value": 4, "owner": "rackforge-performance-api" },
+    "MIN_TEMPO_BPM": { "value": 20, "owner": "rackforge-core" },
+    "MAX_TEMPO_BPM": { "value": 400, "owner": "rackforge-core" }
   }
 }

@@ -6,10 +6,14 @@ import { DEFAULT_INSTRUMENT_ID } from "./firstRun";
 import { MAX_PLAY_CHAIN_EFFECTS } from "./playChain";
 import { RACK_GRAPH_SCHEMA_VERSION } from "./rackGraph";
 import {
-
-  MAX_SEQUENCER_LANES,
-  SWING_MAX,
   LANE_SLOTS,
+  MAX_NOTE_LOCKS,
+  MAX_PATTERN_NOTES,
+  MAX_PATTERN_TICKS,
+  MAX_SEQUENCER_LANES,
+  MAX_TEMPO_BPM,
+  MIN_TEMPO_BPM,
+  SWING_MAX,
   SWING_STRAIGHT,
   TICKS_PER_BEAT,
 } from "./sequencer";
@@ -54,6 +58,11 @@ const HERE: Record<string, number | string> = {
   SWING_STRAIGHT,
   SWING_MAX,
   LANE_SLOTS,
+  MAX_PATTERN_NOTES,
+  MAX_PATTERN_TICKS,
+  MAX_NOTE_LOCKS,
+  MIN_TEMPO_BPM,
+  MAX_TEMPO_BPM,
 };
 
 describe(`the interface knows the host's limits (${contract})`, () => {

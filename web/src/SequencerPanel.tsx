@@ -41,6 +41,7 @@ import {
   clearMelodicStep,
   cycleMelodicTie,
   cycleMelodicVelocity,
+  clampPatternLength,
   emptyPattern,
   hasStep,
   melodicStepNote,
@@ -816,7 +817,9 @@ function SequencerTabEditor({
   const setBars = useCallback(
     (value: number) => {
       if (!draft) return;
-      const length = value * beatsPerBar * TICKS_PER_BEAT;
+      // Inside what the host will compile: a longer document is refused,
+      // and the player would see only a pattern that will not save.
+      const length = clampPatternLength(value * beatsPerBar * TICKS_PER_BEAT);
       edit({
         ...draft,
         length_ticks: length,

@@ -1,5 +1,6 @@
 use super::{RackForgeControllerShared, VstPluginModel, diagnostic, engine::VstParameterValue};
 use include_dir::{Dir, include_dir};
+use rackforge_core::host_bridge::{HOST_PROTOCOL, PROTOCOL_PLACEHOLDER};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{borrow::Cow, path::Component};
@@ -7,10 +8,10 @@ use wry::http::{Request, Response, StatusCode, header};
 
 static WEB_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist");
 
-pub const INITIALIZATION_SCRIPT: &str = r#"
+const INITIALIZATION_SCRIPT_TEMPLATE: &str = r#"
 (() => {
   window.__RACKFORGE_HOST_SHELL__ = 'vst3';
-  const protocol = 'rackforge.host@1';
+  const protocol = '__RACKFORGE_HOST_PROTOCOL__';
   const publish = message => window.postMessage(message, '*');
   window.RackForgeNativeHost = {
     postMessage(payload) {
@@ -42,6 +43,15 @@ pub const INITIALIZATION_SCRIPT: &str = r#"
   };
 })();
 "#;
+
+/// The bridge this host injects, stamped with the shared protocol.
+///
+/// The script is JavaScript and full of braces, so the value is written in
+/// by name rather than by `format!` — see
+/// [`PROTOCOL_PLACEHOLDER`](rackforge_core::host_bridge::PROTOCOL_PLACEHOLDER).
+pub fn initialization_script() -> String {
+    INITIALIZATION_SCRIPT_TEMPLATE.replace(PROTOCOL_PLACEHOLDER, HOST_PROTOCOL)
+}
 
 #[derive(Deserialize)]
 struct NativeRequest {
@@ -77,7 +87,7 @@ fn bridge_response(
     let body = match result {
         Ok((result, events)) => json!({
             "response": {
-                "protocol": "rackforge.host@1",
+                "protocol": HOST_PROTOCOL,
                 "kind": "response",
                 "request_id": request.request_id,
                 "ok": true,
@@ -87,7 +97,7 @@ fn bridge_response(
         }),
         Err(message) => json!({
             "response": {
-                "protocol": "rackforge.host@1",
+                "protocol": HOST_PROTOCOL,
                 "kind": "response",
                 "request_id": request.request_id,
                 "ok": false,
@@ -490,7 +500,7 @@ fn session_message(message: Value) -> Value {
 
 fn session_event(event: &str, payload: Option<String>) -> Value {
     json!({
-        "protocol": "rackforge.host@1",
+        "protocol": HOST_PROTOCOL,
         "kind": "event",
         "channel": "session",
         "event": event,
@@ -678,5 +688,28 @@ mod tests {
         };
         assert!(handle_native_request(&invalid, &controller.shared).is_err());
         assert_eq!(controller.shared.ui_route(), "/play");
+    }
+}
+
+#[cfg(test)]
+mod initialization_script_tests {
+    use super::*;
+
+    #[test]
+    fn the_injected_script_carries_the_shared_protocol() {
+        let script = initialization_script();
+        assert!(
+            !script.contains(PROTOCOL_PLACEHOLDER),
+            "the marker survived: the bridge would stamp envelopes with it"
+        );
+        assert!(
+            script.contains(HOST_PROTOCOL),
+            "the injected bridge does not name the protocol at all"
+        );
+        assert!(
+            INITIALIZATION_SCRIPT_TEMPLATE.contains(PROTOCOL_PLACEHOLDER),
+            "the template stopped carrying the marker, so the substitution \
+             above now proves nothing"
+        );
     }
 }

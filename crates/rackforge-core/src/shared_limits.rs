@@ -24,6 +24,7 @@ use rackforge_performance_api::{
 use rackforge_session_api::{MAX_PLAY_CHAIN_EFFECTS, SESSION_SCHEMA_VERSION};
 
 use crate::default_instrument::DEFAULT_INSTRUMENT_ID;
+use crate::host_bridge::HOST_PROTOCOL;
 use crate::sequencer::LANE_SLOTS;
 use crate::transport::{MAX_TEMPO_BPM, MIN_TEMPO_BPM};
 
@@ -114,6 +115,14 @@ fn shared_limits() -> Vec<SharedLimit> {
             owner: "rackforge-core",
             value: MAX_TEMPO_BPM.to_string(),
         },
+        // Stamped on every envelope crossing the native bridge, and checked
+        // on arrival: a copy that disagrees is not answered, and the surface
+        // sits there looking like it is still loading.
+        SharedLimit {
+            name: "HOST_PROTOCOL",
+            owner: "rackforge-core",
+            value: format!("\"{HOST_PROTOCOL}\""),
+        },
     ]
 }
 
@@ -159,6 +168,69 @@ mod tests {
         assert_eq!(names.len(), total, "a limit is listed twice");
     }
 
+    /// The Android activity, read as text.
+    ///
+    /// It is Java, so nothing in this workspace compiles against it and no
+    /// test in CI runs it — the Android job builds an APK and stops there.
+    /// What can still be done is read it, which is the same thing the Web
+    /// conformance tests do to their own source for the same reason.
+    fn android_activity() -> String {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/rackforge-android/app/src/main/java/org/rackforge/android/MainActivity.java"
+        );
+        std::fs::read_to_string(path).expect("reading the Android activity")
+    }
+
+    /// Every `static final` constant the activity declares, by name, with its
+    /// literal exactly as written.
+    fn android_constants(source: &str) -> Vec<(String, String)> {
+        source
+            .lines()
+            .filter_map(|line| {
+                let after = line.trim().split_once("static final ")?.1;
+                let (_type, rest) = after.split_once(' ')?;
+                let (name, value) = rest.split_once(" = ")?;
+                let value = value.trim().strip_suffix(';')?;
+                Some((name.trim().to_string(), value.trim().to_string()))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_android_host_agrees_on_the_limits_it_declares() {
+        // Android is a third language on the same wire, carrying its own copy
+        // of some of these, and the record could not see it: the Web test
+        // reads the Web source, and nothing read this one. Java writes a
+        // string constant as `"text"` and a number as bare digits, which is
+        // exactly how the record renders them, so the two compare as written.
+        let source = android_activity();
+        let declared = android_constants(&source);
+        let limits = shared_limits();
+        let mut checked = 0;
+        for limit in &limits {
+            for (name, value) in &declared {
+                if name != limit.name {
+                    continue;
+                }
+                assert_eq!(
+                    value, &limit.value,
+                    "the Android host declares {} as {} while {} declares {}",
+                    limit.name, value, limit.owner, limit.value
+                );
+                checked += 1;
+            }
+        }
+        // Silence is not agreement. If the activity moves, is renamed, or
+        // stops spelling its constants this way, every comparison above
+        // quietly stops happening and this test passes having read nothing.
+        assert!(
+            checked >= 2,
+            "found only {checked} shared limits in the Android activity; \
+             the reader has probably stopped matching how it declares them"
+        );
+    }
+
     #[test]
     fn the_shared_limits_match_these_declarations() {
         let path = concat!(
@@ -170,7 +242,14 @@ mod tests {
             std::fs::write(path, &expected).expect("writing the shared limits");
             return;
         }
-        let actual = std::fs::read_to_string(path).expect("reading fixtures/shared-limits-v1.json");
+        // Compared without regard to line endings. The record is stored with
+        // newlines, and `text=auto` hands a Windows checkout the same bytes
+        // with carriage returns in them, so a contributor there would be told
+        // the record is out of date by a difference nobody made and
+        // regenerating cannot fix.
+        let actual = std::fs::read_to_string(path)
+            .expect("reading fixtures/shared-limits-v1.json")
+            .replace('\r', "");
         assert_eq!(
             actual, expected,
             "fixtures/shared-limits-v1.json is out of date; run \

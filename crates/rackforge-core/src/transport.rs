@@ -682,7 +682,11 @@ mod tests {
             std::fs::write(path, &expected).expect("writing the tap tempo vectors");
             return;
         }
-        let actual = std::fs::read_to_string(path).expect("reading fixtures/tap-tempo-v1.json");
+        // Compared without regard to line endings; see the note in
+        // `shared_limits`, which reads its own record the same way.
+        let actual = std::fs::read_to_string(path)
+            .expect("reading fixtures/tap-tempo-v1.json")
+            .replace('\r', "");
         assert_eq!(
             actual, expected,
             "fixtures/tap-tempo-v1.json is out of date; run \

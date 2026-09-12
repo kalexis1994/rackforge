@@ -31,6 +31,9 @@ pub mod rack_graph;
 pub mod realtime;
 pub mod session;
 pub mod session_checkpoint;
+/// Deliberately outside every platform gate: these are the numbers the Web
+/// interface carries a copy of, and it carries them on every host.
+pub mod shared_limits;
 pub mod ump;
 /// How hard a key was struck, as this machine reads it: outside every
 /// platform gate, because every host reads its own incoming MIDI through it.

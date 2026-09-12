@@ -1,0 +1,15 @@
+{
+  "contract": "shared-limits-v1",
+  "generated_by": "UPDATE_SHARED_LIMITS=1 cargo test -p rackforge-core",
+  "limits": {
+    "DEFAULT_INSTRUMENT_ID": { "value": "org.rackforge.concert-grand", "owner": "rackforge-core" },
+    "MAX_PLAY_CHAIN_EFFECTS": { "value": 8, "owner": "rackforge-session-api" },
+    "SESSION_SCHEMA_VERSION": { "value": 14, "owner": "rackforge-session-api" },
+    "RACK_GRAPH_SCHEMA_VERSION": { "value": 2, "owner": "rackforge-performance-api" },
+    "TICKS_PER_BEAT": { "value": 960, "owner": "rackforge-performance-api" },
+    "MAX_SEQUENCER_LANES": { "value": 8, "owner": "rackforge-performance-api" },
+    "SWING_STRAIGHT": { "value": 50, "owner": "rackforge-performance-api" },
+    "SWING_MAX": { "value": 75, "owner": "rackforge-performance-api" },
+    "LANE_SLOTS": { "value": 4, "owner": "rackforge-core" }
+  }
+}

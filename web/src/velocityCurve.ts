@@ -5,8 +5,12 @@
  * cubic Hermite through three points with the Fritsch–Carlson tangents. It
  * exists here so the square in Settings draws exactly what the audio thread
  * will do to the next key you press, rather than an artist's impression of
- * it. `crates/rackforge-core/src/velocity_curve.rs` is the other half, and
- * the tests either side hold them to the same numbers.
+ * it. `crates/rackforge-midi-api/src/velocity_curve.rs` is the other half.
+ *
+ * Neither side is the other's test. Both are held to one file of numbers the
+ * host generates and owns — `crates/rackforge-midi-api/fixtures/`
+ * `velocity-curve-v1.json` — and `velocityCurve.conformance.test.ts` is where
+ * this side answers for it.
  */
 
 export interface VelocityCurve {

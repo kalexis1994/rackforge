@@ -364,6 +364,101 @@ pub fn tap_tempo(taps_seconds: &[f64]) -> Option<f64> {
     Some(bpm.clamp(MIN_TEMPO_BPM, MAX_TEMPO_BPM))
 }
 
+/// The tap sequences the conformance vectors cover.
+///
+/// A player taps a tempo in on stage and the Web surface folds the same taps
+/// with its own copy of this arithmetic, so the two have to answer alike.
+/// These are the ways a hand actually behaves: steady, hurried, interrupted,
+/// started over, and faster or slower than a tempo is allowed to be. The
+/// awkward ones matter most — a gap and a doubling are the branches, and a
+/// branch taken on one side and not the other is a tempo that jumps when the
+/// player looks away.
+const TAP_TEMPO_SEQUENCES: [(&str, &[f64]); 17] = [
+    ("no taps at all", &[]),
+    ("one tap says nothing", &[1.0]),
+    ("two taps half a second apart", &[0.0, 0.5]),
+    ("four steady taps", &[0.0, 0.5, 1.0, 1.5]),
+    (
+        "more than five taps keeps the last five",
+        &[0.0, 5.0, 10.0, 10.5, 11.0, 11.5, 12.0],
+    ),
+    // The one above is steady inside the window, so it answers the same
+    // whatever the window is. Here the oldest kept interval is the odd one
+    // — long enough to move the mean, not long enough to start a session —
+    // so the answer only comes out right if exactly five taps are kept.
+    (
+        "the fifth tap back still counts",
+        &[0.0, 0.4, 1.0, 1.5, 2.0, 2.5],
+    ),
+    ("a gap mid-sequence starts over", &[0.0, 0.5, 1.0, 4.0, 4.5]),
+    // Two and a half seconds after one and a half: long enough to be a
+    // pause, not long enough to be a doubling. Only the absolute bound
+    // catches this one, so it is the only vector that pins that bound.
+    (
+        "a pause that is not a doubling still starts over",
+        &[0.0, 1.5, 4.0],
+    ),
+    (
+        "a leading gap is dropped by the halving rule",
+        &[0.0, 3.0, 3.5, 4.0],
+    ),
+    ("a sudden doubling", &[0.0, 0.25, 0.5, 1.5]),
+    ("a sudden halving", &[0.0, 1.0, 2.0, 2.25]),
+    // The two above are far past their thresholds, so they would still fire
+    // if the thresholds moved. These two sit just past them — a ratio of
+    // 2.25 either way — and are what pins the factor at two rather than at
+    // whatever a later edit makes it.
+    ("barely a doubling", &[0.0, 0.4, 1.3]),
+    ("barely a halving", &[0.0, 1.0, 1.45]),
+    ("taps that do not advance say nothing", &[1.0, 1.0]),
+    ("taps running backwards say nothing", &[1.0, 0.5]),
+    (
+        "faster than the transport allows is held at the ceiling",
+        &[0.0, 0.1],
+    ),
+    (
+        "slower than the transport allows is held at the floor",
+        &[0.0, 4.0],
+    ),
+];
+
+/// The tap-tempo fold written down as numbers, for the surface that folds it
+/// too.
+///
+/// `fixtures/tap-tempo-v1.json` is this function's output. The test below
+/// compares them and `web/src/sequencer.conformance.test.ts` reads the same
+/// file, so the fixture is a view of this implementation rather than a third
+/// copy of it. Both sides run the same sequence of IEEE-754 double
+/// operations, in the same order, so the answers agree exactly.
+pub fn tap_tempo_conformance_vectors() -> String {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"contract\": \"tap-tempo-v1\",\n");
+    out.push_str("  \"generated_by\": \"UPDATE_TAP_TEMPO=1 cargo test -p rackforge-core\",\n");
+    out.push_str("  \"sequences\": [\n");
+    for (index, (name, taps)) in TAP_TEMPO_SEQUENCES.iter().enumerate() {
+        let rendered: Vec<String> = taps.iter().map(|tap| tap.to_string()).collect();
+        let bpm = match tap_tempo(taps) {
+            Some(bpm) => bpm.to_string(),
+            None => "null".to_string(),
+        };
+        out.push_str(&format!(
+            "    {{ \"name\": \"{}\", \"taps_seconds\": [{}], \"bpm\": {} }}",
+            name,
+            rendered.join(", "),
+            bpm
+        ));
+        if index + 1 == TAP_TEMPO_SEQUENCES.len() {
+            out.push('\n');
+        } else {
+            out.push_str(",\n");
+        }
+    }
+    out.push_str("  ]\n");
+    out.push_str("}\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,5 +672,21 @@ mod tests {
     fn tap_tempo_needs_two_taps_and_monotonic_time() {
         assert!(tap_tempo(&[1.0]).is_none());
         assert!(tap_tempo(&[2.0, 1.0]).is_none());
+    }
+
+    #[test]
+    fn the_tap_tempo_vectors_match_this_implementation() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/tap-tempo-v1.json");
+        let expected = tap_tempo_conformance_vectors();
+        if std::env::var("UPDATE_TAP_TEMPO").is_ok() {
+            std::fs::write(path, &expected).expect("writing the tap tempo vectors");
+            return;
+        }
+        let actual = std::fs::read_to_string(path).expect("reading fixtures/tap-tempo-v1.json");
+        assert_eq!(
+            actual, expected,
+            "fixtures/tap-tempo-v1.json is out of date; run \
+             UPDATE_TAP_TEMPO=1 cargo test -p rackforge-core"
+        );
     }
 }

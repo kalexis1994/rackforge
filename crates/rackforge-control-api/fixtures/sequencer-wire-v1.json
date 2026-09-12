@@ -1,0 +1,31 @@
+{
+  "contract": "sequencer-wire-v1",
+  "generated_by": "UPDATE_SEQUENCER_WIRE=1 cargo test -p rackforge-control-api",
+  "commands": [
+    { "kind": "transport_start", "fields": [], "required": [] },
+    { "kind": "transport_stop", "fields": [], "required": [] },
+    { "kind": "transport_panic", "fields": [], "required": [] },
+    { "kind": "set_tempo", "fields": ["bpm"], "required": ["bpm"] },
+    { "kind": "set_signature", "fields": ["beat_unit", "beats_per_bar"], "required": ["beat_unit", "beats_per_bar"] },
+    { "kind": "queue_pattern", "fields": ["lane", "pattern", "quantize"], "required": ["lane", "pattern", "quantize"] },
+    { "kind": "load_slot", "fields": ["lane", "pattern", "slot"], "required": ["lane", "pattern", "slot"] },
+    { "kind": "launch_slot", "fields": ["lane", "quantize", "slot"], "required": ["lane", "quantize", "slot"] },
+    { "kind": "launch_lane", "fields": ["lane", "quantize"], "required": ["lane", "quantize"] },
+    { "kind": "stop_lane", "fields": ["lane", "quantize"], "required": ["lane", "quantize"] },
+    { "kind": "set_lane_muted", "fields": ["lane", "muted"], "required": ["lane", "muted"] },
+    { "kind": "set_focus_lane", "fields": ["lane"], "required": ["lane"] },
+    { "kind": "set_capture", "fields": ["lane", "on"], "required": ["lane", "on"] },
+    { "kind": "set_clock_out", "fields": ["on"], "required": ["on"] },
+    { "kind": "set_fill", "fields": ["on"], "required": ["on"] },
+    { "kind": "set_lane_follow", "fields": ["lane", "scale"], "required": ["lane"] },
+    { "kind": "set_lane_listen_channel", "fields": ["channel", "lane"], "required": ["lane"] }
+  ],
+  "quantize": ["now", "next_beat", "next_bar"],
+  "scales": ["chromatic", "major", "minor", "dorian", "mixolydian", "pentatonic_major", "pentatonic_minor"],
+  "status_fields": ["bar", "beat_in_bar", "beat_phase", "beat_unit", "beats_per_bar", "clock_out", "fill", "focus_lane", "lanes", "running", "tempo_bpm"],
+  "status_required": ["bar", "beat_in_bar", "beat_phase", "beat_unit", "beats_per_bar", "lanes", "running", "tempo_bpm"],
+  "lane_status_fields": ["active_slot", "capturing", "following", "listen_channel", "muted", "pattern_name", "playing", "queued", "slots", "stopping"],
+  "lane_status_required": ["muted", "playing", "queued"],
+  "pattern_fields": ["follow_action", "follow_after", "id", "length_ticks", "name", "notes", "root_key", "swing_percent", "view"],
+  "pattern_required": ["id", "length_ticks", "name"]
+}

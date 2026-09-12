@@ -15,6 +15,26 @@ export const TICKS_PER_BEAT = 960;
 export const STEP_TICKS = TICKS_PER_BEAT / 4;
 export const MAX_SEQUENCER_LANES = 8;
 
+/**
+ * What the host will compile. A document past any of these is refused with a
+ * `PatternError`, which reaches the player as a pattern that will not save
+ * and no reason given — so the surface declines to build one instead.
+ * `crates/rackforge-core/fixtures/shared-limits-v1.json` holds these to the
+ * crates that declare them.
+ */
+export const MAX_PATTERN_TICKS = 256 * TICKS_PER_BEAT;
+export const MAX_PATTERN_NOTES = 2048;
+export const MAX_NOTE_LOCKS = 4;
+
+/** The tempo the transport accepts; the tap fold answers inside it. */
+export const MIN_TEMPO_BPM = 20;
+export const MAX_TEMPO_BPM = 400;
+
+/** A pattern no longer than the host will compile. */
+export function clampPatternLength(ticks: number): number {
+  return Math.min(MAX_PATTERN_TICKS, Math.max(1, Math.round(ticks)));
+}
+
 export type SequencerQuantize = "now" | "next_beat" | "next_bar";
 
 export type SequencerScale =
@@ -121,7 +141,7 @@ export function emptyPattern(
   return {
     id: scopedId("pattern"),
     name,
-    length_ticks: Math.max(1, bars) * beatsPerBar * TICKS_PER_BEAT,
+    length_ticks: clampPatternLength(Math.max(1, bars) * beatsPerBar * TICKS_PER_BEAT),
     notes: [],
     view,
     swing_percent: SWING_STRAIGHT,
@@ -463,5 +483,5 @@ export function tapTempo(tapsSeconds: number[]): number | null {
   if (used.length === 0) return null;
   const mean = used.reduce((sum, value) => sum + value, 0) / used.length;
   const bpm = 60.0 / mean;
-  return Math.min(400, Math.max(20, bpm));
+  return Math.min(MAX_TEMPO_BPM, Math.max(MIN_TEMPO_BPM, bpm));
 }

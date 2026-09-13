@@ -4,11 +4,13 @@ import {
   chainOf,
   effectPlugins,
   emptyChain,
+  isAddableSuggestion,
   sameChain,
   suggestedEffects,
   withEffect,
   withEffectEnabled,
   withEffectMoved,
+  withSuggestedEffects,
   withoutEffect,
 } from "./playChain";
 import type { PluginInstance, PluginWebDescriptor } from "./types";
@@ -150,4 +152,66 @@ it("adds a suggested effect on the program the instrument named", () => {
   // Added by hand from the picker, it arrives on the plugin's own default.
   const plain = withEffect({ instrument_id: "desktop.piano", effects: [] }, "org.rackforge.rf-eq");
   expect(plain.effects[0]).not.toHaveProperty("program_id");
+});
+
+/**
+ * An instrument suggesting a chain is making one recommendation, not a list
+ * of unrelated ones: the Concert Grand asks for glue and then a ceiling, in
+ * that order, each on a named preset. Taking the whole recommendation costs
+ * one decision — and still only ever when somebody asks for it.
+ */
+describe("taking the whole suggestion", () => {
+  const installed = [
+    descriptor("org.rackforge.rf-comp", "effect"),
+    descriptor("org.rackforge.rf-limiter", "effect"),
+  ];
+  const suggestion = [
+    { plugin: "org.rackforge.rf-comp", preset: "piano_glue" },
+    { plugin: "org.rackforge.rf-limiter", preset: "transparent" },
+  ];
+
+  it("adds them in the order the instrument asked for, on the presets it named", () => {
+    const empty = emptyChain("desktop.piano");
+    const chain = withSuggestedEffects(empty, suggestedEffects(suggestion, installed, empty));
+    expect(chain.effects.map((effect) => [effect.plugin_id, effect.program_id])).toEqual([
+      ["org.rackforge.rf-comp", "piano_glue"],
+      ["org.rackforge.rf-limiter", "transparent"],
+    ]);
+  });
+
+  it("leaves alone what the player already took", () => {
+    const started = withEffect(emptyChain("desktop.piano"), "org.rackforge.rf-comp", "piano_glue");
+    const chain = withSuggestedEffects(started, suggestedEffects(suggestion, installed, started));
+    expect(chain.effects).toHaveLength(2);
+    expect(chain.effects.filter((e) => e.plugin_id === "org.rackforge.rf-comp")).toHaveLength(1);
+  });
+
+  it("skips what is not installed rather than inventing it", () => {
+    const empty = emptyChain("desktop.piano");
+    const partial = suggestedEffects(suggestion, [installed[0]], empty);
+    const chain = withSuggestedEffects(empty, partial);
+    expect(chain.effects.map((effect) => effect.plugin_id)).toEqual(["org.rackforge.rf-comp"]);
+  });
+
+  it("stops at the ceiling the host enforces", () => {
+    let full = emptyChain("desktop.piano");
+    for (let n = 0; n < MAX_PLAY_CHAIN_EFFECTS; n += 1) full = withEffect(full, `filler-${n}`);
+    const chain = withSuggestedEffects(full, suggestedEffects(suggestion, installed, full));
+    expect(chain.effects).toHaveLength(MAX_PLAY_CHAIN_EFFECTS);
+  });
+
+  it("changes nothing when there is nothing left to take", () => {
+    let chain = withEffect(emptyChain("desktop.piano"), "org.rackforge.rf-comp", "piano_glue");
+    chain = withEffect(chain, "org.rackforge.rf-limiter", "transparent");
+    const again = withSuggestedEffects(chain, suggestedEffects(suggestion, installed, chain));
+    expect(again).toEqual(chain);
+  });
+
+  it("knows which suggestions are still open to the player", () => {
+    const started = withEffect(emptyChain("desktop.piano"), "org.rackforge.rf-comp");
+    const resolved = suggestedEffects(suggestion, [installed[0]], started);
+    expect(resolved.map(isAddableSuggestion)).toEqual([false, false]);
+    const fresh = suggestedEffects(suggestion, installed, emptyChain("desktop.piano"));
+    expect(fresh.map(isAddableSuggestion)).toEqual([true, true]);
+  });
 });

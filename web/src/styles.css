@@ -1019,6 +1019,26 @@ textarea {
   text-transform: uppercase;
 }
 
+/* Taking the whole recommendation. It is the instrument speaking rather
+   than the host, so it carries the same weight as one of its own pills and
+   not the accent the individual Add buttons wear -- the emphasis belongs on
+   what is being suggested, not on accepting all of it at once. */
+.play-chain-suggest-all {
+  padding: 3px 10px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--acid);
+  border-radius: var(--rf-radius-control);
+  cursor: pointer;
+  font: 800 10px/1 var(--display-font);
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.play-chain-suggest-all:hover {
+  background: color-mix(in srgb, var(--acid) 14%, transparent);
+}
+
 .play-header-button.presets {
   justify-self: end;
 }

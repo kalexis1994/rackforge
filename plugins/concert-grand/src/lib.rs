@@ -14816,6 +14816,105 @@ mod tests {";
         }
     }
 
+    /// Not a test: the whole trigger space of the re-strike runaway.
+    ///
+    /// `a_restrike_over_a_bouncing_damper_decays` samples it -- ten notes and
+    /// the five felt contacts -- because it runs on every commit. This walks
+    /// all of it: every key, and every whole millisecond of gap between the
+    /// key coming up and the hammer coming back, which is where the bug
+    /// lived. Run with
+    /// `cargo test -p rackforge-concert-grand sweep_the_restrike -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn sweep_the_restrike_window() {
+        let rate = FS as usize;
+        let quiet = 0.35f32;
+        let mut worst_peak = 0.0f32;
+        let mut worst_pole = 0.0f32;
+        let mut worst_case = (0u8, 0usize);
+        let mut loud = Vec::new();
+        let mut growing = Vec::new();
+        let mut cases = 0usize;
+        for note in LOW_NOTE..=(LOW_NOTE + NOTE_COUNT as u8 - 1) {
+            for gap in 0..=60usize {
+                cases += 1;
+                let mut piano = prepared();
+                let at = |ms: usize| ms * rate / 1000;
+                let events: [(usize, [u8; 3]); 5] = [
+                    (at(0), [0xb0, 64, 0]),
+                    (at(50), [0x90, note, 37]),
+                    (at(91), [0x80, note, 64]),
+                    (at(91 + gap), [0x90, note, 78]),
+                    (at(138 + gap), [0x80, note, 64]),
+                ];
+                let block = 512usize;
+                let total = rate * 7 / 5;
+                let mut output = vec![0.0f32; block * 2];
+                let (mut next, mut frame) = (0usize, 0usize);
+                let (mut peak, mut pole, mut early, mut late) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+                while frame < total {
+                    let mut midi = Vec::new();
+                    while next < events.len() && events[next].0 < frame + block {
+                        midi.push(MidiEvent {
+                            frame: (events[next].0 - frame) as u32,
+                            data: events[next].1,
+                            length: 3,
+                        });
+                        next += 1;
+                    }
+                    output.fill(0.0);
+                    piano.process(&[], &mut output, &midi, &[], block as u32, 0, 2);
+                    for voice in piano.voices.iter().filter(|v| v.active) {
+                        for partial in &voice.partials[..voice.partial_count] {
+                            for lane in 0..LANES {
+                                pole = pole.max(
+                                    partial.rc[lane] * partial.rc[lane]
+                                        + partial.rs[lane] * partial.rs[lane],
+                                );
+                            }
+                        }
+                    }
+                    let block_peak = output.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+                    peak = peak.max(block_peak);
+                    let ms = frame * 1000 / rate;
+                    if (200..400).contains(&ms) {
+                        early = early.max(block_peak);
+                    }
+                    if ms >= 1_100 {
+                        late = late.max(block_peak);
+                    }
+                    frame += block;
+                }
+                let pole = sqrtf(pole);
+                if peak > worst_peak {
+                    worst_peak = peak;
+                    worst_case = (note, gap);
+                }
+                worst_pole = worst_pole.max(pole);
+                if peak > quiet {
+                    loud.push((note, gap, peak));
+                }
+                if late >= early {
+                    growing.push((note, gap, early, late));
+                }
+            }
+        }
+        println!("casos {cases}");
+        println!(
+            "pico mayor {worst_peak:.4} (nota {}, hueco {} ms)",
+            worst_case.0, worst_case.1
+        );
+        println!("polo mayor |r| = {worst_pole:.7}");
+        println!("casos por encima de {quiet}: {}", loud.len());
+        for (note, gap, peak) in loud.iter().take(20) {
+            println!("  nota {note}, hueco {gap} ms: {peak:.4}");
+        }
+        println!("casos que crecen en vez de decaer: {}", growing.len());
+        for (note, gap, early, late) in growing.iter().take(20) {
+            println!("  nota {note}, hueco {gap} ms: {early:.4} -> {late:.4}");
+        }
+    }
+
     /// A note struck again while its felt is still bouncing must decay.
     ///
     /// The key comes up, the damper is armed, and it lands and rebounds five

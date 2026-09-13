@@ -76,9 +76,9 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-7.rfplugin",
         "plugin_id": "org.rackforge.rf7",
-        "version": "0.5.0",
-        "url": "https://github.com/kalexis1994/RF-7/releases/download/v0.5.0/RF-7.rfplugin",
-        "sha256": "dbdbead013c6278433238e76f42d0e399db15bde2ae204bcc2969bf359eae283",
+        "version": "0.5.1",
+        "url": "https://github.com/kalexis1994/RF-7/releases/download/v0.5.1/RF-7.rfplugin",
+        "sha256": "d8cfdbce57004cdf2b1e2a7dbdce702e523717f481d0e6aa9642c5de7fead0ca",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

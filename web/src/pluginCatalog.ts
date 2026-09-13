@@ -342,3 +342,58 @@ export function usePluginDescriptor(pluginId: string | undefined) {
     runtime: pluginId ? catalog.runtime[pluginId] ?? null : null,
   };
 }
+
+/** What a plugin is, for a descriptor that predates the field declaring it. */
+export type PluginKind = PluginWebDescriptor["kind"];
+
+/**
+ * The kind a plugin is, treating an unstated one as an instrument.
+ *
+ * Instruments came first and were the only thing a package could be, so a
+ * descriptor written before the field existed is one — which is also what
+ * the card has always shown for them.
+ */
+export function pluginKind(plugin: PluginWebDescriptor): PluginKind {
+  return plugin.kind ?? "instrument";
+}
+
+/**
+ * Whether PLAY can open this plugin.
+ *
+ * PLAY is one instrument and its programs. An effect belongs to a chain
+ * behind an instrument and a MIDI processor belongs in front of one; neither
+ * is something PLAY can be pointed at, and asking for it moves the host into
+ * PLAY mode around a plugin that cannot be played.
+ */
+export function canOpenInPlay(plugin: PluginWebDescriptor): boolean {
+  return pluginKind(plugin) === "instrument";
+}
+
+/** The kinds the Plugin Manager lists, in the order it lists them. */
+export const PLUGIN_KIND_ORDER: readonly PluginKind[] = [
+  "instrument",
+  "effect",
+  "midi_processor",
+];
+
+export interface PluginKindGroup {
+  kind: PluginKind;
+  plugins: PluginWebDescriptor[];
+}
+
+/**
+ * The installed plugins split by what they are, in listing order.
+ *
+ * A kind with nothing in it is left out rather than shown empty: a machine
+ * with no effects installed should not be told it has an empty shelf for
+ * them. Order within a kind is the order the catalogue gave, so the list
+ * does not reshuffle under a plugin being activated.
+ */
+export function groupPluginsByKind(
+  plugins: readonly PluginWebDescriptor[],
+): PluginKindGroup[] {
+  return PLUGIN_KIND_ORDER.map((kind) => ({
+    kind,
+    plugins: plugins.filter((plugin) => pluginKind(plugin) === kind),
+  })).filter((group) => group.plugins.length > 0);
+}

@@ -254,14 +254,36 @@ pub struct VstPluginModel {
     pub preset_values: BTreeMap<String, Vec<VstParameterValue>>,
 }
 
+/// The instruments the VST3 can be, in the order they were carried.
+///
+/// INSTRUMENTS. A VST3 instrument plug-in offers a list of things to play,
+/// and the carried packages are not all playable: the Standard edition
+/// travels with RF-Comp, RF-EQ and RF-Limiter beside the instruments, and
+/// `open_package` rightly refuses an effect. Unfiltered, the first effect
+/// in the list failed `setActive` and the WHOLE plug-in failed to activate
+/// -- Live reporting only "could not be activated (error: false)" while the
+/// scan and the load had both succeeded. The effects belong to the chain a
+/// PLAY surface builds, not to the list of instruments the DAW switches
+/// between.
 pub fn load_bundled_plugin_models() -> Result<Vec<VstPluginModel>> {
     get_or_try_init_cloned(&BUNDLED_MODELS, &BUNDLED_MODELS_INIT, || {
         let root = rackforge_root()?;
-        bundled_package_roots()?
-            .into_iter()
-            .map(|package_root| load_plugin_model_at(&root, package_root))
-            .collect::<Result<Vec<_>>>()
+        models_from_roots(&root, bundled_package_roots()?)
     })
+}
+
+/// The instrument models among these packages. One definition, because the
+/// test path had its own copy of this walk and the filter reached only the
+/// shipping one -- the test then still saw the effects and failed.
+fn models_from_roots(root: &Path, packages: Vec<PathBuf>) -> Result<Vec<VstPluginModel>> {
+    packages
+        .into_iter()
+        .filter(|package_root| {
+            PluginPackage::open(package_root)
+                .is_ok_and(|package| package.manifest().kind == PluginKind::Instrument)
+        })
+        .map(|package_root| load_plugin_model_at(root, package_root))
+        .collect()
 }
 
 fn load_plugin_model_at(root: &Path, package_root: PathBuf) -> Result<VstPluginModel> {
@@ -413,10 +435,7 @@ fn install_bundled_packages_at(root: &Path) -> Result<Vec<PathBuf>> {
 
 #[cfg(test)]
 fn load_bundled_plugin_models_at(root: &Path) -> Result<Vec<VstPluginModel>> {
-    install_bundled_packages_at(root)?
-        .into_iter()
-        .map(|package_root| load_plugin_model_at(root, package_root))
-        .collect()
+    models_from_roots(root, install_bundled_packages_at(root)?)
 }
 
 fn package_root_for_id(plugin_id: &str) -> Result<PathBuf> {
@@ -571,10 +590,20 @@ mod tests {
         assert_eq!(newest_installed_instrument(root.path()).unwrap(), None);
     }
 
-    /// Every instrument the build carried must reach the store: the plug-in
-    /// ships the same official set the desktop does, not one chosen name.
+    /// Every instrument the build carried reaches the store -- and NO
+    /// effect does.
+    ///
+    /// This counted `BUNDLED_OFFICIAL_PLUGINS.len() + 1` and so asserted the
+    /// bug: the Standard edition carries RF-Comp, RF-EQ and RF-Limiter
+    /// beside the instruments, `open_package` refuses an effect, and
+    /// `setActive` opens every model -- so the first effect failed and the
+    /// whole plug-in failed to activate. Live said only "could not be
+    /// activated (error: false)" after reporting the scan and the load
+    /// successful. It survived because both guards below are true in CI,
+    /// where nothing is carried: the test returned before asserting
+    /// anything. It needs a build with a bundle to have teeth.
     #[test]
-    fn a_configured_bundle_exposes_every_instrument_it_carries() {
+    fn a_configured_bundle_exposes_its_instruments_and_no_effect() {
         if BUNDLED_PLUGIN.is_none() || BUNDLED_OFFICIAL_PLUGINS.is_empty() {
             return;
         }
@@ -585,11 +614,27 @@ mod tests {
             .map(|model| model.plugin_id)
             .collect::<Vec<_>>();
         assert!(ids.contains(&"org.rackforge.concert-grand".to_owned()));
+        let mut instruments = 0usize;
+        let mut effects = Vec::new();
+        for path in install_bundled_packages_at(root.path()).unwrap() {
+            let package = PluginPackage::open(&path).unwrap();
+            if package.manifest().kind == PluginKind::Instrument {
+                instruments += 1;
+            } else {
+                effects.push(package.manifest().id.clone());
+            }
+        }
         assert_eq!(
             ids.len(),
-            BUNDLED_OFFICIAL_PLUGINS.len() + 1,
+            instruments,
             "an instrument was carried but never installed: {ids:?}"
         );
+        for effect in effects {
+            assert!(
+                !ids.contains(&effect),
+                "the effect {effect} is offered as an instrument; setActive will refuse it"
+            );
+        }
     }
 
     /// A store left holding an older build of a version the release also

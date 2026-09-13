@@ -232,16 +232,30 @@ impl IComponentTrait for RackForgeProcessor {
         if inner.engines.is_empty() {
             let mut engines = Vec::with_capacity(self.models.len());
             for model in &self.models {
-                let Ok(engine) = RackForgeEngine::open_plugin(
+                let engine = match RackForgeEngine::open_plugin(
                     &model.plugin_id,
                     inner.sample_rate,
                     inner.maximum_frames,
-                ) else {
-                    return kResultFalse;
+                ) {
+                    Ok(engine) => engine,
+                    Err(error) => {
+                        // A host reports this as one word -- Live says only
+                        // "could not be activated (error: false)" -- so the
+                        // reason has to be written down here or it is gone.
+                        diagnostic::write(format!(
+                            "setActive: opening {} at {} Hz, {} frames failed: {error:#}",
+                            model.plugin_id, inner.sample_rate, inner.maximum_frames
+                        ));
+                        return kResultFalse;
+                    }
                 };
                 engines.push(engine);
             }
             if engines.is_empty() {
+                diagnostic::write(format!(
+                    "setActive: no engines to open; {} bundled models",
+                    self.models.len()
+                ));
                 return kResultFalse;
             }
             let pending_engine = inner.active_engine.min(engines.len() - 1);

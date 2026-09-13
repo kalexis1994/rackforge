@@ -1684,6 +1684,21 @@ impl Partial {
         self.rs[lane] = component.rs;
     }
 
+    /// Pulls every lane back inside the unit circle: see `POLE_CEILING_T60_S`.
+    ///
+    /// Called only where a phasor has just been scaled UP, so the square
+    /// root is paid on the damper's relief and never on the audio path.
+    fn hold_inside_unit_circle(&mut self, ceiling: f32) {
+        for lane in 0..LANES {
+            let squared = self.rc[lane] * self.rc[lane] + self.rs[lane] * self.rs[lane];
+            if squared > ceiling * ceiling {
+                let back = ceiling / sqrtf(squared);
+                self.rc[lane] *= back;
+                self.rs[lane] *= back;
+            }
+        }
+    }
+
     fn lane_magnitude_squared(&self, lane: usize) -> f32 {
         self.s[lane] * self.s[lane] + self.c[lane] * self.c[lane]
     }
@@ -1897,6 +1912,40 @@ impl BodyMode {
         self.a1 *= factor;
         self.a2 *= factor * factor;
     }
+}
+
+/// The longest tail a string's phasor may be left able to hold, in seconds.
+///
+/// A partial is a LOSSY oscillator: `|r| < 1` is not a tuning choice, it is
+/// what makes the thing a string. Every place that scales a phasor -- the
+/// damper landing, its relief, the half pedal, the ease-out of a re-strike
+/// -- multiplies `rc` and `rs`, and a bookkeeping slip in any of them can
+/// write a radius of one or more. Nothing downstream recovers: the partial
+/// then grows by that factor every sample until the output saturator
+/// flattens it, which on the Campanella was a hundred decibels a second
+/// into a square-topped tone at full scale.
+///
+/// So the radius is clamped where it is written, the way `tension_step`
+/// renormalises its own nudge. The ceiling cannot be a bare number: a pole's
+/// distance from one is `ln(1000) / (t60 * rate)`, so it SHRINKS with the
+/// sample rate, and a constant chosen at one rate cuts real tails at
+/// another. Measured by `the_pole_ceiling_clears_every_real_string`, the
+/// longest pole a struck string actually holds is note 24's: 1 - 8.0e-6 at
+/// 16 kHz, 1 - 2.6e-6 at 48 kHz, 1 - 7.2e-7 at 192 kHz -- a t60 of about
+/// thirty seconds at every rate, as it should be. Four times that t60 clears
+/// every real tail by ten ulps of f32 at 192 kHz, the worst case, and sits
+/// seven ulps inside one.
+///
+/// This is a backstop and not a voicing: with the damper's presses paired
+/// correctly nothing reaches it -- the widest pole the regression test sees
+/// is 1 - 9e-6, three hundred times further from one than the ceiling -- and
+/// if anything ever does, the instrument holds a long note instead of
+/// detonating.
+const POLE_CEILING_T60_S: f32 = 120.0;
+
+/// The largest pole radius a phasor may be left holding at this rate.
+fn pole_ceiling(rate: f32) -> f32 {
+    expf(-6.907_755 / (POLE_CEILING_T60_S * rate.max(1.0)))
 }
 
 /// How loud the action's broadband knock is, before the per-note calibration.
@@ -3207,6 +3256,9 @@ struct Voice {
     /// the strike. A half pedal presses and relieves through the SAME
     /// damper, so every relief undoes exactly the press it answers.
     firmness: f32,
+    /// The largest pole radius this voice's phasors may be left holding,
+    /// from the rate it was struck at. See `POLE_CEILING_T60_S`.
+    pole_ceiling: f32,
     partials: [Partial; MAX_PARTIALS],
     partial_count: usize,
     /// Hammer/soundboard thump: a decaying low-passed noise burst whose
@@ -3342,6 +3394,7 @@ impl Default for Voice {
             onset: 1.0,
             onset_step: 0.0,
             firmness: 1.0,
+            pole_ceiling: pole_ceiling(48_000.0),
             partials: [Partial::default(); MAX_PARTIALS],
             partial_count: 0,
             noise_amp: 0.0,
@@ -3887,6 +3940,13 @@ impl Voice {
             for lane in 0..LANES {
                 partial.rc[lane] *= factor;
                 partial.rs[lane] *= factor;
+            }
+            // A relief scales the phasor UP. Paired with its own press it
+            // lands back where it started; unpaired -- and the hammer has
+            // just reset the poles a press was applied to -- it lands
+            // outside the unit circle, and the string stops being a string.
+            if factor > 1.0 {
+                partial.hold_inside_unit_circle(self.pole_ceiling);
             }
         }
     }
@@ -6821,6 +6881,13 @@ impl ConcertGrand {
                 && voice.channel == channel
                 && (voice.held || voice.sustained)
             {
+                // The felt is still bouncing on this string, and the
+                // hammer is about to reset every lane that has decayed
+                // to a fresh, undamped phasor. Whatever press is
+                // standing has to be relieved HERE, against the pole it
+                // was applied to -- and the bounce disarmed, so no later
+                // contact relieves a press that no longer stands.
+                voice.cancel_damper();
                 if voice.sustained && voice.damper_applied > 0.0 {
                     let own = Self::damper_for(note, rate, grip * voice.firmness, 1.0);
                     voice.press_damper(own, -voice.damper_applied);
@@ -6850,6 +6917,10 @@ impl ConcertGrand {
             // step). The ease-out stays; the knock goes.
             for voice in &mut self.voices {
                 if voice.active && voice.note == note && voice.channel == channel {
+                    // Its felt too: an eased-out voice still ticks, and a
+                    // bounce landing on it relieves a press against a pole
+                    // `damp` has since moved.
+                    voice.cancel_damper();
                     voice.damp(restrike, thud_coefficient, thud_decay, 0.0);
                 }
             }
@@ -8149,6 +8220,7 @@ impl ConcertGrand {
         voice.sostenuto = false;
         voice.damper_applied = 0.0;
         voice.firmness = firmness;
+        voice.pole_ceiling = pole_ceiling(sample_rate);
         voice.onset = 0.0;
         voice.onset_step = 1.0 / (ATTACK_RAMP_S.get().max(1e-4) * sample_rate);
         voice.partials = partials;
@@ -8344,6 +8416,7 @@ impl ConcertGrand {
             }
             if let Some(shadow) = self.allocate_voice() {
                 *shadow = Voice::default();
+                shadow.pole_ceiling = pole_ceiling(sample_rate);
                 shadow.active = true;
                 shadow.halo = true;
                 shadow.note = note;
@@ -14692,6 +14765,154 @@ mod tests {";
                 20.0 * (peak / local.max(1e-9)).log10()
             );
         }
+    }
+
+    /// The backstop must sit above every pole a real string holds.
+    ///
+    /// A pole's distance from one is `ln(1000) / (t60 * rate)`: it shrinks as
+    /// the rate rises, so a ceiling that clears the longest bass tail at
+    /// 16 kHz can sit BELOW it at 48, and clamping there would quietly cut
+    /// the tail the calibration was built on. Written first as a bare
+    /// 0.999995 -- fine at 16 kHz, under note 24's own pole at 44.1, 48, 96
+    /// and 192. Hence `pole_ceiling`, and hence this.
+    #[test]
+    fn the_pole_ceiling_clears_every_real_string() {
+        for rate in [
+            16_000.0f32,
+            22_050.0,
+            44_100.0,
+            48_000.0,
+            96_000.0,
+            192_000.0,
+        ] {
+            let ceiling = pole_ceiling(rate);
+            assert!(ceiling < 1.0, "{rate} Hz: el techo es {ceiling}, no decae");
+            let mut widest = 0.0f32;
+            let mut owner = 0u8;
+            for note in LOW_NOTE..=(LOW_NOTE + NOTE_COUNT as u8 - 1) {
+                let mut piano = Box::new(ConcertGrand::default());
+                assert!(piano.prepare(f64::from(rate), 512, 0, 2));
+                let mut output = vec![0.0f32; 512 * 2];
+                piano.process(&[], &mut output, &[note_on(note, 127)], &[], 512, 0, 2);
+                for voice in piano.voices.iter().filter(|v| v.active) {
+                    for partial in &voice.partials[..voice.partial_count] {
+                        for lane in 0..LANES {
+                            let r = sqrtf(
+                                partial.rc[lane] * partial.rc[lane]
+                                    + partial.rs[lane] * partial.rs[lane],
+                            );
+                            if r > widest {
+                                widest = r;
+                                owner = note;
+                            }
+                        }
+                    }
+                }
+            }
+            assert!(
+                widest < ceiling,
+                "{rate} Hz: la nota {owner} tiene |r| = {widest:.9} y el techo la corta en {ceiling:.9}"
+            );
+        }
+    }
+
+    /// A note struck again while its felt is still bouncing must decay.
+    ///
+    /// The key comes up, the damper is armed, and it lands and rebounds five
+    /// times over the next fifteen milliseconds -- pressing the string and
+    /// relieving it at each contact. A re-strike arriving inside one of those
+    /// contacts used to leave the press standing while the hammer reset every
+    /// decayed lane to a fresh, undamped phasor; the next rebound then
+    /// relieved a press that no longer stood, and multiplied a full-magnitude
+    /// pole by a number above one. The partial then grew about a hundred
+    /// decibels a second until the output saturator flattened it: measured on
+    /// the Campanella at 4:35, a quarter-second of square wave at -0.46 dBFS
+    /// where the music is at -20. Reduced: two strikes of one note 79 ms
+    /// apart at velocities 37 then 78 -- ordinary playing -- and it went to
+    /// full scale on every note from 21 to 87. (88 and 89 have dampers too
+    /// and survived it; their tails are short enough that their poles start
+    /// further from one than the relief can carry them.)
+    ///
+    /// Two things are asserted, because two things were wrong. No phasor may
+    /// be left on or outside the unit circle -- that is what a string IS --
+    /// and the sound has to be dying at the end of the second it is given,
+    /// which is the audible form of the same statement.
+    #[test]
+    fn a_restrike_over_a_bouncing_damper_decays() {
+        // The felt lands at DAMPER_LAND_MS and rebounds with a halving hang,
+        // so its contacts fall at roughly 22, 29, 33, 36 and 37 ms after the
+        // key comes up. Every one of them was a trigger.
+        let contacts = [22usize, 29, 33, 36, 38];
+        let mut complaints = Vec::new();
+        for note in (LOW_NOTE..=(LOW_NOTE + NOTE_COUNT as u8 - 1)).step_by(9) {
+            for gap in contacts {
+                let mut piano = prepared();
+                let rate = FS as usize;
+                let at = |ms: usize| ms * rate / 1000;
+                let events: Vec<(usize, [u8; 3])> = vec![
+                    (at(0), [0xb0, 64, 0]),
+                    (at(50), [0x90, note, 37]),
+                    (at(91), [0x80, note, 64]),
+                    (at(91 + gap), [0x90, note, 78]),
+                    (at(138 + gap), [0x80, note, 64]),
+                ];
+                let block = 512usize;
+                let total = rate * 7 / 5;
+                let mut output = vec![0.0f32; block * 2];
+                let mut next = 0usize;
+                let mut frame = 0usize;
+                let mut widest = 0.0f32;
+                let mut early = 0.0f32;
+                let mut late = 0.0f32;
+                while frame < total {
+                    let mut midi = Vec::new();
+                    while next < events.len() && events[next].0 < frame + block {
+                        midi.push(MidiEvent {
+                            frame: (events[next].0 - frame) as u32,
+                            data: events[next].1,
+                            length: 3,
+                        });
+                        next += 1;
+                    }
+                    output.fill(0.0);
+                    piano.process(&[], &mut output, &midi, &[], block as u32, 0, 2);
+                    for voice in piano.voices.iter().filter(|v| v.active) {
+                        for partial in &voice.partials[..voice.partial_count] {
+                            for lane in 0..LANES {
+                                let squared = partial.rc[lane] * partial.rc[lane]
+                                    + partial.rs[lane] * partial.rs[lane];
+                                widest = widest.max(squared);
+                            }
+                        }
+                    }
+                    let peak = output.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+                    let ms = frame * 1000 / rate;
+                    if (200..400).contains(&ms) {
+                        early = early.max(peak);
+                    }
+                    if ms >= 1_100 {
+                        late = late.max(peak);
+                    }
+                    frame += block;
+                }
+                let widest = sqrtf(widest);
+                if widest >= 1.0 {
+                    complaints.push(format!(
+                        "nota {note}, re-golpe {gap} ms tras soltar: |r| = {widest:.6}"
+                    ));
+                }
+                if late >= early {
+                    complaints.push(format!(
+                        "nota {note}, re-golpe {gap} ms tras soltar: crece, {early:.4} -> {late:.4}"
+                    ));
+                }
+            }
+        }
+        assert!(
+            complaints.is_empty(),
+            "un re-golpe sobre el fieltro rebotando no decae:\n  {}",
+            complaints.join("\n  ")
+        );
     }
 
     /// What happens when the same note is struck again while it still rings.

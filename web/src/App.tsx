@@ -5911,6 +5911,42 @@ function SettingsPage({
     }
   }, [onAudioChange]);
 
+  // The readings below the form -- health, actual rate, audio load, buffer
+  // underruns -- are LIVE, and the snapshot behind them was not: the whole
+  // settings bootstrap is requested once when the app mounts and memoised for
+  // the life of the page. The browser host boots its engine only after someone
+  // has touched the page, so at that moment there is no engine and never can
+  // be, and the panel then showed "LOST" over a running instrument for as long
+  // as the tab stayed open. It cost an evening of hunting a dead audio engine
+  // that was playing the whole time.
+  //
+  // Only the readings are refreshed here. `loadAudioSettings` also replaces the
+  // draft, which would throw away edits someone had not applied yet.
+  const refreshAudioReadings = useCallback(async () => {
+    try {
+      const settings = await hostJson<HostAudioSettings>("/api/v1/host/audio");
+      setAudioSettings(settings);
+      onAudioChange(settings);
+    } catch {
+      // A reading that fails to arrive leaves the last one standing: this is
+      // a meter, and a meter that erases itself on a hiccup is worse than one
+      // that is a couple of seconds old.
+    }
+  }, [onAudioChange]);
+
+  useEffect(() => {
+    if (settingsTab !== "audio") return;
+    // Both reads are callbacks, not the effect body: a reading is news from
+    // outside React, and setting state straight from an effect cascades a
+    // render. The first one lands on the next tick rather than two seconds in.
+    const first = window.setTimeout(() => void refreshAudioReadings(), 0);
+    const timer = window.setInterval(() => void refreshAudioReadings(), 2_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
+  }, [settingsTab, refreshAudioReadings]);
+
   const selectAudioDriver = (driver: string) => {
     if (!audioSettings || !audioDraft) return;
     const output = audioSettings.inventory.outputs.find(

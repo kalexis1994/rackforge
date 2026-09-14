@@ -1,6 +1,7 @@
 use super::{RackForgeControllerShared, VstPluginModel, diagnostic, engine::VstParameterValue};
 use include_dir::{Dir, include_dir};
 use rackforge_core::host_bridge::{HOST_PROTOCOL, PROTOCOL_PLACEHOLDER};
+use rackforge_resource_api::{BindResourceRequest, ResourceBrowser};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{borrow::Cow, path::Component};
@@ -204,14 +205,14 @@ fn handle_http_request(
             shared
                 .catalog
                 .iter()
-                .map(|model| plugin_descriptor(model))
+                .map(|model| plugin_descriptor(model, shared))
                 .collect(),
         ),
         ("GET", "/api/v1/controllers") => json!({ "status": "ok", "controllers": [] }),
         ("GET", requested) if requested.starts_with("/api/v1/plugins/") => {
             let plugin_id = requested.trim_start_matches("/api/v1/plugins/");
             let model = catalog_model(shared, plugin_id)?;
-            plugin_descriptor(&model)
+            plugin_descriptor(&model, shared)
         }
         ("POST", requested)
             if requested.starts_with("/api/v1/plugins/") && requested.ends_with("/activate") =>
@@ -223,9 +224,238 @@ fn handle_http_request(
             let model = shared.select_plugin_from_ui(plugin_id)?;
             json!({ "status": "active", "plugin_id": model.plugin_id })
         }
-        _ => return Err(format!("RackForge VST3 has no {method} route for {path}")),
+        _ => {
+            let body = params.get("body").and_then(Value::as_str).unwrap_or("null");
+            if let Some(outcome) = handle_resource_request(&method, path, body, shared) {
+                outcome?
+            } else {
+                return Err(format!("RackForge VST3 has no {method} route for {path}"));
+            }
+        }
     };
     Ok((value, Vec::new()))
+}
+
+/// Where an installed file lives for a plug-in: `data/plugins/<id>/<data_path>`.
+///
+/// The same place the desktop writes and every host's `resources/status` reads,
+/// so a cartridge installed from the DAW is the one the desktop app sees.
+fn installed_resource_path(
+    plugin_id: &str,
+    resource_id: &str,
+    shared: &RackForgeControllerShared,
+) -> Result<std::path::PathBuf, String> {
+    let model = shared
+        .catalog
+        .iter()
+        .find(|candidate| candidate.plugin_id == plugin_id)
+        .ok_or_else(|| format!("RackForge VST3 does not carry {plugin_id}"))?;
+    let requirement = model
+        .resources
+        .iter()
+        .find(|resource| resource.id == resource_id)
+        .ok_or_else(|| format!("{plugin_id} declares no resource {resource_id}"))?;
+    let relative = requirement
+        .data_path
+        .as_deref()
+        .ok_or_else(|| format!("{resource_id} is not an installable resource"))?;
+    // The plug-in wrote this path, so it is checked rather than trusted: it
+    // stays inside the plug-in's own directory or it is refused.
+    if relative.is_empty()
+        || std::path::Path::new(relative)
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(format!("{resource_id} declares an unusable data path"));
+    }
+    let root = crate::engine::rackforge_root().map_err(|error| error.to_string())?;
+    Ok(root
+        .join("data")
+        .join("plugins")
+        .join(plugin_id)
+        .join(relative))
+}
+
+/// The storage routes a plug-in's config surface asks this host for.
+///
+/// They are the same paths the desktop and the Raspberry Pi serve, answered by
+/// the same `NativeResourceBrowser`, so a config page cannot tell which host it
+/// is talking to -- which is the point: the page is the plug-in's, written once.
+///
+/// It is RackForge's own explorer that walks these, not an operating-system
+/// dialog. The desktop can open one because its routes are answered on a tokio
+/// worker, away from the thread that owns its window; here the answer is a
+/// synchronous WebView2 protocol callback on the thread that owns the editor,
+/// and a modal window opened from it would hold that thread -- inside the DAW's
+/// process -- for as long as the dialog stood.
+fn handle_resource_request(
+    method: &str,
+    path: &str,
+    body: &str,
+    shared: &RackForgeControllerShared,
+) -> Option<Result<Value, String>> {
+    let browser = match shared.resources.as_ref() {
+        Some(browser) => browser,
+        // Reached only if the interface asked for a surface this host never
+        // offered, so it says so rather than answering as though it had.
+        None => {
+            return Some(Err(
+                "RackForge VST3 has no storage to browse: its resource store could not be opened"
+                    .to_owned(),
+            ));
+        }
+    };
+    let as_request = |body: &str| -> Result<Value, String> {
+        serde_json::from_str::<Value>(body).map_err(|error| error.to_string())
+    };
+    let known = |model: Option<&str>| -> Result<(), String> {
+        let plugin_id = model.unwrap_or_default();
+        if shared
+            .catalog
+            .iter()
+            .any(|candidate| candidate.plugin_id == plugin_id)
+        {
+            Ok(())
+        } else {
+            Err(format!("RackForge VST3 does not carry {plugin_id}"))
+        }
+    };
+    let outcome = match (method, path) {
+        ("GET", "/api/v1/resources/mounts") => browser
+            .mounts()
+            .map_err(|error| error.to_string())
+            .and_then(|mounts| serde_json::to_value(mounts).map_err(|error| error.to_string())),
+        ("GET", requested) if requested.starts_with("/api/v1/resources/mounts/") => {
+            let mount_id = requested
+                .trim_start_matches("/api/v1/resources/mounts/")
+                .trim_end_matches("/root");
+            browser
+                .mount_root(mount_id)
+                .map_err(|error| error.to_string())
+                .and_then(|root| serde_json::to_value(root).map_err(|error| error.to_string()))
+        }
+        ("GET", requested) if requested.starts_with("/api/v1/resources/entries/") => {
+            let parent = requested.trim_start_matches("/api/v1/resources/entries/");
+            browser
+                .entries(parent)
+                .map_err(|error| error.to_string())
+                .and_then(|entries| {
+                    serde_json::to_value(entries).map_err(|error| error.to_string())
+                })
+        }
+        ("POST", "/api/v1/resources/bind") => as_request(body).and_then(|request| {
+            known(request.get("plugin_id").and_then(Value::as_str))?;
+            let request: BindResourceRequest =
+                serde_json::from_value(request).map_err(|error| error.to_string())?;
+            browser
+                .bind(&request)
+                .map_err(|error| error.to_string())
+                .and_then(|grant| serde_json::to_value(grant).map_err(|error| error.to_string()))
+        }),
+        ("POST", "/api/v1/resources/grants") => as_request(body).and_then(|request| {
+            let plugin_id = request.get("plugin_id").and_then(Value::as_str);
+            known(plugin_id)?;
+            browser
+                .grants(plugin_id.unwrap_or_default())
+                .map_err(|error| error.to_string())
+                .and_then(|grants| serde_json::to_value(grants).map_err(|error| error.to_string()))
+        }),
+        ("POST", "/api/v1/resources/status") => as_request(body).and_then(|request| {
+            let plugin_id = request.get("plugin_id").and_then(Value::as_str);
+            known(plugin_id)?;
+            let plugin_id = plugin_id.unwrap_or_default();
+            let model = shared
+                .catalog
+                .iter()
+                .find(|candidate| candidate.plugin_id == plugin_id)
+                .ok_or_else(|| format!("RackForge VST3 does not carry {plugin_id}"))?;
+            Ok(Value::Array(
+                model
+                    .resources
+                    .iter()
+                    .filter(|resource| resource.data_path.is_some())
+                    .map(|resource| {
+                        let installed = installed_resource_path(plugin_id, &resource.id, shared)
+                            .is_ok_and(|path| path.is_file());
+                        json!({ "resource_id": resource.id, "installed": installed })
+                    })
+                    .collect(),
+            ))
+        }),
+        ("POST", "/api/v1/resources/load") => as_request(body).and_then(|request| {
+            let plugin_id = request.get("plugin_id").and_then(Value::as_str);
+            known(plugin_id)?;
+            let plugin_id = plugin_id.unwrap_or_default();
+            if request.get("preview").and_then(Value::as_bool) == Some(true) {
+                // A preview means "let me hear it without keeping it", and
+                // hearing it means reaching the sounding instrument, which
+                // this side cannot do. Refused rather than silently kept.
+                return Err(
+                    "RackForge VST3 cannot preview a resource: install it to hear it".to_owned(),
+                );
+            }
+            let target = request
+                .get("target_resource_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "the request names no resource".to_owned())?;
+            let grant_id = request
+                .get("grant_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "the request names no grant".to_owned())?;
+            let source = browser
+                .resolve_granted_file(
+                    plugin_id,
+                    grant_id,
+                    request.get("entry_id").and_then(Value::as_str),
+                )
+                .map_err(|error| error.to_string())?;
+            let destination = installed_resource_path(plugin_id, target, shared)?;
+            install_file(&source, &destination)?;
+            shared.reload_component();
+            Ok(json!({ "status": "ok" }))
+        }),
+        ("POST", "/api/v1/resources/clear") => as_request(body).and_then(|request| {
+            let plugin_id = request.get("plugin_id").and_then(Value::as_str);
+            known(plugin_id)?;
+            let plugin_id = plugin_id.unwrap_or_default();
+            let target = request
+                .get("target_resource_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "the request names no resource".to_owned())?;
+            let installed = installed_resource_path(plugin_id, target, shared)?;
+            match std::fs::remove_file(&installed) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!("removing {}: {error}", installed.display()));
+                }
+            }
+            shared.reload_component();
+            Ok(json!({ "status": "ok" }))
+        }),
+        _ => return None,
+    };
+    Some(outcome)
+}
+
+/// Puts a granted file where the plug-in will read it, whole or not at all.
+///
+/// Written beside the destination and renamed onto it: a copy interrupted
+/// half way -- the DAW quitting, the machine losing power -- must not leave a
+/// truncated cartridge that the instrument would load as though it were one.
+fn install_file(source: &std::path::Path, destination: &std::path::Path) -> Result<(), String> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "the install path has no directory".to_owned())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("creating {}: {error}", parent.display()))?;
+    let staged = destination.with_extension("rackforge-installing");
+    std::fs::copy(source, &staged)
+        .map_err(|error| format!("copying {}: {error}", source.display()))?;
+    std::fs::rename(&staged, destination).map_err(|error| {
+        let _ = std::fs::remove_file(&staged);
+        format!("installing {}: {error}", destination.display())
+    })
 }
 
 fn handle_session_command(
@@ -377,7 +607,19 @@ fn validate_instance(command: &Value) -> Result<(), String> {
     }
 }
 
-fn plugin_descriptor(model: &VstPluginModel) -> Value {
+/// Whether this host can actually serve a plug-in's config surface.
+///
+/// A config page is a page plus the storage routes behind it. Advertising the
+/// page alone is a promise the host cannot keep: the interface lights the
+/// Config button, the page loads, and its first request fails. The VST3 did
+/// exactly that -- `config_available` was the literal `true` -- so the answer
+/// is derived from the two things that have to hold, in one place that both
+/// the catalogue and the snapshot read.
+fn config_available(model: &VstPluginModel, shared: &RackForgeControllerShared) -> bool {
+    model.config_entry.is_some() && shared.resources.is_some()
+}
+
+fn plugin_descriptor(model: &VstPluginModel, shared: &RackForgeControllerShared) -> Value {
     let asset = |entry: &str| {
         format!(
             "/plugin-assets/{}/{}?v={}",
@@ -387,7 +629,11 @@ fn plugin_descriptor(model: &VstPluginModel) -> Value {
         )
     };
     let mut surfaces = vec![json!({ "kind": "play", "entry_url": asset(&model.play_entry) })];
-    if let Some(config) = &model.config_entry {
+    // Listed only when it can be served: the interface reads this list to
+    // decide whether to offer Config at all.
+    if let Some(config) = &model.config_entry
+        && config_available(model, shared)
+    {
         surfaces.push(json!({ "kind": "config", "entry_url": asset(config) }));
     }
     let branding = model.branding.as_ref().map(|branding| {
@@ -428,7 +674,7 @@ fn snapshot(shared: &RackForgeControllerShared) -> Result<Value, String> {
             })
         })
         .collect::<Vec<_>>();
-    let layouts = if model.config_entry.is_some() {
+    let layouts = if config_available(&model, shared) {
         vec!["play", "config"]
     } else {
         vec!["play"]
@@ -449,7 +695,7 @@ fn snapshot(shared: &RackForgeControllerShared) -> Result<Value, String> {
                 "plugin_id": model.plugin_id,
                 "plugin_name": model.name,
                 "ui_layouts": layouts,
-                "config_available": model.config_entry.is_some(),
+                "config_available": config_available(&model, shared),
                 "sounds": sounds,
                 "selected_sound_id": shared.selected_sound_id(),
             }],
@@ -710,6 +956,310 @@ mod initialization_script_tests {
             INITIALIZATION_SCRIPT_TEMPLATE.contains(PROTOCOL_PLACEHOLDER),
             "the template stopped carrying the marker, so the substitution \
              above now proves nothing"
+        );
+    }
+
+    /// A host may not offer a surface it cannot serve.
+    ///
+    /// `config_available` was the literal `true`, so the interface lit the
+    /// Config button on a host with no storage routes at all: the page opened
+    /// and its first request failed. The answer is derived now, and this holds
+    /// it to both halves -- the plug-in has a config page, AND this host can
+    /// answer for it.
+    #[test]
+    fn a_config_surface_is_offered_only_when_it_can_be_served() {
+        let controller = super::super::RackForgeController::new();
+        let Some(model) = controller
+            .shared
+            .catalog
+            .iter()
+            .find(|model| model.config_entry.is_some())
+            .cloned()
+        else {
+            return;
+        };
+
+        assert!(
+            config_available(&model, &controller.shared),
+            "a carried config page with storage open must be offered"
+        );
+        let descriptor = plugin_descriptor(&model, &controller.shared);
+        assert!(
+            descriptor["surfaces"]
+                .as_array()
+                .expect("surfaces")
+                .iter()
+                .any(|surface| surface["kind"] == "config"),
+            "the catalogue must list the config surface it can serve"
+        );
+
+        let without = RackForgeControllerShared {
+            resources: None,
+            ..controller.shared.clone()
+        };
+        assert!(
+            !config_available(&model, &without),
+            "with no storage the config surface must not be claimed"
+        );
+        let descriptor = plugin_descriptor(&model, &without);
+        assert!(
+            !descriptor["surfaces"]
+                .as_array()
+                .expect("surfaces")
+                .iter()
+                .any(|surface| surface["kind"] == "config"),
+            "a surface that cannot be served must not be listed either"
+        );
+    }
+
+    /// The storage routes answer over the same bridge the interface uses.
+    ///
+    /// Not a unit call: this goes through `http.request`, the way the config
+    /// page's `hostJson` reaches this host, so a route that is implemented but
+    /// never dispatched fails here.
+    #[test]
+    fn the_storage_routes_answer_over_the_bridge() {
+        let controller = super::super::RackForgeController::new();
+        if controller.shared.resources.is_none() {
+            return;
+        }
+        let ask = |method: &str, path: &str, body: Value| {
+            handle_native_request(
+                &NativeRequest {
+                    request_id: "test.resources".to_owned(),
+                    method: "http.request".to_owned(),
+                    params: json!({
+                        "path": path,
+                        "method": method,
+                        "body": if body.is_null() { Value::Null } else { Value::String(body.to_string()) },
+                    }),
+                },
+                &controller.shared,
+            )
+            .map(|(value, _)| value)
+        };
+
+        let mounts = ask("GET", "/api/v1/resources/mounts", Value::Null).expect("mounts answers");
+        let mounts = mounts.as_array().expect("mounts is a list").clone();
+        assert!(
+            !mounts.is_empty(),
+            "the platform defaults give this host somewhere to start"
+        );
+        let mount_id = mounts[0]["id"].as_str().expect("a mount has an id");
+        let root = ask(
+            "GET",
+            &format!("/api/v1/resources/mounts/{mount_id}/root"),
+            Value::Null,
+        )
+        .expect("a mount root answers");
+        assert!(root["id"].is_string(), "a root is an entry");
+
+        let Some(model) = controller.shared.catalog.first().cloned() else {
+            return;
+        };
+        let grants = ask(
+            "POST",
+            "/api/v1/resources/grants",
+            json!({ "plugin_id": model.plugin_id }),
+        )
+        .expect("grants answers for a carried plugin");
+        assert!(grants.is_array(), "grants is a list");
+    }
+
+    /// A storage route may not be used to reach a plug-in this host never
+    /// carried: the bridge is open to the page, and the page is the plug-in's.
+    #[test]
+    fn the_storage_routes_refuse_a_plugin_this_host_does_not_carry() {
+        let controller = super::super::RackForgeController::new();
+        if controller.shared.resources.is_none() {
+            return;
+        }
+        let outcome = handle_native_request(
+            &NativeRequest {
+                request_id: "test.resources.stranger".to_owned(),
+                method: "http.request".to_owned(),
+                params: json!({
+                    "path": "/api/v1/resources/grants",
+                    "method": "POST",
+                    "body": "{\"plugin_id\":\"org.example.not-carried\"}",
+                }),
+            },
+            &controller.shared,
+        );
+
+        let error = outcome.expect_err("an uncarried plugin is refused");
+        assert!(
+            error.contains("org.example.not-carried"),
+            "the refusal names what was asked for: {error}"
+        );
+    }
+
+    /// An install lands in the plug-in's data directory, whole, and shows.
+    ///
+    /// Installing means a file at `data/plugins/<id>/<data_path>` -- the same
+    /// place the desktop writes and every host's `status` reads -- so a
+    /// cartridge installed from the DAW is the one the desktop app sees. This
+    /// walks the whole way: nothing installed, a grant bound from a real file,
+    /// `load`, and then installed.
+    #[test]
+    fn a_granted_file_installs_where_every_host_looks_for_it() {
+        let controller = super::super::RackForgeController::new();
+        let Some(browser) = controller.shared.resources.clone() else {
+            return;
+        };
+        let Some((model, resource)) = controller.shared.catalog.iter().find_map(|model| {
+            model
+                .resources
+                .iter()
+                .find(|resource| resource.data_path.is_some())
+                .map(|resource| (model.clone(), resource.clone()))
+        }) else {
+            return;
+        };
+
+        let destination =
+            installed_resource_path(&model.plugin_id, &resource.id, &controller.shared)
+                .expect("a declared resource has an install path");
+        let _ = std::fs::remove_file(&destination);
+        let ask = |method: &str, path: &str, body: Value| {
+            handle_native_request(
+                &NativeRequest {
+                    request_id: "test.install".to_owned(),
+                    method: "http.request".to_owned(),
+                    params: json!({
+                        "path": path,
+                        "method": method,
+                        "body": Value::String(body.to_string()),
+                    }),
+                },
+                &controller.shared,
+            )
+            .map(|(value, _)| value)
+        };
+        let installed = |answer: &Value| -> bool {
+            answer
+                .as_array()
+                .expect("status is a list")
+                .iter()
+                .find(|entry| entry["resource_id"] == resource.id.as_str())
+                .map(|entry| entry["installed"] == true)
+                .expect("the declared resource is reported")
+        };
+
+        let before = ask(
+            "POST",
+            "/api/v1/resources/status",
+            json!({ "plugin_id": model.plugin_id }),
+        )
+        .expect("status answers");
+        assert!(!installed(&before), "nothing is installed to begin with");
+
+        // A real file on this machine, reached the way the explorer reaches
+        // one: a mount, its root, and an entry inside it.
+        let source = std::env::temp_dir().join("rackforge-vst3-install-test.bin");
+        std::fs::write(&source, b"RACKFORGE TEST CARTRIDGE").expect("write a file to install");
+        let selection = browser
+            .register_native_selection(&source)
+            .expect("a file on this machine can be selected");
+        let grant = browser
+            .bind_selection(
+                &rackforge_resource_api::BindSelectionRequest {
+                    plugin_id: model.plugin_id.clone(),
+                    resource_id: resource.id.clone(),
+                    selection_id: selection.selection_id.clone(),
+                },
+                rackforge_resource_api::ResourceEntryKind::File,
+            )
+            .expect("the selection binds to the declared resource");
+
+        ask(
+            "POST",
+            "/api/v1/resources/load",
+            json!({
+                "plugin_id": model.plugin_id,
+                "instance_id": "vst3-main",
+                "target_resource_id": resource.id,
+                "grant_id": grant.grant_id,
+                "persist": true,
+                "preview": false,
+            }),
+        )
+        .expect("a granted file installs");
+
+        assert!(
+            destination.is_file(),
+            "the file must be where the plug-in reads it: {}",
+            destination.display()
+        );
+        assert_eq!(
+            std::fs::read(&destination).expect("read the installed file"),
+            b"RACKFORGE TEST CARTRIDGE",
+            "installed whole, not truncated"
+        );
+        let after = ask(
+            "POST",
+            "/api/v1/resources/status",
+            json!({ "plugin_id": model.plugin_id }),
+        )
+        .expect("status answers");
+        assert!(installed(&after), "and status says so");
+
+        ask(
+            "POST",
+            "/api/v1/resources/clear",
+            json!({
+                "plugin_id": model.plugin_id,
+                "instance_id": "vst3-main",
+                "target_resource_id": resource.id,
+            }),
+        )
+        .expect("an installed resource clears");
+        assert!(!destination.is_file(), "clearing removes it");
+
+        let _ = std::fs::remove_file(&source);
+        let _ = browser.release_plugin_grants(&model.plugin_id);
+    }
+
+    /// A preview is refused rather than quietly kept.
+    ///
+    /// Preview means "let me hear it without keeping it", and hearing it means
+    /// reaching the instrument that is sounding -- which this side cannot do.
+    /// Answering `ok` would have installed it for good while the page believed
+    /// it had borrowed it.
+    #[test]
+    fn a_preview_is_refused_because_this_host_cannot_give_one() {
+        let controller = super::super::RackForgeController::new();
+        if controller.shared.resources.is_none() {
+            return;
+        }
+        let Some(model) = controller.shared.catalog.first().cloned() else {
+            return;
+        };
+        let error = handle_native_request(
+            &NativeRequest {
+                request_id: "test.preview".to_owned(),
+                method: "http.request".to_owned(),
+                params: json!({
+                    "path": "/api/v1/resources/load",
+                    "method": "POST",
+                    "body": json!({
+                        "plugin_id": model.plugin_id,
+                        "instance_id": "vst3-main",
+                        "target_resource_id": "anything",
+                        "grant_id": "anything",
+                        "persist": false,
+                        "preview": true,
+                    })
+                    .to_string(),
+                }),
+            },
+            &controller.shared,
+        )
+        .expect_err("a preview is refused");
+
+        assert!(
+            error.contains("preview"),
+            "the refusal says what it cannot do: {error}"
         );
     }
 }

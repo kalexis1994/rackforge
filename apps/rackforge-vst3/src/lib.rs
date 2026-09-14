@@ -641,6 +641,15 @@ struct RackForgeControllerShared {
     handler: Arc<Mutex<Option<ComPtr<IComponentHandler>>>>,
     model: Arc<RwLock<Option<Arc<VstPluginModel>>>>,
     catalog: Arc<Vec<Arc<VstPluginModel>>>,
+    /// The process's one storage browser: see `engine::resource_browser`.
+    ///
+    /// `None` when it could not be opened -- a read-only or missing RackForge
+    /// root. The config surface is then not offered at all rather than offered
+    /// and broken: see `config_available`.
+    /// Windows only, with the editor: the only reader is the web host that
+    /// answers a config surface, and that is built for the WebView.
+    #[cfg(windows)]
+    resources: Option<Arc<rackforge_resource_host::NativeResourceBrowser>>,
     values: Arc<RwLock<BTreeMap<u32, f64>>>,
     selected_sound_id: Arc<RwLock<Option<String>>>,
     #[cfg(windows)]
@@ -648,6 +657,26 @@ struct RackForgeControllerShared {
 }
 
 impl RackForgeControllerShared {
+    /// Asks the DAW to rebuild the audio side.
+    ///
+    /// The controller cannot reach the processor -- separate VST3 objects, and
+    /// the processor owns the engines -- so an install cannot be pushed into
+    /// the instrument that is sounding. It is written where the next instance
+    /// will read it, and the host is asked to make a next instance now.
+    /// Without this a cartridge would appear only whenever the DAW happened to
+    /// reload the plug-in.
+    #[cfg(windows)]
+    fn reload_component(&self) {
+        let Ok(handler) = self.handler.lock() else {
+            return;
+        };
+        if let Some(handler) = handler.as_ref() {
+            unsafe {
+                let _ = handler.restartComponent(RestartFlags_::kReloadComponent);
+            }
+        }
+    }
+
     fn model(&self) -> Option<Arc<VstPluginModel>> {
         self.model.read().ok()?.clone()
     }
@@ -886,6 +915,8 @@ impl RackForgeController {
                 revision: Arc::new(AtomicU64::new(0)),
                 handler: Arc::new(Mutex::new(None)),
                 catalog: Arc::new(catalog),
+                #[cfg(windows)]
+                resources: engine::resource_browser(),
                 selected_sound_id: Arc::new(RwLock::new(
                     model
                         .as_ref()

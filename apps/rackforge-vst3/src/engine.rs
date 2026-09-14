@@ -5,7 +5,11 @@ use rackforge_plugin_api::{
     abi::ParameterEventV1,
 };
 use rackforge_repository::install_local_archive_replacing;
+#[cfg(windows)]
+use rackforge_resource_host::NativeResourceBrowser;
 use serde::Deserialize;
+#[cfg(windows)]
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     collections::BTreeMap,
@@ -25,6 +29,24 @@ struct RootDocument {
     mode: String,
     root: PathBuf,
 }
+
+/// The storage browser, opened once for this process.
+///
+/// The processor and the controller are separate VST3 objects and neither can
+/// see the other's state, so they must not each open their own: the grants
+/// file would have two writers. One browser, and both read the same installs.
+///
+/// Note that an installed resource reaches the instrument through the
+/// plug-in's DATA directory and not through the runtime's resource overrides.
+/// Both exist; every host passes an empty override map, the desktop included.
+/// What "installed" MEANS is a file at `data/plugins/<id>/<data_path>`, which
+/// is what `resources/status` reports everywhere, and the plug-in reads it
+/// from the data root it is handed when it is built. Installing through the
+/// overrides would have given the VST3 a second, private mechanism for the
+/// same thing, and a cartridge installed in the DAW would have been invisible
+/// to the desktop app on the same machine.
+#[cfg(windows)]
+static RESOURCES: OnceLock<Option<Arc<NativeResourceBrowser>>> = OnceLock::new();
 
 static BUNDLED_PACKAGES: OnceLock<Vec<PathBuf>> = OnceLock::new();
 static BUNDLED_PACKAGES_INIT: Mutex<()> = Mutex::new(());
@@ -254,6 +276,44 @@ pub struct VstPluginModel {
     pub preset_values: BTreeMap<String, Vec<VstParameterValue>>,
 }
 
+/// The storage browser this host serves, or `None` if it could not be opened.
+#[cfg(windows)]
+pub(crate) fn resource_browser() -> Option<Arc<NativeResourceBrowser>> {
+    RESOURCES.get_or_init(open_resource_browser).clone()
+}
+
+/// Grants outlive the DAW session, so they are kept in the RackForge root
+/// beside the desktop's: one machine, one set of installs.
+///
+/// A root that cannot be written is not fatal. The host stops claiming it can
+/// configure anything -- see `config_available` -- rather than offering a
+/// surface whose first request would fail.
+#[cfg(windows)]
+fn open_resource_browser() -> Option<Arc<NativeResourceBrowser>> {
+    let root = rackforge_root()
+        .inspect_err(|error| {
+            crate::diagnostic::write(format!("resource browser: no RackForge root: {error:#}"));
+        })
+        .ok()?;
+    let grants = root.join("state/resource-grants.json");
+    if let Some(parent) = grants.parent() {
+        fs::create_dir_all(parent)
+            .inspect_err(|error| {
+                crate::diagnostic::write(format!(
+                    "resource browser: cannot create {}: {error}",
+                    parent.display()
+                ));
+            })
+            .ok()?;
+    }
+    NativeResourceBrowser::platform_defaults_persistent(grants)
+        .inspect_err(|error| {
+            crate::diagnostic::write(format!("resource browser: {error}"));
+        })
+        .ok()
+        .map(Arc::new)
+}
+
 /// The instruments the VST3 can be, in the order they were carried.
 ///
 /// INSTRUMENTS. A VST3 instrument plug-in offers a list of things to play,
@@ -466,7 +526,7 @@ impl Drop for RackForgeEngine {
     }
 }
 
-fn rackforge_root() -> Result<PathBuf> {
+pub(crate) fn rackforge_root() -> Result<PathBuf> {
     if let Some(explicit) = env::var_os("RACKFORGE_ROOT") {
         return Ok(PathBuf::from(explicit));
     }

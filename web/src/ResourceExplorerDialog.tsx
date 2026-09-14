@@ -8,7 +8,7 @@ import {
 import { FileUp } from "lucide-react";
 import "@svar-ui/react-filemanager/all.css";
 
-import { hostJson, isRemoteWebClient } from "./host";
+import { hostJson, IS_BROWSER_HOST, isRemoteWebClient } from "./host";
 import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import type {
   PluginResourceRequirement,
@@ -204,8 +204,24 @@ export function ResourceExplorerDialog(props: ResourceExplorerDialogProps) {
     }
   };
 
+  // Where the file actually is decides which of these is the right tool.
+  //
+  // The explorer walks the HOST's storage. That is exactly right when the
+  // interface is somewhere else -- a Raspberry Pi's page open on a laptop,
+  // where the cartridge may well be on the Pi. It is the wrong tool, and
+  // then the only tool, when the page IS the host: the browser build answers
+  // `/api/v1/resources/mounts` with an empty list and says why -- "there is
+  // no host storage to browse: a page can only be given a file" -- and the
+  // upload was gated on `isRemoteWebClient()`, which excludes that build. So
+  // the dialog opened on an empty tree with no way out of it.
   const clientUploadAvailable =
-    props.mode !== "select" && target.kind === "file" && isRemoteWebClient();
+    props.mode !== "select" &&
+    target.kind === "file" &&
+    (isRemoteWebClient() || IS_BROWSER_HOST);
+  // Empty is not "still loading": mounts have answered and there is nothing
+  // on the other side to open.
+  const hostStorageEmpty = data !== null && data.length === 0;
+  const clientUploadOnly = hostStorageEmpty && clientUploadAvailable;
 
   return (
     <div className="resource-explorer-backdrop" role="presentation">
@@ -217,7 +233,9 @@ export function ResourceExplorerDialog(props: ResourceExplorerDialogProps) {
       >
         <header className="resource-explorer-header">
           <div>
-            <span className="eyebrow">RACKFORGE STORAGE</span>
+            <span className="eyebrow">
+              {clientUploadOnly ? "THIS DEVICE" : "RACKFORGE STORAGE"}
+            </span>
             <h2 id="resource-explorer-title">Select {target.name}</h2>
           </div>
           <button type="button" className="icon-button" onClick={onCancel} disabled={binding}>
@@ -230,7 +248,11 @@ export function ResourceExplorerDialog(props: ResourceExplorerDialogProps) {
               <FileUp aria-hidden="true" />
               <span>
                 <strong>File on this device</strong>
-                <small>Upload it securely to the RackForge host</small>
+                <small>
+                  {clientUploadOnly
+                    ? "It stays in this browser: nothing leaves this device"
+                    : "Upload it securely to the RackForge host"}
+                </small>
               </span>
             </div>
             <button
@@ -239,7 +261,7 @@ export function ResourceExplorerDialog(props: ResourceExplorerDialogProps) {
               onClick={() => uploadInputRef.current?.click()}
             >
               <AsyncActionLabel active={operation === "uploading"} activeLabel="Uploading…">
-                Upload from this device
+                {clientUploadOnly ? "Choose a file…" : "Upload from this device"}
               </AsyncActionLabel>
             </button>
             <input
@@ -254,7 +276,12 @@ export function ResourceExplorerDialog(props: ResourceExplorerDialogProps) {
           </div>
         ) : null}
         <div className="resource-explorer-body">
-          {data ? (
+          {clientUploadOnly ? (
+            <div className="resource-explorer-empty">
+              This page is the RackForge host, so there is no storage of its own
+              to browse. Choose the {target.kind} from this device.
+            </div>
+          ) : data ? (
             <WillowDark>
               <Filemanager
                 data={data}
@@ -288,11 +315,13 @@ export function ResourceExplorerDialog(props: ResourceExplorerDialogProps) {
             <button type="button" className="secondary" onClick={onCancel} disabled={binding}>
               Cancel
             </button>
-            <button type="button" disabled={!selectionValid || binding} onClick={select}>
-              <AsyncActionLabel active={operation === "binding"} activeLabel="Selecting…">
-                {`Select ${target.kind}`}
-              </AsyncActionLabel>
-            </button>
+            {clientUploadOnly ? null : (
+              <button type="button" disabled={!selectionValid || binding} onClick={select}>
+                <AsyncActionLabel active={operation === "binding"} activeLabel="Selecting…">
+                  {`Select ${target.kind}`}
+                </AsyncActionLabel>
+              </button>
+            )}
           </div>
         </footer>
       </section>

@@ -8,12 +8,14 @@ use rackforge_repository::install_local_archive_replacing;
 #[cfg(windows)]
 use rackforge_resource_host::NativeResourceBrowser;
 use serde::Deserialize;
+#[cfg(windows)]
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Mutex, OnceLock},
 };
 
 include!(concat!(env!("OUT_DIR"), "/bundled_plugin.rs"));

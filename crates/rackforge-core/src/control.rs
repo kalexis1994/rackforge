@@ -6109,7 +6109,7 @@ mod tests {
 
     fn draft_document(name: &str) -> ProgramDocument {
         ProgramDocument {
-            schema_version: 1,
+            schema_version: rackforge_plugin_api::PROGRAM_SCHEMA_VERSION,
             id: "program.test".into(),
             name: name.into(),
             plugin_id: "org.rackforge.rf-dls".into(),
@@ -6132,11 +6132,31 @@ mod tests {
         }
     }
 
-    fn empty_editor() -> ProgramEditorView {
+    /// The smallest editor a plug-in is allowed to return.
+    ///
+    /// Not empty: `ProgramEditorView::validate` refuses a view with no pages,
+    /// and a page with neither pages nor fields, so an editor that shows
+    /// nothing never reaches a draft. The first version of these tests
+    /// returned an empty one and every one of them failed on it.
+    fn smallest_editor() -> ProgramEditorView {
         ProgramEditorView {
-            schema_version: 1,
+            schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
             title: "Program".into(),
-            pages: Vec::new(),
+            pages: vec![rackforge_plugin_api::ProgramEditorPage {
+                id: "page.main".into(),
+                label: "Main".into(),
+                detail: "The only page".into(),
+                enabled: true,
+                pages: Vec::new(),
+                fields: vec![rackforge_plugin_api::ProgramEditorField {
+                    id: "field.gain".into(),
+                    label: "Gain".into(),
+                    detail: "Output gain".into(),
+                    value: rackforge_plugin_api::ProgramEditorValue::Boolean(true),
+                    kind: rackforge_plugin_api::ProgramEditorFieldKind::Toggle,
+                    live_preview: false,
+                }],
+            }],
         }
     }
 
@@ -6152,6 +6172,18 @@ mod tests {
                 },
             ),
         )
+    }
+
+    /// Applied, or the refusal itself -- not just "not applied".
+    ///
+    /// `assert!(matches!(..))` says only that the shape was wrong, and these
+    /// tests cannot be run on a machine that does not build this module: a
+    /// bare assertion costs a round trip to CI to learn what the answer was.
+    fn expect_applied(response: ControlResponse) {
+        assert!(
+            matches!(response, ControlResponse::CommandApplied { .. }),
+            "expected the command to be applied, got {response:?}"
+        );
     }
 
     fn open_draft_id(context: &Arc<ControlContext>) -> u64 {
@@ -6171,7 +6203,7 @@ mod tests {
         thread::spawn(move || match receiver.recv().unwrap() {
             AudioControlCommand::BeginProgramEdit { reply, .. } => {
                 reply
-                    .send(Ok((7, prepared_draft("Edited"), empty_editor())))
+                    .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
                     .unwrap();
             }
             _ => panic!("expected a program edit to reach audio"),
@@ -6198,7 +6230,7 @@ mod tests {
                     "the sound to come back to is remembered before the audition"
                 );
                 reply
-                    .send(Ok((7, prepared_draft("Edited"), empty_editor())))
+                    .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
                     .unwrap();
             }
             _ => panic!("expected a program edit to reach audio"),
@@ -6207,10 +6239,7 @@ mod tests {
         let response = begin_edit(&context, 1);
         worker.join().unwrap();
 
-        assert!(
-            matches!(response, ControlResponse::CommandApplied { .. }),
-            "applied once the instrument answers: {response:?}"
-        );
+        expect_applied(response);
         let store = context.store.lock().unwrap();
         let snapshot = store.state();
         let draft = snapshot.program_draft.as_ref().expect("a draft is held");
@@ -6239,10 +6268,7 @@ mod tests {
     fn a_second_program_edit_is_refused_as_a_conflict() {
         let (context, receiver) = context();
         let worker = answer_one_begin(receiver);
-        assert!(matches!(
-            begin_edit(&context, 1),
-            ControlResponse::CommandApplied { .. }
-        ));
+        expect_applied(begin_edit(&context, 1));
         worker.join().unwrap();
 
         let response = begin_edit(&context, 2);
@@ -6278,10 +6304,7 @@ mod tests {
     fn a_command_for_another_draft_never_reaches_the_instrument() {
         let (context, receiver) = context();
         let worker = answer_one_begin(receiver);
-        assert!(matches!(
-            begin_edit(&context, 1),
-            ControlResponse::CommandApplied { .. }
-        ));
+        expect_applied(begin_edit(&context, 1));
         worker.join().unwrap();
         let stale = open_draft_id(&context).wrapping_add(1);
 
@@ -6325,10 +6348,7 @@ mod tests {
     fn saving_without_storage_is_refused_before_the_instrument_installs() {
         let (context, receiver) = context();
         let worker = answer_one_begin(receiver);
-        assert!(matches!(
-            begin_edit(&context, 1),
-            ControlResponse::CommandApplied { .. }
-        ));
+        expect_applied(begin_edit(&context, 1));
         worker.join().unwrap();
         let draft_id = open_draft_id(&context);
 
@@ -6373,7 +6393,7 @@ mod tests {
             match receiver.recv().unwrap() {
                 AudioControlCommand::BeginProgramEdit { reply, .. } => {
                     reply
-                        .send(Ok((7, prepared_draft("Edited"), empty_editor())))
+                        .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
                         .unwrap();
                 }
                 _ => panic!("expected a program edit"),
@@ -6385,10 +6405,7 @@ mod tests {
                 _ => panic!("expected the audition to end"),
             }
         });
-        assert!(matches!(
-            begin_edit(&context, 1),
-            ControlResponse::CommandApplied { .. }
-        ));
+        expect_applied(begin_edit(&context, 1));
         let draft_id = open_draft_id(&context);
 
         let response = dispatch_command(
@@ -6401,10 +6418,7 @@ mod tests {
         );
         worker.join().unwrap();
 
-        assert!(
-            matches!(response, ControlResponse::CommandApplied { .. }),
-            "cancelling is applied: {response:?}"
-        );
+        expect_applied(response);
         let store = context.store.lock().unwrap();
         let snapshot = store.state();
         assert!(snapshot.program_draft.is_none(), "the draft is gone");

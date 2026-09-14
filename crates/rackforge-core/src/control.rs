@@ -6094,4 +6094,334 @@ mod tests {
             Revision::ZERO
         );
     }
+
+    // Program drafts, pinned.
+    //
+    // The six draft commands are about five hundred lines of this file and had
+    // no behavioural coverage: the sixteen tests above never open one, and the
+    // only draft test anywhere else checks that the commands serialise. They
+    // are about to be lifted out so one state machine can serve the VST3 too,
+    // and a move is only checkable against a record of what the thing did.
+    //
+    // These are characterisation tests. They assert what the code does today,
+    // refusals included, and each says why its refusal matters rather than
+    // only that it happens.
+
+    fn draft_document(name: &str) -> ProgramDocument {
+        ProgramDocument {
+            schema_version: rackforge_plugin_api::PROGRAM_SCHEMA_VERSION,
+            id: "program.test".into(),
+            name: name.into(),
+            plugin_id: "org.rackforge.rf-dls".into(),
+            plugin_version: "1.0.0".into(),
+            plugin_state_version: 1,
+            payload_version: 1,
+            category: None,
+            tags: Vec::new(),
+            payload: serde_json::json!({ "gain": 0.5 }),
+        }
+    }
+
+    fn prepared_draft(name: &str) -> PreparedProgram {
+        PreparedProgram {
+            schema_version: rackforge_plugin_api::PROGRAM_EDIT_SCHEMA_VERSION,
+            storage_path: "programs/test.json".into(),
+            preview_sound_id: "program.preview".into(),
+            document: draft_document(name),
+            artifacts: Vec::new(),
+        }
+    }
+
+    /// The smallest editor a plug-in is allowed to return.
+    ///
+    /// Not empty: `ProgramEditorView::validate` refuses a view with no pages,
+    /// and a page with neither pages nor fields, so an editor that shows
+    /// nothing never reaches a draft. The first version of these tests
+    /// returned an empty one and every one of them failed on it.
+    fn smallest_editor() -> ProgramEditorView {
+        ProgramEditorView {
+            schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+            title: "Program".into(),
+            pages: vec![rackforge_plugin_api::ProgramEditorPage {
+                id: "page.main".into(),
+                label: "Main".into(),
+                detail: "The only page".into(),
+                enabled: true,
+                pages: Vec::new(),
+                fields: vec![rackforge_plugin_api::ProgramEditorField {
+                    id: "field.gain".into(),
+                    label: "Gain".into(),
+                    detail: "Output gain".into(),
+                    value: rackforge_plugin_api::ProgramEditorValue::Boolean(true),
+                    kind: rackforge_plugin_api::ProgramEditorFieldKind::Toggle,
+                    live_preview: false,
+                }],
+            }],
+        }
+    }
+
+    fn begin_edit(context: &Arc<ControlContext>, serial: u64) -> ControlResponse {
+        dispatch_command(
+            context,
+            CommandEnvelope::new(
+                ClientId::new("test.program").unwrap(),
+                serial,
+                SessionCommand::BeginProgramEdit {
+                    instance_id: InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap(),
+                    program_id: Some("piano".into()),
+                },
+            ),
+        )
+    }
+
+    /// Applied, or the refusal itself -- not just "not applied".
+    ///
+    /// `assert!(matches!(..))` says only that the shape was wrong, and these
+    /// tests cannot be run on a machine that does not build this module: a
+    /// bare assertion costs a round trip to CI to learn what the answer was.
+    fn expect_applied(response: ControlResponse) {
+        assert!(
+            matches!(response, ControlResponse::CommandApplied { .. }),
+            "expected the command to be applied, got {response:?}"
+        );
+    }
+
+    fn open_draft_id(context: &Arc<ControlContext>) -> u64 {
+        context
+            .store
+            .lock()
+            .unwrap()
+            .state()
+            .program_draft
+            .as_ref()
+            .expect("a draft is open")
+            .draft_id
+    }
+
+    /// Answers one `BeginProgramEdit` on the audio channel and returns.
+    fn answer_one_begin(receiver: Receiver<AudioControlCommand>) -> thread::JoinHandle<()> {
+        thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::BeginProgramEdit { reply, .. } => {
+                reply
+                    .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
+                    .unwrap();
+            }
+            _ => panic!("expected a program edit to reach audio"),
+        })
+    }
+
+    /// Editing begins only after the instrument prepares the program, and what
+    /// it prepared is what the session then holds.
+    #[test]
+    fn beginning_a_program_edit_records_what_the_instrument_prepared() {
+        let (context, receiver) = context();
+        let worker = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::BeginProgramEdit {
+                instance_id,
+                request,
+                previous_sound_id,
+                reply,
+            } => {
+                assert_eq!(instance_id.as_str(), DEFAULT_LIVE_INSTANCE_ID);
+                assert_eq!(request.program_id.as_deref(), Some("piano"));
+                assert_eq!(
+                    previous_sound_id.as_deref(),
+                    Some("piano"),
+                    "the sound to come back to is remembered before the audition"
+                );
+                reply
+                    .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
+                    .unwrap();
+            }
+            _ => panic!("expected a program edit to reach audio"),
+        });
+
+        let response = begin_edit(&context, 1);
+        worker.join().unwrap();
+
+        expect_applied(response);
+        let store = context.store.lock().unwrap();
+        let snapshot = store.state();
+        let draft = snapshot.program_draft.as_ref().expect("a draft is held");
+        assert_eq!(draft.instance_id.as_str(), DEFAULT_LIVE_INSTANCE_ID);
+        assert_eq!(draft.original_program_id.as_deref(), Some("piano"));
+        assert_eq!(draft.name, "Edited");
+        assert_eq!(draft.preview_sound_id, "program.preview");
+        assert_eq!(draft.storage_path, "programs/test.json");
+        assert!(
+            !draft.dirty,
+            "a freshly opened draft carries no unsaved edit"
+        );
+        assert!(
+            snapshot.audition.is_some(),
+            "editing auditions the draft, so the lease is held while it is open"
+        );
+    }
+
+    /// One draft at a time, and the refusal names the reason.
+    ///
+    /// Asserting the message and not only the code: a second edit can be
+    /// refused for several reasons -- a stale command, a closed audio channel
+    /// -- and a test that accepted any Conflict would pass while the guard it
+    /// is here for was gone.
+    #[test]
+    fn a_second_program_edit_is_refused_as_a_conflict() {
+        let (context, receiver) = context();
+        let worker = answer_one_begin(receiver);
+        expect_applied(begin_edit(&context, 1));
+        worker.join().unwrap();
+
+        let response = begin_edit(&context, 2);
+
+        match response {
+            ControlResponse::Error { code, message, .. } => {
+                assert_eq!(code, ControlErrorCode::Conflict);
+                assert!(
+                    message.contains("already active"),
+                    "the refusal is the one-draft guard, not something else: {message}"
+                );
+            }
+            other => panic!("a second draft must be refused: {other:?}"),
+        }
+        assert!(
+            context
+                .store
+                .lock()
+                .unwrap()
+                .state()
+                .program_draft
+                .is_some(),
+            "and the draft that was open stays open"
+        );
+    }
+
+    /// A command for a draft that is not the open one is refused, and the
+    /// instrument is never asked.
+    ///
+    /// This is the guard that keeps a stale editor -- a page left open, a
+    /// second window -- from saving over a draft someone else started.
+    #[test]
+    fn a_command_for_another_draft_never_reaches_the_instrument() {
+        let (context, receiver) = context();
+        let worker = answer_one_begin(receiver);
+        expect_applied(begin_edit(&context, 1));
+        worker.join().unwrap();
+        let stale = open_draft_id(&context).wrapping_add(1);
+
+        // The audio worker has returned, so anything that reached the channel
+        // would fail on it rather than answer: these must not get that far.
+        for command in [
+            SessionCommand::SaveProgramDraft { draft_id: stale },
+            SessionCommand::CancelProgramEdit { draft_id: stale },
+            SessionCommand::RestoreProgramDraftPreview { draft_id: stale },
+        ] {
+            let response = dispatch_command(
+                &context,
+                CommandEnvelope::new(ClientId::new("test.program").unwrap(), 9, command),
+            );
+            match response {
+                ControlResponse::Error { code, message, .. } => {
+                    assert_eq!(code, ControlErrorCode::NotFound, "{message}");
+                    assert!(
+                        message.contains("missing or no longer valid"),
+                        "the refusal is the draft-id guard: {message}"
+                    );
+                }
+                other => panic!("a stale draft id must be refused: {other:?}"),
+            }
+        }
+        assert!(
+            context
+                .store
+                .lock()
+                .unwrap()
+                .state()
+                .program_draft
+                .is_some(),
+            "and the open draft is untouched"
+        );
+    }
+
+    /// Saving with nowhere to write is refused before the program is installed,
+    /// so a save that cannot be kept is not half-applied.
+    #[test]
+    fn saving_without_storage_is_refused_before_the_instrument_installs() {
+        let (context, receiver) = context();
+        let worker = answer_one_begin(receiver);
+        expect_applied(begin_edit(&context, 1));
+        worker.join().unwrap();
+        let draft_id = open_draft_id(&context);
+
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.program").unwrap(),
+                2,
+                SessionCommand::SaveProgramDraft { draft_id },
+            ),
+        );
+
+        match response {
+            ControlResponse::Error { message, .. } => assert!(
+                message.contains("storage"),
+                "the refusal is about storage, before anything is installed: {message}"
+            ),
+            other => panic!("a save with nowhere to write must be refused: {other:?}"),
+        }
+        assert!(
+            context
+                .store
+                .lock()
+                .unwrap()
+                .state()
+                .program_draft
+                .is_some(),
+            "the draft survives a refused save: nothing is lost"
+        );
+    }
+
+    /// Cancelling ends the audition and clears the draft together.
+    ///
+    /// Together is the point. A draft cleared without releasing the lease
+    /// leaves the instrument auditioning a program nobody is editing, and a
+    /// lease released without clearing the draft leaves an editor open over a
+    /// program that is no longer being previewed.
+    #[test]
+    fn cancelling_a_program_edit_releases_the_audition_and_the_draft() {
+        let (context, receiver) = context();
+        let worker = thread::spawn(move || {
+            match receiver.recv().unwrap() {
+                AudioControlCommand::BeginProgramEdit { reply, .. } => {
+                    reply
+                        .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
+                        .unwrap();
+                }
+                _ => panic!("expected a program edit"),
+            }
+            match receiver.recv().unwrap() {
+                AudioControlCommand::EndAudition { reply, .. } => {
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected the audition to end"),
+            }
+        });
+        expect_applied(begin_edit(&context, 1));
+        let draft_id = open_draft_id(&context);
+
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.program").unwrap(),
+                2,
+                SessionCommand::CancelProgramEdit { draft_id },
+            ),
+        );
+        worker.join().unwrap();
+
+        expect_applied(response);
+        let store = context.store.lock().unwrap();
+        let snapshot = store.state();
+        assert!(snapshot.program_draft.is_none(), "the draft is gone");
+        assert!(snapshot.audition.is_none(), "and so is the audition lease");
+    }
 }

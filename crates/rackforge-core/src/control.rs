@@ -6174,7 +6174,7 @@ mod tests {
                     .send(Ok((7, prepared_draft("Edited"), empty_editor())))
                     .unwrap();
             }
-            other => panic!("expected a program edit to reach audio, got {other:?}"),
+            _ => panic!("expected a program edit to reach audio"),
         })
     }
 
@@ -6201,7 +6201,7 @@ mod tests {
                     .send(Ok((7, prepared_draft("Edited"), empty_editor())))
                     .unwrap();
             }
-            other => panic!("expected a program edit to reach audio, got {other:?}"),
+            _ => panic!("expected a program edit to reach audio"),
         });
 
         let response = begin_edit(&context, 1);
@@ -6376,13 +6376,13 @@ mod tests {
                         .send(Ok((7, prepared_draft("Edited"), empty_editor())))
                         .unwrap();
                 }
-                other => panic!("expected a program edit, got {other:?}"),
+                _ => panic!("expected a program edit"),
             }
             match receiver.recv().unwrap() {
                 AudioControlCommand::EndAudition { reply, .. } => {
                     reply.send(Ok(())).unwrap();
                 }
-                other => panic!("expected the audition to end, got {other:?}"),
+                _ => panic!("expected the audition to end"),
             }
         });
         assert!(matches!(

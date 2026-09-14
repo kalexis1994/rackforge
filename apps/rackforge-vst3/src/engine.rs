@@ -5,6 +5,7 @@ use rackforge_plugin_api::{
     abi::ParameterEventV1,
 };
 use rackforge_repository::install_local_archive_replacing;
+#[cfg(windows)]
 use rackforge_resource_host::NativeResourceBrowser;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -42,6 +43,7 @@ struct RootDocument {
 /// overrides would have given the VST3 a second, private mechanism for the
 /// same thing, and a cartridge installed in the DAW would have been invisible
 /// to the desktop app on the same machine.
+#[cfg(windows)]
 static RESOURCES: OnceLock<Option<Arc<NativeResourceBrowser>>> = OnceLock::new();
 
 static BUNDLED_PACKAGES: OnceLock<Vec<PathBuf>> = OnceLock::new();
@@ -273,6 +275,7 @@ pub struct VstPluginModel {
 }
 
 /// The storage browser this host serves, or `None` if it could not be opened.
+#[cfg(windows)]
 pub(crate) fn resource_browser() -> Option<Arc<NativeResourceBrowser>> {
     RESOURCES.get_or_init(open_resource_browser).clone()
 }
@@ -283,6 +286,7 @@ pub(crate) fn resource_browser() -> Option<Arc<NativeResourceBrowser>> {
 /// A root that cannot be written is not fatal. The host stops claiming it can
 /// configure anything -- see `config_available` -- rather than offering a
 /// surface whose first request would fail.
+#[cfg(windows)]
 fn open_resource_browser() -> Option<Arc<NativeResourceBrowser>> {
     let root = rackforge_root()
         .inspect_err(|error| {

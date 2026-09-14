@@ -646,6 +646,9 @@ struct RackForgeControllerShared {
     /// `None` when it could not be opened -- a read-only or missing RackForge
     /// root. The config surface is then not offered at all rather than offered
     /// and broken: see `config_available`.
+    /// Windows only, with the editor: the only reader is the web host that
+    /// answers a config surface, and that is built for the WebView.
+    #[cfg(windows)]
     resources: Option<Arc<rackforge_resource_host::NativeResourceBrowser>>,
     values: Arc<RwLock<BTreeMap<u32, f64>>>,
     selected_sound_id: Arc<RwLock<Option<String>>>,
@@ -662,6 +665,7 @@ impl RackForgeControllerShared {
     /// will read it, and the host is asked to make a next instance now.
     /// Without this a cartridge would appear only whenever the DAW happened to
     /// reload the plug-in.
+    #[cfg(windows)]
     fn reload_component(&self) {
         let Ok(handler) = self.handler.lock() else {
             return;
@@ -911,6 +915,7 @@ impl RackForgeController {
                 revision: Arc::new(AtomicU64::new(0)),
                 handler: Arc::new(Mutex::new(None)),
                 catalog: Arc::new(catalog),
+                #[cfg(windows)]
                 resources: engine::resource_browser(),
                 selected_sound_id: Arc::new(RwLock::new(
                     model

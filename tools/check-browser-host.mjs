@@ -532,12 +532,12 @@ function probeProgramDraft(targetInstanceId) {
   const source = current?.instances
     ?.find((instance) => instance.instance_id === targetInstanceId)
     ?.sounds?.find((sound) => sound.editable);
-  if (!source) return "the active instrument exposes no editable program";
-  const begun = dispatch({
+  const beginCommand = {
     type: "begin_program_edit",
     instance_id: targetInstanceId,
-    program_id: source.id,
-  });
+  };
+  if (source) beginCommand.program_id = source.id;
+  const begun = dispatch(beginCommand);
   if (begun.status !== "command_applied") return begun.message;
   const opened = request({ op: "snapshot" }).snapshot;
   const draft = opened?.program_draft;

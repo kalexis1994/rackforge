@@ -1350,6 +1350,17 @@ impl BrowserHost {
                     ],
                 );
             }
+            SessionCommand::KeepAuditionAlive { lease_id } => {
+                validate_audition_lease(
+                    self.store
+                        .state()
+                        .audition
+                        .as_ref()
+                        .map(|audition| audition.lease_id),
+                    lease_id,
+                )?;
+                return Ok(Vec::new());
+            }
             SessionCommand::ReplaceProgramDraft {
                 draft_id,
                 document_json,
@@ -3408,6 +3419,20 @@ fn fixed_range(value: u32) -> AudioValueRange {
     AudioValueRange::new(value.max(1), value.max(1)).expect("a non-zero fixed range is valid")
 }
 
+fn validate_audition_lease(
+    active_lease_id: Option<u64>,
+    requested_lease_id: u64,
+) -> Result<(), Failure> {
+    if active_lease_id == Some(requested_lease_id) {
+        Ok(())
+    } else {
+        Err(Failure::new(
+            ControlErrorCode::NotFound,
+            "audition lease is missing or no longer valid",
+        ))
+    }
+}
+
 /// Convenience for the ABI layer: turn a queued MIDI byte triple into the
 /// event shape plugins consume.
 pub fn midi_event(frame: u32, data: [u8; 3], length: u8) -> MidiEventV1 {
@@ -3479,5 +3504,12 @@ mod package_preview_tests {
                 .unwrap()
                 .starts_with("data:image/png;base64,")
         );
+    }
+
+    #[test]
+    fn browser_renews_only_the_active_audition_lease() {
+        assert!(validate_audition_lease(Some(41), 41).is_ok());
+        assert!(validate_audition_lease(Some(41), 42).is_err());
+        assert!(validate_audition_lease(None, 41).is_err());
     }
 }

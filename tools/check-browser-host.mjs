@@ -487,9 +487,14 @@ const PROBES = {
       const upgrade = new Uint8Array(readFileSync(upgradePath));
       const upgraded = JSON.parse(withArchive(upgrade, host.rf_install_plugin));
       if (!upgraded.ok) return upgraded.error;
+      const activated = JSON.parse(withArchive(
+        new TextEncoder().encode(JSON.stringify({ plugin_id: installedPluginId, active: true })),
+        host.rf_set_plugin_active,
+      ));
+      if (!activated.ok) return activated.error;
       const copies = request({ op: "snapshot" }).snapshot?.instances
         ?.filter((plugin) => plugin.plugin_id === installedPluginId);
-      if (copies?.length !== 1) return "upgrading retained duplicate runtime instances";
+      if (copies?.length !== 1) return `upgrade must retain one active instance, got ${copies?.length}`;
       const catalog = JSON.parse(readResponse(host.rf_plugin_catalog()));
       const descriptor = catalog.catalog?.find((plugin) => plugin.plugin_id === installedPluginId);
       if (descriptor?.version !== upgraded.installed.version) {

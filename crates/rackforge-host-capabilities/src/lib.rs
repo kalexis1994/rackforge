@@ -407,13 +407,10 @@ const BROWSER: &[(Capability, Support)] = &[
     (Capability::MidiHotplug, Support::Yes),
     (Capability::PluginParameters, Support::Yes),
     (Capability::HostPresets, Support::Yes),
-    (
-        Capability::ProgramDrafts,
-        Support::Planned("the program-draft commands are not implemented in the browser host"),
-    ),
+    (Capability::ProgramDrafts, Support::Yes),
     (
         Capability::Auditions,
-        Support::Planned("audition leases are not implemented in the browser host"),
+        Support::Planned("standalone audition leases are not implemented in the browser host"),
     ),
     (Capability::PerformanceLibrary, Support::Yes),
     (

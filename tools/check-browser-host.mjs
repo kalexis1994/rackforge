@@ -430,6 +430,7 @@ const PROBES = {
     });
     return deleted.status === "plugin_preset_deleted" ? null : deleted.message;
   },
+  program_drafts: () => probeProgramDraft(instanceId),
   performance_library: () => {
     const library = request({ op: "performance_snapshot" });
     return library.status === "performance_snapshot" ? null : library.message;
@@ -525,6 +526,46 @@ const PROBES = {
 };
 
 let installedPluginId = null;
+
+function probeProgramDraft(targetInstanceId) {
+  const current = request({ op: "snapshot" }).snapshot;
+  const source = current?.instances
+    ?.find((instance) => instance.instance_id === targetInstanceId)
+    ?.sounds?.find((sound) => sound.editable);
+  if (!source) return "the active instrument exposes no editable program";
+  const begun = dispatch({
+    type: "begin_program_edit",
+    instance_id: targetInstanceId,
+    program_id: source.id,
+  });
+  if (begun.status !== "command_applied") return begun.message;
+  const opened = request({ op: "snapshot" }).snapshot;
+  const draft = opened?.program_draft;
+  const audition = opened?.audition;
+  if (!draft || !audition) return "the program draft and audition lease were not published";
+  const document = JSON.parse(draft.document_json);
+  document.name = `${document.name} Probe`;
+  const replaced = dispatch({
+    type: "replace_program_draft",
+    draft_id: draft.draft_id,
+    document_json: JSON.stringify(document),
+  });
+  if (replaced.status !== "command_applied") return replaced.message;
+  const renewed = dispatch({ type: "keep_audition_alive", lease_id: audition.lease_id });
+  if (renewed.status !== "command_applied") return renewed.message;
+  peak(128);
+  const saved = dispatch({ type: "save_program_draft", draft_id: draft.draft_id });
+  if (saved.status !== "command_applied") return saved.message;
+  const finished = request({ op: "snapshot" }).snapshot;
+  if (finished?.program_draft || finished?.audition) {
+    return "saving left the program draft or audition lease open";
+  }
+  return finished?.instances
+    ?.find((instance) => instance.instance_id === targetInstanceId)
+    ?.sounds?.some((sound) => sound.name === document.name)
+    ? null
+    : "the saved program is missing from the instrument catalog";
+}
 
 function dispatch(command) {
   return request({

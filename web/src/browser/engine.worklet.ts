@@ -24,9 +24,9 @@ import { ParallelBridge } from "./parallelBridge";
 import { PluginHost } from "./pluginHost";
 import {
   ENGINE_PROCESSOR,
-  PACKAGED_STORAGE_PREFIX,
   engineFailureEvent,
   linkedPackageMutationEvents,
+  writableStorageFiles,
   type EngineCommand,
   type EngineEvent,
   type PackageMessage,
@@ -133,6 +133,19 @@ function operationOf(request: string): string {
   }
 }
 
+/** Mutations whose success must mean their files are already durable. */
+function requiresDurableStorage(request: string): boolean {
+  try {
+    const decoded = JSON.parse(request) as {
+      op?: unknown;
+      envelope?: { command?: { type?: unknown } };
+    };
+    return decoded.op === "dispatch" && decoded.envelope?.command?.type === "save_program_draft";
+  } catch {
+    return false;
+  }
+}
+
 /** Flattens a directory tree into the path/bytes pairs the page stores. */
 function collectFiles(contents: Map<string, Inode>, prefix: string, files: SeedFile[]) {
   for (const [name, inode] of contents) {
@@ -190,6 +203,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #failed = false;
   #sessionRevision = 0;
   #storageRevision = 0;
+  #packagedPaths = new Set<string>();
 
   constructor() {
     super();
@@ -206,15 +220,36 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #handle(command: EngineCommand) {
     switch (command.kind) {
       case "boot":
-        this.#boot(command.wasm, command.files, command.maximumFrames, command.channels);
+        this.#boot(
+          command.wasm,
+          command.files,
+          command.packagedPaths,
+          command.maximumFrames,
+          command.channels,
+        );
         break;
       case "request": {
         const response = this.#request(command.request);
-        this.#post({ kind: "response", id: command.id, response });
-        this.#publishControllerOutput();
-        if (!READ_ONLY_OPERATIONS.has(operationOf(command.request))) {
-          this.#publishStorage();
+        const mutatesStorage = !READ_ONLY_OPERATIONS.has(operationOf(command.request));
+        if (mutatesStorage) {
+          const files = this.#storageFiles();
+          if (files && requiresDurableStorage(command.request)) {
+            for (const event of linkedPackageMutationEvents(
+              command.id,
+              response,
+              files,
+              false,
+            )) {
+              this.#post(event);
+            }
+          } else {
+            this.#post({ kind: "response", id: command.id, response });
+            if (files) this.#post({ kind: "storage", files });
+          }
+        } else {
+          this.#post({ kind: "response", id: command.id, response });
         }
+        this.#publishControllerOutput();
         break;
       }
       case "package":
@@ -306,6 +341,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #boot(
     wasm: Uint8Array,
     files: SeedFile[],
+    packagedPaths: string[],
     maximumFrames: number,
     channels: number,
   ) {
@@ -344,6 +380,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     this.#pluginHost.attach(exports.memory);
     this.#parallel.attach(exports.memory);
     this.#host = exports;
+    this.#packagedPaths = new Set(packagedPaths);
     this.#sessionRevision = exports.rf_session_revision();
     this.#storageRevision = exports.rf_storage_revision?.() ?? 0;
     this.#frames = maximumFrames;
@@ -426,7 +463,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     const files: SeedFile[] = [];
     collectFiles(storage.dir.contents, "", files);
     this.#storageRevision = this.#host?.rf_storage_revision?.() ?? this.#storageRevision;
-    return files.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX));
+    return writableStorageFiles(files, this.#packagedPaths);
   }
 
   #publishStorage() {

@@ -12,10 +12,10 @@ import { HostRequestError } from "../host";
 import engineWorkletUrl from "./engine.worklet.ts?worker&url";
 import {
   ENGINE_PROCESSOR,
-  PACKAGED_STORAGE_PREFIX,
   type EngineEvent,
   type SeedFile,
   waitForLinkedStoragePublication,
+  writableStorageFiles,
 } from "./protocol";
 import {
   canServePluginAssets,
@@ -250,17 +250,18 @@ async function loadStorage(): Promise<SeedFile[]> {
     ),
     readStoredFiles(),
   ]);
+  const packagedPaths = packaged.map((file) => file.path);
+  const writable = writableStorageFiles(stored, packagedPaths);
   const files = [
     ...packaged,
-    ...stored.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
+    ...writable,
   ];
   // Copies, because booting the engine transfers every file's buffer to the
   // worklet and leaves these detached. Republishing then threw on the first
   // storage write, and a plugin's interface quietly stopped following its
   // package for the rest of the session.
   packagedFiles = packaged.map((file) => ({ path: file.path, bytes: file.bytes.slice() }));
-  latestStoredFiles = stored
-    .filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX))
+  latestStoredFiles = writable
     .map((file) => ({ path: file.path, bytes: file.bytes.slice() }));
   installPluginAssetRecovery();
   await queuePluginAssetPublication(latestStoredFiles, true).catch((error: unknown) => {
@@ -277,6 +278,10 @@ async function loadStorage(): Promise<SeedFile[]> {
  */
 let storageWrite: number | null = null;
 let pendingStorage: SeedFile[] = [];
+let storageWaiters: Array<{
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}> = [];
 
 function storeFiles(files: SeedFile[], publishAssets: boolean): Promise<void> {
   pendingStorage = files;
@@ -284,17 +289,23 @@ function storeFiles(files: SeedFile[], publishAssets: boolean): Promise<void> {
   const publication = publishAssets
     ? queuePluginAssetPublication(files, true)
     : pluginAssetPublicationTail;
+  const durable = new Promise<void>((resolve, reject) => {
+    storageWaiters.push({ resolve, reject });
+  });
   if (storageWrite === null) {
     storageWrite = window.setTimeout(() => {
       storageWrite = null;
       const files = pendingStorage;
+      const waiters = storageWaiters;
       pendingStorage = [];
-      void writeStoredFiles(files).catch((error: unknown) => {
-        console.warn("RackForge could not keep its storage in this browser", error);
-      });
+      storageWaiters = [];
+      void writeStoredFiles(files).then(
+        () => waiters.forEach((waiter) => waiter.resolve()),
+        (error: unknown) => waiters.forEach((waiter) => waiter.reject(error)),
+      );
     }, 400);
   }
-  return publication;
+  return Promise.all([publication, durable]).then(() => undefined);
 }
 
 /**
@@ -466,6 +477,10 @@ function handleEngineEvent(event: EngineEvent) {
         // observer immediately so a fast Cache Storage rejection is never
         // reported as an unhandled promise before that response event arrives.
         void publication.catch(() => undefined);
+      } else {
+        void publication.catch((error: unknown) => {
+          console.warn("RackForge could not keep its storage in this browser", error);
+        });
       }
       break;
     }
@@ -569,6 +584,7 @@ export async function startBrowserHost(): Promise<void> {
         kind: "boot",
         wasm,
         files,
+        packagedPaths: packagedFiles.map((file) => file.path),
         maximumFrames: RENDER_FRAMES,
         channels: OUTPUT_CHANNELS,
       },

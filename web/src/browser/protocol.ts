@@ -28,6 +28,8 @@ export interface BootMessage {
    */
   wasm: Uint8Array;
   files: SeedFile[];
+  /** Exact site-owned files that must be fetched again instead of filed in IndexedDB. */
+  packagedPaths: string[];
   maximumFrames: number;
   channels: number;
 }
@@ -199,7 +201,7 @@ export type EngineEvent =
   | PoolRequestEvent
   | ControllerOutputMessage;
 
-/** Constructs the only valid event order for a successful package mutation. */
+/** Constructs the only valid event order for a storage mutation. */
 export function linkedPackageMutationEvents(
   operationId: number,
   response: string,
@@ -288,10 +290,20 @@ export function engineFailureEvent(
 }
 
 /**
- * Storage the host does not own: RackForge ships these with the site, and a
- * stored copy would go stale as soon as the site was rebuilt.
+ * Removes only the files the deployed site owns from a host snapshot.
+ *
+ * Plugin-private data also lives below `plugins/`, so filtering that entire
+ * directory loses saved programs and imported resources on the next visit.
+ * The page knows the exact packaged paths from the deployment manifest and
+ * passes them to the worklet at boot.
  */
-export const PACKAGED_STORAGE_PREFIX = "plugins/";
+export function writableStorageFiles(
+  files: SeedFile[],
+  packagedPaths: Iterable<string>,
+): SeedFile[] {
+  const packaged = new Set(packagedPaths);
+  return files.filter((file) => !packaged.has(file.path));
+}
 
 /** Name the page registers the engine processor under. */
 export const ENGINE_PROCESSOR = "rackforge-engine";

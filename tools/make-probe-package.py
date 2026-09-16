@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Builds a `.rfplugin` used only to probe installing and removing a plugin.
+"""Builds a `.rfplugin` used only to probe browser plugin lifecycle support.
 
 Installation is a capability the browser host claims, so CI has to exercise it
-against a real package. Rather than commit a binary for that, this repackages
-the demo instrument under a second identity: same component, different plugin
-id, so installing it cannot collide with the copy the site already ships.
+against a real package. Rather than commit a binary for that, this packages a
+component staged by the workflow and also emits a higher-version upgrade.
 
 Usage: tools/make-probe-package.py <package-directory> <output.rfplugin>
 """
@@ -15,10 +14,6 @@ import shutil
 import sys
 import tempfile
 import zipfile
-
-PROBE_ID = "org.rackforge.probe-instrument"
-PROBE_NAME = "RackForge Probe Instrument"
-
 
 def main() -> int:
     if len(sys.argv) != 3:
@@ -33,24 +28,9 @@ def main() -> int:
 
         manifest_path = staged / "rackforge-plugin.toml"
         manifest = manifest_path.read_text()
-        original_id = next(
-            line.split("=", 1)[1].strip().strip('"')
-            for line in manifest.splitlines()
-            if line.startswith("id =")
-        )
-        manifest_path.write_text(
-            manifest.replace(f'id = "{original_id}"', f'id = "{PROBE_ID}"').replace(
-                manifest.split("name = ")[1].splitlines()[0],
-                f'"{PROBE_NAME}"',
-                1,
-            )
-        )
 
         runtime_path = staged / "metadata" / "runtime.json"
         runtime = json.loads(runtime_path.read_text())
-        runtime["id"] = PROBE_ID
-        runtime_path.write_text(json.dumps(runtime, indent=2) + "\n")
-
         output.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(staged.rglob("*")):

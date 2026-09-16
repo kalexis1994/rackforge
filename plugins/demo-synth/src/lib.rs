@@ -10,7 +10,10 @@
 //! recurrences rather than from `sin` or `exp`, so the component builds as
 //! `no_std` and sounds identical on every host.
 
-use rackforge_plugin_sdk::{MidiEvent, ParameterEvent, Processor, export_processor};
+use rackforge_plugin_sdk::{
+    MidiEvent, PROGRAM_EDIT_BASIC, PROGRAM_EDIT_DECLARATIVE, PROGRAM_EDIT_PREVIEW, ParameterEvent,
+    Processor, export_processor,
+};
 
 const MAX_VOICES: usize = 16;
 const MAX_OUTPUT_CHANNELS: usize = 2;
@@ -185,6 +188,7 @@ pub struct DemoSynth {
     /// Rotates which voice is stolen, so a busy passage does not always cut
     /// the same note short.
     next_voice: usize,
+    custom_program_installed: bool,
 }
 
 impl Default for DemoSynth {
@@ -194,6 +198,7 @@ impl Default for DemoSynth {
             voices: [Voice::default(); MAX_VOICES],
             sample_rate: 48_000.0,
             next_voice: 0,
+            custom_program_installed: false,
         }
     }
 }
@@ -346,6 +351,53 @@ impl Processor for DemoSynth {
         true
     }
 
+    fn program_editing_capabilities(&self) -> u32 {
+        PROGRAM_EDIT_BASIC | PROGRAM_EDIT_PREVIEW | PROGRAM_EDIT_DECLARATIVE
+    }
+
+    fn write_program_catalog(&mut self, destination: &mut [u8]) -> Option<usize> {
+        let catalog = if self.custom_program_installed {
+            include_bytes!("../package/metadata/presets-with-probe.json").as_slice()
+        } else {
+            include_bytes!("../package/metadata/presets.json").as_slice()
+        };
+        destination
+            .get_mut(..catalog.len())?
+            .copy_from_slice(catalog);
+        Some(catalog.len())
+    }
+
+    fn begin_program_edit(&mut self, _request: &[u8], destination: &mut [u8]) -> Option<usize> {
+        copy_control_json(PROBE_PREPARED_PROGRAM, destination)
+    }
+
+    fn prepare_program_save(&mut self, document: &[u8], destination: &mut [u8]) -> Option<usize> {
+        const PREFIX: &[u8] = br#"{"schema_version":1,"storage_path":"programs/probe-1.json","preview_sound_id":"custom.probe-1","document":"#;
+        const SUFFIX: &[u8] = br#", "artifacts":[]}"#;
+        let length = PREFIX
+            .len()
+            .checked_add(document.len())?
+            .checked_add(SUFFIX.len())?;
+        let target = destination.get_mut(..length)?;
+        target[..PREFIX.len()].copy_from_slice(PREFIX);
+        target[PREFIX.len()..PREFIX.len() + document.len()].copy_from_slice(document);
+        target[PREFIX.len() + document.len()..].copy_from_slice(SUFFIX);
+        Some(length)
+    }
+
+    fn install_program(&mut self, _prepared: &[u8]) -> bool {
+        self.custom_program_installed = true;
+        true
+    }
+
+    fn preview_program(&mut self, _prepared: &[u8]) -> bool {
+        true
+    }
+
+    fn program_editor_view(&mut self, _document: &[u8], destination: &mut [u8]) -> Option<usize> {
+        copy_control_json(PROBE_EDITOR_VIEW, destination)
+    }
+
     fn process(
         &mut self,
         _input: &[f32],
@@ -392,6 +444,48 @@ impl Processor for DemoSynth {
         }
     }
 }
+
+fn copy_control_json(source: &[u8], destination: &mut [u8]) -> Option<usize> {
+    destination.get_mut(..source.len())?.copy_from_slice(source);
+    Some(source.len())
+}
+
+const PROBE_PREPARED_PROGRAM: &[u8] = br#"{
+  "schema_version": 1,
+  "storage_path": "programs/probe-1.json",
+  "preview_sound_id": "custom.probe-1",
+  "document": {
+    "schema_version": 1,
+    "id": "probe-1",
+    "name": "Demo Program",
+    "plugin_id": "org.rackforge.demo-synth",
+    "plugin_version": "0.1.0",
+    "plugin_state_version": 1,
+    "payload_version": 1,
+    "category": "Synth",
+    "tags": ["custom"],
+    "payload": {"brightness": 0.6, "attack": 0.05, "release": 0.3, "shape": 0.25, "level": 0.7}
+  },
+  "artifacts": []
+}"#;
+
+const PROBE_EDITOR_VIEW: &[u8] = br#"{
+  "schema_version": 1,
+  "title": "Demo Synth Program",
+  "pages": [{
+    "id": "tone",
+    "label": "Tone",
+    "detail": "Program validation controls.",
+    "fields": [{
+      "id": "enabled",
+      "label": "Enabled",
+      "detail": "Program validation field.",
+      "value": {"type": "boolean", "value": true},
+      "kind": {"type": "toggle"},
+      "live_preview": false
+    }]
+  }]
+}"#;
 
 /// Equal temperament from A440, computed with repeated multiplication so the
 /// component needs no `exp`.

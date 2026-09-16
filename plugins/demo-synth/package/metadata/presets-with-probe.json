@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "banks": [
+    {
+      "id": "factory",
+      "name": "Factory",
+      "order": 0
+    },
+    {
+      "id": "user",
+      "name": "User",
+      "order": 1
+    }
+  ],
+  "presets": [
+    {
+      "id": "keys",
+      "name": "Demo Keys",
+      "bank": "factory",
+      "category": "Keys",
+      "order": 0,
+      "tags": ["default"]
+    },
+    {
+      "id": "pad",
+      "name": "Demo Pad",
+      "bank": "factory",
+      "category": "Pad",
+      "order": 1,
+      "tags": ["soft"]
+    },
+    {
+      "id": "bass",
+      "name": "Demo Bass",
+      "bank": "factory",
+      "category": "Bass",
+      "order": 2,
+      "tags": ["low"]
+    },
+    {
+      "id": "lead",
+      "name": "Demo Lead",
+      "bank": "factory",
+      "category": "Lead",
+      "order": 3,
+      "tags": ["bright"]
+    },
+    {
+      "id": "custom.probe-1",
+      "name": "Demo Program Probe",
+      "bank": "user",
+      "category": "Synth",
+      "order": 4,
+      "tags": ["custom"],
+      "editable": true
+    }
+  ]
+}

@@ -430,7 +430,16 @@ const PROBES = {
     });
     return deleted.status === "plugin_preset_deleted" ? null : deleted.message;
   },
-  program_drafts: () => probeProgramDraft(instanceId),
+  program_drafts: () => {
+    const installed = ensureProbeInstalled(false);
+    if (installed) return installed;
+    const selected = dispatch({ type: "select_plugin", instance_id: installedInstanceId });
+    if (selected.status !== "command_applied") return selected.message;
+    const failure = probeProgramDraft(installedInstanceId);
+    const restored = dispatch({ type: "select_plugin", instance_id: instanceId });
+    if (failure) return failure;
+    return restored.status === "command_applied" ? null : restored.message;
+  },
   performance_library: () => {
     const library = request({ op: "performance_snapshot" });
     return library.status === "performance_snapshot" ? null : library.message;
@@ -472,43 +481,7 @@ const PROBES = {
     readResponse(host.rf_controller_output());
     return valid ? null : "the bundled controller returned an invalid SysEx plan";
   },
-  plugin_install: () => {
-    if (!packagePath) return "no .rfplugin was given to install";
-    const archive = new Uint8Array(readFileSync(packagePath));
-    trail(`install: ${archive.length} bytes to inspect`);
-    const inspected = JSON.parse(withArchive(archive, host.rf_inspect_plugin));
-    if (!inspected.ok) return inspected.error;
-    trail("install: inspected, installing");
-    const installed = JSON.parse(withArchive(archive, host.rf_install_plugin));
-    trail("install: installed");
-    if (!installed.ok) return installed.error;
-    installedPluginId = installed.installed.plugin_id;
-    const upgradePath = packagePath.replace(/\.rfplugin$/, ".upgrade.rfplugin");
-    if (upgradePath !== packagePath && existsSync(upgradePath)) {
-      const upgrade = new Uint8Array(readFileSync(upgradePath));
-      const upgraded = JSON.parse(withArchive(upgrade, host.rf_install_plugin));
-      if (!upgraded.ok) return upgraded.error;
-      const activated = JSON.parse(withArchive(
-        new TextEncoder().encode(JSON.stringify({ plugin_id: installedPluginId, active: true })),
-        host.rf_set_plugin_active,
-      ));
-      if (!activated.ok) return activated.error;
-      const copies = request({ op: "snapshot" }).snapshot?.instances
-        ?.filter((plugin) => plugin.plugin_id === installedPluginId);
-      if (copies?.length !== 1) return `upgrade must retain one active instance, got ${copies?.length}`;
-      const catalog = JSON.parse(readResponse(host.rf_plugin_catalog()));
-      const descriptor = catalog.catalog?.find((plugin) => plugin.plugin_id === installedPluginId);
-      if (descriptor?.version !== upgraded.installed.version) {
-        return "upgrading did not select the newest catalog version";
-      }
-      const parameters = request({ op: "plugin_parameters", instance_id: copies[0].instance_id });
-      if (parameters.status !== "plugin_parameters") return parameters.message ?? "upgraded instance parameters unavailable";
-    }
-    const listed = JSON.parse(readResponse(host.rf_plugin_catalog()));
-    return listed.catalog?.some((plugin) => plugin.plugin_id === installedPluginId)
-      ? null
-      : "the installed plugin is not in the catalog";
-  },
+  plugin_install: () => ensureProbeInstalled(true),
   plugin_removal: () => {
     if (!installedPluginId) return "nothing was installed to remove";
     const removed = JSON.parse(
@@ -526,6 +499,54 @@ const PROBES = {
 };
 
 let installedPluginId = null;
+let installedInstanceId = null;
+let probeUpgraded = false;
+
+function ensureProbeInstalled(upgradeRequested) {
+  if (!packagePath) return "no .rfplugin was given to install";
+  if (!installedPluginId) {
+    const archive = new Uint8Array(readFileSync(packagePath));
+    trail(`install: ${archive.length} bytes to inspect`);
+    const inspected = JSON.parse(withArchive(archive, host.rf_inspect_plugin));
+    if (!inspected.ok) return inspected.error;
+    trail("install: inspected, installing");
+    const installed = JSON.parse(withArchive(archive, host.rf_install_plugin));
+    trail("install: installed");
+    if (!installed.ok) return installed.error;
+    installedPluginId = installed.installed.plugin_id;
+  }
+
+  let expectedVersion = null;
+  const upgradePath = packagePath.replace(/\.rfplugin$/, ".upgrade.rfplugin");
+  if (upgradeRequested && !probeUpgraded && upgradePath !== packagePath && existsSync(upgradePath)) {
+    const archive = new Uint8Array(readFileSync(upgradePath));
+    const upgraded = JSON.parse(withArchive(archive, host.rf_install_plugin));
+    if (!upgraded.ok) return upgraded.error;
+    expectedVersion = upgraded.installed.version;
+    probeUpgraded = true;
+  }
+
+  const activated = JSON.parse(withArchive(
+    new TextEncoder().encode(JSON.stringify({ plugin_id: installedPluginId, active: true })),
+    host.rf_set_plugin_active,
+  ));
+  if (!activated.ok) return activated.error;
+  const copies = request({ op: "snapshot" }).snapshot?.instances
+    ?.filter((plugin) => plugin.plugin_id === installedPluginId);
+  if (copies?.length !== 1) return `install must retain one active instance, got ${copies?.length}`;
+  installedInstanceId = copies[0].instance_id;
+
+  const catalog = JSON.parse(readResponse(host.rf_plugin_catalog()));
+  const descriptor = catalog.catalog?.find((plugin) => plugin.plugin_id === installedPluginId);
+  if (!descriptor) return "the installed plugin is not in the catalog";
+  if (expectedVersion && descriptor.version !== expectedVersion) {
+    return "upgrading did not select the newest catalog version";
+  }
+  const parameters = request({ op: "plugin_parameters", instance_id: installedInstanceId });
+  return parameters.status === "plugin_parameters"
+    ? null
+    : (parameters.message ?? "installed instance parameters unavailable");
+}
 
 function probeProgramDraft(targetInstanceId) {
   const current = request({ op: "snapshot" }).snapshot;

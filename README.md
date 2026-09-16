@@ -40,7 +40,8 @@ To hear your first sound:
 
 1. Open RackForge Web and click or tap once to enable browser audio.
 2. Open **Touch Controller** and play the on-screen keyboard or pads.
-3. Open **PLAY** to choose Concert Grand or RF-106 and select a program.
+3. Open **PLAY** to choose an included instrument such as Concert Grand or
+   RF-73 and select a program.
 4. Optionally connect a USB MIDI keyboard and allow MIDI access when asked.
 
 Chrome and Edge provide the most complete Web MIDI support. Firefox asks for
@@ -97,7 +98,7 @@ graph, so changing stage routing does not rewrite the plugin.
 Native CI builds are published in two editions for every supported platform:
 
 - **Standard** includes Concert Grand and the officially pinned instruments —
-  today RF-106, RF-5 and RF-7 — so a new installation can be played
+  today RF-106, RF-5, RF-7 and RF-73 — so a new installation can be played
   immediately.
 - **Minimal** includes no instrument plugins. It keeps the complete RackForge
   host, Plugin Manager, controller support, and performance tools so you can
@@ -118,12 +119,15 @@ Standard installations include:
 - **RF-5**, a five-voice programmable polyphonic synthesizer.
 - **RF-7**, a six-operator FM instrument with its own panel, voice editor and
   cartridge reader, built from the instrument's own firmware tables.
+- **RF-73**, a physically modelled 73-key electric piano with playable and
+  physical voicing panels, factory programs and portable program files.
 
-Other open-source instruments include:
+Source and releases for these instruments:
 
 - [RF-106 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-106)
 - [RF-5 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-5)
 - [RF-7 source and releases](https://github.com/kalexis1994/RF-7)
+- [RF-73 source and releases](https://github.com/kalexis1994/RF-73)
 - [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
   a SoundFont instrument that includes the sampled YDP Grand Piano
 

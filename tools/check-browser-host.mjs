@@ -482,6 +482,22 @@ const PROBES = {
     trail("install: installed");
     if (!installed.ok) return installed.error;
     installedPluginId = installed.installed.plugin_id;
+    const upgradePath = packagePath.replace(/\.rfplugin$/, ".upgrade.rfplugin");
+    if (upgradePath !== packagePath && existsSync(upgradePath)) {
+      const upgrade = new Uint8Array(readFileSync(upgradePath));
+      const upgraded = JSON.parse(withArchive(upgrade, host.rf_install_plugin));
+      if (!upgraded.ok) return upgraded.error;
+      const copies = request({ op: "snapshot" }).snapshot?.instances
+        ?.filter((plugin) => plugin.plugin_id === installedPluginId);
+      if (copies?.length !== 1) return "upgrading retained duplicate runtime instances";
+      const catalog = JSON.parse(readResponse(host.rf_plugin_catalog()));
+      const descriptor = catalog.catalog?.find((plugin) => plugin.plugin_id === installedPluginId);
+      if (descriptor?.version !== upgraded.installed.version) {
+        return "upgrading did not select the newest catalog version";
+      }
+      const parameters = request({ op: "plugin_parameters", instance_id: copies[0].instance_id });
+      if (parameters.status !== "plugin_parameters") return parameters.message ?? "upgraded instance parameters unavailable";
+    }
     const listed = JSON.parse(readResponse(host.rf_plugin_catalog()));
     return listed.catalog?.some((plugin) => plugin.plugin_id === installedPluginId)
       ? null

@@ -2558,19 +2558,39 @@ fn request_name(request: &ControlRequest) -> &'static str {
 /// is the only way a person can upgrade a bundled instrument, and two
 /// instances of one plugin id would collide in the session.
 fn prefer_installed(plugins: &mut Vec<HostedPlugin>) {
+    let keep = preferred_versions(plugins.iter().map(|plugin| {
+        (
+            plugin.plugin_id.as_str(),
+            plugin.managed,
+            plugin.runtime.manifest().version.as_str(),
+        )
+    }));
     let mut index = 0;
-    while index < plugins.len() {
-        let duplicate = plugins.iter().enumerate().any(|(other, plugin)| {
-            other != index
-                && plugin.plugin_id == plugins[index].plugin_id
-                && (plugin.managed && !plugins[index].managed)
-        });
-        if duplicate {
-            plugins.remove(index);
-        } else {
-            index += 1;
+    plugins.retain(|_| {
+        let selected = keep.contains(&index);
+        index += 1;
+        selected
+    });
+}
+
+/// Match the catalog's package precedence. Multiple installed versions have
+/// the same instance ID; retaining both makes parameter/audio lookup resolve
+/// the older instance while the UI is served from the newer package.
+fn preferred_versions<'a>(entries: impl Iterator<Item = (&'a str, bool, &'a str)>) -> Vec<usize> {
+    let mut chosen = BTreeMap::<&str, (bool, semver::Version, usize)>::new();
+    for (index, (id, managed, version)) in entries.enumerate() {
+        let version = semver::Version::parse(version).expect("validated package version");
+        if chosen
+            .get(id)
+            .is_none_or(|(previous_managed, previous_version, _)| {
+                (managed && !previous_managed)
+                    || (managed == *previous_managed && version >= *previous_version)
+            })
+        {
+            chosen.insert(id, (managed, version, index));
         }
     }
+    chosen.into_values().map(|(_, _, index)| index).collect()
 }
 
 fn store_root() -> PathBuf {
@@ -2910,6 +2930,32 @@ pub fn midi_event(frame: u32, data: [u8; 3], length: u8) -> MidiEventV1 {
 mod package_preview_tests {
     use super::*;
     use rackforge_repository::LocalPackageBrandingPreview;
+
+    #[test]
+    fn runtime_keeps_one_semantically_newest_managed_version_per_plugin() {
+        let entries = [
+            ("piano", false, "9.0.0"),
+            ("piano", true, "0.1.6"),
+            ("piano", true, "0.1.10"),
+            ("piano", true, "0.1.9"),
+            ("effect", false, "1.0.0"),
+        ];
+        assert_eq!(preferred_versions(entries.into_iter()), vec![4, 2]);
+    }
+
+    #[test]
+    fn runtime_version_selection_handles_reverse_order_prereleases_and_ties() {
+        let entries = [
+            ("piano", true, "0.1.7"),
+            ("piano", true, "0.1.6"),
+            ("piano", true, "0.1.8-beta.1"),
+            ("piano", true, "0.1.8"),
+            ("piano", true, "0.1.8"),
+            ("piano", false, "2.0.0"),
+        ];
+        assert_eq!(preferred_versions(entries.into_iter()), vec![4]);
+        assert!(preferred_versions(std::iter::empty()).is_empty());
+    }
 
     #[test]
     fn browser_preview_preserves_validated_branding() {

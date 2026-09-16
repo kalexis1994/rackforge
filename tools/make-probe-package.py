@@ -56,6 +56,20 @@ def main() -> int:
             for path in sorted(staged.rglob("*")):
                 if path.is_file():
                     archive.write(path, path.relative_to(staged).as_posix())
+        # Keep both versions installed in the runtime probe: the catalog and
+        # audio instance must agree on the newest package, with no duplicate ID.
+        old_version = runtime["version"]
+        new_version = f"{int(old_version.split('.')[0]) + 1}.0.0"
+        manifest_path.write_text(manifest_path.read_text().replace(
+            f'version = "{old_version}"', f'version = "{new_version}"', 1
+        ))
+        runtime["version"] = new_version
+        runtime_path.write_text(json.dumps(runtime, indent=2) + "\n")
+        upgrade = output.with_suffix(".upgrade.rfplugin")
+        with zipfile.ZipFile(upgrade, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(staged.rglob("*")):
+                if path.is_file():
+                    archive.write(path, path.relative_to(staged).as_posix())
     print(f"{output} ({output.stat().st_size} bytes)")
     return 0
 

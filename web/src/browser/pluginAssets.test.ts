@@ -56,6 +56,30 @@ afterEach(() => {
 });
 
 describe("browser plugin asset routing", () => {
+  it("recovers an uncontrolled tab through its already-active worker", async () => {
+    vi.resetModules();
+    const workerEvents = new EventTarget();
+    const serviceWorker = Object.assign(workerEvents, { controller: null as unknown });
+    const active = { postMessage: vi.fn((message: { kind: string }, transfer?: Transferable[]) => {
+      if (message.kind === "rackforge-plugin-assets-claim") {
+        serviceWorker.controller = active;
+        queueMicrotask(() => workerEvents.dispatchEvent(new Event("controllerchange")));
+      } else {
+        (transfer![0] as MessagePort).postMessage({ kind: "rackforge-plugin-assets-capabilities", protocol: 1 });
+      }
+    }) };
+    vi.stubGlobal("navigator", { serviceWorker });
+    vi.stubGlobal("window", globalThis);
+    const freshPwa = await import("./pwa");
+    vi.spyOn(freshPwa, "ensureServiceWorker").mockResolvedValue({
+      active, update: async () => undefined,
+    } as unknown as ServiceWorkerRegistration);
+    const assets = await import("./pluginAssets");
+    await expect(assets.whenServing(1_000)).resolves.toBe(true);
+    expect(active.postMessage.mock.calls[0][0].kind).toBe("rackforge-plugin-assets-claim");
+    expect(serviceWorker.controller).toBe(active);
+  });
+
   it("serves installed interfaces despite a lost reply and a stalled worker update", async () => {
     const cache = new MemoryCache();
     vi.spyOn(pwa, "ensureServiceWorker").mockResolvedValue({

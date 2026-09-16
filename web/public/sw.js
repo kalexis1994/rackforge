@@ -59,6 +59,12 @@ const PLUGIN_ASSET_PROTOCOL = 1;
 // deployed UI advertise plugin URLs through yesterday's worker, which then
 // forwarded them to GitHub Pages and cached a 404 in the iframe.
 self.addEventListener("message", (event) => {
+  if (event.data?.kind === "rackforge-plugin-assets-claim") {
+    // A cache-bypassing navigation can leave an existing tab uncontrolled.
+    // Registering the same active worker does not run activate again.
+    event.waitUntil(self.clients.claim());
+    return;
+  }
   if (event.data?.kind !== "rackforge-plugin-assets-capabilities") return;
   event.ports[0]?.postMessage({
     kind: "rackforge-plugin-assets-capabilities",

@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as pwa from "./pwa";
 import {
   canServePluginAssets,
   declaredPluginAssetsPublished,
   isPackagedPluginRoot,
   pluginAssetUrl,
+  probePluginAssetRoute,
   publishPluginAssets,
   supportsPluginAssetProtocol,
   versionPluginAssetUrl,
+  whenServing,
 } from "./pluginAssets";
 import {
   linkedPackageMutationEvents,
@@ -49,9 +52,48 @@ function seed(path: string, body: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("browser plugin asset routing", () => {
+  it("serves installed interfaces despite a lost reply and a stalled worker update", async () => {
+    const cache = new MemoryCache();
+    vi.spyOn(pwa, "ensureServiceWorker").mockResolvedValue({
+      update: () => new Promise(() => {}),
+    } as unknown as ServiceWorkerRegistration);
+    vi.stubGlobal("navigator", { serviceWorker: { controller: { postMessage() {} } } });
+    vi.stubGlobal("caches", { open: async () => cache });
+    vi.stubGlobal("fetch", async (url: string) => cache.match(url));
+    await expect(whenServing(1_000)).resolves.toBe(true);
+    expect(await cache.keys()).toHaveLength(0);
+  });
+
+  it("proves the installed route works without relying on a capability reply", async () => {
+    const cache = new MemoryCache();
+    vi.stubGlobal("caches", { open: async () => cache });
+    vi.stubGlobal("fetch", async (url: string) => cache.match(url));
+    await expect(probePluginAssetRoute()).resolves.toBe(true);
+    expect(await cache.keys()).toHaveLength(0);
+  });
+
+  it.each([200, 404])("rejects network fallback with status %s and removes its probe", async (status) => {
+    const cache = new MemoryCache();
+    vi.stubGlobal("caches", { open: async () => cache });
+    vi.stubGlobal("fetch", async () => new Response("<html>Application shell</html>", { status }));
+    await expect(probePluginAssetRoute()).resolves.toBe(false);
+    expect(await cache.keys()).toHaveLength(0);
+  });
+
+  it("bounds an unresponsive route and removes its probe", async () => {
+    const cache = new MemoryCache();
+    vi.stubGlobal("caches", { open: async () => cache });
+    vi.stubGlobal("fetch", (_url: string, options: RequestInit) => new Promise((_, reject) => {
+      options.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    }));
+    await expect(probePluginAssetRoute(10)).resolves.toBe(false);
+    expect(await cache.keys()).toHaveLength(0);
+  });
+
   it("distinguishes the current asset worker from a stale controller", async () => {
     const current = {
       postMessage(_message: unknown, transfer: Transferable[]) {

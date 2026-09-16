@@ -656,6 +656,8 @@ export interface PluginWebDescriptor {
   managed: boolean;
   api_version: number;
   branding?: PluginBranding | null;
+  /** The package declares a UI, but the browser cannot currently serve it. */
+  web_ui_unavailable_reason?: string;
   surfaces: Array<{
     kind: PluginWebSurfaceKind;
     entry_url: string;

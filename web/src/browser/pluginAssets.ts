@@ -108,6 +108,30 @@ export function supportsPluginAssetProtocol(
 
 let serving: Promise<boolean> | null = null;
 
+/** Verify the actual cache-backed route when the worker's message reply is lost. */
+export async function probePluginAssetRoute(timeoutMs = 2_000): Promise<boolean> {
+  if (!("caches" in globalThis)) return false;
+  const token = crypto.randomUUID();
+  const url = assetUrl(`${PLUGIN_ASSET_PREFIX}__probe__/${token}.txt`);
+  let cache: Cache | undefined;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), timeoutMs);
+  try {
+    cache = await caches.open(CACHE);
+    await cache.put(url, new Response(token, {
+      headers: { "content-type": "text/plain", "cache-control": "no-store" },
+    }));
+    const response = await fetch(url, { cache: "no-store", signal: abort.signal });
+    // A network 200, application shell or stale response is not proof.
+    return response.ok && await response.text() === token;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+    await cache?.delete(url).catch(() => undefined);
+  }
+}
+
 async function establishServing(timeoutMs: number): Promise<boolean> {
   if (!("serviceWorker" in navigator)) return false;
   const registration = await ensureServiceWorker();
@@ -117,16 +141,21 @@ async function establishServing(timeoutMs: number): Promise<boolean> {
   // worker owns the page; it says nothing about support for plugin-assets.
   // The current worker calls skipWaiting + clients.claim, so controllerchange
   // can complete this without asking the performer for a reload.
-  await registration.update().catch(() => undefined);
+  // An update needs the network; readiness of the existing controller does not.
+  void registration.update().catch(() => undefined);
 
   const deadline = Date.now() + timeoutMs;
-  let checked: ServiceWorker | null = null;
   while (Date.now() < deadline) {
     const controller = navigator.serviceWorker.controller;
-    if (controller && controller !== checked) {
-      checked = controller;
+    if (controller) {
       const remaining = Math.max(1, deadline - Date.now());
       if (await supportsPluginAssetProtocol(controller, Math.min(750, remaining))) {
+        return true;
+      }
+      // A worker can serve installed pages without answering the capability
+      // message (or its reply can miss the short startup deadline).
+      const probeBudget = deadline - Date.now();
+      if (probeBudget > 0 && await probePluginAssetRoute(Math.min(2_000, probeBudget))) {
         return true;
       }
     }

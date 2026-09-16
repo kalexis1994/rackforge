@@ -145,8 +145,20 @@ async function establishServing(timeoutMs: number): Promise<boolean> {
   void registration.update().catch(() => undefined);
 
   const deadline = Date.now() + timeoutMs;
+  let claimRequestedFrom: ServiceWorker | null = null;
   while (Date.now() < deadline) {
     const controller = navigator.serviceWorker.controller;
+    if (!controller && registration.active && registration.active !== claimRequestedFrom) {
+      claimRequestedFrom = registration.active;
+      // Ask the already-active worker to claim this tab. An unchanged worker
+      // will not emit activate, so re-registering or waiting alone cannot help.
+      try {
+        registration.active.postMessage({ kind: "rackforge-plugin-assets-claim" });
+      } catch {
+        // A worker replaced during the request can be retried on the next loop.
+        claimRequestedFrom = null;
+      }
+    }
     if (controller) {
       const remaining = Math.max(1, deadline - Date.now());
       if (await supportsPluginAssetProtocol(controller, Math.min(750, remaining))) {

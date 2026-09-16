@@ -108,6 +108,7 @@ import {
   usePluginDescriptor,
 } from "./pluginCatalog";
 import { pluginContextInstance } from "./pluginContext";
+import { validPluginProgramName } from "./programName";
 import {
   commitPlayPluginSelection,
   preflightPlayPluginSelection,
@@ -5225,10 +5226,7 @@ export function PluginFrame({
         (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id &&
-        typeof params.name === "string" &&
-        params.name.trim().length > 0 &&
-        params.name.trim().length <= 64 &&
-        /^[\x20-\x7e]+$/.test(params.name.trim())
+        validPluginProgramName(params.name)
       ) {
         try {
           const document = JSON.parse(draft.document_json) as Record<

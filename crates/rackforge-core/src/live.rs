@@ -2607,16 +2607,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             voice
                                 .mirror_control(|instance| instance.load_preset(&sound_id))
                                 .map_err(|error| error.to_string())?;
-                            if voice.effect_bypass.is_some() {
+                            if let Some(bypass) = voice.effect_bypass.as_mut() {
                                 let latency_frames = voice
                                     .instance
                                     .latency_frames()
                                     .map_err(|error| error.to_string())?;
-                                voice
-                                    .effect_bypass
-                                    .as_mut()
-                                    .expect("effect bypass presence was checked")
-                                    .set_latency(latency_frames)?;
+                                bypass.set_latency(latency_frames)?;
                             }
                             voice.process_faulted = false;
                             live_parameter_writer.clear(voice.live_parameter_target);
@@ -2743,16 +2739,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 .instance
                                 .get_parameter(parameter_index)
                                 .map_err(|error| error.to_string())?;
-                            if voice.effect_bypass.is_some() {
+                            if let Some(bypass) = voice.effect_bypass.as_mut() {
                                 let latency_frames = voice
                                     .instance
                                     .latency_frames()
                                     .map_err(|error| error.to_string())?;
-                                voice
-                                    .effect_bypass
-                                    .as_mut()
-                                    .expect("effect bypass presence was checked")
-                                    .set_latency(latency_frames)?;
+                                bypass.set_latency(latency_frames)?;
                             }
                             if voice.live_parameter_target != CHAIN_LIVE_PARAMETER_TARGET {
                                 live_parameter_writer.try_record(

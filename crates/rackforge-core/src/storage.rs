@@ -54,8 +54,10 @@ impl PluginStorage {
             .file_name()
             .context("plugin storage path has no file name")?
             .to_string_lossy();
-        let temporary =
-            destination.with_file_name(format!(".{file_name}.tmp-{}-{serial}", std::process::id()));
+        let temporary = destination.with_file_name(format!(
+            ".{file_name}.tmp-{}-{serial}",
+            writer_discriminator()
+        ));
         let write_result = (|| -> Result<()> {
             let mut file = OpenOptions::new()
                 .create_new(true)
@@ -104,8 +106,10 @@ impl PluginStorage {
             .file_name()
             .context("plugin storage path has no file name")?
             .to_string_lossy();
-        let temporary =
-            destination.with_file_name(format!(".{file_name}.tmp-{}-{serial}", std::process::id()));
+        let temporary = destination.with_file_name(format!(
+            ".{file_name}.tmp-{}-{serial}",
+            writer_discriminator()
+        ));
         let copy_result = (|| -> Result<()> {
             let copied = fs::copy(source, &temporary).with_context(|| {
                 format!(

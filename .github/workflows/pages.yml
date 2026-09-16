@@ -53,9 +53,14 @@ jobs:
       - name: Check the host against what it claims
         run: |
           storage="$(mktemp -d)"
+          probe_source="$(mktemp -d)"
           cp -r web/public/demo/rackforge/. "$storage"
+          cargo build --release --target wasm32-unknown-unknown -p rackforge-demo-synth
+          cp -r plugins/demo-synth/package/. "$probe_source"
+          cp target/wasm32-unknown-unknown/release/rackforge_demo_synth.wasm \
+            "$probe_source/component.wasm"
           python3 tools/make-probe-package.py \
-            web/public/demo/rackforge/plugins/concert-grand "$RUNNER_TEMP/probe.rfplugin"
+            "$probe_source" "$RUNNER_TEMP/probe.rfplugin"
           # CHECK_TRACE_CALLS=1 names every plugin and WASI call, for when
           # this dies somewhere that leaves no other trace.
           node tools/check-browser-host.mjs \

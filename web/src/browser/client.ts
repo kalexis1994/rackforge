@@ -1159,6 +1159,11 @@ function withAssetUrls(plugin: CatalogEntry, serving: boolean): PluginWebDescrip
     && published;
   return {
     ...plugin,
+    web_ui_unavailable_reason: !assetsAvailable && plugin.surfaces.length > 0
+      ? published
+        ? "The plugin includes a web interface, but this browser could not connect to its installed files."
+        : "The plugin includes a web interface, but its installed files are not ready."
+      : undefined,
     branding: assetsAvailable && plugin.branding
       ? {
           icon_url: asset(plugin.branding.icon),

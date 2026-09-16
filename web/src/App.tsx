@@ -5353,9 +5353,9 @@ export function PluginFrame({
       <PluginSurfaceState
         title="Web view unavailable"
         detail={
-          descriptor
+          descriptor?.web_ui_unavailable_reason ?? (descriptor
             ? `${instance.plugin_name} does not provide a ${surface.toUpperCase()} web view.`
-            : `${instance.plugin_name} does not include a RackForge Web interface.`
+            : `${instance.plugin_name} does not include a RackForge Web interface.`)
         }
       />
     );

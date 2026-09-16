@@ -41,11 +41,13 @@ Called once, before anything else. Return one of:
 | Value | Meaning |
 | --- | --- |
 | `0x0001_0001` | ABI v1.1 |
-| `0x0001_0002` | ABI v1 (current) |
+| `0x0001_0002` | ABI v1.2 |
+| `0x0001_0003` | ABI v1.3 (current) |
 
 The host accepts that range inclusive and refuses anything outside it. Return
-the highest version whose contract you actually implement; the difference is
-described under [Optional extensions](#optional-extensions).
+the highest version whose contract you actually implement. ABI v1.3 adds the
+required latency query below. Hosts treat v1.1 and v1.2 components without that
+export as zero-latency.
 
 ## Status codes
 
@@ -144,8 +146,9 @@ It is only valid during the call that names it.
 
 ## Required exports
 
-Twenty-three functions and the memory. The signatures are given in WebAssembly
-types; `i32` is a signed 32-bit integer.
+ABI v1.3 has twenty-four functions and the memory. ABI v1.1 and v1.2 have the
+same contract without `rackforge_latency_frames`. The signatures are given in
+WebAssembly types; `i32` is a signed 32-bit integer.
 
 ### Instance
 
@@ -155,12 +158,17 @@ types; `i32` is a signed 32-bit integer.
       (param $sample_rate f64) (param $maximum_frames i32)
       (param $input_channels i32) (param $output_channels i32) (result i32))
 (func (export "rackforge_reset") (result i32))
+(func (export "rackforge_latency_frames") (result i32))
 ```
 
 `initialize` runs once and sets up whatever the buffers need. `prepare` gives
 the audio format and may be called again when the format changes; it must be
 called before `process`. `reset` clears sounding voices and any tail, without
-disturbing parameters.
+disturbing parameters. After `prepare`, `latency_frames` returns the current
+non-negative processing delay in samples at that sample rate. Return `0` for a
+processor with no delay. If a parameter changes the delay, this query must
+reflect the new value immediately; the host decides when its graph can apply
+the compensation.
 
 ### Parameters
 
@@ -270,6 +278,7 @@ rackforge_initialize
 rackforge_prepare
   ├─ rackforge_load_state / rackforge_load_preset / resource_begin…write…end
   ├─ rackforge_set_parameter, at any time
+  ├─ rackforge_latency_frames, after prepare and after latency-changing edits
   ├─ rackforge_process, once per audio block
   ├─ rackforge_reset, when sound must stop
   └─ rackforge_save_state, at any time

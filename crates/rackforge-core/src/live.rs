@@ -496,8 +496,108 @@ struct StandaloneVoice<'plugin> {
     /// The events as the parallel scheduler takes them, rebuilt each block.
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
-    /// A chain effect the player switched off: the signal passes it by.
-    bypassed: bool,
+    /// Present only for chain effects. Keeps bypass click-free and preserves
+    /// the effect's declared latency while the wet path fades in or out.
+    effect_bypass: Option<EffectBypass>,
+}
+
+/// Host bypass remains latency-stable and takes ten milliseconds to cross.
+/// The bounded quarter-second delay reserve covers mastering lookahead and
+/// leaves parameter changes allocation-free on the audio thread.
+const EFFECT_BYPASS_FADE_MS: f64 = 10.0;
+const MAX_EFFECT_LATENCY_MS: u64 = 250;
+
+#[derive(Debug)]
+struct EffectBypass {
+    wet: f32,
+    target: f32,
+    step: f32,
+    latency_frames: usize,
+    capacity_frames: usize,
+    channels: usize,
+    write_frame: usize,
+    delay: Vec<f32>,
+}
+
+impl EffectBypass {
+    fn new(enabled: bool, sample_rate: f64, channels: usize, latency_frames: u32) -> Result<Self> {
+        let capacity_frames =
+            ((sample_rate.max(1.0) as u64 * MAX_EFFECT_LATENCY_MS) / 1_000).max(1) as usize;
+        let samples = capacity_frames
+            .checked_mul(channels)
+            .context("effect bypass delay capacity overflow")?;
+        let fade_frames = (sample_rate * EFFECT_BYPASS_FADE_MS / 1_000.0).max(1.0);
+        let value = if enabled { 1.0 } else { 0.0 };
+        let mut bypass = Self {
+            wet: value,
+            target: value,
+            step: (1.0 / fade_frames) as f32,
+            latency_frames: 0,
+            capacity_frames,
+            channels,
+            write_frame: 0,
+            delay: vec![0.0; samples],
+        };
+        bypass
+            .set_latency(latency_frames)
+            .map_err(anyhow::Error::msg)?;
+        Ok(bypass)
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.target = if enabled { 1.0 } else { 0.0 };
+    }
+
+    fn set_latency(&mut self, latency_frames: u32) -> Result<(), String> {
+        let latency_frames = latency_frames as usize;
+        if latency_frames >= self.capacity_frames {
+            return Err(format!(
+                "effect latency {latency_frames} exceeds the host bypass limit of {} frames",
+                self.capacity_frames - 1
+            ));
+        }
+        self.latency_frames = latency_frames;
+        Ok(())
+    }
+
+    fn force_dry(&mut self) {
+        self.wet = 0.0;
+        self.target = 0.0;
+    }
+
+    /// Replaces `dry` in place with the latency-aligned wet/dry crossfade.
+    fn blend(&mut self, dry: &mut [f32], wet: &[f32], frames: usize) {
+        debug_assert_eq!(dry.len(), frames * self.channels);
+        debug_assert_eq!(wet.len(), dry.len());
+        for frame in 0..frames {
+            if self.wet < self.target {
+                self.wet = (self.wet + self.step).min(self.target);
+            } else if self.wet > self.target {
+                self.wet = (self.wet - self.step).max(self.target);
+            }
+            let dry_gain = 1.0 - self.wet;
+            let write = self.write_frame * self.channels;
+            let read_frame = if self.latency_frames == 0 {
+                self.write_frame
+            } else {
+                (self.write_frame + self.capacity_frames - self.latency_frames)
+                    % self.capacity_frames
+            };
+            let read = read_frame * self.channels;
+            for channel in 0..self.channels {
+                let index = frame * self.channels + channel;
+                let input = dry[index];
+                let delayed = if self.latency_frames == 0 {
+                    input
+                } else {
+                    self.delay[read + channel]
+                };
+                self.delay[write + channel] = input;
+                dry[index] = delayed * dry_gain + wet[index] * self.wet;
+            }
+            self.write_frame = (self.write_frame + 1) % self.capacity_frames;
+        }
+    }
 }
 
 /// Chain effects record no live parameters: they have no target of their
@@ -755,6 +855,9 @@ fn create_chain_voice<'plugin>(
             output_channels as u32,
         )
         .with_context(|| format!("activating effect {}", spec.instance_id))?;
+    let latency_frames = instance
+        .latency_frames()
+        .with_context(|| format!("reading effect {} latency", spec.instance_id))?;
     Ok(StandaloneVoice {
         instance_id: spec.instance_id.clone(),
         plugin,
@@ -767,7 +870,12 @@ fn create_chain_voice<'plugin>(
         events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
         parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
         process_faulted: false,
-        bypassed: !spec.enabled,
+        effect_bypass: Some(EffectBypass::new(
+            spec.enabled,
+            f64::from(sample_rate_hz),
+            channels as usize,
+            latency_frames,
+        )?),
     })
 }
 
@@ -791,24 +899,43 @@ fn create_chain_voices<'plugin>(
 
 fn chain_voices_from_prepared(
     prepared: Vec<PreparedChainVoice>,
+    sample_rate: f64,
     period_frames: usize,
     channels: usize,
-) -> Vec<StandaloneVoice<'static>> {
+) -> Result<Vec<StandaloneVoice<'static>>> {
     prepared
         .into_iter()
-        .map(|prepared| StandaloneVoice {
-            instance_id: prepared.instance_id,
-            plugin: prepared.plugin,
-            instance: prepared.instance.0,
-            parallel: None,
-            input_channels: prepared.input_channels,
-            live_parameter_target: CHAIN_LIVE_PARAMETER_TARGET,
-            input: vec![0.0; period_frames * prepared.input_channels],
-            output: vec![0.0; period_frames * channels],
-            events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
-            parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
-            process_faulted: false,
-            bypassed: !prepared.enabled,
+        .map(|prepared| {
+            let PreparedChainVoice {
+                instance_id,
+                plugin,
+                instance,
+                input_channels,
+                enabled,
+            } = prepared;
+            let mut instance = instance.0;
+            let latency_frames = instance
+                .latency_frames()
+                .with_context(|| format!("reading effect {instance_id} latency"))?;
+            Ok(StandaloneVoice {
+                instance_id,
+                plugin,
+                instance,
+                parallel: None,
+                input_channels,
+                live_parameter_target: CHAIN_LIVE_PARAMETER_TARGET,
+                input: vec![0.0; period_frames * input_channels],
+                output: vec![0.0; period_frames * channels],
+                events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+                parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+                process_faulted: false,
+                effect_bypass: Some(EffectBypass::new(
+                    enabled,
+                    sample_rate,
+                    channels,
+                    latency_frames,
+                )?),
+            })
         })
         .collect()
 }
@@ -1319,7 +1446,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
-            bypassed: false,
+            effect_bypass: None,
         });
     }
     let live_parameter_writer =
@@ -2365,11 +2492,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     reply,
                 } => {
                     let result = match prepared {
-                        Some(prepared) => Ok(chain_voices_from_prepared(
+                        Some(prepared) => chain_voices_from_prepared(
                             prepared,
+                            output_rate as f64,
                             period_frames,
                             channels,
-                        )),
+                        ),
                         None => create_chain_voices(
                             plugins,
                             &effects,
@@ -2387,6 +2515,51 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         );
                     })
                     .map_err(|error| format!("{error:#}"));
+                    let _ = reply.send(result);
+                }
+                AudioControlCommand::SetPlayChainEffectStates {
+                    instrument_id,
+                    effects,
+                    reply,
+                } => {
+                    let result = (|| -> Result<(), String> {
+                        if active_instance_id != instrument_id {
+                            return Err(format!(
+                                "PLAY chain {instrument_id} is not the active instrument"
+                            ));
+                        }
+                        for (instance_id, _) in &effects {
+                            let Some(stage) = chain_voices
+                                .iter()
+                                .find(|stage| stage.instance_id == *instance_id)
+                            else {
+                                return Err(format!(
+                                    "effect {instance_id} is not in the running PLAY chain"
+                                ));
+                            };
+                            if stage.effect_bypass.is_none() {
+                                return Err(format!(
+                                    "effect {instance_id} has no host bypass transition"
+                                ));
+                            }
+                        }
+                        for (instance_id, enabled) in effects {
+                            let stage = chain_voices
+                                .iter_mut()
+                                .find(|stage| stage.instance_id == instance_id)
+                                .expect("PLAY effect states were validated");
+                            stage
+                                .effect_bypass
+                                .as_mut()
+                                .expect("PLAY effect bypass was validated")
+                                .set_enabled(enabled);
+                        }
+                        println!(
+                            "PLAY_CHAIN_BYPASS_APPLIED instrument={instrument_id} effects={}",
+                            chain_voices.len()
+                        );
+                        Ok(())
+                    })();
                     let _ = reply.send(result);
                 }
                 AudioControlCommand::EmergencyStop { reply } => {
@@ -2434,6 +2607,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             voice
                                 .mirror_control(|instance| instance.load_preset(&sound_id))
                                 .map_err(|error| error.to_string())?;
+                            if let Some(bypass) = voice.effect_bypass.as_mut() {
+                                let latency_frames = voice
+                                    .instance
+                                    .latency_frames()
+                                    .map_err(|error| error.to_string())?;
+                                bypass.set_latency(latency_frames)?;
+                            }
                             voice.process_faulted = false;
                             live_parameter_writer.clear(voice.live_parameter_target);
                             Ok(())
@@ -2559,6 +2739,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 .instance
                                 .get_parameter(parameter_index)
                                 .map_err(|error| error.to_string())?;
+                            if let Some(bypass) = voice.effect_bypass.as_mut() {
+                                let latency_frames = voice
+                                    .instance
+                                    .latency_frames()
+                                    .map_err(|error| error.to_string())?;
+                                bypass.set_latency(latency_frames)?;
+                            }
                             if voice.live_parameter_target != CHAIN_LIVE_PARAMETER_TARGET {
                                 live_parameter_writer.try_record(
                                     voice.live_parameter_target,
@@ -3277,9 +3464,6 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     // sounding through the rest.
                     chain_scratch.copy_from_slice(&voice.output);
                     for stage in chain_voices.iter_mut() {
-                        if stage.bypassed || stage.process_faulted {
-                            continue;
-                        }
                         lay_chain_input(
                             &chain_scratch,
                             channels,
@@ -3289,20 +3473,33 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         );
                         stage.events.clear();
                         stage.parameter_events.clear();
-                        process_slots_sequential(
-                            std::slice::from_mut(stage),
-                            period_frames as u32,
-                            channels as u32,
-                            &render_telemetry,
-                        );
-                        if stage.process_faulted {
-                            eprintln!(
-                                "PLUGIN_PROCESS_QUARANTINED context=chain:{} action=bypass",
-                                stage.instance_id
+                        let was_faulted = stage.process_faulted;
+                        if !was_faulted {
+                            process_slots_sequential(
+                                std::slice::from_mut(stage),
+                                period_frames as u32,
+                                channels as u32,
+                                &render_telemetry,
                             );
-                            continue;
                         }
-                        chain_scratch.copy_from_slice(&stage.output);
+                        if stage.process_faulted {
+                            if !was_faulted {
+                                eprintln!(
+                                    "PLUGIN_PROCESS_QUARANTINED context=chain:{} action=bypass",
+                                    stage.instance_id
+                                );
+                            }
+                            stage
+                                .effect_bypass
+                                .as_mut()
+                                .expect("chain effects have host bypass")
+                                .force_dry();
+                        }
+                        stage
+                            .effect_bypass
+                            .as_mut()
+                            .expect("chain effects have host bypass")
+                            .blend(&mut chain_scratch, &stage.output, period_frames);
                     }
                     mix_output.copy_from_slice(&chain_scratch);
                 }
@@ -4293,6 +4490,34 @@ mod tests {
         HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
         MidiButtonBinding, MidiControlChangeBinding,
     };
+
+    #[test]
+    fn effect_bypass_delays_the_dry_path_by_the_reported_latency() {
+        let mut bypass = EffectBypass::new(false, 1_000.0, 1, 2).unwrap();
+        let mut dry = [1.0, 2.0, 3.0, 4.0];
+        bypass.blend(&mut dry, &[99.0; 4], 4);
+        assert_eq!(dry, [0.0, 0.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn effect_bypass_crossfades_without_a_sample_step() {
+        let mut bypass = EffectBypass::new(true, 1_000.0, 1, 0).unwrap();
+        bypass.set_enabled(false);
+        let mut dry = [1.0; 10];
+        bypass.blend(&mut dry, &[0.0; 10], 10);
+        for pair in dry.windows(2) {
+            assert!(pair[1] >= pair[0]);
+            assert!(pair[1] - pair[0] <= 0.101);
+        }
+        assert!((dry[0] - 0.1).abs() < 0.001);
+        assert!((dry[9] - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn effect_bypass_rejects_latency_beyond_its_realtime_reserve() {
+        let error = EffectBypass::new(true, 1_000.0, 2, 250).unwrap_err();
+        assert!(format!("{error:#}").contains("bypass limit"));
+    }
 
     fn midi(length: u8, data: [u8; 3]) -> MidiEventV1 {
         MidiEventV1 {

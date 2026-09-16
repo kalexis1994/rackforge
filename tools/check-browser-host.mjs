@@ -55,6 +55,18 @@ const EXPORTS = [
   "rackforge_program_preview",
   "rackforge_program_editor_view",
   "rackforge_program_apply_edit",
+  "rackforge_parallel_abi_version",
+  "rackforge_parallel_max_units",
+  "rackforge_parallel_dispatch_stride",
+  "rackforge_parallel_dispatch_ptr",
+  "rackforge_parallel_plan_ptr",
+  "rackforge_parallel_mix_ptr",
+  "rackforge_parallel_shared_ptr",
+  "rackforge_parallel_shared_capacity",
+  "rackforge_parallel_begin_block",
+  "rackforge_parallel_render_unit",
+  "rackforge_parallel_end_block",
+  "rackforge_latency_frames",
 ];
 
 const [, , hostPath, storagePath, packagePath] = process.argv;

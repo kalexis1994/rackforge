@@ -157,6 +157,13 @@ pub enum AudioControlCommand {
         prepared: Option<Vec<PreparedChainVoice>>,
         reply: SyncSender<Result<(), String>>,
     },
+    /// Changes only enabled states on the already-running PLAY chain. The
+    /// audio loop preserves each effect instance and crossfades its bypass.
+    SetPlayChainEffectStates {
+        instrument_id: InstanceId,
+        effects: Vec<(InstanceId, bool)>,
+        reply: SyncSender<Result<(), String>>,
+    },
     BeginAudition {
         instance_id: InstanceId,
         previous_sound_id: Option<String>,
@@ -3307,10 +3314,17 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             // Only the instrument on stage gets its effects built now;
             // another instrument's chain is kept and built when it is
             // selected.
-            if snapshot.active_instance_id.as_ref() == Some(&instrument_id)
-                && let Err(failure) = apply_play_chain(context, snapshot.revision, &chain)
-            {
-                return failure.into_response();
+            if snapshot.active_instance_id.as_ref() == Some(&instrument_id) {
+                let result = match snapshot.play_chain(&instrument_id) {
+                    Some(previous) => play_chain_effect_state_update(previous, &chain).map_or_else(
+                        || apply_play_chain(context, snapshot.revision, &chain),
+                        |effects| apply_play_chain_effect_states(context, &instrument_id, effects),
+                    ),
+                    None => apply_play_chain(context, snapshot.revision, &chain),
+                };
+                if let Err(failure) = result {
+                    return failure.into_response();
+                }
             }
             record_command_event(
                 context,
@@ -4523,6 +4537,59 @@ fn apply_play_chain(
     )
 }
 
+/// Returns the runtime enabled states when no effect identity, order or
+/// program changed. This path keeps the existing DSP instances alive.
+fn play_chain_effect_state_update(
+    previous: &PlayChainState,
+    next: &PlayChainState,
+) -> Option<Vec<(InstanceId, bool)>> {
+    if previous.instrument_id != next.instrument_id || previous.effects.len() != next.effects.len()
+    {
+        return None;
+    }
+    if previous
+        .effects
+        .iter()
+        .zip(&next.effects)
+        .any(|(left, right)| {
+            left.id != right.id
+                || left.plugin_id != right.plugin_id
+                || left.program_id != right.program_id
+        })
+    {
+        return None;
+    }
+    next.effects
+        .iter()
+        .map(|effect| {
+            next.effect_instance_id(&effect.id)
+                .map(|instance_id| (instance_id, effect.enabled))
+                .ok()
+        })
+        .collect()
+}
+
+fn apply_play_chain_effect_states(
+    context: &ControlContext,
+    instrument_id: &InstanceId,
+    effects: Vec<(InstanceId, bool)>,
+) -> Result<(), ControlFailure> {
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    send_audio(
+        context,
+        AudioControlCommand::SetPlayChainEffectStates {
+            instrument_id: instrument_id.clone(),
+            effects,
+            reply: reply_sender,
+        },
+    )?;
+    receive_audio_with_timeout(
+        reply_receiver,
+        "set PLAY effect bypass",
+        AUDIO_RECONFIGURE_TIMEOUT,
+    )
+}
+
 /// The chain's effects built, activated and warmed on this thread, when
 /// every one of them is portable; `None` sends the audio loop to build
 /// them itself (native instances keep their thread affinity).
@@ -5251,6 +5318,35 @@ mod tests {
         PluginInstanceState, SessionId, SessionState, SoundSummary,
     };
     use std::sync::mpsc::sync_channel;
+
+    fn effect_chain(enabled: bool, program_id: Option<&str>) -> PlayChainState {
+        PlayChainState {
+            instrument_id: InstanceId::new("instrument.test").unwrap(),
+            effects: vec![rackforge_session_api::PlayChainEffect {
+                id: "limiter".into(),
+                plugin_id: "org.rackforge.limiter".into(),
+                enabled,
+                program_id: program_id.map(str::to_owned),
+            }],
+        }
+    }
+
+    #[test]
+    fn enabled_only_chain_edits_keep_the_running_effect_instances() {
+        let previous = effect_chain(true, Some("clean"));
+        let next = effect_chain(false, Some("clean"));
+        let update = play_chain_effect_state_update(&previous, &next).unwrap();
+        assert_eq!(update.len(), 1);
+        assert_eq!(update[0].0.as_str(), "instrument.test.fx.limiter");
+        assert!(!update[0].1);
+    }
+
+    #[test]
+    fn structural_chain_edits_require_a_rebuild() {
+        let previous = effect_chain(true, Some("clean"));
+        let next = effect_chain(false, Some("loud"));
+        assert!(play_chain_effect_state_update(&previous, &next).is_none());
+    }
 
     fn context() -> (Arc<ControlContext>, Receiver<AudioControlCommand>) {
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();

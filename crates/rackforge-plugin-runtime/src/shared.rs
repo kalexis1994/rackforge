@@ -10,7 +10,8 @@ use anyhow::{Context, Result, bail};
 use std::ops::Range;
 
 pub const ABI_VERSION_V1_1: i32 = 0x0001_0001;
-pub const ABI_VERSION_V1: i32 = 0x0001_0002;
+pub const ABI_VERSION_V1_2: i32 = 0x0001_0002;
+pub const ABI_VERSION_V1: i32 = 0x0001_0003;
 /// Version reported by `rackforge_parallel_abi_version` for the optional
 /// parallel-render extension. Major mismatches are rejected outright.
 pub const PARALLEL_ABI_VERSION_V1: i32 = 0x0001_0000;

@@ -151,6 +151,31 @@ The host validates the method, surface, target and value, derives the plugin
 instance ID itself and returns a response. It never accepts a raw Core command
 from plugin JavaScript.
 
+### Canonical parameter stream
+
+After the initial `plugin.parameters` request supplies the schema and current
+values, RackForge sends a `parameter_changed` event whenever a value changes:
+
+```json
+{
+  "protocol": "rackforge.plugin.web@1",
+  "kind": "parameter_changed",
+  "parameter_index": 8,
+  "value": -3.25
+}
+```
+
+The stream includes writable controls and read-only meters. Values are finite,
+canonical plugin values, and unchanged values are suppressed. A surface should
+patch the matching control or meter from this event instead of repeatedly
+calling `plugin.parameters`. It may ignore an event while the user is holding
+that same control, then accept the next canonical event after the gesture.
+
+The stream is UI telemetry rather than sample-accurate automation. Delivery can
+be coalesced, and a hidden page should not infer elapsed audio time from it.
+Calling `plugin.parameters` remains the way to bootstrap a surface, recover
+after reconnect, or load a changed schema.
+
 ## Current v1 methods
 
 - `plugin.parameters`: available to `PLAY` and `CONFIG`; returns the active

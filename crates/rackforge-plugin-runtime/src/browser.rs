@@ -26,7 +26,8 @@ use crate::shared::{
     validate_realtime_events, write_f32, write_midi, write_parameters,
 };
 use crate::{
-    ABI_VERSION_V1, ABI_VERSION_V1_1, MidiEvent, MidiEvent2, ParameterEvent, RuntimeLimits,
+    ABI_VERSION_V1, ABI_VERSION_V1_1, ABI_VERSION_V1_2, MidiEvent, MidiEvent2, ParameterEvent,
+    RuntimeLimits,
 };
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -78,6 +79,7 @@ pub mod export {
     pub const PARALLEL_BEGIN_BLOCK: i32 = 40;
     pub const PARALLEL_RENDER_UNIT: i32 = 41;
     pub const PARALLEL_END_BLOCK: i32 = 42;
+    pub const LATENCY_FRAMES: i32 = 43;
 }
 
 /// Raw imports the embedding page must supply.
@@ -457,6 +459,10 @@ impl PortableModule {
             None
         };
 
+        let has_latency = raw.export_present(export::LATENCY_FRAMES);
+        if version > ABI_VERSION_V1_2 && !has_latency {
+            bail!("wasm-v1 ABI v1.3 plugin is missing export rackforge_latency_frames");
+        }
         Ok(PortableInstance {
             raw,
             input_offset,
@@ -471,6 +477,7 @@ impl PortableModule {
             capacity_transfer_bytes: transfer_capacity as usize,
             program_api,
             parallel_api,
+            has_latency,
             prepared_sample_rate: 0.0,
             prepared_input_channels: 0,
             prepared_output_channels: 0,
@@ -587,6 +594,7 @@ pub struct PortableInstance {
     capacity_transfer_bytes: usize,
     program_api: Option<PortableProgramApi>,
     parallel_api: Option<PortableParallelApi>,
+    has_latency: bool,
     prepared_sample_rate: f64,
     prepared_input_channels: u32,
     prepared_output_channels: u32,
@@ -688,6 +696,17 @@ impl PortableInstance {
             bail!("portable plugin does not expose parameter {index}");
         }
         Ok(value)
+    }
+
+    pub fn latency_frames(&mut self) -> Result<u32> {
+        if !self.has_latency {
+            return Ok(0);
+        }
+        let value = self.raw.call_0(export::LATENCY_FRAMES, "latency_frames")?;
+        if value < 0 {
+            bail!("portable plugin returned an invalid latency");
+        }
+        Ok(value as u32)
     }
 
     pub fn reset(&mut self) -> Result<()> {

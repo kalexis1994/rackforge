@@ -11,7 +11,7 @@ use crate::shared::{
     validate_realtime_events, write_f32, write_midi, write_midi2, write_parameters,
 };
 use crate::{
-    ABI_VERSION_V1, ABI_VERSION_V1_1, MAX_PARALLEL_UNITS, MidiEvent, MidiEvent2,
+    ABI_VERSION_V1, ABI_VERSION_V1_1, ABI_VERSION_V1_2, MAX_PARALLEL_UNITS, MidiEvent, MidiEvent2,
     PARALLEL_ABI_VERSION_V1, ParallelBlockPlan, ParallelLayout, ParallelPlanEntry, ParameterEvent,
     RuntimeLimits,
 };
@@ -428,6 +428,10 @@ impl PortableModule {
         let prepare = typed(&instance, &mut store, "rackforge_prepare")?;
         let set_parameter = typed(&instance, &mut store, "rackforge_set_parameter")?;
         let get_parameter = typed(&instance, &mut store, "rackforge_get_parameter")?;
+        let latency_frames = optional_typed(&instance, &mut store, "rackforge_latency_frames")?;
+        if version > ABI_VERSION_V1_2 && latency_frames.is_none() {
+            bail!("wasm-v1 ABI v1.3 plugin is missing export rackforge_latency_frames");
+        }
         let reset = typed(&instance, &mut store, "rackforge_reset")?;
         let resource_begin = typed(&instance, &mut store, "rackforge_resource_begin")?;
         let resource_write = typed(&instance, &mut store, "rackforge_resource_write")?;
@@ -457,6 +461,7 @@ impl PortableModule {
             prepare,
             set_parameter,
             get_parameter,
+            latency_frames,
             reset,
             resource_begin,
             resource_write,
@@ -531,6 +536,7 @@ pub struct PortableInstance {
     prepare: TypedFunc<(f64, i32, i32, i32), i32>,
     set_parameter: TypedFunc<(i32, f64), i32>,
     get_parameter: TypedFunc<i32, f64>,
+    latency_frames: Option<TypedFunc<(), i32>>,
     reset: TypedFunc<(), i32>,
     resource_begin: TypedFunc<(i32, i64), i32>,
     resource_write: TypedFunc<(i64, i32), i32>,
@@ -635,6 +641,22 @@ impl PortableInstance {
             bail!("portable plugin does not expose parameter {index}");
         }
         Ok(value)
+    }
+
+    pub fn latency_frames(&mut self) -> Result<u32> {
+        if self.latency_frames.is_none() {
+            return Ok(0);
+        }
+        self.reset_control_fuel()?;
+        let latency_frames = self
+            .latency_frames
+            .as_ref()
+            .expect("latency export presence was checked");
+        let value = latency_frames.call(&mut self.store, ())?;
+        if value < 0 {
+            bail!("portable plugin returned an invalid latency");
+        }
+        Ok(value as u32)
     }
 
     pub fn reset(&mut self) -> Result<()> {
@@ -1758,6 +1780,45 @@ mod tests {
             .process_interleaved(&input, &mut output, 2)
             .unwrap();
         assert_eq!(output, [0.5, -0.5, 0.125, -0.125]);
+    }
+
+    #[test]
+    fn latency_is_zero_for_legacy_components_and_reported_by_v1_3() {
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let legacy = engine.compile(&wat::parse_str(GAIN).unwrap()).unwrap();
+        assert_eq!(legacy.instantiate().unwrap().latency_frames().unwrap(), 0);
+
+        let source = GAIN
+            .replace("i32.const 65537", "i32.const 65539")
+            .replace(
+                "          (func (export \"rackforge_reset\")",
+                "          (func (export \"rackforge_latency_frames\") (result i32) i32.const 96)\n          (func (export \"rackforge_reset\")",
+            );
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        assert_eq!(module.instantiate().unwrap().latency_frames().unwrap(), 96);
+    }
+
+    #[test]
+    fn v1_3_requires_a_valid_latency_export() {
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let missing = GAIN.replace("i32.const 65537", "i32.const 65539");
+        let module = engine.compile(&wat::parse_str(missing).unwrap()).unwrap();
+        let error = match module.instantiate() {
+            Ok(_) => panic!("ABI v1.3 component without latency export loaded"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:#}").contains("rackforge_latency_frames"));
+
+        let negative = GAIN
+            .replace("i32.const 65537", "i32.const 65539")
+            .replace(
+                "          (func (export \"rackforge_reset\")",
+                "          (func (export \"rackforge_latency_frames\") (result i32) i32.const -1)\n          (func (export \"rackforge_reset\")",
+            );
+        let module = engine.compile(&wat::parse_str(negative).unwrap()).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        let error = instance.latency_frames().unwrap_err();
+        assert!(format!("{error:#}").contains("invalid latency"));
     }
 
     #[test]

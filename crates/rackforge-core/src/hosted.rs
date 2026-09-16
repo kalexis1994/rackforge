@@ -708,6 +708,17 @@ impl PluginInstance<'_> {
         }
     }
 
+    /// Processing latency introduced by this instance at its current
+    /// prepared sample rate. Native ABI v1 plugins predate this optional
+    /// portable contract and therefore report zero until their extension is
+    /// introduced.
+    pub fn latency_frames(&mut self) -> Result<u32> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => Ok(0),
+            PluginInstanceBackend::Portable(instance) => instance.instance.latency_frames(),
+        }
+    }
+
     pub fn save_state(&mut self) -> Result<Vec<u8>> {
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.save_state(),

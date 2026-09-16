@@ -13,7 +13,8 @@
 //! memory buffers so plugin code does not handle pointers or host platforms.
 
 pub const ABI_VERSION_V1_1: u32 = 0x0001_0001;
-pub const ABI_VERSION_V1: u32 = 0x0001_0002;
+pub const ABI_VERSION_V1_2: u32 = 0x0001_0002;
+pub const ABI_VERSION_V1: u32 = 0x0001_0003;
 #[cfg(test)]
 mod wide_midi_probe_test;
 
@@ -147,6 +148,14 @@ pub trait Processor: Default {
 
     fn get_parameter(&self, _index: u32) -> Option<f64> {
         None
+    }
+
+    /// Processing latency introduced by this instance, in samples at the
+    /// current prepared sample rate. A processor whose latency changes after a
+    /// parameter edit returns the new value immediately; the host decides when
+    /// its graph can apply compensation.
+    fn latency_frames(&self) -> u32 {
+        0
     }
 
     fn reset(&mut self) {}
@@ -456,6 +465,11 @@ pub trait ParallelProcessor: Default {
         None
     }
 
+    /// Processing latency introduced by the complete parallel processor.
+    fn latency_frames(&self) -> u32 {
+        0
+    }
+
     /// Resets coordinator state. Unit state is reset separately through
     /// [`Self::reset_unit`] on every instance that holds it.
     fn reset(&mut self) {}
@@ -719,6 +733,22 @@ macro_rules! export_processor {
                 }
                 let processor = &*core::ptr::addr_of!(RF_PROCESSOR).cast::<$processor>();
                 processor.get_parameter(index as u32).unwrap_or(f64::NAN)
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_latency_frames() -> i32 {
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor = &*core::ptr::addr_of!(RF_PROCESSOR).cast::<$processor>();
+                let latency = processor.latency_frames();
+                if latency > i32::MAX as u32 {
+                    $crate::STATUS_INVALID_STATE
+                } else {
+                    latency as i32
+                }
             }
         }
 
@@ -1567,6 +1597,10 @@ macro_rules! export_parallel_processor {
 
             fn get_parameter(&self, index: u32) -> Option<f64> {
                 $crate::ParallelProcessor::get_parameter(&self.inner, index)
+            }
+
+            fn latency_frames(&self) -> u32 {
+                $crate::ParallelProcessor::latency_frames(&self.inner)
             }
 
             fn reset(&mut self) {

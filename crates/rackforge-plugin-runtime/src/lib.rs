@@ -15,7 +15,7 @@
 mod shared;
 
 pub use shared::{
-    ABI_VERSION_V1, ABI_VERSION_V1_1, MAX_PARALLEL_UNITS, MidiEvent, MidiEvent2,
+    ABI_VERSION_V1, ABI_VERSION_V1_1, ABI_VERSION_V1_2, MAX_PARALLEL_UNITS, MidiEvent, MidiEvent2,
     PARALLEL_ABI_VERSION_V1, ParallelBlockPlan, ParallelLayout, ParallelPlanEntry, ParameterEvent,
     RuntimeLimits,
 };

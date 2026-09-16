@@ -5185,14 +5185,22 @@ export function PluginFrame({
       ) {
         if (isolated) {
           respond(false, "Program document editing is unavailable in a Rack Slot session.");
-        } else dispatchCommand({
-          type: "begin_program_edit",
-          instance_id: instance.instance_id,
-          ...(typeof params.program_id === "string"
-            ? { program_id: params.program_id }
-            : {}),
-        });
-        if (!isolated) respond(true);
+        } else {
+          dispatchCommandAwait({
+            type: "begin_program_edit",
+            instance_id: instance.instance_id,
+            ...(typeof params.program_id === "string"
+              ? { program_id: params.program_id }
+              : {}),
+          })
+            .then(() => respond(true))
+            .catch((error: unknown) =>
+              respond(
+                false,
+                error instanceof Error ? error.message : "Could not begin program editing.",
+              ),
+            );
+        }
       } else if (
         event.data.method === "plugin.edit_program_field" &&
         !isolated &&
@@ -5238,17 +5246,56 @@ export function PluginFrame({
           respond(false, "The active program document is invalid.");
         }
       } else if (
+        event.data.method === "plugin.replace_program_draft" &&
+        surface === "config" &&
+        !isolated &&
+        draft &&
+        params.draft_id === draft.draft_id &&
+        params.document &&
+        typeof params.document === "object" &&
+        !Array.isArray(params.document)
+      ) {
+        try {
+          const documentJson = JSON.stringify(params.document);
+          if (new TextEncoder().encode(documentJson).byteLength > 16_384) {
+            respond(false, "The program document exceeds the plugin transfer limit.");
+          } else {
+            dispatchCommandAwait({
+              type: "replace_program_draft",
+              draft_id: draft.draft_id,
+              document_json: documentJson,
+            })
+              .then(() => respond(true))
+              .catch((error: unknown) =>
+                respond(
+                  false,
+                  error instanceof Error
+                    ? error.message
+                    : "Could not replace the program draft.",
+                ),
+              );
+          }
+        } catch {
+          respond(false, "The imported program document is not valid JSON.");
+        }
+      } else if (
         event.data.method === "plugin.save_program" &&
         !isolated &&
         (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id
       ) {
-        dispatchCommand({
+        dispatchCommandAwait({
           type: "save_program_draft",
           draft_id: draft.draft_id,
-        });
-        respond(true);
+        })
+          .then(() => respond(true))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not save this program.",
+            ),
+          );
       } else if (
         event.data.method === "plugin.cancel_program" &&
         !isolated &&
@@ -5256,11 +5303,17 @@ export function PluginFrame({
         draft &&
         params.draft_id === draft.draft_id
       ) {
-        dispatchCommand({
+        dispatchCommandAwait({
           type: "cancel_program_edit",
           draft_id: draft.draft_id,
-        });
-        respond(true);
+        })
+          .then(() => respond(true))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not cancel program editing.",
+            ),
+          );
       } else if (
         event.data.method === "plugin.restore_program_preview" &&
         !isolated &&

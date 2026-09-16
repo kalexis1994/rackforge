@@ -231,6 +231,12 @@ from plugin JavaScript.
 - `plugin.set_program_name`: available to `PLAY` and `CONFIG`; changes the
   active draft's portable program name without exposing plugin document
   internals.
+- `plugin.replace_program_draft`: available only to `CONFIG`; replaces the
+  active draft with a complete program document. The request carries the
+  active `draft_id` and a `document` object, limited to 16 KiB after JSON
+  encoding. RackForge parses the typed program envelope and the plugin validates
+  its payload before the draft changes. This is intended for portable program
+  file import; it does not expose plugin storage paths or bypass atomic saving.
 - `plugin.restore_program_preview`: available to `PLAY` and `CONFIG`; restores
   the last confirmed draft after transient previews.
 - `plugin.save_program`: available to `PLAY` and `CONFIG`; persists the active

@@ -20,6 +20,7 @@ rackforge-host-capabilities = { path = "../../crates/rackforge-host-capabilities
 rackforge-midi-api = { path = "../../crates/rackforge-midi-api" }
 rackforge-performance-api = { path = "../../crates/rackforge-performance-api" }
 rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api" }
+rackforge-program-api = { path = "../../crates/rackforge-program-api" }
 rackforge-repository = { path = "../../crates/rackforge-repository" }
 rackforge-session-api = { path = "../../crates/rackforge-session-api" }
 rackforge-surface-runtime = { path = "../../crates/rackforge-surface-runtime" }

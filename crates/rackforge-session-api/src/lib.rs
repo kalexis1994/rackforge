@@ -610,12 +610,17 @@ impl SessionState {
                 instance_id,
                 sound_id,
             } => {
+                let is_active_program_preview = self.program_draft.as_ref().is_some_and(|draft| {
+                    draft.instance_id == *instance_id && draft.preview_sound_id == *sound_id
+                });
                 let instance = self
                     .instances
                     .iter_mut()
                     .find(|instance| &instance.instance_id == instance_id)
                     .ok_or_else(|| format!("unknown instance {instance_id}"))?;
-                if !instance.sounds.iter().any(|sound| sound.id == *sound_id) {
+                if !instance.sounds.iter().any(|sound| sound.id == *sound_id)
+                    && !is_active_program_preview
+                {
                     return Err(format!(
                         "unknown sound {sound_id:?} for instance {instance_id}"
                     ));
@@ -1643,9 +1648,32 @@ mod tests {
                 },
             ))
             .unwrap();
+        let preview_sound_id = session
+            .program_draft
+            .as_ref()
+            .unwrap()
+            .preview_sound_id
+            .clone();
         session
             .apply(&event(
                 4,
+                SessionEvent::SoundSelected {
+                    instance_id: instance_id.clone(),
+                    sound_id: preview_sound_id.clone(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(
+            session
+                .active_instance()
+                .unwrap()
+                .selected_sound_id
+                .as_deref(),
+            Some(preview_sound_id.as_str())
+        );
+        session
+            .apply(&event(
+                5,
                 SessionEvent::ProgramSaved {
                     draft_id: 17,
                     instance_id: instance_id.clone(),
@@ -1663,7 +1691,7 @@ mod tests {
             .unwrap();
         session
             .apply(&event(
-                5,
+                6,
                 SessionEvent::AuditionEnded {
                     lease_id: 7,
                     instance_id,

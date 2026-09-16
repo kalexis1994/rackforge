@@ -47,7 +47,11 @@ use rackforge_performance_api::{
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{
     Capability, HostPresetSummary, PluginKind, PluginManifest, PluginStateReference, PresetCatalog,
-    ResourceKind,
+    PresetDescriptor, ResourceKind,
+};
+use rackforge_program_api::{
+    PreparedProgram, ProgramDocument, ProgramEditRequest, ProgramEditorView,
+    ProgramFieldEditRequest,
 };
 use rackforge_repository::{
     LocalPackageInspection, PluginUserDataRemovalOptions, inspect_local_archive,
@@ -55,9 +59,10 @@ use rackforge_repository::{
     uninstall_plugin,
 };
 use rackforge_session_api::{
-    BankSummary, ClientId, CommandEnvelope, CommandRef, EventEnvelope, InstanceId, MasterLevel,
-    MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent,
-    SessionId, SessionState, SoundSummary, SurfaceMode,
+    AuditionEndReason, BankSummary, ClientId, CommandEnvelope, CommandRef, EventEnvelope,
+    InstanceId, MasterLevel, MasterPan, PluginInstanceState, ProgramDraftState, Revision,
+    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SessionId, SessionState, SoundSummary,
+    SurfaceMode,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -141,6 +146,8 @@ pub struct BrowserHost {
     /// MIDI itself stays in the page; this owns no browser handle.
     controller: BrowserKeyLabController,
     controller_command_id: u64,
+    next_audition_lease_id: u64,
+    next_program_draft_id: u64,
     parameter_links: Vec<CompiledParameterLink>,
     live_parameter_store: LiveParameterStateStore,
     live_parameter_dirty_at: Option<Instant>,
@@ -305,6 +312,8 @@ impl BrowserHost {
             virtual_notes: BTreeMap::new(),
             controller: BrowserKeyLabController::default(),
             controller_command_id: 1,
+            next_audition_lease_id: 1,
+            next_program_draft_id: 1,
             parameter_links: Vec::new(),
             live_parameter_store,
             live_parameter_dirty_at: None,
@@ -1270,6 +1279,353 @@ impl BrowserHost {
                     }
                 }
             }
+            SessionCommand::BeginProgramEdit {
+                instance_id,
+                program_id,
+            } => {
+                if self.store.state().active_instance_id.as_ref() != Some(&instance_id) {
+                    return Err(Failure::new(
+                        ControlErrorCode::Conflict,
+                        "program editing requires the active instrument",
+                    ));
+                }
+                if self.store.state().audition.is_some()
+                    || self.store.state().program_draft.is_some()
+                {
+                    return Err(Failure::new(
+                        ControlErrorCode::Conflict,
+                        "another audition or program edit is already active",
+                    ));
+                }
+                let previous_sound_id = self
+                    .store
+                    .state()
+                    .instance(&instance_id)
+                    .and_then(|instance| instance.selected_sound_id.clone());
+                let request = ProgramEditRequest::new(program_id.clone());
+                let plugin = self.plugin_mut(&instance_id)?;
+                let prepared = plugin
+                    .instance
+                    .begin_program_edit(&request)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                if prepared.document.plugin_id != plugin.plugin_id {
+                    return Err(Failure::new(
+                        ControlErrorCode::Internal,
+                        "plugin prepared a program for a different plugin",
+                    ));
+                }
+                let editor = plugin
+                    .instance
+                    .program_editor_view(&prepared.document)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                plugin.instance.reset().map_err(|error| {
+                    Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                })?;
+                preview_prepared_program(plugin, &prepared)?;
+                let lease_id = self.next_audition_lease_id;
+                self.next_audition_lease_id = self.next_audition_lease_id.wrapping_add(1).max(1);
+                let draft_id = self.next_program_draft_id;
+                self.next_program_draft_id = self.next_program_draft_id.wrapping_add(1).max(1);
+                let draft = program_draft_state(
+                    draft_id,
+                    instance_id.clone(),
+                    program_id,
+                    &prepared,
+                    editor,
+                    false,
+                )?;
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::AuditionStarted {
+                            lease_id,
+                            instance_id,
+                            previous_sound_id,
+                        },
+                        SessionEvent::ProgramEditStarted { draft },
+                    ],
+                );
+            }
+            SessionCommand::ReplaceProgramDraft {
+                draft_id,
+                document_json,
+            } => {
+                let draft = self.program_draft(draft_id)?;
+                self.require_program_audition(&draft)?;
+                let document: ProgramDocument =
+                    serde_json::from_str(&document_json).map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::InvalidRequest,
+                            format!("invalid program document JSON: {error}"),
+                        )
+                    })?;
+                let previous: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                if document.id != previous.id || document.plugin_id != previous.plugin_id {
+                    return Err(Failure::new(
+                        ControlErrorCode::Rejected,
+                        "program identity cannot change while editing",
+                    ));
+                }
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                let prepared =
+                    plugin
+                        .instance
+                        .prepare_program_save(&document)
+                        .map_err(|error| {
+                            Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                        })?;
+                let editor = plugin
+                    .instance
+                    .program_editor_view(&prepared.document)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                preview_prepared_program(plugin, &prepared)?;
+                let updated = program_draft_state(
+                    draft_id,
+                    draft.instance_id.clone(),
+                    draft.original_program_id,
+                    &prepared,
+                    editor,
+                    true,
+                )?;
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::ProgramDraftUpdated {
+                            draft: updated.clone(),
+                        },
+                        SessionEvent::SoundSelected {
+                            instance_id: updated.instance_id.clone(),
+                            sound_id: updated.preview_sound_id,
+                        },
+                    ],
+                );
+            }
+            SessionCommand::PreviewProgramDraft {
+                draft_id,
+                document_json,
+            } => {
+                let draft = self.program_draft(draft_id)?;
+                self.require_program_audition(&draft)?;
+                let document: ProgramDocument =
+                    serde_json::from_str(&document_json).map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::InvalidRequest,
+                            format!("invalid preview program document JSON: {error}"),
+                        )
+                    })?;
+                let confirmed: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                if document.id != confirmed.id || document.plugin_id != confirmed.plugin_id {
+                    return Err(Failure::new(
+                        ControlErrorCode::Rejected,
+                        "program identity cannot change during preview",
+                    ));
+                }
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                let prepared =
+                    plugin
+                        .instance
+                        .prepare_program_save(&document)
+                        .map_err(|error| {
+                            Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                        })?;
+                preview_prepared_program(plugin, &prepared)?;
+                return Ok(Vec::new());
+            }
+            SessionCommand::EditProgramDraftField {
+                draft_id,
+                field_id,
+                value,
+                preview,
+            } => {
+                let draft = self.program_draft(draft_id)?;
+                self.require_program_audition(&draft)?;
+                let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                let request = ProgramFieldEditRequest {
+                    schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                    document,
+                    field_id,
+                    value,
+                };
+                request.validate().map_err(|error| {
+                    Failure::new(ControlErrorCode::InvalidRequest, error.to_string())
+                })?;
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                let prepared = plugin
+                    .instance
+                    .apply_program_edit(&request)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                let editor = plugin
+                    .instance
+                    .program_editor_view(&prepared.document)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                preview_prepared_program(plugin, &prepared)?;
+                if preview {
+                    return Ok(Vec::new());
+                }
+                let updated = program_draft_state(
+                    draft_id,
+                    draft.instance_id,
+                    draft.original_program_id,
+                    &prepared,
+                    editor,
+                    true,
+                )?;
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::ProgramDraftUpdated {
+                            draft: updated.clone(),
+                        },
+                        SessionEvent::SoundSelected {
+                            instance_id: updated.instance_id.clone(),
+                            sound_id: updated.preview_sound_id,
+                        },
+                    ],
+                );
+            }
+            SessionCommand::RestoreProgramDraftPreview { draft_id } => {
+                let draft = self.program_draft(draft_id)?;
+                self.require_program_audition(&draft)?;
+                let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                let prepared =
+                    plugin
+                        .instance
+                        .prepare_program_save(&document)
+                        .map_err(|error| {
+                            Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                        })?;
+                preview_prepared_program(plugin, &prepared)?;
+                return Ok(Vec::new());
+            }
+            SessionCommand::SaveProgramDraft { draft_id } => {
+                let draft = self.program_draft(draft_id)?;
+                let audition = self.require_program_audition(&draft)?;
+                let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                let prepared = PreparedProgram {
+                    schema_version: rackforge_plugin_api::PROGRAM_EDIT_SCHEMA_VERSION,
+                    storage_path: draft.storage_path.clone(),
+                    preview_sound_id: draft.preview_sound_id,
+                    document,
+                    artifacts: draft.artifacts,
+                };
+                prepared.validate().map_err(|error| {
+                    Failure::new(
+                        ControlErrorCode::Internal,
+                        format!("stored prepared program is invalid: {error}"),
+                    )
+                })?;
+                PluginStorage::new(Path::new(DATA_ROOT))
+                    .save_prepared_program(&prepared)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Rejected,
+                            format!("saving program: {error:#}"),
+                        )
+                    })?;
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                plugin
+                    .instance
+                    .install_program(&prepared)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                let catalog = plugin.instance.preset_catalog().map_err(|error| {
+                    Failure::new(ControlErrorCode::Internal, format!("{error:#}"))
+                })?;
+                let preset_id = format!("custom.{}", prepared.document.id);
+                let preset = catalog
+                    .presets
+                    .iter()
+                    .find(|preset| preset.id == preset_id)
+                    .ok_or_else(|| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            "installed program is missing from the plugin catalog",
+                        )
+                    })?
+                    .clone();
+                plugin.presets = catalog;
+                restore_program_selection(plugin, audition.previous_sound_id.as_deref())?;
+                let sound = sound_summary(&preset);
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::ProgramSaved {
+                            draft_id,
+                            instance_id: draft.instance_id.clone(),
+                            sound,
+                        },
+                        SessionEvent::AuditionEnded {
+                            lease_id: audition.lease_id,
+                            instance_id: draft.instance_id,
+                            restored_sound_id: audition.previous_sound_id,
+                            reason: AuditionEndReason::Released,
+                        },
+                    ],
+                );
+            }
+            SessionCommand::CancelProgramEdit { draft_id } => {
+                let draft = self.program_draft(draft_id)?;
+                let audition = self.require_program_audition(&draft)?;
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                restore_program_selection(plugin, audition.previous_sound_id.as_deref())?;
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::ProgramEditCancelled {
+                            draft_id,
+                            instance_id: draft.instance_id.clone(),
+                        },
+                        SessionEvent::AuditionEnded {
+                            lease_id: audition.lease_id,
+                            instance_id: draft.instance_id,
+                            restored_sound_id: audition.previous_sound_id,
+                            reason: AuditionEndReason::Cancelled,
+                        },
+                    ],
+                );
+            }
             SessionCommand::SetPlayChain {
                 instrument_id,
                 effects,
@@ -1693,6 +2049,52 @@ impl BrowserHost {
                     format!("could not load the Slot's sound: {error:#}"),
                 )
             })
+    }
+
+    fn program_draft(&self, draft_id: u64) -> Result<ProgramDraftState, Failure> {
+        self.store
+            .state()
+            .program_draft
+            .as_ref()
+            .filter(|draft| draft.draft_id == draft_id)
+            .cloned()
+            .ok_or_else(|| {
+                Failure::new(
+                    ControlErrorCode::NotFound,
+                    "program draft is missing or no longer valid",
+                )
+            })
+    }
+
+    fn require_program_audition(
+        &self,
+        draft: &ProgramDraftState,
+    ) -> Result<rackforge_session_api::AuditionState, Failure> {
+        self.store
+            .state()
+            .audition
+            .as_ref()
+            .filter(|audition| audition.instance_id == draft.instance_id)
+            .cloned()
+            .ok_or_else(|| {
+                Failure::new(
+                    ControlErrorCode::Internal,
+                    "program draft lost its audition lease",
+                )
+            })
+    }
+
+    fn record_events(
+        &mut self,
+        command_ref: &CommandRef,
+        events: Vec<SessionEvent>,
+    ) -> Result<Vec<EventEnvelope>, Failure> {
+        let recorded = self
+            .store
+            .record_many(Some(command_ref.clone()), events)
+            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+        self.save_checkpoint();
+        Ok(recorded)
     }
 
     fn plugin_mut(&mut self, instance_id: &InstanceId) -> Result<&mut HostedPlugin, Failure> {
@@ -2490,6 +2892,96 @@ impl BrowserHost {
         }
         self.live_parameter_dirty_at = None;
         self.storage_revision = self.storage_revision.wrapping_add(1);
+    }
+}
+
+fn program_draft_state(
+    draft_id: u64,
+    instance_id: InstanceId,
+    original_program_id: Option<String>,
+    prepared: &PreparedProgram,
+    editor: ProgramEditorView,
+    dirty: bool,
+) -> Result<ProgramDraftState, Failure> {
+    prepared.validate().map_err(|error| {
+        Failure::new(
+            ControlErrorCode::Internal,
+            format!("plugin returned an invalid prepared program: {error}"),
+        )
+    })?;
+    editor.validate().map_err(|error| {
+        Failure::new(
+            ControlErrorCode::Internal,
+            format!("plugin returned an invalid program editor: {error}"),
+        )
+    })?;
+    let document_json = serde_json::to_string(&prepared.document).map_err(|error| {
+        Failure::new(
+            ControlErrorCode::Internal,
+            format!("serializing prepared program document: {error}"),
+        )
+    })?;
+    Ok(ProgramDraftState {
+        draft_id,
+        instance_id,
+        original_program_id,
+        name: prepared.document.name.clone(),
+        preview_sound_id: prepared.preview_sound_id.clone(),
+        storage_path: prepared.storage_path.clone(),
+        artifacts: prepared.artifacts.clone(),
+        document_json,
+        editor,
+        dirty,
+    })
+}
+
+fn preview_prepared_program(
+    plugin: &mut HostedPlugin,
+    prepared: &PreparedProgram,
+) -> Result<(), Failure> {
+    let previewed = plugin
+        .instance
+        .preview_program(prepared)
+        .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+    if !previewed {
+        plugin
+            .instance
+            .load_preset(&prepared.preview_sound_id)
+            .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+    }
+    Ok(())
+}
+
+fn restore_program_selection(
+    plugin: &mut HostedPlugin,
+    previous_sound_id: Option<&str>,
+) -> Result<(), Failure> {
+    plugin
+        .instance
+        .reset()
+        .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+    if let Some(previous) = previous_sound_id {
+        plugin
+            .instance
+            .load_preset(previous)
+            .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+    }
+    plugin.selected_sound_id = previous_sound_id.map(str::to_owned);
+    Ok(())
+}
+
+fn sound_summary(preset: &PresetDescriptor) -> SoundSummary {
+    SoundSummary {
+        id: preset.id.clone(),
+        name: preset.name.clone(),
+        bank: preset.bank.clone(),
+        detail: preset
+            .description
+            .clone()
+            .or_else(|| preset.category.clone()),
+        category: None,
+        tags: Vec::new(),
+        editable: preset.editable,
     }
 }
 

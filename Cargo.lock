@@ -3648,6 +3648,7 @@ dependencies = [
  "rackforge-midi-api",
  "rackforge-performance-api",
  "rackforge-plugin-api",
+ "rackforge-program-api",
  "rackforge-repository",
  "rackforge-session-api",
  "rackforge-surface-runtime",

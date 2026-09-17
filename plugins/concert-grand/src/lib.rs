@@ -8871,6 +8871,26 @@ impl ConcertGrand {
         }
     }
 
+    /// Rebuilds the byte event the host widened. Keeping the conversion in a
+    /// pure function makes the compatibility promise inspectable without
+    /// rendering against the lab's deliberately live, process-global knobs.
+    fn narrow_origin_event(event: &MidiEvent2) -> Option<MidiEvent> {
+        if event.flags & MIDI2_FLAG_ORIGIN_7BIT == 0 {
+            return None;
+        }
+        let status = match event.kind {
+            MIDI2_KIND_NOTE_ON => 0x90,
+            MIDI2_KIND_NOTE_OFF => 0x80,
+            MIDI2_KIND_CONTROL_CHANGE => 0xb0,
+            _ => return None,
+        } | (event.channel & 0x0f);
+        let value = match event.kind {
+            MIDI2_KIND_CONTROL_CHANGE => (event.value >> 25) as u8,
+            _ => ((event.value & 0xffff) >> 9) as u8,
+        };
+        MidiEvent::new(event.frame, [status, event.index & 0x7f, value], 3)
+    }
+
     /// The same instrument reached at MIDI 2.0 widths. Kinds outside the two
     /// families this component declared never arrive here; the host keeps
     /// them narrow.
@@ -8880,21 +8900,20 @@ impl ConcertGrand {
     /// instrument behaves, sample for sample, as it did before it could hear
     /// the width. Only a value no byte can express takes the wide path.
     fn handle_wide(&mut self, event: &MidiEvent2) {
+        if let Some(narrow) = Self::narrow_origin_event(event) {
+            self.handle_midi(&narrow);
+            return;
+        }
         let channel = event.channel & 0x0f;
         let note = event.index & 0x7f;
-        let seven_bit = event.flags & MIDI2_FLAG_ORIGIN_7BIT != 0;
         match event.kind {
             MIDI2_KIND_NOTE_ON => {
                 let velocity = event.value & 0xffff;
-                if seven_bit {
-                    self.start_voice(channel, note, (velocity >> 9) as u8);
-                } else {
-                    // MIDI 2.0 keeps velocity 0 a note-on. The instrument's
-                    // softest calibrated strike is one seven-bit step, and a
-                    // hammer thrown slower than that is that strike.
-                    let unit = (velocity as f32 / 65535.0).max(1.0 / 127.0);
-                    self.start_voice_unit(channel, note, unit);
-                }
+                // MIDI 2.0 keeps velocity 0 a note-on. The instrument's
+                // softest calibrated strike is one seven-bit step, and a
+                // hammer thrown slower than that is that strike.
+                let unit = (velocity as f32 / 65535.0).max(1.0 / 127.0);
+                self.start_voice_unit(channel, note, unit);
             }
             MIDI2_KIND_NOTE_OFF => {
                 // The host raises `RELEASE_MEASURED` under exactly the rule
@@ -8908,11 +8927,7 @@ impl ConcertGrand {
                 self.release(channel, note, release);
             }
             MIDI2_KIND_CONTROL_CHANGE => {
-                let unit = if seven_bit {
-                    (event.value >> 25) as f32 / 127.0
-                } else {
-                    event.value as f32 / u32::MAX as f32
-                };
+                let unit = event.value as f32 / u32::MAX as f32;
                 match event.index {
                     64 => self.set_pedal_level(unit),
                     66 => self.set_sostenuto(event.value >= 1 << 31),
@@ -10858,55 +10873,45 @@ mod tests {
     }
 
     /// A seven-bit source, delivered wide with its origin flagged, produces
-    /// the same samples as the bytes did: the width changes nothing it did
-    /// not have.
+    /// the original byte event: the width changes nothing it did not have.
+    /// `handle_wide` sends this result through `handle_midi`, making sample
+    /// identity a consequence of using the same path rather than a timing-
+    /// sensitive comparison while other tests exercise the live lab knobs.
     #[test]
     fn a_seven_bit_origin_takes_the_byte_path_exactly() {
-        let bytes = render_wide(&[note_on(60, 100)], &[], 40);
-        let flagged = render_wide(
-            &[],
-            &[wide(
-                0,
-                MIDI2_KIND_NOTE_ON,
-                60,
-                MIDI2_FLAG_ORIGIN_7BIT,
-                (100u32 << 9) | 0x1ff,
-            )],
-            40,
+        let note = wide(
+            17,
+            MIDI2_KIND_NOTE_ON,
+            60,
+            MIDI2_FLAG_ORIGIN_7BIT,
+            (100u32 << 9) | 0x1ff,
         );
-        assert!(bytes.iter().any(|s| *s != 0.0));
-        assert_eq!(bytes, flagged);
+        let note = ConcertGrand::narrow_origin_event(&note).unwrap();
+        assert_eq!(note.frame, 17);
+        assert_eq!(note.data, [0x90, 60, 100]);
+        assert_eq!(note.length, 3);
 
-        // Pedal down as a byte and as its upscaled 32-bit self: identical.
-        let pedal_bytes = render_wide(
-            &[
-                MidiEvent::new(0, [0xb0, 64, 100], 3).unwrap(),
-                note_on(60, 90),
-            ],
-            &[],
-            40,
+        let pedal = wide(
+            23,
+            MIDI2_KIND_CONTROL_CHANGE,
+            64,
+            MIDI2_FLAG_ORIGIN_7BIT,
+            100u32 << 25,
         );
-        let pedal_wide = render_wide(
-            &[],
-            &[
-                wide(
-                    0,
-                    MIDI2_KIND_CONTROL_CHANGE,
-                    64,
-                    MIDI2_FLAG_ORIGIN_7BIT,
-                    100u32 << 25,
-                ),
-                wide(
-                    0,
-                    MIDI2_KIND_NOTE_ON,
-                    60,
-                    MIDI2_FLAG_ORIGIN_7BIT,
-                    90u32 << 9,
-                ),
-            ],
-            40,
+        let pedal = ConcertGrand::narrow_origin_event(&pedal).unwrap();
+        assert_eq!(pedal.frame, 23);
+        assert_eq!(pedal.data, [0xb0, 64, 100]);
+
+        // A widened running-status Note On at zero must remain the byte
+        // path's Note Off, not become a minimum-strength MIDI 2.0 strike.
+        let zero = wide(0, MIDI2_KIND_NOTE_ON, 60, MIDI2_FLAG_ORIGIN_7BIT, 0);
+        assert_eq!(
+            ConcertGrand::narrow_origin_event(&zero).unwrap().data,
+            [0x90, 60, 0]
         );
-        assert_eq!(pedal_bytes, pedal_wide);
+
+        let native_wide = wide(0, MIDI2_KIND_NOTE_ON, 60, 0, 100u32 << 9);
+        assert!(ConcertGrand::narrow_origin_event(&native_wide).is_none());
     }
 
     /// Two velocities that round to the same byte are two different strikes

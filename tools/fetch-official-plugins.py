@@ -128,12 +128,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Limiter.rfplugin",
         "plugin_id": "org.rackforge.rf-limiter",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-limiter/"
-            "releases/download/v0.1.0/RF-Limiter.rfplugin"
+            "releases/download/v0.2.0/RF-Limiter.rfplugin"
         ),
-        "sha256": "185a498e9e748f435322927a770a581e5e8c6afd14e813fd3a1583e839899fd7",
+        "sha256": "fd7bbadf8ef92a2b466ed62128800450efec61fffbc9c1e34922390e36bf82d9",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -152,12 +152,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-EQ.rfplugin",
         "plugin_id": "org.rackforge.rf-eq",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-eq/"
-            "releases/download/v0.1.0/RF-EQ.rfplugin"
+            "releases/download/v0.2.0/RF-EQ.rfplugin"
         ),
-        "sha256": "8bd974d71dd8f2955173dde1a3cebca8e8a281fdf790fa66c296e7e16c4891c7",
+        "sha256": "1e3993fb2185b89eac0c8bcde0f99b809d1e8f5268089d7eaf55cc6a4d807e43",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -176,12 +176,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Comp.rfplugin",
         "plugin_id": "org.rackforge.rf-comp",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-comp/"
-            "releases/download/v0.1.0/RF-Comp.rfplugin"
+            "releases/download/v0.2.0/RF-Comp.rfplugin"
         ),
-        "sha256": "4a41650ca5155d7b9fedaf197320558c1fbeb816a915793007901e8b94060c4b",
+        "sha256": "6627519805c85e2e8251ad4759c8cac33b397611e15cfea4ab77785bfd1e3de4",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

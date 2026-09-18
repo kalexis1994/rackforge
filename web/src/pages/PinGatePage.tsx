@@ -89,7 +89,10 @@ export function PinGatePage({
               ? "No PIN has been set and this device no longer accepts one over the network. Set one from the machine itself, then reload."
               : "This device is protected by a PIN chosen when it was set up."}
         </p>
-        <form onSubmit={submit}>
+        <form
+          onSubmit={submit}
+          className={enrolling ? "field-row confirm" : "field-row"}
+        >
           <input
             value={pin}
             onChange={(event) => setPin(onlyDigits(event.target.value))}

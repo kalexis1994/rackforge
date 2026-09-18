@@ -1740,9 +1740,58 @@ body {
     #e9e7e1;
 }
 
+/* A field and the action that submits it.
+
+   Fifteen rules in this file grew their own copy of `minmax(0, 1fr) auto`,
+   and they all fail the same way once the row is narrow: `auto` holds the
+   button at its natural width while the field collapses. Worse with a second
+   field, which claims its intrinsic width from the `auto` track and squeezes
+   the first one to a sliver -- which is what the PIN panel did on a phone.
+
+   Below the stacking width every control takes a full-width row of its own.
+   480px is the widest phone in portrait this host is used on; above it the
+   pair reads better side by side. */
+.field-row {
+  display: grid;
+  gap: var(--rf-space-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.field-row > * {
+  min-width: 0;
+}
+
+.field-row > .primary-button,
+.field-row > .secondary-button {
+  width: 100%;
+  min-height: var(--rf-target-default);
+}
+
+/* Confirming a value asks for it twice, so the row carries three controls.
+   The two fields share the width and the action takes its own row rather
+   than being wedged into what is left. */
+.field-row.confirm {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.field-row.confirm > .primary-button {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 480px) {
+  .field-row,
+  .field-row.confirm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .pairing-shell {
   min-height: 100vh;
-  padding: 28px;
+  /* The URL bar is part of 100vh but not of the screen, so a centred panel
+     ends up pushed below the fold on a phone. */
+  min-height: 100svh;
+  padding: clamp(var(--rf-space-4), 5vw, var(--rf-space-8));
   display: grid;
   place-items: center;
   color: #f4f2ec;
@@ -1765,7 +1814,7 @@ body {
 }
 
 .pairing-brand {
-  margin-bottom: 56px;
+  margin-bottom: clamp(var(--rf-space-6), 8vw, 56px);
   display: flex;
   align-items: center;
   gap: 13px;
@@ -1790,15 +1839,15 @@ body {
 }
 
 .pairing-panel form {
-  margin-top: 34px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  margin-top: clamp(var(--rf-space-5), 6vw, 34px);
 }
 
 .pairing-panel input {
   min-width: 0;
   height: 50px;
+  /* Centred text with letter-spacing sits half a space left of centre,
+     because the spacing is added after the last character too. */
+  text-indent: 0.3em;
   padding: 0 15px;
   color: #f4f2ec;
   background: #292925;
@@ -1832,7 +1881,7 @@ body {
   display: block;
   margin-top: 22px;
   color: #73726b;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .app-shell {

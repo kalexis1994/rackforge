@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router";
 import { AsyncActionLabel } from "../../components/AsyncSpinner";
 import { PageHeading } from "../../components/PageHeading";
 import { VelocityCurveReading } from "../../components/VelocityCurveReading";
-import { IS_BROWSER_HOST, hostJson, isNativeHost } from "../../host";
+import { HostRequestError, IS_BROWSER_HOST, hostJson, isNativeHost } from "../../host";
 import { ChangePinCard } from "../../pages/settings/ChangePinCard";
 import { ScreenGlassCard } from "../../pages/settings/ScreenGlassCard";
 import { TypingKeyboardCard } from "../../pages/settings/TypingKeyboardCard";
@@ -27,6 +27,9 @@ export function SettingsPage({
   const [webBusy, setWebBusy] = useState(false);
   const [webMessage, setWebMessage] = useState<string | null>(null);
   const [audioSettings, setAudioSettings] = useState<HostAudioSettings | null>(initial.audioSettings);
+  // A host that does not serve the endpoint at all is not a host whose
+  // request failed, and the two need different words on screen.
+  const [audioUnsupported, setAudioUnsupported] = useState(false);
   const [audioDraft, setAudioDraft] = useState<HostAudioPreferences | null>(initial.audioSettings?.preferences ?? null);
   const [audioOperation, setAudioOperation] = useState<"refresh" | "test" | "save" | null>(null);
   const audioBusy = audioOperation !== null;
@@ -56,7 +59,12 @@ export function SettingsPage({
       setAudioDraft(settings.preferences);
       onAudioChange(settings);
     } catch (error) {
-      setAudioMessage(error instanceof Error ? error.message : "Device refresh failed.");
+      if (error instanceof HostRequestError && error.status === 404) {
+        setAudioUnsupported(true);
+        setAudioMessage(null);
+      } else {
+        setAudioMessage(error instanceof Error ? error.message : "Device refresh failed.");
+      }
     } finally {
       setAudioOperation(null);
     }
@@ -629,10 +637,17 @@ export function SettingsPage({
             <div className="settings-icon">{settingsTab === "midi" ? "⌸" : "♫"}</div>
             <div className="settings-copy">
               <span className="card-kicker">Host capabilities</span>
-              <h2>{settingsTab === "midi" ? "MIDI" : "Audio"} unavailable</h2>
-              <p>The current host did not publish its audio and MIDI settings.</p>
+              <h2>
+                {settingsTab === "midi" ? "MIDI" : "Audio"}{" "}
+                {audioUnsupported ? "configured on the device" : "unavailable"}
+              </h2>
+              <p>
+                {audioUnsupported
+                  ? "This RackForge host does not choose audio and MIDI devices over the network. Activating an instrument writes config/audio.toml from the example beside it, and the engine starts from that file."
+                  : "The current host did not publish its audio and MIDI settings."}
+              </p>
             </div>
-            <div className="host-audio-actions">
+            <div className="host-audio-actions" hidden={audioUnsupported}>
               <button
                 className="secondary-button"
                 disabled={audioBusy}

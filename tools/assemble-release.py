@@ -9,6 +9,9 @@ THIRD_PARTY_NOTICES.md, and (with --publish) creates the GitHub release.
 With --notes-header, <notes.md> carries only what changed in this release and
 the opening — commit, editions, and the bundled package list with versions —
 is written from the pins and checked against the artifact being published.
+
+Everything above happens in main(); importing this file does nothing, so the
+checks it performs can be tested without a run to download.
 """
 import hashlib
 import importlib.util
@@ -22,17 +25,6 @@ import tarfile
 import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-run_id, tag, notes = sys.argv[1], sys.argv[2], sys.argv[3]
-publish = "--publish" in sys.argv
-generate_header = "--notes-header" in sys.argv
-work = os.path.join(os.environ["TEMP"], f"rf-release-{tag}")
-downloads = os.path.join(work, "artifacts")
-assets = os.path.join(work, "assets")
-shutil.rmtree(work, ignore_errors=True)
-os.makedirs(downloads)
-os.makedirs(assets)
-
-subprocess.run(["gh", "run", "download", run_id, "-D", downloads], check=True, cwd=REPO)
 
 
 def edition_suffix(name: str) -> str:
@@ -123,14 +115,18 @@ def check_pins_against_artifact(pins: tuple, assets: str) -> None:
         raise SystemExit("the Standard archive carries unpinned packages: " + ", ".join(unexpected))
 
 
-def notes_header(pins: tuple) -> str:
-    commit = subprocess.run(
+def run_commit(run_id: str) -> str:
+    """The commit the artifacts were built from, according to the run itself."""
+    return subprocess.run(
         ["gh", "run", "view", run_id, "--json", "headSha", "-q", ".headSha"],
         check=True,
         capture_output=True,
         text=True,
         cwd=REPO,
     ).stdout.strip()[:7]
+
+
+def notes_header(pins: tuple, tag: str, commit: str) -> str:
     bundled = [
         f"[{str(plugin['filename']).removesuffix('.rfplugin')} {plugin['version']}]"
         f"({upstream_repository(str(plugin['url']))})"
@@ -155,48 +151,65 @@ def notes_header(pins: tuple) -> str:
     )
 
 
-notices = os.path.join(REPO, "THIRD_PARTY_NOTICES.md")
-for artifact in sorted(os.listdir(downloads)):
-    folder = os.path.join(downloads, artifact)
-    suffix = edition_suffix(artifact)
-    if artifact.startswith("RackForge-VST3-Windows-x86_64"):
-        # The bundle directory plus the loose files, with the notices, as before.
-        zip_dir(folder, os.path.join(assets, f"RackForge-VST3-Windows-x86_64{suffix}.zip"), {"THIRD_PARTY_NOTICES.md": notices})
-    elif artifact.startswith("RackForge-Windows-x86_64"):
-        shutil.copy2(os.path.join(folder, "rackforge.exe"), os.path.join(assets, f"RackForge-Windows-x86_64{suffix}.exe"))
-    elif artifact.startswith("RackForge-Linux-x86_64"):
-        shutil.copy2(os.path.join(folder, "RackForge-Linux-x86_64.tar.gz"), os.path.join(assets, f"RackForge-Linux-x86_64{suffix}.tar.gz"))
-    elif artifact.startswith("RackForge-RaspberryPi-arm64"):
-        shutil.copy2(os.path.join(folder, "RackForge-RaspberryPi-arm64.tar.gz"), os.path.join(assets, f"RackForge-RaspberryPi-arm64{suffix}.tar.gz"))
-    elif artifact.startswith("RackForge-Android-arm64"):
-        shutil.copy2(os.path.join(folder, "RackForge-debug.apk"), os.path.join(assets, f"RackForge-Android-arm64{suffix}.apk"))
-    else:
-        print("skipping unknown artifact", artifact)
+def main() -> None:
+    run_id, tag, notes = sys.argv[1], sys.argv[2], sys.argv[3]
+    publish = "--publish" in sys.argv
+    generate_header = "--notes-header" in sys.argv
+    work = os.path.join(os.environ["TEMP"], f"rf-release-{tag}")
+    downloads = os.path.join(work, "artifacts")
+    assets = os.path.join(work, "assets")
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(downloads)
+    os.makedirs(assets)
 
-shutil.copy2(notices, os.path.join(assets, "THIRD_PARTY_NOTICES.md"))
-with open(os.path.join(assets, "SHA256SUMS.txt"), "w", newline="\n") as sums:
+    subprocess.run(["gh", "run", "download", run_id, "-D", downloads], check=True, cwd=REPO)
+
+    notices = os.path.join(REPO, "THIRD_PARTY_NOTICES.md")
+    for artifact in sorted(os.listdir(downloads)):
+        folder = os.path.join(downloads, artifact)
+        suffix = edition_suffix(artifact)
+        if artifact.startswith("RackForge-VST3-Windows-x86_64"):
+            # The bundle directory plus the loose files, with the notices, as before.
+            zip_dir(folder, os.path.join(assets, f"RackForge-VST3-Windows-x86_64{suffix}.zip"), {"THIRD_PARTY_NOTICES.md": notices})
+        elif artifact.startswith("RackForge-Windows-x86_64"):
+            shutil.copy2(os.path.join(folder, "rackforge.exe"), os.path.join(assets, f"RackForge-Windows-x86_64{suffix}.exe"))
+        elif artifact.startswith("RackForge-Linux-x86_64"):
+            shutil.copy2(os.path.join(folder, "RackForge-Linux-x86_64.tar.gz"), os.path.join(assets, f"RackForge-Linux-x86_64{suffix}.tar.gz"))
+        elif artifact.startswith("RackForge-RaspberryPi-arm64"):
+            shutil.copy2(os.path.join(folder, "RackForge-RaspberryPi-arm64.tar.gz"), os.path.join(assets, f"RackForge-RaspberryPi-arm64{suffix}.tar.gz"))
+        elif artifact.startswith("RackForge-Android-arm64"):
+            shutil.copy2(os.path.join(folder, "RackForge-debug.apk"), os.path.join(assets, f"RackForge-Android-arm64{suffix}.apk"))
+        else:
+            print("skipping unknown artifact", artifact)
+
+    shutil.copy2(notices, os.path.join(assets, "THIRD_PARTY_NOTICES.md"))
+    with open(os.path.join(assets, "SHA256SUMS.txt"), "w", newline="\n") as sums:
+        for name in sorted(os.listdir(assets)):
+            if name in ("SHA256SUMS.txt", "THIRD_PARTY_NOTICES.md"):
+                continue
+            digest = hashlib.sha256(open(os.path.join(assets, name), "rb").read()).hexdigest()
+            sums.write(f"{digest} {name}\n")
+
     for name in sorted(os.listdir(assets)):
-        if name in ("SHA256SUMS.txt", "THIRD_PARTY_NOTICES.md"):
-            continue
-        digest = hashlib.sha256(open(os.path.join(assets, name), "rb").read()).hexdigest()
-        sums.write(f"{digest} {name}\n")
+        print(f"{os.path.getsize(os.path.join(assets, name)):>12} {name}")
 
-for name in sorted(os.listdir(assets)):
-    print(f"{os.path.getsize(os.path.join(assets, name)):>12} {name}")
+    if generate_header:
+        pins = official_pins()
+        check_pins_against_artifact(pins, assets)
+        composed = os.path.join(work, f"release-notes-{tag}.md")
+        with open(composed, "w", encoding="utf-8", newline="\n") as file:
+            file.write(notes_header(pins, tag, run_commit(run_id)))
+            file.write("\n" + open(notes, encoding="utf-8").read().lstrip("\n"))
+        notes = composed
+        print("notes written to", notes)
 
-if generate_header:
-    pins = official_pins()
-    check_pins_against_artifact(pins, assets)
-    composed = os.path.join(work, f"release-notes-{tag}.md")
-    with open(composed, "w", encoding="utf-8", newline="\n") as file:
-        file.write(notes_header(pins))
-        file.write("\n" + open(notes, encoding="utf-8").read().lstrip("\n"))
-    notes = composed
-    print("notes written to", notes)
+    if publish:
+        files = [os.path.join(assets, n) for n in sorted(os.listdir(assets))]
+        subprocess.run(["gh", "release", "create", tag, "--target", "main", "--title", f"RackForge {tag} Preview", "--notes-file", notes, *files], check=True, cwd=REPO)
+        print("published", tag)
+    else:
+        print("assets ready in", assets, "(no --publish)")
 
-if publish:
-    files = [os.path.join(assets, n) for n in sorted(os.listdir(assets))]
-    subprocess.run(["gh", "release", "create", tag, "--target", "main", "--title", f"RackForge {tag} Preview", "--notes-file", notes, *files], check=True, cwd=REPO)
-    print("published", tag)
-else:
-    print("assets ready in", assets, "(no --publish)")
+
+if __name__ == "__main__":
+    main()

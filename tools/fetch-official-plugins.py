@@ -98,11 +98,44 @@ OFFICIAL_PLUGINS = (
         ),
     },
     {
-        "filename": "RF-73.rfplugin",
-        "plugin_id": "org.rackforge.rhodes",
-        "version": "0.1.14",
-        "url": "https://github.com/kalexis1994/RF-73/releases/download/v0.1.14/RF-73.rfplugin",
-        "sha256": "a621187e30624c452e75431c2cfb8cbdb835d9048425b80203b584bfb17347ad",
+        "filename": "RF-Organ.rfplugin",
+        "plugin_id": "org.rackforge.organ",
+        "version": "0.48.0",
+        "url": (
+            "https://github.com/kalexis1994/RF-Organ/"
+            "releases/download/v0.48.0/RF-Organ.rfplugin"
+        ),
+        "sha256": "3f2a8b43ef7e9e1553074edf68cf7c2aa802c21957739ca2d8a7e643cdb0107c",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/bootstrap.js",
+            "web/app.js",
+            "web/app_bg.wasm",
+            "web/style.css",
+            "web/fonts/oswald.woff2",
+            "web/fonts/playfair.woff2",
+            "web/fonts/OFL.txt",
+        ),
+    },
+    {
+        "filename": "RF-Tines.rfplugin",
+        "plugin_id": "org.rackforge.rftines",
+        "version": "0.2.0",
+        "url": (
+            "https://github.com/kalexis1994/RF-Tines/"
+            "releases/download/v0.2.0/RF-Tines.rfplugin"
+        ),
+        "sha256": "565720d01ee22bb9494e37e20d1c4465fe6121ba2e8bb4d3a071648d0945d659",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -121,7 +154,7 @@ OFFICIAL_PLUGINS = (
             "web/config.css",
             "web/config.mjs",
             "web/play-programs.mjs",
-            "web/rf73-format.mjs",
+            "web/rftines-format.mjs",
             "web/style.css",
         ),
     },

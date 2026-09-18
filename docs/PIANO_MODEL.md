@@ -1022,7 +1022,7 @@ sample (0.171.26).** After let-off the key still has its aftertouch to
 travel and the hammer its flight; the key is the action's ratio slower.
 So the thump waits `(KEY_AFTERTOUCH_MM · ACTION_RATIO − LETOFF_DISTANCE_MM)
 / v_letoff` -- three millimetres' worth: 5 ms at pianissimo, under half a
-millisecond at fortissimo (RF-73's key landed 1.0 ms after let-off at its
+millisecond at fortissimo (RF-Tines' key landed 1.0 ms after let-off at its
 strong drive with a 1 mm aftertouch), one countdown per voice
 (`thump_in`), and a merged blow bottoms out again the same way. The
 thump's level stays the measured law in MIDI velocity: read as a power of
@@ -1058,7 +1058,7 @@ back check, a third of the way up: the let-off speed is
 (sqrt(1/3) = 0.58 for a constant push over a third of the travel, more for
 the repetition spring that holds the hammer there), growing back to the
 full blow as the key returns the rest of the way. All regulation geometry,
-stated as such; RF-73 measured that a second blow's strength is the state
+stated as such; RF-Tines measured that a second blow's strength is the state
 the first left behind, and a grand's lever and check exist to make that
 repeatable. And the merge of a re-strike into the living voice, off since
 0.171.5 for the pop of a momentum pushed into the phasors in one sample,
@@ -1083,7 +1083,7 @@ bounces. The reference cannot say how long -- its release-resonance
 samples (`harmL*`, `harmS*`) start with the note's band *rising* for a
 hundred milliseconds, so they carry no key-up to measure from (script
 `damper_landing.py`, every note from A2 to C6 tried). So the timing is
-regulation geometry stated as such, and the shape is RF-73's, whose action
+regulation geometry stated as such, and the shape is RF-Tines', whose action
 solved as bodies landed its felt 22-32 ms after every key-up at 0.18-0.38
 m/s and bounced 4-9 times over 17-31 ms with a restitution of 0.5-0.55; a
 grand's trigger is the key and not the hammer, so the delay follows the
@@ -1110,7 +1110,7 @@ pedal's fall still seat at once. Rendered for the ear:
 let-off on its own now. The action's calibrated law, `HAMMER_V_FF ·
 span^(v − 1)`, is read as the speed at let-off, and the string gets what is
 left after the flight's toll, `v_string² = v_letoff² − 2 g d` with
-`LETOFF_DISTANCE_MM` = 2.5 (regulation practice, 1.5-3 mm). RF-73's action,
+`LETOFF_DISTANCE_MM` = 2.5 (regulation practice, 1.5-3 mm). RF-Tines' action,
 solved as coupled bodies, found the toll to be an energy fixed by the
 distance, not a fraction of the hammer's, and the curve above it nearly
 vertical; that shape is carried, the number is a grand's. The reference has

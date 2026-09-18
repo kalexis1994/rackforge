@@ -9,7 +9,7 @@ import {
 describe("browser storage snapshots", () => {
   it("keeps plugin-private files while omitting exact packaged assets", () => {
     const packaged = "plugins/concert-grand/component.wasm";
-    const program = "plugins/org.rackforge.rhodes/programs/lab-1.rackforge-program.json";
+    const program = "plugins/org.rackforge.rftines/programs/lab-1.rackforge-program.json";
     const files = [
       { path: packaged, bytes: new Uint8Array([1]) },
       { path: program, bytes: new Uint8Array([2]) },

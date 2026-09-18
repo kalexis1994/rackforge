@@ -1863,12 +1863,6 @@ body {
   border-color: var(--acid);
 }
 
-.pairing-panel .primary-button:disabled {
-  color: #77766f;
-  background: #34342f;
-  cursor: not-allowed;
-}
-
 .pairing-error {
   margin-top: 12px;
   padding: 10px 12px;

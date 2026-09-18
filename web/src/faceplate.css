@@ -494,6 +494,29 @@
   box-shadow: var(--fp-well) !important;
 }
 
+/* A key with nothing to press: flat, no depth in either direction.
+
+   It has to force the fill back. The rule above forces red on every
+   `.primary-button`, and an `!important` outranks the more specific
+   `:disabled` selector in styles.css that tried to grey it -- so the PIN
+   screen showed "Set PIN" as a fully armed key while the PIN was still
+   incomplete, and the only cue that it did nothing was the cursor.
+
+   The dead touch keys reach this state through `opacity: 0.42`, which is
+   not right for a key that stands alone on a panel: at that alpha the fill
+   lands 1.07:1 against the panel behind it and the key stops having a
+   shape, taking its label down to 3.23:1 with it. Naming the inert tokens
+   instead keeps the label at 5.95:1 and gives the key the same 1.78:1 edge
+   the fields above it have, which is how this panel already draws the
+   boundary of something you type into rather than press. */
+.primary-button:disabled {
+  color: var(--muted) !important;
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+  cursor: not-allowed;
+}
+
 .text-button {
   border-radius: var(--fp-radius-key) !important;
   border: var(--fp-seam) !important;

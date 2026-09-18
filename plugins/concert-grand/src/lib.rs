@@ -4924,7 +4924,7 @@ fn keybed_delay(letoff: f32, sample_rate: f32) -> u32 {
 /// `2 g d` turns back before the string -- the key goes down and nothing
 /// sounds. Regulation practice puts the let-off at 1.5-3 mm on a grand.
 /// The toll is an energy fixed by the distance, not a fraction of the
-/// hammer's: RF-73's action, solved as coupled bodies, took 1.74-2.21 mJ
+/// hammer's: RF-Tines' action, solved as coupled bodies, took 1.74-2.21 mJ
 /// over the same 1.6 mm flight across a fivefold range of release energy.
 /// So `v_string^2 = v_letoff^2 - 2 g d`, nothing below the threshold and a
 /// curve that rises almost vertically just above it: 16.7 % more drive
@@ -4948,7 +4948,7 @@ pub static LETOFF_KNEE: Knob = Knob::new(12.0);
 /// sample. In a grand the key lets the damper down: the felt meets the
 /// string when the returning key passes back through the height that
 /// lifted it, about half its travel, and a key coming up under its own
-/// weight takes tens of milliseconds to get there. RF-73's action, solved as
+/// weight takes tens of milliseconds to get there. RF-Tines' action, solved as
 /// bodies, landed its felt 22-32 ms after every key-up; a grand's trigger is
 /// the key rather than the hammer, so the delay follows the release speed
 /// here (`damper_span`: a key let go fast lands sooner) and this is the
@@ -4957,7 +4957,7 @@ pub static LETOFF_KNEE: Knob = Knob::new(12.0);
 /// regulation geometry, stated as such.
 pub static DAMPER_LAND_MS: Knob = Knob::new(22.0);
 
-/// How many times the felt bounces before it seats. RF-73 measured 4-9
+/// How many times the felt bounces before it seats. RF-Tines measured 4-9
 /// contacts over 17-31 ms with a restitution of 0.5-0.55; a grand's damper
 /// head is heavier and its felt softer, so fewer.
 pub static DAMPER_BOUNCES: Knob = Knob::new(5.0);
@@ -4967,7 +4967,7 @@ pub static DAMPER_BOUNCES: Knob = Knob::new(5.0);
 pub static DAMPER_HANG_MS: Knob = Knob::new(6.0);
 pub static DAMPER_RESTITUTION: Knob = Knob::new(0.5);
 
-/// How long each bounce's contact holds the string, in milliseconds. RF-73's
+/// How long each bounce's contact holds the string, in milliseconds. RF-Tines'
 /// felt was in contact for a tenth to a third of its bouncing.
 pub static DAMPER_DWELL_MS: Knob = Knob::new(1.0);
 
@@ -5016,7 +5016,7 @@ pub static KEY_AFTERTOUCH_MM: Knob = Knob::new(1.0);
 /// let-off distance it gives the time between the string being struck
 /// and the key reaching the bed, `(aftertouch * ratio - letoff) / v_letoff`:
 /// three millimetres' worth, five milliseconds at pianissimo and under
-/// half a millisecond at fortissimo. RF-73's key landed 1.0 ms after
+/// half a millisecond at fortissimo. RF-Tines' key landed 1.0 ms after
 /// let-off at its strong drive with a 1 mm aftertouch.
 pub static ACTION_RATIO: Knob = Knob::new(5.5);
 

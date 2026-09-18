@@ -3,7 +3,7 @@
 A feasibility study, 2026-09-08. The Concert Grand's action is calibrated in
 level and colour but is not a *mechanism*: a note-on strikes at once with
 whatever velocity it carries, a note-off seats the damper in the same sample,
-and a key that makes no sound does not exist. The RF-73 model, which solves
+and a key that makes no sound does not exist. The RF-Tines model, which solves
 its action as coupled bodies, measured how a real mechanism departs from
 that, and the departures are audible. This document says, for each of the
 five behaviours, what the grand does, what the model does today (with the
@@ -18,11 +18,13 @@ The cost is engineering and measurement, not CPU. The one expensive item on
 the same list, the hammer that can only brighten, costs nothing per sample
 either; it costs a refit.
 
-Where a figure below comes from RF-73 it is labelled so. Those figures are a
-Rhodes action's — a hammer thrown at a tine, a damper lifted by the hammer
-through a bridle. The *shapes* carry over to a grand; the numbers are to be
-re-measured, and the trigger of the damper does not carry over at all: in a
-grand the key lifts the damper, not the hammer.
+Where a figure below comes from RF-Tines it is labelled so. That plugin was
+called RF-73 while these measurements were taken, and its own receipts still
+carry the old name. Those figures are a Rhodes action's — a hammer thrown at
+a tine, a damper lifted by the hammer through a bridle. The *shapes* carry
+over to a grand; the numbers are to be re-measured, and the trigger of the
+damper does not carry over at all: in a grand the key lifts the damper, not
+the hammer.
 
 ## The MIDI we have to work with
 
@@ -43,10 +45,10 @@ down and nothing sounds. The threshold is at the bottom of the dynamic
 range a player can reach, and the curve above it is steep: just above the
 threshold, a little more key speed is a lot more hammer speed.
 
-**RF-73 measured.** The toll is a fixed *energy* set by the flight distance,
+**RF-Tines measured.** The toll is a fixed *energy* set by the flight distance,
 not a fraction of the hammer's energy: 1.74-2.21 mJ across a fivefold range
 of release energy over the same 1.6 mm flight
-(`RF-73/docs/LOADED-FLIGHT-BUDGET.md`). So the impact speed follows
+(`RF-Tines/docs/LOADED-FLIGHT-BUDGET.md`). So the impact speed follows
 `v_impact² = max(0, v_release² − v_toll²)`: nothing below the threshold,
 then a curve that rises almost vertically. At drive 1.125 m/s the hammer
 arrived at 0.106 m/s; at 1.3125, 16.7 % more drive, it arrived at 0.719 —
@@ -141,7 +143,7 @@ where the key-off is: the felt takes tens of milliseconds to reach the
 string, lands with a speed, and bounces; the string keeps ringing between
 the bounces, at the level each contact left it.
 
-**RF-73 measured.** The felt landed 22-32 ms after key-up in every
+**RF-Tines measured.** The felt landed 22-32 ms after key-up in every
 configuration tried, at 0.18-0.38 m/s, and bounced 4-9 times over 17-31 ms
 before seating; the output reached −20 dB 42-58 ms after key-up and −40 dB
 not within 60 ms (`LOADED-DAMPER-SEATING.md`, `LOADED-DAMPER-LIFT.md`). The
@@ -175,7 +177,7 @@ the release velocity instead of calling `damp()`; the per-sample voice loop
 decrements it beside `cull_in`; on landing, `press_damper(own, +1)` and the
 felt thud; each bounce is `press_damper(own, −1)` for the airborne samples
 and `press_damper(own, +1)` on the next contact, with the airborne spans
-shrinking geometrically (RF-73's restitution was 0.5-0.55; 4-9 contacts over
+shrinking geometrically (RF-Tines' restitution was 0.5-0.55; 4-9 contacts over
 17-31 ms). The key-off knock stays at key-up, where it belongs; the damper
 thud moves to the landing. `held` and `sustained` keep their meaning; the
 new state only says where the felt is.
@@ -208,7 +210,7 @@ the second blow is struck from there, sooner and from nearer the string.
 Below the repetition point the jack has not reset: the second press pushes
 a hammer that is not engaged, and the blow is weak or absent.
 
-**RF-73 measured.** The second strike's strength depends on the state the
+**RF-Tines measured.** The second strike's strength depends on the state the
 first left behind: after a 60 ms wait the soft second blow was 13.5 times
 the first, after 300 ms 6.7 times, while strong blows repeated within 9-11 %
 (`LOADED-REPETITION.md`); a second gesture that catches the hammer still
@@ -262,7 +264,7 @@ flight is long and the key lands 1-5 ms *after* the string is struck; at
 `ff` the two nearly coincide. And the bed's knock scales with the *key's*
 speed squared — the finger's energy into the felt — not with the hammer's.
 
-**RF-73 measured.** With a sharp let-off the key landed on its bed 1.0 ms
+**RF-Tines measured.** With a sharp let-off the key landed on its bed 1.0 ms
 after let-off at the strong drive, having accelerated through its 1 mm
 aftertouch, and the bed destroyed the finger's 4-6 mJ; the hammer's flight
 at the soft drive took 3.0 ms across 1.5 mm (`LOADED-LETOFF.md`,

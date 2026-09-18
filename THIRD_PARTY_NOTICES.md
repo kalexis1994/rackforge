@@ -1,16 +1,27 @@
 # Third-Party Notices
 
-RackForge release builds include RF-106 as a separately packaged portable
-instrument. Its `.rfplugin` archive retains its own license and notice files.
+RackForge Standard builds include the officially pinned plugins as separately
+packaged portable instruments and effects. Each `.rfplugin` archive retains its
+own license and notice files, and each plugin remains a software component
+separate from RackForge. The pinned versions are listed in
+`tools/fetch-official-plugins.py`, which is the one place they are recorded.
 
-## RF-106
+## Officially pinned plugins
 
-- Project: <https://github.com/kalexis1994/rackforge-plugin-rf-106>
-- Bundled release: `v0.2.6`
-- License: GPL-3.0-only
+| Package | Project | License |
+| --- | --- | --- |
+| `RF-106.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-106> | GPL-3.0-only |
+| `RF-5.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-5> | GPL-3.0-only |
+| `RF-7.rfplugin` | <https://github.com/kalexis1994/RF-7> | GPL-3.0-only |
+| `RF-Organ.rfplugin` | <https://github.com/kalexis1994/RF-Organ> | GPL-2.0-or-later |
+| `RF-Tines.rfplugin` | <https://github.com/kalexis1994/RF-Tines> | Proprietary, all rights reserved |
+| `RF-Limiter.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-limiter> | GPL-3.0-only |
+| `RF-EQ.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-eq> | GPL-3.0-only |
+| `RF-Comp.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-comp> | GPL-3.0-only |
 
-RF-106 and RackForge remain separate software components. The complete RF-106
-license and notices are distributed inside `RF-106.rfplugin`.
+The complete license and notices of each plugin are distributed inside its own
+package. RF-Tines is redistributed by permission of the copyright holder and is
+not covered by RackForge's own license.
 
 RackForge includes the Chakra Petch typeface for display typography.
 

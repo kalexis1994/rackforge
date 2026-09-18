@@ -64,6 +64,7 @@ prints a clear error and exits before opening MIDI, plugins, or ALSA. The
 kernel releases this lock automatically when the owning process exits or
 crashes; the persistent lock file is not a stale PID-file gate.
 
-Concert Grand, RF-106 and RF-5 are included as official instruments. RF-Soundfonts
+Concert Grand and every officially pinned instrument — today RF-106, RF-5,
+RF-7, RF-Organ and RF-Tines — are included in a Standard build. RF-Soundfonts
 and other plugins are installed separately as `.rfplugin` packages.
 Proprietary banks and ROMs are never bundled with RackForge.

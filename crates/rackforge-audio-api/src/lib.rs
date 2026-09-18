@@ -145,6 +145,51 @@ pub enum AudioTransport {
     Unknown,
 }
 
+impl AudioTransport {
+    /// Where this kind of connection sits when several outputs could serve.
+    ///
+    /// By kind, never by make: an appliance meets interfaces it was never
+    /// told about, and a list of known vendors is a list that is wrong by the
+    /// time it ships. What can be said about a device without knowing it:
+    ///
+    /// - something plugged into USB was plugged in *for this*, by hand, and
+    ///   outranks anything soldered to the board;
+    /// - a board's own output is a real fallback, quiet but present;
+    /// - HDMI carries audio to a screen. On a headless appliance it is
+    ///   usually a monitor that is not there, so it goes last;
+    /// - an unclassified transport is taken as a wired-in output.
+    ///
+    /// Lower sorts first.
+    pub fn preference(self) -> u8 {
+        match self {
+            Self::Usb => 0,
+            Self::BuiltIn => 1,
+            Self::Unknown => 2,
+            Self::Hdmi => 3,
+        }
+    }
+}
+
+/// The output to use when the configuration names none.
+///
+/// `candidates` are the devices already known to serve the profile. The order
+/// is by kind of connection first and by identity second, so the same machine
+/// makes the same choice every boot -- an appliance that plays through a
+/// different output each time it starts is worse than one that refuses.
+pub fn preferred_automatic_output<'a>(
+    candidates: &[&'a AudioDeviceDescriptor],
+) -> Option<&'a AudioDeviceDescriptor> {
+    candidates
+        .iter()
+        .min_by(|left, right| {
+            left.transport
+                .preference()
+                .cmp(&right.transport.preference())
+                .then_with(|| left.id.as_str().cmp(right.id.as_str()))
+        })
+        .copied()
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioSampleFormat {
@@ -275,6 +320,17 @@ impl AudioDeviceDescriptor {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AudioDeviceSelector {
+    /// Whatever output can serve this profile.
+    ///
+    /// A deployment that is handed to a player rather than configured by one
+    /// cannot name the interface in advance: the appliance is imaged once and
+    /// the interface is whatever gets plugged into it. Naming a model here --
+    /// as the shipped configuration used to -- means every other machine has
+    /// no audio until somebody edits a file over SSH.
+    ///
+    /// Which one is chosen when several can serve is a question about kinds of
+    /// device, not about makes: see [`AudioTransport::preference`].
+    Automatic,
     Id {
         id: AudioDeviceId,
     },
@@ -306,6 +362,9 @@ impl AudioDeviceSelector {
 
     pub fn matches(&self, device: &AudioDeviceDescriptor) -> bool {
         match self {
+            // Automatic names no device, so nothing "is" it. The host picks
+            // from what the profile can actually run on instead.
+            Self::Automatic => false,
             Self::Id { id } => id == &device.id,
             Self::Usb {
                 vendor_id,
@@ -706,6 +765,90 @@ mod tests {
                 buffer_frames: AudioValueRange::new(64, 16_384).unwrap(),
             }),
         }
+    }
+
+    /// A device of a given kind, for asking which kind wins.
+    fn output_of(id: &str, transport: AudioTransport) -> AudioDeviceDescriptor {
+        AudioDeviceDescriptor {
+            id: AudioDeviceId::new(id).unwrap(),
+            name: id.into(),
+            transport,
+            usb: match transport {
+                AudioTransport::Usb => Some(UsbAudioIdentity {
+                    vendor_id: 0x1234,
+                    product_id: 0x5678,
+                    serial: None,
+                }),
+                _ => None,
+            },
+            capture: None,
+            ..device()
+        }
+    }
+
+    /// The appliance is imaged once and meets the interface later, so the
+    /// choice has to be about kinds of connection. A player who plugs an
+    /// interface into a Raspberry Pi means to play through it, not through
+    /// the jack on the board.
+    #[test]
+    fn something_plugged_in_outranks_the_board() {
+        let built_in = output_of("alsa.card-headphones.pcm-0", AudioTransport::BuiltIn);
+        let usb = output_of("alsa.usb-aaaa-bbbb.pcm-0", AudioTransport::Usb);
+        let candidates = [&built_in, &usb];
+        assert_eq!(
+            preferred_automatic_output(&candidates).map(|device| device.id.as_str()),
+            Some("alsa.usb-aaaa-bbbb.pcm-0"),
+        );
+    }
+
+    /// A headless appliance's HDMI usually leads to a screen that is not
+    /// there; it is an output of last resort, not a first choice.
+    #[test]
+    fn hdmi_goes_last() {
+        let hdmi = output_of("alsa.card-vc4hdmi0.pcm-0", AudioTransport::Hdmi);
+        let built_in = output_of("alsa.card-headphones.pcm-0", AudioTransport::BuiltIn);
+        let candidates = [&hdmi, &built_in];
+        assert_eq!(
+            preferred_automatic_output(&candidates).map(|device| device.id.as_str()),
+            Some("alsa.card-headphones.pcm-0"),
+        );
+    }
+
+    /// Two interfaces of the same kind must not make the machine play
+    /// through a different one each boot.
+    #[test]
+    fn a_tie_is_broken_the_same_way_every_time() {
+        let second = output_of("alsa.usb-2222-2222.pcm-0", AudioTransport::Usb);
+        let first = output_of("alsa.usb-1111-1111.pcm-0", AudioTransport::Usb);
+        assert_eq!(
+            preferred_automatic_output(&[&second, &first]).map(|d| d.id.as_str()),
+            preferred_automatic_output(&[&first, &second]).map(|d| d.id.as_str()),
+        );
+        assert_eq!(
+            preferred_automatic_output(&[&second, &first]).map(|d| d.id.as_str()),
+            Some("alsa.usb-1111-1111.pcm-0"),
+        );
+    }
+
+    #[test]
+    fn nothing_connected_selects_nothing() {
+        assert!(preferred_automatic_output(&[]).is_none());
+    }
+
+    /// Automatic names no device, so no device answers to it: the host is
+    /// meant to resolve it against what a device can do.
+    #[test]
+    fn automatic_matches_no_device_by_identity() {
+        assert!(!AudioDeviceSelector::Automatic.matches(&device()));
+        assert!(AudioDeviceSelector::Automatic.validate().is_ok());
+    }
+
+    /// The seed installers ship is read by Core, so the spelling matters.
+    #[test]
+    fn automatic_is_spelled_the_way_the_configuration_writes_it() {
+        let selector: AudioDeviceSelector =
+            toml::from_str("mode = \"automatic\"").expect("parsing the automatic selector");
+        assert_eq!(selector, AudioDeviceSelector::Automatic);
     }
 
     fn profile() -> AudioOutputProfile {

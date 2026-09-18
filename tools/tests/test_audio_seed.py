@@ -68,13 +68,27 @@ class AudioSeedTests(unittest.TestCase):
             "a resource override belongs to one plugin and this seed serves any",
         )
 
-    def test_a_machine_without_the_pinned_device_can_still_bind_one(self):
-        output = rendered()["audio"]["output"]
+    def test_it_names_no_make_and_no_model(self):
+        # The appliance is imaged before anyone knows which interface it will
+        # meet. A vendor id here is a machine that works on one desk.
+        device = rendered()["audio"]["output"]["device"]
         self.assertEqual(
-            output["fallback"],
-            "unique_compatible",
-            "with no fallback the pinned interface is the only one that works",
+            device,
+            {"mode": "automatic"},
+            "the seed pins a specific device; every other machine has no audio",
         )
+
+    def test_nothing_in_the_seed_names_a_vendor(self):
+        text = SEED.read_text(encoding="utf-8")
+        body = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        )
+        for hardcoded in ("vendor_id", "product_id", "serial"):
+            self.assertNotIn(
+                hardcoded,
+                body,
+                f"{hardcoded} ties the shipped configuration to one interface",
+            )
 
     def test_it_asks_for_the_only_format_the_engine_renders(self):
         self.assertEqual(rendered()["audio"]["output"]["sample_format"], "s32_le")

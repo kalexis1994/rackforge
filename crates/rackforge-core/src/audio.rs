@@ -5,9 +5,9 @@ use alsa::{Direction, ValueOr};
 use anyhow::{Context, Result, bail};
 use rackforge_audio_api::{
     AUDIO_DEVICE_SCHEMA_VERSION, AudioBackend, AudioDeviceDescriptor, AudioDeviceId,
-    AudioFallbackPolicy, AudioInputProfile, AudioOutputProfile, AudioSampleFormat,
-    AudioStreamCapabilities, AudioTransport, AudioValueRange, COMMON_SAMPLE_RATES,
-    UsbAudioIdentity,
+    AudioDeviceSelector, AudioFallbackPolicy, AudioInputProfile, AudioOutputProfile,
+    AudioSampleFormat, AudioStreamCapabilities, AudioTransport, AudioValueRange,
+    COMMON_SAMPLE_RATES, UsbAudioIdentity, preferred_automatic_output,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -265,6 +265,41 @@ fn resolve_output_device<'a>(
     profile: &AudioOutputProfile,
     devices: &'a [AudioDeviceDescriptor],
 ) -> Result<&'a AudioDeviceDescriptor> {
+    if profile.device == AudioDeviceSelector::Automatic {
+        let compatible = devices
+            .iter()
+            .filter(|device| profile.validate_against(device).is_ok())
+            .collect::<Vec<_>>();
+        return match preferred_automatic_output(&compatible) {
+            Some(device) => {
+                // Two devices that can both serve is the ordinary case on a
+                // board with its own output, not an error to refuse over.
+                eprintln!(
+                    "AUDIO_AUTOMATIC selected={} transport={:?} considered={}",
+                    device.id,
+                    device.transport,
+                    compatible
+                        .iter()
+                        .map(|candidate| candidate.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                Ok(device)
+            }
+            None => {
+                let available = devices
+                    .iter()
+                    .filter(|device| device.playback.is_some())
+                    .map(|device| device.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                bail!(
+                    "no connected output can serve this audio profile;                      playback devices seen: {available}"
+                )
+            }
+        };
+    }
+
     let matching = devices
         .iter()
         .filter(|device| device.playback.is_some() && profile.device.matches(device))

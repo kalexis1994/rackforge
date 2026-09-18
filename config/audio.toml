@@ -21,14 +21,16 @@ data_root = "@RACKFORGE_ROOT@/data"
 # alongside a `package` that declares those ids.
 
 [audio.output]
-# `unique_compatible` is what makes this file portable. The device below is a
-# pin, not a requirement: when it is absent and exactly one output can serve
-# this profile, Core uses that one. With `none` a machine without this exact
-# interface simply has no audio.
-fallback = "unique_compatible"
-# Core renders S32_LE and nothing else today. An output that cannot take it --
-# a Raspberry Pi's headphone jack offers U8 and S16_LE only -- cannot be used
-# by the engine whatever else is configured here.
+# Nothing here names a make or a model, and nothing should: this file is
+# imaged onto machines whose interface nobody has met yet. `automatic` means
+# "whichever connected output can run this profile", and when more than one
+# can, the choice is by kind of connection -- something plugged into USB was
+# plugged in to be played through, a board's own output is the fallback, and
+# HDMI on a headless appliance usually leads to a screen that is not there.
+#
+# To pin one deliberately, replace the device table with
+# `mode = "usb"` and the interface's ids, or `mode = "id"` and the device id
+# Core prints in AUDIO_READY.
 sample_format = "s32_le"
 sample_rate_hz = 48000
 channels = 2
@@ -36,16 +38,13 @@ period_frames = 128
 buffer_frames = 384
 
 [audio.output.device]
-mode = "usb"
-vendor_id = 0x1235
-product_id = 0x8211
+mode = "automatic"
 
 # Audio capture is opt-in. Uncomment this section for a mono guitar connected
 # to physical input 1 of the same interface. Keep rate and period equal to the
 # output profile so both streams remain in one clock domain.
 #
 # [audio.input]
-# fallback = "unique_compatible"
 # sample_format = "s32_le"
 # sample_rate_hz = 48000
 # channels = [1]
@@ -54,6 +53,4 @@ product_id = 0x8211
 # gain_db = 0
 #
 # [audio.input.device]
-# mode = "usb"
-# vendor_id = 0x1235
-# product_id = 0x8211
+# mode = "automatic"

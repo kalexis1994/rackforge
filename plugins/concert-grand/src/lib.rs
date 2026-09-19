@@ -16555,6 +16555,206 @@ mod bench {
         }
     }
 
+    /// What a voice costs once it is only ringing, at the polyphony a
+    /// pedalled performance actually reaches.
+    ///
+    /// The ramp held twelve. Measured against MAESTRO, a pedalled Liszt
+    /// leaves **forty-seven** ringing, and La Campanella's dense passage
+    /// spends 82 % of the period on the appliance -- so the steady cost, not
+    /// the strike, is what it cannot afford. This measures it in that
+    /// regime.
+    ///
+    /// Notes are struck the way a performance strikes them, a few
+    /// milliseconds apart rather than in one block, and then left under the
+    /// pedal for four seconds so the partial cull has finished. What is
+    /// reported is the cost per voice and per LIVE component -- live because
+    /// `Component::tick` retires a lane whose radius has reached zero, and
+    /// the third string does not exist below the tenor, so the slots and the
+    /// work are very different numbers.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release sustained_voice_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn sustained_voice_cost() {
+        const FRAMES: usize = 128;
+        std::println!(
+            "{:>6} {:>7} {:>10} {:>11} {:>10} {:>11} {:>12}",
+            "voces", "activas", "parciales", "componentes", "bloque", "us/voz", "us/componente"
+        );
+        let mut previous: Option<(usize, f64)> = None;
+        for wanted in [1usize, 4, 8, 16, 24, 32, 47] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            // Spread across the compass and across time, as a hand does.
+            let mut struck = 0usize;
+            for block in 0..1_600 {
+                let events: std::vec::Vec<MidiEvent> = if struck < wanted && block % 3 == 0 {
+                    struck += 1;
+                    std::vec![note_on(24 + ((struck * 5) % 64) as u8, 90)]
+                } else {
+                    std::vec::Vec::new()
+                };
+                piano.process(&[], &mut output, &events, &[], FRAMES as u32, 0, 2);
+            }
+            // Settled: the cull has run, the blooms have retired.
+            let mut cost = 0.0f64;
+            for _ in 0..300 {
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                cost += start.elapsed().as_secs_f64() * 1e6;
+            }
+            cost /= 300.0;
+
+            let active = piano.voices.iter().filter(|voice| voice.active).count();
+            let partials: usize = piano
+                .voices
+                .iter()
+                .filter(|voice| voice.active)
+                .map(|voice| voice.partial_count)
+                .sum();
+            let mut components = 0usize;
+            for voice in piano.voices.iter().filter(|voice| voice.active) {
+                for partial in &voice.partials[..voice.partial_count] {
+                    for lane in 0..LANES {
+                        if partial.rc[lane] != 0.0 || partial.rs[lane] != 0.0 {
+                            components += 1;
+                        }
+                    }
+                }
+            }
+            // The marginal cost, which is the honest one: the fixed part of a
+            // block is the board and the sympathetic banks, not the voices.
+            let marginal = previous.map(|(voices, before)| {
+                (cost - before) / (active.saturating_sub(voices)).max(1) as f64
+            });
+            std::println!(
+                "{wanted:>6} {active:>7} {partials:>10} {components:>11} {:>8.0}us {:>9} {:>12.2}",
+                cost,
+                marginal.map_or(std::string::String::from("--"), |m| std::format!("{m:.0}us")),
+                if components > 0 { cost / components as f64 } else { 0.0 },
+            );
+            previous = Some((active, cost));
+
+            if wanted == 32 {
+                // Where the live components actually sit, against what is
+                // being heard. `DEAD_MAGNITUDE_SQUARED` kills one at about
+                // -95 dB ABSOLUTE; masking is relative, and under a pedal in
+                // a loud passage those are very different lines.
+                let peak = output.iter().fold(0.0f32, |a, x| a.max(x.abs())).max(1e-9);
+                let mut levels: std::vec::Vec<f32> = std::vec::Vec::new();
+                for voice in piano.voices.iter().filter(|voice| voice.active) {
+                    for partial in &voice.partials[..voice.partial_count] {
+                        for lane in 0..LANES {
+                            if partial.rc[lane] == 0.0 && partial.rs[lane] == 0.0 {
+                                continue;
+                            }
+                            let (sn, cn) = (partial.s[lane], partial.c[lane]);
+                            let magnitude = (sn * sn + cn * cn).sqrt();
+                            levels.push(
+                                20.0 * log2f((magnitude / peak).max(1e-12)) / log2f(10.0),
+                            );
+                        }
+                    }
+                }
+                // And the safer line: each component against the loudest one
+                // of ITS OWN voice. A threshold on the global peak is a
+                // moving one -- a pedalled note masked under a loud chord
+                // would be killed, and it cannot come back when the chord
+                // releases and it should be exposed again. Within a note the
+                // ratio is stable, because the whole note decays together.
+                let mut within: std::vec::Vec<f32> = std::vec::Vec::new();
+                for voice in piano.voices.iter().filter(|voice| voice.active) {
+                    let mut loudest = 1e-12f32;
+                    for partial in &voice.partials[..voice.partial_count] {
+                        for lane in 0..LANES {
+                            let (sn, cn) = (partial.s[lane], partial.c[lane]);
+                            loudest = loudest.max((sn * sn + cn * cn).sqrt());
+                        }
+                    }
+                    for partial in &voice.partials[..voice.partial_count] {
+                        for lane in 0..LANES {
+                            if partial.rc[lane] == 0.0 && partial.rs[lane] == 0.0 {
+                                continue;
+                            }
+                            let (sn, cn) = (partial.s[lane], partial.c[lane]);
+                            let magnitude = (sn * sn + cn * cn).sqrt();
+                            within.push(
+                                20.0 * log2f((magnitude / loudest).max(1e-12)) / log2f(10.0),
+                            );
+                        }
+                    }
+                }
+                within.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                levels.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                std::println!();
+                std::println!(
+                    "  con 32 voces: {} componentes vivos, pico de salida {peak:.4}",
+                    levels.len()
+                );
+                std::println!("  cuantos estan por debajo de cada nivel, contra el pico:");
+                for floor in [-100.0f32, -90.0, -80.0, -70.0, -60.0, -50.0, -40.0] {
+                    let under = levels.iter().filter(|db| **db < floor).count();
+                    std::println!(
+                        "    {floor:>6.0} dB: {under:>5} de {:>5} ({:>4.0} %)  {}",
+                        levels.len(),
+                        100.0 * under as f32 / levels.len() as f32,
+                        "#".repeat((50.0 * under as f32 / levels.len() as f32) as usize)
+                    );
+                }
+                // One note is TWO voices: the note and its halo, a second
+                // smaller ladder built under the pedal. At this polyphony
+                // that is half the slots, and the question is what share of
+                // the WORK it is.
+                let (mut halo_voices, mut halo_components) = (0usize, 0usize);
+                let (mut note_voices, mut note_components) = (0usize, 0usize);
+                for voice in piano.voices.iter().filter(|voice| voice.active) {
+                    let mut live = 0usize;
+                    for partial in &voice.partials[..voice.partial_count] {
+                        for lane in 0..LANES {
+                            if partial.rc[lane] != 0.0 || partial.rs[lane] != 0.0 {
+                                live += 1;
+                            }
+                        }
+                    }
+                    if voice.halo {
+                        halo_voices += 1;
+                        halo_components += live;
+                    } else {
+                        note_voices += 1;
+                        note_components += live;
+                    }
+                }
+                let total = (note_components + halo_components).max(1);
+                std::println!();
+                std::println!(
+                    "  notas: {note_voices:>2} voces, {note_components:>5} componentes ({:>3.0} %)",
+                    100.0 * note_components as f32 / total as f32
+                );
+                std::println!(
+                    "  halos: {halo_voices:>2} voces, {halo_components:>5} componentes ({:>3.0} %)",
+                    100.0 * halo_components as f32 / total as f32
+                );
+                std::println!();
+                std::println!("  y contra el componente mas fuerte de SU PROPIA voz:");
+                for floor in [-80.0f32, -70.0, -60.0, -50.0, -40.0, -30.0] {
+                    let under = within.iter().filter(|db| **db < floor).count();
+                    std::println!(
+                        "    {floor:>6.0} dB: {under:>5} de {:>5} ({:>4.0} %)  {}",
+                        within.len(),
+                        100.0 * under as f32 / within.len() as f32,
+                        "#".repeat((50.0 * under as f32 / within.len() as f32) as usize)
+                    );
+                }
+                std::println!();
+            }
+        }
+        std::println!("  MAX_VOICES es {MAX_VOICES}, asi que 47 notas roban voces");
+        std::println!("  el deadline de la Pi a 128 cuadros es 2666 us");
+    }
+
     /// Is the contact integrator converged at the timestep it ships with?
     ///
     /// The strike simulation is 42-47 % of a note-on on the appliance, and

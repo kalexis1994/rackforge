@@ -3544,6 +3544,22 @@ pub static AIR_HIGHPASS: Knob = Knob::new(0.0094);
 const ROOM_BUFFER: usize = 4096;
 /// Wet level of the chamber against the direct sound.
 pub static ROOM_MIX: Knob = Knob::new(0.09);
+/// Every voice slot, section by section -- the order a unit walks them.
+///
+/// The event handlers mutate each voice independently and write nothing to
+/// the instrument inside their loops, so this order and plain slot order
+/// give the same result. That is not an argument, it is a test: the four
+/// handlers below were switched to this order and the render fingerprint
+/// did not move.
+///
+/// The RENDER loop is a different matter and keeps slot order, because it
+/// sums into shared accumulators and the float order is the fingerprint.
+fn section_major_slots() -> impl Iterator<Item = usize> {
+    (0..STRING_SECTIONS).flat_map(|section| {
+        (0..VOICES_PER_SECTION).map(move |index| (index << SECTION_SHIFT) | section)
+    })
+}
+
 /// What the stages after the strings need to know about the frame they are
 /// rendering, captured where the events for that frame have just landed.
 ///
@@ -9355,7 +9371,7 @@ impl ConcertGrand {
             .damp_serial
             .wrapping_mul(0x9E37_79B9)
             .wrapping_add((note as u32).wrapping_mul(2_654_435_761));
-        for slot in 0..MAX_VOICES {
+        for slot in section_major_slots() {
             let voice = &mut voice_at!(self, slot);
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
                 voice.key_off_knock(key_off, key_off_decay, key_off_rise, key_off_seed, rate);
@@ -9437,7 +9453,7 @@ impl ConcertGrand {
             // The rail coming up catches every felt still on its way down:
             // that string is sustained from here, its press relieved through
             // the same damper it was made with.
-            for slot in 0..MAX_VOICES {
+            for slot in section_major_slots() {
             let voice = &mut voice_at!(self, slot);
                 if voice.active && voice.damper_phase != 0 {
                     voice.cancel_damper();
@@ -9464,7 +9480,7 @@ impl ConcertGrand {
         // chord ending like a gate rather than like felt.
         self.damp_serial = self.damp_serial.wrapping_add(1);
         let serial = self.damp_serial;
-        for slot in 0..MAX_VOICES {
+        for slot in section_major_slots() {
             let voice = &mut voice_at!(self, slot);
             if !(voice.active && voice.sustained) || voice.undamped {
                 continue;
@@ -9515,7 +9531,7 @@ impl ConcertGrand {
         let knock = 0.0025 * Controls::noise_gain(self.controls.pedal_noise);
         self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
         if down {
-            for slot in 0..MAX_VOICES {
+            for slot in section_major_slots() {
             let voice = &mut voice_at!(self, slot);
                 if voice.active && voice.held {
                     voice.sostenuto = true;
@@ -9530,7 +9546,7 @@ impl ConcertGrand {
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
         let pressure = self.pedal_pressure;
-        for slot in 0..MAX_VOICES {
+        for slot in section_major_slots() {
             let voice = &mut voice_at!(self, slot);
             if !(voice.active && voice.sostenuto) {
                 continue;
@@ -9556,7 +9572,7 @@ impl ConcertGrand {
         let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
-        for slot in 0..MAX_VOICES {
+        for slot in section_major_slots() {
             let voice = &mut voice_at!(self, slot);
             if voice.active {
                 let damper = Self::damper_for(voice.note, rate, grip, 1.0);

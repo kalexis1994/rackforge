@@ -217,7 +217,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 156;
+pub const KNOB_COUNT: usize = 157;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -880,6 +880,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         &MERGE_RAMP_CONTACT,
         "How much of the blow's own contact time a re-strike's momentum is spread over: 1 the contact itself, 0 off.",
     ),
+    (
+        "WIRE_LOSS_TOP",
+        &WIRE_LOSS_TOP,
+        "Multiplier on the wire's viscoelastic loss reached at C8, log-linear from about C3; 1 = the fitted rate everywhere.",
+    ),
 ];
 
 /// Applies `NAME = value` lines (blank lines and `#` comments ignored;
@@ -973,6 +978,75 @@ const NOTE_COUNT: usize = 88;
 /// build keeps the temporaries and the harness's 2 MiB thread overflowed.
 /// Locally, `cargo test --release` fits; a debug run wants the variable.
 const MAX_VOICES: usize = 32;
+/// What the instrument costs the sandbox, per frame of audio, in wasmtime
+/// fuel. This is how a budget handed down by the host (`realtime_budget` in
+/// `rackforge-core`) becomes a decision about how much instrument to build.
+///
+/// Measured through `rackforge-core stress --parameter 32=<density>` at 128
+/// frames, which is the appliance's period. Sweeping Board Density from its
+/// floor to its ceiling moved the bank from 106 modes to 256 and the steady
+/// fuel from 11,546,535 to 14,292,135 -- 18,304 fuel a block per mode, and
+/// exactly that for every step in between, so the bank is linear in its modes
+/// to the fuel. The split between the parts that are not the soundboard comes
+/// from the ablation in `RELIABILITY.md`, measured on a Raspberry Pi 4 by
+/// building the plugin with each bank taken out.
+///
+/// **None of these has to be right.** The host watches what the render
+/// actually does with the period and keeps moving the budget until it fits,
+/// so an estimate off by a factor still lands; it just takes a few seconds
+/// longer. They are here to make the first jump land near the answer instead
+/// of walking to it.
+///
+/// What no budget can take away: the bridge projection, the damped bed, the
+/// open top octave, the halo, the rim, the lid and the room. These are the
+/// parts with nothing left to give up that would still leave a piano.
+const UNAVOIDABLE_FUEL: f32 = 14_219.0;
+/// The soundboard bank at the voicing it ships with -- 169 modes, not its 256
+/// slots, because the shipped Density control does not fill them.
+const BOARD_AT_FULL_FUEL: f32 = 24_167.0;
+/// The undamped top register's sympathetic partials at full count. 393 us of
+/// a Raspberry Pi's 1321 us of silence, which is the largest single thing in
+/// the instrument after the soundboard itself.
+const UNDAMPED_AT_FULL_FUEL: f32 = 13_125.0;
+/// One sounding voice. Freshly struck notes cost about three times what a
+/// note a Raspberry Pi has been holding for twelve seconds costs, because the
+/// partial cull thins them; this is the expensive end, since that is the end
+/// where deadlines are missed.
+const VOICE_FUEL: f32 = 9_688.0;
+/// How much polyphony the instrument keeps room for before it spends anything
+/// on the parts of itself it could do without. A piano that fits its body by
+/// refusing to play a chord has the priority backwards.
+const RESERVED_VOICES: f32 = 6.0;
+/// And the same floor said in the units the bank is actually built from. The
+/// builder stops at a ceiling frequency rather than at a count, so a spacing
+/// asked to deliver a count it cannot reach would keep being asked for more;
+/// this is where that stops.
+const MAXIMUM_BUDGET_SPACING: f32 = 3.0;
+/// The least instrument this will build. Below this the losses stop being a
+/// smaller piano and start being a broken one, and the honest report is that
+/// the machine cannot run it -- which the host says for itself, in the log,
+/// once its cuts stop buying anything.
+const MINIMUM_QUALITY: f32 = 0.2;
+/// Floors for the two banks the quality scalar thins, in their own units.
+const MINIMUM_UNDAMPED_PARTIALS: usize = 2;
+const MINIMUM_PARTIAL_BUDGET: usize = 300;
+/// How many independently renderable sections the strings are defined in.
+///
+/// A power of two so a voice's section is its slot index masked, with no
+/// division in the per-sample loop, and four because that is the shape a
+/// `parallel_render_v1` decomposition would take on the machines this has to
+/// hold up on -- a Raspberry Pi 4 has four cores and RackForge uses one.
+///
+/// Sections are not a musical division. Voices land in them by slot, so a
+/// chord's notes are spread across all four rather than gathered in one.
+const STRING_SECTIONS: usize = 4;
+/// The longest coupling delay the model can be defined with: the largest
+/// block a host may hand this plugin. A delay shorter than the block cannot
+/// be honoured by units that render a whole block in isolation, and a delay
+/// that changed with the host's period would make the instrument sound
+/// different at 128 frames than at 512 -- which is the one thing the parallel
+/// contract forbids.
+const MAX_SECTION_DELAY: usize = 512;
 /// How many strikes have had to steal a sounding voice, natively: the lab
 /// reports it after a render, since a steal is a step in the output.
 #[cfg(not(target_arch = "wasm32"))]
@@ -4480,6 +4554,21 @@ pub struct ConcertGrand {
     soft: f32,
     /// Live count of active partials, the budget the callback answers to.
     active_partials: usize,
+    /// Each section's per-frame string sum for the last `MAX_SECTION_DELAY`
+    /// frames, as a ring. Read by the sections that did not write it.
+    section_history: [[f32; MAX_SECTION_DELAY]; STRING_SECTIONS],
+    section_cursor: usize,
+    /// The previous frame's sum, per section: what a section hears of itself,
+    /// which is never delayed.
+    section_previous: [f32; STRING_SECTIONS],
+    /// Samples of delay on the sympathetic coupling BETWEEN sections.
+    ///
+    /// `0` couples every string to every other with the one sample of latency
+    /// the bridge has always had, which is the instrument as shipped and the
+    /// only setting that renders identically on every host. Anything larger
+    /// is the price of rendering sections concurrently, and what it costs the
+    /// ear is measured by `section_delay_audibility`, not asserted here.
+    section_delay: usize,
     /// Whether a re-strike merges into the living voice, read from
     /// RESTRIKE_MERGE at prepare and at every retune -- a field and not a
     /// live knob read, so a test can set it without racing the knob
@@ -4529,6 +4618,9 @@ pub struct ConcertGrand {
     /// decibels at 0.4 s.
     undamped_note: [u8; UNDAMPED_COUNT],
     note_sounding: [bool; NOTE_COUNT],
+    /// Which undamped lengths are muted for this block because the note that
+    /// owns them is being played. Decided once, from `note_sounding`.
+    undamped_muted: [bool; UNDAMPED_COUNT],
     /// Which keys are down right now, struck or not. A key that is down
     /// has its damper up whatever else is true of its string.
     key_down: [bool; NOTE_COUNT],
@@ -4618,6 +4710,42 @@ pub struct ConcertGrand {
     /// The board is a rebuild, not a per-sample read: its two controls set
     /// this and `process` retunes the bank at the next block boundary.
     board_dirty: bool,
+    /// What the host says one real-time call may spend here, in sandbox fuel.
+    /// Zero until a host says -- which is every host built before this
+    /// existed, and every host that does not meter fuel.
+    budget_fuel_per_call: u64,
+    /// Set when a new budget arrives and cleared by the block that spends it.
+    ///
+    /// Without this the spacing was recomputed every block from the bank that
+    /// the previous block built, and when the bank could not reach the mode
+    /// count being asked for -- the builder stops at a ceiling frequency, not
+    /// at a count -- the correction oscillated and marked the board dirty
+    /// every block. Measured on a Raspberry Pi: the soundboard rebuilding at
+    /// the block rate took the render from 1050 us to 3598 us and missed
+    /// every deadline in the window, which the host then read as a plugin
+    /// that needed a smaller budget, and cut, and so on down.
+    budget_pending: bool,
+    /// What that budget does to the soundboard: a multiplier on the spacing
+    /// between its modes, so 1.0 is the bank as voiced and 2.0 is half of it.
+    /// Never below 1.0 -- a budget may take quality away, never add some the
+    /// player did not ask for.
+    board_budget_spacing: f32,
+    /// How much instrument the budget affords, from 1.0 (as voiced) down to
+    /// `MINIMUM_QUALITY`. One scalar drives all three axes, so the losses
+    /// arrive together instead of the body going dry while the sympathy stays
+    /// lavish.
+    quality: f32,
+    /// Partials per undamped string, thinned from the top down: the highest
+    /// are the quietest and the first the ear lets go of.
+    undamped_partials: usize,
+    /// How many of the undamped bank's resonators were actually built, and so
+    /// how many are worth ticking.
+    undamped_active: usize,
+    /// The ceiling on partials sounding across all voices. `PARTIAL_BUDGET` is
+    /// what the instrument ships with; a budget scales it, and the existing
+    /// machinery then thins new notes instead of missing the callback.
+    partial_budget: usize,
+    undamped_dirty: bool,
     scale_dirty: bool,
     room_index: [usize; ROOM_LINES],
 }
@@ -4633,6 +4761,10 @@ impl Default for ConcertGrand {
             pedal: false,
             soft: 0.0,
             active_partials: 0,
+            section_history: [[0.0; MAX_SECTION_DELAY]; STRING_SECTIONS],
+            section_cursor: 0,
+            section_previous: [0.0; STRING_SECTIONS],
+            section_delay: 0,
             restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
             // Per-note calibration fitted against the YDP samples: ten
             // anchors from A0 to C8, nine multipliers each (felt, HF floor,
@@ -4702,6 +4834,7 @@ impl Default for ConcertGrand {
             undamped: [BodyMode::default(); UNDAMPED_COUNT],
             undamped_note: [0; UNDAMPED_COUNT],
             note_sounding: [false; NOTE_COUNT],
+            undamped_muted: [false; UNDAMPED_COUNT],
             key_down: [false; NOTE_COUNT],
             silent: [BodyMode::default(); SILENT_MODES],
             silent_note: [0; SILENT_SLOTS],
@@ -4754,6 +4887,14 @@ impl Default for ConcertGrand {
             proximity: [0.0; 2],
             room_dirty: false,
             board_dirty: false,
+            budget_fuel_per_call: 0,
+            budget_pending: false,
+            board_budget_spacing: 1.0,
+            quality: 1.0,
+            undamped_partials: FREE_STRING_PARTIALS,
+            undamped_active: UNDAMPED_COUNT,
+            partial_budget: PARTIAL_BUDGET,
+            undamped_dirty: false,
             scale_dirty: false,
             room_index: [0; ROOM_LINES],
         };
@@ -4881,6 +5022,25 @@ pub static STULOV_EPSILON: Knob = Knob::new(0.5);
 pub static STULOV_TAU_S: Knob = Knob::new(2.0e-4);
 /// The wire's viscoelastic loss rate at 4.4 kHz, in 1/s; grows with f^2.
 pub static STRING_HF_LOSS: Knob = Knob::new(5.0);
+/// The same loss is not one number for the whole compass. Bensa et al. (JASA
+/// 114, 2003) give it per string as sigma = b1 + b3*omega^2, and b3 is a
+/// property of the wire: the rate above was fitted on 122 partials across
+/// eleven notes that were mostly bass, where it is right, and measured on
+/// the YDP mid register it is a factor of three to six short -- the
+/// instrument loses 10-27 dB of 4-8 kHz in the first second where the model
+/// loses 2-12. Doubling the global rate halved that gap and cost the bass
+/// nine points of fit, so the growth is placed where the wire is plain and
+/// thin: from `WIRE_LOSS_FROM` along the compass (0 = A0, 1 = C8) the rate
+/// climbs log-linearly to `WIRE_LOSS_TOP` times itself at C8. 1.0 at the top
+/// is the fitted rate everywhere, bit for bit.
+const WIRE_LOSS_FROM: f32 = 0.31;
+/// Six at C8 puts C7 at about 4.4x, which is where Chaigne and Askenfelt's
+/// treble b3 sits against their C4 value; the fit cost kept falling past
+/// this (8: 825, 12: 813 against 835) but it was the treble cost doing the
+/// falling, in the register whose reference is dominated by a knock the
+/// model does not have -- a fit that likes an over-damped treble because
+/// the alternative source is missing. The literature's number, and the ear.
+pub static WIRE_LOSS_TOP: Knob = Knob::new(6.0);
 /// The board's loss factor at 50 Hz; log-linear to BOARD_LOSS_FACTOR at 300 Hz.
 pub static BOARD_LOW_LOSS: Knob = Knob::new(0.05);
 /// Cap on the Skudrzyk boost of a sparse region's peaks: the lowest, sparsest modes must not tower over the mean.
@@ -5521,7 +5681,12 @@ impl ConcertGrand {
             }
         }
         let loss = self.controls.board_loss();
-        let density = self.controls.board_density();
+        // The control says how close the modes sit; the budget says how much
+        // of that this machine can afford. Spacing, not a truncated count:
+        // dropping the last modes would cut the top off the body's range,
+        // while spacing them wider keeps the whole range and thins it, which
+        // is what the Density control itself does.
+        let density = self.controls.board_density() * self.board_budget_spacing;
         let ceiling = if BOARD_TOP_HZ.get() < 0.45 * self.sample_rate {
             BOARD_TOP_HZ.get()
         } else {
@@ -5945,7 +6110,7 @@ impl ConcertGrand {
             let b = self.inharmonicity_for(note);
             let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
             let pan = (0.5 + 0.8 * (position - 0.5) * self.controls.width).clamp(0.05, 0.95);
-            for k in 1..=FREE_STRING_PARTIALS {
+            for k in 1..=self.undamped_partials {
                 if index >= UNDAMPED_COUNT {
                     break;
                 }
@@ -5983,6 +6148,9 @@ impl ConcertGrand {
             *string = BodyMode::default();
             *owner = 0;
         }
+        // A zeroed resonator still rotates, and rotating zero costs what
+        // rotating anything costs. What is not built is not ticked.
+        self.undamped_active = index;
     }
 
     fn tune_open_strings(&mut self) {
@@ -6307,7 +6475,7 @@ impl ConcertGrand {
                 * Self::radiation_efficiency(radiating)
                 * self.slow_bridge_factor(f0)
             + SLOW_WIRE_SHARE.get()
-                * Self::viscoelastic_loss(radiating)
+                * Self::viscoelastic_loss(radiating, f0)
                 * self.slow_bridge_factor(f0);
         (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
     }
@@ -6346,7 +6514,7 @@ impl ConcertGrand {
                 * self.bridge_speed_factor(f0)
                 + bending)
                 / treble_life.max(0.05)
-            + Self::viscoelastic_loss(radiating) * self.bridge_speed_factor(f0);
+            + Self::viscoelastic_loss(radiating, f0) * self.bridge_speed_factor(f0);
         // There is no register correction here any more, and that is the
         // point. One used to divide the whole note by up to 2.6 because the
         // bass rang too long; but the bass rang too long because the curve
@@ -6506,9 +6674,20 @@ impl ConcertGrand {
     /// and 200 ms -- a T60 near half a second -- where the bridge channel
     /// alone let it ring three times longer, and a C7's fundamental at
     /// 2.1 kHz keeps its 1.7 s. STRING_HF_LOSS is the rate at 4.4 kHz, 1/s.
-    fn viscoelastic_loss(frequency: f32) -> f32 {
+    fn viscoelastic_loss(frequency: f32, f0: f32) -> f32 {
         let r = frequency / 4400.0;
-        STRING_HF_LOSS.get() * r * r
+        STRING_HF_LOSS.get() * r * r * Self::wire_loss_factor(f0)
+    }
+
+    /// How much more than the fitted rate this string's wire loses: one
+    /// below `WIRE_LOSS_FROM`, `WIRE_LOSS_TOP` at C8, log-linear between.
+    /// `powf(1.0, x)` is exactly one, so a top of 1.0 leaves every note as it
+    /// was.
+    fn wire_loss_factor(f0: f32) -> f32 {
+        let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
+        let from = WIRE_LOSS_FROM;
+        let reach = ((position - from) / (1.0 - from)).clamp(0.0, 1.0);
+        powf(WIRE_LOSS_TOP.get().max(0.01), reach)
     }
 
     fn radiation_efficiency(frequency: f32) -> f32 {
@@ -7522,7 +7701,7 @@ impl ConcertGrand {
         }
 
         let floor = peak * 1e-3;
-        let budget_left = PARTIAL_BUDGET.saturating_sub(self.active_partials);
+        let budget_left = self.partial_budget.saturating_sub(self.active_partials);
         // Sixteen slots stay reserved for the nonlinear extras (phantoms and
         // the longitudinal clang): the lowest notes fill the whole array with
         // their transverse ladder otherwise, and the growl never fits.
@@ -8433,6 +8612,66 @@ impl ConcertGrand {
         }
     }
 
+    /// How much instrument this machine affords, from 1.0 down.
+    ///
+    /// The budget is per real-time call, so it is worth only as much as the
+    /// call is long: the same number over 512 frames buys a quarter of what it
+    /// buys over 128. Everything below is therefore per frame.
+    ///
+    /// Returns 1.0 -- the instrument exactly as voiced -- when no host has
+    /// said anything, which is what older hosts and the browser always see.
+    ///
+    /// The arithmetic does not have to be right. The host watches what the
+    /// render actually does with the period and keeps moving the budget until
+    /// it fits, so an estimate off by a factor still lands; it just takes a
+    /// few seconds longer. It is here to make the first jump land near the
+    /// answer instead of walking to it.
+    fn budgeted_quality(&self, frames: u32) -> f32 {
+        if self.budget_fuel_per_call == 0 || frames == 0 {
+            return 1.0;
+        }
+        let per_frame = self.budget_fuel_per_call as f32 / frames as f32;
+        let scalable = BOARD_AT_FULL_FUEL + UNDAMPED_AT_FULL_FUEL + RESERVED_VOICES * VOICE_FUEL;
+        ((per_frame - UNAVOIDABLE_FUEL) / scalable).clamp(MINIMUM_QUALITY, 1.0)
+    }
+
+    /// Spends the quality scalar across the three things this instrument can
+    /// be smaller in.
+    ///
+    /// They move together on purpose. Thinning one axis to its floor while
+    /// another stays lavish gives a piano with a dry body and an extravagant
+    /// sympathetic halo, which is not a smaller piano -- it is a differently
+    /// shaped one. What the ear is offered here is the same instrument, less
+    /// of it.
+    fn apply_quality(&mut self) {
+        // The body: the modes sit further apart, keeping the whole frequency
+        // range and thinning it, which is what the Density control does.
+        let spacing = (1.0 / self.quality).clamp(1.0, MAXIMUM_BUDGET_SPACING);
+        if (spacing - self.board_budget_spacing).abs() > 0.02 {
+            self.board_budget_spacing = spacing;
+            self.board_dirty = true;
+        }
+
+        // The sympathetic top register: fewer partials per string, taken from
+        // the top down. The highest are the quietest and the shortest-lived,
+        // so this is the axis that costs the ear least per microsecond.
+        // Plus a half and truncate: `f32::round` is std, and this compiles
+        // without it for the wasm hosts.
+        let partials = ((FREE_STRING_PARTIALS as f32 * self.quality + 0.5) as usize)
+            .clamp(MINIMUM_UNDAMPED_PARTIALS, FREE_STRING_PARTIALS);
+        if partials != self.undamped_partials {
+            self.undamped_partials = partials;
+            self.undamped_dirty = true;
+        }
+
+        // The notes themselves. Nothing is rebuilt for this: the strike path
+        // already reads the ceiling and gives a new note a shorter ladder when
+        // the instrument is busy, which is the graceful degradation the
+        // constant was written for and never got told about.
+        self.partial_budget = ((PARTIAL_BUDGET as f32 * self.quality) as usize)
+            .clamp(MINIMUM_PARTIAL_BUDGET, PARTIAL_BUDGET);
+    }
+
     fn allocate_voice(&mut self) -> Option<&mut Voice> {
         if let Some(index) = self.voices.iter().position(|voice| !voice.active) {
             return Some(&mut self.voices[index]);
@@ -9168,6 +9407,18 @@ impl Processor for ConcertGrand {
         true
     }
 
+    /// Takes the host's real-time budget. See `BOARD_MODE_FUEL` for where the
+    /// arithmetic that spends it comes from.
+    ///
+    /// Only the number is taken here; the bank is not rebuilt until the next
+    /// block, where the frame count is known -- a budget is per call, and a
+    /// call's worth of work depends on how many frames are in it.
+    fn set_realtime_budget(&mut self, fuel_per_call: u64) -> bool {
+        self.budget_fuel_per_call = fuel_per_call;
+        self.budget_pending = true;
+        true
+    }
+
     fn reset(&mut self) {
         self.voices = [Voice::default(); MAX_VOICES];
         self.pedal = false;
@@ -9870,6 +10121,22 @@ impl Processor for ConcertGrand {
                 *slot = true;
             }
         }
+        // `note_sounding` is rebuilt here and never changes inside the block,
+        // so which undamped lengths are muted is settled for the whole block
+        // too. It used to be asked per string per sample -- a hundred and
+        // ninety-two bounds-checked lookups, a hundred and twenty-eight times
+        // a block, all of them returning what the one before them returned.
+        //
+        // Measured on a Raspberry Pi 4 by taking each bank away: an undamped
+        // length cost 2.05 us a block where the open top octave's identical
+        // resonator cost 1.07 us, and this lookup was the whole difference.
+        for (muted, owner) in self
+            .undamped_muted
+            .iter_mut()
+            .zip(self.undamped_note.iter())
+        {
+            *muted = *owner >= LOW_NOTE && self.note_sounding[(*owner - LOW_NOTE) as usize];
+        }
         let knob_headroom = HEADROOM.get();
         let knob_open_mix = OPEN_MIX.get();
         let pedal_c1 =
@@ -9910,8 +10177,20 @@ impl Processor for ConcertGrand {
         if self.room_dirty {
             self.tune_room();
         }
+        if self.budget_pending {
+            self.budget_pending = false;
+            let quality = self.budgeted_quality(frames);
+            if (quality - self.quality).abs() > 0.05 {
+                self.quality = quality;
+                self.apply_quality();
+            }
+        }
         if self.board_dirty {
             self.tune_board();
+        }
+        if self.undamped_dirty {
+            self.undamped_dirty = false;
+            self.tune_undamped();
         }
         if self.scale_dirty {
             self.scale_dirty = false;
@@ -9986,14 +10265,38 @@ impl Processor for ConcertGrand {
                 }
             }
             let mut strings_total = 0.0f32;
+            let mut section_total = [0.0f32; STRING_SECTIONS];
             let mut bridge_drive = 0.0f32;
             let mut drive_points = [0.0f32; BOARD_DRIVE_POINTS];
+            // What each section hears of the rest of the instrument. With no
+            // section delay every section hears the same thing -- the whole
+            // bridge, one sample ago -- and this is the shipped instrument,
+            // taken from `bridge_feed` so the float summation order is
+            // unchanged and the render stays bit-identical.
+            let feeds = if self.section_delay == 0 {
+                [bridge_feed; STRING_SECTIONS]
+            } else {
+                let read = (self.section_cursor + MAX_SECTION_DELAY - self.section_delay)
+                    % MAX_SECTION_DELAY;
+                let mut stale = 0.0f32;
+                for section in 0..STRING_SECTIONS {
+                    stale += self.section_history[section][read];
+                }
+                // Itself from one sample ago, everyone else from a whole
+                // block ago. A section that is the only one sounding hears
+                // exactly what it hears today: the others' sums are zero, so
+                // there is nothing to be late.
+                core::array::from_fn(|section| {
+                    stale - self.section_history[section][read] + self.section_previous[section]
+                })
+            };
             let mut keybed_left = 0.0f32;
             let mut keybed_right = 0.0f32;
-            for voice in &mut self.voices {
+            for (slot, voice) in self.voices.iter_mut().enumerate() {
                 if !voice.active {
                     continue;
                 }
+                let section = slot & (STRING_SECTIONS - 1);
                 // Everyone but me, gated by the damper: a seated or
                 // pressed damper takes a string out of the conversation
                 // exactly as far as it is pressed.
@@ -10004,10 +10307,11 @@ impl Processor for ConcertGrand {
                 } else {
                     0.0
                 };
-                let sympathy = (bridge_feed - voice.last_out) * sympathy_rate * free;
+                let sympathy = (feeds[section] - voice.last_out) * sympathy_rate * free;
                 let sample = voice.tick(sympathy);
                 voice.last_out = sample;
                 strings_total += sample;
+                section_total[section] += sample;
                 keybed_left += voice.keybed_out * voice.pan_left;
                 keybed_right += voice.keybed_out * voice.pan_right;
                 // What drives the BODY is the bridge. The strings used to
@@ -10058,24 +10362,36 @@ impl Processor for ConcertGrand {
             }
 
             bridge_feed = strings_total;
+            self.section_previous = section_total;
+            for section in 0..STRING_SECTIONS {
+                self.section_history[section][self.section_cursor] = section_total[section];
+            }
+            self.section_cursor = (self.section_cursor + 1) % MAX_SECTION_DELAY;
             // Everything the strings produce radiates through the board --
             // each string from its own point of the bridge (`BOARD_SHAPE`).
             let excitation = bridge_drive;
             let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
             let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
-            for q in 0..BOARD_DRIVE_POINTS {
-                let mut c = 0.0f32;
-                let mut s = 0.0f32;
-                for ((basis_cos, basis_sin), point) in self.drive_basis_cos[q]
-                    .iter()
-                    .zip(self.drive_basis_sin[q].iter())
-                    .zip(drive_points.iter())
-                {
-                    c += basis_cos * point;
-                    s += basis_sin * point;
+            // With nothing sounding every drive point is zero, and the
+            // projection below spends five hundred and twelve multiplies a
+            // frame proving that zero times a basis is zero. Skipping it is
+            // exact -- the arrays are already the zeros the loop would leave
+            // -- and it is 155 us of a Raspberry Pi's 2667 us block.
+            if drive_points.iter().any(|point| *point != 0.0) {
+                for q in 0..BOARD_DRIVE_POINTS {
+                    let mut c = 0.0f32;
+                    let mut s = 0.0f32;
+                    for ((basis_cos, basis_sin), point) in self.drive_basis_cos[q]
+                        .iter()
+                        .zip(self.drive_basis_sin[q].iter())
+                        .zip(drive_points.iter())
+                    {
+                        c += basis_cos * point;
+                        s += basis_sin * point;
+                    }
+                    cos_t[q] = c;
+                    sin_t[q] = s;
                 }
-                cos_t[q] = c;
-                sin_t[q] = s;
             }
             let mut board_left = 0.0;
             let mut board_right = 0.0;
@@ -10098,10 +10414,13 @@ impl Processor for ConcertGrand {
             // Every other string's undamped length, listening to the bridge.
             let mut undamped_left = 0.0;
             let mut undamped_right = 0.0;
-            for (string, owner) in self.undamped.iter_mut().zip(self.undamped_note.iter()) {
-                let sounding =
-                    *owner >= LOW_NOTE && self.note_sounding[(*owner - LOW_NOTE) as usize];
-                let y = string.tick(if sounding { 0.0 } else { excitation });
+            for (string, muted) in self
+                .undamped
+                .iter_mut()
+                .take(self.undamped_active)
+                .zip(self.undamped_muted.iter())
+            {
+                let y = string.tick(if *muted { 0.0 } else { excitation });
                 undamped_left += y * string.pan_left;
                 undamped_right += y * string.pan_right;
             }
@@ -15792,6 +16111,605 @@ mod bench {
             }
         }
         std::println!("huella del render: {hash:#018x}");
+    }
+
+    /// Renders a script and returns the left channel.
+    #[cfg(test)]
+    fn render_script(delay: usize, chord: &[u8], blocks: usize) -> std::vec::Vec<f32> {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        piano.section_delay = delay;
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+        for block in 0..blocks {
+            let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                chord
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &note)| MidiEvent {
+                        frame: (i * 11) as u32,
+                        data: [0x90, note, 100],
+                        length: 3,
+                    })
+                    .collect()
+            } else {
+                std::vec::Vec::new()
+            };
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            for frame in 0..FRAMES {
+                captured.push(output[frame * 2]);
+            }
+        }
+        captured
+    }
+
+    /// Power of one frequency in one windowed segment (Goertzel, in f64 so a
+    /// long render does not drift).
+    #[cfg(test)]
+    fn goertzel(samples: &[f32], hertz: f64) -> f64 {
+        let w = core::f64::consts::TAU * hertz / 48_000.0;
+        let coefficient = 2.0 * w.cos();
+        let (mut s1, mut s2) = (0.0f64, 0.0f64);
+        let n = samples.len() as f64;
+        for (index, sample) in samples.iter().enumerate() {
+            // Hann, so neighbouring partials do not leak into the band.
+            let phase = core::f64::consts::TAU * index as f64 / n;
+            let window = 0.5 - 0.5 * phase.cos();
+            let s0 = f64::from(*sample) * window + coefficient * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        (s1 * s1 + s2 * s2 - coefficient * s1 * s2).max(0.0)
+    }
+
+    /// Band levels, third-octave, averaged over overlapping windows.
+    #[cfg(test)]
+    fn band_levels(samples: &[f32]) -> std::vec::Vec<(f64, f64)> {
+        const WINDOW: usize = 8192;
+        const HOP: usize = 4096;
+        const PROBES: usize = 8;
+        let mut bands = std::vec::Vec::new();
+        let mut centre = 40.0f64;
+        while centre < 16_000.0 {
+            let mut power = 0.0f64;
+            let mut windows = 0usize;
+            let mut start = 0usize;
+            while start + WINDOW <= samples.len() {
+                let segment = &samples[start..start + WINDOW];
+                for probe in 0..PROBES {
+                    // Spread the probes across the band's width.
+                    let fraction = (probe as f64 + 0.5) / PROBES as f64 - 0.5;
+                    power += goertzel(segment, centre * 2.0f64.powf(fraction / 3.0));
+                }
+                windows += 1;
+                start += HOP;
+            }
+            if windows > 0 {
+                bands.push((centre, power / windows as f64));
+            }
+            centre *= 2.0f64.powf(1.0 / 3.0);
+        }
+        bands
+    }
+
+    /// How many board modes each Board Density setting builds.
+    ///
+    /// The bank's size is what a machine pays for the instrument standing
+    /// still, and Density is the only control that changes it. This mapping is
+    /// deterministic and machine independent, so it can be taken here and used
+    /// to read an ablation sweep run on a Raspberry Pi -- which is the only
+    /// machine whose stage split is worth knowing.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release board_count_by_density -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn board_count_by_density() {
+        let (low, high) = parameter_bounds(PARAM_BOARD_DENSITY);
+        std::println!("Board Density: {low} .. {high}");
+        std::println!("{:>9}  {:>6}", "densidad", "modos");
+        for step in 0..=10 {
+            let density = low + (high - low) * f64::from(step) / 10.0;
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, 128, 0, 2));
+            assert!(piano.set_parameter(PARAM_BOARD_DENSITY, density));
+            // The bank is rebuilt lazily; one block is enough to force it.
+            let mut output = vec![0.0f32; 256];
+            piano.process(&[], &mut output, &[], &[], 128, 0, 2);
+            std::println!("{density:>9.1}  {:>6}", piano.board_count);
+        }
+    }
+
+    /// Writes the A/B the measurement cannot make: the ear decides beating,
+    /// and a band level averaged over four seconds cannot see it.
+    ///
+    /// Both cases go into ONE file, separated by silence, because switching
+    /// files is the worst way to compare these. A player restarts its output
+    /// stream on every file, and a wireless headset gates its radio when the
+    /// stream stops -- so the first few hundred milliseconds after each switch
+    /// are swallowed by the device waking up, which is exactly the attack the
+    /// comparison is about. One continuous stream keeps every onset intact.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release section_delay_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn section_delay_render() {
+        fn wav(path: &str, samples: &[f32]) {
+            let mut bytes = std::vec::Vec::with_capacity(44 + samples.len() * 2);
+            let data = samples.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in samples {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(path, bytes).expect("writing the comparison render");
+        }
+
+        // Long enough for a radio to wake, a player to settle and an ear to
+        // arrive before anything is asked of it.
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let scripts: [(&str, &[u8]); 2] = [
+            ("acorde", &[36, 43, 48, 55, 60, 64, 67, 72]),
+            ("nota", &[60]),
+        ];
+        for (name, chord) in scripts {
+            let reference = render_script(0, chord, 1_400);
+            let delayed = render_script(512, chord, 1_400);
+            let mut track = vec![0.0f32; LEAD_IN];
+            // A B A B: the second pair is what actually gets judged, once the
+            // ear knows what it is listening for.
+            for pass in 0..2 {
+                for rendered in [&reference, &delayed] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+                let _ = pass;
+            }
+            let path = std::format!("{directory}/ab-{name}.wav");
+            wav(&path, &track);
+            std::println!(
+                "escrito {path} ({:.1} s) -- {:.0} s de silencio, luego A(0) B(512) A(0) B(512)",
+                track.len() as f64 / 48_000.0,
+                LEAD_IN as f64 / 48_000.0,
+            );
+        }
+    }
+
+    /// What a budget does to the instrument, at the two ends that exist.
+    ///
+    /// The numbers are the ones the hosts measured: about 60M fuel a block on
+    /// a desktop, about 5M on a Raspberry Pi 4 at 128 frames.
+    #[test]
+    fn a_budget_thins_the_instrument_only_when_it_has_to() {
+        const FRAMES: u32 = 128;
+        fn block(piano: &mut ConcertGrand) {
+            let mut output = vec![0.0f32; FRAMES as usize * 2];
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+        }
+
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        block(&mut piano);
+        let voiced = (
+            piano.board_count,
+            piano.undamped_active,
+            piano.partial_budget,
+        );
+        assert!(
+            voiced.0 > 150,
+            "the shipped bank should be most of its slots"
+        );
+        assert_eq!(voiced.2, PARTIAL_BUDGET);
+
+        // A machine with room to spare is left exactly as voiced: a budget may
+        // take quality away and must never invent some.
+        assert!(piano.set_realtime_budget(60_000_000));
+        block(&mut piano);
+        block(&mut piano);
+        assert_eq!(
+            (
+                piano.board_count,
+                piano.undamped_active,
+                piano.partial_budget
+            ),
+            voiced
+        );
+
+        // A machine without room. Every axis gives, together.
+        assert!(piano.set_realtime_budget(5_000_000));
+        block(&mut piano);
+        block(&mut piano);
+        let thinned = (
+            piano.board_count,
+            piano.undamped_active,
+            piano.partial_budget,
+        );
+        assert!(
+            thinned.0 < voiced.0,
+            "the soundboard kept {} modes",
+            thinned.0
+        );
+        assert!(
+            thinned.1 < voiced.1,
+            "the undamped register kept {} resonators",
+            thinned.1
+        );
+        assert!(
+            thinned.2 < voiced.2,
+            "the partial ceiling stayed at {}",
+            thinned.2
+        );
+        assert!(
+            thinned.2 >= MINIMUM_PARTIAL_BUDGET,
+            "the partial ceiling fell to {}, below a piano",
+            thinned.2
+        );
+        assert!(piano.quality >= MINIMUM_QUALITY);
+
+        // And it settles: a second look at the same budget does not keep
+        // cutting, which is what would make the timbre breathe.
+        block(&mut piano);
+        block(&mut piano);
+        assert_eq!(
+            (
+                piano.board_count,
+                piano.undamped_active,
+                piano.partial_budget
+            ),
+            thinned
+        );
+
+        // Room again, and the instrument comes back whole.
+        assert!(piano.set_realtime_budget(60_000_000));
+        for _ in 0..6 {
+            block(&mut piano);
+        }
+        assert_eq!(
+            (
+                piano.board_count,
+                piano.undamped_active,
+                piano.partial_budget
+            ),
+            voiced,
+            "the instrument did not come back after the machine was free"
+        );
+    }
+
+    /// A thinned instrument is still an instrument: it renders, it is not
+    /// silent, and nothing in it has gone to NaN.
+    #[test]
+    fn the_smallest_instrument_still_sounds() {
+        const FRAMES: u32 = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        assert!(piano.set_realtime_budget(1_000_000));
+        let mut output = vec![0.0f32; FRAMES as usize * 2];
+        piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+        assert_eq!(piano.quality, MINIMUM_QUALITY);
+
+        let strike = MidiEvent {
+            frame: 0,
+            data: [0x90, 60, 100],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[strike], &[], FRAMES, 0, 2);
+        let mut peak = 0.0f32;
+        for _ in 0..80 {
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+            for sample in &output {
+                assert!(
+                    sample.is_finite(),
+                    "the thinned instrument rendered {sample}"
+                );
+                peak = peak.max(sample.abs());
+            }
+        }
+        assert!(
+            peak > 1e-3,
+            "a struck note at the smallest quality peaked at {peak}"
+        );
+    }
+
+    /// What the budget costs the ear, rendered so it can be judged.
+    ///
+    /// The measurement says a Raspberry Pi stops missing deadlines; it cannot
+    /// say whether the piano that does so is still the piano. Both cases go
+    /// into ONE file after a lead-in of silence, because a player restarts its
+    /// output stream on every file and a wireless headset gates its radio when
+    /// the stream stops -- the first few hundred milliseconds after a switch
+    /// are swallowed by the device waking up.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release budget_quality_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn budget_quality_render() {
+        const FRAMES: usize = 128;
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+
+        fn render(budget: u64, chord: &[u8], blocks: usize) -> std::vec::Vec<f32> {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            if budget > 0 {
+                assert!(piano.set_realtime_budget(budget));
+                // Two blocks for the banks to be rebuilt at the new quality.
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                    chord
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &note)| MidiEvent {
+                            frame: (i * 11) as u32,
+                            data: [0x90, note, 100],
+                            length: 3,
+                        })
+                        .collect()
+                } else {
+                    std::vec::Vec::new()
+                };
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                for frame in 0..FRAMES {
+                    captured.push(output[frame * 2]);
+                }
+            }
+            captured
+        }
+
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let scripts: [(&str, &[u8]); 2] = [
+            ("acorde", &[36, 43, 48, 55, 60, 64, 67, 72]),
+            ("nota", &[60]),
+        ];
+        for (name, chord) in scripts {
+            // 0 is the instrument as voiced; 1,260,758 fuel is what a
+            // Raspberry Pi 4 settled on, measured.
+            let full = render(0, chord, 1_400);
+            let thinned = render(1_260_758, chord, 1_400);
+            let mut track = vec![0.0f32; LEAD_IN];
+            for _ in 0..2 {
+                for rendered in [&full, &thinned] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+            }
+            let path = std::format!("{directory}/ab-presupuesto-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in &track {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison render");
+            std::println!(
+                "escrito {path} ({:.1} s) -- 2 s de silencio, luego entero(A) reducido(B) A B",
+                track.len() as f64 / 48_000.0
+            );
+        }
+    }
+
+    /// The per-string wire loss, rendered so it can be judged by ear.
+    ///
+    /// A is `WIRE_LOSS_TOP = 1` (the instrument before), B is whatever
+    /// `CG_WIRE_TOP` says (the candidate). A mid-register phrase and a
+    /// single mid-high note, each as one continuous file after a lead-in of
+    /// silence, because a player restarts its output on every file and a
+    /// wireless headset swallows the first attack after a switch.
+    ///
+    /// `CG_WIRE_TOP=6 cargo test -p rackforge-concert-grand --release wire_loss_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn wire_loss_render() {
+        const FRAMES: usize = 128;
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+        let candidate: f32 = std::env::var("CG_WIRE_TOP")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(6.0);
+
+        fn render(top: f32, script: &[(usize, u8)], blocks: usize) -> std::vec::Vec<f32> {
+            WIRE_LOSS_TOP.set(top);
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = script
+                    .iter()
+                    .filter(|(at, _)| *at == block)
+                    .map(|(_, note)| MidiEvent {
+                        frame: 0,
+                        data: [0x90, *note, 96],
+                        length: 3,
+                    })
+                    .collect();
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                for frame in 0..FRAMES {
+                    captured.push(output[frame * 2]);
+                }
+            }
+            WIRE_LOSS_TOP.set(1.0);
+            captured
+        }
+
+        // A tenor phrase, the register the complaint is about: ascending
+        // fourths from A3, a note every 400 ms, then the last one rings.
+        let phrase: std::vec::Vec<(usize, u8)> = [57u8, 62, 66, 69, 74]
+            .iter()
+            .enumerate()
+            .map(|(i, &n)| (i * 150, n))
+            .collect();
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        for (name, script, blocks) in [
+            ("frase", phrase.as_slice(), 1_500usize),
+            ("nota-fa4", &[(2usize, 66u8)][..], 1_200),
+        ] {
+            let before = render(1.0, script, blocks);
+            let after = render(candidate, script, blocks);
+            let mut track = vec![0.0f32; LEAD_IN];
+            for _ in 0..2 {
+                for rendered in [&before, &after] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+            }
+            let path = std::format!("{directory}/ab-wire-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in &track {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison render");
+            std::println!(
+                "escrito {path} ({:.1} s) -- 2 s de silencio, luego antes(A) despues(B) A B, B = WIRE_LOSS_TOP {candidate}",
+                track.len() as f64 / 48_000.0
+            );
+        }
+    }
+
+    /// What a block of delay between string sections costs the ear.
+    ///
+    /// `parallel_render_v1` renders units in isolation for a whole block, so
+    /// sections can only hear each other with at least a block of delay --
+    /// and `PARALLEL_RENDER.md` requires the sequential path to sound
+    /// identical, which means the delay is not a rendering trick but a change
+    /// to the instrument, on every machine. This is what decides whether the
+    /// piano may be spread across four cores at all.
+    ///
+    /// Two numbers per delay, because they bound the answer from both sides:
+    ///
+    ///   * **band**, the largest third-octave level change, is the fair one --
+    ///     a delayed drive changes the phase of a sympathetic response without
+    ///     changing its magnitude, and the ear hears the magnitude.
+    ///   * **residual**, the difference signal against the reference, is the
+    ///     pessimistic bound: it counts pure phase as error.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release section_delay_audibility -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn section_delay_audibility() {
+        // A single note under the pedal is where sympathy is most exposed:
+        // every other string is free and ringing only because this one is.
+        // A dense chord is where the delay is largest, and most masked.
+        let scripts: [(&str, &[u8]); 2] = [
+            ("una nota con pedal", &[60]),
+            ("acorde denso", &[36, 43, 48, 55, 60, 64, 67, 72]),
+        ];
+        for (name, chord) in scripts {
+            let reference = render_script(0, chord, 1_400);
+            let reference_bands = band_levels(&reference);
+            let reference_rms = (reference
+                .iter()
+                .map(|s| f64::from(*s) * f64::from(*s))
+                .sum::<f64>()
+                / reference.len() as f64)
+                .sqrt();
+            std::println!(
+                "\n{name} ({} voces, {:.1} s)",
+                chord.len(),
+                reference.len() as f64 / 48_000.0
+            );
+            std::println!(
+                "  {:>7}  {:>12}  {:>10}  {:>22}",
+                "retardo",
+                "banda peor",
+                "residual",
+                "donde"
+            );
+            // 1 and 8 are controls, not candidates: a single sample of
+            // delay is a perturbation far below anything a block could
+            // cause. If they move the residual as much as 512 does, the
+            // residual is measuring the model's sensitivity to being nudged
+            // and not the cost of the delay, and only the band levels mean
+            // anything.
+            for delay in [1usize, 8, 128, 256, 512] {
+                let rendered = render_script(delay, chord, 1_400);
+                let mut worst = 0.0f64;
+                let mut worst_hz = 0.0f64;
+                for ((hertz, reference_power), (_, power)) in
+                    reference_bands.iter().zip(band_levels(&rendered).iter())
+                {
+                    // Bands with no signal in them cannot be audibly wrong.
+                    if *reference_power < 1e-12 {
+                        continue;
+                    }
+                    let change = 10.0 * (power / reference_power).log10();
+                    if change.abs() > worst.abs() {
+                        worst = change;
+                        worst_hz = *hertz;
+                    }
+                }
+                let residual = (reference
+                    .iter()
+                    .zip(rendered.iter())
+                    .map(|(a, b)| {
+                        let d = f64::from(*a) - f64::from(*b);
+                        d * d
+                    })
+                    .sum::<f64>()
+                    / reference.len() as f64)
+                    .sqrt();
+                std::println!(
+                    "  {delay:>7}  {worst:>+11.2} dB  {:>9.1} dB  {worst_hz:>18.0} Hz",
+                    20.0 * (residual / reference_rms.max(1e-12)).log10(),
+                );
+            }
+        }
     }
 
     /// Not a test: the tail, not the mean.

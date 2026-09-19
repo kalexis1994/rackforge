@@ -86,6 +86,32 @@ Stubbornness is measured against where a streak of cuts started, not against the
 cut before it. Block times wander by a few percent on their own, and comparing
 consecutive windows let noise reset the count.
 
+**A window is a window.** The cadence hangs off when the window was last
+*read*, not when something was last published -- and getting that wrong is
+what made this mechanism untrustworthy for a whole day of measurements. With
+the two on one field, a poll that got past the interval, read the window and
+then found the change too small to publish left the timer stale; every block
+after it passed the interval too and was judged **on its own**. The log with
+the raw counts in it said so in one line:
+
+    late_pct=100.0  load=0.57  blocks=1  late=1
+
+A hundred percent of a window of one. Every cut the governor made on a ramp
+that missed no deadline at all was a single unlucky block -- a note-on
+running the strike simulation, or a bank rebuild -- read as the whole
+instrument running late. Three threshold changes (`LATE_AT` 0.9, 0.95, 1.0
+and the tolerance with them) could not touch it, because none of them was the
+cause. After the fix, the same ramp:
+
+    tightened  late=110/749  load=1.31
+    tightened  late=63/745   load=1.06
+    settled    late=0/750    load=0.50
+
+Two justified cuts and a settle. That is why `AUDIO_QUALITY_BUDGET` carries
+`blocks` and `late` and not only the rate: one late block in one and seven
+hundred in seven hundred and fifty read the same as a percentage, and they
+are completely different faults.
+
 * **It never raises within a session.** A raise rebuilds banks, and the
   player hears the instrument change under their hands -- reported from the
   appliance as "se nota como cambia la calidad en vivo": quality came back

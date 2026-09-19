@@ -236,6 +236,19 @@ pub struct BudgetGovernor {
     window_over: u32,
     published: Option<u64>,
     last_publish: Option<Duration>,
+    /// When the window was last read, which is not the same as when
+    /// something was last published.
+    ///
+    /// They used to be one field, and the cadence hung off it: a poll that
+    /// got past the interval, read the window and then decided the change
+    /// was too small to publish left the timer stale, so every block after
+    /// it passed the interval too and was judged **on its own**. Measured on
+    /// the appliance with the counts in the log: `blocks=1 late=1`, a
+    /// hundred percent of a window of one. Every cut this mechanism has ever
+    /// made on a ramp that missed no deadline was a single unlucky block --
+    /// a note-on running the strike simulation, or a bank rebuild -- read as
+    /// the whole instrument being late.
+    last_window_at: Option<Duration>,
     comfortable_since: Option<Duration>,
     /// The load the last cut was made at, and how many cuts in a row have
     /// failed to bring it down.
@@ -248,6 +261,8 @@ pub struct BudgetGovernor {
     before_streak: Option<u64>,
     last_over_rate: f64,
     last_load: f64,
+    last_blocks: u32,
+    last_over: u32,
     /// A remembered budget waiting for the first poll to hand it over.
     seed_pending: bool,
     /// The window after a publish is the plugin rebuilding to it, and a
@@ -275,6 +290,7 @@ impl Default for BudgetGovernor {
             window_over: 0,
             published: None,
             last_publish: None,
+            last_window_at: None,
             comfortable_since: None,
             load_at_cut: None,
             stubborn: 0,
@@ -282,6 +298,8 @@ impl Default for BudgetGovernor {
             before_streak: None,
             last_over_rate: 0.0,
             last_load: 0.0,
+            last_blocks: 0,
+            last_over: 0,
             seed_pending: false,
             discard_next_window: false,
         }
@@ -409,10 +427,19 @@ impl BudgetGovernor {
         (self.last_over_rate, self.last_load)
     }
 
+    /// The raw counts the last decision was made on: blocks in the window,
+    /// and how many of them ran late. A rate of one means "every block",
+    /// which reads the same whether the window held seven hundred blocks or
+    /// one -- and those are very different faults.
+    pub const fn last_counts(&self) -> (u32, u32) {
+        (self.last_blocks, self.last_over)
+    }
+
     pub fn poll(&mut self, now: Duration, may_raise: bool) -> Option<(u64, BudgetReason)> {
         if self.seed_pending {
             self.seed_pending = false;
             self.last_publish = Some(now);
+            self.last_window_at = Some(now);
             self.discard_next_window = true;
             return self.published.map(|budget| (budget, BudgetReason::Seeded));
         }
@@ -431,11 +458,14 @@ impl BudgetGovernor {
             return self.publish_if_credible(first, BudgetReason::Measured, now);
         };
 
-        if let Some(last) = self.last_publish {
+        if let Some(last) = self.last_window_at {
             if now.saturating_sub(last) < PUBLISH_INTERVAL {
                 return None;
             }
         }
+        // Past the interval: this window is being read, whatever comes of
+        // it, so the next one starts here.
+        self.last_window_at = Some(now);
         let blocks = self.window_blocks;
         let over = self.window_over;
         self.window_blocks = 0;
@@ -455,6 +485,8 @@ impl BudgetGovernor {
         let load = self.render_ns / allowance;
         self.last_over_rate = over_rate;
         self.last_load = load;
+        self.last_blocks = blocks;
+        self.last_over = over;
         if over_rate > OVER_TOLERANCE {
             // Late blocks are audible now, so this does not wait. How far the
             // budget falls follows how far over the render is -- but a window
@@ -1165,6 +1197,35 @@ mod tests {
             remembered >= first,
             "remembered {remembered}, the floor the useless cuts reached, not the {first} that was running"
         );
+    }
+
+    #[test]
+    fn a_window_that_publishes_nothing_still_starts_the_next_one() {
+        // The appliance's own bug, as a test. A window read but not acted on
+        // used to leave the cadence timer where it was, so the very next
+        // block passed the interval and was judged alone -- and one late
+        // block out of one is a hundred percent, which is a cut. Measured:
+        // `blocks=1 late=1` on a ramp that missed no deadline at all.
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        let (first, _) = governor.poll(Duration::ZERO, true).expect("measured");
+        let mut clock = grace(&mut governor, Duration::ZERO);
+
+        // A window comfortably inside the allowance: read, nothing to say.
+        clock += PUBLISH_INTERVAL;
+        settled(&mut governor, 1_000, 1_000_000);
+        assert_eq!(governor.poll(clock, false), None);
+
+        // The next block is a single expensive one -- a note-on, a rebuild.
+        // It must not be a window of its own.
+        clock += Duration::from_millis(3);
+        governor.observe(DEADLINE_NS * 2, 1_000_000);
+        assert_eq!(
+            governor.poll(clock, false),
+            None,
+            "one late block became a whole window"
+        );
+        assert_eq!(governor.published(), Some(first));
     }
 
     #[test]

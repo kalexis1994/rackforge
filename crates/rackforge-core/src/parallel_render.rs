@@ -397,6 +397,13 @@ pub struct RenderTelemetry {
     budget_reason: Box<[AtomicU64]>,
     budget_picoseconds_per_fuel: Box<[AtomicU64]>,
     budget_deadline_ns: Box<[AtomicU64]>,
+    /// What the decision was made on, in per-mille: the share of the
+    /// window's blocks that ran late, and the render average against the
+    /// allowance.
+    budget_over_permille: Box<[AtomicU64]>,
+    budget_blocks: Box<[AtomicU64]>,
+    budget_late_blocks: Box<[AtomicU64]>,
+    budget_load_permille: Box<[AtomicU64]>,
     /// Publisher-side only: which plugin each slot holds, for the store.
     budget_plugins: Mutex<Vec<String>>,
     unit_faults: Box<[AtomicU64]>,
@@ -423,6 +430,10 @@ impl RenderTelemetry {
             budget_reason: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             budget_picoseconds_per_fuel: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             budget_deadline_ns: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_over_permille: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_blocks: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_late_blocks: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_load_permille: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             budget_plugins: Mutex::new(Vec::new()),
             unit_faults: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             worker_units: (0..worker_capacity.max(1))
@@ -451,6 +462,8 @@ impl RenderTelemetry {
         reason: &'static str,
         rate_ns: f64,
         deadline_ns: u64,
+        window: (f64, f64),
+        counts: (u32, u32),
     ) {
         let Some(slot_fuel) = self.budget_fuel.get(slot) else {
             return;
@@ -458,6 +471,18 @@ impl RenderTelemetry {
         slot_fuel.store(fuel, Ordering::Relaxed);
         if let Some(deadline) = self.budget_deadline_ns.get(slot) {
             deadline.store(deadline_ns, Ordering::Relaxed);
+        }
+        if let Some(over) = self.budget_over_permille.get(slot) {
+            over.store((window.0 * 1_000.0) as u64, Ordering::Relaxed);
+        }
+        if let Some(load) = self.budget_load_permille.get(slot) {
+            load.store((window.1 * 1_000.0) as u64, Ordering::Relaxed);
+        }
+        if let Some(blocks) = self.budget_blocks.get(slot) {
+            blocks.store(u64::from(counts.0), Ordering::Relaxed);
+        }
+        if let Some(late) = self.budget_late_blocks.get(slot) {
+            late.store(u64::from(counts.1), Ordering::Relaxed);
         }
         if let Some(rate) = self.budget_picoseconds_per_fuel.get(slot) {
             rate.store((rate_ns * 1_000.0) as u64, Ordering::Relaxed);
@@ -519,7 +544,7 @@ impl RenderTelemetry {
             Ok(guard) => guard.clone(),
             Err(_) => return,
         };
-        for (slot, fuel, reason, _, deadline_ns) in &snapshot.budgets {
+        for (slot, fuel, reason, _, deadline_ns, _, _, _, _) in &snapshot.budgets {
             if *reason != "settled" {
                 continue;
             }
@@ -575,6 +600,10 @@ impl RenderTelemetry {
                         *reason,
                         self.budget_picoseconds_per_fuel[slot].load(Ordering::Relaxed),
                         self.budget_deadline_ns[slot].load(Ordering::Relaxed),
+                        self.budget_over_permille[slot].load(Ordering::Relaxed),
+                        self.budget_load_permille[slot].load(Ordering::Relaxed),
+                        self.budget_blocks[slot].load(Ordering::Relaxed),
+                        self.budget_late_blocks[slot].load(Ordering::Relaxed),
                     ))
                 })
                 .collect(),
@@ -629,7 +658,7 @@ pub struct TelemetrySnapshot {
     pub slot_faults: Vec<u64>,
     /// `(slot, fuel, reason, picoseconds per fuel, deadline ns)` for every
     /// slot that was handed a budget since the last snapshot.
-    pub budgets: Vec<(usize, u64, &'static str, u64, u64)>,
+    pub budgets: Vec<(usize, u64, &'static str, u64, u64, u64, u64, u64, u64)>,
     pub unit_faults: Vec<u64>,
     pub worker_units: Vec<u64>,
     pub worker_busy_ns: Vec<u64>,
@@ -693,13 +722,17 @@ impl TelemetrySnapshot {
                 }
             }
         }
-        for (slot, fuel, reason, picoseconds, deadline_ns) in &self.budgets {
+        for (slot, fuel, reason, picoseconds, deadline_ns, over, load, blocks, late) in
+            &self.budgets
+        {
             lines.push(format!(
                 "AUDIO_QUALITY_BUDGET slot={} fuel={fuel} reason={reason} ns_per_fuel={:.3} \
-                 deadline_us={}",
+                 deadline_us={} late_pct={:.1} load={:.2} blocks={blocks} late={late}",
                 self.label(*slot),
                 *picoseconds as f64 / 1_000.0,
                 deadline_ns / 1_000,
+                *over as f64 / 10.0,
+                *load as f64 / 1_000.0,
             ));
         }
         for (slot, count) in self.slot_faults.iter().enumerate() {

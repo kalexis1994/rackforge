@@ -320,8 +320,18 @@ fn observe_budget(budget: &mut SlotBudget, instance: &mut PluginInstance<'_>, re
 /// second later, because formatting one on the audio thread would allocate.
 fn report_budget(budget: &mut SlotBudget, slot: usize, telemetry: &Arc<RenderTelemetry>) {
     let deadline_ns = budget.governor.deadline_ns();
+    let window = budget.governor.last_window();
+    let counts = budget.governor.last_counts();
     if let Some((fuel, reason, rate)) = budget.pending.take() {
-        telemetry.record_budget(slot, fuel, reason.as_str(), rate, deadline_ns);
+        telemetry.record_budget(
+            slot,
+            fuel,
+            reason.as_str(),
+            rate,
+            deadline_ns,
+            window,
+            counts,
+        );
         return;
     }
     if budget.stored {
@@ -339,6 +349,8 @@ fn report_budget(budget: &mut SlotBudget, slot: usize, telemetry: &Arc<RenderTel
             BudgetReason::Settled.as_str(),
             rate,
             deadline_ns,
+            window,
+            counts,
         );
     }
 }

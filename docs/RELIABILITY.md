@@ -123,6 +123,66 @@ already vectorising that loop. The rewrite is not in the tree.
   integration is 63. `strike_budget` guards a cost that is not the problem;
   the voice it starts costs that much again in *every* block it rings.
 
+## Where the time goes, measured by taking things away
+
+The ceiling above says how much fits. This says what is filling it, which is
+what any attempt to move the ceiling has to start from.
+
+Two measurements, on a Raspberry Pi 4 at 128 frames.
+
+**The soundboard, by sweeping it.** Board Density is the only control that
+changes how many modes the bank has, so
+`tools/measure-appliance-stage-split.py` sweeps it on the running appliance
+and watches the block cost move:
+
+| board modes | silence | six notes | misses / 10 s |
+| --- | --- | --- | --- |
+| 106 | 1145 us | 1601 us | 0 |
+| 153 | 1280 us | 1777 us | 0 |
+| 200 | 1422 us | 1962 us | 39 |
+| 235 | 1530 us | 2011 us | 12 |
+| 256 | 1586 us | 2106 us | 157 |
+
+A mode costs 2.97 us a block, the full 256-mode bank costs 759 us, and
+everything that is not the bank costs 829 us.
+
+**Everything else, by building the plugin without it.** One build per bank,
+each measured on the appliance at 169 modes (1321 us of silence):
+
+| taken out | silence | what it cost | what it is |
+| --- | --- | --- | --- |
+| nothing | 1321 us | -- | |
+| `undamped` | 928 us | **393 us** | 192 resonators: the sympathetic partials of the undamped top register |
+| bridge projection | 1166 us | **155 us** | the 16x16 product that puts the strings' force on the board |
+| `bed` | 1261 us | 60 us | 40 resonators: the damped strings' bed |
+| open top octave | 1306 us | 15 us | 14 resonators |
+
+The two methods agree: the ablations plus the room, lid, halo and rim sum to
+819 us against the sweep's 829 us, within 1.2 %.
+
+So **the instrument spends 59 % of the period rendering silence**, and at the
+polyphony where it breaks up the voices are only about a quarter of the work.
+That is why `REALTIME_BUDGET.md` scales the soundboard and the undamped
+register before it touches the notes: those are the parts that cost the most
+and are heard the least.
+
+### Two exact savings found this way
+
+Both are bit-identical -- the Concert Grand's render fingerprint is unchanged
+-- and both came out of the table above rather than from guessing:
+
+* The bridge projection spends 512 multiplies a frame proving that zero times
+  a basis is zero. Skipping it when no voice contributed saves **151 us**, all
+  of it while nothing is sounding.
+* The undamped bank asked `note_sounding` per resonator per sample, when the
+  answer is settled once a block. Hoisting it saves **37 us**.
+
+The second is worth recording for what it disproved. An undamped length cost
+2.05 us a block where the open top octave's identical resonator cost 1.07 us,
+and the lookup looked like the whole difference. It was not: removing it
+bought 37 us of a 190 us gap. The rest is the working set -- 192 resonators
+against 14 is a cache story, not a branch one.
+
 ## Audio device arrival and loss
 
 The engine binds one output when it starts and renders through it until it

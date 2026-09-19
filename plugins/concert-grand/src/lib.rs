@@ -1859,6 +1859,31 @@ fn hash01(mut seed: u32) -> f32 {
 /// `≈ 1 / ((1-r)·2·sin ω0)`, so the drive is normalised by that whole factor
 /// — normalising by `1 - r` alone leaves a residual `1/sin ω0 ∝ 1/f` that
 /// turns the low modes into a bass boost of tens of times.
+/// A resonator is swept whole, every sample, so what it WEIGHS is not a
+/// bookkeeping detail: it is the cost.
+///
+/// These banks are arrays of structs and the per-sample loops walk every
+/// element of them. One struct holding every bank's needs came to 88 bytes,
+/// and the banks together to 65 KB against a Cortex-A72's 32 KB of L1 --
+/// so every sample streamed twice the cache it had, and half of each line
+/// fetched was fields that loop never reads (the board's shape on a
+/// sympathetic string, a sympathetic string's pan on a board mode).
+///
+/// Measured on the appliance with a standalone sweep -- same arithmetic,
+/// same count, same order, only the stride changed:
+///
+/// | bytes per mode | bank | ns per mode per sample |
+/// | --- | --- | --- |
+/// | 32 | 23.7 KB | 4.57 |
+/// | 56 | 41.5 KB | 5.11 |
+/// | 88 | 65.1 KB | 6.82 |
+/// | 152 | 112.5 KB | 9.82 |
+///
+/// It tracks the stride, not the flops, and it does not flatten the way the
+/// same sweep does on a desktop (1.2x there against 2.15x here). So the
+/// banks are split by what their loop actually reads: this one for the
+/// sympathetic strings, which tick to a pan, and `BoardMode` for the
+/// soundboard, which tick to a pair of capsules through a shape.
 #[derive(Clone, Copy, Default)]
 struct BodyMode {
     y1: f32,
@@ -1874,22 +1899,34 @@ struct BodyMode {
     velocity: f32,
     pan_left: f32,
     pan_right: f32,
+}
+
+/// One mode of the soundboard bank: the same resonator, read through a
+/// shape at the bridge and spoken through two capsules.
+///
+/// Everything here is touched every sample. What is only touched when the
+/// bank is built lives in `BoardCold`, which is a parallel array for the
+/// reason in `BodyMode`'s note.
+#[derive(Clone, Copy, Default)]
+struct BoardMode {
+    y1: f32,
+    y2: f32,
+    a1: f32,
+    a2: f32,
+    drive: f32,
+    /// See `BodyMode::velocity`.
+    velocity: f32,
     /// The mode's shape along the bridge, read from the drive points'
     /// transforms: `shape_a` on the plain sum (the mono bridge),
     /// `shape_b` on the cosine at `shape_q`, `shape_c` on the sine.
-    shape_q: usize,
+    ///
+    /// `shape_q` indexes a row of a sixteen-point transform, so it is a
+    /// `u16` rather than a `usize`: eight bytes for a number that never
+    /// exceeds fifteen is six bytes of every mode's cache line.
+    shape_q: u16,
     shape_a: f32,
     shape_b: f32,
     shape_c: f32,
-    /// The shape's phase along the bridge, kept for the pair's integral.
-    shape_theta: f32,
-    /// The shape across the board's width, for the pair's integral: a
-    /// plate mode is a cosine in both directions, `k^2 = kx^2 + ky^2`, and
-    /// the split between them is drawn per mode. Half-waves over the width
-    /// and the phase there.
-    shape_qy: f32,
-    shape_theta_y: f32,
-    omega: f32,
     /// The output to each capsule as coefficients on the mode's last two
     /// VELOCITY samples: `out_m = v * out_y[m] + v1 * out_y1[m]`. A
     /// sinusoid's two consecutive samples span its plane, so any level and
@@ -1900,6 +1937,27 @@ struct BodyMode {
     out_y: [f32; 2],
     out_y1: [f32; 2],
     v1: f32,
+}
+
+/// What a board mode needs to be BUILT, and never to be rendered.
+///
+/// `tune_pair` reads these a handful of modes per block while the bank is
+/// being completed; the per-sample loop never touches them. Parallel to
+/// `board`, and out of `BoardMode` so that the sixty bytes the render
+/// thread streams per mode are sixty bytes it uses.
+#[derive(Clone, Copy, Default)]
+struct BoardCold {
+    /// The shape's phase along the bridge, kept for the pair's integral.
+    shape_theta: f32,
+    /// The shape across the board's width, for the pair's integral: a
+    /// plate mode is a cosine in both directions, `k^2 = kx^2 + ky^2`, and
+    /// the split between them is drawn per mode. Half-waves over the width
+    /// and the phase there.
+    shape_qy: f32,
+    shape_theta_y: f32,
+    omega: f32,
+    pan_left: f32,
+    pan_right: f32,
 }
 
 impl BodyMode {
@@ -1917,18 +1975,63 @@ impl BodyMode {
             velocity,
             pan_left: 1.0 - pan,
             pan_right: pan,
-            shape_q: 0,
-            shape_a: 1.0,
-            shape_b: 0.0,
-            shape_c: 0.0,
-            shape_theta: 0.0,
-            shape_qy: 0.0,
-            shape_theta_y: 0.0,
-            omega,
-            out_y: [1.0 - pan, pan],
-            out_y1: [0.0, 0.0],
-            v1: 0.0,
         }
+    }
+
+    #[inline(always)]
+    fn tick(&mut self, input: f32) -> f32 {
+        let y = self.a1 * self.y1 + self.a2 * self.y2 + self.drive * input;
+        let out = (y - self.y1) * self.velocity;
+        self.y2 = self.y1;
+        self.y1 = y;
+        out
+    }
+
+    /// A damper on this mode: its pole radius scaled by `factor` per sample
+    /// from here on, exactly what `Voice::damp` does to a partial's phasor.
+    /// `a1 = 2 r cos w` and `a2 = -r^2`, so the radius is scaled through
+    /// `a1` once and `a2` twice.
+    fn damp(&mut self, factor: f32) {
+        self.a1 *= factor;
+        self.a2 *= factor * factor;
+    }
+}
+
+impl BoardMode {
+    /// The same resonator as `BodyMode::tune`, plus the build-time half the
+    /// render thread never reads. The capsule outputs start at the pan, which
+    /// is what `BOARD_PAIR` at zero leaves them as and what `tune_pair`
+    /// replaces a few modes per block.
+    fn tune(frequency: f32, t60: f32, pan: f32, sample_rate: f32) -> (Self, BoardCold) {
+        let r = expf(-6.907_755 / (t60 * sample_rate));
+        let omega = core::f32::consts::TAU * frequency / sample_rate;
+        let (sin, cos) = sincosf(omega);
+        let velocity = 1.0 / (2.0 * sincosf(0.5 * omega).0).max(1e-6_f32);
+        (
+            Self {
+                y1: 0.0,
+                y2: 0.0,
+                a1: 2.0 * r * cos,
+                a2: -r * r,
+                drive: (1.0 - r) * 2.0 * sin,
+                velocity,
+                shape_q: 0,
+                shape_a: 1.0,
+                shape_b: 0.0,
+                shape_c: 0.0,
+                out_y: [1.0 - pan, pan],
+                out_y1: [0.0, 0.0],
+                v1: 0.0,
+            },
+            BoardCold {
+                shape_theta: 0.0,
+                shape_qy: 0.0,
+                shape_theta_y: 0.0,
+                omega,
+                pan_left: 1.0 - pan,
+                pan_right: pan,
+            },
+        )
     }
 
     /// One sample into the pair: the mode's state advances and each
@@ -1947,8 +2050,9 @@ impl BodyMode {
 
     /// Sets the capsule outputs from complex gains: `gain` is what the
     /// capsule hears of the mode's unit velocity at the mode's frequency.
-    fn set_pair(&mut self, gains: [(f32, f32); 2]) {
-        let (sin_w, cos_w) = sincosf(self.omega);
+    /// `omega` comes from `BoardCold`, which is where it lives now.
+    fn set_pair(&mut self, gains: [(f32, f32); 2], omega: f32) {
+        let (sin_w, cos_w) = sincosf(omega);
         let sin_w = if sin_w.abs() < 1e-4 { 1e-4 } else { sin_w };
         for (m, (re, im)) in gains.iter().copied().enumerate() {
             let magnitude = sqrtf(re * re + im * im);
@@ -1962,18 +2066,9 @@ impl BodyMode {
         }
     }
 
-    /// The excitation this mode takes from the drive points' transforms.
-    #[inline(always)]
-    fn excitation(
-        &self,
-        cos_t: &[f32; BOARD_DRIVE_POINTS],
-        sin_t: &[f32; BOARD_DRIVE_POINTS],
-    ) -> f32 {
-        self.shape_a * cos_t[0]
-            + self.shape_b * cos_t[self.shape_q]
-            + self.shape_c * sin_t[self.shape_q]
-    }
-    #[inline(always)]
+    /// The bank driven mono, for tests that compare it against a
+    /// reference sum rather than through the capsules.
+    #[cfg(test)]
     fn tick(&mut self, input: f32) -> f32 {
         let y = self.a1 * self.y1 + self.a2 * self.y2 + self.drive * input;
         let out = (y - self.y1) * self.velocity;
@@ -1982,13 +2077,15 @@ impl BodyMode {
         out
     }
 
-    /// A damper on this mode: its pole radius scaled by `factor` per sample
-    /// from here on, exactly what `Voice::damp` does to a partial's phasor.
-    /// `a1 = 2 r cos w` and `a2 = -r^2`, so the radius is scaled through
-    /// `a1` once and `a2` twice.
-    fn damp(&mut self, factor: f32) {
-        self.a1 *= factor;
-        self.a2 *= factor * factor;
+    /// The excitation this mode takes from the drive points' transforms.
+    #[inline(always)]
+    fn excitation(
+        &self,
+        cos_t: &[f32; BOARD_DRIVE_POINTS],
+        sin_t: &[f32; BOARD_DRIVE_POINTS],
+    ) -> f32 {
+        let q = self.shape_q as usize;
+        self.shape_a * cos_t[0] + self.shape_b * cos_t[q] + self.shape_c * sin_t[q]
     }
 }
 
@@ -4636,7 +4733,9 @@ pub struct ConcertGrand {
     /// It replaced a pair of banks — a sparse parallel "body" and a serial
     /// through path — which between them held 45 resonators against the
     /// 200-500 a modelled board needs, and damped them like rubber.
-    board: [BodyMode; BOARD_MODES],
+    board: [BoardMode; BOARD_MODES],
+    /// Parallel to `board`, read only while the bank is being built.
+    board_cold: [BoardCold; BOARD_MODES],
     /// `cos(pi q x_j)` and `sin(pi q x_j)` over the drive points `x_j = j / (J - 1)`:
     /// the transforms every board mode reads its excitation from.
     drive_basis_cos: [[f32; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
@@ -4875,7 +4974,8 @@ impl Default for ConcertGrand {
                     1.0345, 0.4249, 4.0000, 4.0000, 1.0000, 1.0000, 1.0000, 1.0000, 2.0000,
                 ],
             ],
-            board: [BodyMode::default(); BOARD_MODES],
+            board: [BoardMode::default(); BOARD_MODES],
+            board_cold: [BoardCold::default(); BOARD_MODES],
             drive_basis_cos: [[0.0; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
             drive_basis_sin: [[0.0; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
             pair_next: 0,
@@ -5768,7 +5868,7 @@ impl ConcertGrand {
                     BOARD_MEASURED_KNEE_HZ
                 };
                 let spacing_here = 0.5 * (above - below);
-                let mut mode = self.board_mode(
+                let (mut mode, cold) = self.board_mode(
                     0x4D0D_E000 | i as u32,
                     hz,
                     spacing_here,
@@ -5776,6 +5876,7 @@ impl ConcertGrand {
                     powf(10.0, ripple_db / 20.0),
                 );
                 mode.drive *= measured;
+                self.board_cold[index] = cold;
                 // A rebuild keeps what the slot was ringing with. Replacing the
                 // resonator whole zeroes its state, and a bank of zeroed
                 // states under a sounding note is a step in the output: the
@@ -5804,13 +5905,14 @@ impl ConcertGrand {
             // A real plate's mobility is ragged: per-mode strength swings
             // ~±8 dB — a bank of equal modes is only a volume knob.
             let strength = 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
-            let mut mode = self.board_mode(
+            let (mut mode, cold) = self.board_mode(
                 seed,
                 placed,
                 board_spacing(frequency, density),
                 loss,
                 strength,
             );
+            self.board_cold[index] = cold;
             if placed < BOARD_MEASURED_KNEE_HZ {
                 mode.drive *= 1.0 - measured;
             }
@@ -5823,7 +5925,7 @@ impl ConcertGrand {
         }
         self.board_count = index;
         for slot in self.board.iter_mut().skip(index) {
-            *slot = BodyMode::default();
+            *slot = BoardMode::default();
         }
         self.pair_next = 0;
     }
@@ -5845,8 +5947,11 @@ impl ConcertGrand {
         let to = (from + PAIR_MODES_PER_BLOCK).min(self.board_count);
         self.pair_next = to;
         if BOARD_PAIR.get() < 0.5 {
-            for mode in self.board[from..to].iter_mut() {
-                mode.out_y = [mode.pan_left, mode.pan_right];
+            for (mode, cold) in self.board[from..to]
+                .iter_mut()
+                .zip(self.board_cold[from..to].iter())
+            {
+                mode.out_y = [cold.pan_left, cold.pan_right];
                 mode.out_y1 = [0.0, 0.0];
             }
             return;
@@ -5863,8 +5968,11 @@ impl ConcertGrand {
         const ALONG: usize = 40;
         const ACROSS: usize = 7;
         let sample_rate = self.sample_rate;
-        for mode in self.board[from..to].iter_mut() {
-            let frequency = mode.omega * sample_rate / core::f32::consts::TAU;
+        for (mode, cold) in self.board[from..to]
+            .iter_mut()
+            .zip(self.board_cold[from..to].iter())
+        {
+            let frequency = cold.omega * sample_rate / core::f32::consts::TAU;
             let k = core::f32::consts::TAU * frequency / speed;
             let mut gains = [(0.0f32, 0.0f32); 2];
             for i in 0..ALONG {
@@ -5873,12 +5981,13 @@ impl ConcertGrand {
                 // only hears its bay must only speak from it, or the board
                 // radiates energy no string ever put into it.
                 let along =
-                    sincosf(core::f32::consts::PI * mode.shape_q as f32 * x + mode.shape_theta).1;
+                    sincosf(core::f32::consts::PI * mode.shape_q as f32 * x + cold.shape_theta)
+                        .1;
                 for j in 0..ACROSS {
                     let y = ((j as f32 + 0.5) / ACROSS as f32 - 0.5) * BOARD_WIDTH_M;
                     let across = sincosf(
-                        core::f32::consts::PI * mode.shape_qy * y / BOARD_WIDTH_M
-                            + mode.shape_theta_y,
+                        core::f32::consts::PI * cold.shape_qy * y / BOARD_WIDTH_M
+                            + cold.shape_theta_y,
                     )
                     .1;
                     let shape = 2.0 * along * across;
@@ -5903,7 +6012,7 @@ impl ConcertGrand {
                 gain.0 *= scale;
                 gain.1 *= scale;
             }
-            mode.set_pair(gains);
+            mode.set_pair(gains, cold.omega);
         }
     }
 
@@ -5914,7 +6023,7 @@ impl ConcertGrand {
         spacing_here: f32,
         loss: f32,
         strength: f32,
-    ) -> BodyMode {
+    ) -> (BoardMode, BoardCold) {
         let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ seed << 5);
         // The lowest modes of a real board are the most damped -- three
         // to five percent against two above the ribs' transition -- and
@@ -5923,7 +6032,8 @@ impl ConcertGrand {
         // bottom, log-linear from 300 Hz down to BOARD_LOW_LOSS at 50 Hz.
         let low = (log2f(300.0 / placed.max(20.0)) / log2f(6.0)).clamp(0.0, 1.0);
         let loss_here = loss * powf(BOARD_LOW_LOSS.get() / BOARD_LOSS_FACTOR.get(), low);
-        let mut mode = BodyMode::tune(placed, board_t60(placed, loss_here), pan, self.sample_rate);
+        let (mut mode, mut cold) =
+            BoardMode::tune(placed, board_t60(placed, loss_here), pan, self.sample_rate);
         // Skudrzyk: a plate's MEAN mobility is flat with frequency,
         // whatever its modal density and damping. A bank of unit-gain
         // peaks is not -- where the modes overlap more the mean rises --
@@ -5971,19 +6081,19 @@ impl ConcertGrand {
             // its cosine of that share, across it the sine.
             let (sin_alpha, cos_alpha) =
                 sincosf(core::f32::consts::FRAC_PI_2 * hash01(0x2D1E ^ seed << 13));
-            mode.shape_qy = half_waves * sin_alpha * BOARD_WIDTH_M / BRIDGE_LENGTH_M;
-            mode.shape_theta_y = core::f32::consts::TAU * hash01(0x7E1A ^ seed << 15);
+            cold.shape_qy = half_waves * sin_alpha * BOARD_WIDTH_M / BRIDGE_LENGTH_M;
+            cold.shape_theta_y = core::f32::consts::TAU * hash01(0x7E1A ^ seed << 15);
             if placed < BOARD_SHAPE_FLOOR_HZ {
                 // The whole board, in phase, from every string.
                 mode.shape_q = 0;
-                mode.shape_theta = 0.0;
+                cold.shape_theta = 0.0;
                 mode.shape_a = 1.0;
                 mode.shape_b = 0.0;
                 mode.shape_c = 0.0;
             } else {
-                mode.shape_q =
-                    (roundf(half_waves * cos_alpha) as usize).clamp(1, BOARD_DRIVE_POINTS - 1);
-                mode.shape_theta = theta;
+                mode.shape_q = (roundf(half_waves * cos_alpha) as u16)
+                    .clamp(1, BOARD_DRIVE_POINTS as u16 - 1);
+                cold.shape_theta = theta;
                 mode.shape_a = 1.0 - depth;
                 mode.shape_b = depth * core::f32::consts::SQRT_2 * cos_theta;
                 mode.shape_c = -depth * core::f32::consts::SQRT_2 * sin_theta;
@@ -6006,7 +6116,7 @@ impl ConcertGrand {
             BOARD_RADIATION_ORDER.get(),
         );
         mode.drive *= ratio / (1.0 + ratio);
-        mode
+        (mode, cold)
     }
 
     /// Retunes the undamped top-octave strings.
@@ -13531,7 +13641,7 @@ mod tests {
             render(&mut piano, 64, &[note_on(note, 110)]);
             let (f0, b) = f0_of(&piano);
             let board_count = piano.board_count;
-            let mut board: Vec<BodyMode> = piano.board[..board_count].to_vec();
+            let mut board: Vec<BoardMode> = piano.board[..board_count].to_vec();
             let Some(voice) = piano.voices.iter_mut().find(|v| v.active) else {
                 return;
             };
@@ -15109,9 +15219,13 @@ mod tests {";
                 bank.iter()
                     .fold(0.0f32, |a, m| a.max(m.y1.abs()).max(m.y2.abs()))
             };
+            let board_peak_of = |bank: &[BoardMode]| {
+                bank.iter()
+                    .fold(0.0f32, |a, m| a.max(m.y1.abs()).max(m.y2.abs()))
+            };
             states.push((
                 state,
-                peak_of(&piano.board[..piano.board_count]),
+                board_peak_of(&piano.board[..piano.board_count]),
                 peak_of(&piano.undamped),
                 peak_of(&piano.open_strings),
             ));
@@ -15960,8 +16074,13 @@ mod tests {";
         for (i, slot) in out.iter_mut().enumerate() {
             let input = if i == 0 { 1.0 } else { 0.0 };
             let mut left = 0.0;
-            for mode in piano.board.iter_mut().take(piano.board_count) {
-                left += mode.tick(input) * mode.pan_left;
+            for (mode, cold) in piano
+                .board
+                .iter_mut()
+                .zip(piano.board_cold.iter())
+                .take(piano.board_count)
+            {
+                left += mode.tick(input) * cold.pan_left;
             }
             *slot = left;
         }
@@ -16323,6 +16442,276 @@ mod bench {
             let mut output = vec![0.0f32; 256];
             piano.process(&[], &mut output, &[], &[], 128, 0, 2);
             std::println!("{density:>9.1}  {:>6}", piano.board_count);
+        }
+    }
+
+    /// Times the render, to say whether the banks are paying for arithmetic
+    /// or for memory.
+    ///
+    /// `bank_working_set` says the banks sweep 65 KB every sample against a
+    /// Raspberry Pi's 32 KB of L1. If that is what costs, then PADDING
+    /// `BodyMode` -- adding bytes the loop never reads -- has to cost time
+    /// in proportion. If the loop is compute-bound the padding is free.
+    /// That is the whole experiment, and it is worth running before any
+    /// refactor that packs these structs.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bank_render_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bank_render_cost() {
+        const FRAMES: usize = 128;
+        const BLOCKS: usize = 4000;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        // Six notes held, which is where the appliance's ramp starts.
+        let events: std::vec::Vec<MidiEvent> = [40u8, 47, 52, 59, 64, 71]
+            .iter()
+            .map(|note| note_on(*note, 90))
+            .collect();
+        piano.process(&[], &mut output, &events, &[], FRAMES as u32, 0, 2);
+        // Warm the caches before the clock starts.
+        for _ in 0..200 {
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+        }
+        let start = std::time::Instant::now();
+        for _ in 0..BLOCKS {
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+        }
+        let each = start.elapsed().as_secs_f64() * 1e6 / BLOCKS as f64;
+        std::println!(
+            "BodyMode {} bytes, {} modos de tabla: {each:.1} us por bloque de {FRAMES}",
+            core::mem::size_of::<BodyMode>(),
+            piano.board_count,
+        );
+    }
+
+    /// What the resonator banks weigh, against the cache that has to hold
+    /// them.
+    ///
+    /// The banks are swept whole every sample. If the bytes they occupy do
+    /// not fit the L1 the loop is not paying for its arithmetic, it is
+    /// paying for the trip to L2 -- and the measured 2.97 us per board mode
+    /// per block is about thirty-five cycles for thirteen flops, which is
+    /// what that trip costs on a Cortex-A72.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bank_working_set -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bank_working_set() {
+        let one = core::mem::size_of::<BodyMode>();
+        let board_one = core::mem::size_of::<BoardMode>();
+        std::println!(
+            "BodyMode: {one} bytes   BoardMode: {board_one} bytes   BoardCold: {} bytes (frio)",
+            core::mem::size_of::<BoardCold>()
+        );
+        let banks: &[(&str, usize)] = &[
+            ("board", BOARD_MODES),
+            ("undamped", UNDAMPED_COUNT),
+            ("silent", SILENT_MODES),
+            ("bed", BED_COUNT),
+            ("open", OPEN_STRINGS.len()),
+        ];
+        let mut total = 0;
+        std::println!("{:>10} {:>7} {:>10}", "banco", "modos", "KB");
+        for (name, count) in banks {
+            let each = if *name == "board" { board_one } else { one };
+            total += each * count;
+            std::println!("{name:>10} {count:>7} {:>10.1}", (each * count) as f32 / 1024.0);
+        }
+        std::println!("{:>10} {:>7} {:>10.1}", "suma", "", total as f32 / 1024.0);
+        std::println!("  L1d de un Cortex-A72 (Raspberry Pi 4): 32 KB por nucleo");
+        std::println!("  L2 compartida: 1 MB");
+        std::println!();
+        // What the per-sample loops actually read.
+        let hot_board = 4 * 11 + core::mem::size_of::<usize>() + 4 * 3;
+        let hot_simple = 4 * 8;
+        std::println!("lo que el lazo por muestra realmente toca:");
+        std::println!("  tabla    {hot_board} de {one} bytes  (y1 y2 a1 a2 drive velocity v1 out_y[2] out_y1[2] shape_a/b/c/q)");
+        std::println!("  simpatia {hot_simple} de {one} bytes  (y1 y2 a1 a2 drive velocity pan_left pan_right)");
+        let hot = hot_board * BOARD_MODES
+            + hot_simple * (UNDAMPED_COUNT + SILENT_MODES + BED_COUNT + OPEN_STRINGS.len());
+        std::println!(
+            "  caliente: {:.1} KB contra {:.1} KB que se recorren hoy",
+            hot as f32 / 1024.0,
+            total as f32 / 1024.0
+        );
+    }
+
+    /// How much of the soundboard bank is audible at any one moment.
+    ///
+    /// Every mode is ticked every sample, and above the rib knee a mode's
+    /// T60 is short -- 2.2/(eta f) is about 30 ms at 3 kHz -- so a mode
+    /// whose bay nothing has struck lately is advancing a state that
+    /// rounds to nothing. This counts them, against the block's own peak,
+    /// so the threshold is relative to what is actually being heard.
+    ///
+    /// The estimate per mode is its state times what the output takes from
+    /// it: `max(|y1|,|y2|) * velocity * (|out_y| + |out_y1|)`, the envelope
+    /// of its contribution to a capsule.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release board_audible_share -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn board_audible_share() {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+
+        // A realistic passage rather than one held chord: a bass octave, a
+        // mid chord, then a treble run over the top of them.
+        let script: &[(usize, &[u8])] = &[
+            (0, &[28, 40]),
+            (12, &[55, 59, 62]),
+            (40, &[76, 79, 83]),
+            (70, &[88, 91]),
+        ];
+
+        let knee_hz = 1477.0f32;
+        let mut rows: std::vec::Vec<(usize, f32, usize, usize, usize, usize)> =
+            std::vec::Vec::new();
+        for block in 0..140 {
+            let mut events: std::vec::Vec<MidiEvent> = std::vec::Vec::new();
+            for (at, notes) in script {
+                if *at == block {
+                    for note in *notes {
+                        events.push(note_on(*note, 88));
+                    }
+                }
+            }
+            piano.process(&[], &mut output, &events, &[], FRAMES as u32, 0, 2);
+
+            let peak = output.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            if peak <= 0.0 {
+                continue;
+            }
+            // -80 dB under the block's own peak: a mode this far down is
+            // below the noise of any converter this will ever reach.
+            let floor = peak * 1e-4;
+            let (mut quiet, mut quiet_high, mut high) = (0usize, 0usize, 0usize);
+            for (mode, cold) in piano
+                .board
+                .iter()
+                .zip(piano.board_cold.iter())
+                .take(piano.board_count)
+            {
+                let state = mode.y1.abs().max(mode.y2.abs());
+                let mut reach = 0.0f32;
+                for capsule in 0..2 {
+                    reach = reach.max(
+                        mode.out_y[capsule].abs() + mode.out_y1[capsule].abs(),
+                    );
+                }
+                let amp = state * mode.velocity.abs() * reach;
+                let above_knee = cold.omega * 48_000.0 / core::f32::consts::TAU >= knee_hz;
+                if above_knee {
+                    high += 1;
+                }
+                if amp < floor {
+                    quiet += 1;
+                    if above_knee {
+                        quiet_high += 1;
+                    }
+                }
+            }
+            if block % 10 == 0 || block == 139 {
+                rows.push((block, peak, quiet, piano.board_count, quiet_high, high));
+            }
+            if matches!(block, 20 | 60 | 100 | 139) {
+                let mut db: std::vec::Vec<f32> = piano
+                    .board
+                    .iter()
+                    .take(piano.board_count)
+                    .map(|mode| {
+                        let state = mode.y1.abs().max(mode.y2.abs());
+                        let mut reach = 0.0f32;
+                        for capsule in 0..2 {
+                            reach = reach.max(
+                                mode.out_y[capsule].abs() + mode.out_y1[capsule].abs(),
+                            );
+                        }
+                        let amp = state * mode.velocity.abs() * reach;
+                        20.0 * log2f((amp / peak).max(1e-12)) / log2f(10.0)
+                    })
+                    .collect();
+                db.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let at = |q: f32| db[((db.len() - 1) as f32 * q) as usize];
+                std::println!(
+                    "  bloque {block:>3}: dB bajo el pico -- p5 {:>6.1}  p25 {:>6.1}  p50 {:>6.1}  p75 {:>6.1}  max {:>6.1}",
+                    at(0.05), at(0.25), at(0.50), at(0.75), at(1.0)
+                );
+            }
+        }
+        std::println!(
+            "{:>7} {:>9} {:>16} {:>18}",
+            "bloque", "pico", "callados/total", "de esos, agudos"
+        );
+        for (block, peak, quiet, total, quiet_high, high) in &rows {
+            std::println!(
+                "{block:>7} {peak:>9.4} {:>9} ({:>3.0} %) {:>10} de {high:>3}",
+                std::format!("{quiet}/{total}"),
+                100.0 * *quiet as f32 / *total as f32,
+                quiet_high,
+            );
+        }
+    }
+
+    /// Which rows of the drive transform the bank actually reads.
+    ///
+    /// The transform computes all sixteen cosine and sine rows every sample,
+    /// 512 multiplies, and each mode reads three numbers out of it: row 0 and
+    /// its own `shape_q`. A row no mode names is computed for nobody -- and
+    /// `shape_q` is fixed when the bank is built, so which rows those are is
+    /// known before a sample is rendered.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release board_row_usage -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn board_row_usage() {
+        for density in [0.0f64, 0.5, 1.0] {
+            let (low, high) = parameter_bounds(PARAM_BOARD_DENSITY);
+            let value = low + (high - low) * density;
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, 128, 0, 2));
+            assert!(piano.set_parameter(PARAM_BOARD_DENSITY, value));
+            let mut output = vec![0.0f32; 256];
+            piano.process(&[], &mut output, &[], &[], 128, 0, 2);
+
+            let mut per_row = [0usize; BOARD_DRIVE_POINTS];
+            let mut knee_split = (0usize, 0usize);
+            let mut top_below_knee = 0usize;
+            for (mode, cold) in piano
+                .board
+                .iter()
+                .zip(piano.board_cold.iter())
+                .take(piano.board_count)
+            {
+                per_row[mode.shape_q as usize] += 1;
+                let hertz = cold.omega * 48_000.0 / core::f32::consts::TAU;
+                if hertz < 1477.0 {
+                    knee_split.0 += 1;
+                    top_below_knee = top_below_knee.max(mode.shape_q as usize);
+                } else {
+                    knee_split.1 += 1;
+                }
+            }
+            std::println!(
+                "
+densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
+                piano.board_count, knee_split.0, knee_split.1
+            );
+            std::println!("  fila q:  modos que la leen");
+            let mut dead = 0;
+            for (q, count) in per_row.iter().enumerate() {
+                let bar = "#".repeat(*count);
+                if *count == 0 {
+                    dead += 1;
+                }
+                std::println!("  {q:>6}: {count:>3}  {bar}");
+            }
+            std::println!("  filas muertas: {dead} de {BOARD_DRIVE_POINTS}");
+            std::println!("  mayor q bajo la rodilla: {top_below_knee}");
         }
     }
 

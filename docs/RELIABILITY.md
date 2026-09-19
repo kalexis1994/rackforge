@@ -166,10 +166,11 @@ That is why `REALTIME_BUDGET.md` scales the soundboard and the undamped
 register before it touches the notes: those are the parts that cost the most
 and are heard the least.
 
-### Two exact savings found this way
+### Three exact savings found this way
 
-Both are bit-identical -- the Concert Grand's render fingerprint is unchanged
--- and both came out of the table above rather than from guessing:
+All three are bit-identical -- the Concert Grand's render fingerprint is
+unchanged -- and all three came out of the table above rather than from
+guessing:
 
 * The bridge projection spends 512 multiplies a frame proving that zero times
   a basis is zero. Skipping it when no voice contributed saves **151 us**, all
@@ -182,6 +183,53 @@ The second is worth recording for what it disproved. An undamped length cost
 and the lookup looked like the whole difference. It was not: removing it
 bought 37 us of a 190 us gap. The rest is the working set -- 192 resonators
 against 14 is a cache story, not a branch one.
+
+That sentence was the third saving's starting point.
+
+* **The banks were twice the cache they had.** One `BodyMode` served every
+  bank and carried every bank's needs: 88 bytes, of which the board's
+  per-sample loop reads 60 and a sympathetic string's reads 32. Swept whole
+  every sample, the banks came to **65 KB against a Cortex-A72's 32 KB of
+  L1**, so half of every cache line fetched was a field that loop never
+  looks at -- the board's shape on a sympathetic string, a string's pan on
+  a board mode.
+
+  Whether that costs anything is a measurement, not an opinion, and it has
+  to be made on the appliance: `tools/measure-bank-stride.rs` sweeps the
+  same arithmetic over the same count in the same order, changing only the
+  stride.
+
+  | bytes per mode | bank | ns per mode per sample, Pi 4 | on a desktop |
+  | --- | --- | --- | --- |
+  | 32 | 23.7 KB | 4.57 | 1.27 |
+  | 56 | 41.5 KB | 5.11 | 1.50 |
+  | 88 | 65.1 KB | 6.82 | 1.57 |
+  | 152 | 112.5 KB | 9.82 | 1.53 |
+
+  The Pi tracks the stride -- 2.15x across that range -- and the desktop
+  flattens at 1.2x. **A desktop cannot answer this question**, which is why
+  an in-plugin version of the same experiment, run here, said the padding
+  was free.
+
+  So the struct was split by what its loop reads: `BodyMode` at **32 bytes**
+  for the sympathetic banks, which tick to a pan, and `BoardMode` at **60**
+  for the soundboard, which ticks to two capsules through a shape. What is
+  only read while the bank is built -- `omega`, the shape's phases, the
+  board's pan -- moved to a parallel `BoardCold`, which `tune_pair` touches
+  a handful of modes per block and the render thread never does. The banks
+  went from **65.1 KB to 30.7 KB**, inside L1.
+
+  Measured with `tools/measure-bank-layout.rs`, which runs both layouts:
+  **1.20x on the bank loops, 139 us a block** on the Pi. Less than the
+  stride sweep's 1.49x, for two reasons worth stating: the board only
+  reached 60 bytes rather than 32, and its loop does more arithmetic per
+  mode, so a larger share of it was never memory to begin with. The 139 us
+  is also an upper bound -- it has all 256 `silent` resonators live, and
+  free slots are already skipped.
+
+  Nothing about the instrument changed. The arithmetic and its order are
+  untouched, which is why the fingerprint is: **0x0c396512799eb435** before
+  and after.
 
 ## Audio device arrival and loss
 

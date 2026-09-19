@@ -3544,8 +3544,26 @@ pub static AIR_HIGHPASS: Knob = Knob::new(0.0094);
 const ROOM_BUFFER: usize = 4096;
 /// Wet level of the chamber against the direct sound.
 pub static ROOM_MIX: Knob = Knob::new(0.09);
+/// What one voice puts into a frame.
+///
+/// Exactly what a `parallel_render_v1` unit can hand back: the voice's own
+/// sample, what it leaves on the bridge, and what its cull returned. The
+/// caller does the summing, in slot order, so this carries no accumulator
+/// and reaches nothing outside the voice -- which is the point. A unit is
+/// given its voices and a context, never `&self`.
+struct VoiceFrame {
+    sample: f32,
+    keybed_left: f32,
+    keybed_right: f32,
+    force: f32,
+    drive_index: usize,
+    drive_frac: f32,
+    culled: usize,
+}
+
 
 #[derive(Clone, Copy)]
+
 struct Voice {
     active: bool,
     note: u8,
@@ -4035,6 +4053,84 @@ impl Voice {
                 partial.rs[lane] = (partial.rs[lane] + partial.rc[lane] * step) * scale;
                 partial.rc[lane] = rc;
             }
+        }
+    }
+
+
+    /// One frame of this voice, and everything it needs to make one.
+    ///
+    /// `feed` is what this voice's SECTION hears of the rest of the
+    /// instrument; `sostenuto` is the middle pedal. That is the whole of it,
+    /// and the render fingerprint is the proof that the boundary is drawn in
+    /// the right place: extracting this changed no arithmetic and no order,
+    /// so 0x0c396512799eb435 held.
+    #[inline(always)]
+    fn render_frame(&mut self, feed: f32, sympathy_rate: f32, sostenuto: bool) -> VoiceFrame {
+        let mut culled = 0usize;
+        // Everyone but me, gated by the damper: a seated or
+        // pressed damper takes a string out of the conversation
+        // exactly as far as it is pressed.
+        let free = if self.held {
+            1.0
+        } else if self.sustained {
+            1.0 - self.damper_applied
+        } else {
+            0.0
+        };
+        let sympathy = (feed - self.last_out) * sympathy_rate * free;
+        let sample = self.tick(sympathy);
+        self.last_out = sample;
+        let keybed_left = self.keybed_out * self.pan_left;
+        let keybed_right = self.keybed_out * self.pan_right;
+        // What drives the BODY is the bridge. The strings used to
+        // pass through a per-voice "spaced pair" -- one write read at
+        // two delays, panned, then summed -- and that sum was this
+        // excitation. Summing two arrival times is a comb, and since
+        // NOTHING else ever read the pair's left and right (the
+        // output mix is built from the board, the lid and the room
+        // alone), the pair never made stereo: its entire audible
+        // output was that comb, deterministic per note. For B3 the
+        // first notch landed at ~2.7 kHz, on its eleventh partial --
+        // measured 5-8 dB of absolute loss across the upper ladder,
+        // and every note got its own notch pattern: the ragged,
+        // bell-like mid-register the ear reported as metallic. The
+        // machinery is gone; the pan weight stays so each string
+        // drives the board at the level the calibration expects.
+        let force = sample * (self.pan_left + self.pan_right);
+
+        if self.damper_phase != 0 {
+            self.damper_in -= 1;
+            if self.damper_in == 0 {
+                if sostenuto && self.sostenuto {
+                    // The middle pedal caught this key while its
+                    // felt was still up: it stays up.
+                    self.cancel_damper();
+                    self.held = false;
+                    self.sustained = true;
+                    self.damper_applied = 0.0;
+                } else {
+                    self.advance_damper();
+                }
+            }
+        }
+        self.tension_in -= 1;
+        if self.tension_in == 0 {
+            self.tension_in = TENSION_INTERVAL;
+            self.tension_step();
+        }
+        self.cull_in -= 1;
+        if self.cull_in == 0 {
+            self.cull_in = CULL_INTERVAL;
+            culled = self.cull();
+        }
+        VoiceFrame {
+            sample,
+            keybed_left,
+            keybed_right,
+            force,
+            drive_index: self.drive_index,
+            drive_frac: self.drive_frac,
+            culled,
         }
     }
 
@@ -10681,74 +10777,28 @@ impl Processor for ConcertGrand {
             };
             let mut keybed_left = 0.0f32;
             let mut keybed_right = 0.0f32;
+            let sostenuto_now = self.sostenuto;
+            // In slot order, because that is the order the sums were
+            // built in and the fingerprint knows it. What each voice needs
+            // is now explicit in the call -- its section's feed, the
+            // sympathy rate and the middle pedal -- and nothing else
+            // crosses, which is the boundary a unit will be given.
             for slot in 0..MAX_VOICES {
-            let voice = &mut voice_at!(self, slot);
+                let section = slot & (STRING_SECTIONS - 1);
+                let feed = feeds[section];
+                let voice = &mut voice_at!(self, slot);
                 if !voice.active {
                     continue;
                 }
-                let section = slot & (STRING_SECTIONS - 1);
-                // Everyone but me, gated by the damper: a seated or
-                // pressed damper takes a string out of the conversation
-                // exactly as far as it is pressed.
-                let free = if voice.held {
-                    1.0
-                } else if voice.sustained {
-                    1.0 - voice.damper_applied
-                } else {
-                    0.0
-                };
-                let sympathy = (feeds[section] - voice.last_out) * sympathy_rate * free;
-                let sample = voice.tick(sympathy);
-                voice.last_out = sample;
-                strings_total += sample;
-                section_total[section] += sample;
-                keybed_left += voice.keybed_out * voice.pan_left;
-                keybed_right += voice.keybed_out * voice.pan_right;
-                // What drives the BODY is the bridge. The strings used to
-                // pass through a per-voice "spaced pair" -- one write read at
-                // two delays, panned, then summed -- and that sum was this
-                // excitation. Summing two arrival times is a comb, and since
-                // NOTHING else ever read the pair's left and right (the
-                // output mix is built from the board, the lid and the room
-                // alone), the pair never made stereo: its entire audible
-                // output was that comb, deterministic per note. For B3 the
-                // first notch landed at ~2.7 kHz, on its eleventh partial --
-                // measured 5-8 dB of absolute loss across the upper ladder,
-                // and every note got its own notch pattern: the ragged,
-                // bell-like mid-register the ear reported as metallic. The
-                // machinery is gone; the pan weight stays so each string
-                // drives the board at the level the calibration expects.
-                let force = sample * (voice.pan_left + voice.pan_right);
-                bridge_drive += force;
-                drive_points[voice.drive_index] += force * (1.0 - voice.drive_frac);
-                drive_points[voice.drive_index + 1] += force * voice.drive_frac;
-
-                if voice.damper_phase != 0 {
-                    voice.damper_in -= 1;
-                    if voice.damper_in == 0 {
-                        if self.sostenuto && voice.sostenuto {
-                            // The middle pedal caught this key while its
-                            // felt was still up: it stays up.
-                            voice.cancel_damper();
-                            voice.held = false;
-                            voice.sustained = true;
-                            voice.damper_applied = 0.0;
-                        } else {
-                            voice.advance_damper();
-                        }
-                    }
-                }
-                voice.tension_in -= 1;
-                if voice.tension_in == 0 {
-                    voice.tension_in = TENSION_INTERVAL;
-                    voice.tension_step();
-                }
-                voice.cull_in -= 1;
-                if voice.cull_in == 0 {
-                    voice.cull_in = CULL_INTERVAL;
-                    let removed = voice.cull();
-                    self.active_partials = self.active_partials.saturating_sub(removed);
-                }
+                let made = voice.render_frame(feed, sympathy_rate, sostenuto_now);
+                strings_total += made.sample;
+                section_total[section] += made.sample;
+                keybed_left += made.keybed_left;
+                keybed_right += made.keybed_right;
+                bridge_drive += made.force;
+                drive_points[made.drive_index] += made.force * (1.0 - made.drive_frac);
+                drive_points[made.drive_index + 1] += made.force * made.drive_frac;
+                self.active_partials = self.active_partials.saturating_sub(made.culled);
             }
 
             bridge_feed = strings_total;

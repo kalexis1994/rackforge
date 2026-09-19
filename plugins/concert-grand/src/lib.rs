@@ -4795,6 +4795,19 @@ pub struct ConcertGrand {
     /// so `BOARD_FEED_DELAY` can hand the board a stale copy. Only written
     /// when that delay is non-zero, so the shipped path does not pay for it.
     board_feed_history: [[f32; BOARD_DRIVE_POINTS]; BOARD_FEED_HISTORY],
+    /// The same delay for what the SYMPATHETIC banks hear. The board is the
+    /// through path and the banks are beside it, so delaying one without the
+    /// other leaves two copies of the strike a block apart and they comb --
+    /// which is what the ear reported as the attack losing a pinch. Delayed
+    /// together, the whole downstream chain is simply late, which is latency
+    /// and not colour.
+    bridge_feed_history: [f32; BOARD_FEED_HISTORY],
+    /// And the keybed with them. It is the action's knock -- percussive, and
+    /// exactly at the attack -- so leaving it on time while the tone arrives
+    /// a block later separates the two, which is what "pierde una pizca de
+    /// ataque" was. Everything a unit could not reach moves together or the
+    /// delay is not a delay, it is a smear.
+    keybed_feed_history: [[f32; 2]; BOARD_FEED_HISTORY],
     board_feed_cursor: usize,
     /// Samples of delay on the sympathetic coupling BETWEEN sections.
     ///
@@ -5014,6 +5027,8 @@ impl Default for ConcertGrand {
             section_cursor: 0,
             section_previous: [0.0; STRING_SECTIONS],
             board_feed_history: [[0.0; BOARD_DRIVE_POINTS]; BOARD_FEED_HISTORY],
+            bridge_feed_history: [0.0; BOARD_FEED_HISTORY],
+            keybed_feed_history: [[0.0; 2]; BOARD_FEED_HISTORY],
             board_feed_cursor: 0,
             section_delay: 0,
             restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
@@ -10703,20 +10718,33 @@ impl Processor for ConcertGrand {
             self.section_cursor = (self.section_cursor + 1) % MAX_SECTION_DELAY;
             // Everything the strings produce radiates through the board --
             // each string from its own point of the bridge (`BOARD_SHAPE`).
-            let excitation = bridge_drive;
-            // What the board hears, which is what a board unit could reach
-            // if it rendered beside the strings instead of after them. At
-            // zero the array is handed straight through and nothing is
-            // written, so the shipped render is untouched.
-            let drive_points = if board_feed_delay == 0 {
-                drive_points
-            } else {
-                let write = self.board_feed_cursor;
-                let read = (write + BOARD_FEED_HISTORY - board_feed_delay) % BOARD_FEED_HISTORY;
-                self.board_feed_history[write] = drive_points;
-                self.board_feed_cursor = (write + 1) % BOARD_FEED_HISTORY;
-                self.board_feed_history[read]
-            };
+            // What everything downstream of the strings hears, which is what
+            // those units could reach if they rendered beside the strings
+            // instead of after them. The board and the sympathetic banks move
+            // TOGETHER: the board is the through path and the banks sit
+            // beside it, so delaying one alone leaves two copies of the
+            // strike a block apart, and the ear heard that as the attack
+            // losing a pinch. At zero both are handed straight through and
+            // nothing is written, so the shipped render is untouched.
+            let (drive_points, excitation, keybed_left, keybed_right) =
+                if board_feed_delay == 0 {
+                    (drive_points, bridge_drive, keybed_left, keybed_right)
+                } else {
+                    let write = self.board_feed_cursor;
+                    let read =
+                        (write + BOARD_FEED_HISTORY - board_feed_delay) % BOARD_FEED_HISTORY;
+                    self.board_feed_history[write] = drive_points;
+                    self.bridge_feed_history[write] = bridge_drive;
+                    self.keybed_feed_history[write] = [keybed_left, keybed_right];
+                    self.board_feed_cursor = (write + 1) % BOARD_FEED_HISTORY;
+                    let keybed = self.keybed_feed_history[read];
+                    (
+                        self.board_feed_history[read],
+                        self.bridge_feed_history[read],
+                        keybed[0],
+                        keybed[1],
+                    )
+                };
             let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
             let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
             // With nothing sounding every drive point is zero, and the
@@ -18057,18 +18085,62 @@ densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
             let shipped = render(0.0, chord, 1_400);
             let delayed = render(128.0, chord, 1_400);
             let peak = shipped.iter().fold(0.0f32, |a, s| a.max(s.abs()));
-            let (mut worst, mut sum) = (0.0f32, 0.0f64);
-            for (a, b) in shipped.iter().zip(delayed.iter()) {
-                let difference = (a - b).abs();
+            // ALIGNED before differencing. Delaying everything downstream of
+            // the strings delays the output, and subtracting a signal from a
+            // shifted copy of itself gives an error the size of the signal --
+            // which is what the first version of this measured and reported
+            // as -3.8 dB. That number was the latency, not the colour. What
+            // is left after the shift is taken out is the colour.
+            // Which shift actually aligns them. A residual concentrated at
+            // the attack and falling away after it is the signature of a
+            // misalignment of a few samples, not of a colour: the error is
+            // largest where the signal changes fastest.
+            let mut shift = 128usize;
+            {
+                let mut best = f64::MAX;
+                for candidate in 120..=136usize {
+                    let mut sum = 0.0f64;
+                    for index in 0..shipped.len().saturating_sub(candidate).min(48_000) {
+                        let d = f64::from(shipped[index] - delayed[index + candidate]);
+                        sum += d * d;
+                    }
+                    if sum < best {
+                        best = sum;
+                        shift = candidate;
+                    }
+                }
+                std::println!("  {name}: alinea mejor a {shift} muestras");
+            }
+            let (mut worst, mut sum, mut counted) = (0.0f32, 0.0f64, 0usize);
+            for index in 0..shipped.len().saturating_sub(shift) {
+                let difference = (shipped[index] - delayed[index + shift]).abs();
                 worst = worst.max(difference);
                 sum += f64::from(difference) * f64::from(difference);
+                counted += 1;
             }
-            let rms = (sum / shipped.len() as f64).sqrt() as f32;
+            let rms = (sum / counted.max(1) as f64).sqrt() as f32;
             std::println!(
-                "{name}: pico {peak:.4}, mayor diferencia {:.1} dB bajo el pico, rms de la diferencia {:.1} dB",
+                "{name}: pico {peak:.4}, alineado: mayor diferencia {:.1} dB bajo el pico, rms {:.1} dB",
                 20.0 * log2f((worst / peak).max(1e-9)) / log2f(10.0),
                 20.0 * log2f((rms / peak).max(1e-9)) / log2f(10.0),
             );
+            // WHERE it is, before anyone guesses why. Two hypotheses in a row
+            // -- the sympathetic banks, then the keybed -- each moved the
+            // number by nothing, which is what guessing buys.
+            std::println!("    la diferencia en el tiempo, por 100 ms:");
+            let window = 4_800usize;
+            let mut line = std::string::String::new();
+            for start in (0..counted.saturating_sub(window)).step_by(window).take(20) {
+                let mut local = 0.0f32;
+                let mut signal = 0.0f32;
+                for index in start..start + window {
+                    local = local.max((shipped[index] - delayed[index + shift]).abs());
+                    signal = signal.max(shipped[index].abs());
+                }
+                let db = 20.0 * log2f((local / signal.max(1e-9)).max(1e-9)) / log2f(10.0);
+                line.push_str(&std::format!(" {db:.0}"));
+            }
+            std::println!("    {line}  (dB bajo la senal local)");
             let mut track = vec![0.0f32; LEAD_IN];
             for _ in 0..2 {
                 for rendered in [&shipped, &delayed] {

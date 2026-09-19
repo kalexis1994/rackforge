@@ -2677,6 +2677,52 @@ Stated so nobody mistakes silence for coverage:
   sympathetic bed spread along the rest -- which is what confinement *means*,
   so the test was left at its bound rather than loosened. Any future attempt
   has to answer that ratio against recordings, not against the threshold.
+
+  **The density law was then checked against a computed board, and it
+  held (2026-09-19).** `tools/solve-soundboard-modes.py` solves the plate by
+  Rayleigh-Ritz and the bays above the knee as strips clamped between ribs,
+  to see whether `board_spacing` is drawing the right number of modes. The
+  first reading said it was badly wrong -- 0.036/Hz computed against 0.060
+  at the bottom, 0.064 against 0.030 above the knee. Both halves of that
+  were artefacts of the comparison, and both are worth stating because they
+  are easy to walk into again:
+
+  * **A density needs many modes in the band.** Between 45 and 100 Hz a
+    real board has one or two. The count comes out quantised in 1/width --
+    0.029, 0.057, 0.086 and nothing between -- so the "rise from 0.036 to
+    0.062" was rounding, not physics. Making the plate orthotropic to
+    explain the rise moved those bands between 0.029 and 0.057 with no
+    trend, which is what a quantised count does. The instrument's own tap
+    measurements (`BOARD_LOW_MODES`) have the same problem: two modes in
+    65-100 Hz "are" 0.057/Hz. Over a band wide enough to mean something,
+    45-1477 Hz, the computed board gives **0.056/Hz**, the taps give
+    **0.054/Hz** over 65-232 Hz, and the model uses 0.060. There is nothing
+    to correct there.
+  * **Above the knee the law is not a mode count at all**, so comparing a
+    mode count against it was meaningless. It is set by *modal overlap*:
+    60% at 3 kHz at a 2.3% loss factor gives spacing ~=0.038*f. Modes
+    closer than that are not separable, so drawing more of them buys
+    nothing and costs CPU -- and drawing too few is the failure already
+    recorded above this function, 11 dB of ripple through 500-1000 Hz.
+
+  The second point corrects a sentence in the paragraph above it. The total
+  modal density does **not** fall above the knee: n = (A/2)*sqrt(rho*h/D)
+  depends on the board's area and material, and cutting a plate into strips
+  does not change how many modes it has, only **where they live**. Computed,
+  the bays hold 0.085/Hz between them -- more than the plate below, since
+  their areas sum to more than the board. What falls is what one string
+  sees: one bay in ten, ~0.008/Hz, which is what the model's law already
+  draws up there to within a factor of two to four, on the generous side.
+
+  So the law survived and the solver's report was what needed fixing. The
+  gap this measurement does confirm is the one already named -- **locality,
+  not count**. Two bridge points 19 cm apart drive the computed bays with a
+  correlation of 0.00 and the plate below the knee with 0.16; in this
+  model's shared global bank, every pair of strings correlates 1.00 at
+  every frequency. The high bands of that solve are also not converged
+  (3-6 kHz reads 0.023, 0.042, 0.057 at 12, 18 and 24 terms and is still
+  climbing), so nobody should take a number above 3 kHz from it without
+  pushing the basis first.
 * **The broadband knock.** The impacts of the action and the keys — everything
   in a piano's sound that does not come from the strings — are not modelled.
   It is most exposed in the extreme treble, where the tonal fundamental sits

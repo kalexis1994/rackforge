@@ -263,18 +263,53 @@ def main():
           f"{RIB_KNEE_HZ:.0f} Hz   (primero {plate[0]:.1f} Hz)")
     print(f"vanos: {len(bay_hz)} modos entre {RIB_KNEE_HZ:.0f} y "
           f"{BOARD_TOP_HZ:.0f} Hz, en {int(round(BRIDGE_LENGTH_M / RIB_SPACING_M))} vanos")
+    print("  OJO: arriba de 3 kHz este solve NO esta convergido. Variando los")
+    print("  terminos del basis de los vanos, la densidad de 3-6 kHz da 0.023,")
+    print("  0.042 y 0.057 con 12, 18 y 24 terminos, y sigue subiendo: es el")
+    print("  truncamiento de Rayleigh-Ritz agotandose, no la tabla. No saques")
+    print("  numeros de ahi sin empujar el basis hasta que se queden quietos.")
     print()
 
+    bays = max(1, int(round(BRIDGE_LENGTH_M / RIB_SPACING_M)))
+
     print("=== densidad modal: calculada contra la ley del modelo ===")
-    print(f"{'banda':>14} {'calculada':>12} {'modelo':>12}")
-    edges = [45, 100, 200, 400, 800, 1477, 3000, 6000, 8500]
+    print("  Dos advertencias, las dos aprendidas rompiendose la cara contra")
+    print("  esta tabla:")
+    print()
+    print("  1. Una densidad necesita muchos modos en la banda. Abajo de unos")
+    print("     200 Hz caben uno o dos, y la cuenta sale cuantizada en 1/ancho")
+    print("     -- no es fisica, es redondeo. Esas bandas no se reportan.")
+    print("  2. Arriba de la rodilla la ley del modelo NO es la densidad de la")
+    print("     tabla: es la que ve UNA cuerda. El total no baja ahi, porque")
+    print("     n = (A/2) sqrt(rho h / D) depende del area y del material, y")
+    print("     partir la tabla en vanos no cambia cuantos modos hay, cambia")
+    print("     donde viven. Se compara contra el total / n_vanos.")
+    print()
+    edges = [45, 400, 800, 1477, 3000, 6000, 8500]
     every = np.concatenate([plate, bay_hz])
+    print(f"{'banda':>14} {'modos':>7} {'calculada':>12} {'por cuerda':>12} "
+          f"{'modelo':>11}")
     for lo, hi in zip(edges[:-1], edges[1:]):
         n = int(((every >= lo) & (every < hi)).sum())
-        computed = n / (hi - lo)
+        if n < 8:
+            print(f"{lo:5.0f}-{hi:5.0f} Hz {n:>7}      -- muy pocos para "
+                  f"hablar de densidad")
+            continue
+        total = n / (hi - lo)
+        confined = hi > RIB_KNEE_HZ
+        seen = total / bays if confined else total
         centre = math.sqrt(lo * hi)
-        print(f"{lo:5.0f}-{hi:5.0f} Hz {computed:9.3f}/Hz "
-              f"{model_density([centre])[0]:9.3f}/Hz")
+        print(f"{lo:5.0f}-{hi:5.0f} Hz {n:>7} {total:9.3f}/Hz "
+              f"{seen:9.3f}/Hz {model_density([centre])[0]:8.3f}/Hz"
+              + ("" if confined else "   (globales: las dos son la misma)"))
+    print()
+    wide = int(((every >= BOARD_BOTTOM_HZ) & (every < RIB_KNEE_HZ)).sum())
+    print(f"  banda ancha bajo la rodilla, que es la cifra con sentido:")
+    print(f"    {wide} modos en {BOARD_BOTTOM_HZ:.0f}-{RIB_KNEE_HZ:.0f} Hz "
+          f"-> {wide / (RIB_KNEE_HZ - BOARD_BOTTOM_HZ):.3f}/Hz "
+          f"contra {1.0 / (1.0 / 0.06):.3f} del modelo")
+    print(f"    y los golpes en la tabla del propio instrumento")
+    print(f"    (BOARD_LOW_MODES, 10 modos en 65.3-231.7 Hz): 0.054/Hz")
     print()
 
     def unit(rows):

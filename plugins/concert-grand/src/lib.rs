@@ -2971,6 +2971,30 @@ pub static BOARD_BOTTOM_HZ: Knob = Knob::new(45.0);
 /// bandwidth — overlap 0.6 where the measurement says 1.0 — and the bank came
 /// out with 11 dB of ripple through 500-1000 Hz where the over-damped bank it
 /// replaced had 1.3 dB.
+///
+/// Checked against a computed board and kept unchanged (2026-09-19).
+/// `tools/solve-soundboard-modes.py` solves the plate and the rib bays and
+/// compares them with this law. Below the knee, over a band wide enough for
+/// a density to mean anything (45-1477 Hz), it computes 0.056/Hz and the
+/// instrument's own taps give 0.054/Hz against the 0.060 used here -- inside
+/// the scatter, and the solver's asymptote is calibrated to 0.06 anyway, so
+/// it is not independent evidence. Narrower bands cannot be read at all: at
+/// 45-100 Hz a board has one or two modes and the count quantises to 0.029
+/// or 0.057 with nothing between.
+///
+/// Above the knee the comparison does not apply, and that is the part worth
+/// remembering. This is an *overlap* law, not a mode count. The total modal
+/// density does not fall above the knee -- n = (A/2)sqrt(rho h/D) is set by
+/// area and material, and confining waves into bays moves modes rather than
+/// removing them -- so a computed total of 0.085/Hz up there is not evidence
+/// against the 0.030 here. What falls is what one string sees, about one bay
+/// in ten, and this law sits two to four times above that, on the generous
+/// side, which is the safe direction given the ripple above.
+///
+/// The gap the solver does confirm is locality, not count: two bridge points
+/// 19 cm apart drive the computed bays with a correlation of 0.00, while
+/// every pair of strings in this shared bank correlates 1.00. See
+/// `PIANO_MODEL.md`, "A measured soundboard".
 fn board_spacing(frequency: f32, density: f32) -> f32 {
     const KNEE_HZ: f32 = 1477.0;
     const FLAT: f32 = 1.0 / 0.06;

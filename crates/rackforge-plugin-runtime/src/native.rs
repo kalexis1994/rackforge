@@ -353,6 +353,18 @@ impl PortableModule {
                 let mix_offset =
                     typed::<(), i32>(&instance, &mut store, "rackforge_parallel_mix_ptr")?
                         .call(&mut store, ())?;
+                // Optional: a component built before it existed does not
+                // export it, and zero means "the output channels", which is
+                // what those components always meant.
+                let unit_channels = typed::<(), i32>(
+                    &instance,
+                    &mut store,
+                    "rackforge_parallel_unit_channels",
+                )
+                .ok()
+                .and_then(|call| call.call(&mut store, ()).ok())
+                .filter(|width| *width > 0)
+                .unwrap_or(0);
                 let shared_offset =
                     typed::<(), i32>(&instance, &mut store, "rackforge_parallel_shared_ptr")?
                         .call(&mut store, ())?;
@@ -412,6 +424,7 @@ impl PortableModule {
                         max_units,
                         dispatch_stride,
                         mix_slot_samples: output_capacity as usize,
+                        unit_channels: unit_channels as usize,
                         shared_capacity,
                     },
                     dispatch_offset,

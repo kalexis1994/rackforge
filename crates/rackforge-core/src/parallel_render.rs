@@ -1547,6 +1547,9 @@ struct UnitCell<'plugin> {
     input_ptr: *const f32,
     input_len: usize,
     output_samples: usize,
+    /// What this unit writes per frame, from the plugin's own declaration.
+    /// Falls back to the output channels when it declares none.
+    unit_channels: usize,
 }
 
 /// Runs one unit inside its worker instance.
@@ -1659,7 +1662,14 @@ impl<'plugin> ParallelUnits<'plugin> {
         let Some(layout) = plugin.parallel_layout() else {
             return Ok(None);
         };
-        let samples = maximum_frames as usize * output_channels as usize;
+        // A unit's buffer is as wide as the unit writes, which is the
+        // output channels unless the plugin declared otherwise.
+        let unit_channels = if layout.unit_channels == 0 {
+            output_channels as usize
+        } else {
+            layout.unit_channels
+        };
+        let samples = maximum_frames as usize * unit_channels;
         let mut cells = Vec::with_capacity(layout.max_units);
         for unit in 0..layout.max_units {
             let mut instance = if resource_overrides.is_empty() {
@@ -1682,6 +1692,7 @@ impl<'plugin> ParallelUnits<'plugin> {
                 input_ptr: std::ptr::null(),
                 input_len: 0,
                 output_samples: 0,
+                unit_channels,
             }));
         }
         Ok(Some(Self {
@@ -1791,7 +1802,14 @@ impl<'plugin> ParallelUnits<'plugin> {
         let cell = &mut self.cells[unit as usize];
         cell.input_ptr = input.as_ptr();
         cell.input_len = input.len();
-        cell.output_samples = frames as usize * channels as usize;
+        // What this unit WRITES, which is not always what the plugin
+        // outputs. A unit that produces finished audio writes the output
+        // channels; one that produces an intermediate signal -- a string
+        // section handing a shared soundboard its bridge forces -- declares
+        // its own width through `rackforge_parallel_unit_channels`, and
+        // copying only the output channels would truncate it in silence.
+        let width = cell.unit_channels.max(1);
+        cell.output_samples = frames as usize * width;
         UnitJob {
             context: (&mut **cell as *mut UnitCell<'plugin>).cast(),
             unit,

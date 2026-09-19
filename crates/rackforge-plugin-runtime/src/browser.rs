@@ -80,6 +80,10 @@ pub mod export {
     pub const PARALLEL_RENDER_UNIT: i32 = 41;
     pub const PARALLEL_END_BLOCK: i32 = 42;
     pub const LATENCY_FRAMES: i32 = 43;
+    /// How many f32 a unit writes per frame. Optional: a component built
+    /// before it existed does not export it, and the host then uses the
+    /// output channels.
+    pub const PARALLEL_UNIT_CHANNELS: i32 = 44;
 }
 
 /// Raw imports the embedding page must supply.
@@ -394,6 +398,14 @@ impl PortableModule {
                 raw.call_0(export::PARALLEL_DISPATCH_PTR, "parallel_dispatch_ptr")?;
             let plan_offset = raw.call_0(export::PARALLEL_PLAN_PTR, "parallel_plan_ptr")?;
             let mix_offset = raw.call_0(export::PARALLEL_MIX_PTR, "parallel_mix_ptr")?;
+            // Optional, as on the native host: zero means the output channels.
+            let unit_channels = raw
+                .call_0(
+                    export::PARALLEL_UNIT_CHANNELS,
+                    "parallel_unit_channels",
+                )
+                .unwrap_or(0)
+                .max(0);
             let shared_offset = raw.call_0(export::PARALLEL_SHARED_PTR, "parallel_shared_ptr")?;
             let shared_capacity =
                 raw.call_0(export::PARALLEL_SHARED_CAPACITY, "parallel_shared_capacity")?;
@@ -448,6 +460,7 @@ impl PortableModule {
                     max_units,
                     dispatch_stride,
                     mix_slot_samples: output_capacity as usize,
+                    unit_channels: unit_channels as usize,
                     shared_capacity,
                 },
                 dispatch_offset,

@@ -43,6 +43,17 @@ pub struct ParallelLayout {
     pub dispatch_stride: usize,
     /// f32 samples reserved for each unit's slot in the mix region.
     pub mix_slot_samples: usize,
+    /// How many f32 a unit writes per frame.
+    ///
+    /// Usually the plugin's output channel count, and then a unit produces
+    /// finished audio and the mix is a sum of signals. A plugin whose units
+    /// produce an INTERMEDIATE signal declares more -- the Concert Grand's
+    /// string sections hand over a bridge force, sixteen bridge drive points
+    /// and two keybed contributions, and one shared serial stage turns those
+    /// into sound. Zero means the plugin did not say, and the host uses the
+    /// output channels, which is what every plugin wanted before the export
+    /// existed.
+    pub unit_channels: usize,
     /// Bytes of the block-shared payload region every unit receives — the
     /// immutable per-block signals (per-frame LFO/noise arrays, wheel and
     /// bend curves, automation segments) the coordinator computes once.

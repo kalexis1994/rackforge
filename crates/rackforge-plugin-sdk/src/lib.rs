@@ -471,6 +471,26 @@ impl<'a> UnitMix<'a> {
 pub trait ParallelProcessor: Default {
     type Unit: Default;
 
+    /// How many floats a unit writes per frame into its slot.
+    ///
+    /// Zero, the default, means the plugin's output channel count, which is
+    /// right whenever a unit produces audio -- one voice of a synthesiser,
+    /// say. The mix is then a sum of finished signals.
+    ///
+    /// It is not right for every decomposition. An instrument with one
+    /// resonating body has units that produce an INTERMEDIATE signal: the
+    /// Concert Grand's string sections hand over a bridge force, sixteen
+    /// bridge drive points and two keybed contributions -- nineteen floats a
+    /// frame -- and a shared serial stage turns those into sound. Two
+    /// channels cannot carry that, and truncating it silently is worse than
+    /// refusing it.
+    ///
+    /// The region a unit writes is sized `max_frames * max_output_channels`,
+    /// so a plugin that widens this must keep `frames * UNIT_CHANNELS`
+    /// inside that. The generated `render_unit` checks it and refuses the
+    /// block rather than writing past the end.
+    const UNIT_CHANNELS: u32 = 0;
+
     fn prepare(
         &mut self,
         _sample_rate: f64,
@@ -1397,6 +1417,13 @@ macro_rules! export_parallel_processor {
         const RF_PARALLEL_MAX_UNITS: usize = $max_units;
         const RF_PARALLEL_DISPATCH_STRIDE: usize = $dispatch_stride;
         const RF_PARALLEL_SHARED_CAPACITY: usize = $shared_capacity;
+        /// What a unit writes per frame: its own declared width, or the
+        /// plugin's output channels when it declares none. See
+        /// `ParallelProcessor::UNIT_CHANNELS`.
+        const RF_PARALLEL_UNIT_CHANNELS: usize = {
+            let declared = <$processor as $crate::ParallelProcessor>::UNIT_CHANNELS as usize;
+            if declared == 0 { $max_output_channels } else { declared }
+        };
         const RF_PARALLEL_MIX_SLOT_SAMPLES: usize = $max_frames * $max_output_channels;
 
         /// The host requires an 8-aligned dispatch region.
@@ -1592,7 +1619,7 @@ macro_rules! export_parallel_processor {
                         RF_PARALLEL_MIX_SLOT_SAMPLES,
                         &plan_region[2..],
                         RF_PLAN_COUNT,
-                        frames as usize * output_channels as usize,
+                        frames as usize * RF_PARALLEL_UNIT_CHANNELS,
                     );
                     $crate::ParallelProcessor::end_block(
                         &mut self.inner,
@@ -1776,7 +1803,7 @@ macro_rules! export_parallel_processor {
                             input,
                             shared,
                             frames,
-                            output_channels,
+                            output_channels: RF_PARALLEL_UNIT_CHANNELS as u32,
                         };
                         <$processor as $crate::ParallelProcessor>::render_unit(
                             unit,
@@ -1817,6 +1844,14 @@ macro_rules! export_parallel_processor {
         #[unsafe(no_mangle)]
         pub extern "C" fn rackforge_parallel_plan_ptr() -> i32 {
             core::ptr::addr_of_mut!(RF_PLAN).cast::<u32>() as usize as i32
+        }
+
+        /// How many floats a unit writes per frame. A host that does not
+        /// know this export copies `frames * output_channels`, which is
+        /// what every plugin wanted before it existed.
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_unit_channels() -> i32 {
+            RF_PARALLEL_UNIT_CHANNELS as i32
         }
 
         #[unsafe(no_mangle)]
@@ -1876,7 +1911,13 @@ macro_rules! export_parallel_processor {
             {
                 return $crate::STATUS_INVALID_ARGUMENT;
             }
-            let Some(samples) = (frames as usize).checked_mul(output_channels as usize) else {
+            // A unit writes its OWN width, which is the plugin's output
+            // channels unless it declared otherwise. The region it writes is
+            // sized for the plugin's channels at `max_frames`, so a widened
+            // unit has to stay inside that -- refused here rather than
+            // written past the end.
+            let _ = output_channels;
+            let Some(samples) = (frames as usize).checked_mul(RF_PARALLEL_UNIT_CHANNELS) else {
                 return $crate::STATUS_INVALID_ARGUMENT;
             };
             if samples > RF_MAX_OUTPUT_SAMPLES {

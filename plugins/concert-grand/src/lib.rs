@@ -17742,6 +17742,127 @@ densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
         }
     }
 
+    /// What the contact integrator's step costs the ear, rendered.
+    ///
+    /// `contact_convergence` measures the shipped four-microsecond step at
+    /// 1.23 dB from converged on the worst partial of a mezzo-forte C4, and
+    /// on a bass note the error is enough to change how many partials the
+    /// ladder carries. Whether any of that is audible is not a measurement,
+    /// so this renders it.
+    ///
+    /// A is the instrument as it ships. B is the same instrument with the
+    /// step at one microsecond, four times the cost and near enough
+    /// converged (0.12 dB worst on the same note). If B sounds better, the
+    /// piano is voiced on top of a discretisation artefact and the step is a
+    /// voicing decision rather than an inherited constant. If they are the
+    /// same, the step is justified and the question closes.
+    ///
+    /// One file, a lead-in of silence, and A B A B -- a player restarts its
+    /// output stream on every file and a wireless headset gates its radio
+    /// when the stream stops, so a switch between files swallows exactly the
+    /// attack this comparison is about.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release contact_step_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn contact_step_render() {
+        const FRAMES: usize = 128;
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+
+        fn render(dt: f32, chord: &[u8], velocity: u8, blocks: usize) -> std::vec::Vec<f32> {
+            SIM_DT_S.set(dt);
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                    chord
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &note)| MidiEvent {
+                            frame: (i * 11) as u32,
+                            data: [0x90, note, velocity],
+                            length: 3,
+                        })
+                        .collect()
+                } else {
+                    std::vec::Vec::new()
+                };
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                for frame in 0..FRAMES {
+                    captured.push(output[frame * 2]);
+                }
+            }
+            captured
+        }
+
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        // The bass, where the error changes the ladder's LENGTH; a single
+        // mezzo-forte C4, which is where the 1.23 dB was measured; and a
+        // pianissimo, where the felt is least compressed and the contact
+        // longest, so the step has the most to resolve.
+        let scripts: [(&str, &[u8], u8); 3] = [
+            ("bajo", &[28, 35, 40], 100),
+            ("c4", &[60], 100),
+            ("c4-pianissimo", &[60], 28),
+        ];
+        for (name, chord, velocity) in scripts {
+            let shipped = render(4.0e-6, chord, velocity, 1_400);
+            let fine = render(1.0e-6, chord, velocity, 1_400);
+            // How far apart they are, before anyone listens: the ear should
+            // be told what it is looking for.
+            let (mut worst, mut sum) = (0.0f32, 0.0f64);
+            for (a, b) in shipped.iter().zip(fine.iter()) {
+                let difference = (a - b).abs();
+                worst = worst.max(difference);
+                sum += f64::from(difference) * f64::from(difference);
+            }
+            let peak = shipped.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            let rms = (sum / shipped.len() as f64).sqrt() as f32;
+            std::println!(
+                "{name}: pico {peak:.4}, mayor diferencia {worst:.4} ({:.1} dB bajo el pico), rms de la diferencia {:.1} dB",
+                20.0 * log2f((worst / peak).max(1e-9)) / log2f(10.0),
+                20.0 * log2f((rms / peak).max(1e-9)) / log2f(10.0),
+            );
+            let mut track = vec![0.0f32; LEAD_IN];
+            for _ in 0..2 {
+                for rendered in [&shipped, &fine] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+            }
+            let path = std::format!("{directory}/ab-paso-contacto-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in &track {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison render");
+            std::println!(
+                "  escrito {path} ({:.1} s) -- 2 s de silencio, luego 4us(A) 1us(B) A B",
+                track.len() as f64 / 48_000.0
+            );
+        }
+        SIM_DT_S.set(4.0e-6);
+    }
+
     /// What the budget costs the ear, rendered so it can be judged.
     ///
     /// The measurement says a Raspberry Pi stops missing deadlines; it cannot

@@ -272,22 +272,75 @@ can hear.
 
 So the cut now waits for confirmation: the lateness has to still be there a
 window later (`CONFIRM_WINDOWS`). A chord fills one window and leaves the
-next clean; an instrument that genuinely does not fit stays late. Re-measured
-on the appliance with that rule, the governor made **no cuts at all** through
-the same ramp, and the misses did not move:
+next clean; an instrument that genuinely does not fit stays late.
 
-| notes held | with confirmation | misses |
+**Corrected (2026-09-19).** This section first reported that the governor
+then made *no cuts at all* through the same ramp. That measurement was of a
+binary that did not contain the rule: the `cp` into `~/rackforge/bin`
+failed -- almost certainly `Text file busy`, since `rackforge-audio.path`
+brings the service back up on its own -- and the failure was not noticed
+because the install output was read through `tail -6`. The engine under
+test was the old one, and its zero cuts were its own variance: the same
+binary had cut twice in each of the two runs before it.
+
+Re-measured with the binary's hash checked against the build's:
+
+| notes held | cuts | misses |
 | --- | --- | --- |
-| 2 | no cut | 0 |
-| 4 | no cut | 2 |
-| 6 | no cut | 3 |
-| 8 | no cut | 58 |
-| 12 | no cut | 228 |
+| 2 | -- | 0 |
+| 4 | -- | 26 |
+| 6 | -- | 36 |
+| 8 | -- | 32 |
+| 12 | one, to 2,122,155 fuel | 260 |
 
-Full quality held, the same deadlines missed. The cost of the rule is stated
-rather than hidden: a machine that genuinely cannot fit the instrument is cut
-two seconds later than it used to be, which is two more seconds of xruns
-before the thing that stops them engages.
+One cut where the old rule made two, and the one it made fired on a window
+with 94 late blocks of 751 -- twelve percent, sustained -- rather than on
+the 25-of-750 burst that used to be enough. That is what the rule was for,
+and it is a smaller claim than the one it replaces.
+
+The cost of the rule is stated rather than hidden: a machine that genuinely
+cannot fit the instrument is cut two seconds later than it used to be,
+which is two more seconds of xruns before the thing that stops them
+engages.
+
+## What a real performance asks for
+
+Everything above is measured by pressing N keys and holding them, and that
+is not what a pianist does. Measured against MAESTRO -- competition
+performances captured on Yamaha Disklaviers with all three pedals, so the
+timing and the pedalling are a person's -- by `analyse-performance-midi.py`:
+
+| piece | voices ringing | attacks in one 2.7 ms block | in 20 ms |
+| --- | --- | --- | --- |
+| Liszt, La Campanella | **47** | 5 | 8 |
+| Chopin, Nocturne Op. 27/2 | 22 | 3 | 4 |
+| a dense 8-minute programme | 36 | 7 | 9 |
+
+The ramp had it wrong in both directions at once. Twelve attacks in one
+block is nearly twice the densest real moment, so the transient was
+overstated; and twelve held voices is a quarter of what a pedalled Liszt
+leaves ringing, so the steady load was understated by more.
+
+`play-performance-midi.py` plays one into the engine over its control
+socket and counts what it misses. On the appliance, seeded at 2,897,563
+fuel:
+
+| | mean block | worst p99 | misses |
+| --- | --- | --- | --- |
+| Nocturne, its densest 90 s | 1399 us (52 %) | 2752 us | **47** |
+| La Campanella, its densest 30 s | 2191 us (82 %) | 4456 us | **3805** |
+
+The player is not what is late: its worst send in either run was 2.0 ms out
+and one of ~1,600 was more than a millisecond behind, with the control
+socket costing 181-224 us a message.
+
+So the Nocturne is close -- one miss every two seconds, which is audible
+but rare -- and La Campanella does not render in real time at all. Its mean
+block is 82 % of the period with peaks past 5 ms, which is not a transient
+to be absorbed but a passage the instrument cannot afford. The governor cut
+three times inside it and gave up, correctly: the load rose from 1.38 to
+2.06 while the budget fell, so the cuts were buying nothing, and the store
+kept the pre-streak budget rather than the floor.
 
 **And the ceiling this mechanism was built to raise is still not the one that
 binds.** Held notes are cheap here -- twelve of them at half the period,

@@ -1917,7 +1917,7 @@ ambiguous or the measurement said no, it did not, and the reason is here.
 | String tension | 850 N all notes | ~650 N plain strings, higher wound | Euphonics (Broadwood) | Kept: the model derives density from tension and a constant wave speed, and the bridge loss is calibrated on it; a change is a re-calibration, not a value. |
 | Unison detune | 0.9 .. 1.8 cents, capped to 2 Hz of beat | 1-2 cents maximum preferred | Kirk 1959 | The cap (UNISON_BEAT_CAP_HZ) removed the treble chirp; the per-partial jitter remains an open non-physical item. |
 | Soundboard loss factor | 2.3 % | 1-3 %, mean ~2 % | Ege & Boutillon | Matches (was 1.1 %). |
-| Soundboard modal density | 0.06 /Hz below 1477 Hz, thinning above | 0.05 -> 0.01 /Hz, ribs confine above 1.1 kHz | Ege & Boutillon | Matches. |
+| Soundboard modal density | 0.06 /Hz below 1477 Hz, thinning above | 0.05 -> 0.01 /Hz, ribs confine above 1.1 kHz | Ege & Boutillon | Matches, and the knee differs on purpose: their 1.1 kHz is measured on an **upright**, and the knee runs 1355 (Steinway D) to 1589 Hz (Hohner) across instruments. 1477 is the Steinway B's, and a sweep against the render puts the optimum inside that published range rather than beyond it. Revisited 2026-09-19 against the same authors' later mobility paper and left alone. |
 | Radiation transition | first-order drive fall below 60 Hz; loss channel bell 200 Hz .. 5 kHz | efficiency smooth, transition 1-1.6 kHz, no sharp coincidence | Suzuki 1986 | Consistent: no sharp coincidence is modelled. |
 | Microphones | ORTF 17 cm, +-55 deg, ~1.7 m | ORTF 17 cm, 110 deg; in the curve, a couple of feet away | DPA, ORTF | Matches. |
 | Air absorption | 0.0022 /m amplitude at 4 kHz | ~5 dB/km at 1 kHz, 160 at 10 kHz (20 C, 50 % RH) | ISO 9613-1 | Within a factor of two; kept. |
@@ -2626,6 +2626,19 @@ Stated so nobody mistakes silence for coverage:
 * **A measured soundboard.** The bank follows measured density and damping
   laws, but its mode frequencies come from those laws rather than from any
   particular instrument's response.
+
+  What the laws also do not carry is *where* on the board a mode lives. Ege
+  and Boutillon measure the soundboard as a homogeneous plate only up to
+  their knee; above it the ribs confine the waves into bays, the modal
+  density falls **and becomes location-dependent** -- two strings a few
+  bays apart stop sharing the modes they drive. This model's bank is global
+  at every frequency: each of the sixteen drive points projects onto every
+  mode. That is the missing half of "each note of one instrument has an
+  individual character", and it is the standing candidate for the
+  mid-treble's body (`PIANO_MIDRANGE.md`). The open-source MAESSTRO
+  framework (Acta Acustica 2022) computes exactly this from a board's
+  geometry and materials, and is the reference to measure any attempt
+  against.
 * **The broadband knock.** The impacts of the action and the keys — everything
   in a piano's sound that does not come from the strings — are not modelled.
   It is most exposed in the extreme treble, where the tonal fundamental sits

@@ -86,6 +86,15 @@ at 48 kHz (a 2667 us deadline), with `tools/measure-appliance-polyphony.py`:
 **Six to eight sustained notes.** Above that the tail crosses the deadline and
 the audio breaks up. Silence already costs about half the budget.
 
+Read that `misses / 10 s` column as a floor, not a count. It was measured
+before `measure-appliance-polyphony.py` was fixed (2026-09-19), when the tool
+read a ten-second window inside a twelve-second hold and so could not see a
+miss that landed in the strike. It is defensible here because at these block
+costs -- 63 to 80 % of the deadline -- the sustain itself was missing, which
+is what the column is counting. It is not defensible once a budget brings the
+sustain down: see the corrected ramp in `REALTIME_BUDGET.md`, where every
+remaining miss is in the transient and the old window reported zero.
+
 ### Where the cost is, so it is not looked for in the wrong place
 
 On a desktop, with the board bank switched off to weigh it:

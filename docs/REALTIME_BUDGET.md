@@ -204,7 +204,44 @@ given a ladder from. The polyphony ramp of `RELIABILITY.md`, before and after:
 | 8 | 261 | 0 |
 | 12 | 670 | 59 |
 
-The first missed deadline moved from six notes to twelve. What it costs the
-ear is rendered, not claimed: `budget_quality_render` writes the instrument
-as voiced and as the appliance settled it into one file, and the player
-judges.
+**That table said "the first missed deadline moved from six notes to
+twelve", and the "after" column was measured through a window that could not
+see most of the misses.** `measure-appliance-polyphony.py` held the notes for
+twelve seconds and read the last ten, to describe the part of the notes that
+lasts rather than the strike. A mean survives that. A miss does not: misses
+are rare events and they are in the seconds it cut off. Re-measured with the
+window bracketing the whole hold, twice, from a restart seeded at the same
+2,897,563 fuel:
+
+| notes held | mean block | share | misses, whole hold | misses, sustain only |
+| --- | --- | --- | --- | --- |
+| 2 | 911-947 us | 34-36% | 0, 0 | 0, 0 |
+| 4 | 1123-1132 us | 42% | 1, 3 | 0, 0 |
+| 6 | 1183-1272 us | 44-48% | 6, 13 | 0, 0 |
+| 8 | 1292-1374 us | 48-52% | 311, 26 | 89, 0 |
+| 12 | 1348-1367 us | 51% | 225, 251 | 0, 0 |
+
+Two things follow, and the second is the more important.
+
+**Sustained, this instrument is nowhere near the deadline.** Twelve notes
+held cost about half the period and the sustain column is zero at every
+step. The appliance is not short of polyphony.
+
+**What misses is the transient.** Every miss above is outside the sustain
+window -- the strikes, and the governor's own rebuilds. In both runs the
+governor tightened at eight notes and again at twelve, at nearly the same
+fuel (2,267,403 and 2,223,754; then 1,813,922 and 1,779,003) off nearly the
+same counts (25 and 26 late of 750; then 163 and 158 of ~735) -- and the
+largest bursts of misses land in the same second as its cuts. A cut rebuilds
+the banks and a rebuild is expensive; the forty-millisecond fade above makes
+that inaudible, not cheap.
+
+So the ceiling this mechanism was built to raise is not the one that binds.
+Held notes are cheap here; note-on bursts and budget-driven rebuilds are
+not, and the governor reads its own rebuild cost as evidence that the
+instrument is too expensive. That is the next thing to measure, with a tool
+that can now see it.
+
+What the budget costs the ear is rendered, not claimed: `budget_quality_render`
+writes the instrument as voiced and as the appliance settled it into one
+file, and the player judges.

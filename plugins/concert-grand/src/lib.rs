@@ -25,7 +25,7 @@
 
 mod math;
 
-use math::{expf, log2f, powf, roundf, sincosf, sqrtf};
+use math::{exp2f, expf, log2f, powf, roundf, sincosf, sqrtf};
 use rackforge_plugin_sdk::{
     MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_FLAG_RELEASE_MEASURED,
     MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF, MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2,
@@ -7916,6 +7916,18 @@ impl ConcertGrand {
         // rate proportional to its frequency — precisely the synthesizer
         // "shimmer" a real unison does not have.
         let sample_rate = self.sample_rate;
+        // Out of the ladder loop, because none of it depends on the partial.
+        // Measured, a note-on is 8.55 us per partial and almost nothing else,
+        // so what the loop does per partial is the whole of the note-on block
+        // -- and it was paying for a power of the strike position, and for
+        // nine atomic reads of knobs that cannot change inside it, once for
+        // every partial it built.
+        let horizontal_share =
+            HORIZONTAL_SHARE.get() * (0.65 + 1.2 * powf(1.0 - position, 1.5));
+        let horizontal_bridge = HORIZONTAL_BRIDGE.get();
+        let unison_jitter_spread = UNISON_JITTER_SPREAD.get();
+        let polarisation_cents = POLARISATION_CENTS.get();
+        let prompt_measured_power = PROMPT_MEASURED_POWER.get();
         let mut partials = [Partial::default(); MAX_PARTIALS];
         let mut placed = 0;
         for n in 0..count {
@@ -7941,7 +7953,7 @@ impl ConcertGrand {
                 let measured = measured_prompt_t60(note) * controls;
                 t60 *= powf(
                     measured / t60.max(1e-3),
-                    PROMPT_MEASURED_POWER.get() * measured_prompt_share(note),
+                    prompt_measured_power * measured_prompt_share(note),
                 );
             }
             let t60 = t60 * board_decay * self.cal(note, 4) * string_life;
@@ -7956,7 +7968,7 @@ impl ConcertGrand {
             // ear already approved.
             let jitter = 0.95
                 * powf(
-                    UNISON_JITTER_SPREAD.get(),
+                    unison_jitter_spread,
                     hash01((note as u32) << 10 | (n as u32) << 2 | 1) - 0.5,
                 );
             let cents = detune_cents * jitter;
@@ -7989,10 +8001,9 @@ impl ConcertGrand {
             let split = 1.0 / (1.0 + second + third_string);
             let shares = [split, split * second, split * third_string];
             let ratios = [
-                powf(2.0, -cents / 2400.0),
-                powf(2.0, cents / 2400.0),
-                powf(
-                    2.0,
+                exp2f(-cents / 2400.0),
+                exp2f(cents / 2400.0),
+                exp2f(
                     cents * (0.9 + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3)) / 1200.0,
                 ),
             ];
@@ -8040,7 +8051,7 @@ impl ConcertGrand {
                 + 1.0
                 + second * second
                 + third_string * third_string
-                + HORIZONTAL_BRIDGE.get() * HORIZONTAL_BRIDGE.get();
+                + horizontal_bridge * horizontal_bridge;
             let coupling = drained / weights;
             // How fast a partial reaches its amplitude. It is NOT a swell.
             //
@@ -8069,8 +8080,6 @@ impl ConcertGrand {
             // cross-coupling hands a larger share of the vertical motion
             // sideways. This is also where the second decay stage is most
             // prominent in measured pianos.
-            let horizontal_share =
-                HORIZONTAL_SHARE.get() * (0.65 + 1.2 * powf(1.0 - position, 1.5));
             let (pq, po) = (phase_q[n], phase_o[n]);
             let mut built = Partial::default();
             built.set_lane(
@@ -8079,9 +8088,8 @@ impl ConcertGrand {
                     amplitude * horizontal_share * pq,
                     amplitude * horizontal_share * po,
                     (frequency
-                        * powf(
-                            2.0,
-                            POLARISATION_CENTS.get()
+                        * exp2f(
+                            polarisation_cents
                                 * (0.6 + 0.8 * hash01((note as u32) << 7 | (n as u32) << 2 | 5))
                                 / 1200.0,
                         ))
@@ -8101,7 +8109,7 @@ impl ConcertGrand {
                 ),
             );
             built.coupling = coupling;
-            built.drain = Partial::drain_per_sample(coupling, HORIZONTAL_BRIDGE.get());
+            built.drain = Partial::drain_per_sample(coupling, horizontal_bridge);
             built.slope = {
                 let h = (n + 1) as f32;
                 let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
@@ -8582,7 +8590,16 @@ impl ConcertGrand {
         voice.pole_ceiling = pole_ceiling(sample_rate);
         voice.onset = 0.0;
         voice.onset_step = 1.0 / (ATTACK_RAMP_S.get().max(1e-4) * sample_rate);
-        voice.partials = partials;
+        // Only what was placed. `voice.partials` is sized for the largest
+        // ladder any note could want -- 144 partials of 132 bytes, 18.6 KB --
+        // and assigning the whole array copied all of it on every note-on,
+        // however few partials the note actually has. Measured across the
+        // compass, a note uses 6 % of it at the top and 56 % at the bottom.
+        //
+        // Nothing reads past `partial_count`, so the stale tail a reused
+        // voice slot keeps is never looked at. Every read in the render path
+        // is `partials[..partial_count]`.
+        voice.partials[..placed].copy_from_slice(&partials[..placed]);
         voice.partial_count = placed;
         voice.duplex = duplex;
         voice.cull_in = CULL_INTERVAL;
@@ -8782,7 +8799,7 @@ impl ConcertGrand {
                 shadow.channel = channel;
                 shadow.held = false;
                 shadow.sustained = true;
-                shadow.partials = halo;
+                shadow.partials[..halo_count].copy_from_slice(&halo[..halo_count]);
                 shadow.partial_count = halo_count;
                 shadow.pan_left = pan_left;
                 shadow.pan_right = pan_right;
@@ -16443,6 +16460,127 @@ mod bench {
             piano.process(&[], &mut output, &[], &[], 128, 0, 2);
             std::println!("{density:>9.1}  {:>6}", piano.board_count);
         }
+    }
+
+    /// What a note-on writes before it computes anything.
+    ///
+    /// The ladder is built into `[Partial::default(); MAX_PARTIALS]`, a stack
+    /// array sized for the largest ladder any note could want, zeroed in full
+    /// on every note-on -- and then `placed` of its entries are used, which
+    /// for most of the compass is a small fraction. On a desktop that is
+    /// invisible. This machine has already shown twice that it is not a
+    /// desktop.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release note_on_scratch -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn note_on_scratch() {
+        let one = core::mem::size_of::<Partial>();
+        std::println!("Partial: {one} bytes   MAX_PARTIALS: {MAX_PARTIALS}");
+        std::println!(
+            "  el borrador que un note-on inicializa: {:.1} KB",
+            (one * MAX_PARTIALS) as f32 / 1024.0
+        );
+        std::println!(
+            "  y con doce notas en un bloque: {:.1} KB, contra 32 KB de L1",
+            (one * MAX_PARTIALS * 12) as f32 / 1024.0
+        );
+        // What is actually used, per note, across the compass.
+        const FRAMES: usize = 128;
+        std::println!("
+{:>5} {:>10} {:>12} {:>14}", "nota", "parciales", "usado KB", "% del borrador");
+        for note in [24u8, 40, 55, 72, 96] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            piano.process(&[], &mut output, &[note_on(note, 100)], &[], FRAMES as u32, 0, 2);
+            let placed: usize = piano
+                .voices
+                .iter()
+                .filter(|voice| voice.active)
+                .map(|voice| voice.partial_count)
+                .sum();
+            std::println!(
+                "{note:>5} {placed:>10} {:>10.1} {:>13.0}%",
+                (placed * one) as f32 / 1024.0,
+                100.0 * placed as f32 / MAX_PARTIALS as f32,
+            );
+        }
+    }
+
+    /// Is the note-on block proportional to the ladder it builds, or is it
+    /// mostly a fixed cost?
+    ///
+    /// This decides whether spreading the build over several blocks is worth
+    /// doing at all. A note-on that is 90 % ladder can be amortised; one that
+    /// is mostly fixed setup cannot, and the effort belongs elsewhere.
+    ///
+    /// One note at a time, across the compass, because a low note's ladder is
+    /// many times a high note's and that is the only lever here that moves
+    /// `placed` without moving anything else.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release strike_cost_per_partial -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn strike_cost_per_partial() {
+        const FRAMES: usize = 128;
+        std::println!(
+            "{:>5} {:>10} {:>11} {:>10} {:>12}",
+            "nota", "parciales", "asentado", "golpe", "us/parcial"
+        );
+        let mut rows: std::vec::Vec<(f64, f64)> = std::vec::Vec::new();
+        for note in [24u8, 33, 40, 48, 55, 64, 72, 84, 96] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            for _ in 0..500 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut floor = 0.0f64;
+            for _ in 0..200 {
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                floor += start.elapsed().as_secs_f64() * 1e6;
+            }
+            floor /= 200.0;
+            let strike = [note_on(note, 100)];
+            let start = std::time::Instant::now();
+            piano.process(&[], &mut output, &strike, &[], FRAMES as u32, 0, 2);
+            let block = start.elapsed().as_secs_f64() * 1e6;
+            let placed: usize = piano
+                .voices
+                .iter()
+                .filter(|voice| voice.active)
+                .map(|voice| voice.partial_count)
+                .sum();
+            let over = block - floor;
+            rows.push((placed as f64, over));
+            std::println!(
+                "{note:>5} {placed:>10} {:>9.0}us {:>8.0}us {:>12.2}",
+                floor,
+                over,
+                if placed > 0 { over / placed as f64 } else { 0.0 }
+            );
+        }
+        // A straight line through the points: the slope is what a partial
+        // costs to build, the intercept is what a note-on costs regardless.
+        let n = rows.len() as f64;
+        let sx: f64 = rows.iter().map(|r| r.0).sum();
+        let sy: f64 = rows.iter().map(|r| r.1).sum();
+        let sxx: f64 = rows.iter().map(|r| r.0 * r.0).sum();
+        let sxy: f64 = rows.iter().map(|r| r.0 * r.1).sum();
+        let slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+        let intercept = (sy - slope * sx) / n;
+        std::println!();
+        std::println!(
+            "  ajuste: {:.2} us por parcial + {:.0} us fijos por note-on",
+            slope, intercept
+        );
+        std::println!(
+            "  con una escalera de 46 parciales eso es {:.0} us de escalera contra {:.0} us fijos",
+            slope * 46.0,
+            intercept
+        );
     }
 
     /// Does the size of a voice's partial ladder explain BOTH halves of the

@@ -67,6 +67,19 @@ pub fn log2f(x: f32) -> f32 {
     lnf(x) * core::f32::consts::LOG2_E
 }
 
+/// `2^y`, which is what most of this crate's `powf` calls actually want.
+///
+/// Bit-identical to `powf(2.0, y)` BY CONSTRUCTION, not by luck: `powf` is
+/// `expf(y * lnf(x))`, so with `x` a literal two the only difference is that
+/// `lnf(2.0)` is folded at compile time instead of recomputed. The ladder a
+/// note-on builds called `powf(2.0, ..)` four times per partial -- the
+/// unison's two detune ratios, the third string's, and the polarisation --
+/// and each one was paying for a logarithm of a constant.
+#[inline(always)]
+pub fn exp2f(y: f32) -> f32 {
+    expf(y * lnf(2.0))
+}
+
 /// `x^y` for positive `x`, through `exp(y·ln x)`.
 pub fn powf(x: f32, y: f32) -> f32 {
     if x <= 0.0 {

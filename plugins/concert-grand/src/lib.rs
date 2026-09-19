@@ -16445,6 +16445,69 @@ mod bench {
         }
     }
 
+    /// How long a struck chord stays expensive, and how expensive.
+    ///
+    /// The appliance's budget governor cuts on windows where 20 % of blocks
+    /// ran late, while the same notes held cost half the deadline and miss
+    /// nothing. So the lateness is a transient, and this measures its shape:
+    /// block cost from the strike onward, against the cost of the same notes
+    /// once they have settled.
+    ///
+    /// The absolute numbers here are a desktop's. What transfers is the
+    /// RATIO and the time constant -- whether the spike is worth a control
+    /// decision that lasts forever.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release strike_transient -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn strike_transient() {
+        const FRAMES: usize = 128;
+        let block_ms = FRAMES as f64 / 48.0;
+        for held in [1usize, 6, 12] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            for _ in 0..200 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            // The pedal down, then the chord, one note every ~50 ms as a
+            // player's hand does and as the ramp does.
+            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            let mut costs: std::vec::Vec<f64> = std::vec::Vec::new();
+            let mut struck = 0usize;
+            // 900 blocks is 2.4 s, longer than the governor's window.
+            for block in 0..900 {
+                let mut events: std::vec::Vec<MidiEvent> = std::vec::Vec::new();
+                if struck < held && block % 19 == 0 {
+                    events.push(note_on(40 + (struck as u8) * 4, 100));
+                    struck += 1;
+                }
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, &events, &[], FRAMES as u32, 0, 2);
+                costs.push(start.elapsed().as_secs_f64() * 1e6);
+            }
+            // The settled cost: the last 200 blocks, well past the cull.
+            let settled: f64 = costs[700..].iter().sum::<f64>() / 200.0;
+            let peak = costs.iter().cloned().fold(0.0f64, f64::max);
+            // How long the cost stays above 1.5x settled, in blocks.
+            let elevated = costs.iter().filter(|c| **c > settled * 1.5).count();
+            std::println!(
+                "{held:>2} notas: asentado {:6.0} us   pico {:6.0} us   {:.1}x   bloques sobre 1.5x: {elevated:>3} ({:.0} ms)",
+                settled,
+                peak,
+                peak / settled,
+                elevated as f64 * block_ms,
+            );
+            std::print!("        perfil por 100 bloques:");
+            for chunk in costs.chunks(100) {
+                let mean: f64 = chunk.iter().sum::<f64>() / chunk.len() as f64;
+                std::print!(" {:.0}", mean / settled * 100.0);
+            }
+            std::println!("  (% del asentado)");
+        }
+    }
+
     /// Times the render, to say whether the banks are paying for arithmetic
     /// or for memory.
     ///

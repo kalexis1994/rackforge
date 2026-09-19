@@ -71,9 +71,15 @@ deadline lost, five cuts.
 * **Slow.** At most one change every two seconds, and none that moves the budget
   by less than 15 %, because a plugin is allowed to rebuild coefficients when it
   is told.
-* **One-directional.** It falls as soon as blocks run late and rises only after
+* **One-directional.** It falls when blocks run late and rises only after
   twenty seconds of comfort. Quality that oscillates with CPU noise sounds worse
   than lower quality held steady — the timbre would breathe with the load.
+* **It asks twice.** A cut needs the lateness to still be there a window
+  later. One window of late blocks is a chord, not a verdict: measured on the
+  appliance, a struck chord fills one two-second window and leaves the next
+  clean, while the same notes *held* cost half the period and miss nothing —
+  and cutting on that burst does not shrink it. See `CONFIRM_WINDOWS` and the
+  ramp at the end of this document.
 * **It gives up.** After three cuts that buy nothing, the governor logs
   `reason=exhausted` and stops. A budget that keeps falling while the render
   does not is not controlling anything; it is thinning an instrument for no
@@ -117,8 +123,9 @@ are completely different faults.
   appliance as "se nota como cambia la calidad en vivo": quality came back
   between pieces, twenty seconds after the passage that had cut it, and the
   next dense passage cut it again, every piece. So in a session quality only
-  goes down, rarely, when the machine proves it must. Cuts still land
-  whenever blocks run late, because the alternative to a cut is an xrun.
+  goes down, rarely, when the machine proves it must. Cuts still land when
+  lateness lasts, because the alternative to a cut is an xrun -- but not on a
+  single window, for the reason above.
 
 ## It learns once, and remembers
 
@@ -228,19 +235,65 @@ held cost about half the period and the sustain column is zero at every
 step. The appliance is not short of polyphony.
 
 **What misses is the transient.** Every miss above is outside the sustain
-window -- the strikes, and the governor's own rebuilds. In both runs the
-governor tightened at eight notes and again at twelve, at nearly the same
-fuel (2,267,403 and 2,223,754; then 1,813,922 and 1,779,003) off nearly the
-same counts (25 and 26 late of 750; then 163 and 158 of ~735) -- and the
-largest bursts of misses land in the same second as its cuts. A cut rebuilds
-the banks and a rebuild is expensive; the forty-millisecond fade above makes
-that inaudible, not cheap.
+window: the strikes. In both runs the governor tightened at eight notes and
+again at twelve, at nearly the same fuel (2,267,403 and 2,223,754; then
+1,813,922 and 1,779,003) off nearly the same counts (25 and 26 late of 750;
+then 163 and 158 of ~735), and the largest bursts of misses land in the same
+second as its cuts.
 
-So the ceiling this mechanism was built to raise is not the one that binds.
-Held notes are cheap here; note-on bursts and budget-driven rebuilds are
-not, and the governor reads its own rebuild cost as evidence that the
-instrument is too expensive. That is the next thing to measure, with a tool
-that can now see it.
+**That coincidence was read here as the governor causing them, and it was
+not.** A cut does rebuild the banks and a rebuild is heavy, so the reading
+was plausible -- and the first window after any publish has been thrown away
+unread since long before this, precisely so a rebuild cannot justify the next
+cut. The way to settle it is a control, not an argument: a build of the
+plugin whose `set_realtime_budget` returns `false`, so it declines the
+mechanism entirely and no cut ever happens. The same ramp, same appliance,
+same notes, with zero `AUDIO_QUALITY_BUDGET` lines in the log to prove the
+governor never ran:
+
+| notes held | governor, run 1 | governor, run 2 | **no governor** |
+| --- | --- | --- | --- |
+| 2 | 0 | 0 | 0 |
+| 4 | 1 | 3 | 1 |
+| 6 | 6 | 13 | 6 |
+| 8 | 311 | 26 | 57 |
+| 12 | 225 | 251 | **271** |
+
+The misses are there without it. The governor was responding to a real
+transient, and it cuts at eight and twelve notes because that is where the
+transient is. Cause runs the other way from the way it was written.
+
+**What the control did prove is worse for the mechanism, not better.** In the
+governed runs the instrument had already been cut twice by twelve notes, from
+2,897,563 fuel down to about 1,780,000 -- a 1.6x thinner piano -- and it
+missed 225 and 251 against the ungoverned 271. The cut does not shrink the
+burst. It was paying for nothing, permanently, in the one currency the player
+can hear.
+
+So the cut now waits for confirmation: the lateness has to still be there a
+window later (`CONFIRM_WINDOWS`). A chord fills one window and leaves the
+next clean; an instrument that genuinely does not fit stays late. Re-measured
+on the appliance with that rule, the governor made **no cuts at all** through
+the same ramp, and the misses did not move:
+
+| notes held | with confirmation | misses |
+| --- | --- | --- |
+| 2 | no cut | 0 |
+| 4 | no cut | 2 |
+| 6 | no cut | 3 |
+| 8 | no cut | 58 |
+| 12 | no cut | 228 |
+
+Full quality held, the same deadlines missed. The cost of the rule is stated
+rather than hidden: a machine that genuinely cannot fit the instrument is cut
+two seconds later than it used to be, which is two more seconds of xruns
+before the thing that stops them engages.
+
+**And the ceiling this mechanism was built to raise is still not the one that
+binds.** Held notes are cheap here -- twelve of them at half the period,
+missing nothing. What is expensive is the strike, and no budget the governor
+can publish makes a hammer cost less. That is the next thing to measure, with
+a tool that can now see it.
 
 What the budget costs the ear is rendered, not claimed: `budget_quality_render`
 writes the instrument as voiced and as the appliance settled it into one

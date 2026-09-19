@@ -114,6 +114,30 @@ pub const SILENT_BEFORE_RAISE: Duration = Duration::from_secs(30);
 /// under their hands, for nothing.
 const OVER_TOLERANCE: f64 = 0.02;
 
+/// How many windows in a row have to be over the tolerance before the budget
+/// is cut.
+///
+/// One was the original answer, on the grounds that a late block is audible
+/// now and a cut is the alternative to an xrun. Measured on the appliance,
+/// that is true of the block and false of the cut.
+///
+/// A chord is a burst. Twelve notes struck together put about half a second
+/// of late blocks into one two-second window and nothing into the next: the
+/// same twelve notes HELD cost 51 % of the period and miss nothing at all.
+/// Cutting on that window thins the instrument permanently for a transient
+/// that has already passed -- and, measured, the cut does not even reduce
+/// the burst. A ramp run with the plugin declining the budget entirely, so
+/// no cut ever happened, missed 271 deadlines at twelve notes; the same ramp
+/// with the governor cutting twice, down to 1.78 M fuel from 2.90 M, missed
+/// 225 and 251. A 1.6x thinner instrument had the same transient.
+///
+/// So the governor now asks for the lateness to still be there two windows
+/// later. A burst is gone by then; an instrument that genuinely does not fit
+/// is not. The cost of the change is stated plainly: a real overload is cut
+/// two seconds later than it used to be, which is two more seconds of xruns
+/// before the mechanism that stops them engages.
+const CONFIRM_WINDOWS: u32 = 2;
+
 /// How much of the period a block has to reach to count as late.
 ///
 /// Deliberately not the allowance. The allowance is what the budget is sized
@@ -265,6 +289,11 @@ pub struct BudgetGovernor {
     last_over: u32,
     /// A remembered budget waiting for the first poll to hand it over.
     seed_pending: bool,
+    /// Consecutive windows over `OVER_TOLERANCE`. A cut waits for
+    /// `CONFIRM_WINDOWS` of them, so that a chord's burst -- which fills one
+    /// window and leaves the next clean -- does not thin the instrument for
+    /// a transient it cannot fix.
+    late_streak: u32,
     /// The window after a publish is the plugin rebuilding to it, and a
     /// rebuild is heavy: measured on the appliance, every cut's own rebuild
     /// ran late, that lateness justified the next cut, and twelve held notes
@@ -301,6 +330,7 @@ impl Default for BudgetGovernor {
             last_blocks: 0,
             last_over: 0,
             seed_pending: false,
+            late_streak: 0,
             discard_next_window: false,
         }
     }
@@ -488,12 +518,19 @@ impl BudgetGovernor {
         self.last_blocks = blocks;
         self.last_over = over;
         if over_rate > OVER_TOLERANCE {
-            // Late blocks are audible now, so this does not wait. How far the
-            // budget falls follows how far over the render is -- but a window
-            // can be over on its tail alone, with a mean that looks fine, so
-            // every cut is a real cut.
+            // How far the budget falls follows how far over the render is --
+            // but a window can be over on its tail alone, with a mean that
+            // looks fine, so every cut is a real cut.
             self.comfortable_since = None;
             if self.exhausted {
+                return None;
+            }
+            // And it has to still be over a window later. See
+            // `CONFIRM_WINDOWS`: a chord fills one window with late blocks
+            // and leaves the next clean, and cutting on that costs quality
+            // for a burst the cut does not shrink.
+            self.late_streak = self.late_streak.saturating_add(1);
+            if self.late_streak < CONFIRM_WINDOWS {
                 return None;
             }
             // Measured against where this streak of cuts started, not
@@ -532,6 +569,7 @@ impl BudgetGovernor {
             return published;
         }
 
+        self.late_streak = 0;
         if load >= COMFORTABLE || !may_raise {
             // Inside its allowance but not comfortably -- or comfortably,
             // but with someone playing. Leave it exactly where it is: the
@@ -691,6 +729,27 @@ mod tests {
         clock
     }
 
+    /// Runs the window that `CONFIRM_WINDOWS` asks for before a cut: the
+    /// blocks are still late, and the governor is expected to say nothing
+    /// about them yet. Returns the clock at which it will act.
+    fn confirm(
+        governor: &mut BudgetGovernor,
+        clock: Duration,
+        render_ns: u64,
+        fuel: u64,
+    ) -> Duration {
+        let next = clock + PUBLISH_INTERVAL;
+        assert_eq!(
+            governor.poll(next, true),
+            None,
+            "one window of lateness is a burst, not a verdict"
+        );
+        // A poll empties the window it reads, so the next one needs blocks
+        // of its own before there is anything to judge.
+        settled(governor, render_ns, fuel);
+        next
+    }
+
     /// Feeds enough identical blocks for the estimates to settle.
     fn settled(governor: &mut BudgetGovernor, render_ns: u64, fuel: u64) {
         for _ in 0..MINIMUM_OBSERVATIONS * 8 {
@@ -821,19 +880,55 @@ mod tests {
     }
 
     #[test]
-    fn late_blocks_cut_the_budget_without_waiting() {
+    fn lateness_that_lasts_cuts_the_budget() {
         let mut governor = governor(1);
         settled(&mut governor, 1_000, 1_000);
         let (first, _) = governor.poll(Duration::ZERO, true).expect("measured");
         let base = grace(&mut governor, Duration::ZERO);
-        // Every block now runs at twice its allowance.
+        // Every block now runs at twice its allowance, and keeps doing it.
         let allowance = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
         settled(&mut governor, allowance * 2, 1_000_000);
+        let clock = confirm(&mut governor, base, allowance * 2, 1_000_000);
         let (tightened, reason) = governor
-            .poll(base + PUBLISH_INTERVAL, true)
-            .expect("blocks running long are acted on at once");
+            .poll(clock + PUBLISH_INTERVAL, true)
+            .expect("lateness that is still there a window later is acted on");
         assert_eq!(reason, BudgetReason::Tightened);
         assert!(tightened < first);
+    }
+
+    /// The measurement this rule came from, as a test.
+    ///
+    /// Twelve notes struck together put half a second of late blocks into one
+    /// window and nothing into the next; the same twelve notes HELD cost half
+    /// the period and miss nothing. The old law cut on that first window and
+    /// thinned the instrument for good -- and, measured on the appliance, the
+    /// cut did not shrink the burst at all: 271 misses with no governor
+    /// against 225 and 251 with one that had already cut twice.
+    #[test]
+    fn a_burst_in_one_window_is_not_a_verdict() {
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        let (first, _) = governor.poll(Duration::ZERO, true).expect("measured");
+        let base = grace(&mut governor, Duration::ZERO);
+        let allowance = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
+        // One window of a struck chord: most of it late.
+        settled(&mut governor, allowance * 2, 1_000_000);
+        let clock = confirm(&mut governor, base, allowance / 2, 1_000);
+        // And then the notes are just held, which this instrument fits --
+        // `confirm` already fed that window.
+        assert_eq!(
+            governor.poll(clock + PUBLISH_INTERVAL, false),
+            None,
+            "a burst that has passed must not cost quality"
+        );
+        assert_eq!(
+            governor.settled(clock + PUBLISH_INTERVAL),
+            None,
+            "and nothing was published to settle on"
+        );
+        // The budget the plugin holds is the one it started with.
+        assert_eq!(governor.last_counts().1, 0, "the confirming window was clean");
+        let _ = first;
     }
 
     #[test]
@@ -860,14 +955,15 @@ mod tests {
         let allowance = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
 
         settled(&mut governor, allowance * 2, 1_000_000);
+        let cut_at = confirm(&mut governor, base, allowance * 2, 1_000_000);
         let (tightened, _) = governor
-            .poll(base + PUBLISH_INTERVAL, true)
+            .poll(cut_at + PUBLISH_INTERVAL, true)
             .expect("tightened");
         assert!(tightened < first);
 
         // Comfortable from here on, but nothing happens for a long time: a
         // budget that tracked every lull would make the timbre breathe.
-        let mut clock = base + PUBLISH_INTERVAL;
+        let mut clock = cut_at + PUBLISH_INTERVAL;
         for _ in 0..8 {
             clock += PUBLISH_INTERVAL;
             settled(&mut governor, allowance / 4, 1_000_000);
@@ -989,12 +1085,13 @@ mod tests {
         governor.poll(Duration::ZERO, true).expect("measured");
         let base = grace(&mut governor, Duration::ZERO);
         settled(&mut governor, allowance * 2, 1_000_000);
+        let cut_at = confirm(&mut governor, base, allowance * 2, 1_000_000);
         let (cut, _) = governor
-            .poll(base + PUBLISH_INTERVAL, true)
+            .poll(cut_at + PUBLISH_INTERVAL, true)
             .expect("tightened");
 
         // Comfortable, but played: nothing may change, however long it lasts.
-        let mut clock = base + PUBLISH_INTERVAL;
+        let mut clock = cut_at + PUBLISH_INTERVAL;
         for _ in 0..30 {
             clock += RAISE_AFTER;
             settled(&mut governor, allowance / 4, 1_000_000);
@@ -1035,8 +1132,9 @@ mod tests {
         let base = grace(&mut governor, Duration::ZERO);
         let allowance = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
         settled(&mut governor, allowance * 2, 1_000_000);
+        let cut_at = confirm(&mut governor, base, allowance * 2, 1_000_000);
         let (cut, reason) = governor
-            .poll(base + PUBLISH_INTERVAL, false)
+            .poll(cut_at + PUBLISH_INTERVAL, false)
             .expect("a seed is a start, not a pin");
         assert_eq!(reason, BudgetReason::Tightened);
         assert!(cut < 2_000_000);
@@ -1115,8 +1213,9 @@ mod tests {
         governor.poll(Duration::ZERO, true).expect("measured");
         let late = (DEADLINE_NS as f64 * LATE_AT) as u64 + 1;
         // Something changed for real: cut once.
-        let mut clock = grace(&mut governor, Duration::ZERO) + PUBLISH_INTERVAL;
+        let started = grace(&mut governor, Duration::ZERO);
         settled(&mut governor, late, 1_000_000);
+        let mut clock = confirm(&mut governor, started, late, 1_000_000) + PUBLISH_INTERVAL;
         let (first, reason) = governor.poll(clock, true).expect("a real change is cut");
         assert_eq!(reason, BudgetReason::Tightened);
         // The next window is all rebuild -- late blocks the cut caused.

@@ -8770,7 +8770,11 @@ impl ConcertGrand {
         // slow decay, released by the pedal like any sustained string.
         if self.pedal && placed > 0 {
             let halo_count = placed.min(24);
-            let mut halo = [Partial::default(); MAX_PARTIALS];
+            // Twenty-four, which is every entry the loop below can reach --
+            // `halo_count` is `placed.min(24)`. It was MAX_PARTIALS, so each
+            // note-on zeroed 18.6 KB of scratch to fill at most 3.1 KB of it,
+            // and a pedalled twelve-note chord did that twelve times.
+            let mut halo = [Partial::default(); 24];
             let rise = expf(-1.0 / (0.030 * sample_rate));
             for n in 0..halo_count {
                 let frequency = frequencies[n];
@@ -16476,7 +16480,17 @@ mod bench {
     #[ignore]
     fn note_on_scratch() {
         let one = core::mem::size_of::<Partial>();
-        std::println!("Partial: {one} bytes   MAX_PARTIALS: {MAX_PARTIALS}");
+        std::println!(
+            "Partial: {one} bytes   MAX_PARTIALS: {MAX_PARTIALS}   Voice: {} bytes",
+            core::mem::size_of::<Voice>()
+        );
+        std::println!(
+            "  un note-on con pedal inicializa: {:.1} KB de escalera + {:.1} KB de halo + {:.1} KB de Voice::default() = {:.1} KB",
+            (one * MAX_PARTIALS) as f32 / 1024.0,
+            (one * 24) as f32 / 1024.0,
+            core::mem::size_of::<Voice>() as f32 / 1024.0,
+            (one * MAX_PARTIALS + one * 24 + core::mem::size_of::<Voice>()) as f32 / 1024.0,
+        );
         std::println!(
             "  el borrador que un note-on inicializa: {:.1} KB",
             (one * MAX_PARTIALS) as f32 / 1024.0

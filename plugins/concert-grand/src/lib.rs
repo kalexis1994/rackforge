@@ -15750,6 +15750,240 @@ mod bench {
         }
     }
 
+    /// Not a test: the tail, not the mean.
+    ///
+    /// A Raspberry Pi holds p95 inside its 2667 us budget and then misses it
+    /// on about one block in a hundred, always by the same amount. A mean
+    /// cannot see that; this prints the distribution and where in the stream
+    /// the worst blocks fall, which is what tells a periodic task apart from
+    /// an unlucky one.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bench_block_tail -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_block_tail() {
+        const FRAMES: usize = 128;
+        const RATE: f64 = 48_000.0;
+        const BLOCKS: usize = 2_000;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let midi: Vec<MidiEvent> = [40u8, 47, 52, 55]
+            .iter()
+            .map(|&note| MidiEvent {
+                frame: 0,
+                data: [0x90, note, 100],
+                length: 3,
+            })
+            .collect();
+        piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+        for _ in 0..32 {
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+        }
+        let mut times = std::vec::Vec::with_capacity(BLOCKS);
+        for _ in 0..BLOCKS {
+            let t0 = std::time::Instant::now();
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            times.push(t0.elapsed().as_secs_f64() * 1e6);
+        }
+        let mut sorted = times.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let at = |q: f64| sorted[((sorted.len() - 1) as f64 * q) as usize];
+        std::println!(
+            "p50 {:.0} us | p95 {:.0} us | p99 {:.0} us | max {:.0} us",
+            at(0.50),
+            at(0.95),
+            at(0.99),
+            sorted[sorted.len() - 1],
+        );
+        let threshold = at(0.50) * 1.8;
+        let spikes: std::vec::Vec<usize> = times
+            .iter()
+            .enumerate()
+            .filter(|&(_, &t)| t > threshold)
+            .map(|(i, _)| i)
+            .collect();
+        std::println!("bloques por encima de 1.8x la mediana: {}", spikes.len());
+        if spikes.len() > 1 {
+            let gaps: std::vec::Vec<usize> =
+                spikes.windows(2).map(|w| w[1] - w[0]).take(12).collect();
+            std::println!("primeros indices: {:?}", &spikes[..spikes.len().min(8)]);
+            std::println!("separaciones entre picos: {gaps:?}");
+        }
+    }
+
+    /// Not a test: what each sustaining voice costs in a 128-frame block.
+    ///
+    /// The engine on a Raspberry Pi renders 128 frames at 48 kHz, a 2667 us
+    /// deadline. This reports the steady-state block cost with N notes held
+    /// down, which is the number that decides how many notes the instrument
+    /// can hold there at all.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bench_voice_scaling -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_voice_scaling() {
+        const FRAMES: usize = 128;
+        const RATE: f64 = 48_000.0;
+        const BLOCKS: usize = 200;
+        let deadline_us = FRAMES as f64 / RATE * 1e6;
+        let mut previous = 0.0f64;
+        for held in [0usize, 1, 2, 4, 8, 16, 24] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let midi: Vec<MidiEvent> = (0..held)
+                .map(|i| MidiEvent {
+                    frame: 0,
+                    data: [0x90, 28 + (i * 3) as u8, 110],
+                    length: 3,
+                })
+                .collect();
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            // Past the attack, into the part of the note that lasts.
+            for _ in 0..32 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut worst = 0.0f64;
+            let started = std::time::Instant::now();
+            for _ in 0..BLOCKS {
+                let t0 = std::time::Instant::now();
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                worst = worst.max(t0.elapsed().as_secs_f64() * 1e6);
+            }
+            let mean = started.elapsed().as_secs_f64() * 1e6 / BLOCKS as f64;
+            let marginal = if held == 0 {
+                0.0
+            } else {
+                (mean - previous) / 1.0
+            };
+            previous = mean;
+            std::println!(
+                "{held:>2} notas sostenidas: media {mean:6.0} us ({:5.1}% del deadline) |                  peor {worst:6.0} us | salto desde el anterior {marginal:6.0} us",
+                mean / deadline_us * 100.0,
+            );
+        }
+    }
+
+    /// Not a test: which half of a note-on costs what.
+    ///
+    /// A control change sets the same "something arrived" flag a note does and
+    /// refreshes the same damped-string bookkeeping, but builds no voice. The
+    /// difference between the two is the voice.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bench_onset_split -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_onset_split() {
+        const FRAMES: usize = 128;
+        const RATE: f64 = 48_000.0;
+        const ROUNDS: usize = 64;
+        let cases: [(&str, [u8; 3]); 3] = [
+            ("nothing arrives   ", [0, 0, 0]),
+            ("a control change  ", [0xB0, 67, 64]),
+            ("a note-on         ", [0x90, 60, 100]),
+        ];
+        for (label, data) in cases {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            for _ in 0..8 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut total = 0.0f64;
+            for round in 0..ROUNDS {
+                let mut event = data;
+                if event[0] == 0x90 {
+                    event[1] = 36 + ((round * 7) % 48) as u8;
+                }
+                let midi: Vec<MidiEvent> = if event[0] == 0 {
+                    vec![]
+                } else {
+                    vec![MidiEvent {
+                        frame: 0,
+                        data: event,
+                        length: 3,
+                    }]
+                };
+                let t0 = std::time::Instant::now();
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                total += t0.elapsed().as_secs_f64() * 1e6;
+                if event[0] == 0x90 {
+                    let off = MidiEvent {
+                        frame: 0,
+                        data: [0x80, event[1], 0],
+                        length: 3,
+                    };
+                    piano.process(&[], &mut output, &[off], &[], FRAMES as u32, 0, 2);
+                }
+            }
+            std::println!("{label}: mean {:.0} us", total / ROUNDS as f64);
+        }
+    }
+
+    /// Not a test: what a block costs *while notes are arriving in it*.
+    ///
+    /// `bench_blocks` above sends its note-ons in one block and then times the
+    /// blocks after it, so it reports steady-state voice cost and never the
+    /// arrival itself. On a Raspberry Pi the arrival is what misses the
+    /// deadline: a run played fast lands several note-ons inside one 128-frame
+    /// block, and each one builds its partials inline.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bench_note_onset -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_note_onset() {
+        const FRAMES: usize = 128;
+        const RATE: f64 = 48_000.0;
+        let deadline_us = FRAMES as f64 / RATE * 1e6;
+        for arrivals in [0usize, 1, 2, 4, 8] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            for _ in 0..8 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut worst = 0.0f64;
+            let mut total = 0.0f64;
+            const ROUNDS: usize = 64;
+            for round in 0..ROUNDS {
+                let midi: Vec<MidiEvent> = (0..arrivals)
+                    .map(|i| {
+                        let note = 36 + ((round * 7 + i * 5) % 48) as u8;
+                        MidiEvent {
+                            frame: (i * 3) as u32,
+                            data: [0x90, note, 100],
+                            length: 3,
+                        }
+                    })
+                    .collect();
+                let t0 = std::time::Instant::now();
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                let spent = t0.elapsed().as_secs_f64() * 1e6;
+                worst = worst.max(spent);
+                total += spent;
+                // Release them so the next round starts from a comparable
+                // voice count rather than measuring an ever-fuller piano.
+                let offs: Vec<MidiEvent> = (0..arrivals)
+                    .map(|i| {
+                        let note = 36 + ((round * 7 + i * 5) % 48) as u8;
+                        MidiEvent {
+                            frame: 0,
+                            data: [0x80, note, 0],
+                            length: 3,
+                        }
+                    })
+                    .collect();
+                piano.process(&[], &mut output, &offs, &[], FRAMES as u32, 0, 2);
+            }
+            std::println!(
+                "{arrivals} note-on(s) in a block: mean {:.0} us | worst {worst:.0} us |                  worst is {:.0}% of the {deadline_us:.0} us deadline",
+                total / ROUNDS as f64,
+                worst / deadline_us * 100.0,
+            );
+        }
+    }
+
     /// Not a test: wall-time per 512-frame block at 44.1 kHz, per scenario.
     /// Run release, single-threaded:
     /// `cargo test -p rackforge-concert-grand --release bench_blocks -- --ignored --nocapture`

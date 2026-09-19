@@ -168,6 +168,48 @@ already vectorising that loop. The rewrite is not in the tree.
   the pedal -- is a sixth. Four earlier rounds of guessing had each landed
   under ten percent because all four were about the ladder.
 
+  **Tried and not kept: an exact integrator for the contact.** The
+  simulation is symplectic Euler at a four-microsecond step, running until
+  the hammer is thrown off -- 250 to 2000 steps -- over every mode below
+  8 kHz, which for a bass note is about a hundred. Cost is steps times
+  modes, and the step looked like the lever: each mode is a harmonic
+  oscillator driven by the contact force, and over one step with the force
+  held constant its exact solution is a rotation about the forced
+  equilibrium, with the sine and cosine computed once per mode. Same
+  arithmetic per step, and the step would then be limited by the FORCE
+  rather than by the top mode.
+
+  It was built and measured against a reference eight times finer than the
+  shipped step (`contact_convergence`, C4 mezzo-forte, worst partial):
+
+  | step | symplectic Euler | exact rotation |
+  | --- | --- | --- |
+  | 4 us (shipped) | 1.23 dB | 1.30 dB |
+  | 8 us | 3.51 dB | 2.56 dB |
+
+  The two schemes are the same to within noise at the shipped step. That is
+  the answer: the accuracy bottleneck is not the string modes, it is the
+  hammer and the felt -- `hammer_y` is integrated with plain Euler and the
+  felt's compression is nonlinear with a relaxation memory, so the force
+  itself needs the resolution. Making the oscillators exact buys no step
+  size, and the implementation was reverted.
+
+  Two things survive it. `SIM_DT_S` stays as a knob outside the registry so
+  the sweep can be re-run, and the sweep's own finding is worth recording
+  on its own: **the instrument as voiced carries the discretisation error.**
+  At the shipped step the worst partial of a mezzo-forte C4 sits 1.23 dB
+  from converged, and on a bass note the error is enough to push a partial
+  across the amplitude floor and change the ladder's LENGTH. Halving the
+  step would double the cost of half the note-on and change the sound;
+  that is a voicing decision, not a performance one.
+
+  What is left of the note-on, then, is `steps x modes` with both set by
+  physics: `SIM_TOP_HZ` already stops at 8 kHz on the grounds that higher
+  modes contribute almost nothing to the contact shape, and `strike_budget`
+  already has its documented audible price. SIMD is not the answer either
+  -- `simd128` has been on for every wasm build in the workspace since
+  before this, for exactly these loops.
+
   It is the ladder. `strike_cost_by_ladder` counts a voice's partials as they
   age, which the first version of it failed to do -- counting them at the end
   counts what the cull LEFT, and reported the same 220 at every budget. As

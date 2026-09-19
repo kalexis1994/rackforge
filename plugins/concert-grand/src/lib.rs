@@ -795,6 +795,8 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "SIM_MIN_MODES",
         &SIM_MIN_MODES,
         "Partials a note needs under SIM_TOP_HZ before its strike is integrated rather than drawn.",
+
+
     ),
     (
         "COMB_FLOOR_LOW",
@@ -2777,6 +2779,20 @@ const TOP_INCOHERENT_EXTRA: f32 = 0.6;
 /// integrated rather than drawn. Four leaves everything above G#6 to the
 /// recipe; one strikes every note.
 pub static SIM_MIN_MODES: Knob = Knob::new(4.0);
+/// The contact integrator's timestep, in seconds.
+///
+/// Deliberately NOT in the knob registry: that table is full -- the knobs
+/// occupy parameter indices 42..199 and the preamplifier owns 200 -- so
+/// adding one shifts every index after it and three tests say so at once.
+/// This exists for `contact_convergence` to sweep, not for a fader.
+///
+/// The scheme is symplectic Euler -- `v += a dt; q += v dt` -- which is
+/// first order, so this is an accuracy choice and not only a stability one.
+/// Stability alone would allow far more: the highest mode integrated sits
+/// near 10 kHz, and `omega*dt` at four microseconds is 0.25 against a bound
+/// of 2.
+pub static SIM_DT_S: Knob = Knob::new(4.0e-6);
+
 /// Whether a re-strike merges into the living voice (1) or eases it out and
 /// strikes fresh (0) -- a switch for the ear, not a voicing.
 ///
@@ -5613,7 +5629,10 @@ fn simulate_strike(
         stulov_tau,
         comb_floor,
     } = configuration;
-    let dt = 4.0e-6_f32;
+    // Four microseconds, and whether that is finer than it needs to be is a
+    // convergence question rather than a taste one -- see `contact_convergence`.
+    // A knob so the sweep can ask.
+    let dt = SIM_DT_S.get().max(1.0e-7);
     // The contact ends when the string throws the hammer off, and not
     // before. This loop used to be CUT at a contact time drawn from a
     // formula -- 2 ms at the bottom tapering to 0.4, swung linearly by the
@@ -5730,13 +5749,13 @@ fn simulate_strike(
         }
         hammer_v -= force / mass * dt;
         hammer_y += hammer_v * dt;
+        // Modal force projection for a pinned string: modal mass is half
+        // the string's, so the force enters as 2F/(mu*L). With the string's
+        // mass physical, the coupling no longer depends on how many modes we
+        // chose to integrate -- the old build divided the hammer mass by
+        // (sim_modes/SIM_MODES) to undo exactly that artefact, and the
+        // correction is retired with the cause.
         for n in 0..modes {
-            // Modal force projection for a pinned string: modal mass is half
-            // the string's, so the force enters as 2F/(mu*L). With the
-            // string's mass physical, the coupling no longer depends on how
-            // many modes we chose to integrate -- the old build divided the
-            // hammer mass by (sim_modes/SIM_MODES) to undo exactly that
-            // artefact, and the correction is retired with the cause.
             v[n] += (-omega[n] * omega[n] * q[n] + (2.0 / string_mass) * shape[n] * force) * dt;
             q[n] += v[n] * dt;
         }
@@ -16534,6 +16553,86 @@ mod bench {
             piano.process(&[], &mut output, &[], &[], 128, 0, 2);
             std::println!("{density:>9.1}  {:>6}", piano.board_count);
         }
+    }
+
+    /// Is the contact integrator converged at the timestep it ships with?
+    ///
+    /// The strike simulation is 42-47 % of a note-on on the appliance, and
+    /// it is symplectic Euler at a four-microsecond step -- first order, so
+    /// the step is an accuracy choice. Stability would allow far more:
+    /// `omega*dt` for the highest mode integrated is about 0.25 against a
+    /// bound of 2.
+    ///
+    /// If halving the step does not move the strike, the shipped sound does
+    /// not depend on the discretisation error, and an integrator that is
+    /// exact for each mode -- a rotation by `omega*dt`, precomputed once per
+    /// mode, the same arithmetic per step -- can take a much larger step and
+    /// land in the same place. If halving it DOES move the strike, then the
+    /// instrument as voiced includes that error, and making the integrator
+    /// better is a change to the sound rather than a saving.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release contact_convergence -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn contact_convergence() {
+        const FRAMES: usize = 128;
+        fn ladder(note: u8, velocity: u8, dt: f32) -> std::vec::Vec<f32> {
+            SIM_DT_S.set(dt);
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            piano.process(
+                &[], &mut output, &[note_on(note, velocity)], &[], FRAMES as u32, 0, 2,
+            );
+            let Some(voice) = piano.voices.iter().find(|voice| voice.active && !voice.halo)
+            else {
+                return std::vec::Vec::new();
+            };
+            voice.partials[..voice.partial_count]
+                .iter()
+                .map(|partial| {
+                    let (s, c) = (partial.s[0], partial.c[0]);
+                    (s * s + c * c).sqrt()
+                })
+                .collect()
+        }
+        let steps = [1.0e-6f32, 2.0e-6, 4.0e-6, 8.0e-6, 16.0e-6];
+        for (note, velocity) in [(40u8, 100u8), (64, 100), (64, 30), (76, 110)] {
+            // The truth both schemes should agree on: the shipped scheme at a
+            // step eight times finer than it ships with.
+            let reference = ladder(note, velocity, 0.5e-6);
+            std::println!(
+                "
+nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
+                reference.len()
+            );
+            std::println!("  {:>10} {:>12} {:>12}", "dt", "peor dB", "rms dB");
+            for dt in steps {
+                let got = ladder(note, velocity, dt);
+                if got.len() != reference.len() {
+                    std::println!(
+                        "  {:>8.1} us   escalera distinta ({} parciales)",
+                        dt * 1e6, got.len()
+                    );
+                    continue;
+                }
+                let (mut worst, mut sum, mut counted) = (0.0f32, 0.0f32, 0usize);
+                for (a, b) in reference.iter().zip(got.iter()) {
+                    // Only partials that carry something: a difference of
+                    // nothing against nothing is not a difference.
+                    if *a < reference.iter().cloned().fold(0.0f32, f32::max) * 1e-3 {
+                        continue;
+                    }
+                    let db = 20.0 * log2f((b / a).max(1e-9)) / log2f(10.0);
+                    worst = worst.max(db.abs());
+                    sum += db * db;
+                    counted += 1;
+                }
+                let rms = if counted > 0 { (sum / counted as f32).sqrt() } else { 0.0 };
+                std::println!("  {:>8.1} us {:>9.2} dB {:>9.2} dB", dt * 1e6, worst, rms);
+            }
+        }
+        SIM_DT_S.set(4.0e-6);
     }
 
     /// Where a note-on's time actually goes, by phase.

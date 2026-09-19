@@ -389,6 +389,13 @@ pub struct RenderTelemetry {
     deadline_misses: AtomicU64,
     miss_attribution: Box<[[AtomicU64; STAGE_COUNT]]>,
     slot_faults: Box<[AtomicU64]>,
+    /// The budget each slot was last handed, why, and the machine speed it
+    /// was derived from. Written by the audio loop as two relaxed stores and
+    /// read by the publisher, because a render thread must not format a
+    /// string: `budget_reason` is zero until there is something new to say.
+    budget_fuel: Box<[AtomicU64]>,
+    budget_reason: Box<[AtomicU64]>,
+    budget_picoseconds_per_fuel: Box<[AtomicU64]>,
     unit_faults: Box<[AtomicU64]>,
     worker_units: Box<[AtomicU64]>,
     worker_busy_ns: Box<[AtomicU64]>,
@@ -409,6 +416,9 @@ impl RenderTelemetry {
                 .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
                 .collect(),
             slot_faults: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_fuel: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_reason: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_picoseconds_per_fuel: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             unit_faults: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             worker_units: (0..worker_capacity.max(1))
                 .map(|_| AtomicU64::new(0))
@@ -423,6 +433,22 @@ impl RenderTelemetry {
     fn record_stage(&self, slot: usize, stage: usize, ns: u64) {
         if let Some(stages) = self.stages.get(slot) {
             stages[stage].record(ns);
+        }
+    }
+
+    /// Records that a slot was handed a new real-time budget. Called from the
+    /// audio loop; `reason` is a non-empty word, and the publisher clears it
+    /// once it has been said.
+    pub fn record_budget(&self, slot: usize, fuel: u64, reason: &'static str, rate_ns: f64) {
+        let Some(slot_fuel) = self.budget_fuel.get(slot) else {
+            return;
+        };
+        slot_fuel.store(fuel, Ordering::Relaxed);
+        if let Some(rate) = self.budget_picoseconds_per_fuel.get(slot) {
+            rate.store((rate_ns * 1_000.0) as u64, Ordering::Relaxed);
+        }
+        if let Some(code) = self.budget_reason.get(slot) {
+            code.store(budget_reason_code(reason), Ordering::Relaxed);
         }
     }
 
@@ -495,6 +521,21 @@ impl RenderTelemetry {
                 .iter()
                 .map(|counter| counter.swap(0, Ordering::Relaxed))
                 .collect(),
+            budgets: self
+                .budget_reason
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, code)| {
+                    let code = code.swap(0, Ordering::Relaxed);
+                    let reason = BUDGET_REASONS.get(code.checked_sub(1)? as usize)?;
+                    Some((
+                        slot,
+                        self.budget_fuel[slot].load(Ordering::Relaxed),
+                        *reason,
+                        self.budget_picoseconds_per_fuel[slot].load(Ordering::Relaxed),
+                    ))
+                })
+                .collect(),
             unit_faults: self
                 .unit_faults
                 .iter()
@@ -515,6 +556,21 @@ impl RenderTelemetry {
     }
 }
 
+/// The reasons, as the one place that knows both spellings.
+///
+/// A reason missing from this list is a decision that never reaches a log:
+/// `budget_reason_code` returns zero for it, which the snapshot reads as
+/// "nothing new to say". That is exactly what happened to `exhausted` -- the
+/// governor gave up on a Raspberry Pi and said so, four times, silently.
+const BUDGET_REASONS: [&str; 4] = ["measured", "tightened", "relaxed", "exhausted"];
+
+fn budget_reason_code(reason: &str) -> u64 {
+    BUDGET_REASONS
+        .iter()
+        .position(|known| *known == reason)
+        .map_or(0, |index| index as u64 + 1)
+}
+
 pub struct TelemetrySnapshot {
     pub stages: Vec<[HistogramSnapshot; STAGE_COUNT]>,
     pub block: HistogramSnapshot,
@@ -522,6 +578,9 @@ pub struct TelemetrySnapshot {
     pub deadline_misses: u64,
     pub miss_attribution: Vec<[u64; STAGE_COUNT]>,
     pub slot_faults: Vec<u64>,
+    /// `(fuel, reason, picoseconds per fuel)` for every slot that was handed a
+    /// budget since the last snapshot.
+    pub budgets: Vec<(usize, u64, &'static str, u64)>,
     pub unit_faults: Vec<u64>,
     pub worker_units: Vec<u64>,
     pub worker_busy_ns: Vec<u64>,
@@ -584,6 +643,13 @@ impl TelemetrySnapshot {
                     ));
                 }
             }
+        }
+        for (slot, fuel, reason, picoseconds) in &self.budgets {
+            lines.push(format!(
+                "AUDIO_QUALITY_BUDGET slot={} fuel={fuel} reason={reason}                  ns_per_fuel={:.3}",
+                self.label(*slot),
+                *picoseconds as f64 / 1_000.0,
+            ));
         }
         for (slot, count) in self.slot_faults.iter().enumerate() {
             if *count > 0 {

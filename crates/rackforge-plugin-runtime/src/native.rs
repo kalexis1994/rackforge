@@ -432,6 +432,12 @@ impl PortableModule {
         if version > ABI_VERSION_V1_2 && latency_frames.is_none() {
             bail!("wasm-v1 ABI v1.3 plugin is missing export rackforge_latency_frames");
         }
+        // Optional, and deliberately unversioned: a plugin either accepts a
+        // real-time budget or it does not, and one that does not is a plugin
+        // that keeps whatever its author calibrated. See
+        // `rackforge_core::realtime_budget`.
+        let set_realtime_budget =
+            optional_typed(&instance, &mut store, "rackforge_set_realtime_budget")?;
         let reset = typed(&instance, &mut store, "rackforge_reset")?;
         let resource_begin = typed(&instance, &mut store, "rackforge_resource_begin")?;
         let resource_write = typed(&instance, &mut store, "rackforge_resource_write")?;
@@ -462,6 +468,7 @@ impl PortableModule {
             set_parameter,
             get_parameter,
             latency_frames,
+            set_realtime_budget,
             reset,
             resource_begin,
             resource_write,
@@ -537,6 +544,7 @@ pub struct PortableInstance {
     set_parameter: TypedFunc<(i32, f64), i32>,
     get_parameter: TypedFunc<i32, f64>,
     latency_frames: Option<TypedFunc<(), i32>>,
+    set_realtime_budget: Option<TypedFunc<i64, i32>>,
     reset: TypedFunc<(), i32>,
     resource_begin: TypedFunc<(i32, i64), i32>,
     resource_write: TypedFunc<(i64, i32), i32>,
@@ -657,6 +665,37 @@ impl PortableInstance {
             bail!("portable plugin returned an invalid latency");
         }
         Ok(value as u32)
+    }
+
+    /// Whether this plugin accepts a real-time budget at all.
+    pub const fn accepts_realtime_budget(&self) -> bool {
+        self.set_realtime_budget.is_some()
+    }
+
+    /// Tells the plugin how much fuel one real-time call may spend on this
+    /// machine.
+    ///
+    /// Called between blocks, never inside one, and rarely -- a plugin is
+    /// allowed to rebuild coefficients here, so the host earns the right to
+    /// call it by changing the number seldom (`BudgetGovernor`). Returns
+    /// whether the plugin took it; a plugin without the export returns false
+    /// and is left exactly as its author shipped it.
+    pub fn set_realtime_budget(&mut self, fuel: u64) -> Result<bool> {
+        let Some(call) = self.set_realtime_budget.clone() else {
+            return Ok(false);
+        };
+        self.reset_control_fuel()?;
+        // Saturating rather than wrapping: a budget larger than i64::MAX is
+        // "spend what you like", and that is what the plugin should read.
+        let fuel = i64::try_from(fuel).unwrap_or(i64::MAX);
+        // 1 taken, 0 declined, anything negative is a fault worth reporting.
+        // A plugin built against an SDK that has this method but does not
+        // implement it declines here, and is never asked again.
+        let status = call.call(&mut self.store, fuel)?;
+        if status < 0 {
+            check_status(status, "set_realtime_budget")?;
+        }
+        Ok(status == 1)
     }
 
     pub fn reset(&mut self) -> Result<()> {

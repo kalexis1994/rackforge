@@ -1044,6 +1044,30 @@ impl PluginInstance<'_> {
         }
     }
 
+    /// Whether this plugin scales itself to the machine it was given.
+    pub fn accepts_realtime_budget(&self) -> bool {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => false,
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.accepts_realtime_budget()
+            }
+        }
+    }
+
+    /// Hands the plugin the fuel it may spend on one real-time call.
+    ///
+    /// Native plugins are outside the sandbox that meters fuel, so there is no
+    /// budget to state in units they share; they are told nothing and keep
+    /// what their author calibrated.
+    pub fn set_realtime_budget(&mut self, fuel: u64) -> Result<bool> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => Ok(false),
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.set_realtime_budget(fuel)
+            }
+        }
+    }
+
     /// Reports the fuel consumed by the most recent portable process call.
     /// Native plugins are not metered by the WebAssembly sandbox.
     pub fn last_realtime_fuel_consumed(&self) -> Option<u64> {

@@ -35,6 +35,7 @@ pub mod parameter_link;
 pub mod performance;
 pub mod rack_graph;
 pub mod realtime;
+pub mod realtime_budget;
 pub mod session;
 pub mod session_checkpoint;
 /// Deliberately outside every platform gate: these are the numbers the Web

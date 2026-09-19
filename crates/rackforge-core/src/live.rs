@@ -18,6 +18,7 @@ use crate::parallel_render::{
 use crate::performance::PerformanceRepository;
 use crate::rack_graph::compile_instrument_definition;
 use crate::realtime::{self, XrunMonitor};
+use crate::realtime_budget::{BudgetGovernor, BudgetReason, SILENT_BEFORE_RAISE};
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{
@@ -174,6 +175,7 @@ struct RackSlotVoice<'plugin> {
     /// The events as the parallel scheduler takes them, rebuilt each block.
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
+    budget: SlotBudget,
 }
 
 /// Resolves every Slot's cable sources to indices and dependency masks.
@@ -210,6 +212,99 @@ fn resolve_rack_voice_graph(voices: &mut [RackSlotVoice<'_>]) {
                 }
             }
         }
+    }
+}
+
+/// One Slot's side of `realtime_budget`: the governor, the clock it measures
+/// against, and whatever it has decided but not yet had a chance to report.
+///
+/// Lives on the voice because that is what the worker thread owns for the
+/// duration of a block. Nothing here formats a string or allocates: the
+/// decision is left in `pending` and the audio loop moves it into telemetry
+/// once the block is finished.
+struct SlotBudget {
+    governor: BudgetGovernor,
+    epoch: Instant,
+    /// When a MIDI event last reached this Slot. Quality is only ever given
+    /// back after `SILENT_BEFORE_RAISE` of this standing still.
+    last_note: Instant,
+    pending: Option<(u64, BudgetReason, f64)>,
+    /// `None` until the plugin has been asked whether it takes a budget at
+    /// all. Most plugins do not, and those are never asked twice.
+    participates: Option<bool>,
+}
+
+impl SlotBudget {
+    fn new() -> Self {
+        Self {
+            governor: BudgetGovernor::default(),
+            epoch: Instant::now(),
+            last_note: Instant::now(),
+            pending: None,
+            participates: None,
+        }
+    }
+}
+
+/// Closes the budget loop around one finished block.
+///
+/// Called on the worker thread that just rendered the Slot, with the wall time
+/// that render took. The plugin is only ever entered here between blocks, and
+/// at most once every couple of seconds, which is the whole reason a plugin is
+/// allowed to rebuild coefficients when it is told.
+fn observe_budget(
+    budget: &mut SlotBudget,
+    instance: &mut PluginInstance<'_>,
+    render_ns: u64,
+    had_events: bool,
+) {
+    if budget.participates == Some(false) {
+        return;
+    }
+    let now_instant = Instant::now();
+    if had_events {
+        budget.last_note = now_instant;
+    }
+    if budget.participates.is_none() {
+        budget.participates = Some(instance.accepts_realtime_budget());
+        if budget.participates == Some(false) {
+            return;
+        }
+    }
+    let Some(fuel) = instance.last_realtime_fuel_consumed() else {
+        // Not metered by the sandbox, so there is no honest budget to state.
+        budget.participates = Some(false);
+        return;
+    };
+    budget.governor.observe(render_ns, fuel);
+    let now = now_instant.saturating_duration_since(budget.epoch);
+    let silent = now_instant.saturating_duration_since(budget.last_note) >= SILENT_BEFORE_RAISE;
+    let Some((granted, reason)) = budget.governor.poll(now, silent) else {
+        return;
+    };
+    match instance.set_realtime_budget(granted) {
+        Ok(true) => {
+            let rate = budget.governor.nanoseconds_per_fuel().unwrap_or(0.0);
+            budget.pending = Some((granted, reason, rate));
+        }
+        Ok(false) => budget.participates = Some(false),
+        Err(error) => {
+            // A trap in a control call is the plugin's fault, not the block's.
+            // Stop asking rather than risk it every couple of seconds.
+            budget.participates = Some(false);
+            eprintln!("PLUGIN_BUDGET_REFUSED action=stop-asking error={error:#}");
+        }
+    }
+}
+
+/// Moves a Slot's budget decision into telemetry, once the block it was made
+/// in is over.
+///
+/// Two relaxed stores. The publisher thread turns them into a log line a
+/// second later, because formatting one on the audio thread would allocate.
+fn report_budget(budget: &mut SlotBudget, slot: usize, telemetry: &Arc<RenderTelemetry>) {
+    if let Some((fuel, reason, rate)) = budget.pending.take() {
+        telemetry.record_budget(slot, fuel, reason.as_str(), rate);
     }
 }
 
@@ -411,6 +506,7 @@ fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channel
     if voice.process_faulted {
         return;
     }
+    let started = Instant::now();
     let process_result = voice.instance.process_wide(
         &voice.input,
         &mut voice.output,
@@ -420,6 +516,16 @@ fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channel
         &voice.events,
         &voice.parameter_events,
     );
+    let render_ns = started.elapsed().as_nanos() as u64;
+    if process_result.is_ok() {
+        let had_events = !voice.events.is_empty();
+        observe_budget(
+            &mut voice.budget,
+            &mut voice.instance,
+            render_ns,
+            had_events,
+        );
+    }
     if let Err(error) = process_result {
         voice.output.fill(0.0);
         voice.process_faulted = true;
@@ -499,6 +605,7 @@ struct StandaloneVoice<'plugin> {
     /// Present only for chain effects. Keeps bypass click-free and preserves
     /// the effect's declared latency while the wet path fades in or out.
     effect_bypass: Option<EffectBypass>,
+    budget: SlotBudget,
 }
 
 /// Host bypass remains latency-stable and takes ten milliseconds to cross.
@@ -636,7 +743,9 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
         if self.process_faulted {
             return true;
         }
-        self.instance
+        let started = Instant::now();
+        let rendered = self
+            .instance
             .process_wide(
                 &self.input,
                 &mut self.output,
@@ -646,7 +755,19 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
                 &self.events,
                 &self.parameter_events,
             )
-            .is_ok()
+            .is_ok();
+        if rendered {
+            // Only a block that finished says anything about what this
+            // machine costs; a faulted one is about to be silenced.
+            let had_events = !self.events.is_empty();
+            observe_budget(
+                &mut self.budget,
+                &mut self.instance,
+                started.elapsed().as_nanos() as u64,
+                had_events,
+            );
+        }
+        rendered
     }
 
     fn run_begin(&mut self, frames: u32, _channels: u32) -> Option<u32> {
@@ -812,6 +933,7 @@ fn create_rack_voices<'plugin>(
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
+            budget: SlotBudget::new(),
         });
     }
     resolve_rack_voice_graph(&mut voices);
@@ -876,6 +998,7 @@ fn create_chain_voice<'plugin>(
             channels as usize,
             latency_frames,
         )?),
+        budget: SlotBudget::new(),
     })
 }
 
@@ -935,6 +1058,7 @@ fn chain_voices_from_prepared(
                     channels,
                     latency_frames,
                 )?),
+                budget: SlotBudget::new(),
             })
         })
         .collect()
@@ -1031,6 +1155,7 @@ fn rack_voices_from_prepared(
                 .collect(),
             parameter_events: prepared.parameter_events,
             process_faulted: false,
+            budget: SlotBudget::new(),
         })
         .collect::<Vec<_>>();
     resolve_rack_voice_graph(&mut voices);
@@ -1447,6 +1572,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
             effect_bypass: None,
+            budget: SlotBudget::new(),
         });
     }
     let live_parameter_writer =
@@ -3444,6 +3570,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 voice.parameter_events.clear();
                 voice.parameter_events.extend_from_slice(&parameter_events);
                 let was_faulted = voice.process_faulted;
+                // One instrument, the whole period to itself.
+                voice.budget.governor.configure(deadline_ns, 1);
                 let render_started = Instant::now();
                 let scheduled = rack_renderer.process(
                     std::slice::from_mut(voice),
@@ -3464,6 +3592,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         None,
                     );
                 }
+                report_budget(&mut voice.budget, 0, &render_telemetry);
                 if voice.process_faulted {
                     if !was_faulted {
                         eprintln!(
@@ -3524,7 +3653,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     period_frames as u64 * 1_000_000_000 / (output_rate as u64).max(1);
                 // Stage this block's capture for the Slots whose cables read
                 // the hardware input; the gather step consumes it.
+                let rack_slot_count = rack_voices.len();
                 for voice in &mut rack_voices {
+                    voice
+                        .budget
+                        .governor
+                        .configure(deadline_ns, rack_slot_count);
                     voice.capture_ptr = captured_input.as_ptr();
                     voice.capture_len = captured_input.len();
                     voice.capture_channels = capture_channels;
@@ -3552,6 +3686,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         deadline_ns,
                         None,
                     );
+                }
+                for (slot, voice) in rack_voices.iter_mut().enumerate() {
+                    report_budget(&mut voice.budget, slot, &render_telemetry);
                 }
                 for voice in &rack_voices {
                     if voice.process_faulted || !voice.sends_to_main {

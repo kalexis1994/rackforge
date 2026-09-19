@@ -1203,6 +1203,19 @@ impl PortableInstance {
         Ok(())
     }
 
+    /// Always false. A budget is denominated in fuel, and this engine does not
+    /// meter fuel, so there is no honest number to hand over here -- a plugin
+    /// running in a browser keeps whatever quality its author calibrated.
+    pub const fn accepts_realtime_budget(&self) -> bool {
+        false
+    }
+
+    /// Always `Ok(false)`, for the same reason. The host asks every backend
+    /// the same question rather than branching on which one it has.
+    pub const fn set_realtime_budget(&mut self, _fuel: u64) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Always `0`: the browser engine does not meter guest execution, so no
     /// fuel figure would be truthful.
     pub const fn last_realtime_fuel_consumed(&self) -> u64 {

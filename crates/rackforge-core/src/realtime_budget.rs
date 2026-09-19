@@ -1,0 +1,760 @@
+//! What a plugin may spend on one real-time call, in the plugin's own units.
+//!
+//! A physically modelled instrument costs what its model costs, and the
+//! machines RackForge runs on differ by nearly an order of magnitude. Until
+//! this existed, a plugin was told how many frames to render and never how
+//! much machine there was to render them with, so every plugin was calibrated
+//! against whatever desk its author sat at. Concert Grand carries the
+//! evidence: `PARTIAL_BUDGET` is documented in its own source as "a fuel
+//! budget, not a taste one", sized against a 512-frame block on a desktop --
+//! and a Raspberry Pi gets the same number and breaks up.
+//!
+//! So the host measures what it alone can measure, and hands it over.
+//!
+//! # Why the host decides on time and pays in fuel
+//!
+//! Two different quantities, for two different jobs.
+//!
+//! **The decision is made on wall time**, because a deadline is wall time: a
+//! block that took too long is an xrun whatever it cost in any other unit.
+//! The governor watches how often this slot's render ran past its share of the
+//! period, which is the thing that is actually wrong when something is wrong.
+//!
+//! **The budget is denominated in fuel**, because a plugin cannot read a
+//! clock. Fuel is wasmtime's instruction counter: the same block of audio
+//! costs the same fuel on a phone, a Pi and a desktop, because it is the same
+//! work. A number in fuel therefore means something inside the plugin, and the
+//! same budget produces the same choice on every machine of the same speed --
+//! which is what makes it testable, since a test injects a rate instead of
+//! racing a timer.
+//!
+//! # Why the loop is closed, and why that matters more than the arithmetic
+//!
+//! The obvious design hands the plugin a budget computed from a cost model and
+//! trusts it to fit. That was tried and the model would not hold still:
+//! Concert Grand's own cost per voice, measured through this crate's `stress`
+//! command, came out about three times higher for freshly struck notes than
+//! for notes a Raspberry Pi had been holding for twelve seconds, because the
+//! partial cull had thinned them in between. Any constant baked into the
+//! plugin would have been wrong for one of those two, and quietly.
+//!
+//! So nothing here trusts a cost model. The governor publishes a budget,
+//! watches what the slot then actually does with the period, and multiplies
+//! the budget up or down until the render fits. A plugin whose arithmetic is
+//! off by three still converges; it just takes a few seconds longer. The first
+//! budget is a feed-forward guess from the measured rate, and everything after
+//! it is feedback.
+//!
+//! # Why it is slow, one-directional and sticky
+//!
+//! Quality that oscillates with CPU noise sounds worse than lower quality held
+//! steady -- the timbre would breathe with the load. So the governor falls
+//! quickly when blocks are running past their allowance, and rises only after
+//! the machine has been comfortable for a long time. It never publishes a
+//! change that is not material, because a plugin is allowed to rebuild
+//! coefficients when it is told.
+//!
+//! # Plugins that do not participate
+//!
+//! Most will not, and that is their author's choice. A plugin with no budget
+//! export is never called and never knows this happened; the fuel cap in
+//! `RuntimeLimits` still stops a runaway, and per-slot telemetry still names
+//! which plugin is over. Nothing here is required to render audio.
+
+use std::time::Duration;
+
+/// Share of the block deadline one slot may plan to spend.
+///
+/// Not 1.0, and not close to it. The deadline is when the buffer is due, not
+/// when it is comfortable: the engine also has to convert and write the
+/// period, ALSA has to hand it over, and a governor may drop the clock in the
+/// middle of the block being planned.
+///
+/// 0.6 is measured rather than chosen. On a Raspberry Pi 4 at 128 frames,
+/// Concert Grand holding six notes with a 106-mode soundboard averaged 1601 us
+/// of the 2667 us period -- 60 % -- and missed no deadlines at all across the
+/// window; the same six notes at 1892 us (71 %) missed seventeen.
+pub const DEFAULT_HEADROOM: f64 = 0.6;
+
+/// Blocks to watch before the rate is worth believing. At 128 frames this is
+/// under a second, and it is long enough to leave the first blocks after a
+/// device change -- which are always the slowest -- out of the estimate.
+const MINIMUM_OBSERVATIONS: u32 = 96;
+
+/// Weight of one block in the estimates. Slow on purpose: they should describe
+/// the machine, not the phrase being played.
+const SMOOTHING: f64 = 1.0 / 256.0;
+
+/// How often a change may be published at all, and the window over which
+/// blocks that ran long are counted.
+const PUBLISH_INTERVAL: Duration = Duration::from_secs(2);
+
+/// How long the slot must be comfortable before quality is given back.
+const RAISE_AFTER: Duration = Duration::from_secs(20);
+
+/// How long the instrument must have gone without a note before quality is
+/// given back. Not a performance detail: a raise rebuilds banks, and a player
+/// hears a soundboard change shape under their hands. Measured on the
+/// appliance and reported by the player as "se nota como cambia la calidad
+/// en vivo" -- the raise was landing between phrases of a piece, twenty
+/// seconds after the dense passage that had cut it. Cuts still land whenever
+/// blocks run late, because the alternative to a cut is an xrun; raises wait
+/// for the instrument to be silent, where nothing can be heard changing.
+pub const SILENT_BEFORE_RAISE: Duration = Duration::from_secs(30);
+
+/// Blocks allowed to run late before the budget is cut, as a fraction of the
+/// window. Not zero: one late block in a thousand is a scheduler hiccup, and
+/// chasing it would mean a permanently thinner instrument.
+const OVER_TOLERANCE: f64 = 0.01;
+
+/// How much of the period a block has to reach to count as late.
+///
+/// Deliberately not the allowance. The allowance is what the budget is sized
+/// against -- a target with room left over -- and treating a block that
+/// exceeded it as a failure makes the governor act on renders that are
+/// perfectly fine: measured on a Raspberry Pi, two notes rendered in 63 % of
+/// the period and missed nothing at all, while sitting above a 60 % allowance
+/// and being read as trouble. What is actually wrong is a block that is about
+/// to arrive late, so that is what this measures.
+const LATE_AT: f64 = 0.9;
+
+/// The slot has to be using less than this much of its allowance before any
+/// of it is given back. The gap between this and 1.0 is the hysteresis that
+/// keeps the timbre from breathing with the load.
+const COMFORTABLE: f64 = 0.7;
+
+/// Bounds on one correction. The floor stops a single bad window from
+/// collapsing the instrument; the ceiling makes sure a cut is a real cut even
+/// when the mean looks fine and only the tail is late.
+const MOST_SEVERE_CUT: f64 = 0.5;
+/// Below `1.0 - MATERIAL_CHANGE`, so that every cut the governor decides to
+/// make is one it can actually publish. A cut rejected for being too small to
+/// bother the plugin with still looks like a cut that did not work.
+const GENTLEST_CUT: f64 = 0.8;
+
+/// Consecutive cuts that bought nothing before the governor accepts that this
+/// plugin is not going to fit and stops cutting.
+///
+/// A budget that keeps falling while the render does not is not controlling
+/// anything -- it is thinning an instrument for no reason, and on the way down
+/// it reads every cut as evidence that another is needed. Measured on a
+/// Raspberry Pi before this existed: eight cuts in sixteen seconds took the
+/// budget from 340,068 fuel to 5,649 while the render went the wrong way,
+/// from 1,050 us to 3,598 us.
+const STUBBORN_LIMIT: u32 = 3;
+
+/// A cut has to buy at least this much of the load back to count as working.
+const CUT_MUST_BUY: f64 = 0.95;
+
+/// How much is given back at a time, once it has been earned.
+const RAISE_BY: f64 = 1.25;
+
+/// A change smaller than this is not worth a rebuild on the plugin's side.
+const MATERIAL_CHANGE: f64 = 0.15;
+
+/// A budget is never published below this. A plugin handed a budget it cannot
+/// render anything with should be told nothing instead, and left at whatever
+/// its author shipped: an instrument that is silent is worse than one that is
+/// late, and at that point the honest report is that this machine cannot run
+/// this plugin at all.
+const MINIMUM_CREDIBLE_BUDGET: u64 = 4_096;
+
+/// Why a budget changed, for the log line and for the interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetReason {
+    /// First budget this plugin has been given on this machine.
+    Measured,
+    /// Blocks were running past their allowance.
+    Tightened,
+    /// The slot has been comfortable long enough to afford more.
+    Relaxed,
+    /// Cutting stopped helping. The budget stays where it is and the blocks
+    /// keep running long: this machine cannot render this plugin at this
+    /// period, and saying so is more use than thinning it further.
+    Exhausted,
+}
+
+impl BudgetReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Measured => "measured",
+            Self::Tightened => "tightened",
+            Self::Relaxed => "relaxed",
+            Self::Exhausted => "exhausted",
+        }
+    }
+}
+
+/// One slot's view of how fast this machine is, and what it may spend.
+///
+/// Fed one observation per rendered block, and asked -- at the block rate,
+/// cheaply -- whether it has something new to say.
+#[derive(Debug)]
+pub struct BudgetGovernor {
+    deadline_ns: u64,
+    share: f64,
+    headroom: f64,
+    /// This machine's speed for this plugin: the only machine-dependent
+    /// quantity in the system, and the one a plugin cannot measure itself.
+    ns_per_fuel: f64,
+    render_ns: f64,
+    observations: u32,
+    /// Blocks in the current window, and how many of them ran past the
+    /// allowance. A rate, not a total, so the window length does not matter.
+    window_blocks: u32,
+    window_over: u32,
+    published: Option<u64>,
+    last_publish: Option<Duration>,
+    comfortable_since: Option<Duration>,
+    /// The load the last cut was made at, and how many cuts in a row have
+    /// failed to bring it down.
+    load_at_cut: Option<f64>,
+    stubborn: u32,
+    exhausted: bool,
+}
+
+impl Default for BudgetGovernor {
+    /// A governor that has been told nothing yet, and so says nothing. A voice
+    /// is built before the audio loop knows its period, and a governor that
+    /// guessed a deadline in the meantime would hand out a budget for a
+    /// machine it has not measured.
+    fn default() -> Self {
+        Self {
+            deadline_ns: 0,
+            share: 1.0,
+            headroom: DEFAULT_HEADROOM,
+            ns_per_fuel: 0.0,
+            render_ns: 0.0,
+            observations: 0,
+            window_blocks: 0,
+            window_over: 0,
+            published: None,
+            last_publish: None,
+            comfortable_since: None,
+            load_at_cut: None,
+            stubborn: 0,
+            exhausted: false,
+        }
+    }
+}
+
+impl BudgetGovernor {
+    /// The situation this slot renders in, restated every block by the audio
+    /// loop because both halves of it can change under a running engine: the
+    /// period when the interface is re-bound, the slot count when the rack is
+    /// edited.
+    ///
+    /// Slots are given equal shares of the headroom rather than shares
+    /// proportional to what they have been spending: a slot that spends more
+    /// would otherwise be granted more for spending it, and the loudest plugin
+    /// in the rack would squeeze out the rest.
+    ///
+    /// Cheap and idempotent -- two stores, no state reset.
+    pub fn configure(&mut self, deadline_ns: u64, slot_count: usize) {
+        self.deadline_ns = deadline_ns;
+        self.share = 1.0 / slot_count.max(1) as f64;
+    }
+
+    /// The budget currently handed to the plugin, if any.
+    pub const fn published(&self) -> Option<u64> {
+        self.published
+    }
+
+    /// This machine's measured speed for this plugin, once it is known.
+    pub fn nanoseconds_per_fuel(&self) -> Option<f64> {
+        (self.observations >= MINIMUM_OBSERVATIONS && self.ns_per_fuel > 0.0)
+            .then_some(self.ns_per_fuel)
+    }
+
+    /// The wall time this slot is aiming to spend on one block: what its
+    /// budget is sized against.
+    fn allowance_ns(&self) -> f64 {
+        self.deadline_ns as f64 * self.headroom * self.share
+    }
+
+    /// The wall time past which this slot's block counts as late: what the
+    /// governor actually acts on.
+    fn late_ns(&self) -> f64 {
+        self.deadline_ns as f64 * LATE_AT * self.share
+    }
+
+    /// One rendered block: how long it took, and what the plugin spent.
+    ///
+    /// A block with no fuel reading is a plugin the sandbox does not meter --
+    /// a native plugin, or the browser runtime. Those never accumulate a rate,
+    /// so they are never handed a budget, which is the correct outcome: a
+    /// budget in fuel means nothing to something that is not metered in fuel.
+    pub fn observe(&mut self, render_ns: u64, fuel: u64) {
+        if fuel == 0 || render_ns == 0 {
+            return;
+        }
+        let rate = render_ns as f64 / fuel as f64;
+        if self.observations == 0 {
+            self.ns_per_fuel = rate;
+            self.render_ns = render_ns as f64;
+        } else {
+            self.ns_per_fuel += (rate - self.ns_per_fuel) * SMOOTHING;
+            self.render_ns += (render_ns as f64 - self.render_ns) * SMOOTHING;
+        }
+        self.observations = self.observations.saturating_add(1);
+        self.window_blocks = self.window_blocks.saturating_add(1);
+        if render_ns as f64 > self.late_ns() {
+            self.window_over = self.window_over.saturating_add(1);
+        }
+    }
+
+    /// Asked once per block. Returns a budget only when the plugin should be
+    /// told about it, which is rarely. `may_raise` is false while the
+    /// instrument is being played: a raise is audible, a cut is the
+    /// alternative to an xrun, and only one of those may wait.
+    pub fn poll(&mut self, now: Duration, may_raise: bool) -> Option<(u64, BudgetReason)> {
+        let rate = self.nanoseconds_per_fuel()?;
+        let allowance = self.allowance_ns();
+        if allowance <= 0.0 {
+            return None;
+        }
+
+        let Some(published) = self.published else {
+            // Nothing has been measured about how this plugin behaves under a
+            // budget yet, so the first one is the only feed-forward step in
+            // the whole mechanism: what the allowance buys at the rate this
+            // machine has been running at.
+            let first = allowance / rate;
+            return self.publish_if_credible(first, BudgetReason::Measured, now);
+        };
+
+        if let Some(last) = self.last_publish {
+            if now.saturating_sub(last) < PUBLISH_INTERVAL {
+                return None;
+            }
+        }
+        let blocks = self.window_blocks;
+        let over = self.window_over;
+        self.window_blocks = 0;
+        self.window_over = 0;
+        if blocks == 0 {
+            return None;
+        }
+
+        let over_rate = f64::from(over) / f64::from(blocks);
+        let load = self.render_ns / allowance;
+        if over_rate > OVER_TOLERANCE {
+            // Late blocks are audible now, so this does not wait. How far the
+            // budget falls follows how far over the render is -- but a window
+            // can be over on its tail alone, with a mean that looks fine, so
+            // every cut is a real cut.
+            self.comfortable_since = None;
+            if self.exhausted {
+                return None;
+            }
+            // Measured against where this streak of cuts started, not
+            // against the cut before it. Block times wander by a few percent
+            // on their own, so comparing consecutive windows let noise reset
+            // the count: on a Raspberry Pi that turned three cuts into nine,
+            // and every one of them rebuilt the soundboard.
+            if let Some(streak_started_at) = self.load_at_cut {
+                if load >= streak_started_at * CUT_MUST_BUY {
+                    self.stubborn += 1;
+                    if self.stubborn >= STUBBORN_LIMIT {
+                        self.exhausted = true;
+                        self.last_publish = Some(now);
+                        return Some((published, BudgetReason::Exhausted));
+                    }
+                } else {
+                    // Real progress: this is the new baseline to beat.
+                    self.stubborn = 0;
+                    self.load_at_cut = Some(load);
+                }
+            }
+            let cut = (1.0 / load.max(1.0)).clamp(MOST_SEVERE_CUT, GENTLEST_CUT);
+            let published =
+                self.publish_if_credible(published as f64 * cut, BudgetReason::Tightened, now);
+            if published.is_some() && self.load_at_cut.is_none() {
+                // Only a cut that reached the plugin is one it can be judged
+                // on. Recording an intention would count a budget the plugin
+                // never saw as a budget it ignored.
+                self.load_at_cut = Some(load);
+            }
+            return published;
+        }
+
+        if load >= COMFORTABLE || !may_raise {
+            // Inside its allowance but not comfortably -- or comfortably,
+            // but with someone playing. Leave it exactly where it is: the
+            // first is the band the mechanism aims for, the second is a
+            // change the player would hear.
+            self.comfortable_since = None;
+            return None;
+        }
+        let since = *self.comfortable_since.get_or_insert(now);
+        if now.saturating_sub(since) < RAISE_AFTER {
+            return None;
+        }
+        self.comfortable_since = None;
+        // Room again: whatever made it stop responding is over.
+        self.exhausted = false;
+        self.stubborn = 0;
+        self.load_at_cut = None;
+        self.publish_if_credible(published as f64 * RAISE_BY, BudgetReason::Relaxed, now)
+    }
+
+    fn publish_if_credible(
+        &mut self,
+        budget: f64,
+        reason: BudgetReason,
+        now: Duration,
+    ) -> Option<(u64, BudgetReason)> {
+        if !budget.is_finite() || budget < MINIMUM_CREDIBLE_BUDGET as f64 {
+            return None;
+        }
+        let budget = budget as u64;
+        if let Some(published) = self.published {
+            let change = (budget as f64 - published as f64).abs() / published as f64;
+            if change < MATERIAL_CHANGE {
+                return None;
+            }
+        }
+        self.published = Some(budget);
+        self.last_publish = Some(now);
+        Some((budget, reason))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 128 frames at 48 kHz, which is what the appliance runs.
+    const DEADLINE_NS: u64 = 128 * 1_000_000_000 / 48_000;
+
+    fn governor(slot_count: usize) -> BudgetGovernor {
+        let mut governor = BudgetGovernor::default();
+        governor.configure(DEADLINE_NS, slot_count);
+        governor
+    }
+
+    /// Feeds enough identical blocks for the estimates to settle.
+    fn settled(governor: &mut BudgetGovernor, render_ns: u64, fuel: u64) {
+        for _ in 0..MINIMUM_OBSERVATIONS * 8 {
+            governor.observe(render_ns, fuel);
+        }
+    }
+
+    #[test]
+    fn an_unmetered_plugin_is_never_handed_a_budget() {
+        // A native plugin reports no fuel. A budget denominated in fuel means
+        // nothing to it, and a number it cannot interpret is worse than none.
+        let mut governor = governor(1);
+        for _ in 0..10_000 {
+            governor.observe(1_000_000, 0);
+        }
+        assert_eq!(governor.poll(Duration::from_secs(60), true), None);
+        assert_eq!(governor.published(), None);
+    }
+
+    #[test]
+    fn a_governor_that_has_not_been_told_the_period_says_nothing() {
+        // Voices are built before the audio loop opens the device. A budget
+        // handed out against a guessed deadline is the hardcoded constant this
+        // exists to replace, with more steps.
+        let mut governor = BudgetGovernor::default();
+        settled(&mut governor, 1_000, 1_000);
+        assert_eq!(governor.poll(Duration::from_secs(60), true), None);
+        governor.configure(DEADLINE_NS, 1);
+        assert!(governor.poll(Duration::from_secs(60), true).is_some());
+    }
+
+    #[test]
+    fn it_waits_for_enough_blocks_before_believing_the_rate() {
+        let mut governor = governor(1);
+        for _ in 0..MINIMUM_OBSERVATIONS - 1 {
+            governor.observe(1_000_000, 1_000_000);
+        }
+        assert_eq!(governor.poll(Duration::ZERO, true), None);
+        governor.observe(1_000_000, 1_000_000);
+        assert!(governor.poll(Duration::ZERO, true).is_some());
+    }
+
+    #[test]
+    fn the_first_budget_is_the_allowance_at_the_measured_rate() {
+        // One nanosecond per fuel makes the arithmetic readable: the slot may
+        // spend its share of the headroom, in nanoseconds, as fuel.
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        let (budget, reason) = governor.poll(Duration::ZERO, true).expect("measured");
+        assert_eq!(reason, BudgetReason::Measured);
+        let expected = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
+        assert!(
+            budget.abs_diff(expected) <= expected / 100,
+            "{budget} is not within a percent of {expected}"
+        );
+    }
+
+    #[test]
+    fn a_slower_machine_is_handed_a_smaller_budget() {
+        // The whole point, stated as a test: same plugin, same work, two
+        // machines. The faster one may spend more of itself per block.
+        let mut fast = governor(1);
+        settled(&mut fast, 1_000_000, 10_000_000);
+        let mut slow = governor(1);
+        settled(&mut slow, 4_000_000, 10_000_000);
+        let (fast_budget, _) = fast
+            .poll(Duration::ZERO, true)
+            .expect("fast machine measured");
+        let (slow_budget, _) = slow
+            .poll(Duration::ZERO, true)
+            .expect("slow machine measured");
+        assert!(
+            fast_budget > slow_budget * 3,
+            "a machine four times faster was handed {fast_budget} against {slow_budget}"
+        );
+    }
+
+    #[test]
+    fn slots_share_the_headroom_rather_than_each_claiming_it() {
+        // Four plugins in a rack cannot each be told they may have the whole
+        // machine, or the rack is over budget by construction.
+        let mut alone = governor(1);
+        settled(&mut alone, 1_000, 1_000);
+        let mut crowded = governor(4);
+        settled(&mut crowded, 1_000, 1_000);
+        let (alone, _) = alone.poll(Duration::ZERO, true).expect("measured");
+        let (crowded, _) = crowded.poll(Duration::ZERO, true).expect("measured");
+        assert!(alone.abs_diff(crowded * 4) <= alone / 100);
+    }
+
+    #[test]
+    fn a_plugin_whose_cost_model_is_wrong_still_converges() {
+        // The reason the loop is closed. This plugin ignores two thirds of
+        // whatever it is told and renders at three times its allowance; no
+        // feed-forward arithmetic could have predicted that, and it still has
+        // to end up inside the period.
+        let mut governor = governor(1);
+        // What the governor promises is that blocks stop arriving late, not
+        // that they land on the allowance: the allowance sizes the first guess
+        // and decides when quality may come back.
+        let late = DEADLINE_NS as f64 * LATE_AT;
+        settled(&mut governor, 1_000, 1_000);
+        let (mut budget, _) = governor.poll(Duration::ZERO, true).expect("measured");
+        let overspend = 3.0;
+
+        let mut clock = Duration::ZERO;
+        for _ in 0..40 {
+            clock += PUBLISH_INTERVAL;
+            // What the plugin actually does with the budget it was given.
+            let render = (budget as f64 * overspend) as u64;
+            settled(&mut governor, render.max(1), budget.max(1));
+            match governor.poll(clock, true) {
+                Some((next, BudgetReason::Exhausted)) => {
+                    panic!("gave up at {next} while cuts were still working")
+                }
+                Some((next, _)) => budget = next,
+                None => {}
+            }
+            if budget as f64 * overspend <= late {
+                break;
+            }
+        }
+        assert!(
+            budget as f64 * overspend <= late,
+            "a budget of {budget} still renders {} against a deadline that is late at {late}",
+            budget as f64 * overspend
+        );
+    }
+
+    #[test]
+    fn late_blocks_cut_the_budget_without_waiting() {
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        let (first, _) = governor.poll(Duration::ZERO, true).expect("measured");
+        // Every block now runs at twice its allowance.
+        let allowance = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
+        settled(&mut governor, allowance * 2, 1_000_000);
+        let (tightened, reason) = governor
+            .poll(PUBLISH_INTERVAL, true)
+            .expect("blocks running long are acted on at once");
+        assert_eq!(reason, BudgetReason::Tightened);
+        assert!(tightened < first);
+    }
+
+    #[test]
+    fn a_rare_late_block_is_tolerated() {
+        // One hiccup in a window is a scheduler, not an instrument. Chasing it
+        // would leave every machine permanently thinner than it needs to be.
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        let (first, _) = governor.poll(Duration::ZERO, true).expect("measured");
+        let allowance = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
+        for index in 0..1_000 {
+            governor.observe(if index == 500 { allowance * 3 } else { 1_000 }, 1_000);
+        }
+        assert_eq!(governor.poll(PUBLISH_INTERVAL, true), None);
+        assert_eq!(governor.published(), Some(first));
+    }
+
+    #[test]
+    fn quality_comes_back_only_after_a_long_comfortable_stretch() {
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        let (first, _) = governor.poll(Duration::ZERO, true).expect("measured");
+        let allowance = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
+
+        settled(&mut governor, allowance * 2, 1_000_000);
+        let (tightened, _) = governor.poll(PUBLISH_INTERVAL, true).expect("tightened");
+        assert!(tightened < first);
+
+        // Comfortable from here on, but nothing happens for a long time: a
+        // budget that tracked every lull would make the timbre breathe.
+        let mut clock = PUBLISH_INTERVAL;
+        for _ in 0..8 {
+            clock += PUBLISH_INTERVAL;
+            settled(&mut governor, allowance / 4, 1_000_000);
+            assert_eq!(
+                governor.poll(clock, true),
+                None,
+                "gave quality back too early"
+            );
+        }
+        clock += RAISE_AFTER;
+        settled(&mut governor, allowance / 4, 1_000_000);
+        let (relaxed, reason) = governor
+            .poll(clock, true)
+            .expect("a slot comfortable for long enough may have its quality back");
+        assert_eq!(reason, BudgetReason::Relaxed);
+        assert!(relaxed > tightened);
+    }
+
+    #[test]
+    fn a_slot_inside_its_allowance_but_not_comfortable_is_left_alone() {
+        // The band the whole mechanism aims for. Nudging here would be churn.
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        let (first, _) = governor.poll(Duration::ZERO, true).expect("measured");
+        let allowance = DEADLINE_NS as f64 * DEFAULT_HEADROOM;
+        let mut clock = Duration::ZERO;
+        for _ in 0..40 {
+            clock += PUBLISH_INTERVAL;
+            settled(&mut governor, (allowance * 0.85) as u64, 1_000_000);
+            assert_eq!(governor.poll(clock, true), None);
+        }
+        assert_eq!(governor.published(), Some(first));
+    }
+
+    #[test]
+    fn a_window_with_no_blocks_in_it_says_nothing() {
+        // A stopped stream is not a comfortable one. Reading an empty window
+        // as "well inside its allowance" would hand quality back to a slot
+        // that has not rendered anything since the last time it was asked.
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        let (first, _) = governor.poll(Duration::ZERO, true).expect("measured");
+        let mut clock = Duration::ZERO;
+        for _ in 0..40 {
+            clock += PUBLISH_INTERVAL + RAISE_AFTER;
+            assert_eq!(governor.poll(clock, true), None);
+        }
+        assert_eq!(governor.published(), Some(first));
+    }
+
+    #[test]
+    fn cutting_stops_when_it_stops_buying_anything() {
+        // A plugin that ignores the budget, or one already at the floor of
+        // what it can do, must not be cut forever. Before this, a Raspberry Pi
+        // took Concert Grand from 340,068 fuel to 5,649 in sixteen seconds
+        // while the render got slower, because every cut was read as evidence
+        // that another was needed.
+        let mut governor = governor(1);
+        let allowance = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
+        settled(&mut governor, 1_000, 1_000);
+        governor.poll(Duration::ZERO, true).expect("measured");
+
+        let mut clock = Duration::ZERO;
+        let mut exhausted = None;
+        let mut cuts = 0;
+        for _ in 0..40 {
+            clock += PUBLISH_INTERVAL;
+            // Stubbornly over, whatever it is told.
+            settled(&mut governor, allowance * 2, 1_000_000);
+            match governor.poll(clock, true) {
+                Some((budget, BudgetReason::Exhausted)) => {
+                    exhausted = Some(budget);
+                    break;
+                }
+                Some((_, BudgetReason::Tightened)) => cuts += 1,
+                _ => {}
+            }
+        }
+        let floor = exhausted.expect("the governor never gave up");
+        assert!(
+            cuts <= STUBBORN_LIMIT + 1,
+            "it cut {cuts} times before giving up"
+        );
+
+        // And it stays given up rather than churning.
+        for _ in 0..10 {
+            clock += PUBLISH_INTERVAL;
+            settled(&mut governor, allowance * 2, 1_000_000);
+            assert_eq!(governor.poll(clock, true), None);
+        }
+        assert_eq!(governor.published(), Some(floor));
+
+        // Until the machine is free again, at which point it is worth trying.
+        // The comfortable stretch is counted from the first poll that sees it,
+        // so this takes two: one to start the clock and one to read it.
+        clock += PUBLISH_INTERVAL;
+        settled(&mut governor, allowance / 4, 1_000_000);
+        assert_eq!(
+            governor.poll(clock, true),
+            None,
+            "quality came back immediately"
+        );
+        clock += RAISE_AFTER;
+        settled(&mut governor, allowance / 4, 1_000_000);
+        let (_, reason) = governor
+            .poll(clock, true)
+            .expect("a free machine may try again");
+        assert_eq!(reason, BudgetReason::Relaxed);
+    }
+
+    #[test]
+    fn quality_does_not_come_back_while_the_instrument_is_played() {
+        // The player's complaint, as a test: a cut during a dense passage
+        // must not be undone twenty seconds later in the middle of the next
+        // phrase. It comes back only once the instrument has been silent.
+        let mut governor = governor(1);
+        let allowance = (DEADLINE_NS as f64 * DEFAULT_HEADROOM) as u64;
+        settled(&mut governor, 1_000, 1_000);
+        governor.poll(Duration::ZERO, true).expect("measured");
+        settled(&mut governor, allowance * 2, 1_000_000);
+        let (cut, _) = governor.poll(PUBLISH_INTERVAL, true).expect("tightened");
+
+        // Comfortable, but played: nothing may change, however long it lasts.
+        let mut clock = PUBLISH_INTERVAL;
+        for _ in 0..30 {
+            clock += RAISE_AFTER;
+            settled(&mut governor, allowance / 4, 1_000_000);
+            assert_eq!(governor.poll(clock, false), None, "raised while played");
+        }
+        assert_eq!(governor.published(), Some(cut));
+
+        // Silent: the same comfort is now allowed to count.
+        clock += PUBLISH_INTERVAL;
+        settled(&mut governor, allowance / 4, 1_000_000);
+        assert_eq!(governor.poll(clock, true), None);
+        clock += RAISE_AFTER;
+        settled(&mut governor, allowance / 4, 1_000_000);
+        let (_, reason) = governor.poll(clock, true).expect("raised in silence");
+        assert_eq!(reason, BudgetReason::Relaxed);
+    }
+
+    #[test]
+    fn a_machine_too_slow_to_render_anything_is_told_nothing() {
+        // Handing over a budget of forty fuel would have the plugin render
+        // silence and call it quality. Leaving it alone keeps the audio, and
+        // the deadline misses in the log say what is actually wrong.
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000_000, 1);
+        assert_eq!(governor.poll(Duration::from_secs(60), true), None);
+        assert_eq!(governor.published(), None);
+    }
+}

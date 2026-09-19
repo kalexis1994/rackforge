@@ -1029,6 +1029,11 @@ const MAXIMUM_BUDGET_SPACING: f32 = 3.0;
 const MINIMUM_QUALITY: f32 = 0.2;
 /// Floors for the two banks the quality scalar thins, in their own units.
 const MINIMUM_UNDAMPED_PARTIALS: usize = 2;
+/// How long the body banks take to fade out before a budget rebuild, and
+/// back in after it: forty milliseconds at 48 kHz, short enough to read as
+/// the body breathing rather than dropping out, long enough that nothing
+/// steps.
+const BANK_FADE_SAMPLES: f32 = 1920.0;
 const MINIMUM_PARTIAL_BUDGET: usize = 300;
 /// How many independently renderable sections the strings are defined in.
 ///
@@ -4746,6 +4751,18 @@ pub struct ConcertGrand {
     /// machinery then thins new notes instead of missing the callback.
     partial_budget: usize,
     undamped_dirty: bool,
+    /// A budget-driven rebuild does not happen on the block the budget lands
+    /// in. Swapping a bank under a sounding note is a step in the output --
+    /// seventy-three modes that were ringing gone in one sample, measured as
+    /// a seam 3.5x the note's own largest step, the tick the player heard --
+    /// and carrying each slot's state across did nothing for it. So the body
+    /// banks fade to nothing over `BANK_FADE_SAMPLES`, rebuild while they
+    /// are silent, and fade back. One multiply a sample; no block is rendered
+    /// twice.
+    body_gain: f32,
+    body_target: f32,
+    rebuild_board_after_fade: bool,
+    rebuild_undamped_after_fade: bool,
     scale_dirty: bool,
     room_index: [usize; ROOM_LINES],
 }
@@ -4895,6 +4912,10 @@ impl Default for ConcertGrand {
             undamped_active: UNDAMPED_COUNT,
             partial_budget: PARTIAL_BUDGET,
             undamped_dirty: false,
+            body_gain: 1.0,
+            body_target: 1.0,
+            rebuild_board_after_fade: false,
+            rebuild_undamped_after_fade: false,
             scale_dirty: false,
             room_index: [0; ROOM_LINES],
         };
@@ -5722,7 +5743,17 @@ impl ConcertGrand {
                     powf(10.0, ripple_db / 20.0),
                 );
                 mode.drive *= measured;
-                self.board[index] = mode;
+                // A rebuild keeps what the slot was ringing with. Replacing the
+                // resonator whole zeroes its state, and a bank of zeroed
+                // states under a sounding note is a step in the output: the
+                // tick the player hears when a budget lands mid-phrase.
+                let (y1, y2) = (self.board[index].y1, self.board[index].y2);
+                let (y1, y2) = (self.board[index].y1, self.board[index].y2);
+            self.board[index] = mode;
+            self.board[index].y1 = y1;
+            self.board[index].y2 = y2;
+                self.board[index].y1 = y1;
+                self.board[index].y2 = y2;
                 index += 1;
             }
         }
@@ -6133,7 +6164,10 @@ impl ConcertGrand {
                     let tuned = hz * powf(2.0, side * spread);
                     let mut string = BodyMode::tune(tuned, t60, pan, self.sample_rate);
                     string.drive *= 0.7;
+                    let (y1, y2) = (self.undamped[index].y1, self.undamped[index].y2);
                     self.undamped[index] = string;
+                    self.undamped[index].y1 = y1;
+                    self.undamped[index].y2 = y2;
                     self.undamped_note[index] = note;
                     index += 1;
                 }
@@ -8649,7 +8683,8 @@ impl ConcertGrand {
         let spacing = (1.0 / self.quality).clamp(1.0, MAXIMUM_BUDGET_SPACING);
         if (spacing - self.board_budget_spacing).abs() > 0.02 {
             self.board_budget_spacing = spacing;
-            self.board_dirty = true;
+            self.rebuild_board_after_fade = true;
+            self.body_target = 0.0;
         }
 
         // The sympathetic top register: fewer partials per string, taken from
@@ -8661,7 +8696,8 @@ impl ConcertGrand {
             .clamp(MINIMUM_UNDAMPED_PARTIALS, FREE_STRING_PARTIALS);
         if partials != self.undamped_partials {
             self.undamped_partials = partials;
-            self.undamped_dirty = true;
+            self.rebuild_undamped_after_fade = true;
+            self.body_target = 0.0;
         }
 
         // The notes themselves. Nothing is rebuilt for this: the strike path
@@ -10185,6 +10221,19 @@ impl Processor for ConcertGrand {
                 self.apply_quality();
             }
         }
+        if (self.rebuild_board_after_fade || self.rebuild_undamped_after_fade)
+            && self.body_gain <= 0.0
+        {
+            if self.rebuild_board_after_fade {
+                self.rebuild_board_after_fade = false;
+                self.board_dirty = true;
+            }
+            if self.rebuild_undamped_after_fade {
+                self.rebuild_undamped_after_fade = false;
+                self.undamped_dirty = true;
+            }
+            self.body_target = 1.0;
+        }
         if self.board_dirty {
             self.tune_board();
         }
@@ -10403,6 +10452,16 @@ impl Processor for ConcertGrand {
             // The rim: below its first mode the board radiates almost nothing.
             board_left = rim_pass(&mut self.rim[0], &self.rim_coef, board_left);
             board_right = rim_pass(&mut self.rim[1], &self.rim_coef, board_right);
+            if self.body_gain != self.body_target {
+                let step = 1.0 / BANK_FADE_SAMPLES;
+                self.body_gain = if self.body_target > self.body_gain {
+                    (self.body_gain + step).min(self.body_target)
+                } else {
+                    (self.body_gain - step).max(self.body_target)
+                };
+            }
+            board_left *= self.body_gain;
+            board_right *= self.body_gain;
             // The open top octave listens to the bridge and rings on.
             let mut open_left = 0.0;
             let mut open_right = 0.0;
@@ -10442,6 +10501,8 @@ impl Processor for ConcertGrand {
             }
             undamped_left = rim_pass(&mut self.rim[2], &self.rim_coef, undamped_left);
             undamped_right = rim_pass(&mut self.rim[3], &self.rim_coef, undamped_right);
+            undamped_left *= self.body_gain;
+            undamped_right *= self.body_gain;
             let undamped_gain = knob_undamped_mix * self.controls.lab(15);
             // The damped strings' bed, listening to the bridge like the
             // undamped lengths do -- see BED_MIX.
@@ -10459,6 +10520,8 @@ impl Processor for ConcertGrand {
             // fundamental 12 dB over its partials, past the board.
             bed_left = rim_pass(&mut self.rim[4], &self.rim_coef, bed_left);
             bed_right = rim_pass(&mut self.rim[5], &self.rim_coef, bed_right);
+            bed_left *= self.body_gain;
+            bed_right *= self.body_gain;
             let bed_gain = knob_bed_mix * self.controls.lab(15);
 
             // The shimmer: everything above ~1.8 kHz feeds the undamped
@@ -16334,10 +16397,12 @@ mod bench {
             voiced
         );
 
-        // A machine without room. Every axis gives, together.
+        // A machine without room. Every axis gives, together -- after the
+        // body has faded out, which takes forty milliseconds of blocks.
         assert!(piano.set_realtime_budget(5_000_000));
-        block(&mut piano);
-        block(&mut piano);
+        for _ in 0..20 {
+            block(&mut piano);
+        }
         let thinned = (
             piano.board_count,
             piano.undamped_active,
@@ -16367,8 +16432,9 @@ mod bench {
 
         // And it settles: a second look at the same budget does not keep
         // cutting, which is what would make the timbre breathe.
-        block(&mut piano);
-        block(&mut piano);
+        for _ in 0..40 {
+            block(&mut piano);
+        }
         assert_eq!(
             (
                 piano.board_count,
@@ -16378,9 +16444,10 @@ mod bench {
             thinned
         );
 
-        // Room again, and the instrument comes back whole.
+        // Room again, and the instrument comes back whole -- through the
+        // same fade, so it takes the same forty blocks.
         assert!(piano.set_realtime_budget(60_000_000));
-        for _ in 0..6 {
+        for _ in 0..40 {
             block(&mut piano);
         }
         assert_eq!(
@@ -16391,6 +16458,69 @@ mod bench {
             ),
             voiced,
             "the instrument did not come back after the machine was free"
+        );
+    }
+
+    /// A budget landing under a sounding note must not tick.
+    ///
+    /// The player heard one: "se escucha como un tick y cambia el sonido".
+    /// A bank rebuild used to replace every resonator whole, state included,
+    /// and a bank of freshly zeroed states under a ringing note is a step in
+    /// the output. The rebuild now carries each slot's state across, so the
+    /// largest sample-to-sample jump in the block the budget lands in is no
+    /// worse than the note was already making on its own.
+    #[test]
+    fn a_budget_landing_under_a_note_does_not_tick() {
+        const FRAMES: u32 = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        let mut output = vec![0.0f32; FRAMES as usize * 2];
+        let strike = MidiEvent {
+            frame: 0,
+            data: [0x90, 64, 110],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[strike], &[], FRAMES, 0, 2);
+        let biggest_step = |output: &[f32]| -> f32 {
+            output
+                .chunks(2)
+                .map(|f| f[0])
+                .collect::<std::vec::Vec<_>>()
+                .windows(2)
+                .map(|w| (w[1] - w[0]).abs())
+                .fold(0.0f32, f32::max)
+        };
+        // Well past the attack, into the ring: what the note steps by on
+        // its own, taken from the blocks right before the budget lands.
+        for _ in 0..60 {
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+        }
+        let mut before = 0.0f32;
+        let mut last = 0.0f32;
+        for _ in 0..4 {
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+            before = before.max(biggest_step(&output));
+            last = output[output.len() - 2];
+        }
+        let modes_before = piano.board_count;
+        // The budget lands, the body fades through silence, both banks
+        // rebuild while nothing of them is sounding, and it fades back:
+        // about forty blocks in all, every one of them watched.
+        assert!(piano.set_realtime_budget(1_260_758));
+        let mut during = 0.0f32;
+        let mut seam = 0.0f32;
+        for block in 0..40 {
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+            during = during.max(biggest_step(&output));
+            seam = seam.max((output[0] - last).abs());
+            last = output[output.len() - 2];
+            let _ = block;
+        }
+        assert!(piano.board_count < modes_before, "the bank did not rebuild");
+        std::println!("paso propio {before:.5}  paso en la reconstruccion {during:.5}  costura {seam:.5}");
+        assert!(
+            during <= before * 1.5 && seam <= before * 1.5,
+            "the rebuild stepped the output by {during} (seam {seam}) where the note stepped by {before}"
         );
     }
 

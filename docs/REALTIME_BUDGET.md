@@ -56,12 +56,15 @@ longer.
 ## Late is not the same as over budget
 
 The allowance (`DEFAULT_HEADROOM`, 0.6 of the period) is what a budget is *sized*
-against. The line the governor *acts* on is `LATE_AT`, 0.9 of the period.
+against. The line the governor *acts* on is `LATE_AT`, 0.95 of the period, and it
+acts only when more than two percent of a window's blocks cross it.
 
 They have to be different numbers. Measured on a Raspberry Pi 4, two notes
 rendered in 63 % of the period and missed nothing at all — and an earlier
 version of this treated that as trouble because it sat above a 60 % allowance,
-cut the budget, and kept cutting.
+cut the budget, and kept cutting. At 0.9 with a one-percent tolerance it was
+still cutting on the tail of renders that never missed: twelve held notes, no
+deadline lost, five cuts.
 
 ## Why it is slow, sticky, and gives up
 
@@ -83,14 +86,48 @@ Stubbornness is measured against where a streak of cuts started, not against the
 cut before it. Block times wander by a few percent on their own, and comparing
 consecutive windows let noise reset the count.
 
-* **It never raises while someone is playing.** A raise rebuilds banks, and
-  the player hears a soundboard change shape under their hands -- reported
-  from the appliance as "se nota como cambia la calidad en vivo", landing
-  between phrases twenty seconds after the passage that had cut it. Quality
-  now comes back only after `SILENT_BEFORE_RAISE` (30 s) with no MIDI
-  reaching the Slot, where nothing can be heard changing. Cuts still land
-  whenever blocks run late: the alternative to a cut is an xrun, and only one
-  of the two directions may wait.
+* **It never raises within a session.** A raise rebuilds banks, and the
+  player hears the instrument change under their hands -- reported from the
+  appliance as "se nota como cambia la calidad en vivo": quality came back
+  between pieces, twenty seconds after the passage that had cut it, and the
+  next dense passage cut it again, every piece. So in a session quality only
+  goes down, rarely, when the machine proves it must. Cuts still land
+  whenever blocks run late, because the alternative to a cut is an xrun.
+
+## It learns once, and remembers
+
+A governor that only learns under load learns in front of the player, since
+load only exists while someone plays. So what a machine settles on is written
+down and used as the starting point next time:
+
+* A budget **settles** when the governor has given up cutting (`exhausted`),
+  or when it has not moved for sixty seconds under observation. The audio
+  loop notes it once; the telemetry thread writes it to
+  `state/realtime-budget.txt` -- one line per plugin and period, `<plugin id>
+  <deadline ns> <fuel>` -- under the plugin's name.
+* When a voice is built, the control thread copies that plugin's remembered
+  `(period, fuel)` pairs into it. On the first block whose period is known the
+  governor is **seeded** from the matching one and hands it to the plugin at
+  once, without waiting to measure anything: the instrument is built at this
+  machine's quality before the first note.
+* A seed is a start, not a pin. If the machine proves slower than last time
+  the budget is still cut, and the new floor is what gets remembered.
+
+The render thread never touches the store: it scans a few pairs it was given
+by value, and it stores two integers for the publisher.
+
+## A rebuild does not tick
+
+Even a rare cut used to be audible as a click plus a step in timbre. Measured
+in the plugin: swapping a bank under a sounding note made a seam 3.5 times
+the note's own largest sample-to-sample step -- seventy-three modes that were
+ringing, gone in one sample -- and carrying each resonator's state across the
+rebuild did nothing for it, because the composition of the bank is what
+changes. So a budget-driven rebuild is deferred behind a fade: the soundboard,
+undamped and bed sums ramp to nothing over forty milliseconds, both banks
+rebuild while they are silent, and the sums ramp back. One multiply per
+sample, no block rendered twice, seam 0.005 against the note's own 0.010
+(`a_budget_landing_under_a_note_does_not_tick`).
 
 ## The plugin side
 

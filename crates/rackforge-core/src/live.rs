@@ -18,7 +18,7 @@ use crate::parallel_render::{
 use crate::performance::PerformanceRepository;
 use crate::rack_graph::compile_instrument_definition;
 use crate::realtime::{self, XrunMonitor};
-use crate::realtime_budget::{BudgetGovernor, BudgetReason, SILENT_BEFORE_RAISE};
+use crate::realtime_budget::{self, BudgetGovernor, BudgetReason};
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{
@@ -227,21 +227,31 @@ struct SlotBudget {
     epoch: Instant,
     /// When a MIDI event last reached this Slot. Quality is only ever given
     /// back after `SILENT_BEFORE_RAISE` of this standing still.
-    last_note: Instant,
     pending: Option<(u64, BudgetReason, f64)>,
     /// `None` until the plugin has been asked whether it takes a budget at
     /// all. Most plugins do not, and those are never asked twice.
     participates: Option<bool>,
+    /// What this machine settled on for this plugin before, per period,
+    /// copied out of the store on the control thread. The first block whose
+    /// period is known seeds the governor from it -- a scan of a few pairs,
+    /// no lock, on the render thread.
+    remembered: Vec<(u64, u64)>,
+    seeded: bool,
+    /// Whether this session's settled budget has been handed to the store.
+    stored: bool,
 }
 
 impl SlotBudget {
-    fn new() -> Self {
+    /// Built on the control thread, where reading the store is allowed.
+    fn for_plugin(plugin: &LoadedPlugin) -> Self {
         Self {
             governor: BudgetGovernor::default(),
             epoch: Instant::now(),
-            last_note: Instant::now(),
             pending: None,
             participates: None,
+            remembered: realtime_budget::remembered(&plugin.descriptor().id),
+            seeded: false,
+            stored: false,
         }
     }
 }
@@ -252,18 +262,19 @@ impl SlotBudget {
 /// that render took. The plugin is only ever entered here between blocks, and
 /// at most once every couple of seconds, which is the whole reason a plugin is
 /// allowed to rebuild coefficients when it is told.
-fn observe_budget(
-    budget: &mut SlotBudget,
-    instance: &mut PluginInstance<'_>,
-    render_ns: u64,
-    had_events: bool,
-) {
+fn observe_budget(budget: &mut SlotBudget, instance: &mut PluginInstance<'_>, render_ns: u64) {
     if budget.participates == Some(false) {
         return;
     }
     let now_instant = Instant::now();
-    if had_events {
-        budget.last_note = now_instant;
+    if !budget.seeded {
+        // Once, on the first block whose period is known: what last session
+        // settled on for this plugin at this period, if anything.
+        budget.seeded = true;
+        let deadline = budget.governor.deadline_ns();
+        if let Some((_, fuel)) = budget.remembered.iter().find(|(d, _)| *d == deadline) {
+            budget.governor.seed(*fuel);
+        }
     }
     if budget.participates.is_none() {
         budget.participates = Some(instance.accepts_realtime_budget());
@@ -278,8 +289,13 @@ fn observe_budget(
     };
     budget.governor.observe(render_ns, fuel);
     let now = now_instant.saturating_duration_since(budget.epoch);
-    let silent = now_instant.saturating_duration_since(budget.last_note) >= SILENT_BEFORE_RAISE;
-    let Some((granted, reason)) = budget.governor.poll(now, silent) else {
+    // Never raised within a session. A raise rebuilds banks, and even faded
+    // through silence it is a change the player hears coming and going:
+    // measured on the appliance, quality came back between pieces and the
+    // next dense passage cut it again, every piece. In a session quality only
+    // goes down, rarely, when the machine proves it must; it comes back the
+    // next time the engine starts, from what the store remembers.
+    let Some((granted, reason)) = budget.governor.poll(now, false) else {
         return;
     };
     match instance.set_realtime_budget(granted) {
@@ -303,8 +319,27 @@ fn observe_budget(
 /// Two relaxed stores. The publisher thread turns them into a log line a
 /// second later, because formatting one on the audio thread would allocate.
 fn report_budget(budget: &mut SlotBudget, slot: usize, telemetry: &Arc<RenderTelemetry>) {
+    let deadline_ns = budget.governor.deadline_ns();
     if let Some((fuel, reason, rate)) = budget.pending.take() {
-        telemetry.record_budget(slot, fuel, reason.as_str(), rate);
+        telemetry.record_budget(slot, fuel, reason.as_str(), rate, deadline_ns);
+        return;
+    }
+    if budget.stored {
+        return;
+    }
+    // Once the budget has stopped moving it is worth remembering; the
+    // publisher thread writes it down under the plugin's name.
+    let now = Instant::now().saturating_duration_since(budget.epoch);
+    if let Some(settled) = budget.governor.settled(now) {
+        budget.stored = true;
+        let rate = budget.governor.nanoseconds_per_fuel().unwrap_or(0.0);
+        telemetry.record_budget(
+            slot,
+            settled,
+            BudgetReason::Settled.as_str(),
+            rate,
+            deadline_ns,
+        );
     }
 }
 
@@ -518,13 +553,7 @@ fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channel
     );
     let render_ns = started.elapsed().as_nanos() as u64;
     if process_result.is_ok() {
-        let had_events = !voice.events.is_empty();
-        observe_budget(
-            &mut voice.budget,
-            &mut voice.instance,
-            render_ns,
-            had_events,
-        );
+        observe_budget(&mut voice.budget, &mut voice.instance, render_ns);
     }
     if let Err(error) = process_result {
         voice.output.fill(0.0);
@@ -759,12 +788,10 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
         if rendered {
             // Only a block that finished says anything about what this
             // machine costs; a faulted one is about to be silenced.
-            let had_events = !self.events.is_empty();
             observe_budget(
                 &mut self.budget,
                 &mut self.instance,
                 started.elapsed().as_nanos() as u64,
-                had_events,
             );
         }
         rendered
@@ -933,7 +960,7 @@ fn create_rack_voices<'plugin>(
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
-            budget: SlotBudget::new(),
+            budget: SlotBudget::for_plugin(plugin),
         });
     }
     resolve_rack_voice_graph(&mut voices);
@@ -998,7 +1025,7 @@ fn create_chain_voice<'plugin>(
             channels as usize,
             latency_frames,
         )?),
-        budget: SlotBudget::new(),
+        budget: SlotBudget::for_plugin(plugin),
     })
 }
 
@@ -1058,7 +1085,7 @@ fn chain_voices_from_prepared(
                     channels,
                     latency_frames,
                 )?),
-                budget: SlotBudget::new(),
+                budget: SlotBudget::for_plugin(plugin),
             })
         })
         .collect()
@@ -1155,7 +1182,7 @@ fn rack_voices_from_prepared(
                 .collect(),
             parameter_events: prepared.parameter_events,
             process_faulted: false,
-            budget: SlotBudget::new(),
+            budget: SlotBudget::for_plugin(prepared.plugin),
         })
         .collect::<Vec<_>>();
     resolve_rack_voice_graph(&mut voices);
@@ -1289,6 +1316,15 @@ fn plugin_instance_id(plugin_id: &str, primary: bool) -> Result<InstanceId> {
 }
 
 pub fn run(config: LiveConfig) -> Result<()> {
+    // Before any voice is built: a voice copies what the store remembers for
+    // its plugin at construction, and one built against an unloaded store
+    // starts every session from scratch -- measured on the appliance as a
+    // second session that said `measured` where it should have said `seeded`.
+    realtime_budget::load_store(
+        &config
+            .audio_state_path
+            .with_file_name("realtime-budget.txt"),
+    );
     let startup = crate::startup::StartupTimeline::new("core");
     ensure_supported_engine_profile(&config.audio_output)?;
     if let Some(input) = &config.audio_input {
@@ -1572,7 +1608,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
             effect_bypass: None,
-            budget: SlotBudget::new(),
+            budget: SlotBudget::for_plugin(plugin),
         });
     }
     let live_parameter_writer =
@@ -1913,7 +1949,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             audio_sender: control_sender,
             audio_state: Arc::clone(&audio_state),
             output_meter: Arc::clone(&output_meter),
-            audio_state_path: config.audio_state_path,
+            audio_state_path: config.audio_state_path.clone(),
             performance_repository: Arc::new(Mutex::new(performance_repository)),
             state_store,
             plugin_manifests: plugins
@@ -2375,6 +2411,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     }
     let render_telemetry = RenderTelemetry::new(parallel_render::MAX_RENDER_SLOTS);
     spawn_telemetry_publisher(&render_telemetry, Duration::from_secs(1));
+    render_telemetry.set_slot_plugins(
+        rack_voices
+            .iter()
+            .map(|voice| voice.plugin.descriptor().id.clone())
+            .collect(),
+    );
     let mut rack_renderer = RenderPool::automatic(Arc::clone(&render_telemetry));
     render_telemetry.set_slot_labels(
         rack_voices
@@ -2975,6 +3017,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             rack_voices
                                 .iter()
                                 .map(|voice| voice.slot_id.clone())
+                                .collect(),
+                        );
+                        render_telemetry.set_slot_plugins(
+                            rack_voices
+                                .iter()
+                                .map(|voice| voice.plugin.descriptor().id.clone())
                                 .collect(),
                         );
                         println!(
@@ -3591,6 +3639,20 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         deadline_ns,
                         None,
                     );
+                }
+                let about_to_settle = !voice.budget.stored
+                    && voice
+                        .budget
+                        .governor
+                        .settled(Instant::now().saturating_duration_since(voice.budget.epoch))
+                        .is_some();
+                if voice.budget.pending.is_some() || about_to_settle {
+                    // PLAY mode renders one instrument in slot 0, and the
+                    // store needs its name. Naming it from the control
+                    // thread would be cleaner; done here it is one
+                    // uncontended lock and one small allocation on the
+                    // handful of blocks per session that report anything.
+                    render_telemetry.set_slot_plugins(vec![voice.plugin.descriptor().id.clone()]);
                 }
                 report_budget(&mut voice.budget, 0, &render_telemetry);
                 if voice.process_faulted {

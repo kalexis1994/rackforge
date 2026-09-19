@@ -396,6 +396,9 @@ pub struct RenderTelemetry {
     budget_fuel: Box<[AtomicU64]>,
     budget_reason: Box<[AtomicU64]>,
     budget_picoseconds_per_fuel: Box<[AtomicU64]>,
+    budget_deadline_ns: Box<[AtomicU64]>,
+    /// Publisher-side only: which plugin each slot holds, for the store.
+    budget_plugins: Mutex<Vec<String>>,
     unit_faults: Box<[AtomicU64]>,
     worker_units: Box<[AtomicU64]>,
     worker_busy_ns: Box<[AtomicU64]>,
@@ -419,6 +422,8 @@ impl RenderTelemetry {
             budget_fuel: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             budget_reason: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             budget_picoseconds_per_fuel: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_deadline_ns: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_plugins: Mutex::new(Vec::new()),
             unit_faults: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             worker_units: (0..worker_capacity.max(1))
                 .map(|_| AtomicU64::new(0))
@@ -439,11 +444,21 @@ impl RenderTelemetry {
     /// Records that a slot was handed a new real-time budget. Called from the
     /// audio loop; `reason` is a non-empty word, and the publisher clears it
     /// once it has been said.
-    pub fn record_budget(&self, slot: usize, fuel: u64, reason: &'static str, rate_ns: f64) {
+    pub fn record_budget(
+        &self,
+        slot: usize,
+        fuel: u64,
+        reason: &'static str,
+        rate_ns: f64,
+        deadline_ns: u64,
+    ) {
         let Some(slot_fuel) = self.budget_fuel.get(slot) else {
             return;
         };
         slot_fuel.store(fuel, Ordering::Relaxed);
+        if let Some(deadline) = self.budget_deadline_ns.get(slot) {
+            deadline.store(deadline_ns, Ordering::Relaxed);
+        }
         if let Some(rate) = self.budget_picoseconds_per_fuel.get(slot) {
             rate.store((rate_ns * 1_000.0) as u64, Ordering::Relaxed);
         }
@@ -484,6 +499,32 @@ impl RenderTelemetry {
                 && let Some(slots) = self.miss_attribution.get(slot)
             {
                 slots[stage].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Which plugin each Slot holds, so a settled budget can be remembered
+    /// under its name. Called from control paths, and from the audio loop on
+    /// the few blocks per session that report a budget in PLAY mode.
+    pub fn set_slot_plugins(&self, plugins: Vec<String>) {
+        if let Ok(mut guard) = self.budget_plugins.lock() {
+            *guard = plugins;
+        }
+    }
+
+    /// Writes every budget that settled since the last snapshot into the
+    /// store. Publisher thread only: this touches the filesystem.
+    pub fn persist_settled(&self, snapshot: &TelemetrySnapshot) {
+        let plugins = match self.budget_plugins.lock() {
+            Ok(guard) => guard.clone(),
+            Err(_) => return,
+        };
+        for (slot, fuel, reason, _, deadline_ns) in &snapshot.budgets {
+            if *reason != "settled" {
+                continue;
+            }
+            if let Some(plugin) = plugins.get(*slot) {
+                crate::realtime_budget::remember(plugin, *deadline_ns, *fuel);
             }
         }
     }
@@ -533,6 +574,7 @@ impl RenderTelemetry {
                         self.budget_fuel[slot].load(Ordering::Relaxed),
                         *reason,
                         self.budget_picoseconds_per_fuel[slot].load(Ordering::Relaxed),
+                        self.budget_deadline_ns[slot].load(Ordering::Relaxed),
                     ))
                 })
                 .collect(),
@@ -562,7 +604,14 @@ impl RenderTelemetry {
 /// `budget_reason_code` returns zero for it, which the snapshot reads as
 /// "nothing new to say". That is exactly what happened to `exhausted` -- the
 /// governor gave up on a Raspberry Pi and said so, four times, silently.
-const BUDGET_REASONS: [&str; 4] = ["measured", "tightened", "relaxed", "exhausted"];
+const BUDGET_REASONS: [&str; 6] = [
+    "measured",
+    "tightened",
+    "relaxed",
+    "exhausted",
+    "seeded",
+    "settled",
+];
 
 fn budget_reason_code(reason: &str) -> u64 {
     BUDGET_REASONS
@@ -578,9 +627,9 @@ pub struct TelemetrySnapshot {
     pub deadline_misses: u64,
     pub miss_attribution: Vec<[u64; STAGE_COUNT]>,
     pub slot_faults: Vec<u64>,
-    /// `(fuel, reason, picoseconds per fuel)` for every slot that was handed a
-    /// budget since the last snapshot.
-    pub budgets: Vec<(usize, u64, &'static str, u64)>,
+    /// `(slot, fuel, reason, picoseconds per fuel, deadline ns)` for every
+    /// slot that was handed a budget since the last snapshot.
+    pub budgets: Vec<(usize, u64, &'static str, u64, u64)>,
     pub unit_faults: Vec<u64>,
     pub worker_units: Vec<u64>,
     pub worker_busy_ns: Vec<u64>,
@@ -644,11 +693,13 @@ impl TelemetrySnapshot {
                 }
             }
         }
-        for (slot, fuel, reason, picoseconds) in &self.budgets {
+        for (slot, fuel, reason, picoseconds, deadline_ns) in &self.budgets {
             lines.push(format!(
-                "AUDIO_QUALITY_BUDGET slot={} fuel={fuel} reason={reason}                  ns_per_fuel={:.3}",
+                "AUDIO_QUALITY_BUDGET slot={} fuel={fuel} reason={reason} ns_per_fuel={:.3} \
+                 deadline_us={}",
                 self.label(*slot),
                 *picoseconds as f64 / 1_000.0,
+                deadline_ns / 1_000,
             ));
         }
         for (slot, count) in self.slot_faults.iter().enumerate() {
@@ -706,9 +757,11 @@ pub fn spawn_telemetry_publisher(telemetry: &Arc<RenderTelemetry>, interval: Dur
                 };
                 let elapsed = last.elapsed();
                 last = Instant::now();
-                for line in telemetry.snapshot_and_reset().render_lines(elapsed) {
+                let snapshot = telemetry.snapshot_and_reset();
+                for line in snapshot.render_lines(elapsed) {
                     println!("{line}");
                 }
+                telemetry.persist_settled(&snapshot);
             }
         });
 }

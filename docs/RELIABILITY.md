@@ -166,11 +166,10 @@ That is why `REALTIME_BUDGET.md` scales the soundboard and the undamped
 register before it touches the notes: those are the parts that cost the most
 and are heard the least.
 
-### Three exact savings found this way
+### Two exact savings found this way, and one that was not there
 
-All three are bit-identical -- the Concert Grand's render fingerprint is
-unchanged -- and all three came out of the table above rather than from
-guessing:
+Both savings are bit-identical -- the Concert Grand's render fingerprint is
+unchanged -- and both came out of the table above rather than from guessing:
 
 * The bridge projection spends 512 multiplies a frame proving that zero times
   a basis is zero. Skipping it when no voice contributed saves **151 us**, all
@@ -184,52 +183,77 @@ and the lookup looked like the whole difference. It was not: removing it
 bought 37 us of a 190 us gap. The rest is the working set -- 192 resonators
 against 14 is a cache story, not a branch one.
 
-That sentence was the third saving's starting point.
+### The third was chased, built, and measured at nothing (2026-09-19)
 
-* **The banks were twice the cache they had.** One `BodyMode` served every
-  bank and carried every bank's needs: 88 bytes, of which the board's
-  per-sample loop reads 60 and a sympathetic string's reads 32. Swept whole
-  every sample, the banks came to **65 KB against a Cortex-A72's 32 KB of
-  L1**, so half of every cache line fetched was a field that loop never
-  looks at -- the board's shape on a sympathetic string, a string's pan on
-  a board mode.
+That last sentence was the starting point, and the chase is recorded here
+because the mistake in it is easy to repeat.
 
-  Whether that costs anything is a measurement, not an opinion, and it has
-  to be made on the appliance: `tools/measure-bank-stride.rs` sweeps the
-  same arithmetic over the same count in the same order, changing only the
-  stride.
+One `BodyMode` served every bank and carried every bank's needs: 88 bytes, of
+which the soundboard's per-sample loop reads 60 and a sympathetic string's
+reads 32. The banks are swept whole every sample, so half of every cache line
+fetched was a field that loop never looks at.
 
-  | bytes per mode | bank | ns per mode per sample, Pi 4 | on a desktop |
-  | --- | --- | --- | --- |
-  | 32 | 23.7 KB | 4.57 | 1.27 |
-  | 56 | 41.5 KB | 5.11 | 1.50 |
-  | 88 | 65.1 KB | 6.82 | 1.57 |
-  | 152 | 112.5 KB | 9.82 | 1.53 |
+**Whether the stride costs anything is real, and it was measured on the
+appliance.** `tools/measure-bank-stride.rs` sweeps the same arithmetic over
+the same count in the same order and changes only the stride:
 
-  The Pi tracks the stride -- 2.15x across that range -- and the desktop
-  flattens at 1.2x. **A desktop cannot answer this question**, which is why
-  an in-plugin version of the same experiment, run here, said the padding
-  was free.
+| bytes per mode | bank | ns per mode per sample, Pi 4 | on a desktop |
+| --- | --- | --- | --- |
+| 32 | 23.7 KB | 4.57 | 1.27 |
+| 56 | 41.5 KB | 5.11 | 1.50 |
+| 88 | 65.1 KB | 6.82 | 1.57 |
+| 152 | 112.5 KB | 9.82 | 1.53 |
 
-  So the struct was split by what its loop reads: `BodyMode` at **32 bytes**
-  for the sympathetic banks, which tick to a pan, and `BoardMode` at **60**
-  for the soundboard, which ticks to two capsules through a shape. What is
-  only read while the bank is built -- `omega`, the shape's phases, the
-  board's pan -- moved to a parallel `BoardCold`, which `tune_pair` touches
-  a handful of modes per block and the render thread never does. The banks
-  went from **65.1 KB to 30.7 KB**, inside L1.
+The Pi tracks the stride, 2.15x across that range, where a desktop flattens at
+1.2x. That part holds, and it is worth keeping: **a desktop cannot answer a
+cache question about this appliance.**
 
-  Measured with `tools/measure-bank-layout.rs`, which runs both layouts:
-  **1.20x on the bank loops, 139 us a block** on the Pi. Less than the
-  stride sweep's 1.49x, for two reasons worth stating: the board only
-  reached 60 bytes rather than 32, and its loop does more arithmetic per
-  mode, so a larger share of it was never memory to begin with. The 139 us
-  is also an upper bound -- it has all 256 `silent` resonators live, and
-  free slots are already skipped.
+So the struct was split by what its loop reads -- `BodyMode` at 32 bytes for
+the sympathetic banks, `BoardMode` at 60 for the soundboard, and a parallel
+`BoardCold` for what only the builder reads. All of it bit-identical.
 
-  Nothing about the instrument changed. The arithmetic and its order are
-  untouched, which is why the fingerprint is: **0x0c396512799eb435** before
-  and after.
+**And on the appliance it bought nothing.** Measured in silence, with the
+budget written to the store and seeded at the same 2,897,563 fuel for every
+run so the instrument was the same size in all of them, alternating:
+
+| | mean block |
+| --- | --- |
+| before, pass 1 | 586 us |
+| before, pass 2 | 607 us |
+| after, pass 1 | 612 us |
+| after, pass 2 | 610 us |
+
+The spread between the two *before* runs is larger than the gap between the
+conditions. No gain.
+
+**Why, and it was knowable in advance.** The 65 KB in that table is the sum of
+the array CAPACITIES -- `BOARD_MODES`, `UNDAMPED_COUNT`, `SILENT_MODES`. The
+instrument never runs there. The density law places 185 modes in the board's
+range at the default Board Density, not 256; the undamped bank stops at
+`UNDAMPED_HIGH_HZ` after about 90 of its 192; and `silent` ticks only the
+slots a held silent key has taken. `bank_working_set` now reports what is
+live rather than what is allocated:
+
+| Board Density | board modes | KB before | KB after |
+| --- | --- | --- | --- |
+| 0.63 | 106 | 21.5 | 10.7 |
+| 1.11 (the appliance) | 185 | **28.3** | 15.3 |
+| 1.58 (maximum) | 256 | 34.4 | 19.5 |
+
+Twenty-eight kilobytes against thirty-two of L1. **It already fit**, and a
+bank that fits cannot be made faster by making it fit. The benchmark that
+justified the work was sized from the capacities, which is the same error as
+comparing a computed mode count against an overlap law: the number was right
+and it was a number about nothing.
+
+The packing is kept -- it is bit-identical, strictly smaller, and it is the
+difference between fitting and not at maximum density or with silent keys
+held, where the old layout runs 34 KB and over. It is recorded here as a
+saving that is **available and not currently collected**, so that nobody
+measures it again expecting the 139 us the native benchmark predicted.
+
+The lesson for the next one: before optimising a sweep, measure how long the
+sweep actually is.
 
 ## Audio device arrival and loss
 

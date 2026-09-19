@@ -16487,54 +16487,64 @@ mod bench {
     }
 
     /// What the resonator banks weigh, against the cache that has to hold
-    /// them.
+    /// them -- as the instrument actually runs, not as the arrays are sized.
     ///
-    /// The banks are swept whole every sample. If the bytes they occupy do
-    /// not fit the L1 the loop is not paying for its arithmetic, it is
-    /// paying for the trip to L2 -- and the measured 2.97 us per board mode
-    /// per block is about thirty-five cycles for thirteen flops, which is
-    /// what that trip costs on a Cortex-A72.
+    /// The distinction is the whole test. An earlier version of it counted
+    /// `BOARD_MODES`, `UNDAMPED_COUNT` and `SILENT_MODES` -- the array
+    /// CAPACITIES -- and reported 65 KB against a Cortex-A72's 32 KB of L1.
+    /// That number never happens. The density law places 167 modes in the
+    /// board's range, not 256; the undamped bank stops at
+    /// `UNDAMPED_HIGH_HZ` after about 90; and `silent` only ticks the slots
+    /// a held silent key has taken. The banks that actually sweep come to
+    /// 27 KB, which fits -- and a bank that fits cannot be made faster by
+    /// making it fit.
     ///
     /// `cargo test -p rackforge-concert-grand --release bank_working_set -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn bank_working_set() {
-        let one = core::mem::size_of::<BodyMode>();
+        const FRAMES: usize = 128;
+        let simple = core::mem::size_of::<BodyMode>();
         let board_one = core::mem::size_of::<BoardMode>();
         std::println!(
-            "BodyMode: {one} bytes   BoardMode: {board_one} bytes   BoardCold: {} bytes (frio)",
+            "BodyMode: {simple} bytes   BoardMode: {board_one} bytes   BoardCold: {} bytes (frio, fuera del lazo)",
             core::mem::size_of::<BoardCold>()
         );
-        let banks: &[(&str, usize)] = &[
-            ("board", BOARD_MODES),
-            ("undamped", UNDAMPED_COUNT),
-            ("silent", SILENT_MODES),
-            ("bed", BED_COUNT),
-            ("open", OPEN_STRINGS.len()),
-        ];
-        let mut total = 0;
-        std::println!("{:>10} {:>7} {:>10}", "banco", "modos", "KB");
-        for (name, count) in banks {
-            let each = if *name == "board" { board_one } else { one };
-            total += each * count;
-            std::println!("{name:>10} {count:>7} {:>10.1}", (each * count) as f32 / 1024.0);
-        }
-        std::println!("{:>10} {:>7} {:>10.1}", "suma", "", total as f32 / 1024.0);
-        std::println!("  L1d de un Cortex-A72 (Raspberry Pi 4): 32 KB por nucleo");
-        std::println!("  L2 compartida: 1 MB");
         std::println!();
-        // What the per-sample loops actually read.
-        let hot_board = 4 * 11 + core::mem::size_of::<usize>() + 4 * 3;
-        let hot_simple = 4 * 8;
-        std::println!("lo que el lazo por muestra realmente toca:");
-        std::println!("  tabla    {hot_board} de {one} bytes  (y1 y2 a1 a2 drive velocity v1 out_y[2] out_y1[2] shape_a/b/c/q)");
-        std::println!("  simpatia {hot_simple} de {one} bytes  (y1 y2 a1 a2 drive velocity pan_left pan_right)");
-        let hot = hot_board * BOARD_MODES
-            + hot_simple * (UNDAMPED_COUNT + SILENT_MODES + BED_COUNT + OPEN_STRINGS.len());
+        let (low, high) = parameter_bounds(PARAM_BOARD_DENSITY);
         std::println!(
-            "  caliente: {:.1} KB contra {:.1} KB que se recorren hoy",
-            hot as f32 / 1024.0,
-            total as f32 / 1024.0
+            "{:>18} {:>7} {:>9} {:>11} {:>11}",
+            "Board Density", "tabla", "undamped", "KB ahora", "KB con 88 B"
+        );
+        for step in [0.0f64, 0.5, 1.0] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            assert!(piano.set_parameter(PARAM_BOARD_DENSITY, low + (high - low) * step));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            let others = piano.undamped_active + BED_COUNT + OPEN_STRINGS.len();
+            let now = piano.board_count * board_one + others * simple;
+            let before = (piano.board_count + others) * 88;
+            std::println!(
+                "{:>18.2} {:>7} {:>9} {:>11.1} {:>11.1}",
+                low + (high - low) * step,
+                piano.board_count,
+                piano.undamped_active,
+                now as f32 / 1024.0,
+                before as f32 / 1024.0,
+            );
+        }
+        std::println!();
+        std::println!(
+            "  y con teclas mudas tomadas, hasta {} resonadores mas ({:.1} KB ahora, {:.1} antes)",
+            SILENT_MODES,
+            (SILENT_MODES * simple) as f32 / 1024.0,
+            (SILENT_MODES * 88) as f32 / 1024.0,
+        );
+        std::println!("  L1d de un Cortex-A72 (Raspberry Pi 4): 32 KB por nucleo");
+        std::println!(
+            "  el appliance corre en el renglon del medio -- 28 KB, que ya cabian.
+\n  solo la densidad maxima, o unas teclas mudas tomadas, se pasan de L1."
         );
     }
 

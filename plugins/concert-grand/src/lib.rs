@@ -15750,6 +15750,50 @@ mod bench {
         }
     }
 
+    /// Not a test: a fingerprint of rendered audio, to compare two builds.
+    ///
+    /// Every sample of a fixed scenario folded into one number. Two builds
+    /// that print the same number rendered the same audio, bit for bit; two
+    /// that do not, did not, and the difference is then worth explaining.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release render_fingerprint -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn render_fingerprint() {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+        for block in 0..240 {
+            let midi: std::vec::Vec<MidiEvent> = if block % 20 == 0 {
+                [36u8, 43, 48, 55, 60]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &note)| MidiEvent {
+                        frame: (i * 7) as u32,
+                        data: [0x90, note + (block / 20) as u8, 96],
+                        length: 3,
+                    })
+                    .collect()
+            } else {
+                std::vec::Vec::new()
+            };
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            for sample in &output {
+                hash ^= sample.to_bits() as u64;
+                hash = hash.wrapping_mul(0x100_0000_01b3);
+            }
+        }
+        std::println!("huella del render: {hash:#018x}");
+    }
+
     /// Not a test: the tail, not the mean.
     ///
     /// A Raspberry Pi holds p95 inside its 2667 us budget and then misses it

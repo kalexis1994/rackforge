@@ -1108,6 +1108,9 @@ const MINIMUM_PARTIAL_BUDGET: usize = 300;
 /// Sections are not a musical division. Voices land in them by slot, so a
 /// chord's notes are spread across all four rather than gathered in one.
 const STRING_SECTIONS: usize = 4;
+/// How many samples of drive-point history the board may read through.
+const BOARD_FEED_HISTORY: usize = 256;
+
 /// The longest coupling delay the model can be defined with: the largest
 /// block a host may hand this plugin. A delay shorter than the block cannot
 /// be honoured by units that render a whole block in isolation, and a delay
@@ -2792,6 +2795,21 @@ pub static SIM_MIN_MODES: Knob = Knob::new(4.0);
 /// near 10 kHz, and `omega*dt` at four microseconds is 0.25 against a bound
 /// of 2.
 pub static SIM_DT_S: Knob = Knob::new(4.0e-6);
+
+/// How late the board hears the strings, in samples. Ships at zero.
+///
+/// Splitting the STRINGS across cores costs one block of delay between
+/// sections, which the ear has been asked about and passed. Splitting the
+/// BOARD as well would cost a second one, here: the board's modes are
+/// independent oscillators and would divide four ways happily, but they are
+/// driven by bridge points that depend on every section, so a board unit
+/// could only read them a block old.
+///
+/// That is a different approximation from the first, and a more exposed
+/// one -- string to board is the direct path, where section to section is
+/// sympathetic. `board_feed_delay_render` puts it where the ear can reach
+/// it. Not in the knob registry; that table is full.
+pub static BOARD_FEED_DELAY: Knob = Knob::new(0.0);
 
 /// Whether a re-strike merges into the living voice (1) or eases it out and
 /// strikes fresh (0) -- a switch for the ear, not a voicing.
@@ -4773,6 +4791,11 @@ pub struct ConcertGrand {
     /// The previous frame's sum, per section: what a section hears of itself,
     /// which is never delayed.
     section_previous: [f32; STRING_SECTIONS],
+    /// The bridge's drive points for the last `BOARD_FEED_HISTORY` frames,
+    /// so `BOARD_FEED_DELAY` can hand the board a stale copy. Only written
+    /// when that delay is non-zero, so the shipped path does not pay for it.
+    board_feed_history: [[f32; BOARD_DRIVE_POINTS]; BOARD_FEED_HISTORY],
+    board_feed_cursor: usize,
     /// Samples of delay on the sympathetic coupling BETWEEN sections.
     ///
     /// `0` couples every string to every other with the one sample of latency
@@ -4990,6 +5013,8 @@ impl Default for ConcertGrand {
             section_history: [[0.0; MAX_SECTION_DELAY]; STRING_SECTIONS],
             section_cursor: 0,
             section_previous: [0.0; STRING_SECTIONS],
+            board_feed_history: [[0.0; BOARD_DRIVE_POINTS]; BOARD_FEED_HISTORY],
+            board_feed_cursor: 0,
             section_delay: 0,
             restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
             // Per-note calibration fitted against the YDP samples: ten
@@ -10514,6 +10539,10 @@ impl Processor for ConcertGrand {
         // meaningless and the feedback explicit.
         let sympathy_rate = knob_sympathy_rate * self.controls.lab(15).min(4.0);
         let mut bridge_feed = self.bridge_feed;
+        // Read once per block, not per sample: it is a knob, and an atomic
+        // load inside the hot loop is a barrier the optimiser has to honour.
+        let board_feed_delay =
+            (BOARD_FEED_DELAY.get().max(0.0) as usize).min(BOARD_FEED_HISTORY - 1);
         let mut midi_index = 0;
         let mut midi2_index = 0;
         let mut parameter_index = 0;
@@ -10675,6 +10704,19 @@ impl Processor for ConcertGrand {
             // Everything the strings produce radiates through the board --
             // each string from its own point of the bridge (`BOARD_SHAPE`).
             let excitation = bridge_drive;
+            // What the board hears, which is what a board unit could reach
+            // if it rendered beside the strings instead of after them. At
+            // zero the array is handed straight through and nothing is
+            // written, so the shipped render is untouched.
+            let drive_points = if board_feed_delay == 0 {
+                drive_points
+            } else {
+                let write = self.board_feed_cursor;
+                let read = (write + BOARD_FEED_HISTORY - board_feed_delay) % BOARD_FEED_HISTORY;
+                self.board_feed_history[write] = drive_points;
+                self.board_feed_cursor = (write + 1) % BOARD_FEED_HISTORY;
+                self.board_feed_history[read]
+            };
             let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
             let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
             // With nothing sounding every drive point is zero, and the
@@ -17540,7 +17582,13 @@ densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
         ];
         for (name, chord) in scripts {
             let reference = render_script(0, chord, 1_400);
-            let delayed = render_script(512, chord, 1_400);
+            // One block at the appliance's period, which is the delay
+            // `parallel_render_v1` actually imposes: units are rendered in
+            // isolation for a whole block, so a section hears its
+            // neighbours one block old. 512 was the worst case this
+            // rendered before -- four blocks, and a bound rather than a
+            // proposal.
+            let delayed = render_script(128, chord, 1_400);
             let mut track = vec![0.0f32; LEAD_IN];
             // A B A B: the second pair is what actually gets judged, once the
             // ear knows what it is listening for.
@@ -17554,7 +17602,7 @@ densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
             let path = std::format!("{directory}/ab-{name}.wav");
             wav(&path, &track);
             std::println!(
-                "escrito {path} ({:.1} s) -- {:.0} s de silencio, luego A(0) B(512) A(0) B(512)",
+                "escrito {path} ({:.1} s) -- {:.0} s de silencio, luego A(sin retardo) B(128) A B",
                 track.len() as f64 / 48_000.0,
                 LEAD_IN as f64 / 48_000.0,
             );
@@ -17940,6 +17988,120 @@ densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
                 pair.len() as f64 / 2.0 / 48_000.0
             );
         }
+    }
+
+    /// What a block of delay between the strings and the BOARD costs the
+    /// ear.
+    ///
+    /// Splitting the strings across four cores costs one block of delay
+    /// between sections, and that one passed: "son iguales". It buys the
+    /// strings, which on La Campanella is about 810 us of a 2191 us block.
+    /// The rest -- the board bank, the sympathetic banks, the room -- runs
+    /// serially after them, and at roughly 1380 us it is the floor.
+    ///
+    /// The board could divide too: its modes are independent oscillators
+    /// and four groups of them would keep four workers busy. But they are
+    /// driven by bridge points that depend on every string section, so a
+    /// board unit rendering BESIDE the strings could only read them a block
+    /// old. That is a second approximation, and a more exposed one: section
+    /// to section is a sympathetic path, string to board is the direct one
+    /// every note travels.
+    ///
+    /// So it is rendered rather than argued. A is the instrument as it
+    /// ships; B hands the board its drive points 128 samples late.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release board_feed_delay_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn board_feed_delay_render() {
+        const FRAMES: usize = 128;
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+
+        fn render(delay: f32, chord: &[u8], blocks: usize) -> std::vec::Vec<f32> {
+            BOARD_FEED_DELAY.set(delay);
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                    chord
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &note)| MidiEvent {
+                            frame: (i * 11) as u32,
+                            data: [0x90, note, 100],
+                            length: 3,
+                        })
+                        .collect()
+                } else {
+                    std::vec::Vec::new()
+                };
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                for frame in 0..FRAMES {
+                    captured.push(output[frame * 2]);
+                }
+            }
+            captured
+        }
+
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let scripts: [(&str, &[u8]); 2] = [
+            ("acorde", &[36, 43, 48, 55, 60, 64, 67, 72]),
+            ("nota", &[60]),
+        ];
+        for (name, chord) in scripts {
+            let shipped = render(0.0, chord, 1_400);
+            let delayed = render(128.0, chord, 1_400);
+            let peak = shipped.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            let (mut worst, mut sum) = (0.0f32, 0.0f64);
+            for (a, b) in shipped.iter().zip(delayed.iter()) {
+                let difference = (a - b).abs();
+                worst = worst.max(difference);
+                sum += f64::from(difference) * f64::from(difference);
+            }
+            let rms = (sum / shipped.len() as f64).sqrt() as f32;
+            std::println!(
+                "{name}: pico {peak:.4}, mayor diferencia {:.1} dB bajo el pico, rms de la diferencia {:.1} dB",
+                20.0 * log2f((worst / peak).max(1e-9)) / log2f(10.0),
+                20.0 * log2f((rms / peak).max(1e-9)) / log2f(10.0),
+            );
+            let mut track = vec![0.0f32; LEAD_IN];
+            for _ in 0..2 {
+                for rendered in [&shipped, &delayed] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+            }
+            let path = std::format!("{directory}/ab-tabla-atrasada-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in &track {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison render");
+            std::println!(
+                "  escrito {path} ({:.1} s) -- 2 s de silencio, luego A(hoy) B(128) A B",
+                track.len() as f64 / 48_000.0
+            );
+        }
+        BOARD_FEED_DELAY.set(0.0);
     }
 
     /// What the contact integrator's step costs the ear, rendered.

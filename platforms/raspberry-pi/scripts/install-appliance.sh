@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/lib/install-env.sh"
+source "$script_dir/lib/render-audio-seed.sh"
 rackforge_resolve_install_environment
 
 root="$RACKFORGE_ROOT_RESOLVED"
@@ -51,8 +52,12 @@ install -m 0755 \
   "$root/bin/rackforge-web.new"
 mv "$root/bin/rackforge-web.new" "$root/bin/rackforge-web"
 
+# The seed carries tokens, not paths: Core refuses a relative `package` or
+# `data_root`, and the Web host copies this file as it stands the first time
+# an instrument is activated. Copying it verbatim is what left every fresh
+# appliance holding a configuration Core would not start.
 if [[ ! -f "$root/config/audio.toml.example" ]]; then
-  install -m 0644 \
+  rackforge_render_audio_seed \
     "$source_root/config/audio.toml" \
     "$root/config/audio.toml.example"
 fi

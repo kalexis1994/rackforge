@@ -11,6 +11,7 @@ esac
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/scripts/lib/install-env.sh"
+source "$script_dir/scripts/lib/render-audio-seed.sh"
 rackforge_resolve_install_environment
 
 root="$RACKFORGE_ROOT_RESOLVED"
@@ -43,8 +44,12 @@ done
 if [[ ! -f "$root/config/rackforge.toml" ]]; then
   install -m 0644 "$script_dir/config/rackforge.toml" "$root/config/rackforge.toml"
 fi
+# Rendered, not copied: the seed names @RACKFORGE_ROOT@ and the bundled
+# instrument, because Core refuses a relative `package` or `data_root`.
 if [[ ! -f "$root/config/audio.toml.example" && -f "$source_root/config/audio.toml" ]]; then
-  install -m 0644 "$source_root/config/audio.toml" "$root/config/audio.toml.example"
+  rackforge_render_audio_seed \
+    "$source_root/config/audio.toml" \
+    "$root/config/audio.toml.example"
 fi
 
 web_stage="$(mktemp -d "$root/.web-stage.XXXXXX")"

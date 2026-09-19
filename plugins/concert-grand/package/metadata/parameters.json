@@ -18,42 +18,42 @@
     },
     {
       "id": "lab_strike",
-      "name": "Lab · Strike",
+      "name": "Lab \u00b7 Strike",
       "order": 3
     },
     {
       "id": "lab_strings",
-      "name": "Lab · Strings",
+      "name": "Lab \u00b7 Strings",
       "order": 4
     },
     {
       "id": "lab_board",
-      "name": "Lab · Board & Air",
+      "name": "Lab \u00b7 Board & Air",
       "order": 5
     },
     {
       "id": "model_strings",
-      "name": "Model · Strings",
+      "name": "Model \u00b7 Strings",
       "order": 6
     },
     {
       "id": "model_hammer",
-      "name": "Model · Hammer",
+      "name": "Model \u00b7 Hammer",
       "order": 7
     },
     {
       "id": "model_board",
-      "name": "Model · Board",
+      "name": "Model \u00b7 Board",
       "order": 8
     },
     {
       "id": "model_air",
-      "name": "Model · Air & Mics",
+      "name": "Model \u00b7 Air & Mics",
       "order": 9
     },
     {
       "id": "model_misc",
-      "name": "Model · Misc",
+      "name": "Model \u00b7 Misc",
       "order": 10
     }
   ],
@@ -436,7 +436,7 @@
         "maximum": 45000.0,
         "step": 1.0,
         "default": 311.3,
-        "unit": "m³",
+        "unit": "m\u00b3",
         "taper": "logarithmic"
       }
     },
@@ -577,7 +577,7 @@
         "step": 0.01,
         "default": 1.0,
         "taper": "logarithmic",
-        "unit": "×"
+        "unit": "\u00d7"
       }
     },
     {
@@ -639,7 +639,7 @@
         "maximum": 45.83662414550781,
         "step": 0.1,
         "default": 24.35,
-        "unit": "°"
+        "unit": "\u00b0"
       }
     },
     {
@@ -655,7 +655,7 @@
         "step": 0.01,
         "default": 1.0,
         "taper": "logarithmic",
-        "unit": "×"
+        "unit": "\u00d7"
       }
     },
     {
@@ -2596,7 +2596,7 @@
         "step": 0.45,
         "default": 45.0,
         "taper": "logarithmic",
-        "unit": "m³"
+        "unit": "m\u00b3"
       },
       "flags": {
         "automatable": true,
@@ -2618,7 +2618,7 @@
         "step": 450.0,
         "default": 45000.0,
         "taper": "logarithmic",
-        "unit": "m³"
+        "unit": "m\u00b3"
       },
       "flags": {
         "automatable": true,
@@ -4094,6 +4094,27 @@
         "step": 0.01,
         "default": 0.0,
         "taper": "linear"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": false,
+        "read_only": false,
+        "advanced": true
+      }
+    },
+    {
+      "index": 198,
+      "id": "knob_wire_loss_top",
+      "name": "WIRE_LOSS_TOP",
+      "page": "model_strings",
+      "order": 34,
+      "kind": {
+        "type": "float",
+        "minimum": 0.375,
+        "maximum": 96.0,
+        "step": 0.05,
+        "default": 6.0,
+        "taper": "logarithmic"
       },
       "flags": {
         "automatable": true,

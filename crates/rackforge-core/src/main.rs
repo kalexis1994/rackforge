@@ -46,7 +46,8 @@ fn run() -> Result<()> {
             )
         }
         "stress" => {
-            let (plugin, voices, blocks, frames) = parse_stress_arguments(&arguments[1..])?;
+            let (plugin, voices, blocks, frames, parameters) =
+                parse_stress_arguments(&arguments[1..])?;
             let (package, binary, resources, preset, data_root) = plugin;
             stress(
                 &package,
@@ -57,6 +58,7 @@ fn run() -> Result<()> {
                 voices,
                 blocks,
                 frames,
+                &parameters,
             )
         }
         "live" => run_live(&arguments[1..]),
@@ -396,15 +398,34 @@ fn parse_plugin_arguments(command: &str, arguments: &[String]) -> Result<PluginA
     Ok((PathBuf::from(package), binary, resources, preset, data_root))
 }
 
-fn parse_stress_arguments(arguments: &[String]) -> Result<(PluginArguments, u8, u32, u32)> {
+fn parse_stress_arguments(
+    arguments: &[String],
+) -> Result<(PluginArguments, u8, u32, u32, Vec<(u32, f64)>)> {
     let mut common = Vec::new();
     let mut voices = 28_u8;
     let mut blocks = 32_u32;
     let mut frames = 256_u32;
+    let mut parameters = Vec::new();
     let mut index = 0;
     while index < arguments.len() {
         let option = arguments[index].as_str();
-        if matches!(option, "--voices" | "--blocks" | "--frames") {
+        if option == "--parameter" {
+            index += 1;
+            let assignment = arguments
+                .get(index)
+                .context("--parameter requires INDEX=VALUE")?;
+            let (parameter, value) = assignment
+                .split_once('=')
+                .context("--parameter requires INDEX=VALUE")?;
+            parameters.push((
+                parameter
+                    .parse()
+                    .context("--parameter index must be an integer")?,
+                value
+                    .parse()
+                    .context("--parameter value must be a number")?,
+            ));
+        } else if matches!(option, "--voices" | "--blocks" | "--frames") {
             index += 1;
             let value = arguments
                 .get(index)
@@ -440,6 +461,7 @@ fn parse_stress_arguments(arguments: &[String]) -> Result<(PluginArguments, u8, 
         voices,
         blocks,
         frames,
+        parameters,
     ))
 }
 
@@ -597,6 +619,7 @@ fn stress(
     voices: u8,
     blocks: u32,
     frames: u32,
+    parameters: &[(u32, f64)],
 ) -> Result<()> {
     let package = PluginPackage::open(package_path)?;
     // SAFETY: stress is an explicit plugin execution command.
@@ -619,6 +642,11 @@ fn stress(
             .context("instrument does not expose a stress-test preset")?,
     };
     instance.load_preset(&preset.id)?;
+    for (index, value) in parameters {
+        instance
+            .set_parameter(*index, *value)
+            .with_context(|| format!("setting parameter {index} to {value}"))?;
+    }
     instance.activate(48_000.0, frames, 0, 2)?;
 
     let note_ons = (0..voices)
@@ -631,6 +659,12 @@ fn stress(
     let mut output = vec![0.0_f32; frames as usize * 2];
     let mut peak = 0.0_f32;
     let mut maximum_fuel = 0_u64;
+    // The last quarter of the run: past the attack, into the part that
+    // repeats. `max_fuel` is the note-on block and says what the cap has to
+    // survive; this says what the instrument costs to hold.
+    let steady_from = blocks - blocks / 4;
+    let mut steady_total = 0_u128;
+    let mut steady_blocks = 0_u32;
     let started = Instant::now();
     for block in 0..blocks {
         output.fill(0.0);
@@ -638,6 +672,10 @@ fn stress(
         let result = instance.process_interleaved(&[], &mut output, frames, 0, 2, events, &[]);
         let fuel = instance.last_realtime_fuel_consumed().unwrap_or(0);
         maximum_fuel = maximum_fuel.max(fuel);
+        if block >= steady_from {
+            steady_total += u128::from(fuel);
+            steady_blocks += 1;
+        }
         result
             .with_context(|| format!("stress block {block} failed after consuming {fuel} fuel"))?;
         peak = output
@@ -649,13 +687,14 @@ fn stress(
     let realtime_ratio = elapsed.as_secs_f64() / rendered_seconds;
     instance.deactivate()?;
     println!(
-        "PLUGIN_STRESS_OK id={} preset={} voices={} blocks={} frames={} max_fuel={} peak={peak:.6} realtime_ratio={realtime_ratio:.3}",
+        "PLUGIN_STRESS_OK id={} preset={} voices={} blocks={} frames={} max_fuel={}          steady_fuel={} peak={peak:.6} realtime_ratio={realtime_ratio:.3}",
         plugin.descriptor().id,
         preset.id,
         voices,
         blocks,
         frames,
         maximum_fuel,
+        steady_total / u128::from(steady_blocks.max(1)),
     );
     Ok(())
 }

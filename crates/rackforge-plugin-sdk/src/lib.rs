@@ -158,6 +158,28 @@ pub trait Processor: Default {
         0
     }
 
+    /// Tells the processor how much fuel one real-time call may spend on the
+    /// machine it is running on, and returns whether it used the number.
+    ///
+    /// Fuel is the sandbox's instruction counter, so the same work costs the
+    /// same fuel everywhere and a budget means the same thing on a phone, a
+    /// Raspberry Pi and a desktop. The host measures the one thing a processor
+    /// cannot -- how long that fuel takes here -- and keeps adjusting the
+    /// number until the render fits the period, so an approximate cost model
+    /// is fine and an exact one is not required.
+    ///
+    /// Returning `false`, which is the default, means this processor does not
+    /// scale itself. The host stops asking and leaves it exactly as shipped;
+    /// nothing else changes, and the sandbox's hard fuel cap still applies.
+    ///
+    /// Called between blocks and rarely -- at most every couple of seconds --
+    /// so rebuilding coefficients here is allowed. It must not allocate or
+    /// block, and a processor that needs a long rebuild should record the
+    /// number and do the work as its blocks come.
+    fn set_realtime_budget(&mut self, _fuel_per_call: u64) -> bool {
+        false
+    }
+
     fn reset(&mut self) {}
 
     /// Starts delivery of one manifest-declared resource on the control thread.
@@ -733,6 +755,22 @@ macro_rules! export_processor {
                 }
                 let processor = &*core::ptr::addr_of!(RF_PROCESSOR).cast::<$processor>();
                 processor.get_parameter(index as u32).unwrap_or(f64::NAN)
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_set_realtime_budget(fuel_per_call: i64) -> i32 {
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                if fuel_per_call < 0 {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                }
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                // 1 taken, 0 declined. Every processor exports this; only the
+                // ones that answer 1 are ever asked again.
+                i32::from(processor.set_realtime_budget(fuel_per_call as u64))
             }
         }
 

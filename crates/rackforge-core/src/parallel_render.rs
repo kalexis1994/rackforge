@@ -389,6 +389,23 @@ pub struct RenderTelemetry {
     deadline_misses: AtomicU64,
     miss_attribution: Box<[[AtomicU64; STAGE_COUNT]]>,
     slot_faults: Box<[AtomicU64]>,
+    /// The budget each slot was last handed, why, and the machine speed it
+    /// was derived from. Written by the audio loop as two relaxed stores and
+    /// read by the publisher, because a render thread must not format a
+    /// string: `budget_reason` is zero until there is something new to say.
+    budget_fuel: Box<[AtomicU64]>,
+    budget_reason: Box<[AtomicU64]>,
+    budget_picoseconds_per_fuel: Box<[AtomicU64]>,
+    budget_deadline_ns: Box<[AtomicU64]>,
+    /// What the decision was made on, in per-mille: the share of the
+    /// window's blocks that ran late, and the render average against the
+    /// allowance.
+    budget_over_permille: Box<[AtomicU64]>,
+    budget_blocks: Box<[AtomicU64]>,
+    budget_late_blocks: Box<[AtomicU64]>,
+    budget_load_permille: Box<[AtomicU64]>,
+    /// Publisher-side only: which plugin each slot holds, for the store.
+    budget_plugins: Mutex<Vec<String>>,
     unit_faults: Box<[AtomicU64]>,
     worker_units: Box<[AtomicU64]>,
     worker_busy_ns: Box<[AtomicU64]>,
@@ -409,6 +426,15 @@ impl RenderTelemetry {
                 .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
                 .collect(),
             slot_faults: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_fuel: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_reason: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_picoseconds_per_fuel: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_deadline_ns: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_over_permille: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_blocks: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_late_blocks: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_load_permille: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_plugins: Mutex::new(Vec::new()),
             unit_faults: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             worker_units: (0..worker_capacity.max(1))
                 .map(|_| AtomicU64::new(0))
@@ -423,6 +449,46 @@ impl RenderTelemetry {
     fn record_stage(&self, slot: usize, stage: usize, ns: u64) {
         if let Some(stages) = self.stages.get(slot) {
             stages[stage].record(ns);
+        }
+    }
+
+    /// Records that a slot was handed a new real-time budget. Called from the
+    /// audio loop; `reason` is a non-empty word, and the publisher clears it
+    /// once it has been said.
+    pub fn record_budget(
+        &self,
+        slot: usize,
+        fuel: u64,
+        reason: &'static str,
+        rate_ns: f64,
+        deadline_ns: u64,
+        window: (f64, f64),
+        counts: (u32, u32),
+    ) {
+        let Some(slot_fuel) = self.budget_fuel.get(slot) else {
+            return;
+        };
+        slot_fuel.store(fuel, Ordering::Relaxed);
+        if let Some(deadline) = self.budget_deadline_ns.get(slot) {
+            deadline.store(deadline_ns, Ordering::Relaxed);
+        }
+        if let Some(over) = self.budget_over_permille.get(slot) {
+            over.store((window.0 * 1_000.0) as u64, Ordering::Relaxed);
+        }
+        if let Some(load) = self.budget_load_permille.get(slot) {
+            load.store((window.1 * 1_000.0) as u64, Ordering::Relaxed);
+        }
+        if let Some(blocks) = self.budget_blocks.get(slot) {
+            blocks.store(u64::from(counts.0), Ordering::Relaxed);
+        }
+        if let Some(late) = self.budget_late_blocks.get(slot) {
+            late.store(u64::from(counts.1), Ordering::Relaxed);
+        }
+        if let Some(rate) = self.budget_picoseconds_per_fuel.get(slot) {
+            rate.store((rate_ns * 1_000.0) as u64, Ordering::Relaxed);
+        }
+        if let Some(code) = self.budget_reason.get(slot) {
+            code.store(budget_reason_code(reason), Ordering::Relaxed);
         }
     }
 
@@ -462,6 +528,32 @@ impl RenderTelemetry {
         }
     }
 
+    /// Which plugin each Slot holds, so a settled budget can be remembered
+    /// under its name. Called from control paths, and from the audio loop on
+    /// the few blocks per session that report a budget in PLAY mode.
+    pub fn set_slot_plugins(&self, plugins: Vec<String>) {
+        if let Ok(mut guard) = self.budget_plugins.lock() {
+            *guard = plugins;
+        }
+    }
+
+    /// Writes every budget that settled since the last snapshot into the
+    /// store. Publisher thread only: this touches the filesystem.
+    pub fn persist_settled(&self, snapshot: &TelemetrySnapshot) {
+        let plugins = match self.budget_plugins.lock() {
+            Ok(guard) => guard.clone(),
+            Err(_) => return,
+        };
+        for (slot, fuel, reason, _, deadline_ns, _, _, _, _) in &snapshot.budgets {
+            if *reason != "settled" {
+                continue;
+            }
+            if let Some(plugin) = plugins.get(*slot) {
+                crate::realtime_budget::remember(plugin, *deadline_ns, *fuel);
+            }
+        }
+    }
+
     /// Publisher-side naming of Slot indices. Called from control paths.
     pub fn set_slot_labels(&self, labels: Vec<String>) {
         if let Ok(mut guard) = self.labels.lock() {
@@ -495,6 +587,26 @@ impl RenderTelemetry {
                 .iter()
                 .map(|counter| counter.swap(0, Ordering::Relaxed))
                 .collect(),
+            budgets: self
+                .budget_reason
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, code)| {
+                    let code = code.swap(0, Ordering::Relaxed);
+                    let reason = BUDGET_REASONS.get(code.checked_sub(1)? as usize)?;
+                    Some((
+                        slot,
+                        self.budget_fuel[slot].load(Ordering::Relaxed),
+                        *reason,
+                        self.budget_picoseconds_per_fuel[slot].load(Ordering::Relaxed),
+                        self.budget_deadline_ns[slot].load(Ordering::Relaxed),
+                        self.budget_over_permille[slot].load(Ordering::Relaxed),
+                        self.budget_load_permille[slot].load(Ordering::Relaxed),
+                        self.budget_blocks[slot].load(Ordering::Relaxed),
+                        self.budget_late_blocks[slot].load(Ordering::Relaxed),
+                    ))
+                })
+                .collect(),
             unit_faults: self
                 .unit_faults
                 .iter()
@@ -515,6 +627,28 @@ impl RenderTelemetry {
     }
 }
 
+/// The reasons, as the one place that knows both spellings.
+///
+/// A reason missing from this list is a decision that never reaches a log:
+/// `budget_reason_code` returns zero for it, which the snapshot reads as
+/// "nothing new to say". That is exactly what happened to `exhausted` -- the
+/// governor gave up on a Raspberry Pi and said so, four times, silently.
+const BUDGET_REASONS: [&str; 6] = [
+    "measured",
+    "tightened",
+    "relaxed",
+    "exhausted",
+    "seeded",
+    "settled",
+];
+
+fn budget_reason_code(reason: &str) -> u64 {
+    BUDGET_REASONS
+        .iter()
+        .position(|known| *known == reason)
+        .map_or(0, |index| index as u64 + 1)
+}
+
 pub struct TelemetrySnapshot {
     pub stages: Vec<[HistogramSnapshot; STAGE_COUNT]>,
     pub block: HistogramSnapshot,
@@ -522,6 +656,9 @@ pub struct TelemetrySnapshot {
     pub deadline_misses: u64,
     pub miss_attribution: Vec<[u64; STAGE_COUNT]>,
     pub slot_faults: Vec<u64>,
+    /// `(slot, fuel, reason, picoseconds per fuel, deadline ns)` for every
+    /// slot that was handed a budget since the last snapshot.
+    pub budgets: Vec<(usize, u64, &'static str, u64, u64, u64, u64, u64, u64)>,
     pub unit_faults: Vec<u64>,
     pub worker_units: Vec<u64>,
     pub worker_busy_ns: Vec<u64>,
@@ -585,6 +722,19 @@ impl TelemetrySnapshot {
                 }
             }
         }
+        for (slot, fuel, reason, picoseconds, deadline_ns, over, load, blocks, late) in
+            &self.budgets
+        {
+            lines.push(format!(
+                "AUDIO_QUALITY_BUDGET slot={} fuel={fuel} reason={reason} ns_per_fuel={:.3} \
+                 deadline_us={} late_pct={:.1} load={:.2} blocks={blocks} late={late}",
+                self.label(*slot),
+                *picoseconds as f64 / 1_000.0,
+                deadline_ns / 1_000,
+                *over as f64 / 10.0,
+                *load as f64 / 1_000.0,
+            ));
+        }
         for (slot, count) in self.slot_faults.iter().enumerate() {
             if *count > 0 {
                 lines.push(format!(
@@ -640,9 +790,11 @@ pub fn spawn_telemetry_publisher(telemetry: &Arc<RenderTelemetry>, interval: Dur
                 };
                 let elapsed = last.elapsed();
                 last = Instant::now();
-                for line in telemetry.snapshot_and_reset().render_lines(elapsed) {
+                let snapshot = telemetry.snapshot_and_reset();
+                for line in snapshot.render_lines(elapsed) {
                     println!("{line}");
                 }
+                telemetry.persist_settled(&snapshot);
             }
         });
 }

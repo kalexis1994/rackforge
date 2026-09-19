@@ -16994,6 +16994,114 @@ mod bench {
         std::println!("  el deadline de la Pi a 128 cuadros es 2666 us");
     }
 
+    /// The oracle for the loop inversion: this render, kept on disk.
+    ///
+    /// Inverting the loops -- sections outside, frames inside -- cannot be
+    /// bit-identical, because each section will accumulate its own bridge
+    /// contributions and `end_block` will sum them in section order where
+    /// today every voice adds into one running total in slot order. Float
+    /// addition is not associative, so the fingerprint stops being the
+    /// guard exactly where the risk starts.
+    ///
+    /// What CAN be checked is that the difference is rounding and not
+    /// behaviour. So this captures the render at `section_delay = 128` --
+    /// the delay the inversion needs and the ear has approved -- before the
+    /// inversion, and `parallel_oracle_compare` measures against it after.
+    /// A difference near -140 dB is float order. Anything above it is a bug,
+    /// and the delay's own effect (-40 dB) is the scale that matters.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release parallel_oracle_capture -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn parallel_oracle_capture() {
+        let (samples, peak) = oracle_render();
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let path = std::format!("{directory}/oracle-seccion-128.f32");
+        let mut bytes = std::vec::Vec::with_capacity(samples.len() * 4);
+        for sample in &samples {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        std::fs::write(&path, bytes).expect("writing the oracle");
+        std::println!(
+            "escrito {path}: {} muestras, pico {peak:.4}",
+            samples.len()
+        );
+    }
+
+    /// Measures the inverted loops against the oracle captured before them.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release parallel_oracle_compare -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn parallel_oracle_compare() {
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let path = std::format!("{directory}/oracle-seccion-128.f32");
+        let Ok(bytes) = std::fs::read(&path) else {
+            std::println!("no hay oraculo en {path}; corre parallel_oracle_capture primero");
+            return;
+        };
+        let before: std::vec::Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|four| f32::from_le_bytes([four[0], four[1], four[2], four[3]]))
+            .collect();
+        let (after, peak) = oracle_render();
+        assert_eq!(before.len(), after.len(), "el render cambio de largo");
+        let (mut worst, mut sum) = (0.0f32, 0.0f64);
+        for (a, b) in before.iter().zip(after.iter()) {
+            let difference = (a - b).abs();
+            worst = worst.max(difference);
+            sum += f64::from(difference) * f64::from(difference);
+        }
+        let rms = (sum / before.len() as f64).sqrt() as f32;
+        let worst_db = 20.0 * log2f((worst / peak).max(1e-12)) / log2f(10.0);
+        let rms_db = 20.0 * log2f((rms / peak).max(1e-12)) / log2f(10.0);
+        std::println!("contra el oraculo: peor {worst_db:.1} dB, rms {rms_db:.1} dB bajo el pico");
+        std::println!("  (orden de flotantes ~ -140 dB; el retraso de seccion vale -40 dB)");
+        assert!(
+            worst_db < -100.0,
+            "la inversion cambio mas que el orden de las sumas: {worst_db:.1} dB"
+        );
+    }
+
+    /// One pedalled passage at `section_delay = 128`, for both halves of the
+    /// oracle to render the same way.
+    fn oracle_render() -> (std::vec::Vec<f32>, f32) {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        piano.section_delay = 128;
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+        let chord: [u8; 8] = [36, 43, 48, 55, 60, 64, 67, 72];
+        let mut captured = std::vec::Vec::with_capacity(900 * FRAMES);
+        for block in 0..900 {
+            // Notes at odd frames, so the events land mid-block and the
+            // inversion has to place them where they belong.
+            let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                chord
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &note)| MidiEvent {
+                        frame: (i * 13 + 5) as u32,
+                        data: [0x90, note, 100],
+                        length: 3,
+                    })
+                    .collect()
+            } else if block == 400 {
+                std::vec![MidiEvent { frame: 37, data: [0xB0, 64, 0], length: 3 }]
+            } else {
+                std::vec::Vec::new()
+            };
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            for frame in 0..FRAMES {
+                captured.push(output[frame * 2]);
+            }
+        }
+        let peak = captured.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+        (captured, peak)
+    }
+
     /// Is the contact integrator converged at the timestep it ships with?
     ///
     /// The strike simulation is 42-47 % of a note-on on the appliance, and

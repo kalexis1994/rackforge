@@ -64,6 +64,65 @@ Run this layer with:
 cargo test -p rackforge-core midi_hotplug
 ```
 
+## How much instrument a machine can hold
+
+An xrun is not a fault to recover from when the render simply does not fit:
+the engine renders a block, the deadline passes, and the gap is audible. The
+question is then how much instrument fits, which is a property of three
+things together -- the machine, the instrument and the period size -- and not
+of any one of them.
+
+Measured on a Raspberry Pi 4 running the appliance, Concert Grand, 128 frames
+at 48 kHz (a 2667 us deadline), with `tools/measure-appliance-polyphony.py`:
+
+| notes held | mean block | share of deadline | misses / 10 s |
+| --- | --- | --- | --- |
+| 2 | 1671 us | 63% | 0 |
+| 4 | 1872 us | 70% | 0 |
+| 6 | 1941 us | 73% | 3 |
+| 8 | 2083 us | 78% | 390 |
+| 12 | 2131 us | 80% | 488 |
+
+**Six to eight sustained notes.** Above that the tail crosses the deadline and
+the audio breaks up. Silence already costs about half the budget.
+
+### Where the cost is, so it is not looked for in the wrong place
+
+On a desktop, with the board bank switched off to weigh it:
+
+| | with the board | without it | the board's share |
+| --- | --- | --- | --- |
+| idle | 202 us | 84 us | 118 us (58%) |
+| 8 notes | 827 us | 627 us | 200 us (24%) |
+| 24 notes | 1326 us | 1061 us | 265 us (20%) |
+
+The 256-mode board bank dominates *silence* and is a fifth of the cost of
+*playing*. The voices are the rest: about 41 us each per block, and a voice is
+a hundred and forty-four partials of a physical model. So the ceiling moves by
+changing what a voice costs, or how many of them there are -- not by making
+the board loop faster. A perfect fourfold speedup of the board would buy one
+more note.
+
+That is worth stating because the board loop looks like the answer and is not.
+It was rewritten into arrays per coefficient and stepped four modes at a time,
+bit-exactly (`render_fingerprint` in the plugin's tests confirmed the audio was
+unchanged); it measured 20% faster on x86 and 2% slower on the Pi, in an
+A/B/A of sixty silent blocks each -- 1323 us, 1348 us, 1329 us. LLVM was
+already vectorising that loop. The rewrite is not in the tree.
+
+### Other things that were measured and were not the cause
+
+* **The buffer size.** Doubling the period to 256 frames doubles the budget
+  and the work with it: 63% of the deadline before, 62% after. It buys room
+  for jitter, not for notes.
+* **The interface polling the engine.** The Web interface asks Core for
+  changes four times a second per open tab, and it uses the incremental
+  `events` path rather than a snapshot. With a generated load of eight notes
+  a second, the misses were zero with the interface connected.
+* **The note-on itself.** A strike costs 69 us, of which the hammer-string
+  integration is 63. `strike_budget` guards a cost that is not the problem;
+  the voice it starts costs that much again in *every* block it rings.
+
 ## Audio device arrival and loss
 
 The engine binds one output when it starts and renders through it until it

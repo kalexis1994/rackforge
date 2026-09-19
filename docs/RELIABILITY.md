@@ -139,9 +139,34 @@ already vectorising that loop. The rewrite is not in the tree.
   | 6 | 3820 us | |
   | 12 | **5797 us** | **2.2x the whole period** |
 
-  And the hammer-string integration is not in it. Gated off through
-  `SIM_MIN_MODES`, the same chord cost 6006 us -- slightly *more*, which is
-  noise. Whatever a note-on spends, it is not the contact model.
+  **RETRACTED: "and the hammer-string integration is not in it".** Gating it
+  off through `SIM_MIN_MODES` did leave the same chord at 6006 us against
+  5797, and that was read here as the contact model costing nothing. It was
+  a confound. Two effects cancel: the simulation is expensive, and skipping
+  it leaves MORE partials above the amplitude floor, so the ladder that
+  follows grows by about what the simulation saved. The settled cost gives
+  it away in the same runs -- 1855 us with the simulation off against 1762
+  with it on, a bigger instrument for the same twelve notes.
+
+  What settled it was a profiler rather than an ablation. `note_on_profile`
+  times the phases of `start_voice_unit` directly -- explicit probes, not
+  sampling, because that function is very large and everything in it inlines
+  onto one symbol. On the appliance:
+
+  | phase | one note | twelve notes |
+  | --- | --- | --- |
+  | the frequency recipe | 4.3 % | 3.0 % |
+  | felt and contact setup | 0.1 % | 0.1 % |
+  | **the strike simulation** | **47.3 %** | **41.8 %** |
+  | the partial ladder | 35.7 % | 37.4 % |
+  | the halo (pedal down) | 10.1 % | 15.2 % |
+  | phantoms, noise, the re-strike merge | 1.6 % | 1.7 % |
+  | allocating the voice | 0.8 % | 0.8 % |
+
+  So the contact model is about half of it after all, the ladder is a bit
+  over a third, and the halo -- a second, smaller ladder built only under
+  the pedal -- is a sixth. Four earlier rounds of guessing had each landed
+  under ten percent because all four were about the ladder.
 
   It is the ladder. `strike_cost_by_ladder` counts a voice's partials as they
   age, which the first version of it failed to do -- counting them at the end

@@ -26,6 +26,67 @@
 mod math;
 
 use math::{exp2f, expf, log2f, powf, roundf, sincosf, sqrtf};
+
+/// Where a note-on's time goes, by phase.
+///
+/// A sampling profiler is the wrong tool here: `start_voice_unit` is one
+/// very large function and everything in it inlines, so the samples land on
+/// one symbol. These are explicit probes instead -- exact attribution, no
+/// tooling on the machine, and they compile away entirely outside tests.
+#[cfg(test)]
+pub(crate) mod probe {
+    use core::sync::atomic::{AtomicU64, Ordering};
+    pub const PHASES: [&str; 7] = [
+        "receta: el lazo de frecuencias",
+        "el fieltro y el contacto (antes de la simulacion)",
+        "escalera (el lazo de parciales)",
+        "fantasmas, ruido y la mezcla",
+        "asignacion de la voz",
+        "halo (la voz sombra)",
+        "la simulacion del golpe en si",
+    ];
+    pub static NANOS: [AtomicU64; 7] = [
+        AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+        AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+    ];
+    pub fn add(phase: usize, nanos: u64) {
+        NANOS[phase].fetch_add(nanos, Ordering::Relaxed);
+    }
+    pub fn reset() {
+        for slot in NANOS.iter() {
+            slot.store(0, Ordering::Relaxed);
+        }
+    }
+    pub fn report(label: &str) {
+        let total: u64 = NANOS.iter().map(|s| s.load(Ordering::Relaxed)).sum();
+        std::println!("
+=== {label} ===   total {:.0} us", total as f64 / 1000.0);
+        for (phase, name) in PHASES.iter().enumerate() {
+            let nanos = NANOS[phase].load(Ordering::Relaxed);
+            let share = if total > 0 { 100.0 * nanos as f64 / total as f64 } else { 0.0 };
+            std::println!(
+                "  {:>38}  {:>8.0} us  {:>5.1} %  {}",
+                name,
+                nanos as f64 / 1000.0,
+                share,
+                "#".repeat((share / 2.0) as usize)
+            );
+        }
+    }
+}
+
+/// A probe that is a no-op unless the crate is being tested.
+macro_rules! phase {
+    ($phase:expr, $mark:ident) => {
+        #[cfg(test)]
+        {
+            let now = std::time::Instant::now();
+            probe::add($phase, now.duration_since($mark).as_nanos() as u64);
+            $mark = now;
+        }
+    };
+}
+
 use rackforge_plugin_sdk::{
     MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_FLAG_RELEASE_MEASURED,
     MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF, MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2,
@@ -7149,6 +7210,8 @@ impl ConcertGrand {
     /// sources come through `start_voice` and land here at exactly the value
     /// they always produced; a 16-bit velocity lands between those steps.
     fn start_voice_unit(&mut self, channel: u8, note: u8, velocity: f32) {
+        #[cfg(test)]
+        let mut mark = std::time::Instant::now();
         let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
         let mut velocity = velocity;
         // Una corda: the shifted hammer meets the strings with softer felt
@@ -7493,6 +7556,7 @@ impl ConcertGrand {
             peak = peak.max(amplitude.abs());
             count += 1;
         }
+        phase!(0, mark);
         if count == 0 || peak <= 0.0 {
             return;
         }
@@ -7524,6 +7588,7 @@ impl ConcertGrand {
             // the strike and the recipe are wrong in the same place, and the
             // recipe is cheaper. The treble's hammer is the open item, not
             // this gate.
+            phase!(1, mark);
             if sim_modes >= SIM_MIN_MODES.get().max(1.0) as usize && self.strike_budget > 0 {
                 self.strike_budget -= 1;
                 // Everything the contact needs, in physical units.
@@ -7930,6 +7995,7 @@ impl ConcertGrand {
         let prompt_measured_power = PROMPT_MEASURED_POWER.get();
         let mut partials = [Partial::default(); MAX_PARTIALS];
         let mut placed = 0;
+        phase!(6, mark);
         for n in 0..count {
             if placed >= cap || amplitudes[n].abs() < floor {
                 continue;
@@ -8146,6 +8212,7 @@ impl ConcertGrand {
             partials[placed] = built;
             placed += 1;
         }
+        phase!(2, mark);
         if placed == 0 {
             return;
         }
@@ -8574,6 +8641,7 @@ impl ConcertGrand {
         // borrow checker is right that the two cannot overlap.
         let clang_register = self.clang_register(position);
         let firmness = Self::damper_firmness(self.strike_serial, note);
+        phase!(3, mark);
         let Some(voice) = self.allocate_voice() else {
             return;
         };
@@ -8768,6 +8836,7 @@ impl ConcertGrand {
         // the same partial ladder ~24 dB down, each component detuned by its
         // own few cents (many strings, none exactly aligned), single-stage
         // slow decay, released by the pedal like any sustained string.
+        phase!(4, mark);
         if self.pedal && placed > 0 {
             let halo_count = placed.min(24);
             // Twenty-four, which is every entry the loop below can reach --
@@ -8811,6 +8880,7 @@ impl ConcertGrand {
                 self.active_partials += halo_count;
             }
         }
+        phase!(5, mark);
     }
 
     /// How much instrument this machine affords, from 1.0 down.
@@ -16463,6 +16533,52 @@ mod bench {
             let mut output = vec![0.0f32; 256];
             piano.process(&[], &mut output, &[], &[], 128, 0, 2);
             std::println!("{density:>9.1}  {:>6}", piano.board_count);
+        }
+    }
+
+    /// Where a note-on's time actually goes, by phase.
+    ///
+    /// Four rounds of picking the next plausible candidate each landed under
+    /// ten percent -- the hammer integration at zero, the (note, n)
+    /// transcendentals at six, the scratch zeroing and copies at seven. This
+    /// stops guessing and asks the function.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release note_on_profile -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn note_on_profile() {
+        const FRAMES: usize = 128;
+        for (label, notes) in [
+            ("una nota (C2)", &[40u8][..]),
+            ("doce notas, un acorde", &[40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84][..]),
+        ] {
+            probe::reset();
+            let mut blocks = 0.0f64;
+            for round in 0..12 {
+                let mut piano = Box::new(ConcertGrand::default());
+                assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+                let mut output = vec![0.0f32; FRAMES * 2];
+                let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+                piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+                for _ in 0..200 {
+                    piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                }
+                let chord: std::vec::Vec<MidiEvent> =
+                    notes.iter().map(|note| note_on(*note, 100)).collect();
+                // The probes are reset by the first round's warm-up, so the
+                // block that is timed is only the ones that are counted.
+                if round == 0 {
+                    probe::reset();
+                }
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, &chord, &[], FRAMES as u32, 0, 2);
+                blocks += start.elapsed().as_secs_f64() * 1e6;
+            }
+            probe::report(label);
+            std::println!(
+                "  el bloque entero del note-on, sumado: {:.0} us   (lo que las fases no cubren es renderizar la voz nueva)",
+                blocks
+            );
         }
     }
 

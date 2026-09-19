@@ -143,18 +143,126 @@ The default render fingerprint moved from `0x7dd8d95093b622f5` to
 `0x0c396512799eb435` with this change: the instrument is different on
 purpose, above C3.
 
+## The attack, measured (defect 1)
+
+The sustain is one half of the complaint; this is the other, and it is the
+half the phrase "le falta" fits better. Measured with
+`tools/measure-attack-fundamental.py`, which exists because the fit cost
+normalises each window by its own strongest band and therefore cannot tell
+"more high content" from "less fundamental".
+
+### It is one octave and a half, not the whole middle
+
+Level of the fundamental's band against the window's own strongest band,
+0-30 ms, reference | model:
+
+| note | f0 | reference | model |
+| --- | --- | --- | --- |
+| C3 | 131 Hz | strongest | **strongest** |
+| F#3 | 185 Hz | strongest | **strongest** |
+| A3 | 220 Hz | strongest | **-8.0 dB** |
+| C4 | 262 Hz | strongest | **-6.6 dB** |
+| D#4 | 311 Hz | strongest | **-7.4 dB** |
+| F#4 | 370 Hz | strongest | **-4.9 dB** |
+| A4 | 440 Hz | strongest | **-5.7 dB** |
+| C5 | 523 Hz | strongest | **strongest** |
+| A5 | 880 Hz | strongest | **strongest** |
+
+Mean over the attack windows of the anchors 51-81: **-4.0 dB**. Outside
+A3-A4 the model puts its energy where the instrument does.
+
+### The strike-point comb is where that energy goes
+
+Per-partial levels of the model's own render, 0-30 ms, against what
+`sin(n·pi·x0)` alone predicts (both normalised to their strongest):
+
+    A4, x0 = 1/8.8      1      2      3      4      5
+    model            -3.8   -0.6   -0.8   -2.2    0.0
+    comb             -9.0   -3.6   -1.0    0.0   -0.1
+
+    C3, x0 = 1/8.0      1      2      3      4      5
+    model             0.0  -10.8   -6.8  -34.6  -20.8
+    comb             -8.3   -3.0   -0.7    0.0   -0.7
+
+At A4 the model follows the comb; at C3 something darkens the attack by
+thirty decibels at the comb's own peak and leaves the fundamental on top.
+Whatever that something is, it stops working between F#3 and A3.
+
+### It is the shape of the contact force, not its length
+
+The simulated contact times match the literature (`strike_profile` and
+`how_long_the_hammer_stays`): 3.62 ms at A0 fortissimo, 2.18 at C3, 1.39 at
+C4. What changes across the compass is **where the force peaks inside that
+contact**:
+
+| note | contact | peak at | peak / contact |
+| --- | --- | --- | --- |
+| A0 | 3.62 ms | 0.29 ms | 8 % |
+| C3 | 2.18 ms | 0.26 ms | 12 % |
+| C4 | 1.39 ms | 0.66 ms | 47 % |
+| C6 | 0.80 ms | 0.39 ms | 49 % |
+
+In the bass the force rises in a quarter of a millisecond and stays up for
+most of the contact -- a long, flat pulse, and a dark attack. From C4 up it
+is a short symmetric pulse, and the attack is bright. That is the register
+pattern, and it comes from the hammer-string integration, not from any
+filter downstream of it.
+
+### What was ruled out, by measurement
+
+* **The recipe.** The strike simulation is what is carrying the fundamental,
+  not the drawn recipe underneath it: turning the simulation off
+  (`SIM_MIN_MODES` past the mode count) takes the deficit from -4.0 dB to
+  **-15.7**, and putting the recipe back as a floor (`RECIPE_FLOOR` 0.5, 1.0)
+  gives -5.7 and -9.7. Improving the recipe cannot help; the simulation
+  already overrides it everywhere below `SIM_TOP_HZ`.
+* **The hammer's contact width.** x0.6 to x2.4 moves the deficit between
+  -3.9 and -4.5 dB. Nothing.
+* **Stulov's hysteresis.** epsilon 0.1, 0.9 and tau at his published 2 us:
+  -4.1, -4.0, -3.8 dB. Nothing.
+* **`FELT_K_DECADES` 3.0.** Buys 0.9 dB of fundamental, costs 6 dB of
+  brightness everywhere and takes the bass cost from 206 to 250.
+
+### The one lever that works, and why it is not taken
+
+The strike point, exactly as `sin(pi·x0)` predicts: x1.30 takes the deficit
+from -4.0 to **-2.6 dB** with the bass cost unmoved, and x0.75 makes it
+-5.4. But x1.30 puts the tenor's strike at 1/6.5, outside the published
+1/7..1/9, and `PIANO_MODEL.md` records the current value as matching
+Conklin and the KTH lectures. Buying 1.4 dB by breaking a measured value is
+the trade three of this model's retractions were written about.
+
+### A defect found on the way: the fit has a disconnected lever
+
+`cal(note, 0)` -- the calibration table's `felt` column -- scales the felt
+low-pass corner **in the recipe**, and the recipe only survives above
+`SIM_TOP_HZ` (8 kHz). Below that the simulation supplies every amplitude.
+So across the whole mid register the column does nothing: sweeping it from
+its 0.25 floor to its 4.0 ceiling, and setting the entire column to 1.0,
+moves the fundamental deficit by **0.0 dB** and the total fit cost by two
+points out of 835.
+
+Meanwhile the fit has pinned it at its bounds at three anchors -- 0.25 at
+C3, 4.0 at D#5, 2.74 at F#4 -- which is the fit's own docstring's warning
+("parameters against their bounds mean the fit is compensating for
+something the model cannot express") coming true on a lever that is not
+connected to anything it can hear.
+
+Repairing it means making the column scale the *simulation's* felt
+stiffness, which is the brightness control the mid register actually has.
+That invalidates the fitted table -- D#5's 4.0 would suddenly bite hard --
+so it cannot ship without a refit, and a refit is a multi-hour run that has
+to be validated on absolute band levels and crest factor rather than on the
+cost alone.
+
 ## What this does not fix, in the order it is worth doing
 
-1. **The fundamental in the attack (defect 1).** No loss curve moves it: it
-   is the initial spectrum, and the sweep says the strike point is not the
-   lever either (±15 % changed nothing). The suspects are the felt low-pass
-   at the mid register's contact times -- 2 ms at C4 is nearly a full period
-   of its second partial, and the reference's spectra fall off harder above
-   the fundamental than the model's fourth-order felt filter does -- and
-   the `max` blend of the strike simulation against the recipe
-   (`PIANO_MODEL.md`, "The hammer can only ever brighten"), which by
-   construction cannot take energy off partials two to four. That repair is
-   a refit of every anchor and is written up there.
+1. **The fundamental in the attack (defect 1).** Measured in the section
+   above: it is A3-A4 only, it is the shape of the simulated contact force,
+   and the recipe and the felt calibration column have nothing to do with
+   it. The next move is to reconnect `cal(note, 0)` to the simulation's felt
+   stiffness and refit -- a multi-hour run validated on absolute band levels
+   and crest factor, not on the cost.
 2. **The knock (defect 3).** A source, not a filter; `chiff` cannot scale
    what is absent. Most exposed from C5 up.
 3. **The horizontal share.** Halving it helped every register a little with
@@ -170,9 +278,11 @@ purpose, above C3.
     CG_RENDER_DIR=target/fit-renders CG_CAL=tools/piano-cal.txt \
       cargo test -p rackforge-concert-grand render_reference --release -- --ignored
 
-renders the 29 anchors; `tools/fit-piano-cal.py`'s `measure` and `note_cost`
-score them, and a `CG_TUNING` file of `NAME = value` lines sets any knob in
-the registry before the render. The A/B of any candidate, as one continuous
+renders the 29 anchors. `tools/fit-piano-cal.py`'s `measure` and `note_cost`
+score them for balance; `tools/measure-attack-fundamental.py` scores the one
+thing that cost is blind to, the fundamental against its own window. A
+`CG_TUNING` file of `NAME = value` lines sets any knob in the registry
+before the render, which is how every lever above was swept. The A/B of any candidate, as one continuous
 file with a lead-in:
 
     CG_WIRE_TOP=6 cargo test -p rackforge-concert-grand --release wire_loss_render -- --ignored --nocapture

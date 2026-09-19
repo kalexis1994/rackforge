@@ -78,6 +78,7 @@ rackforge_parallel_shared_ptr() -> i32        ;; shared_capacity bytes, 8-aligne
 rackforge_parallel_shared_capacity() -> i32   ;; positive multiple of 8
 rackforge_parallel_plan_ptr() -> i32          ;; header + max_units entries, 4-aligned
 rackforge_parallel_mix_ptr() -> i32           ;; max_units × capacity_output_samples f32
+rackforge_parallel_unit_channels() -> i32     ;; OPTIONAL; f32 a unit writes per frame
 
 rackforge_parallel_begin_block(frames, input_channels, output_channels,
                                midi_count, parameter_count) -> i32
@@ -107,6 +108,38 @@ reserved: u32}` followed by one `{unit: u32, payload_bytes: u32}` entry per
 active unit, with strictly increasing unit indices. The host validates all
 of it: duplicate or out-of-range units, payloads beyond the stride and
 shared sizes beyond the capacity are rejected and quarantine the Slot.
+
+### A unit does not always produce audio
+
+`rackforge_parallel_unit_channels` says how many floats a unit writes per
+frame. A component that does not export it, or exports zero, means the
+plugin's output channel count -- what every component meant before the
+export existed, and what is right whenever a unit produces finished audio.
+The host then copies `frames × output_channels` out of each unit, as it
+always did.
+
+It is not right for every decomposition, and the case that forced this is
+worth stating. An instrument with ONE resonating body has units that produce
+an **intermediate** signal: the Concert Grand's four string sections each
+hand over a bridge force, sixteen bridge drive points and two keybed
+contributions -- nineteen floats a frame -- and one shared serial stage
+turns those into sound. The board cannot be divided with them, because its
+modes are driven by bridge points that depend on every section, and reading
+those a block late was rendered and rejected by ear ("pierde una pizca de
+ataque"). Two channels cannot carry nineteen floats, and truncating them in
+silence is worse than refusing them.
+
+So a unit declares its own width, through `ParallelProcessor::UNIT_CHANNELS`
+in the SDK. Two rules come with it:
+
+* The region a unit writes is sized `max_frames × max_output_channels`, so a
+  widened unit must keep `frames × UNIT_CHANNELS` inside that -- it borrows
+  the headroom a short block leaves rather than growing the static. The
+  generated `render_unit` checks and returns `STATUS_INVALID_ARGUMENT`
+  rather than writing past the end.
+* `UnitMix::unit()` hands `end_block` `frames × UNIT_CHANNELS`, so the
+  combine reads what the units actually wrote. For an audio decomposition
+  that is unchanged.
 
 `render_unit` reads its dispatch slot and the shared region (the host wrote
 both into the worker instance) and writes the standard output region.

@@ -1108,6 +1108,24 @@ const MINIMUM_PARTIAL_BUDGET: usize = 300;
 /// Sections are not a musical division. Voices land in them by slot, so a
 /// chord's notes are spread across all four rather than gathered in one.
 const STRING_SECTIONS: usize = 4;
+/// How many voice slots a section owns. `MAX_VOICES` is a multiple of
+/// `STRING_SECTIONS`, so a slot's section is a mask and its place inside
+/// that section is a shift -- no division in the per-sample loop.
+const VOICES_PER_SECTION: usize = MAX_VOICES / STRING_SECTIONS;
+/// `slot >> SECTION_SHIFT` is a slot's index inside its section.
+const SECTION_SHIFT: u32 = STRING_SECTIONS.trailing_zeros();
+
+/// The voice in `slot`, wherever its section keeps it.
+///
+/// A macro and not a method: a method would borrow the whole of `self` for
+/// as long as the voice lives, and several of these loops touch other
+/// fields in the same breath. This borrows one section's array and nothing
+/// else, which is also exactly what a `parallel_render_v1` unit gets.
+macro_rules! voice_at {
+    ($owner:expr, $slot:expr) => {
+        $owner.sections[$slot & (STRING_SECTIONS - 1)][$slot >> SECTION_SHIFT]
+    };
+}
 /// How many samples of drive-point history the board may read through.
 const BOARD_FEED_HISTORY: usize = 256;
 
@@ -4767,7 +4785,19 @@ pub struct ConcertGrand {
     fundamental: [f32; NOTE_COUNT],
     /// Fletcher inharmonicity coefficient per note.
     inharmonicity: [f32; NOTE_COUNT],
-    voices: [Voice; MAX_VOICES],
+    /// The voices, grouped by the section that renders them.
+    ///
+    /// A voice's section is its slot masked, which is what spreads a chord
+    /// across all four rather than gathering it in one. Grouping the STORAGE
+    /// the same way is what lets a section be a `parallel_render_v1` unit: a
+    /// unit owns its own array and can reach no other, which is the whole of
+    /// the contract (`PARALLEL_RENDER.md`).
+    ///
+    /// Every access goes through `voice_at!`, and every loop still walks
+    /// slots 0, 1, 2 ... in order, so the float summation order -- and the
+    /// render fingerprint with it -- is unchanged. This moves bytes, not
+    /// sound.
+    sections: [[Voice; VOICES_PER_SECTION]; STRING_SECTIONS],
     pedal: bool,
     /// Una corda (CC 67): the shifted hammer strikes two of the three
     /// strings, softer and darker, and the free third string feeds the
@@ -5019,7 +5049,7 @@ impl Default for ConcertGrand {
             sample_rate: 48_000.0,
             fundamental: [0.0; NOTE_COUNT],
             inharmonicity: [0.0; NOTE_COUNT],
-            voices: [Voice::default(); MAX_VOICES],
+            sections: [[Voice::default(); VOICES_PER_SECTION]; STRING_SECTIONS],
             pedal: false,
             soft: 0.0,
             active_partials: 0,
@@ -6312,7 +6342,8 @@ impl ConcertGrand {
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
         let mut caught = false;
-        for voice in &mut self.voices {
+        for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
             if !(voice.active && !voice.halo && voice.note == note && voice.channel == channel) {
                 continue;
             }
@@ -7354,7 +7385,8 @@ impl ConcertGrand {
         let mut restrike_target: Option<usize> = None;
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
-        for (slot, voice) in self.voices.iter_mut().enumerate() {
+        for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
             if self.restrike_merge
                 && voice.active
                 && !voice.halo
@@ -7396,7 +7428,8 @@ impl ConcertGrand {
             // B-flats at 1:11 (found by the score: both pops were re-strikes
             // of note 70 under a moving pedal, and neither a steal nor a
             // step). The ease-out stays; the knock goes.
-            for voice in &mut self.voices {
+            for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
                 if voice.active && voice.note == note && voice.channel == channel {
                     // Its felt too: an eased-out voice still ticks, and a
                     // bounce landing on it relieves a press against a pole
@@ -8487,7 +8520,7 @@ impl ConcertGrand {
             // everything else -- noise, clack, phantoms of the NEW blow, or
             // ladder partials the old voice has already culled -- appends
             // into free slots.
-            let voice = &mut self.voices[slot];
+            let voice = &mut voice_at!(self, slot);
             let mut by_harmonic = [usize::MAX; MAX_PARTIALS];
             for (index, partial) in voice.partials[..voice.partial_count].iter().enumerate() {
                 if partial.slope != 0.0 {
@@ -8687,13 +8720,13 @@ impl ConcertGrand {
                 * powf(1.0 - position, 1.2)
                 * self.clang_register(position)
                 * impact_gain;
-            self.voices[slot].clang_feed += clang_kick;
-            self.voices[slot].clang_hold = clang_kick;
-            self.voices[slot].clang_feed_decay =
+            voice_at!(self, slot).clang_feed += clang_kick;
+            voice_at!(self, slot).clang_hold = clang_kick;
+            voice_at!(self, slot).clang_feed_decay =
                 expf(-1.0 / (IMPACT_PULSE_TAU_S.get() * sample_rate));
             // The re-struck wire is full of fresh high partials again.
-            self.voices[slot].longitudinal_upper = longitudinal_upper;
-            self.voices[slot].upper_env = 1.0;
+            voice_at!(self, slot).longitudinal_upper = longitudinal_upper;
+            voice_at!(self, slot).upper_env = 1.0;
             return;
         }
         // Read before the voice is borrowed: this consults the scale, and the
@@ -9005,22 +9038,21 @@ impl ConcertGrand {
     }
 
     fn allocate_voice(&mut self) -> Option<&mut Voice> {
-        if let Some(index) = self.voices.iter().position(|voice| !voice.active) {
-            return Some(&mut self.voices[index]);
+        if let Some(index) = (0..MAX_VOICES).find(|slot| !voice_at!(self, *slot).active) {
+            return Some(&mut voice_at!(self, index));
         }
         // All busy: steal the quietest, refunding its partials to the budget.
         #[cfg(not(target_arch = "wasm32"))]
         STEALS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-        let index = self
-            .voices
-            .iter()
-            .enumerate()
-            .min_by(|(_, a), (_, b)| a.energy.total_cmp(&b.energy))
-            .map(|(index, _)| index)?;
+        // In slot order, so a tie still steals the same voice it always
+        // did: `min_by` keeps the FIRST of equal minima, and which slot that
+        // is decides the note's section.
+        let index = (0..MAX_VOICES)
+            .min_by(|a, b| voice_at!(self, *a).energy.total_cmp(&voice_at!(self, *b).energy))?;
         self.active_partials = self
             .active_partials
-            .saturating_sub(self.voices[index].partial_count);
-        Some(&mut self.voices[index])
+            .saturating_sub(voice_at!(self, index).partial_count);
+        Some(&mut voice_at!(self, index))
     }
 
     /// Per-sample decay multiplier a falling damper applies: the note dies in
@@ -9206,7 +9238,8 @@ impl ConcertGrand {
             .damp_serial
             .wrapping_mul(0x9E37_79B9)
             .wrapping_add((note as u32).wrapping_mul(2_654_435_761));
-        for voice in &mut self.voices {
+        for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
                 voice.key_off_knock(key_off, key_off_decay, key_off_rise, key_off_seed, rate);
                 if voice.undamped {
@@ -9287,7 +9320,8 @@ impl ConcertGrand {
             // The rail coming up catches every felt still on its way down:
             // that string is sustained from here, its press relieved through
             // the same damper it was made with.
-            for voice in &mut self.voices {
+            for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
                 if voice.active && voice.damper_phase != 0 {
                     voice.cancel_damper();
                     voice.held = false;
@@ -9313,7 +9347,8 @@ impl ConcertGrand {
         // chord ending like a gate rather than like felt.
         self.damp_serial = self.damp_serial.wrapping_add(1);
         let serial = self.damp_serial;
-        for voice in &mut self.voices {
+        for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
             if !(voice.active && voice.sustained) || voice.undamped {
                 continue;
             }
@@ -9363,7 +9398,8 @@ impl ConcertGrand {
         let knock = 0.0025 * Controls::noise_gain(self.controls.pedal_noise);
         self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
         if down {
-            for voice in &mut self.voices {
+            for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
                 if voice.active && voice.held {
                     voice.sostenuto = true;
                 }
@@ -9377,7 +9413,8 @@ impl ConcertGrand {
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
         let pressure = self.pedal_pressure;
-        for voice in &mut self.voices {
+        for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
             if !(voice.active && voice.sostenuto) {
                 continue;
             }
@@ -9402,7 +9439,8 @@ impl ConcertGrand {
         let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
-        for voice in &mut self.voices {
+        for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
             if voice.active {
                 let damper = Self::damper_for(voice.note, rate, grip, 1.0);
                 voice.damp(damper, thud_coefficient, thud_decay, release_gain);
@@ -9752,7 +9790,7 @@ impl Processor for ConcertGrand {
     }
 
     fn reset(&mut self) {
-        self.voices = [Voice::default(); MAX_VOICES];
+        self.sections = [[Voice::default(); VOICES_PER_SECTION]; STRING_SECTIONS];
         self.pedal = false;
         self.active_partials = 0;
         for string in &mut self.undamped {
@@ -10445,7 +10483,8 @@ impl Processor for ConcertGrand {
             }
         }
         self.note_sounding = [false; NOTE_COUNT];
-        for voice in &self.voices {
+        for slot in 0..MAX_VOICES {
+            let voice = &voice_at!(self, slot);
             if !(voice.active && !voice.halo && voice.note >= LOW_NOTE) {
                 continue;
             }
@@ -10597,7 +10636,8 @@ impl Processor for ConcertGrand {
             if refresh_busy {
                 refresh_busy = false;
                 bed_busy = [false; BED_COUNT];
-                for voice in &self.voices {
+                for slot in 0..MAX_VOICES {
+            let voice = &voice_at!(self, slot);
                     if voice.active {
                         let slot = voice.note.saturating_sub(LOW_NOTE) as usize;
                         if slot < BED_COUNT {
@@ -10641,7 +10681,8 @@ impl Processor for ConcertGrand {
             };
             let mut keybed_left = 0.0f32;
             let mut keybed_right = 0.0f32;
-            for (slot, voice) in self.voices.iter_mut().enumerate() {
+            for slot in 0..MAX_VOICES {
+            let voice = &mut voice_at!(self, slot);
                 if !voice.active {
                     continue;
                 }
@@ -11925,8 +11966,8 @@ mod tests {
             let mut piano = prepared();
             render(&mut piano, 1, &[note_on(60, velocity)]);
             let voice = piano
-                .voices
-                .iter()
+                
+                .voices()
                 .find(|voice| voice.active && voice.note == 60)
                 .unwrap();
             voice.thump_in as f32 / FS as f32 * 1000.0
@@ -11946,8 +11987,8 @@ mod tests {
         render(&mut piano, 1, &[note_on(60, 20)]);
         render(&mut piano, (FS * 0.02) as usize, &[]);
         let voice = piano
-            .voices
-            .iter()
+            
+            .voices()
             .find(|voice| voice.active && voice.note == 60)
             .unwrap();
         assert_eq!(voice.thump_in, 0);
@@ -11971,8 +12012,8 @@ mod tests {
             "the hammer struck below the repetition point"
         );
         let voice = piano
-            .voices
-            .iter()
+            
+            .voices()
             .find(|voice| voice.active && voice.note == 60)
             .unwrap();
         assert!(
@@ -12158,32 +12199,32 @@ mod tests {
         render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 90)]);
         render(&mut piano, 16, &[note_off(60)]);
         let voice = piano
-            .voices
-            .iter()
+            
+            .voices()
             .position(|voice| voice.active && voice.note == 60)
             .unwrap();
-        assert_eq!(piano.voices[voice].damper_phase, 1, "the felt is falling");
+        assert_eq!(piano.voice(voice).damper_phase, 1, "the felt is falling");
         // Run the felt through its landing and bounces.
         render(&mut piano, (FS * 0.15) as usize, &[]);
-        assert_eq!(piano.voices[voice].damper_phase, 0, "the felt has seated");
-        assert!(!piano.voices[voice].held && !piano.voices[voice].sustained);
+        assert_eq!(piano.voice(voice).damper_phase, 0, "the felt has seated");
+        assert!(!piano.voice(voice).held && !piano.voice(voice).sustained);
 
         // The same voice damped at once, for the ledger.
         let mut at_once = prepared();
         render(&mut at_once, (FS * 0.3) as usize, &[note_on(60, 90)]);
         let slot = at_once
-            .voices
-            .iter()
+            
+            .voices()
             .position(|voice| voice.active && voice.note == 60)
             .unwrap();
-        let firmness = piano.voices[voice].firmness;
-        at_once.voices[slot].firmness = firmness;
+        let firmness = piano.voice(voice).firmness;
+        at_once.voice_mut(slot).firmness = firmness;
         let grip = at_once.controls.damper_grip();
         let damper = ConcertGrand::damper_for(60, FS as f32, grip * firmness, 1.0);
         let (coefficient, decay) = at_once.damper_thud();
-        at_once.voices[slot].damp(damper, coefficient, decay, 0.0);
-        let late = &piano.voices[voice];
-        let now = &at_once.voices[slot];
+        at_once.voice_mut(slot).damp(damper, coefficient, decay, 0.0);
+        let late = &piano.voice(voice);
+        let now = &at_once.voice(slot);
         // Matched by harmonic number: the cull reorders a voice's partials.
         let mut compared = 0;
         for a in &late.partials[..late.partial_count] {
@@ -12260,7 +12301,7 @@ mod tests {
         let mut piano = prepared();
         let quiet = render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 1)]);
         assert!(
-            piano.voices.iter().all(|voice| !voice.active),
+            piano.voices().all(|voice| !voice.active),
             "velocity 1 struck a string"
         );
         assert!(piano.key_down[60 - LOW_NOTE as usize], "the key is down");
@@ -12275,7 +12316,7 @@ mod tests {
         );
         let mut piano = prepared();
         let struck = render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 36)]);
-        assert!(piano.voices.iter().any(|voice| voice.active));
+        assert!(piano.voices().any(|voice| voice.active));
         assert!(energy(&struck) > 1.0e-6);
         render(&mut piano, 16, &[note_off(60)]);
         assert!(!piano.key_down[60 - LOW_NOTE as usize]);
@@ -13093,7 +13134,7 @@ mod tests {
             render(&mut piano, 64, &[note_on(note, 125)]);
             for block in 0..6 {
                 render(&mut piano, (FS * 0.12) as usize, &[]);
-                let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                let Some(voice) = piano.voices().find(|v| v.active) else {
                     break;
                 };
                 let mut stretch = 0.0f32;
@@ -13228,7 +13269,7 @@ mod tests {
         for note in [21u8, 36, 48, 60, 72] {
             let mut piano = prepared();
             render(&mut piano, 128, &[note_on(note, 125)]);
-            let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+            let Some(voice) = piano.voices().find(|v| v.active) else {
                 continue;
             };
             let count = voice.partial_count;
@@ -13618,7 +13659,7 @@ mod tests {
                 let steps = CONTACT_STEPS.load(core::sync::atomic::Ordering::Relaxed);
                 let contact_ms = steps as f32 * 4.0e-6 * 1000.0;
                 let asked_ms = piano.contact_time(note, velocity as f32 / 127.0) * 1000.0;
-                let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                let Some(voice) = piano.voices().find(|v| v.active) else {
                     continue;
                 };
                 // The partial state the strike left: magnitude and frequency
@@ -13665,7 +13706,7 @@ mod tests {
         let mut piano = Box::new(ConcertGrand::default());
         assert!(piano.prepare(44_100.0, 512, 0, 2));
         render(&mut piano, 64, &[note_on(note, 110)]);
-        let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+        let Some(voice) = piano.voices().find(|v| v.active) else {
             return;
         };
         let rate = 44_100.0f32;
@@ -13822,7 +13863,7 @@ mod tests {
             let (f0, b) = f0_of(&piano);
             let board_count = piano.board_count;
             let mut board: Vec<BoardMode> = piano.board[..board_count].to_vec();
-            let Some(voice) = piano.voices.iter_mut().find(|v| v.active) else {
+            let Some(voice) = piano.find_voice_mut(|v| v.active) else {
                 return;
             };
             // Goertzel accumulators per partial.
@@ -13913,7 +13954,7 @@ mod tests {
             for velocity in [60u8, 127] {
                 let mut piano = prepared();
                 render(&mut piano, 64, &[note_on(note, velocity)]);
-                let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                let Some(voice) = piano.voices().find(|v| v.active) else {
                     continue;
                 };
                 // At note-on the components hold (s, c) = amplitude * (pq, po),
@@ -13942,10 +13983,10 @@ mod tests {
         // carry components a pianissimo A0 does not have at all.
         let mut soft = prepared();
         render(&mut soft, 64, &[note_on(21, 30)]);
-        let soft_count = soft.voices.iter().find(|v| v.active).unwrap().partial_count;
+        let soft_count = soft.voices().find(|v| v.active).unwrap().partial_count;
         let mut hard = prepared();
         render(&mut hard, 64, &[note_on(21, 127)]);
-        let hard_count = hard.voices.iter().find(|v| v.active).unwrap().partial_count;
+        let hard_count = hard.voices().find(|v| v.active).unwrap().partial_count;
         assert!(
             hard_count > soft_count,
             "ff placed {hard_count} partials vs pp {soft_count}"
@@ -13959,7 +14000,7 @@ mod tests {
         // number instead of staying a uniform chorus.
         let mut piano = prepared();
         render(&mut piano, 1, &[note_on(45, 100)]);
-        let voice = piano.voices.iter().find(|v| v.active).unwrap();
+        let voice = piano.voices().find(|v| v.active).unwrap();
         let ratio = |p: &Partial| {
             (p.lane_magnitude_squared(3) / p.lane_magnitude_squared(0).max(1e-20)).sqrt()
         };
@@ -13977,7 +14018,7 @@ mod tests {
     fn dump_c4_ladder() {
         let mut piano = prepared();
         render(&mut piano, 8, &[note_on(60, 125)]);
-        let voice = piano.voices.iter().find(|v| v.active).unwrap();
+        let voice = piano.voices().find(|v| v.active).unwrap();
         let f0 = piano.fundamental[60 - LOW_NOTE as usize];
         for n in 0..voice.partial_count {
             let p = &voice.partials[n];
@@ -14375,7 +14416,7 @@ mod tests {
         for velocity in [36u8, 117u8] {
             let mut piano = prepared();
             render(&mut piano, 64, &[note_on(note, velocity)]);
-            let voice = piano.voices.iter().find(|v| v.active).unwrap();
+            let voice = piano.voices().find(|v| v.active).unwrap();
             let mut num = 0.0f64;
             let mut den = 0.0f64;
             let mut rows = String::new();
@@ -14432,8 +14473,8 @@ mod tests {
             render(&mut piano, 64, &opening);
             render(&mut piano, (FS * 2.0) as usize, &[]);
             piano
-                .voices
-                .iter()
+                
+                .voices()
                 .filter(|v| v.active && !v.halo && v.note == 60)
                 .map(|v| {
                     v.partials[..v.partial_count]
@@ -14468,8 +14509,8 @@ mod tests {
         render(&mut piano, 64, &[note_on(48, 100)]);
         render(&mut piano, (FS * 0.15) as usize, &[]);
         let before: f32 = piano
-            .voices
-            .iter()
+            
+            .voices()
             .filter(|v| v.active && !v.halo && v.note == 48)
             .map(|v| {
                 v.partials[..v.partial_count]
@@ -14484,14 +14525,14 @@ mod tests {
             .sum();
         render(&mut piano, 64, &[note_on(48, 100)]);
         let voices = piano
-            .voices
-            .iter()
+            
+            .voices()
             .filter(|v| v.active && !v.halo && v.note == 48)
             .count();
         assert_eq!(voices, 1, "a re-strike must not mint a second voice");
         let after: f32 = piano
-            .voices
-            .iter()
+            
+            .voices()
             .filter(|v| v.active && !v.halo && v.note == 48)
             .map(|v| {
                 v.partials[..v.partial_count]
@@ -14557,7 +14598,7 @@ mod tests {
         render(&mut piano, (FS * 0.4) as usize, &[]);
         let mut held = 0.0f32;
         let mut dropped = 0.0f32;
-        for voice in piano.voices.iter().filter(|v| v.active) {
+        for voice in piano.voices().filter(|v| v.active) {
             let mut total = 0.0;
             for partial in &voice.partials[..voice.partial_count] {
                 total += partial.lane_magnitude_squared(0)
@@ -14814,7 +14855,7 @@ mod tests {";
         let mut piano = prepared();
         render(&mut piano, 64, &[note_on(60, 100)]);
         let coherence = |piano: &ConcertGrand| {
-            let voice = piano.voices.iter().find(|v| v.active).unwrap();
+            let voice = piano.voices().find(|v| v.active).unwrap();
             // A low partial, because this test is about dephasing and needs a
             // partial that is still alive to watch. Radiation damping now
             // kills C4's eighth by two seconds, which is what the real
@@ -14946,7 +14987,7 @@ mod tests {";
         let mut piano = prepared();
         render(&mut piano, 256, &[note_on(84, 120)]);
         let decay_squared = |c: &Component| c.rc * c.rc + c.rs * c.rs;
-        let voice = piano.voices.iter().find(|v| v.active).unwrap();
+        let voice = piano.voices().find(|v| v.active).unwrap();
         assert!(
             decay_squared(&voice.duplex[0]) > 0.0,
             "treble note grew no duplex"
@@ -14957,7 +14998,7 @@ mod tests {";
         render(&mut piano, 8, &[note_off(84)]);
         // The felt lands late (DAMPER_LAND_MS) and bounces before it seats.
         render(&mut piano, (FS * 0.15) as usize, &[]);
-        let voice = piano.voices.iter().find(|v| v.active).unwrap();
+        let voice = piano.voices().find(|v| v.active).unwrap();
         let string_after = voice.partials[0].rc[0] * voice.partials[0].rc[0]
             + voice.partials[0].rs[0] * voice.partials[0].rs[0];
         let duplex_after = decay_squared(&voice.duplex[0]);
@@ -15048,7 +15089,7 @@ mod tests {";
                 piano.process(&[], &mut output, &[], &[], 512, 0, 2);
             }
             let per = start.elapsed().as_secs_f64() * 1000.0 / ROUNDS as f64;
-            let live: usize = piano.voices.iter().filter(|v| v.active).count();
+            let live: usize = piano.voices().filter(|v| v.active).count();
             std::println!(
                 "{held} pedalled notes ({live} voices, {} partials): {per:.2} ms ({:.0}% of budget)",
                 piano.active_partials,
@@ -15130,7 +15171,7 @@ mod tests {";
                     ms_to_silence = Some(block as f32 * 512.0 / 48.0);
                 }
             }
-            let voices = piano.voices.iter().filter(|v| v.active).count();
+            let voices = piano.voices().filter(|v| v.active).count();
             std::println!(
                 "{label}: -34 dB after {:?} ms, {voices} voices still live",
                 ms_to_silence.map(|v| v as u32)
@@ -15389,8 +15430,8 @@ mod tests {";
             // The largest oscillator state anywhere in the bank: if this
             // grows, something has a pole outside the unit circle.
             let state = piano
-                .voices
-                .iter()
+                
+                .voices()
                 .filter(|v| v.active)
                 .flat_map(|v| v.partials[..v.partial_count].iter())
                 .flat_map(|p| p.s.iter().chain(p.c.iter()))
@@ -15512,7 +15553,7 @@ mod tests {";
                 assert!(piano.prepare(f64::from(rate), 512, 0, 2));
                 let mut output = vec![0.0f32; 512 * 2];
                 piano.process(&[], &mut output, &[note_on(note, 127)], &[], 512, 0, 2);
-                for voice in piano.voices.iter().filter(|v| v.active) {
+                for voice in piano.voices().filter(|v| v.active) {
                     for partial in &voice.partials[..voice.partial_count] {
                         for lane in 0..LANES {
                             let r = sqrtf(
@@ -15582,7 +15623,7 @@ mod tests {";
                     }
                     output.fill(0.0);
                     piano.process(&[], &mut output, &midi, &[], block as u32, 0, 2);
-                    for voice in piano.voices.iter().filter(|v| v.active) {
+                    for voice in piano.voices().filter(|v| v.active) {
                         for partial in &voice.partials[..voice.partial_count] {
                             for lane in 0..LANES {
                                 pole = pole.max(
@@ -15693,7 +15734,7 @@ mod tests {";
                     }
                     output.fill(0.0);
                     piano.process(&[], &mut output, &midi, &[], block as u32, 0, 2);
-                    for voice in piano.voices.iter().filter(|v| v.active) {
+                    for voice in piano.voices().filter(|v| v.active) {
                         for partial in &voice.partials[..voice.partial_count] {
                             for lane in 0..LANES {
                                 let squared = partial.rc[lane] * partial.rc[lane]
@@ -15848,16 +15889,16 @@ mod tests {";
         for step in 0..24 {
             let note = 48 + step as u8;
             // What the bank looks like the instant before the strike.
-            let active = piano.voices.iter().filter(|v| v.active).count();
+            let active = piano.voices().filter(|v| v.active).count();
             let quietest = piano
-                .voices
-                .iter()
+                
+                .voices()
                 .filter(|v| v.active)
                 .map(|v| v.energy)
                 .fold(f32::INFINITY, f32::min);
             let loudest = piano
-                .voices
-                .iter()
+                
+                .voices()
                 .filter(|v| v.active)
                 .map(|v| v.energy)
                 .fold(0.0f32, f32::max);
@@ -15967,7 +16008,7 @@ mod tests {";
                 piano.process(&[], &mut output, &[], &[], 512, 0, 2);
             }
             let background = output.iter().fold(0.0f32, |a, s| a.max(s.abs()));
-            let voices = piano.voices.iter().filter(|v| v.active).count();
+            let voices = piano.voices().filter(|v| v.active).count();
             // The onset under test, alone at frame 0.
             let onset = [MidiEvent {
                 frame: 0,
@@ -16075,7 +16116,7 @@ mod tests {";
         // bloom starts as the exact negative of the other three, so a
         // struck partial leaves here at ~zero and swells into the tone.
         let magnitude = |piano: &ConcertGrand| {
-            let voice = piano.voices.iter().find(|v| v.active).unwrap();
+            let voice = piano.voices().find(|v| v.active).unwrap();
             let p = &voice.partials[0];
             let s = p.s[0] + p.s[1] + p.s[2] + p.s[3] + p.s[4];
             let c = p.c[0] + p.c[1] + p.c[2] + p.c[3] + p.c[4];
@@ -16361,9 +16402,9 @@ mod tests {";
         render(&mut piano, 2048, &[note_on(48, 110)]);
         // Let the attack chiff die out first, then release.
         render(&mut piano, (FS * 0.5) as usize, &[]);
-        let before = piano.voices.iter().find(|v| v.active).unwrap().noise_amp;
+        let before = piano.voices().find(|v| v.active).unwrap().noise_amp;
         render(&mut piano, 8, &[note_off(48)]);
-        let after = piano.voices.iter().find(|v| v.active).unwrap().noise_amp;
+        let after = piano.voices().find(|v| v.active).unwrap().noise_amp;
         assert!(
             after > before && after > 1e-4,
             "release thud {after} (was {before})"
@@ -16453,6 +16494,32 @@ mod tests {";
             piano.active_partials < at_start,
             "budget still {at_start} after the note died"
         );
+    }
+}
+
+/// The voices in slot order, for tests that read them as one array.
+///
+/// Production code reaches a voice through `voice_at!`, which borrows one
+/// section and nothing else -- that is what a `parallel_render_v1` unit
+/// gets. Tests want the old flat view, and they are not on the audio thread.
+#[cfg(test)]
+impl ConcertGrand {
+    fn voices(&self) -> impl Iterator<Item = &Voice> + '_ {
+        (0..MAX_VOICES).map(move |slot| &voice_at!(self, slot))
+    }
+
+    fn voice(&self, slot: usize) -> &Voice {
+        &voice_at!(self, slot)
+    }
+
+    fn voice_mut(&mut self, slot: usize) -> &mut Voice {
+        &mut voice_at!(self, slot)
+    }
+
+    /// The first voice in slot order that `wanted` accepts, mutably.
+    fn find_voice_mut(&mut self, wanted: impl Fn(&Voice) -> bool) -> Option<&mut Voice> {
+        let slot = (0..MAX_VOICES).find(|slot| wanted(&voice_at!(self, *slot)))?;
+        Some(&mut voice_at!(self, slot))
     }
 }
 
@@ -16678,15 +16745,15 @@ mod bench {
             }
             cost /= 300.0;
 
-            let active = piano.voices.iter().filter(|voice| voice.active).count();
+            let active = piano.voices().filter(|voice| voice.active).count();
             let partials: usize = piano
-                .voices
-                .iter()
+                
+                .voices()
                 .filter(|voice| voice.active)
                 .map(|voice| voice.partial_count)
                 .sum();
             let mut components = 0usize;
-            for voice in piano.voices.iter().filter(|voice| voice.active) {
+            for voice in piano.voices().filter(|voice| voice.active) {
                 for partial in &voice.partials[..voice.partial_count] {
                     for lane in 0..LANES {
                         if partial.rc[lane] != 0.0 || partial.rs[lane] != 0.0 {
@@ -16715,7 +16782,7 @@ mod bench {
                 // a loud passage those are very different lines.
                 let peak = output.iter().fold(0.0f32, |a, x| a.max(x.abs())).max(1e-9);
                 let mut levels: std::vec::Vec<f32> = std::vec::Vec::new();
-                for voice in piano.voices.iter().filter(|voice| voice.active) {
+                for voice in piano.voices().filter(|voice| voice.active) {
                     for partial in &voice.partials[..voice.partial_count] {
                         for lane in 0..LANES {
                             if partial.rc[lane] == 0.0 && partial.rs[lane] == 0.0 {
@@ -16736,7 +16803,7 @@ mod bench {
                 // releases and it should be exposed again. Within a note the
                 // ratio is stable, because the whole note decays together.
                 let mut within: std::vec::Vec<f32> = std::vec::Vec::new();
-                for voice in piano.voices.iter().filter(|voice| voice.active) {
+                for voice in piano.voices().filter(|voice| voice.active) {
                     let mut loudest = 1e-12f32;
                     for partial in &voice.partials[..voice.partial_count] {
                         for lane in 0..LANES {
@@ -16780,7 +16847,7 @@ mod bench {
                 // the WORK it is.
                 let (mut halo_voices, mut halo_components) = (0usize, 0usize);
                 let (mut note_voices, mut note_components) = (0usize, 0usize);
-                for voice in piano.voices.iter().filter(|voice| voice.active) {
+                for voice in piano.voices().filter(|voice| voice.active) {
                     let mut live = 0usize;
                     for partial in &voice.partials[..voice.partial_count] {
                         for lane in 0..LANES {
@@ -16854,7 +16921,7 @@ mod bench {
             piano.process(
                 &[], &mut output, &[note_on(note, velocity)], &[], FRAMES as u32, 0, 2,
             );
-            let Some(voice) = piano.voices.iter().find(|voice| voice.active && !voice.halo)
+            let Some(voice) = piano.voices().find(|voice| voice.active && !voice.halo)
             else {
                 return std::vec::Vec::new();
             };
@@ -16994,8 +17061,8 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
             let mut output = vec![0.0f32; FRAMES * 2];
             piano.process(&[], &mut output, &[note_on(note, 100)], &[], FRAMES as u32, 0, 2);
             let placed: usize = piano
-                .voices
-                .iter()
+                
+                .voices()
                 .filter(|voice| voice.active)
                 .map(|voice| voice.partial_count)
                 .sum();
@@ -17047,8 +17114,8 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
             piano.process(&[], &mut output, &strike, &[], FRAMES as u32, 0, 2);
             let block = start.elapsed().as_secs_f64() * 1e6;
             let placed: usize = piano
-                .voices
-                .iter()
+                
+                .voices()
                 .filter(|voice| voice.active)
                 .map(|voice| voice.partial_count)
                 .sum();
@@ -17136,8 +17203,8 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
                 costs.push(start.elapsed().as_secs_f64() * 1e6);
                 if let Some(slot) = ages.iter().position(|age| *age == block) {
                     ladder[slot] = piano
-                        .voices
-                        .iter()
+                        
+                        .voices()
                         .filter(|voice| voice.active)
                         .map(|voice| voice.partial_count)
                         .sum();

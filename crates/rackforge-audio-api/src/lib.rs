@@ -159,6 +159,19 @@ impl AudioTransport {
     ///   usually a monitor that is not there, so it goes last;
     /// - an unclassified transport is taken as a wired-in output.
     ///
+    /// Whether an output that has just appeared should take over from the
+    /// one already playing.
+    ///
+    /// Only a better kind of connection does. Two interfaces of the same kind
+    /// never displace each other, which is the whole rule for an appliance on
+    /// a stage: something plugged in while nothing but the board's own output
+    /// was available is a player reaching for their interface, and a second
+    /// interface plugged in beside a working one is not a request to move the
+    /// performance onto it.
+    pub fn outranks(self, current: Self) -> bool {
+        self.preference() < current.preference()
+    }
+
     /// Lower sorts first.
     pub fn preference(self) -> u8 {
         match self {
@@ -168,6 +181,45 @@ impl AudioTransport {
             Self::Hdmi => 3,
         }
     }
+}
+
+/// What the watcher found worth acting on.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OutputChange {
+    /// The bound output is no longer present.
+    Lost,
+    /// A better kind of connection appeared while this one plays.
+    Better {
+        id: AudioDeviceId,
+        transport: AudioTransport,
+    },
+}
+
+/// Decides from one inventory reading, so the decision can be tested without
+/// an ALSA card in the machine.
+pub fn assess(
+    current_id: &AudioDeviceId,
+    current_transport: AudioTransport,
+    profile: &AudioOutputProfile,
+    devices: &[AudioDeviceDescriptor],
+) -> Option<OutputChange> {
+    if !devices.iter().any(|device| &device.id == current_id) {
+        return Some(OutputChange::Lost);
+    }
+    devices
+        .iter()
+        .filter(|device| device.transport.outranks(current_transport))
+        .filter(|device| profile.validate_against(device).is_ok())
+        .min_by(|left, right| {
+            left.transport
+                .preference()
+                .cmp(&right.transport.preference())
+                .then_with(|| left.id.as_str().cmp(right.id.as_str()))
+        })
+        .map(|device| OutputChange::Better {
+            id: device.id.clone(),
+            transport: device.transport,
+        })
 }
 
 /// The output to use when the configuration names none.
@@ -828,6 +880,139 @@ mod tests {
             preferred_automatic_output(&[&second, &first]).map(|d| d.id.as_str()),
             Some("alsa.usb-1111-1111.pcm-0"),
         );
+    }
+
+    fn plain_output(id: &str, transport: AudioTransport) -> AudioDeviceDescriptor {
+        AudioDeviceDescriptor {
+            id: AudioDeviceId::new(id).unwrap(),
+            name: id.into(),
+            transport,
+            // A USB transport without a USB identity is not a device the
+            // inventory would ever produce, and validation says so.
+            usb: match transport {
+                AudioTransport::Usb => Some(UsbAudioIdentity {
+                    vendor_id: 0x1234,
+                    product_id: 0x5678,
+                    serial: None,
+                }),
+                _ => None,
+            },
+            capture: None,
+            ..device()
+        }
+    }
+
+    fn automatic_profile() -> AudioOutputProfile {
+        AudioOutputProfile {
+            device: AudioDeviceSelector::Automatic,
+            ..profile()
+        }
+    }
+
+    #[test]
+    fn a_steady_machine_asks_for_nothing() {
+        let built_in = plain_output("alsa.card-headphones.pcm-0", AudioTransport::BuiltIn);
+        let id = built_in.id.clone();
+        assert_eq!(
+            assess(
+                &id,
+                AudioTransport::BuiltIn,
+                &automatic_profile(),
+                &[built_in]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn an_interface_arriving_beside_the_board_is_adopted() {
+        let built_in = plain_output("alsa.card-headphones.pcm-0", AudioTransport::BuiltIn);
+        let interface = plain_output("alsa.usb-aaaa-bbbb.pcm-0", AudioTransport::Usb);
+        let id = built_in.id.clone();
+        let change = assess(
+            &id,
+            AudioTransport::BuiltIn,
+            &automatic_profile(),
+            &[built_in, interface],
+        );
+        assert!(matches!(
+            change,
+            Some(OutputChange::Better {
+                transport: AudioTransport::Usb,
+                ..
+            })
+        ));
+    }
+
+    /// The rule a stage depends on: a second interface is not a request to
+    /// move the performance onto it.
+    #[test]
+    fn a_second_interface_does_not_move_a_performance() {
+        let playing = plain_output("alsa.usb-1111-1111.pcm-0", AudioTransport::Usb);
+        let arrived = plain_output("alsa.usb-2222-2222.pcm-0", AudioTransport::Usb);
+        let id = playing.id.clone();
+        assert_eq!(
+            assess(
+                &id,
+                AudioTransport::Usb,
+                &automatic_profile(),
+                &[playing, arrived]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn the_output_disappearing_asks_for_a_rebind() {
+        let interface = plain_output("alsa.usb-aaaa-bbbb.pcm-0", AudioTransport::Usb);
+        let remaining = plain_output("alsa.card-headphones.pcm-0", AudioTransport::BuiltIn);
+        assert_eq!(
+            assess(
+                &interface.id,
+                AudioTransport::Usb,
+                &automatic_profile(),
+                &[remaining]
+            ),
+            Some(OutputChange::Lost)
+        );
+    }
+
+    /// An arrival the engine could not play through is no reason to stop
+    /// playing: a Raspberry Pi's HDMI and headphone jack both appear as
+    /// outputs and neither takes S32_LE.
+    #[test]
+    fn an_arrival_that_cannot_serve_the_profile_is_ignored() {
+        let playing = plain_output("alsa.card-headphones.pcm-0", AudioTransport::BuiltIn);
+        let mut unusable = plain_output("alsa.usb-cccc-dddd.pcm-0", AudioTransport::Usb);
+        unusable.playback = Some(AudioStreamCapabilities {
+            sample_formats: vec![AudioSampleFormat::S16Le],
+            sample_rates_hz: vec![48_000],
+            channels: AudioValueRange::new(2, 2).unwrap(),
+            period_frames: AudioValueRange::new(32, 8_192).unwrap(),
+            buffer_frames: AudioValueRange::new(64, 16_384).unwrap(),
+        });
+        let id = playing.id.clone();
+        assert_eq!(
+            assess(
+                &id,
+                AudioTransport::BuiltIn,
+                &automatic_profile(),
+                &[playing, unusable]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn an_interface_takes_over_from_the_board_but_not_from_another_interface() {
+        assert!(AudioTransport::Usb.outranks(AudioTransport::BuiltIn));
+        assert!(AudioTransport::Usb.outranks(AudioTransport::Hdmi));
+        assert!(
+            !AudioTransport::Usb.outranks(AudioTransport::Usb),
+            "a second interface must not move a performance off the first"
+        );
+        assert!(!AudioTransport::BuiltIn.outranks(AudioTransport::Usb));
+        assert!(!AudioTransport::Hdmi.outranks(AudioTransport::BuiltIn));
     }
 
     #[test]

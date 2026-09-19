@@ -1652,6 +1652,21 @@ pub fn run(config: LiveConfig) -> Result<()> {
             output.profile.buffer_frames,
             output.profile.nominal_buffer_latency_ms(),
         );
+        // From here the engine plays through this one device until it stops.
+        // The supervisor is what notices that the machine around it changed:
+        // the interface unplugged, or one arriving beside the board's own
+        // output, which is how an appliance meets the interface it will be
+        // played through.
+        if let Err(error) = crate::audio_hotplug::spawn(
+            output.device.id.clone(),
+            output.device.transport,
+            output.profile.clone(),
+            crate::audio_hotplug::DEFAULT_POLL_INTERVAL,
+        ) {
+            // Worth saying and not worth refusing to play over: without it the
+            // engine is exactly as good as it was before there was one.
+            eprintln!("AUDIO_SUPERVISOR_UNAVAILABLE error={error:#}");
+        }
     }
     if let Some(input) = &input {
         println!(

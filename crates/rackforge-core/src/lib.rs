@@ -1,5 +1,7 @@
 #[cfg(target_os = "linux")]
 pub mod audio;
+#[cfg(target_os = "linux")]
+pub mod audio_hotplug;
 pub mod audio_reliability;
 #[cfg(target_os = "linux")]
 pub mod control;

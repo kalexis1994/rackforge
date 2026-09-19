@@ -64,6 +64,36 @@ Run this layer with:
 cargo test -p rackforge-core midi_hotplug
 ```
 
+## Audio device arrival and loss
+
+The engine binds one output when it starts and renders through it until it
+stops, which is right for the stream and wrong for an appliance: a Raspberry
+Pi is imaged before it meets the interface it will be played through.
+`rackforge_core::audio_hotplug` watches the inventory beside the running
+engine and asks systemd for a restart when the binding has gone stale --
+the same move the MIDI supervisor makes for a keyboard that arrives after
+boot, and for the same reason. Re-binding a live ALSA stream is a larger
+promise than the restart is worth.
+
+It leaves a working output in two cases only:
+
+* the bound device is no longer present (`AUDIO_OUTPUT_LOST`);
+* an output of a **better kind of connection** appears and can serve the
+  running profile (`AUDIO_OUTPUT_ARRIVED`).
+
+Kind, never make: USB outranks the board's own output, which outranks an
+unclassified one, which outranks HDMI -- on a headless appliance HDMI usually
+leads to a screen that is not there. Equal kinds never displace each other, so
+a second interface plugged in beside a working one changes nothing, and a
+performance is never moved off the interface it is playing through.
+
+The decision is a pure function over one inventory reading
+(`rackforge_audio_api::assess`), so it is tested without a sound card:
+
+```text
+cargo test -p rackforge-audio-api
+```
+
 ## Audio fault injection and recovery
 
 `rackforge_core::audio_reliability` owns the bounded stereo render queue and

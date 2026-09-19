@@ -3544,6 +3544,27 @@ pub static AIR_HIGHPASS: Knob = Knob::new(0.0094);
 const ROOM_BUFFER: usize = 4096;
 /// Wet level of the chamber against the direct sound.
 pub static ROOM_MIX: Knob = Knob::new(0.09);
+/// What the stages after the strings need to know about the frame they are
+/// rendering, captured where the events for that frame have just landed.
+///
+/// Once the sections are `parallel_render_v1` units the voices and the
+/// stages after them run in separate passes, and a stage reading `self` in
+/// the second pass would see the state the LAST event of the block left
+/// rather than the state at its own frame. These are the only values where
+/// that differs, and they are measured rather than guessed: the fields an
+/// event handler can touch, intersected with the fields the stages after
+/// the strings read. There are four of them, not the fifty-six that
+/// counting the downstream's own buffers suggests.
+#[derive(Clone, Copy, Default)]
+struct FrameState {
+    /// `lab(14)`, `lab(15)` and `lab(16)`: the only lab knobs those stages
+    /// read, and a parameter event can move one mid-block.
+    lab: [f32; 3],
+    pedal_noise_amp: f32,
+    silent_state: [u8; SILENT_SLOTS],
+    silent_note: [u8; SILENT_SLOTS],
+}
+
 /// What one voice puts into a frame.
 ///
 /// Exactly what a `parallel_render_v1` unit can hand back: the voice's own
@@ -10801,6 +10822,20 @@ impl Processor for ConcertGrand {
                 self.active_partials = self.active_partials.saturating_sub(made.culled);
             }
 
+            // Everything after this line is a stage that will one day run in
+            // its own pass, so it reads the frame rather than `self`. In one
+            // pass the two are the same value, which is why the fingerprint
+            // can still guard this.
+            let frame_state = FrameState {
+                lab: [
+                    self.controls.lab(14),
+                    self.controls.lab(15),
+                    self.controls.lab(16),
+                ],
+                pedal_noise_amp: self.pedal_noise_amp,
+                silent_state: self.silent_state,
+                silent_note: self.silent_note,
+            };
             bridge_feed = strings_total;
             self.section_previous = section_total;
             for section in 0..STRING_SECTIONS {
@@ -10903,10 +10938,10 @@ impl Processor for ConcertGrand {
             // The silent keys' strings, listening like the top octave's;
             // one whose own voice is sounding is that voice.
             for slot in 0..SILENT_SLOTS {
-                if self.silent_state[slot] == SILENT_FREE {
+                if frame_state.silent_state[slot] == SILENT_FREE {
                     continue;
                 }
-                let owner = self.silent_note[slot];
+                let owner = frame_state.silent_note[slot];
                 let sounding = owner >= LOW_NOTE && self.note_sounding[(owner - LOW_NOTE) as usize];
                 let feed = if sounding { 0.0 } else { excitation };
                 let base = slot * SILENT_MODES_PER_SLOT;
@@ -10920,7 +10955,7 @@ impl Processor for ConcertGrand {
             undamped_right = rim_pass(&mut self.rim[3], &self.rim_coef, undamped_right);
             undamped_left *= self.body_gain;
             undamped_right *= self.body_gain;
-            let undamped_gain = knob_undamped_mix * self.controls.lab(15);
+            let undamped_gain = knob_undamped_mix * frame_state.lab[1];
             // The damped strings' bed, listening to the bridge like the
             // undamped lengths do -- see BED_MIX.
             let mut bed_left = 0.0;
@@ -10939,7 +10974,7 @@ impl Processor for ConcertGrand {
             bed_right = rim_pass(&mut self.rim[5], &self.rim_coef, bed_right);
             bed_left *= self.body_gain;
             bed_right *= self.body_gain;
-            let bed_gain = knob_bed_mix * self.controls.lab(15);
+            let bed_gain = knob_bed_mix * frame_state.lab[1];
 
             // The shimmer: everything above ~1.8 kHz feeds the undamped
             // open register and rings on.
@@ -10959,7 +10994,7 @@ impl Processor for ConcertGrand {
                 let next = index + 1;
                 self.halo_index[line] = if next == self.halo_len[line] { 0 } else { next };
             }
-            let sympathy = self.controls.lab(15);
+            let sympathy = frame_state.lab[1];
             let halo_left = (halo_outs[0] - halo_outs[1]) * knob_halo_mix * sympathy;
             let halo_right = (halo_outs[2] - halo_outs[3]) * knob_halo_mix * sympathy;
 
@@ -11071,7 +11106,7 @@ impl Processor for ConcertGrand {
                 let next = index + 1;
                 self.room_index[line] = if next == self.room_len[line] { 0 } else { next };
             }
-            let air = self.controls.lab(16);
+            let air = frame_state.lab[2];
             let wet = knob_room_mix * air * self.reverb_gain;
             let room_left =
                 (outs[0] - outs[1] + outs[2]) * wet + early_left * self.early_gain * air;
@@ -11105,7 +11140,7 @@ impl Processor for ConcertGrand {
             // clamp. That costs about 11 dB of output, which belongs in the
             // host's gain and not in a saturator: the desktop already runs
             // +6 dB and allows +12.
-            let board_mix = knob_board_mix * self.controls.lab(14) * knob_headroom;
+            let board_mix = knob_board_mix * frame_state.lab[0] * knob_headroom;
             let (near_left, near_right) = (self.direct_gain[0], self.direct_gain[1]);
             let mut direct_left = board_left * board_mix * near_left
                 + keybed_left * board_mix * self.keybed_gain[0]
@@ -11121,7 +11156,7 @@ impl Processor for ConcertGrand {
                 + open_right * knob_open_mix * sympathy * knob_headroom
                 + halo_right * knob_headroom
                 + lid_right * air * knob_headroom;
-            if self.pedal_noise_amp > 1e-6 {
+            if frame_state.pedal_noise_amp > 1e-6 {
                 self.pedal_noise_seed = self
                     .pedal_noise_seed
                     .wrapping_mul(1_664_525)
@@ -11133,7 +11168,8 @@ impl Processor for ConcertGrand {
                 self.pedal_noise_lp2 += pedal_c2 * (self.pedal_noise_lp - self.pedal_noise_lp2);
                 self.pedal_noise_floor +=
                     pedal_c0 * (self.pedal_noise_lp2 - self.pedal_noise_floor);
-                let knock = (self.pedal_noise_lp2 - self.pedal_noise_floor) * self.pedal_noise_amp;
+                let knock =
+                    (self.pedal_noise_lp2 - self.pedal_noise_floor) * frame_state.pedal_noise_amp;
                 direct_left += knock;
                 direct_right += knock;
                 self.pedal_noise_amp *= pedal_decay;

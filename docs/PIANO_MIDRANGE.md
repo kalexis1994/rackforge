@@ -232,6 +232,29 @@ from -4.0 to **-2.6 dB** with the bass cost unmoved, and x0.75 makes it
 Conklin and the KTH lectures. Buying 1.4 dB by breaking a measured value is
 the trade three of this model's retractions were written about.
 
+### The ear's verdict: not what it flags
+
+Rendered and listened to (`listen`, the register ladder and the phrase, at
+full quality): **the player hears the A3-A4 region as fine.** The -4.0 dB is
+a real difference from the reference and it is not what anyone is
+complaining about.
+
+That is worth stating plainly rather than filing away, because this model
+already carries three retractions of the same shape: a number that differed
+from the reference, was chased, and turned out to be on the wrong side of
+the comparison or beside the point. The deficit stays measured and
+documented here; it is not a defect to fix until something is heard that it
+explains.
+
+What the complaint that started this document was actually about is the
+open question. The two candidates, in order: the sustain that
+`WIRE_LOSS_TOP` has since changed (the player heard the instrument before
+that shipped), and the real-time budget thinning the instrument on the
+appliance -- a Raspberry Pi settled at 373,087 fuel, which is
+`MINIMUM_QUALITY`, the floor: the soundboard at its widest spacing, two
+sympathetic partials of eight, a partial ceiling of 300 against 900. Nobody
+had listened to the mid register at full quality until now.
+
 ### A defect found on the way: the fit has a disconnected lever
 
 `cal(note, 0)` -- the calibration table's `felt` column -- scales the felt

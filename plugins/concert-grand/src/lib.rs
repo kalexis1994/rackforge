@@ -16559,6 +16559,180 @@ mod bench {
         );
     }
 
+    /// The instrument as it stands, rendered to be listened to.
+    ///
+    /// Two scenes. The ladder walks one note per register with no pedal, so
+    /// the ear can find where the tone thins out -- `PIANO_MIDRANGE.md` puts
+    /// that between F#3 and A3, and this is what it sounds like. The phrase
+    /// plays the same region in use, under the pedal, with the bass under it
+    /// for the body to answer to.
+    ///
+    /// Full quality: no budget is set, so this is the model, not what a
+    /// Raspberry Pi thins it to.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release listen -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn listen() {
+        const FRAMES: usize = 128;
+        const BLOCKS_PER_SECOND: usize = 48_000 / FRAMES;
+
+        /// `(block, note, velocity)`; velocity 0 is a release.
+        fn render(
+            script: &[(usize, u8, u8)],
+            blocks: usize,
+            pedal: bool,
+            budget: u64,
+        ) -> std::vec::Vec<f32> {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            if budget > 0 {
+                assert!(piano.set_realtime_budget(budget));
+                // Two blocks to take it, forty for the body to fade through
+                // silence, rebuild and come back.
+                for _ in 0..44 {
+                    piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                }
+            }
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES * 2);
+            if pedal {
+                let down = MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, 127],
+                    length: 3,
+                };
+                piano.process(&[], &mut output, &[down], &[], FRAMES as u32, 0, 2);
+            }
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = script
+                    .iter()
+                    .filter(|(at, _, _)| *at == block)
+                    .map(|(_, note, velocity)| MidiEvent {
+                        frame: 0,
+                        data: [
+                            if *velocity == 0 { 0x80 } else { 0x90 },
+                            *note,
+                            *velocity,
+                        ],
+                        length: 3,
+                    })
+                    .collect();
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                captured.extend_from_slice(&output[..FRAMES * 2]);
+            }
+            captured
+        }
+
+        // One note per register, a second and a half apart, each left to ring.
+        let ladder: std::vec::Vec<(usize, u8, u8)> = [36u8, 43, 48, 52, 55, 57, 60, 64, 69, 72, 76, 81]
+            .iter()
+            .enumerate()
+            .map(|(i, &note)| (BLOCKS_PER_SECOND * 3 / 2 * i + BLOCKS_PER_SECOND / 2, note, 96u8))
+            .collect();
+
+        // The same region in use: a bass root, then a figure through A3-A4.
+        let mut phrase: std::vec::Vec<(usize, u8, u8)> = std::vec::Vec::new();
+        let beat = BLOCKS_PER_SECOND / 2;
+        for (bar, (root, notes)) in [
+            (36u8, [57u8, 60, 64, 69, 64, 60]),
+            (41u8, [57u8, 61, 65, 69, 65, 61]),
+            (43u8, [59u8, 62, 67, 71, 67, 62]),
+            (36u8, [60u8, 64, 69, 72, 69, 64]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let start = BLOCKS_PER_SECOND / 2 + bar * beat * 7;
+            phrase.push((start, root, 88));
+            for (step, note) in notes.into_iter().enumerate() {
+                let velocity = if step == 3 { 104 } else { 84 };
+                phrase.push((start + beat * (step + 1), note, velocity));
+            }
+        }
+
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        for (name, script, seconds, pedal) in [
+            ("escalera", ladder, 21usize, false),
+            ("frase", phrase, 20, true),
+        ] {
+            let blocks = BLOCKS_PER_SECOND * seconds;
+            let mut track = vec![0.0f32; 48_000 * 2 * 3 / 2];
+            track.extend_from_slice(&render(&script, blocks, pedal, 0));
+            let path = std::format!("{directory}/piano-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&192_000u32.to_le_bytes());
+            bytes.extend_from_slice(&4u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            let peak = track.iter().fold(0.0f32, |m, s| m.max(s.abs())).max(1e-6);
+            let gain = (0.89 / peak).min(4.0);
+            for sample in &track {
+                let clipped = (sample * gain * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the render");
+            std::println!(
+                "escrito {path} ({:.1} s, estereo, ganancia x{gain:.2})",
+                track.len() as f64 / 2.0 / 48_000.0
+            );
+            if name != "frase" {
+                continue;
+            }
+            // The same phrase at what a Raspberry Pi settled on, against the
+            // instrument as voiced: the budget's cost, in use rather than on
+            // a held chord.
+            let budget: u64 = std::env::var("CG_LISTEN_BUDGET")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(373_087);
+            let thinned = render(&script, blocks, pedal, budget);
+            let full = render(&script, blocks, pedal, 0);
+            let mut pair = vec![0.0f32; 48_000 * 2 * 3 / 2];
+            for _ in 0..2 {
+                for side in [&full, &thinned] {
+                    pair.extend_from_slice(side);
+                    pair.extend(core::iter::repeat_n(0.0, 48_000 * 2));
+                }
+            }
+            let path = std::format!("{directory}/piano-frase-ab.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + pair.len() * 2);
+            let data = pair.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&192_000u32.to_le_bytes());
+            bytes.extend_from_slice(&4u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            // One gain for both sides, so a level difference stays audible as
+            // one.
+            for sample in &pair {
+                let clipped = (sample * gain * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison");
+            std::println!(
+                "escrito {path} ({:.1} s) -- entera(A) presupuesto {budget}(B) A B",
+                pair.len() as f64 / 2.0 / 48_000.0
+            );
+        }
+    }
+
     /// What the budget costs the ear, rendered so it can be judged.
     ///
     /// The measurement says a Raspberry Pi stops missing deadlines; it cannot

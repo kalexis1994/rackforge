@@ -16445,67 +16445,205 @@ mod bench {
         }
     }
 
+    /// Does the size of a voice's partial ladder explain BOTH halves of the
+    /// strike transient?
+    ///
+    /// `strike_transient` measures two things at once on the appliance: a
+    /// note-on block that costs 7.5 ms against a 2.7 ms deadline, and a tail
+    /// that takes one to two seconds to come back down. It also shows that
+    /// the hammer-string integration is not what costs -- gating it off
+    /// changes nothing. The remaining candidate explains both at once: a
+    /// fresh voice is born with a large ladder, which is expensive to BUILD
+    /// (the block) and expensive to RUN until the cull thins it (the tail).
+    ///
+    /// If that is right, both halves scale with the budget the voice is
+    /// given. If the block stays put while the tail shrinks, the build is
+    /// something else and this is the wrong tree.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release strike_cost_by_ladder -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn strike_cost_by_ladder() {
+        const FRAMES: usize = 128;
+        const BLOCKS: usize = 900;
+        let block_us = FRAMES as f64 / 48.0;
+        std::println!(
+            "{:>12} {:>9} {:>10} {:>11} {:>10} {:>12}",
+            "fuel", "parciales", "asentado", "golpe", "x deadline", "cola >1.2x"
+        );
+        for fuel in [u64::MAX, 4_000_000, 2_000_000, 1_000_000, 400_000] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            if fuel != u64::MAX {
+                piano.set_realtime_budget(fuel);
+            }
+            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            for _ in 0..600 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let chord: std::vec::Vec<MidiEvent> =
+                (0..12).map(|i| note_on(40 + (i as u8) * 4, 100)).collect();
+            let mut costs = std::vec::Vec::with_capacity(BLOCKS);
+            // The ladder as it ages. Counting it only at the end counts what
+            // the cull LEFT, which is the one number that cannot show a birth
+            // ladder -- the first version of this test did exactly that and
+            // reported 220 partials at every budget.
+            let ages = [1usize, 10, 50, 200, 899];
+            let mut ladder = [0usize; 5];
+            for block in 0..BLOCKS {
+                let events: &[MidiEvent] = if block == 0 { &chord } else { &[] };
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, events, &[], FRAMES as u32, 0, 2);
+                costs.push(start.elapsed().as_secs_f64() * 1e6);
+                if let Some(slot) = ages.iter().position(|age| *age == block) {
+                    ladder[slot] = piano
+                        .voices
+                        .iter()
+                        .filter(|voice| voice.active)
+                        .map(|voice| voice.partial_count)
+                        .sum();
+                }
+            }
+            let partials = ladder[0];
+            let settled: f64 = costs[BLOCKS - 200..].iter().sum::<f64>() / 200.0;
+            let tail = costs.iter().filter(|c| **c > settled * 1.2).count();
+            let name = if fuel == u64::MAX {
+                std::string::String::from("sin tope")
+            } else {
+                std::format!("{fuel}")
+            };
+            std::println!(
+                "{:>12} {:>9} {:>8.0}us {:>9.0}us {:>10.2} {:>9.0} ms",
+                name,
+                partials,
+                settled,
+                costs[0],
+                costs[0] / 2666.0,
+                tail as f64 * block_us,
+            );
+            std::println!(
+                "             escalera por edad: {} en el bloque 1 -> {} -> {} -> {} -> {} a 2.4 s",
+                ladder[0], ladder[1], ladder[2], ladder[3], ladder[4]
+            );
+        }
+        std::println!("  (12 notas en un solo bloque; el deadline de la Pi a 128 cuadros es 2666 us)");
+    }
+
     /// How long a struck chord stays expensive, and how expensive.
     ///
-    /// The appliance's budget governor cuts on windows where 20 % of blocks
-    /// ran late, while the same notes held cost half the deadline and miss
-    /// nothing. So the lateness is a transient, and this measures its shape:
-    /// block cost from the strike onward, against the cost of the same notes
-    /// once they have settled.
+    /// Held notes are cheap on the appliance -- twelve of them at half the
+    /// period, missing nothing -- and what misses is the strike. No budget
+    /// the governor can publish makes a hammer cost less, so the shape of
+    /// this spike is what the ceiling actually is.
     ///
-    /// The absolute numbers here are a desktop's. What transfers is the
-    /// RATIO and the time constant -- whether the spike is worth a control
-    /// decision that lasts forever.
+    /// The chord lands in ONE block rather than spread over a hand's worth
+    /// of milliseconds, because what is being measured is the decay of the
+    /// transient and not the shape of an arpeggio.
+    ///
+    /// Run it on the appliance. Measured on a desktop the spike is 1.6-2.2x
+    /// and gone inside a hundred milliseconds; measured through the
+    /// appliance's own telemetry it is 2.5x and lasts about half a second,
+    /// and a desktop has now given the wrong answer about this machine three
+    /// times in one session.
     ///
     /// `cargo test -p rackforge-concert-grand --release strike_transient -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn strike_transient() {
         const FRAMES: usize = 128;
-        let block_ms = FRAMES as f64 / 48.0;
+        const BLOCKS: usize = 1000;
+        let block_us = FRAMES as f64 / 48.0;
+        std::println!(
+            "un bloque son {block_us:.2} ms; el deadline de la Pi a 128 cuadros es 2667 us"
+        );
+        // Twice over: with the hammer-string integration on, as it ships,
+        // and with it gated off by `SIM_MIN_MODES`, so the strike block can
+        // be split into "what the simulation costs" and "what a note-on
+        // costs anyway". Lowering `strike_budget` is NOT the lever -- it was
+        // three once, and a seven-note chord came out 3.25 dB down in its
+        // fundamentals and 10.34 dB up at 4-8 kHz, which is what
+        // `a_chord_is_the_sum_of_its_notes` now guards.
+        for simulated in [true, false] {
+            SIM_MIN_MODES.set(if simulated { 4.0 } else { 1e9 });
+            std::println!(
+                "
+===== simulacion del golpe: {} =====",
+                if simulated { "ENCENDIDA (como se envia)" } else { "APAGADA" }
+            );
         for held in [1usize, 6, 12] {
             let mut piano = Box::new(ConcertGrand::default());
             assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
             let mut output = vec![0.0f32; FRAMES * 2];
-            for _ in 0..200 {
-                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
-            }
-            // The pedal down, then the chord, one note every ~50 ms as a
-            // player's hand does and as the ramp does.
             let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
             piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
-            let mut costs: std::vec::Vec<f64> = std::vec::Vec::new();
-            let mut struck = 0usize;
-            // 900 blocks is 2.4 s, longer than the governor's window.
-            for block in 0..900 {
-                let mut events: std::vec::Vec<MidiEvent> = std::vec::Vec::new();
-                if struck < held && block % 19 == 0 {
-                    events.push(note_on(40 + (struck as u8) * 4, 100));
-                    struck += 1;
-                }
+            // The floor: what this instrument costs with nothing sounding.
+            for _ in 0..400 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut floor = 0.0f64;
+            for _ in 0..200 {
                 let start = std::time::Instant::now();
-                piano.process(&[], &mut output, &events, &[], FRAMES as u32, 0, 2);
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                floor += start.elapsed().as_secs_f64() * 1e6;
+            }
+            floor /= 200.0;
+
+            // The whole chord in one block.
+            let chord: std::vec::Vec<MidiEvent> = (0..held)
+                .map(|i| note_on(40 + (i as u8) * 4, 100))
+                .collect();
+            let mut costs = std::vec::Vec::with_capacity(BLOCKS);
+            for block in 0..BLOCKS {
+                let events: &[MidiEvent] = if block == 0 { &chord } else { &[] };
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, events, &[], FRAMES as u32, 0, 2);
                 costs.push(start.elapsed().as_secs_f64() * 1e6);
             }
-            // The settled cost: the last 200 blocks, well past the cull.
-            let settled: f64 = costs[700..].iter().sum::<f64>() / 200.0;
+            // Settled: the last 200 blocks, well past the partial cull.
+            let settled: f64 = costs[BLOCKS - 200..].iter().sum::<f64>() / 200.0;
             let peak = costs.iter().cloned().fold(0.0f64, f64::max);
-            // How long the cost stays above 1.5x settled, in blocks.
-            let elevated = costs.iter().filter(|c| **c > settled * 1.5).count();
+            let over = costs.iter().filter(|c| **c > settled * 1.2).count();
+            std::println!();
             std::println!(
-                "{held:>2} notas: asentado {:6.0} us   pico {:6.0} us   {:.1}x   bloques sobre 1.5x: {elevated:>3} ({:.0} ms)",
-                settled,
-                peak,
-                peak / settled,
-                elevated as f64 * block_ms,
+                "--- {held} nota(s) ---  silencio {:.0} us   asentado {:.0} us   primer bloque {:.0} us   pico {:.0} us",
+                floor, settled, costs[0], peak
             );
-            std::print!("        perfil por 100 bloques:");
-            for chunk in costs.chunks(100) {
-                let mean: f64 = chunk.iter().sum::<f64>() / chunk.len() as f64;
-                std::print!(" {:.0}", mean / settled * 100.0);
+            std::println!(
+                "    el golpe cuesta {:.0} us sobre el asentado; {} bloques sobre 1.2x ({:.0} ms)",
+                costs[0] - settled,
+                over,
+                over as f64 * block_us,
+            );
+            // Fine near the strike, coarse after it.
+            let spans: &[(usize, usize)] = &[
+                (0, 1),
+                (1, 5),
+                (5, 20),
+                (20, 50),
+                (50, 100),
+                (100, 200),
+                (200, 400),
+                (400, 700),
+                (700, 1000),
+            ];
+            std::println!("    {:>12} {:>9} {:>9}", "bloques", "us", "x asentado");
+            for (from, to) in spans {
+                let mean: f64 =
+                    costs[*from..*to].iter().sum::<f64>() / (*to - *from) as f64;
+                let label = std::format!("{from}-{to}");
+                std::println!(
+                    "    {:>12} {:>9.0} {:>9.2}   {:>5.0} ms",
+                    label,
+                    mean,
+                    mean / settled,
+                    *from as f64 * block_us,
+                );
             }
-            std::println!("  (% del asentado)");
         }
+        }
+        SIM_MIN_MODES.set(4.0);
     }
 
     /// Times the render, to say whether the banks are paying for arithmetic

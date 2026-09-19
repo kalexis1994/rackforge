@@ -128,9 +128,49 @@ already vectorising that loop. The rewrite is not in the tree.
   changes four times a second per open tab, and it uses the incremental
   `events` path rather than a snapshot. With a generated load of eight notes
   a second, the misses were zero with the interface connected.
-* **The note-on itself.** A strike costs 69 us, of which the hammer-string
-  integration is 63. `strike_budget` guards a cost that is not the problem;
-  the voice it starts costs that much again in *every* block it rings.
+* **The note-on itself.** Re-measured on the appliance (2026-09-19), and the
+  old numbers here -- 69 us a strike, of which 63 the hammer-string
+  integration -- are both wrong. `tools`-free, in the plugin's own
+  `strike_transient`, twelve notes landed in one block on a Raspberry Pi 4:
+
+  | notes struck together | the strike block | against a 2666 us deadline |
+  | --- | --- | --- |
+  | 1 | 880 us over settled | |
+  | 6 | 3820 us | |
+  | 12 | **5797 us** | **2.2x the whole period** |
+
+  And the hammer-string integration is not in it. Gated off through
+  `SIM_MIN_MODES`, the same chord cost 6006 us -- slightly *more*, which is
+  noise. Whatever a note-on spends, it is not the contact model.
+
+  It is the ladder. `strike_cost_by_ladder` counts a voice's partials as they
+  age, which the first version of it failed to do -- counting them at the end
+  counts what the cull LEFT, and reported the same 220 at every budget. As
+  they age, twelve voices together:
+
+      547 partials at block 1  ->  507  ->  464  ->  388  ->  222 at 2.4 s
+
+  A fresh chord carries two and a half times the partials it settles at, and
+  the block cost tracks that curve exactly: 1.74x settled at 3 ms, 1.54x at
+  133 ms, 1.31x at 533 ms, 1.02x at 1.9 s. So one cause explains both halves
+  of the transient -- the ladder is expensive to BUILD, which is the note-on
+  block, and expensive to RUN until the cull thins it, which is the second
+  that follows.
+
+  **`strike_budget` is not the lever**, and the reason is recorded rather
+  than guessed: it was three once, and a seven-note chord came out 3.25 dB
+  down in its fundamentals and 10.34 dB up at 4-8 kHz against the same notes
+  struck alone, losing body and growing an edge from its fourth note on.
+  `a_chord_is_the_sum_of_its_notes` guards that. Nor is the real-time budget:
+  swept from four million fuel down to four hundred thousand, the birth
+  ladder moved only from 547 to 505. The governor cannot reach this, which is
+  the same conclusion `REALTIME_BUDGET.md` reaches from the other side.
+
+  What is left is a design choice with an audible price, and it is stated
+  here rather than taken: a voice could be born closer to the ladder it will
+  settle on, which would roughly halve the note-on block and remove most of
+  the tail -- and those partials are genuinely sounding while they last, so
+  it is the attack that pays. That is the open item.
 
 ## Where the time goes, measured by taking things away
 

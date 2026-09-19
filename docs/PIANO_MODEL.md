@@ -2627,7 +2627,8 @@ Stated so nobody mistakes silence for coverage:
   laws, but its mode frequencies come from those laws rather than from any
   particular instrument's response.
 
-  What the laws also do not carry is *where* on the board a mode lives. Ege
+  **Tried and not kept (2026-09-19): confining modes to rib bays.** What the
+  laws also do not carry is *where* on the board a mode lives. Ege
   and Boutillon measure the soundboard as a homogeneous plate only up to
   their knee; above it the ribs confine the waves into bays, the modal
   density falls **and becomes location-dependent** -- two strings a few
@@ -2639,6 +2640,43 @@ Stated so nobody mistakes silence for coverage:
   framework (Acta Acustica 2022) computes exactly this from a board's
   geometry and materials, and is the reference to measure any attempt
   against.
+
+  It was built and measured. Above the rib knee each mode was given a bay of
+  the bridge -- a raised-cosine window, drawn per mode from its own seed --
+  read only the drive points inside it, and radiated only from it, with drive
+  and radiation normalised together so a confined mode keeps its energy
+  rather than losing four decibels to a smaller footprint. Swept at half
+  widths of 0.12, 0.18, 0.25 and 0.35 of the bridge:
+
+  | bay half-width | fit cost | bass | treble | relief 2-4 kHz |
+  | --- | --- | --- | --- | --- |
+  | off | **834.8** | **206.3** | **288.6** | 22.9 dB |
+  | 0.12 | 864.0 | 221.4 | 299.9 | **23.9 dB** |
+  | 0.18 | 862.7 | 217.0 | 303.9 | 23.8 dB |
+  | 0.35 | 846.3 | 207.9 | 305.7 | 23.4 dB |
+
+  Eleven to twenty-nine points of cost, a worse bass and a worse treble, for
+  one decibel of spectral relief -- the one measure that can see what the
+  change is for. Rendered and listened to, the player's verdict was "muy
+  sutil... casi que son iguales". Reverted; the render fingerprint is
+  unchanged.
+
+  **Why it did not work, for whoever tries again.** A string still meets
+  about fifty modes above the knee wherever it stands on the bridge, and the
+  statistics of fifty bays drawn at random are the same everywhere you
+  stand. Localising the modes is only half of what Ege and Boutillon
+  measure: the modal density falls above the knee **and becomes
+  location-dependent**, so the bays have to be few and shared -- a handful of
+  real rib bays, each with its own sparse set of modes -- rather than one
+  window per mode. That is a different arrangement of the same physics, and
+  it is the one worth building next.
+
+  One measurement to carry forward: with confinement on,
+  `the_top_octave_has_no_dampers` went from 0.75 to 2.0. E7 sits at the
+  treble end of the bridge and above the knee it stops sharing modes with the
+  sympathetic bed spread along the rest -- which is what confinement *means*,
+  so the test was left at its bound rather than loosened. Any future attempt
+  has to answer that ratio against recordings, not against the threshold.
 * **The broadband knock.** The impacts of the action and the keys — everything
   in a piano's sound that does not come from the strings — are not modelled.
   It is most exposed in the extreme treble, where the tonal fundamental sits

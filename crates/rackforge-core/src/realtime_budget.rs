@@ -122,10 +122,20 @@ const OVER_TOLERANCE: f64 = 0.02;
 /// perfectly fine: measured on a Raspberry Pi, two notes rendered in 63 % of
 /// the period and missed nothing at all, while sitting above a 60 % allowance
 /// and being read as trouble. What is actually wrong is a block that is about
-/// to arrive late, so that is what this measures. At 0.9 it was still
-/// acting on renders that never missed (see `OVER_TOLERANCE`); 0.95 leaves a
-/// twentieth of the period for the engine's own work after the render.
-const LATE_AT: f64 = 0.95;
+/// to arrive late, so that is what this measures.
+///
+/// One, and the reason is measured. At 0.9 and then 0.95 the governor was
+/// still cutting through ramps that missed **no deadline at all** -- twelve
+/// held notes on a Raspberry Pi, p99 of 2228 us against a 2666 us period,
+/// zero misses, three cuts. What crosses a line drawn inside the period is
+/// an ordinary expensive block: a note-on runs the strike simulation, and
+/// that block costs more than its neighbours without being late for
+/// anything. Cutting the instrument for it is thinning a piano that was
+/// keeping up.
+///
+/// A slot's share of the whole period is the honest line: past it the slot
+/// alone has spent the buffer, and something is going to arrive late.
+const LATE_AT: f64 = 1.0;
 
 /// The slot has to be using less than this much of its allowance before any
 /// of it is given back. The gap between this and 1.0 is the hysteresis that
@@ -232,6 +242,12 @@ pub struct BudgetGovernor {
     load_at_cut: Option<f64>,
     stubborn: u32,
     exhausted: bool,
+    /// What was published before the current streak of cuts began. If the
+    /// streak ends in `Exhausted` the cuts bought nothing, so this -- and not
+    /// the floor they reached -- is what this machine actually runs at.
+    before_streak: Option<u64>,
+    last_over_rate: f64,
+    last_load: f64,
     /// A remembered budget waiting for the first poll to hand it over.
     seed_pending: bool,
     /// The window after a publish is the plugin rebuilding to it, and a
@@ -263,6 +279,9 @@ impl Default for BudgetGovernor {
             load_at_cut: None,
             stubborn: 0,
             exhausted: false,
+            before_streak: None,
+            last_over_rate: 0.0,
+            last_load: 0.0,
             seed_pending: false,
             discard_next_window: false,
         }
@@ -318,7 +337,21 @@ impl BudgetGovernor {
     pub fn settled(&self, now: Duration) -> Option<u64> {
         let published = self.published?;
         let last = self.last_publish?;
-        (self.exhausted || now.saturating_sub(last) >= SETTLE_AFTER).then_some(published)
+        if self.exhausted {
+            // The streak that ended here bought nothing -- that is what
+            // `Exhausted` means -- so the floor it reached is not a fact about
+            // this machine, it is the record of a mistake. Remember what was
+            // running before it started.
+            //
+            // Without this the store ratchets: a session inherits the floor,
+            // cuts from there, writes a lower floor, and the instrument gets
+            // smaller every time the engine starts. Measured on a Raspberry
+            // Pi across three sessions: 4,677,176 fuel, then 582,949, then
+            // 373,087 -- the last of which is the plugin's own minimum
+            // quality, reached without the machine ever missing a deadline.
+            return self.before_streak.or(Some(published));
+        }
+        (now.saturating_sub(last) >= SETTLE_AFTER).then_some(published)
     }
 
     /// This machine's measured speed for this plugin, once it is known.
@@ -368,6 +401,14 @@ impl BudgetGovernor {
     /// told about it, which is rarely. `may_raise` is false while the
     /// instrument is being played: a raise is audible, a cut is the
     /// alternative to an xrun, and only one of those may wait.
+    /// What the last decision was made on: the share of the window's blocks
+    /// that ran late, and the render average against the allowance. Reported
+    /// beside the budget, because three rounds of guessing at why a ramp that
+    /// missed nothing was still being cut is three rounds too many.
+    pub const fn last_window(&self) -> (f64, f64) {
+        (self.last_over_rate, self.last_load)
+    }
+
     pub fn poll(&mut self, now: Duration, may_raise: bool) -> Option<(u64, BudgetReason)> {
         if self.seed_pending {
             self.seed_pending = false;
@@ -412,6 +453,8 @@ impl BudgetGovernor {
 
         let over_rate = f64::from(over) / f64::from(blocks);
         let load = self.render_ns / allowance;
+        self.last_over_rate = over_rate;
+        self.last_load = load;
         if over_rate > OVER_TOLERANCE {
             // Late blocks are audible now, so this does not wait. How far the
             // budget falls follows how far over the render is -- but a window
@@ -426,6 +469,9 @@ impl BudgetGovernor {
             // on their own, so comparing consecutive windows let noise reset
             // the count: on a Raspberry Pi that turned three cuts into nine,
             // and every one of them rebuilt the soundboard.
+            if self.load_at_cut.is_none() {
+                self.before_streak = self.published;
+            }
             if let Some(streak_started_at) = self.load_at_cut {
                 if load >= streak_started_at * CUT_MUST_BUY {
                     self.stubborn += 1;
@@ -435,9 +481,11 @@ impl BudgetGovernor {
                         return Some((published, BudgetReason::Exhausted));
                     }
                 } else {
-                    // Real progress: this is the new baseline to beat.
+                    // Real progress: this is the new baseline to beat, and
+                    // the budget that produced it is worth keeping.
                     self.stubborn = 0;
                     self.load_at_cut = Some(load);
+                    self.before_streak = self.published;
                 }
             }
             let cut = (1.0 / load.max(1.0)).clamp(MOST_SEVERE_CUT, GENTLEST_CUT);
@@ -469,6 +517,7 @@ impl BudgetGovernor {
         self.exhausted = false;
         self.stubborn = 0;
         self.load_at_cut = None;
+        self.before_streak = None;
         self.publish_if_credible(published as f64 * RAISE_BY, BudgetReason::Relaxed, now)
     }
 
@@ -983,10 +1032,15 @@ mod tests {
                 break;
             }
         }
-        assert_eq!(
-            stubborn.settled(clock),
-            gave_up,
-            "exhausted is settled at once"
+        // Exhausted settles at once -- but at what was running before the
+        // streak, not at the floor those useless cuts reached. See
+        // `a_floor_that_cutting_never_earned_is_not_remembered`.
+        let remembered = stubborn
+            .settled(clock)
+            .expect("exhausted is settled at once");
+        assert!(
+            remembered >= gave_up.expect("it gave up"),
+            "remembered {remembered}, the floor rather than what was working"
         );
     }
 
@@ -1047,6 +1101,70 @@ mod tests {
         settled(&mut governor, 1_000, 1_000_000);
         assert_eq!(governor.poll(clock, true), None);
         assert_eq!(governor.published(), Some(first));
+    }
+
+    #[test]
+    fn a_render_that_misses_nothing_is_never_cut() {
+        // The appliance's own ramp, as a test: twelve held notes at 52 % of
+        // the period, a p99 at 84 % of it, and not one deadline lost. Earlier
+        // versions cut three times through exactly this.
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        governor.poll(Duration::ZERO, true).expect("measured");
+        let mut clock = grace(&mut governor, Duration::ZERO);
+        let published = governor.published();
+        for _ in 0..40 {
+            clock += PUBLISH_INTERVAL;
+            // A window of ordinary blocks with the occasional expensive one:
+            // a note-on runs the strike simulation and costs more, and it is
+            // still comfortably inside the period.
+            for index in 0..800 {
+                let render = if index % 19 == 0 {
+                    (DEADLINE_NS as f64 * 0.84) as u64
+                } else {
+                    (DEADLINE_NS as f64 * 0.52) as u64
+                };
+                governor.observe(render, 1_000_000);
+            }
+            assert_eq!(
+                governor.poll(clock, false),
+                None,
+                "cut a render that missed nothing"
+            );
+        }
+        assert_eq!(governor.published(), published);
+    }
+
+    #[test]
+    fn a_floor_that_cutting_never_earned_is_not_remembered() {
+        // The ratchet, as a test. A plugin at its own minimum cannot answer a
+        // smaller budget, so the governor cuts, gives up -- and what it
+        // remembers must be what was running before that streak, or the next
+        // session starts from the floor and cuts again from there.
+        let mut governor = governor(1);
+        settled(&mut governor, 1_000, 1_000);
+        let (first, _) = governor.poll(Duration::ZERO, true).expect("measured");
+        let mut clock = grace(&mut governor, Duration::ZERO);
+
+        let stuck = (DEADLINE_NS as f64 * 1.4) as u64;
+        let mut floor = first;
+        for _ in 0..40 {
+            clock += PUBLISH_INTERVAL;
+            settled(&mut governor, stuck, 1_000_000);
+            match governor.poll(clock, true) {
+                Some((budget, BudgetReason::Exhausted)) => {
+                    assert!(budget <= floor);
+                    break;
+                }
+                Some((budget, _)) => floor = budget,
+                None => {}
+            }
+        }
+        let remembered = governor.settled(clock).expect("something to remember");
+        assert!(
+            remembered >= first,
+            "remembered {remembered}, the floor the useless cuts reached, not the {first} that was running"
+        );
     }
 
     #[test]

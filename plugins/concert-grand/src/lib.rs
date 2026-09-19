@@ -1973,7 +1973,6 @@ impl BodyMode {
             + self.shape_b * cos_t[self.shape_q]
             + self.shape_c * sin_t[self.shape_q]
     }
-
     #[inline(always)]
     fn tick(&mut self, input: f32) -> f32 {
         let y = self.a1 * self.y1 + self.a2 * self.y2 + self.drive * input;
@@ -2712,6 +2711,16 @@ pub static BOARD_SIGN_TOP_HZ: Knob = Knob::new(700.0);
 ///
 /// This knob is the depth: 0 is the mono bridge as it was, 1 the shape.
 pub static BOARD_SHAPE: Knob = Knob::new(1.0);
+/// Where the board stops being a plate and becomes a set of waveguides.
+///
+/// Ege and Boutillon measure the soundboard as a homogeneous plate only up
+/// to a knee -- 1.1 kHz on their upright, 1355 to 1589 Hz across grands.
+/// Above it the ribs confine the waves between them: a mode no longer spans
+/// the board, the modal density falls, and -- the part this models -- the
+/// mobility becomes **location-dependent**. Two strings a few bays apart
+/// stop sharing the modes they drive, which is where an instrument's
+/// note-to-note character comes from up there.
+///
 const BOARD_DRIVE_POINTS: usize = 16;
 const BOARD_SHAPE_TOP_HZ: f32 = 8000.0;
 /// Below this the board breathes as a whole: its first modes have no
@@ -5748,10 +5757,7 @@ impl ConcertGrand {
                 // states under a sounding note is a step in the output: the
                 // tick the player hears when a budget lands mid-phrase.
                 let (y1, y2) = (self.board[index].y1, self.board[index].y2);
-                let (y1, y2) = (self.board[index].y1, self.board[index].y2);
-            self.board[index] = mode;
-            self.board[index].y1 = y1;
-            self.board[index].y2 = y2;
+                self.board[index] = mode;
                 self.board[index].y1 = y1;
                 self.board[index].y2 = y2;
                 index += 1;
@@ -5784,7 +5790,10 @@ impl ConcertGrand {
             if placed < BOARD_MEASURED_KNEE_HZ {
                 mode.drive *= 1.0 - measured;
             }
+            let (y1, y2) = (self.board[index].y1, self.board[index].y2);
             self.board[index] = mode;
+            self.board[index].y1 = y1;
+            self.board[index].y2 = y2;
             frequency += board_spacing(frequency, density);
             index += 1;
         }
@@ -5836,6 +5845,9 @@ impl ConcertGrand {
             let mut gains = [(0.0f32, 0.0f32); 2];
             for i in 0..ALONG {
                 let x = (i as f32 + 0.5) / ALONG as f32;
+                // The same window the excitation reads through: a mode that
+                // only hears its bay must only speak from it, or the board
+                // radiates energy no string ever put into it.
                 let along =
                     sincosf(core::f32::consts::PI * mode.shape_q as f32 * x + mode.shape_theta).1;
                 for j in 0..ACROSS {
@@ -12052,6 +12064,7 @@ mod tests {
         };
         let top = window(100, false) / window(100, true);
         let mid = window(84, false) / window(84, true);
+        std::println!("E7 suelta/pedal {top:.3}   C6 suelta/pedal {mid:.3}");
         assert!(
             (0.5..2.0).contains(&top),
             "E7 released carries {top:.3} of E7 pedalled; there is no damper up there"
@@ -16517,7 +16530,9 @@ mod bench {
             let _ = block;
         }
         assert!(piano.board_count < modes_before, "the bank did not rebuild");
-        std::println!("paso propio {before:.5}  paso en la reconstruccion {during:.5}  costura {seam:.5}");
+        std::println!(
+            "paso propio {before:.5}  paso en la reconstruccion {during:.5}  costura {seam:.5}"
+        );
         assert!(
             during <= before * 1.5 && seam <= before * 1.5,
             "the rebuild stepped the output by {during} (seam {seam}) where the note stepped by {before}"
@@ -16610,11 +16625,7 @@ mod bench {
                     .filter(|(at, _, _)| *at == block)
                     .map(|(_, note, velocity)| MidiEvent {
                         frame: 0,
-                        data: [
-                            if *velocity == 0 { 0x80 } else { 0x90 },
-                            *note,
-                            *velocity,
-                        ],
+                        data: [if *velocity == 0 { 0x80 } else { 0x90 }, *note, *velocity],
                         length: 3,
                     })
                     .collect();
@@ -16625,11 +16636,18 @@ mod bench {
         }
 
         // One note per register, a second and a half apart, each left to ring.
-        let ladder: std::vec::Vec<(usize, u8, u8)> = [36u8, 43, 48, 52, 55, 57, 60, 64, 69, 72, 76, 81]
-            .iter()
-            .enumerate()
-            .map(|(i, &note)| (BLOCKS_PER_SECOND * 3 / 2 * i + BLOCKS_PER_SECOND / 2, note, 96u8))
-            .collect();
+        let ladder: std::vec::Vec<(usize, u8, u8)> =
+            [36u8, 43, 48, 52, 55, 57, 60, 64, 69, 72, 76, 81]
+                .iter()
+                .enumerate()
+                .map(|(i, &note)| {
+                    (
+                        BLOCKS_PER_SECOND * 3 / 2 * i + BLOCKS_PER_SECOND / 2,
+                        note,
+                        96u8,
+                    )
+                })
+                .collect();
 
         // The same region in use: a bass root, then a figure through A3-A4.
         let mut phrase: std::vec::Vec<(usize, u8, u8)> = std::vec::Vec::new();

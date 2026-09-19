@@ -194,14 +194,29 @@ already vectorising that loop. The rewrite is not in the tree.
   itself needs the resolution. Making the oscillators exact buys no step
   size, and the implementation was reverted.
 
-  Two things survive it. `SIM_DT_S` stays as a knob outside the registry so
-  the sweep can be re-run, and the sweep's own finding is worth recording
-  on its own: **the instrument as voiced carries the discretisation error.**
-  At the shipped step the worst partial of a mezzo-forte C4 sits 1.23 dB
-  from converged, and on a bass note the error is enough to push a partial
-  across the amplitude floor and change the ladder's LENGTH. Halving the
-  step would double the cost of half the note-on and change the sound;
-  that is a voicing decision, not a performance one.
+  One thing survives it: `SIM_DT_S`, a knob outside the registry, so the
+  sweep can be re-run.
+
+  **And the step was then judged by ear, and it holds (2026-09-19).** The
+  sweep had found that the instrument as voiced carries the discretisation
+  error -- at the shipped step the worst partial of a mezzo-forte C4 sits
+  1.23 dB from converged, and on a bass note the error is enough to push a
+  partial across the amplitude floor and change the ladder's LENGTH. That
+  raised a worse possibility than any xrun: that some of the instrument's
+  calibrations were compensating for the integrator's error rather than for
+  physics.
+
+  `contact_step_render` put it where the ear could reach it -- one file, a
+  lead-in, then the shipped four microseconds against one microsecond, A B
+  A B, on a bass chord, a mezzo-forte C4 and a pianissimo C4. Measured, the
+  difference peaks at -39.9 dB below the signal on the most exposed of them
+  and sits at -63 dB rms. The player's verdict: "no noto diferencia
+  prácticamente".
+
+  So the step is justified rather than inherited, the voicing is not built
+  on the artefact, and the contact integrator closes as a line of work. What
+  remains of the note-on is `steps x modes` with both set by physics that
+  has already been calibrated against recordings.
 
   What is left of the note-on, then, is `steps x modes` with both set by
   physics: `SIM_TOP_HZ` already stops at 8 kHz on the grounds that higher

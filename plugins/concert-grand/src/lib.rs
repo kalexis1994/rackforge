@@ -3557,69 +3557,80 @@ struct FrameDeposit {
 /// How many frames render in one span. The appliance's period.
 const RENDER_SPAN: usize = 128;
 
-/// The most strikes one frame of one section can carry.
+/// The most per-voice records one frame can carry across all four sections.
 ///
-/// Four sections, so a sixteen-note cluster landing in one frame puts four
-/// here. Eight is room to spare for a hand that does not exist.
-const MAX_STRIKES_PER_FRAME: usize = 8;
-/// A byte or two of dispatch per section per block is plenty: a strike is
-/// eight bytes and a block is 128 frames.
-const STRIKE_WORK_BYTES: usize = 512;
+/// A broadcast record lands in every section, so one release is four of
+/// these. Thirty-two is a chord and a release in the same frame with room
+/// left over.
+const MAX_VOICE_WORK_PER_FRAME: usize = 32;
+/// Dispatch bytes per section per block. A record is sixteen bytes behind a
+/// four-byte header, so this is sixty-four of them.
+const VOICE_WORK_BYTES: usize = 1_280;
 
-/// What a coordinator tells a section about a note it must strike.
+/// What a coordinator tells a section to do to its own voices.
 ///
-/// The slot and not just the note, because choosing the slot is what the
-/// coordinator does and the section's identity follows from it.
+/// One record type and one queue for every per-voice event, because a
+/// frame's work has to be done in the order it arrived: each strike sizes
+/// its partial ladder from what the one before it left, and a release that
+/// overtook a strike would damp a note that had not sounded.
+///
+/// A strike goes to ONE section -- the coordinator chose the slot, and the
+/// slot is the section. A release goes to all four, because which of them
+/// carries a note is a thing only a unit knows about its own voices.
 #[derive(Clone, Copy)]
-struct StrikeRecord {
+struct VoiceRecord {
+    kind: u8,
+    /// Where this sat in the block's event order.
+    seq: u8,
     slot: u8,
     channel: u8,
     note: u8,
-    /// Where this strike sat in the block's event order.
-    ///
-    /// Strikes in ONE frame have to be done in the order they arrived, not
-    /// in section order: each sizes its partial ladder from
-    /// `active_partials`, which the one before it just spent. Applying four
-    /// sections in turn reordered a chord's ladders, and two chord tests
-    /// said so while the fingerprint -- whose passage has no two notes in a
-    /// frame -- did not.
-    seq: u8,
+    /// A release velocity plus one, so zero can mean "not measured".
+    release: u8,
     velocity: f32,
+    serial: u32,
 }
 
-impl StrikeRecord {
+impl VoiceRecord {
+    const STRIKE: u8 = 0;
+    const RELEASE: u8 = 1;
     const EMPTY: Self = Self {
+        kind: Self::STRIKE,
+        seq: 0,
         slot: 0,
         channel: 0,
         note: 0,
-        seq: 0,
+        release: 0,
         velocity: 0.0,
+        serial: 0,
     };
 
-    fn to_bytes(self) -> [u8; 8] {
-        let velocity = self.velocity.to_le_bytes();
-        [
-            self.slot,
-            self.channel,
-            self.note,
-            self.seq,
-            velocity[0],
-            velocity[1],
-            velocity[2],
-            velocity[3],
-        ]
+    fn to_bytes(self) -> [u8; 16] {
+        let mut bytes = [0u8; 16];
+        bytes[0] = self.kind;
+        bytes[1] = self.seq;
+        bytes[2] = self.slot;
+        bytes[3] = self.channel;
+        bytes[4] = self.note;
+        bytes[5] = self.release;
+        bytes[8..12].copy_from_slice(&self.velocity.to_le_bytes());
+        bytes[12..16].copy_from_slice(&self.serial.to_le_bytes());
+        bytes
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < 8 {
+        if bytes.len() < 16 {
             return None;
         }
         Some(Self {
-            slot: bytes[0],
-            channel: bytes[1],
-            note: bytes[2],
-            seq: bytes[3],
-            velocity: f32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+            kind: bytes[0],
+            seq: bytes[1],
+            slot: bytes[2],
+            channel: bytes[3],
+            note: bytes[4],
+            release: bytes[5],
+            velocity: f32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
+            serial: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
         })
     }
 }
@@ -5103,13 +5114,13 @@ pub struct ConcertGrand {
     event_frame: u16,
     /// Per-section strike dispatch, written while the block's events are
     /// walked and read back at the frame each strike was written for.
-    strike_work: [[u8; STRIKE_WORK_BYTES]; STRING_SECTIONS],
-    strike_len: [usize; STRING_SECTIONS],
+    voice_work: [[u8; VOICE_WORK_BYTES]; STRING_SECTIONS],
+    voice_work_len: [usize; STRING_SECTIONS],
     /// Event order within the block, so a frame's strikes keep theirs.
-    strike_seq: u8,
+    voice_work_seq: u8,
     /// Slots this block has already promised to a strike that has not
     /// happened yet. One bit per slot; `MAX_VOICES` is 32.
-    strike_claimed: u32,
+    voice_claimed: u32,
     /// Samples of delay on the sympathetic coupling BETWEEN sections.
     ///
     /// `0` couples every string to every other with the one sample of latency
@@ -5335,10 +5346,10 @@ impl Default for ConcertGrand {
             silent_work_len: 0,
             span_offset: 0,
             event_frame: 0,
-            strike_work: [[0; STRIKE_WORK_BYTES]; STRING_SECTIONS],
-            strike_len: [0; STRING_SECTIONS],
-            strike_seq: 0,
-            strike_claimed: 0,
+            voice_work: [[0; VOICE_WORK_BYTES]; STRING_SECTIONS],
+            voice_work_len: [0; STRING_SECTIONS],
+            voice_work_seq: 0,
+            voice_claimed: 0,
             section_delay: 0,
             restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
             // Per-note calibration fitted against the YDP samples: ten
@@ -7605,44 +7616,73 @@ impl ConcertGrand {
         let Some(slot) = self.pick_voice_slot() else {
             return;
         };
-        let section = slot & (STRING_SECTIONS - 1);
+        self.push_voice_work(
+            slot & (STRING_SECTIONS - 1),
+            VoiceRecord {
+                kind: VoiceRecord::STRIKE,
+                slot: slot as u8,
+                channel,
+                note,
+                velocity,
+                ..VoiceRecord::EMPTY
+            },
+        );
+    }
+
+    /// Writes one record into one section's work, at the frame being walked,
+    /// and stamps it with where it sat in the block's event order.
+    fn push_voice_work(&mut self, section: usize, record: VoiceRecord) {
+        debug_assert!(section < STRING_SECTIONS, "seccion fuera de rango");
         let frame = self.event_frame;
-        let record = StrikeRecord {
-            slot: slot as u8,
-            channel,
-            note,
-            seq: self.strike_seq,
-            velocity,
+        let record = VoiceRecord {
+            seq: self.voice_work_seq,
+            ..record
         };
-        self.strike_seq = self.strike_seq.wrapping_add(1);
-        let written = self.strike_len[section];
-        let mut work = UnitWork::resume(&mut self.strike_work[section], written);
+        self.voice_work_seq = self.voice_work_seq.wrapping_add(1);
+        let written = self.voice_work_len[section];
+        let mut work = UnitWork::resume(&mut self.voice_work[section], written);
         if work.push(frame, &record.to_bytes()) {
-            self.strike_len[section] = work.written();
+            self.voice_work_len[section] = work.written();
         }
     }
 
-    /// Does every section's strikes for one frame, in the order they
+    /// Writes one record into EVERY section's work, under a single sequence
+    /// number.
+    ///
+    /// One event that every section hears is still one event, so the four
+    /// copies share its place in the order and the tie is broken by section.
+    /// That is the order the sections were walked in before this was work at
+    /// all, which is why the fingerprint can guard the move.
+    fn broadcast_voice_work(&mut self, record: VoiceRecord) {
+        let seq = self.voice_work_seq;
+        for section in 0..STRING_SECTIONS {
+            self.voice_work_seq = seq;
+            self.push_voice_work(section, record);
+        }
+        self.voice_work_seq = seq.wrapping_add(1);
+    }
+
+    /// Does every section's per-voice work for one frame, in the order it
     /// arrived.
     ///
-    /// Read out first, applied after: `start_voice_unit` takes all of
-    /// `self`, and the work it is reading lives there too. Sorted by `seq`
+    /// Read out first, applied after: the handlers take all of `self`, and
+    /// the work they are reading lives there too. Sorted by `(seq, section)`
     /// because each strike sizes its ladder from what the one before it
-    /// left.
-    fn run_strikes(&mut self, frame: u16) {
-        let mut due = [StrikeRecord::EMPTY; MAX_STRIKES_PER_FRAME];
+    /// left, and a broadcast reaches the sections in their own order.
+    fn run_voice_work(&mut self, frame: u16) {
+        let mut due = [(0usize, VoiceRecord::EMPTY); MAX_VOICE_WORK_PER_FRAME];
         let mut count = 0usize;
         for section in 0..STRING_SECTIONS {
-            let written = self.strike_len[section];
+            let written = self.voice_work_len[section];
             if written == 0 {
                 continue;
             }
-            for (at, bytes) in UnitWork::read(&self.strike_work[section][..written]) {
+            for (at, bytes) in UnitWork::read(&self.voice_work[section][..written]) {
                 if at != frame || count == due.len() {
                     continue;
                 }
-                if let Some(record) = StrikeRecord::from_bytes(bytes) {
-                    due[count] = record;
+                if let Some(record) = VoiceRecord::from_bytes(bytes) {
+                    due[count] = (section, record);
                     count += 1;
                 }
             }
@@ -7650,16 +7690,25 @@ impl ConcertGrand {
         if count == 0 {
             return;
         }
-        due[..count].sort_unstable_by_key(|record| record.seq);
+        due[..count].sort_unstable_by_key(|(section, record)| (record.seq, *section));
         for index in 0..count {
-            let record = due[index];
-            self.strike_claimed &= !(1 << record.slot);
-            self.start_voice_unit(
-                record.channel,
-                record.note,
-                record.velocity,
-                record.slot as usize,
-            );
+            let (section, record) = due[index];
+            match record.kind {
+                VoiceRecord::STRIKE => {
+                    self.voice_claimed &= !(1 << record.slot);
+                    self.start_voice_unit(
+                        record.channel,
+                        record.note,
+                        record.velocity,
+                        record.slot as usize,
+                    );
+                }
+                VoiceRecord::RELEASE => {
+                    let release = (record.release > 0).then(|| record.release - 1);
+                    self.release_voices(section, record.channel, record.note, release, record.serial);
+                }
+                _ => debug_assert!(false, "clase de trabajo desconocida"),
+            }
         }
     }
 
@@ -9428,7 +9477,7 @@ impl ConcertGrand {
         // up front, seven notes of one chord all chose slot zero, and
         // `a_chord_is_the_sum_of_its_notes` said so.
         let free = |owner: &Self, slot: usize| {
-            !voice_at!(owner, slot).active && owner.strike_claimed & (1 << slot) == 0
+            !voice_at!(owner, slot).active && owner.voice_claimed & (1 << slot) == 0
         };
         let chosen = if let Some(index) = (0..MAX_VOICES).find(|slot| free(self, *slot)) {
             index
@@ -9438,12 +9487,12 @@ impl ConcertGrand {
             // In slot order, so a tie steals the same voice it always did,
             // and never one this block has already promised away.
             (0..MAX_VOICES)
-                .filter(|slot| self.strike_claimed & (1 << slot) == 0)
+                .filter(|slot| self.voice_claimed & (1 << slot) == 0)
                 .min_by(|a, b| {
                     voice_at!(self, *a).energy.total_cmp(&voice_at!(self, *b).energy)
                 })?
         };
-        self.strike_claimed |= 1 << chosen;
+        self.voice_claimed |= 1 << chosen;
         Some(chosen)
     }
 
@@ -9615,18 +9664,13 @@ impl ConcertGrand {
         // felt still seats where it seats, but how fast the key came back is
         // no longer a guess. Without one, the variation carries the landing
         // exactly as it did before release velocity was read at all.
-        let (span, knock, firmness) = match release {
+        let (span, firmness) = match release {
             Some(velocity) => (
                 Self::damper_span(velocity),
-                Self::damper_knock(velocity),
                 1.0 + (firmness - 1.0) * Self::RELEASE_RESIDUAL,
             ),
-            None => (1.0, 1.0, firmness),
+            None => (1.0, firmness),
         };
-        let damper = self.damper_factor(note, firmness, span);
-        let (thud_coefficient, thud_decay) = self.damper_thud();
-        let release_gain = Controls::noise_gain(self.controls.release_noise) * firmness * knock;
-        let pressure = self.pedal_pressure;
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
         if let Some(slot) = note.checked_sub(LOW_NOTE).map(usize::from)
@@ -9650,14 +9694,60 @@ impl ConcertGrand {
                 self.damp_silent(slot, own);
             }
         }
+        // Every section hears it. Which of them carries this note is a
+        // thing only a unit knows about its own voices, so the matching
+        // happens there and the coordinator only says what happened.
+        self.broadcast_voice_work(VoiceRecord {
+            kind: VoiceRecord::RELEASE,
+            channel,
+            note,
+            release: release.map_or(0, |velocity| velocity.saturating_add(1)),
+            serial: self.damp_serial,
+            ..VoiceRecord::EMPTY
+        });
+    }
+
+    /// The voice half of a release, for one section's voices.
+    ///
+    /// The scalars are recomputed from the record rather than carried in
+    /// it: they are pure arithmetic on the note, the release velocity and
+    /// the damper serial, and a worker has the same tables. What a worker
+    /// does NOT have is the coordinator's key tracking or its silent bank,
+    /// so those writes stay on the other side.
+    fn release_voices(
+        &mut self,
+        section: usize,
+        channel: u8,
+        note: u8,
+        release: Option<u8>,
+        serial: u32,
+    ) {
+        let firmness = Self::damper_firmness(serial, note);
+        // With a measured return the random landing becomes a residual: the
+        // felt still seats where it seats, but how fast the key came back is
+        // no longer a guess. Without one, the variation carries the landing
+        // exactly as it did before release velocity was read at all.
+        let (span, knock, firmness) = match release {
+            Some(velocity) => (
+                Self::damper_span(velocity),
+                Self::damper_knock(velocity),
+                1.0 + (firmness - 1.0) * Self::RELEASE_RESIDUAL,
+            ),
+            None => (1.0, 1.0, firmness),
+        };
+        let damper = self.damper_factor(note, firmness, span);
+        let (thud_coefficient, thud_decay) = self.damper_thud();
+        let release_gain = Controls::noise_gain(self.controls.release_noise) * firmness * knock;
+        let pressure = self.pedal_pressure;
+        let rate = self.sample_rate;
+        let grip = self.controls.damper_grip();
         let key_off = KEYOFF_KNOCK * release_gain;
         let key_off_decay = expf(-LN_1000 / (KEYOFF_T60_S * rate));
         let key_off_rise = expf(-1.0 / (0.002 * rate));
-        let key_off_seed = self
-            .damp_serial
+        let key_off_seed = serial
             .wrapping_mul(0x9E37_79B9)
             .wrapping_add((note as u32).wrapping_mul(2_654_435_761));
-        for slot in section_major_slots() {
+        for slot in (0..VOICES_PER_SECTION).map(|index| (index << SECTION_SHIFT) | section) {
             let voice = &mut voice_at!(self, slot);
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
                 voice.key_off_knock(key_off, key_off_decay, key_off_rise, key_off_seed, rate);
@@ -9708,6 +9798,7 @@ impl ConcertGrand {
             }
         }
     }
+
 
     /// CC64 as the continuous control it is. The bottom of the travel is
     /// a dead zone (the rail has slack), the top is fully lifted, and the
@@ -11030,9 +11121,9 @@ impl Processor for ConcertGrand {
         // frames rather than interleaved frame by frame -- what a
         // `parallel_render_v1` unit needs, since a unit renders a whole span
         // of its own voices and deposits what it made.
-        self.strike_len = [0; STRING_SECTIONS];
-        self.strike_seq = 0;
-        self.strike_claimed = 0;
+        self.voice_work_len = [0; STRING_SECTIONS];
+        self.voice_work_seq = 0;
+        self.voice_claimed = 0;
         let mut deposits = [FrameDeposit::default(); RENDER_SPAN];
         let mut frame_states = [FrameState::default(); RENDER_SPAN];
         let mut span_start = 0usize;
@@ -11072,7 +11163,7 @@ impl Processor for ConcertGrand {
                 // voice. `bed_busy` below walks them, and today the strike
                 // has already landed when it does -- putting this after it
                 // moved the fingerprint, which is how I learned it.
-                self.run_strikes(frame as u16);
+                self.run_voice_work(frame as u16);
 
                 if refresh_busy {
                     refresh_busy = false;

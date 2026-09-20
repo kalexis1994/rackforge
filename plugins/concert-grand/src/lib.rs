@@ -3570,6 +3570,16 @@ pub static ROOM_MIX: Knob = Knob::new(0.09);
 /// How many frames render in one span. The appliance's period.
 const RENDER_SPAN: usize = 128;
 
+/// The largest block the plugin accepts, and so the length of the plan the
+/// coordinator writes down for it.
+///
+/// It matches the export's `max_frames`. The plan has to live on the
+/// coordinator rather than on a stack, because `begin_block` and
+/// `end_block` are two calls with four workers in between -- eighty-eight
+/// bytes a frame, which is 352 KB at the full block and the reason the
+/// parallel path does not have to cap the block size.
+const MAX_BLOCK_FRAMES: usize = 4096;
+
 /// The most per-voice records one frame can carry across all four sections.
 ///
 /// A broadcast record lands in every section, so one release, one pedal
@@ -5185,6 +5195,15 @@ const CAL_PARAMS: usize = 9;
 pub struct ConcertGrand {
     /// What a string needs and a section cannot reach.
     engine: StringEngine,
+    /// What each frame of this block looks like to the stages after the
+    /// strings, written by `plan_span` and read by `serial_stages`.
+    plan_states: [FrameState; MAX_BLOCK_FRAMES],
+    /// And what each unit will hear of the OTHERS at that frame, plus
+    /// whether the sostenuto rod was down. These reach the units: in one
+    /// instance straight from here, in four through the block-shared
+    /// payload.
+    plan_others: [[f32; STRING_SECTIONS]; MAX_BLOCK_FRAMES],
+    plan_sostenuto: [bool; MAX_BLOCK_FRAMES],
     /// The voices, grouped by the section that renders them.
     ///
     /// A voice's section is its slot masked, which is what spreads a chord
@@ -5462,6 +5481,9 @@ impl Default for ConcertGrand {
     fn default() -> Self {
         let mut piano = Self {
             engine: StringEngine::default(),
+            plan_states: [FrameState::default(); MAX_BLOCK_FRAMES],
+            plan_others: [[0.0; STRING_SECTIONS]; MAX_BLOCK_FRAMES],
+            plan_sostenuto: [false; MAX_BLOCK_FRAMES],
             sections: [StringUnit::default(); STRING_SECTIONS],
             pedal: false,
             soft: 0.0,
@@ -10281,9 +10303,6 @@ impl ConcertGrand {
         parameter_index: &mut usize,
         refresh_busy: &mut bool,
         bed_busy: &mut [bool; BED_COUNT],
-        states: &mut [FrameState],
-        others: &mut [[f32; STRING_SECTIONS]],
-        sostenuto: &mut [bool],
         span_start: usize,
         span: usize,
         pedal_decay: f32,
@@ -10363,7 +10382,7 @@ impl ConcertGrand {
                     }
                 }
             }
-            sostenuto[offset] = self.sostenuto;
+            self.plan_sostenuto[offset] = self.sostenuto;
             // What each section will hear of the OTHERS: their sums from
             // a block ago, which is the whole reason the four can run at
             // once. Read here, before anything renders, because after
@@ -10384,9 +10403,9 @@ impl ConcertGrand {
             for section in 0..STRING_SECTIONS {
                 stale += self.section_history[section][read];
             }
-            others[offset] =
+            self.plan_others[offset] =
                 core::array::from_fn(|s| stale - self.section_history[s][read]);
-            states[offset] = FrameState {
+            self.plan_states[offset] = FrameState {
                 lab: [
                     self.engine.controls.lab(14),
                     self.engine.controls.lab(15),
@@ -10422,7 +10441,6 @@ impl ConcertGrand {
     fn serial_stages(
         &mut self,
         unit: impl Fn(usize, usize) -> SectionFrame,
-        states: &[FrameState],
         span_start: usize,
         span: usize,
         output: &mut [f32],
@@ -10472,7 +10490,7 @@ impl ConcertGrand {
 
             let frame = span_start + offset;
             self.run_silent_work(offset as u16);
-            let frame_state = states[offset];
+            let frame_state = self.plan_states[offset];
             let bed_busy = frame_state.bed_busy;
             // Everything the strings produce radiates through the board --
             // each string from its own point of the bridge (`BOARD_SHAPE`).
@@ -12356,11 +12374,8 @@ impl Processor for ConcertGrand {
         self.voice_work_len = [0; STRING_SECTIONS];
         self.voice_work_seq = 0;
         self.voice_claimed = 0;
-        let mut frame_states = [FrameState::default(); RENDER_SPAN];
         // What phase one writes down for phase two, and what phase two hands
         // to phase three.
-        let mut sostenuto_at = [false; RENDER_SPAN];
-        let mut others_at = [[0.0f32; STRING_SECTIONS]; RENDER_SPAN];
         let mut unit_out = [[SectionFrame::default(); RENDER_SPAN]; STRING_SECTIONS];
         let mut span_start = 0usize;
         while span_start < frames as usize {
@@ -12375,9 +12390,6 @@ impl Processor for ConcertGrand {
                 &mut parameter_index,
                 &mut refresh_busy,
                 &mut bed_busy,
-                &mut frame_states,
-                &mut others_at,
-                &mut sostenuto_at,
                 span_start,
                 span,
                 pedal_decay,
@@ -12397,11 +12409,11 @@ impl Processor for ConcertGrand {
                     // block ago. A section that is the only one sounding
                     // hears exactly what it always heard: the others' sums
                     // are zero, so there is nothing to be late.
-                    let feed = others_at[offset][section] + previous;
+                    let feed = self.plan_others[offset][section] + previous;
                     let made = self.sections[section].render_frame(
                         feed,
                         sympathy_rate,
-                        sostenuto_at[offset],
+                        self.plan_sostenuto[offset],
                     );
                     previous = made.sample;
                     unit_out[section][offset] = made;
@@ -12411,7 +12423,6 @@ impl Processor for ConcertGrand {
 
             self.serial_stages(
                 |section, offset| unit_out[section][offset],
-                &frame_states,
                 span_start,
                 span,
                 output,

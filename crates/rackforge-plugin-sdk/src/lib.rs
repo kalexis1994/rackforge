@@ -1612,6 +1612,36 @@ macro_rules! export_parallel_processor {
         };
         const RF_PARALLEL_MIX_SLOT_SAMPLES: usize = $max_frames * $max_output_channels;
 
+        /// What the host copies across this plugin's boundary for ONE block
+        /// at `max_frames`, in bytes.
+        ///
+        /// Arithmetic over numbers the plugin itself declared, not a
+        /// measurement: the block-shared payload is read out of the
+        /// coordinator and written into EVERY unit, each unit's audio is
+        /// read back out and written into the coordinator's mix, and each
+        /// unit's report comes home. The multiplier by unit count is the
+        /// part that surprises people -- a payload that looks small next to
+        /// one unit is not small next to eight.
+        ///
+        /// The number is a ceiling, at the longest block the plugin accepts;
+        /// a host running shorter blocks moves proportionally less. It is
+        /// exposed rather than enforced because a compile-time assertion
+        /// could only carry a fixed message, and what matters is not a
+        /// threshold but whether this figure is large next to the DSP it
+        /// serves. `cargo run -p rackforge-core --example plugin-profile`
+        /// puts the two side by side, with real block lengths.
+        pub const RF_PARALLEL_BLOCK_TRAFFIC_BYTES: usize = {
+            let shared = RF_PARALLEL_SHARED_CAPACITY * (RF_PARALLEL_MAX_UNITS + 1);
+            let audio = $max_frames
+                * RF_PARALLEL_UNIT_CHANNELS
+                * core::mem::size_of::<f32>()
+                * RF_PARALLEL_MAX_UNITS
+                * 2;
+            let reports = <$processor as $crate::ParallelProcessor>::REPORT_BYTES as usize
+                * RF_PARALLEL_MAX_UNITS;
+            shared + audio + reports
+        };
+
         /// The host requires an 8-aligned dispatch region.
         #[repr(C, align(8))]
         pub struct RackForgeDispatchBuffer(

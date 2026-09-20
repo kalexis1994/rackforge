@@ -565,6 +565,60 @@ arrangement of it that helps. What is left there genuinely is an ear-level
 decision — fewer modes, or a cheaper mode — and that is a different kind of
 question from this one.
 
+## Finding out what a block costs
+
+A plugin author's own profiler measures the whole render, which is the
+natural thing to measure and the wrong shape for this host. A block is three
+phases and they land in different places: `begin_block` and `end_block` run
+on the coordinator, one after the other, and the units run on worker cores.
+Splitting five voices across four cores does nothing whatever about the
+serial two, so a fat `begin_block` is the one cost no number of cores can
+help with -- and it is invisible in a figure that adds all three together.
+
+```text
+cargo run --release -p rackforge-core --example plugin-profile -- <package-directory>
+```
+
+It renders a deployed package twice, with nothing playing and under a held
+chord, and reports each phase against the deadline plus how much of it is
+FIXED. That second column is the diagnosis. A serial phase that costs the
+same either way is control-rate work running at sample rate, paid on every
+block forever, and it reads the same on a laptop as on an appliance --
+unlike the microseconds, which do not transfer at all.
+
+This is how RF-5's `begin_block` was found: 100 % fixed, and a third of the
+appliance's deadline before a single voice rendered. The cause was four
+read-only methods taking a kilobyte of sample-and-hold cells by value, which
+a native build elides and wasm does not, so it was invisible to every
+measurement taken on a developer machine.
+
+### What crosses the boundary
+
+The tool also prints what the host carries, which is arithmetic over numbers
+the plugin declared rather than a measurement. `export_parallel_processor!`
+computes the same figure as `RF_PARALLEL_BLOCK_TRAFFIC_BYTES`, and the host
+says it once when it stands a plugin up:
+
+```text
+AUDIO_PARALLEL_TRAFFIC units=5 shared_bytes=671760 unit_channels=2 per_block_kib=3946.1
+```
+
+The multiplier by unit count is the part that surprises people: the shared
+payload is read out of the coordinator and written into EVERY unit, so a
+payload that looks small beside one unit is not small beside eight. RF-5
+carries 3946 KiB a block against the Concert Grand's 427, and the Concert
+Grand is much the larger instrument -- the difference is that RF-5's payload
+is per FRAME.
+
+It is exposed rather than enforced. A compile-time assertion could only
+carry a fixed message and a fixed threshold, and the question is never
+whether this figure crosses a line: it is whether it is large next to the
+DSP it serves, which needs both numbers side by side. Rust also cannot emit
+a compile-time warning carrying a computed value, so a macro that "warns you
+about your wire format" is not a thing that can be built -- only a const
+that anyone can read, a host that says it out loud, and a profiler that puts
+it next to the work.
+
 ## What is not covered
 
 **The browser pool refuses an instrument that reports.** A plugin whose

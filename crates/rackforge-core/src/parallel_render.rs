@@ -1684,6 +1684,27 @@ impl<'plugin> ParallelUnits<'plugin> {
         // output channels unless the plugin declared otherwise.
         let unit_channels = layout.unit_width(output_channels as usize);
         let samples = maximum_frames as usize * unit_channels;
+        // What this plugin will cost the host to carry, once, where an
+        // author can see it. A per-frame shared payload looks small beside
+        // one unit and is not small beside eight, and nothing else in the
+        // pipeline ever says the number out loud: the macro computes it at
+        // compile time but a const is only visible to whoever goes looking,
+        // and a plug-in author debugging deadline misses is looking at their
+        // own DSP.
+        println!(
+            "AUDIO_PARALLEL_TRAFFIC units={} shared_bytes={} unit_channels={} per_block_kib={:.1}",
+            layout.max_units,
+            layout.shared_capacity,
+            unit_channels,
+            (layout.shared_capacity * (layout.max_units + 1)
+                + maximum_frames as usize
+                    * unit_channels
+                    * size_of::<f32>()
+                    * layout.max_units
+                    * 2
+                + layout.report_stride * layout.max_units) as f64
+                / 1024.0
+        );
         let mut cells = Vec::with_capacity(layout.max_units);
         for unit in 0..layout.max_units {
             let mut instance = if resource_overrides.is_empty() {
@@ -1921,6 +1942,17 @@ impl<'plugin> ParallelUnits<'plugin> {
     /// which is how three separate places came to use the wrong one.
     pub fn unit_width(&self, channels: u32) -> usize {
         self.layout.unit_width(channels as usize)
+    }
+
+    /// Bytes of block-shared payload the coordinator committed for the last
+    /// block, which is what the host copies into EVERY unit.
+    ///
+    /// Not the declared capacity, which is sized for the longest block the
+    /// plugin accepts: a profiler that reports the capacity reports a number
+    /// thirty-two times too large on a 128-frame block, and the difference
+    /// between those two is exactly the thing an author needs to see.
+    pub fn shared_len(&self) -> usize {
+        self.shared_len
     }
 
     /// Units silenced by earlier faults; diagnostic only.

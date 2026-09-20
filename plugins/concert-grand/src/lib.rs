@@ -8000,7 +8000,12 @@ impl ConcertGrand {
         for record in due.iter().take(count).copied() {
             match record.kind {
                 VoiceRecord::STRIKE => {
-                    self.voice_claimed &= !(1 << record.slot);
+                    // The claim is not released here any more. It was, back
+                    // when the strike ran in the same pass that chose the
+                    // next one; now every choice in the block is made before
+                    // any strike lands, so nothing reads the bit again and
+                    // clearing it was a section writing a coordinator's
+                    // word for no one.
                     self.start_voice_unit(
                         record.channel,
                         record.note,

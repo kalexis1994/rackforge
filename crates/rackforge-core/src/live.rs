@@ -175,6 +175,16 @@ struct RackSlotVoice<'plugin> {
     /// The events as the parallel scheduler takes them, rebuilt each block.
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
+    /// When this block's `begin` started, so the budget loop can be closed
+    /// at `end` with the wall time the WHOLE block took.
+    ///
+    /// The classic path measures one call and tells the governor about it. A
+    /// parallel block is three calls with four workers in between, and
+    /// nothing was telling the governor anything at all: both call sites
+    /// were in `process_wide`, so an instrument split across cores never
+    /// learned it was late and never gave ground. It ran La Campanella 2280
+    /// blocks past the deadline without one cut.
+    block_started: Option<Instant>,
     budget: SlotBudget,
 }
 
@@ -465,6 +475,7 @@ unsafe impl<'plugin> ScheduledSlot for RackSlotVoice<'plugin> {
 
     fn run_begin(&mut self, frames: u32, _channels: u32) -> Option<u32> {
         self.output.fill(0.0);
+        self.block_started = Some(Instant::now());
         if self.process_faulted {
             return Some(0);
         }
@@ -494,7 +505,7 @@ unsafe impl<'plugin> ScheduledSlot for RackSlotVoice<'plugin> {
         let Some(parallel) = self.parallel.as_mut() else {
             return false;
         };
-        parallel
+        let finished = parallel
             .finish(
                 &mut self.instance,
                 &mut self.output,
@@ -502,7 +513,19 @@ unsafe impl<'plugin> ScheduledSlot for RackSlotVoice<'plugin> {
                 channels,
                 completed,
             )
-            .is_ok()
+            .is_ok();
+        // The budget loop, closed where the block actually ends. The fuel the
+        // coordinator reports now is the whole block's: the orchestrator adds
+        // what planning cost and what the four workers spent in their own
+        // instances.
+        if let (true, Some(started)) = (finished, self.block_started.take()) {
+            observe_budget(
+                &mut self.budget,
+                &mut self.instance,
+                started.elapsed().as_nanos() as u64,
+            );
+        }
+        finished
     }
 
     fn quarantine(&mut self) {
@@ -643,6 +666,16 @@ struct StandaloneVoice<'plugin> {
     /// The events as the parallel scheduler takes them, rebuilt each block.
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
+    /// When this block's `begin` started, so the budget loop can be closed
+    /// at `end` with the wall time the WHOLE block took.
+    ///
+    /// The classic path measures one call and tells the governor about it. A
+    /// parallel block is three calls with four workers in between, and
+    /// nothing was telling the governor anything at all: both call sites
+    /// were in `process_wide`, so an instrument split across cores never
+    /// learned it was late and never gave ground. It ran La Campanella 2280
+    /// blocks past the deadline without one cut.
+    block_started: Option<Instant>,
     /// Present only for chain effects. Keeps bypass click-free and preserves
     /// the effect's declared latency while the wet path fades in or out.
     effect_bypass: Option<EffectBypass>,
@@ -811,6 +844,7 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
 
     fn run_begin(&mut self, frames: u32, _channels: u32) -> Option<u32> {
         self.output.fill(0.0);
+        self.block_started = Some(Instant::now());
         if self.process_faulted {
             return Some(0);
         }
@@ -840,7 +874,7 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
         let Some(parallel) = self.parallel.as_mut() else {
             return false;
         };
-        parallel
+        let finished = parallel
             .finish(
                 &mut self.instance,
                 &mut self.output,
@@ -848,7 +882,19 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
                 channels,
                 completed,
             )
-            .is_ok()
+            .is_ok();
+        // The budget loop, closed where the block actually ends. The fuel the
+        // coordinator reports now is the whole block's: the orchestrator adds
+        // what planning cost and what the four workers spent in their own
+        // instances.
+        if let (true, Some(started)) = (finished, self.block_started.take()) {
+            observe_budget(
+                &mut self.budget,
+                &mut self.instance,
+                started.elapsed().as_nanos() as u64,
+            );
+        }
+        finished
     }
 
     fn quarantine(&mut self) {

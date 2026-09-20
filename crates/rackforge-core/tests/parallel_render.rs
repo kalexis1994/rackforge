@@ -1409,3 +1409,72 @@ fn the_packaged_concert_grand_matches_its_sequential_fallback() {
         );
     }
 }
+
+/// The number the budget governor reads is the whole block's, not the last
+/// stage of it.
+///
+/// A parallel block is spent in five instances: the coordinator's
+/// `begin_block` and `end_block`, and one `render_unit` in each worker. The
+/// governor reads one instance, and what that instance last recorded is
+/// `end_block` alone. An instrument split across cores therefore looked
+/// cheap no matter how late it ran -- it went 2280 blocks past the deadline
+/// during one performance without ever giving ground, because nothing it
+/// could see said it was late.
+///
+/// Nothing tested the gathering that fixes it, which is the same shape of
+/// gap that let three width bugs reach an appliance: host code written,
+/// confirmed by reading one log line on the appliance, and then trusted.
+#[test]
+fn a_parallel_block_reports_the_fuel_the_whole_block_spent() {
+    let plugin = build_package_from(WIDE_UNIT_SYNTH);
+    let note = MidiEventV1 {
+        frame: 1,
+        length: 3,
+        data: [0x90, 60, 100],
+    };
+
+    // One instance renders begin, every unit and end, so its counter is the
+    // whole block's by construction. That is the yardstick.
+    let telemetry = RenderTelemetry::new(1);
+    let mut classic = vec![TestVoice::create(plugin, false)];
+    classic[0].events = vec![note];
+    process_slots_sequential(&mut classic, FRAMES, CHANNELS, &telemetry);
+    let whole_block = classic[0]
+        .instance
+        .last_realtime_fuel_consumed()
+        .expect("portable instances are metered");
+    assert!(
+        whole_block > 0,
+        "the fixture burns no measurable fuel, so nothing below means anything"
+    );
+
+    // The same block, the same work, split across workers.
+    let telemetry = RenderTelemetry::new(3);
+    let mut pool = RenderPool::with_workers(3, telemetry);
+    assert!(pool.worker_count() >= 2, "this machine cannot schedule units");
+    let mut voices = vec![TestVoice::create(plugin, true)];
+    voices[0].events = vec![note];
+    assert!(pool.process(&mut voices, FRAMES, CHANNELS, 1_000_000_000));
+    let reported = voices[0]
+        .instance
+        .last_realtime_fuel_consumed()
+        .expect("portable instances are metered");
+
+    // Same work either way, so the two numbers differ only by the entry
+    // overheads of four extra calls. Three quarters is loose enough not to
+    // be brittle and far tighter than the failure it guards: `end_block`
+    // alone is a small fraction of a block.
+    assert!(
+        reported * 4 >= whole_block * 3,
+        "a parallel block reported {reported} fuel for work the same block \
+         costs {whole_block} sequentially -- the units' share is missing, \
+         which is exactly what the governor was blind to"
+    );
+    // And it must not double-count: begin's fuel is gathered before
+    // `end_block` overwrites the counter, then added back after.
+    assert!(
+        reported <= whole_block * 2,
+        "a parallel block reported {reported} fuel against {whole_block}, \
+         which is more work than the block contains"
+    );
+}

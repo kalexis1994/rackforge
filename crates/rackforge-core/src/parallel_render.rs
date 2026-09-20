@@ -1822,6 +1822,14 @@ impl<'plugin> ParallelUnits<'plugin> {
     /// Publishes the pointer table for one unit. The input slice must stay
     /// untouched until the block retires.
     pub fn unit_job(&mut self, unit: u32, input: &[f32], frames: u32, channels: u32) -> UnitJob {
+        // What `finish` will size this unit's slot by, computed from the
+        // block's channels rather than the cell's. The two are the same
+        // number as long as blocks arrive at the width the units were
+        // created for; a cell's buffer was allocated for that width, so a
+        // block at any other one would truncate here and be read back at a
+        // different stride there -- silently, in the direction that has
+        // already cost this project three bugs.
+        let expected = self.unit_width(channels);
         let cell = &mut self.cells[unit as usize];
         cell.input_ptr = input.as_ptr();
         cell.input_len = input.len();
@@ -1832,6 +1840,10 @@ impl<'plugin> ParallelUnits<'plugin> {
         // its own width through `rackforge_parallel_unit_channels`, and
         // copying only the output channels would truncate it in silence.
         let width = cell.unit_channels.max(1);
+        debug_assert_eq!(
+            width, expected,
+            "unit {unit} was created {width} wide and this block is {expected}"
+        );
         cell.output_samples = frames as usize * width;
         UnitJob {
             context: (&mut **cell as *mut UnitCell<'plugin>).cast(),

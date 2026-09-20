@@ -7857,7 +7857,7 @@ impl ConcertGrand {
         // hammer let off too slowly turns back short of the string. The key
         // is down and its damper is up; the string is free and silent -- and
         // no voice is taken, which is why this is decided here.
-        let (_, _, _, at_string) = self.action_blow(velocity, self.soft, returned);
+        let (_, _, repetition, at_string) = self.action_blow(velocity, self.soft, returned);
         if at_string <= 0.0 {
             self.hold_silent(note);
             return;
@@ -7899,6 +7899,15 @@ impl ConcertGrand {
                 slot
             }
         };
+        // Only now that the blow is certain: the back-check scaling it was
+        // given, and the salt for its felt. Drawn here so that a section
+        // never has to advance a counter another section is also advancing,
+        // and drawn HERE rather than earlier so that a key that takes no
+        // string -- no hammer reaches it, or no slot was free -- does not
+        // move a number the next real blow reads. That order is what the
+        // fingerprint noticed when this was written four lines higher.
+        self.repetition_scale = repetition;
+        self.strike_serial = self.strike_serial.wrapping_add(1);
         // The coordinator's half of what it knows, written where it decided.
         // The energy stays as it was until the block that renders this note
         // reports one; nothing can steal the slot before then, because
@@ -7918,6 +7927,7 @@ impl ConcertGrand {
                 note,
                 flags: if self.pedal { VoiceRecord::FLAG_PEDAL } else { 0 },
                 velocity,
+                serial: self.strike_serial,
                 soft: self.soft,
                 returned,
                 ..VoiceRecord::EMPTY
@@ -7999,6 +8009,7 @@ impl ConcertGrand {
                         record.has(VoiceRecord::FLAG_PEDAL),
                         record.soft,
                         record.returned,
+                        record.serial,
                     );
                 }
                 VoiceRecord::RELEASE => {
@@ -8124,6 +8135,7 @@ impl ConcertGrand {
         pedal: bool,
         soft: f32,
         returned: f32,
+        serial: u32,
     ) {
         #[cfg(test)]
         let mut mark = std::time::Instant::now();
@@ -8147,13 +8159,12 @@ impl ConcertGrand {
         // ~46 mm as the regulated one. The mechanism is certain; the fraction
         // is judgement, like the strike skew and the damper's spread.
         let (velocity, shift, repetition, at_string) = self.action_blow(velocity, soft, returned);
-        self.repetition_scale = repetition;
         // The coordinator asked the same question of the same function
         // before it took this slot, so a hammer that stops short cannot
         // arrive here -- and if it ever did, it would be a silent note
         // holding a voice, not a wrong sound.
         debug_assert!(at_string > 0.0, "un martillo que no llega se quedo con una voz");
-        let (letoff, _) = self.hammer_speeds(velocity);
+        let (letoff, _) = self.hammer_speeds_at(repetition, velocity);
 
         // A RE-STRUCK STRING IS THE SAME STRING. If this note is still
         // ringing free -- held, or sustained with its damper clear -- the
@@ -8497,7 +8508,7 @@ impl ConcertGrand {
                 // one spreads it.
                 // The speed at the string: the action's law at let-off, less
                 // the flight's toll -- see `LETOFF_DISTANCE_MM`.
-                let (_, velocity0) = self.hammer_speeds(velocity);
+                let (_, velocity0) = self.hammer_speeds_at(repetition, velocity);
                 // The felt: K in N/m^p, hardening steeply toward the treble.
                 // Brightness and the Hammer Hard control are voicing -- the
                 // needle and the lacquer act on exactly this property.
@@ -9144,8 +9155,7 @@ impl ConcertGrand {
         // and a real room. The default now sits ~10 dB under the measured
         // ceiling -- present, discreet -- and the fader still reaches the
         // recording level at ~0.65 and x16 above it at the top.
-        self.strike_serial = self.strike_serial.wrapping_add(1);
-        let strike_salt = self.strike_serial.wrapping_mul(0x9E37_79B9);
+        let strike_salt = serial.wrapping_mul(0x9E37_79B9);
         let clack_level = action_noise_dynamic(velocity)
             * KNOCK_LEVEL.get()
             * 3.4
@@ -9504,7 +9514,7 @@ impl ConcertGrand {
         // Read before the voice is borrowed: this consults the scale, and the
         // borrow checker is right that the two cannot overlap.
         let clang_register = self.clang_register(position);
-        let firmness = Self::damper_firmness(self.strike_serial, note);
+        let firmness = Self::damper_firmness(serial, note);
         phase!(3, mark);
         let voice = self.claim_voice(slot);
         voice.active = true;

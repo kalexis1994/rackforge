@@ -451,3 +451,85 @@ Scope: the browser pool parallelises the units of the active instrument, the
 dominant browser-host case. Cabled-rack parallelism across plugin instances
 stays native-only — it rides on the core `RenderPool`, which needs threads
 the wasm host does not have.
+
+## What it bought, on real hardware
+
+The Concert Grand is the first instrument to declare the extension: four
+string sections, one unit each, twenty floats a frame per unit folded down to
+stereo by `end_block`. Measured on the Raspberry Pi 4 appliance, 128-frame
+blocks against a 2666 µs deadline, the densest thirty seconds of La
+Campanella, the same binary and the same component both ways:
+
+| | mean | p99 | deadline misses | governor |
+| --- | --- | --- | --- | --- |
+| sequential (`RACKFORGE_AUDIO_WORKERS=0`) | 1430 µs | 2883 µs | 54 | tightened, `late_pct=23.4` |
+| four cores (auto, three workers) | 1112 µs | 2359 µs | 5 | no cuts |
+
+The gap is wider than the means suggest: the sequential figure is what the
+instrument costs *after* the governor cut quality to survive, while the
+parallel one never had to give ground.
+
+`tests/parallel_overhead.rs` splits the cost three ways — one instance
+rendering a whole block, the same units run inline on one thread, and the
+same units across the real pool — which is the only split that separates
+transport from threading. On the appliance the transport costs 30 µs a block
+idle and 111 µs under a chord, and the threading 58 µs idle and *minus*
+214 µs under a chord: once there is real work the pool finishes ahead of a
+single instance. An earlier claim in this project that the transport cost
+~450 µs was wrong, and it was wrong in the usual way — two numbers compared
+across different states, one of them measured while every unit was being
+refused.
+
+### The floor, which is where the remaining work is
+
+The same measurement says an idle block costs 1039 µs before a single note
+sounds, and about 900 µs of that is the global stage: the soundboard, the
+sympathetic bank and the room, which run every block whether or not anything
+is ringing. A third of the deadline, paid identically in both render paths.
+
+That is why the notes barely show. La Campanella's densest passage means
+1112 µs and the idle floor is 1039: the string work is spread across cores
+and disappears into the space the global stage was not using. Nothing in the
+scheduler moves this, because Amdahl charges for it either way.
+
+So any further gain has to come from the global stage itself, and the only
+obvious lever — not running it, or running it cheaper, when no string holds
+energy — is exactly the mechanism that cuts a decaying tail and silences the
+sympathetic bloom under a chord that is still breathing. That is an
+ear-level decision, not a profiling one, and it wants an A/B before it wants
+an implementation. The honest preparatory step is to measure the three parts
+of the global stage separately, which changes no audio at all.
+
+## What is not covered
+
+**The browser pool refuses an instrument that reports.** A plugin whose
+coordinator decides things from what its units did — which string is busy,
+which is quietest — has no way home for that on the web: the worker arena
+carries audio and nothing else. Such a block takes the sequential fallback,
+which is the same component rendering the same audio on one thread. The
+Concert Grand is exactly that kind of plugin, so on the web it is currently
+single-threaded. Closing this needs a report region in the arena, a copy on
+the worker side and an `rf_par_report_read`.
+
+**Nothing exercises the browser transport the way the native one is now
+exercised.** `tests/parallel_render.rs` holds the native path to its
+sequential fallback with a fixture whose units are deliberately wider than
+its instrument, and holds the packaged Concert Grand to the same standard
+through the real `ParallelUnits` and `RenderPool`. The browser path has the
+same width arithmetic in `browser.rs` and no equivalent guard.
+
+**`live.rs` is invisible to a host build on Windows.** It is behind
+`#[cfg(target_os = "linux")]`, so cargo reports success for a crate whose
+changed file it never compiled — a commit once shipped with five
+constructors missing a field that way. `tools/cross-build-raspberry-pi.ps1`
+is the only build on a Windows machine that compiles it, and any change
+there has to go through it.
+
+**The two packaged equivalence tests are `#[ignore]`d** because they need a
+`wasm32` build of their component. CI builds the components and runs them in
+their own step; a developer has to ask for them:
+
+```bash
+cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+cargo test -p rackforge-core --test parallel_render -- --ignored
+```

@@ -495,10 +495,51 @@ scheduler moves this, because Amdahl charges for it either way.
 So any further gain has to come from the global stage itself, and the only
 obvious lever — not running it, or running it cheaper, when no string holds
 energy — is exactly the mechanism that cuts a decaying tail and silences the
-sympathetic bloom under a chord that is still breathing. That is an
-ear-level decision, not a profiling one, and it wants an A/B before it wants
-an implementation. The honest preparatory step is to measure the three parts
-of the global stage separately, which changes no audio at all.
+sympathetic bloom under a chord that is still breathing. That would be an
+ear-level decision, not a profiling one — but the measurement below says it
+is not the first thing to reach for, because the largest lever in the stage
+needs no decision about the sound at all.
+
+### What the global stage is made of
+
+Priced by ablation — building the instrument with one group of banks given
+an empty range, so everything downstream still runs on the zeros those loops
+would have left. Each figure is therefore a floor on what that group costs,
+never an overstatement. Measured on a developer machine, so read the
+proportions and not the microseconds; the appliance puts the whole stage at
+about three and a half times these numbers.
+
+| | idle | a held chord | share |
+| --- | --- | --- | --- |
+| the soundboard's modal bank | 137 µs | 202 µs | **~69 %** |
+| the sympathetic banks (open, undamped, silent keys, bed) | 90 µs | 113 µs | ~39 % |
+| the room (early reflections and the chamber) | 0 µs | 17 µs | ~6 % |
+
+The room is very nearly free and is not worth touching. The soundboard's
+256-mode bank is the bill.
+
+Two things about that bank were measured rather than assumed, because the
+obvious answer was wrong. It is an array of 56-byte structs, which looks
+like a textbook failure to vectorise — `simd128` is on for every wasm build
+in this workspace, and consecutive modes' state is 56 bytes apart, so a
+four-wide load would need gathers. Laying it out as one array per field is
+**bit-identical and 0.93× — it does not help.** The layout was never the
+constraint.
+
+What is the constraint is the cross-mode sum. Each mode's own recurrence is
+independent and vectorises fine; adding the 256 results into one accumulator
+is a float reduction, and a vectoriser may not reassociate it. Splitting
+that accumulator into four partial sums makes the same loop **3.07×** faster
+— on a developer machine, on x86; the appliance runs wasm on NEON and has
+not been measured, because it was unreachable when this was written.
+
+That 3× is not free. Summing 256 terms in a different order changes the
+result in its last bits, roughly −140 dB relative to the signal: far below
+anything audible and far above the −240 dB the fingerprint guards hold the
+instrument to. Taking it means rebaselining those fingerprints, which is a
+deliberate act and not one to slip into a performance change. It is the
+largest lever left, it does not require a single decision about how the
+instrument sounds, and it is worth doing properly rather than quickly.
 
 ## What is not covered
 
@@ -515,8 +556,12 @@ the worker side and an `rf_par_report_read`.
 exercised.** `tests/parallel_render.rs` holds the native path to its
 sequential fallback with a fixture whose units are deliberately wider than
 its instrument, and holds the packaged Concert Grand to the same standard
-through the real `ParallelUnits` and `RenderPool`. The browser path has the
-same width arithmetic in `browser.rs` and no equivalent guard.
+through the real `ParallelUnits` and `RenderPool`. `browser.rs` is
+`#[cfg(target_arch = "wasm32")]` and calls into the embedder, so nothing in
+this workspace can run it at all. The one rule it used to get wrong on its
+own now lives on `ParallelLayout::unit_width`, which every host asks and
+which has a test that compiles on every target — but that is a rule with a
+guard, not a transport with a guard.
 
 **`live.rs` is invisible to a host build on Windows.** It is behind
 `#[cfg(target_os = "linux")]`, so cargo reports success for a crate whose

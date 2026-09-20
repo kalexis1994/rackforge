@@ -643,6 +643,24 @@ pub trait ParallelProcessor: Default {
         0
     }
 
+    /// The host's fuel budget for one call, as on [`Processor`].
+    ///
+    /// It reaches the coordinator and nothing else, which is where it
+    /// belongs: what a budget buys is decided once for the instrument and
+    /// handed to the units with the rest of the block. A processor that
+    /// answers `false` is one the host stops metering, so the default is
+    /// the same refusal `Processor` gives.
+    ///
+    /// This was missing, and missing quietly: the derived `Processor` for
+    /// the parallel export forwarded every other control call and let this
+    /// one fall through to the default. A plugin whose quality is driven by
+    /// a closed loop -- the Concert Grand's partial budget is -- would have
+    /// been switched to the parallel path and simply stopped hearing from
+    /// the governor.
+    fn set_realtime_budget(&mut self, _fuel_per_call: u64) -> bool {
+        false
+    }
+
     /// Resets coordinator state. Unit state is reset separately through
     /// [`Self::reset_unit`] on every instance that holds it.
     fn reset(&mut self) {}
@@ -1785,6 +1803,10 @@ macro_rules! export_parallel_processor {
                     input_channels,
                     output_channels,
                 )
+            }
+
+            fn set_realtime_budget(&mut self, fuel_per_call: u64) -> bool {
+                $crate::ParallelProcessor::set_realtime_budget(&mut self.inner, fuel_per_call)
             }
 
             fn set_parameter(&mut self, index: u32, value: f64) -> bool {

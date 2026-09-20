@@ -5233,6 +5233,12 @@ pub struct ConcertGrand {
     voice_work_seq: u8,
     /// What the coordinator knows about each voice. See `VoiceSummary`.
     summary: [VoiceSummary; MAX_VOICES],
+    /// The same for the halos, which the coordinator needs for one thing:
+    /// a halo outlives the note that cast it, and while it rings its
+    /// string's damper is off the bed. A halo placed this block needs no
+    /// entry -- the note that cast it is in `summary` already, and they
+    /// share a bed.
+    halo_summary: [VoiceSummary; STRING_SECTIONS * HALOS_PER_SECTION],
     /// Slots this block has already promised to a strike that has not
     /// happened yet. One bit per slot; `MAX_VOICES` is 32.
     voice_claimed: u32,
@@ -5482,6 +5488,12 @@ impl Default for ConcertGrand {
                 channel: 0,
                 energy: 0.0,
             }; MAX_VOICES],
+            halo_summary: [VoiceSummary {
+                active: false,
+                note: 0,
+                channel: 0,
+                energy: 0.0,
+            }; STRING_SECTIONS * HALOS_PER_SECTION],
             voice_claimed: 0,
             section_delay: 0,
             restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
@@ -10699,6 +10711,7 @@ impl Processor for ConcertGrand {
     fn reset(&mut self) {
         self.sections = [StringSection::default(); STRING_SECTIONS];
         self.summary = [VoiceSummary::default(); MAX_VOICES];
+        self.halo_summary = [VoiceSummary::default(); STRING_SECTIONS * HALOS_PER_SECTION];
         self.pedal = false;
         self.section_partials = [0; STRING_SECTIONS];
         self.section_allowance = [self.partial_budget / STRING_SECTIONS; STRING_SECTIONS];
@@ -11586,17 +11599,21 @@ impl Processor for ConcertGrand {
                             let voice = &self.summary[slot];
                             voice.active.then_some(voice.note)
                         };
-                        let halo_note = (slot >> SECTION_SHIFT < HALOS_PER_SECTION)
-                            .then(|| {
-                                let halo = &halo_at!(self, slot & (STRING_SECTIONS - 1), slot >> SECTION_SHIFT);
-                                halo.active.then_some(halo.note)
-                            })
-                            .flatten();
-                        for note in [note, halo_note].into_iter().flatten() {
+                        if let Some(note) = note {
                             let bed = note.saturating_sub(LOW_NOTE) as usize;
                             if bed < BED_COUNT {
                                 bed_busy[bed] = true;
                             }
+                        }
+                    }
+                    // A halo is that note's strings ringing free, so the bed
+                    // it would have damped is busy for it too. Sixteen of
+                    // them against thirty-two slots, so they get their own
+                    // walk rather than a seat in the voices'.
+                    for halo in self.halo_summary.iter().filter(|halo| halo.active) {
+                        let bed = halo.note.saturating_sub(LOW_NOTE) as usize;
+                        if bed < BED_COUNT {
+                            bed_busy[bed] = true;
                         }
                     }
                     // A key that is down has its damper up: its string is not
@@ -12123,6 +12140,17 @@ impl Processor for ConcertGrand {
                 channel: voice.channel,
                 energy: voice.energy,
             };
+        }
+        for section in 0..STRING_SECTIONS {
+            for index in 0..HALOS_PER_SECTION {
+                let halo = &halo_at!(self, section, index);
+                self.halo_summary[section * HALOS_PER_SECTION + index] = VoiceSummary {
+                    active: halo.active,
+                    note: halo.note,
+                    channel: halo.channel,
+                    energy: halo.energy,
+                };
+            }
         }
         self.share_the_budget();
         self.bridge_feed = bridge_feed;

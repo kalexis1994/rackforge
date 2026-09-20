@@ -18262,17 +18262,56 @@ mod bench {
         }
     }
 
-    /// Not a test: a fingerprint of rendered audio, to compare two builds.
+
+
+    /// Puts every knob back to the value it was compiled with.
+    ///
+    /// The knobs are process-wide atomics and eighteen tests write them, so
+    /// a fingerprint that renders after one of those has run measures that
+    /// test's instrument instead of this one. This is half the answer; the
+    /// `#[ignore]` on the two fingerprints is the other half.
+    #[cfg(test)]
+    fn reset_every_knob() {
+        for (_, knob, _) in TUNABLES {
+            knob.set(knob.compiled());
+        }
+    }
+
+    /// What the instrument renders today.
+    ///
+    /// Stable across debug and release, and across x86 and the appliance's
+    /// aarch64 -- all four were checked before this number was written down,
+    /// which is what makes it safe to assert rather than merely print.
+    ///
+    /// If a change moves it, that is the question, not the answer: say which
+    /// samples moved and why, and paste the new number here deliberately.
+    /// Nothing about the instrument's sound should move by accident, and
+    /// until now nothing stopped it -- these two tests printed their hash and
+    /// asserted nothing, so they passed whatever the instrument did.
+    const RENDER_FINGERPRINT: u64 = 0xe74d_f301_16b3_9a5a;
+    /// As `RENDER_FINGERPRINT`, for the pedalled scenario.
+    const RENDER_FINGERPRINT_PEDALS: u64 = 0x8d20_f899_b050_9bd0;
+
+    /// A fingerprint of rendered audio: what the instrument sounds like,
+    /// as one number.
     ///
     /// Every sample of a fixed scenario folded into one number. Two builds
-    /// that print the same number rendered the same audio, bit for bit; two
-    /// that do not, did not, and the difference is then worth explaining.
+    /// with the same number rendered the same audio, bit for bit; two that
+    /// differ, did not, and the difference is then worth explaining.
     ///
-    /// `cargo test -p rackforge-concert-grand --release render_fingerprint -- --ignored --nocapture`
+    /// This used to print the number and assert nothing, which meant it
+    /// passed no matter what the instrument did -- a guard in name only.
+    ///
+    /// It stays `#[ignore]`d for a reason nobody had written down: the knobs
+    /// are process-wide atomics, eighteen tests write them, and the harness
+    /// runs tests in parallel, so unignoring it makes it fail whenever one
+    /// of those eighteen overlaps it. CI runs it in its own invocation,
+    /// single threaded, which is where the guard actually guards.
     #[test]
-    #[ignore]
+    #[ignore = "process-wide knobs: run it single threaded, as CI does"]
     fn render_fingerprint() {
         const FRAMES: usize = 128;
+        reset_every_knob();
         let mut piano = Box::new(ConcertGrand::default());
         assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
         let mut output = vec![0.0f32; FRAMES * 2];
@@ -18304,6 +18343,10 @@ mod bench {
             }
         }
         std::println!("huella del render: {hash:#018x}");
+        assert_eq!(
+            hash, RENDER_FINGERPRINT,
+            "el render cambio: {hash:#018x} donde habia {RENDER_FINGERPRINT:#018x}"
+        );
     }
 
     /// The pedalled script, built once and played by three tests.
@@ -18423,16 +18466,21 @@ mod bench {
     /// leave the plain fingerprint unmoved -- which is what happened twice
     /// before this test existed.
     ///
-    /// `cargo test -p rackforge-concert-grand --release render_fingerprint_pedals -- --ignored --nocapture`
+    /// As above: it asserts now, and is ignored for the same reason.
     #[test]
-    #[ignore]
+    #[ignore = "process-wide knobs: run it single threaded, as CI does"]
     fn render_fingerprint_pedals() {
+        reset_every_knob();
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         for sample in play_pedal_script(300) {
             hash ^= sample.to_bits() as u64;
             hash = hash.wrapping_mul(0x100_0000_01b3);
         }
         std::println!("huella con pedales: {hash:#018x}");
+        assert_eq!(
+            hash, RENDER_FINGERPRINT_PEDALS,
+            "el render con pedales cambio: {hash:#018x} donde habia {RENDER_FINGERPRINT_PEDALS:#018x}"
+        );
     }
 
     /// Writes the pedalled script's audio, to compare two builds sample by

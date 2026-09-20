@@ -3703,6 +3703,32 @@ impl VoiceRecord {
     }
 }
 
+/// What the coordinator knows about a voice it does not own.
+///
+/// Once the sections are `parallel_render_v1` units the voices live inside
+/// them, and the coordinator cannot read one: a unit is another wasm
+/// instance with its own memory. But the coordinator is the one that has
+/// to choose which slot the next note takes, and choosing means knowing
+/// which slots are busy and which is the quietest.
+///
+/// So the units report and the coordinator remembers. Four numbers per
+/// voice, which is what every decision on this side actually reads.
+///
+/// Two halves, kept honestly apart. What a note IS -- busy, which note,
+/// which channel -- the coordinator writes itself the moment it plans the
+/// strike, because it is the one that decided. What a note has BECOME --
+/// its energy, and whether it has died since -- only rendering knows, and
+/// rendering happens after. So that half is a block old, always, by
+/// construction rather than by accident.
+#[derive(Clone, Copy, Default)]
+struct VoiceSummary {
+    active: bool,
+    note: u8,
+    channel: u8,
+    /// As of the end of the last block. Nothing here can be fresher.
+    energy: f32,
+}
+
 /// One section's voices: what a `parallel_render_v1` unit owns.
 ///
 /// A voice's section is its slot masked, so the eight slots a section holds
@@ -5194,6 +5220,8 @@ pub struct ConcertGrand {
     voice_work_len: [usize; STRING_SECTIONS],
     /// Event order within the block, so a frame's strikes keep theirs.
     voice_work_seq: u8,
+    /// What the coordinator knows about each voice. See `VoiceSummary`.
+    summary: [VoiceSummary; MAX_VOICES],
     /// Slots this block has already promised to a strike that has not
     /// happened yet. One bit per slot; `MAX_VOICES` is 32.
     voice_claimed: u32,
@@ -5425,6 +5453,12 @@ impl Default for ConcertGrand {
             voice_work: [[0; VOICE_WORK_BYTES]; STRING_SECTIONS],
             voice_work_len: [0; STRING_SECTIONS],
             voice_work_seq: 0,
+            summary: [VoiceSummary {
+                active: false,
+                note: 0,
+                channel: 0,
+                energy: 0.0,
+            }; MAX_VOICES],
             voice_claimed: 0,
             section_delay: 0,
             restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
@@ -7741,8 +7775,7 @@ impl ConcertGrand {
             // there to catch is read here rather than reported back from
             // the sections: it is `active` and the note, which the sections
             // do not change while they catch.
-            let caught = (0..MAX_VOICES).any(|slot| {
-                let voice = &voice_at!(self, slot);
+            let caught = self.summary.iter().any(|voice| {
                 voice.active && voice.note == note && voice.channel == channel
             });
             if !caught {
@@ -7771,6 +7804,13 @@ impl ConcertGrand {
         let Some(slot) = self.pick_voice_slot() else {
             return;
         };
+        // The coordinator's half of what it knows, written where it decided.
+        // The energy stays as it was until the block that renders this note
+        // reports one; nothing can steal the slot before then, because
+        // `voice_claimed` holds it for the rest of the block.
+        self.summary[slot].active = true;
+        self.summary[slot].note = note;
+        self.summary[slot].channel = channel;
         self.push_voice_work(
             slot & (STRING_SECTIONS - 1),
             VoiceRecord {
@@ -9670,7 +9710,7 @@ impl ConcertGrand {
         // up front, seven notes of one chord all chose slot zero, and
         // `a_chord_is_the_sum_of_its_notes` said so.
         let free = |owner: &Self, slot: usize| {
-            !voice_at!(owner, slot).active && owner.voice_claimed & (1 << slot) == 0
+            !owner.summary[slot].active && owner.voice_claimed & (1 << slot) == 0
         };
         let chosen = if let Some(index) = (0..MAX_VOICES).find(|slot| free(self, *slot)) {
             index
@@ -9682,7 +9722,9 @@ impl ConcertGrand {
             (0..MAX_VOICES)
                 .filter(|slot| self.voice_claimed & (1 << slot) == 0)
                 .min_by(|a, b| {
-                    voice_at!(self, *a).energy.total_cmp(&voice_at!(self, *b).energy)
+                    self.summary[*a]
+                        .energy
+                        .total_cmp(&self.summary[*b].energy)
                 })?
         };
         self.voice_claimed |= 1 << chosen;
@@ -10594,6 +10636,7 @@ impl Processor for ConcertGrand {
 
     fn reset(&mut self) {
         self.sections = [StringSection::default(); STRING_SECTIONS];
+        self.summary = [VoiceSummary::default(); MAX_VOICES];
         self.pedal = false;
         self.active_partials = 0;
         for string in &mut self.undamped {
@@ -11287,7 +11330,7 @@ impl Processor for ConcertGrand {
         }
         self.note_sounding = [false; NOTE_COUNT];
         for slot in 0..MAX_VOICES {
-            let voice = &voice_at!(self, slot);
+            let voice = self.summary[slot];
             if !(voice.active && voice.note >= LOW_NOTE) {
                 continue;
             }
@@ -11464,8 +11507,16 @@ impl Processor for ConcertGrand {
                     for slot in 0..MAX_VOICES {
                         // A halo is that note's strings ringing free, so the
                         // bed it would have damped is busy for it too.
+                        //
+                        // The notes through the summary, because this feeds
+                        // the stages that run after the sections and those
+                        // will not be able to read a voice. A note struck
+                        // this frame is in it already; a note that died
+                        // during this block leaves its bed marked busy until
+                        // the block ends, which is a damper lifted two and a
+                        // half milliseconds too long.
                         let note = {
-                            let voice = &voice_at!(self, slot);
+                            let voice = &self.summary[slot];
                             voice.active.then_some(voice.note)
                         };
                         let halo_note = (slot >> SECTION_SHIFT < HALOS_PER_SECTION)
@@ -11987,6 +12038,23 @@ impl Processor for ConcertGrand {
                 }
             }
             span_start += span;
+        }
+        // What the sections have to say about their own voices, gathered
+        // once. In one instance this is a read; in four it is what comes
+        // back through the unit's widened slot, and it is the only moment
+        // the coordinator learns that a note has died or how loud one is.
+        //
+        // Nothing here is what the coordinator already knows: a note it
+        // planned is busy from the moment it planned it, whether or not
+        // this walk has happened yet.
+        for slot in 0..MAX_VOICES {
+            let voice = &voice_at!(self, slot);
+            self.summary[slot] = VoiceSummary {
+                active: voice.active,
+                note: voice.note,
+                channel: voice.channel,
+                energy: voice.energy,
+            };
         }
         self.bridge_feed = bridge_feed;
     }
@@ -17577,6 +17645,46 @@ mod bench {
         );
     }
 
+    /// The coordinator's picture of the voices is what the sections last
+    /// reported, at the moment a block ends.
+    ///
+    /// Inside a block it is deliberately not: a note is busy from the
+    /// instant it is planned, and a note that died is still busy until the
+    /// block that killed it finishes. But when `process` returns, the two
+    /// have to agree exactly -- if they ever stop agreeing, the coordinator
+    /// is choosing slots from a picture nobody is painting.
+    #[test]
+    fn the_summary_is_what_the_sections_reported() {
+        const FRAMES: u32 = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        let mut output = vec![0.0f32; FRAMES as usize * 2];
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES, 0, 2);
+        for block in 0..64u32 {
+            let midi: std::vec::Vec<MidiEvent> = (0..3)
+                .map(|voice| MidiEvent {
+                    frame: voice * 7,
+                    data: [0x90, 30 + (block * 5 + voice * 13) as u8 % 60, 90],
+                    length: 3,
+                })
+                .collect();
+            piano.process(&[], &mut output, &midi, &[], FRAMES, 0, 2);
+            for slot in 0..MAX_VOICES {
+                let voice = &voice_at!(piano, slot);
+                let seen = piano.summary[slot];
+                assert_eq!(seen.active, voice.active, "slot {slot}, bloque {block}");
+                assert_eq!(seen.note, voice.note, "slot {slot}, bloque {block}");
+                assert_eq!(seen.channel, voice.channel, "slot {slot}, bloque {block}");
+                assert_eq!(seen.energy, voice.energy, "slot {slot}, bloque {block}");
+            }
+        }
+    }
+
     /// A pedalled passage, written out so two builds can be heard against
     /// each other.
     ///
@@ -17601,16 +17709,19 @@ mod bench {
 
         let mut script: std::vec::Vec<(usize, [u8; 3])> = std::vec::Vec::new();
         script.push((0, [0xB0, 64, 127]));
-        // Sixteen notes a second for six seconds, climbing in fifths so the
-        // same string is never asked for twice while it is still ringing --
-        // a repeated note takes its own voice back, and a figure that comes
-        // round never fills the pool. A bass octave on each bar under it.
-        // Nothing is ever let go, so the pedal holds all of it.
-        for step in 0..96usize {
-            let at = 8 + step * (PER_SECOND / 16);
+        // Thirty-two notes a second for six seconds, climbing in fifths so
+        // the same string is never asked for twice while it is still
+        // ringing -- a repeated note takes its own voice back, and a figure
+        // that comes round never fills the pool. A bass octave on each bar
+        // under it. Nothing is ever let go, so the pedal holds all of it,
+        // and the pool is saturated from the second second on: this is
+        // written to be the hard case, because the decisions being compared
+        // are the ones a full pool forces.
+        for step in 0..192usize {
+            let at = 8 + step * (PER_SECOND / 32);
             script.push((at, [0x90, 28 + (step * 7 % 60) as u8, 84]));
-            if step % 16 == 0 {
-                script.push((at, [0x90, 33 + (step / 16 % 3) as u8 * 5, 104]));
+            if step % 32 == 0 {
+                script.push((at, [0x90, 33 + (step / 32 % 3) as u8 * 5, 104]));
             }
         }
         let blocks = 11 * PER_SECOND;

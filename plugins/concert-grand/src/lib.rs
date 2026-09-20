@@ -10269,6 +10269,149 @@ impl ConcertGrand {
 
     /// What the instrument is carrying, across all four sections.
     ///
+    /// Every event of a span, in order, and the picture each frame leaves
+    /// behind.
+    ///
+    /// This is the shape `begin_block` has. Nothing in it reads a voice --
+    /// that is the property the whole boundary rests on -- so what it
+    /// produces is everything four units need and everything the stages
+    /// after them need: one picture per frame for the serial side, and per
+    /// frame for each unit what it will hear of the OTHERS, read out of the
+    /// delay ring before anything writes to it.
+    #[allow(clippy::too_many_arguments)]
+    fn plan_span(
+        &mut self,
+        midi: &[MidiEvent],
+        midi2: &[MidiEvent2],
+        parameters: &[ParameterEvent],
+        midi_index: &mut usize,
+        midi2_index: &mut usize,
+        parameter_index: &mut usize,
+        refresh_busy: &mut bool,
+        bed_busy: &mut [bool; BED_COUNT],
+        states: &mut [FrameState],
+        others: &mut [[f32; STRING_SECTIONS]],
+        sostenuto: &mut [bool],
+        span_start: usize,
+        span: usize,
+        pedal_decay: f32,
+    ) {
+        // PHASE ONE -- the coordinator: every event in the span, in
+        // order, and the picture each frame leaves behind. Nothing here
+        // reads a voice, which is what lets phase two be four things.
+        for offset in 0..span {
+            let frame = span_start + offset;
+            self.span_offset = offset as u16;
+            self.event_frame = frame as u16;
+            self.clock = self.clock.wrapping_add(1);
+            while let Some(event) = midi.get(*midi_index) {
+                if event.frame as usize != frame {
+                    break;
+                }
+                self.handle_midi(event);
+                *midi_index += 1;
+                *refresh_busy = true;
+            }
+            while let Some(event) = midi2.get(*midi2_index) {
+                if event.frame as usize != frame {
+                    break;
+                }
+                self.handle_wide(event);
+                *midi2_index += 1;
+                *refresh_busy = true;
+            }
+            while let Some(event) = parameters.get(*parameter_index) {
+                if event.frame as usize != frame {
+                    break;
+                }
+                let _ = self.engine.controls.set(event.index, event.value);
+                *parameter_index += 1;
+            }
+
+            if *refresh_busy {
+                *refresh_busy = false;
+                *bed_busy = [false; BED_COUNT];
+                for slot in 0..MAX_VOICES {
+                    // A halo is that note's strings ringing free, so the
+                    // bed it would have damped is busy for it too.
+                    //
+                    // The notes through the summary, because this feeds
+                    // the stages that run after the sections and those
+                    // will not be able to read a voice. A note struck
+                    // this frame is in it already; a note that died
+                    // during this block leaves its bed marked busy until
+                    // the block ends, which is a damper lifted two and a
+                    // half milliseconds too long.
+                    let note = {
+                        let voice = &self.summary[slot];
+                        voice.active.then_some(voice.note)
+                    };
+                    if let Some(note) = note {
+                        let bed = note.saturating_sub(LOW_NOTE) as usize;
+                        if bed < BED_COUNT {
+                            bed_busy[bed] = true;
+                        }
+                    }
+                }
+                // A halo is that note's strings ringing free, so the bed
+                // it would have damped is busy for it too. Sixteen of
+                // them against thirty-two slots, so they get their own
+                // walk rather than a seat in the voices'.
+                for halo in self.halo_summary.iter().filter(|halo| halo.active) {
+                    let bed = halo.note.saturating_sub(LOW_NOTE) as usize;
+                    if bed < BED_COUNT {
+                        bed_busy[bed] = true;
+                    }
+                }
+                // A key that is down has its damper up: its string is not
+                // in the damped bed, whether it was struck or not.
+                for (slot, busy) in bed_busy.iter_mut().enumerate() {
+                    if self.key_down[slot] {
+                        *busy = true;
+                    }
+                }
+            }
+            sostenuto[offset] = self.sostenuto;
+            // What each section will hear of the OTHERS: their sums from
+            // a block ago, which is the whole reason the four can run at
+            // once. Read here, before anything renders, because after
+            // this the sections write the same ring.
+            //
+            // The delay has to reach back past the span. Anything shorter
+            // would be asking for a sum this span has not produced yet,
+            // and the ring would hand back the block before it without
+            // saying so.
+            debug_assert!(
+                self.section_delay >= span,
+                "el retraso entre secciones no alcanza el tramo"
+            );
+            let read = (self.section_cursor + offset + MAX_SECTION_DELAY
+                - self.section_delay)
+                % MAX_SECTION_DELAY;
+            let mut stale = 0.0f32;
+            for section in 0..STRING_SECTIONS {
+                stale += self.section_history[section][read];
+            }
+            others[offset] =
+                core::array::from_fn(|s| stale - self.section_history[s][read]);
+            states[offset] = FrameState {
+                lab: [
+                    self.engine.controls.lab(14),
+                    self.engine.controls.lab(15),
+                    self.engine.controls.lab(16),
+                ],
+                pedal_noise_amp: self.pedal_noise_amp,
+                silent_state: self.silent_state,
+                silent_note: self.silent_note,
+                bed_busy: *bed_busy,
+            };
+            if self.pedal_noise_amp > 1e-6 {
+                self.pedal_noise_amp *= pedal_decay;
+            }
+        }
+
+    }
+
     /// Everything downstream of the strings, for one span of frames.
     ///
     /// The units' slots added up in ascending order -- the order a host
@@ -12247,120 +12390,22 @@ impl Processor for ConcertGrand {
         while span_start < frames as usize {
             let span = (frames as usize - span_start).min(RENDER_SPAN);
             self.silent_work_len = 0;
-            // PHASE ONE -- the coordinator: every event in the span, in
-            // order, and the picture each frame leaves behind. Nothing here
-            // reads a voice, which is what lets phase two be four things.
-            for offset in 0..span {
-                let frame = span_start + offset;
-                self.span_offset = offset as u16;
-                self.event_frame = frame as u16;
-                self.clock = self.clock.wrapping_add(1);
-                while let Some(event) = midi.get(midi_index) {
-                    if event.frame as usize != frame {
-                        break;
-                    }
-                    self.handle_midi(event);
-                    midi_index += 1;
-                    refresh_busy = true;
-                }
-                while let Some(event) = midi2.get(midi2_index) {
-                    if event.frame as usize != frame {
-                        break;
-                    }
-                    self.handle_wide(event);
-                    midi2_index += 1;
-                    refresh_busy = true;
-                }
-                while let Some(event) = parameters.get(parameter_index) {
-                    if event.frame as usize != frame {
-                        break;
-                    }
-                    let _ = self.engine.controls.set(event.index, event.value);
-                    parameter_index += 1;
-                }
-
-                if refresh_busy {
-                    refresh_busy = false;
-                    bed_busy = [false; BED_COUNT];
-                    for slot in 0..MAX_VOICES {
-                        // A halo is that note's strings ringing free, so the
-                        // bed it would have damped is busy for it too.
-                        //
-                        // The notes through the summary, because this feeds
-                        // the stages that run after the sections and those
-                        // will not be able to read a voice. A note struck
-                        // this frame is in it already; a note that died
-                        // during this block leaves its bed marked busy until
-                        // the block ends, which is a damper lifted two and a
-                        // half milliseconds too long.
-                        let note = {
-                            let voice = &self.summary[slot];
-                            voice.active.then_some(voice.note)
-                        };
-                        if let Some(note) = note {
-                            let bed = note.saturating_sub(LOW_NOTE) as usize;
-                            if bed < BED_COUNT {
-                                bed_busy[bed] = true;
-                            }
-                        }
-                    }
-                    // A halo is that note's strings ringing free, so the bed
-                    // it would have damped is busy for it too. Sixteen of
-                    // them against thirty-two slots, so they get their own
-                    // walk rather than a seat in the voices'.
-                    for halo in self.halo_summary.iter().filter(|halo| halo.active) {
-                        let bed = halo.note.saturating_sub(LOW_NOTE) as usize;
-                        if bed < BED_COUNT {
-                            bed_busy[bed] = true;
-                        }
-                    }
-                    // A key that is down has its damper up: its string is not
-                    // in the damped bed, whether it was struck or not.
-                    for (slot, busy) in bed_busy.iter_mut().enumerate() {
-                        if self.key_down[slot] {
-                            *busy = true;
-                        }
-                    }
-                }
-                sostenuto_at[offset] = self.sostenuto;
-                // What each section will hear of the OTHERS: their sums from
-                // a block ago, which is the whole reason the four can run at
-                // once. Read here, before anything renders, because after
-                // this the sections write the same ring.
-                //
-                // The delay has to reach back past the span. Anything shorter
-                // would be asking for a sum this span has not produced yet,
-                // and the ring would hand back the block before it without
-                // saying so.
-                debug_assert!(
-                    self.section_delay >= span,
-                    "el retraso entre secciones no alcanza el tramo"
-                );
-                let read = (self.section_cursor + offset + MAX_SECTION_DELAY
-                    - self.section_delay)
-                    % MAX_SECTION_DELAY;
-                let mut stale = 0.0f32;
-                for section in 0..STRING_SECTIONS {
-                    stale += self.section_history[section][read];
-                }
-                others_at[offset] =
-                    core::array::from_fn(|s| stale - self.section_history[s][read]);
-                frame_states[offset] = FrameState {
-                    lab: [
-                        self.engine.controls.lab(14),
-                        self.engine.controls.lab(15),
-                        self.engine.controls.lab(16),
-                    ],
-                    pedal_noise_amp: self.pedal_noise_amp,
-                    silent_state: self.silent_state,
-                    silent_note: self.silent_note,
-                    bed_busy,
-                };
-                if self.pedal_noise_amp > 1e-6 {
-                    self.pedal_noise_amp *= pedal_decay;
-                }
-            }
-
+            self.plan_span(
+                midi,
+                midi2,
+                parameters,
+                &mut midi_index,
+                &mut midi2_index,
+                &mut parameter_index,
+                &mut refresh_busy,
+                &mut bed_busy,
+                &mut frame_states,
+                &mut others_at,
+                &mut sostenuto_at,
+                span_start,
+                span,
+                pedal_decay,
+            );
             // PHASE TWO -- the sections. Each one renders its own strings for
             // the whole span from its own state and what phase one wrote
             // down, and nothing it touches belongs to another section. This

@@ -1096,6 +1096,17 @@ impl PluginInstance<'_> {
 
     /// Reports the fuel consumed by the most recent portable process call.
     /// Native plugins are not metered by the WebAssembly sandbox.
+    /// Adds fuel burned outside this instance to this block's total.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn add_realtime_fuel(&mut self, fuel: u64) {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {}
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.add_realtime_fuel(fuel);
+            }
+        }
+    }
+
     pub fn last_realtime_fuel_consumed(&self) -> Option<u64> {
         match &self.backend {
             PluginInstanceBackend::Native(_) => None,

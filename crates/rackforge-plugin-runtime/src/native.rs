@@ -1524,6 +1524,20 @@ impl PortableInstance {
         self.last_realtime_fuel_consumed
     }
 
+    /// Adds fuel burned OUTSIDE this instance to what it reports for the
+    /// block.
+    ///
+    /// A parallel block is spent in five instances: the coordinator's
+    /// `begin_block` and `end_block`, and one `render_unit` in each worker.
+    /// The governor reads one instance, and what that instance last recorded
+    /// is `end_block` alone -- a third of the block, which looks like
+    /// headroom that is not there. The orchestrator gathers what the rest
+    /// spent and adds it here, so the number the governor acts on is the
+    /// block's.
+    pub fn add_realtime_fuel(&mut self, fuel: u64) {
+        self.last_realtime_fuel_consumed = self.last_realtime_fuel_consumed.saturating_add(fuel);
+    }
+
     fn reset_realtime_fuel(&mut self) -> Result<()> {
         self.store.set_fuel(self.fuel_per_call)?;
         Ok(())

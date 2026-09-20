@@ -1633,6 +1633,9 @@ pub struct ParallelUnits<'plugin> {
     /// Host staging buffer for the coordinator's block-shared payload.
     shared: Box<[u8]>,
     shared_len: usize,
+    /// What planning this block cost the coordinator, kept because
+    /// `end_block` overwrites the counter it was recorded in.
+    begin_fuel: u64,
     plan_mask: u32,
     sched_mask: u32,
     quarantined_units: u32,
@@ -1717,6 +1720,7 @@ impl<'plugin> ParallelUnits<'plugin> {
             plan: vec![ParallelPlanEntry::default(); MAX_PARALLEL_UNITS].into_boxed_slice(),
             shared: vec![0_u8; layout.shared_capacity].into_boxed_slice(),
             shared_len: 0,
+            begin_fuel: 0,
             plan_mask: 0,
             sched_mask: 0,
             quarantined_units: 0,
@@ -1789,6 +1793,9 @@ impl<'plugin> ParallelUnits<'plugin> {
             parameter_events,
             &mut self.plan,
         )?;
+        // What planning the block cost, before `end_block` overwrites the
+        // coordinator's counter with its own.
+        self.begin_fuel = coordinator.last_realtime_fuel_consumed().unwrap_or(0);
         self.shared_len = block.shared_bytes;
         coordinator.parallel_read_shared(&mut self.shared[..block.shared_bytes])?;
         // The staging buffer's heap storage never moves, so the pointer the
@@ -1846,7 +1853,14 @@ impl<'plugin> ParallelUnits<'plugin> {
         channels: u32,
         completed: u32,
     ) -> anyhow::Result<()> {
-        let samples = frames as usize * channels as usize;
+        // What a unit WROTE, which is its own width and not the
+        // instrument's channels. Sized by the channels, a section that hands
+        // over twenty floats a frame had thirteen frames of its block copied
+        // into the mix and the rest left as whatever was there before -- an
+        // instrument that plays the first half-millisecond of every block
+        // and garbage after it. That is the fourth place this same
+        // assumption was written down, and the third that shipped.
+        let samples = frames as usize * self.unit_width(channels);
         self.quarantined_units |= self.sched_mask & !completed;
         let mut pending = self.plan_mask;
         while pending != 0 {
@@ -1865,7 +1879,40 @@ impl<'plugin> ParallelUnits<'plugin> {
                 coordinator.parallel_write_report(unit, &cell.report)?;
             }
         }
-        coordinator.parallel_end_block(output, frames)
+        let spent_elsewhere = self.begin_fuel.saturating_add(self.units_fuel());
+        let finished = coordinator.parallel_end_block(output, frames);
+        // After `end_block`, so its own fuel is already recorded and this
+        // adds to it rather than being overwritten by it.
+        coordinator.add_realtime_fuel(spent_elsewhere);
+        finished
+    }
+
+    /// What the units spent this block, gathered from their own instances.
+    fn units_fuel(&self) -> u64 {
+        let mut pending = self.plan_mask;
+        let mut total = 0_u64;
+        while pending != 0 {
+            let bit = pending.isolate_lowest_one();
+            pending &= !bit;
+            let unit = bit.trailing_zeros() as usize;
+            total = total.saturating_add(
+                self.cells[unit]
+                    .instance
+                    .last_realtime_fuel_consumed()
+                    .unwrap_or(0),
+            );
+        }
+        total
+    }
+
+    /// How many floats one unit writes per frame: what it declared, or the
+    /// instrument's channels when it declared nothing.
+    fn unit_width(&self, channels: u32) -> usize {
+        if self.layout.unit_channels > 0 {
+            self.layout.unit_channels
+        } else {
+            channels as usize
+        }
     }
 
     /// Units silenced by earlier faults; diagnostic only.

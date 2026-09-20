@@ -1682,11 +1682,7 @@ impl<'plugin> ParallelUnits<'plugin> {
         };
         // A unit's buffer is as wide as the unit writes, which is the
         // output channels unless the plugin declared otherwise.
-        let unit_channels = if layout.unit_channels == 0 {
-            output_channels as usize
-        } else {
-            layout.unit_channels
-        };
+        let unit_channels = layout.unit_width(output_channels as usize);
         let samples = maximum_frames as usize * unit_channels;
         let mut cells = Vec::with_capacity(layout.max_units);
         for unit in 0..layout.max_units {
@@ -1924,11 +1920,7 @@ impl<'plugin> ParallelUnits<'plugin> {
     /// The distinction is invisible in audio whenever the two numbers agree,
     /// which is how three separate places came to use the wrong one.
     pub fn unit_width(&self, channels: u32) -> usize {
-        if self.layout.unit_channels > 0 {
-            self.layout.unit_channels
-        } else {
-            channels as usize
-        }
+        self.layout.unit_width(channels as usize)
     }
 
     /// Units silenced by earlier faults; diagnostic only.

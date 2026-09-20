@@ -1386,11 +1386,9 @@ impl PortableInstance {
         // host then counted each unit as failed and filled its slot with
         // silence: an instrument whose strings all stop while its body still
         // rings, which measured as peak 0.001 and sounded like nothing.
-        let unit_width = if api.layout.unit_channels > 0 {
-            api.layout.unit_channels as u32
-        } else {
-            self.prepared_output_channels
-        };
+        let unit_width = api
+            .layout
+            .unit_width(self.prepared_output_channels as usize) as u32;
         let output_samples = checked_samples(frames, unit_width)?;
         if input.len() != input_samples || output.len() != output_samples {
             bail!("audio buffer length does not match the unit's width");

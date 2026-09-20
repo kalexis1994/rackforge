@@ -36,6 +36,28 @@ pub struct ParallelPlanEntry {
 }
 
 /// Geometry of a module's parallel-render extension, fixed at instantiation.
+impl ParallelLayout {
+    /// How many f32 one unit writes per frame, for an instrument prepared
+    /// with `output_channels`.
+    ///
+    /// Every host that carries a unit's audio has to agree on this number,
+    /// and for a while none of them did. The rule was written out four
+    /// separate times -- the native unit call, the browser's mix sizing, the
+    /// orchestrator's cell allocation and its combine -- and three of the
+    /// four sized a unit by the instrument even when the unit had declared
+    /// its own width. Each of those three silenced the Concert Grand on an
+    /// appliance, and none of them was caught by a test, because a fixture
+    /// whose units are as wide as its instrument cannot tell the two numbers
+    /// apart. One rule, one place, so there is one thing to get right.
+    pub const fn unit_width(&self, output_channels: usize) -> usize {
+        if self.unit_channels > 0 {
+            self.unit_channels
+        } else {
+            output_channels
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ParallelLayout {
     pub max_units: usize,
@@ -330,5 +352,36 @@ pub(crate) fn check_status(status: i32, operation: &str) -> Result<()> {
         Ok(())
     } else {
         bail!("portable plugin {operation} failed with status {status}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ParallelLayout;
+
+    fn layout(unit_channels: usize) -> ParallelLayout {
+        ParallelLayout {
+            max_units: 4,
+            dispatch_stride: 16,
+            mix_slot_samples: 512,
+            unit_channels,
+            report_stride: 0,
+            shared_capacity: 256,
+        }
+    }
+
+    /// The rule three hosts each got wrong on their own.
+    #[test]
+    fn a_unit_is_as_wide_as_it_declared_or_as_the_instrument() {
+        // Declared: the Concert Grand's twenty floats a frame, whatever the
+        // instrument's own channels are. This is the case that broke.
+        assert_eq!(layout(20).unit_width(2), 20);
+        assert_eq!(layout(20).unit_width(8), 20);
+        // Undeclared: exactly the instrument, which is what every plugin
+        // wanted before the export existed.
+        assert_eq!(layout(0).unit_width(2), 2);
+        assert_eq!(layout(0).unit_width(8), 8);
+        // A unit narrower than its instrument is still the unit's business.
+        assert_eq!(layout(1).unit_width(2), 1);
     }
 }

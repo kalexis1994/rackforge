@@ -3564,9 +3564,9 @@ const RENDER_SPAN: usize = 128;
 /// Sixty-four is what a section's block can hold at all, so a frame can
 /// never be the thing that drops work.
 const MAX_VOICE_WORK_PER_FRAME: usize = 64;
-/// Dispatch bytes per section per block. A record is sixteen bytes behind a
-/// four-byte header, so this is sixty-four of them.
-const VOICE_WORK_BYTES: usize = 1_280;
+/// Dispatch bytes per section per block: sixty-four records, each behind a
+/// four-byte header.
+const VOICE_WORK_BYTES: usize = 64 * (4 + VoiceRecord::BYTES);
 
 /// What a coordinator tells a section to do to its own voices.
 ///
@@ -3595,14 +3595,27 @@ struct VoiceRecord {
     flags: u8,
     velocity: f32,
     serial: u32,
+    /// The una corda's position when this was planned. A strike needs it
+    /// after the blow as well as during it: the shifted hammer meets one
+    /// string fewer.
+    soft: f32,
+    /// How far the key had come back when it was pressed again, which the
+    /// coordinator alone can know -- it is the one that tracks the keys.
+    returned: f32,
 }
 
 impl VoiceRecord {
+    /// The wire width of one record.
+    const BYTES: usize = 24;
+
     const STRIKE: u8 = 0;
     const RELEASE: u8 = 1;
     const PEDAL: u8 = 2;
     const SOSTENUTO: u8 = 3;
     const ALL_OFF: u8 = 4;
+    /// A key pressed again below the repetition point: the jack has not
+    /// reset, so no hammer flies. The key lifts its damper and that is all.
+    const CATCH: u8 = 5;
 
     /// The sustain pedal is down. A strike carries it because the
     /// sympathetic halo it places is sustained by it; a sostenuto release
@@ -3625,14 +3638,16 @@ impl VoiceRecord {
         flags: 0,
         velocity: 0.0,
         serial: 0,
+        soft: 0.0,
+        returned: 0.0,
     };
 
     fn has(self, flag: u8) -> bool {
         self.flags & flag != 0
     }
 
-    fn to_bytes(self) -> [u8; 16] {
-        let mut bytes = [0u8; 16];
+    fn to_bytes(self) -> [u8; Self::BYTES] {
+        let mut bytes = [0u8; Self::BYTES];
         bytes[0] = self.kind;
         bytes[1] = self.seq;
         bytes[2] = self.slot;
@@ -3642,11 +3657,13 @@ impl VoiceRecord {
         bytes[6] = self.flags;
         bytes[8..12].copy_from_slice(&self.velocity.to_le_bytes());
         bytes[12..16].copy_from_slice(&self.serial.to_le_bytes());
+        bytes[16..20].copy_from_slice(&self.soft.to_le_bytes());
+        bytes[20..24].copy_from_slice(&self.returned.to_le_bytes());
         bytes
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < 16 {
+        if bytes.len() < Self::BYTES {
             return None;
         }
         Some(Self {
@@ -3659,6 +3676,8 @@ impl VoiceRecord {
             flags: bytes[6],
             velocity: f32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             serial: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
+            soft: f32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]),
+            returned: f32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
         })
     }
 }
@@ -3697,12 +3716,6 @@ impl Default for StringSection {
 fn section_slots(section: usize) -> impl Iterator<Item = usize> {
     debug_assert!(section < STRING_SECTIONS, "seccion fuera de rango");
     (0..VOICES_PER_SECTION).map(move |index| (index << SECTION_SHIFT) | section)
-}
-
-fn section_major_slots() -> impl Iterator<Item = usize> {
-    (0..STRING_SECTIONS).flat_map(|section| {
-        (0..VOICES_PER_SECTION).map(move |index| (index << SECTION_SHIFT) | section)
-    })
 }
 
 /// What the stages after the strings need to know about the frame they are
@@ -6662,11 +6675,13 @@ impl ConcertGrand {
     /// down and its damper is up again. A felt on its way down is caught;
     /// a string under the pedal is held by the key from here; a string with
     /// no voice is a silent key.
-    fn catch_key(&mut self, channel: u8, note: u8) {
+    /// The voice half of a key caught below the repetition point, for one
+    /// section's voices. Whether anything was caught at all is the
+    /// coordinator's to know, and it reads it before this runs.
+    fn catch_voices(&mut self, section: usize, channel: u8, note: u8) {
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
-        let mut caught = false;
-        for slot in 0..MAX_VOICES {
+        for slot in section_slots(section) {
             let voice = &mut voice_at!(self, slot);
             if !(voice.active && !voice.halo && voice.note == note && voice.channel == channel) {
                 continue;
@@ -6681,10 +6696,6 @@ impl ConcertGrand {
             }
             voice.held = true;
             voice.sustained = false;
-            caught = true;
-        }
-        if !caught {
-            self.hold_silent(note);
         }
     }
 
@@ -7647,6 +7658,43 @@ impl ConcertGrand {
     /// done at the frame it was written for, which today is the same frame
     /// in the same pass -- and is why the fingerprint can still guard this.
     fn plan_strike(&mut self, channel: u8, note: u8, velocity: f32) {
+        let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
+        // The key is down from here, whether or not a hammer arrives and
+        // whether or not a voice was free. It is the coordinator that
+        // tracks the keys, so this cannot wait for the section to run.
+        self.key_down[index] = true;
+        // Where the key was when it was pressed again: all the way up, or
+        // still on its way back from the last key-up. Below the repetition
+        // point the jack has not reset -- the key goes down and lifts its
+        // damper again, and the hammer stays where it is. Above it the blow
+        // comes from the back check, lighter, growing back to the full one
+        // as the key returns the rest of the way.
+        let since = self.clock.wrapping_sub(self.key_up_at[index]);
+        let returned = if self.key_return[index] == 0 {
+            1.0
+        } else {
+            (since as f32 / self.key_return[index] as f32).min(1.0)
+        };
+        if returned < KEY_REPETITION_POINT.get().clamp(0.0, 0.99) {
+            // No hammer flies, so no voice is taken. Whether any string is
+            // there to catch is read here rather than reported back from
+            // the sections: it is `active` and the note, which the sections
+            // do not change while they catch.
+            let caught = (0..MAX_VOICES).any(|slot| {
+                let voice = &voice_at!(self, slot);
+                voice.active && !voice.halo && voice.note == note && voice.channel == channel
+            });
+            if !caught {
+                self.hold_silent(note);
+            }
+            self.broadcast_voice_work(VoiceRecord {
+                kind: VoiceRecord::CATCH,
+                channel,
+                note,
+                ..VoiceRecord::EMPTY
+            });
+            return;
+        }
         let Some(slot) = self.pick_voice_slot() else {
             return;
         };
@@ -7659,6 +7707,8 @@ impl ConcertGrand {
                 note,
                 flags: if self.pedal { VoiceRecord::FLAG_PEDAL } else { 0 },
                 velocity,
+                soft: self.soft,
+                returned,
                 ..VoiceRecord::EMPTY
             },
         );
@@ -7742,6 +7792,8 @@ impl ConcertGrand {
                         record.velocity,
                         record.slot as usize,
                         record.has(VoiceRecord::FLAG_PEDAL),
+                        record.soft,
+                        record.returned,
                     );
                 }
                 VoiceRecord::RELEASE => {
@@ -7771,6 +7823,7 @@ impl ConcertGrand {
                     record.velocity,
                 ),
                 VoiceRecord::ALL_OFF => self.all_notes_off_voices(section),
+                VoiceRecord::CATCH => self.catch_voices(section, record.channel, record.note),
                 _ => debug_assert!(false, "clase de trabajo desconocida"),
             }
         }
@@ -7791,6 +7844,8 @@ impl ConcertGrand {
         velocity: f32,
         slot: usize,
         pedal: bool,
+        soft: f32,
+        returned: f32,
     ) {
         #[cfg(test)]
         let mut mark = std::time::Instant::now();
@@ -7813,29 +7868,11 @@ impl ConcertGrand {
         // here: 37 mm turns up among technicians as a shortened figure and
         // ~46 mm as the regulated one. The mechanism is certain; the fraction
         // is judgement, like the strike skew and the damper's spread.
-        let shift = self.soft * (1.0 - self.controls.action);
-        let half_blow = self.soft * self.controls.action;
+        let shift = soft * (1.0 - self.controls.action);
+        let half_blow = soft * self.controls.action;
         velocity *= 1.0 - 0.22 * shift - 0.15 * half_blow;
 
-        // The key is down from here, whether or not the hammer arrives.
-        self.key_down[index] = true;
-        // Where the key was when it was pressed again: all the way up, or
-        // still on its way back from the last key-up. Below the repetition
-        // point the jack has not reset -- the key goes down and lifts its
-        // damper again, and the hammer stays where it is. Above it the blow
-        // comes from the back check, lighter, growing back to the full one
-        // as the key returns the rest of the way.
-        let since = self.clock.wrapping_sub(self.key_up_at[index]);
-        let returned = if self.key_return[index] == 0 {
-            1.0
-        } else {
-            (since as f32 / self.key_return[index] as f32).min(1.0)
-        };
         let point = KEY_REPETITION_POINT.get().clamp(0.0, 0.99);
-        if returned < point {
-            self.catch_key(channel, note);
-            return;
-        }
         let from_check = REPETITION_FROM_CHECK.get().clamp(0.1, 1.0);
         self.repetition_scale =
             from_check + (1.0 - from_check) * (returned - point) / (1.0 - point);
@@ -17263,9 +17300,30 @@ mod bench {
                 data: [0xB0, 64, (step(&mut state) % 128) as u8],
                 length: 3,
             });
+            // Every eleventh note is barely touched, which is under the
+            // let-off: no hammer arrives, the key is held silent, and the
+            // silent bank is coordinator state a strike writes.
+            let velocity = if block % 11 == 0 {
+                1
+            } else {
+                64 + (step(&mut state) % 63) as u8
+            };
             midi.push(MidiEvent {
                 frame: 0,
-                data: [0x90, note, 64 + (step(&mut state) % 63) as u8],
+                data: [0x90, note, velocity],
+                length: 3,
+            });
+            // AFTER the strike, in its frame: the una corda changes the blow
+            // the strike is still to make, and a second CC64 reads the bank
+            // that strike may just have written.
+            midi.push(MidiEvent {
+                frame: 0,
+                data: [0xB0, 67, (step(&mut state) % 128) as u8],
+                length: 3,
+            });
+            midi.push(MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, (step(&mut state) % 128) as u8],
                 length: 3,
             });
             if block == 150 || block == 275 {
@@ -17291,6 +17349,15 @@ mod bench {
                 data: [0x90, note.saturating_add(12), 80],
                 length: 3,
             });
+            // A key down and up inside one frame: the note-off writes the
+            // key's return, and the strike before it reads it.
+            if block % 5 == 0 {
+                midi.push(MidiEvent {
+                    frame: 40,
+                    data: [0x80, note.saturating_add(12), 64],
+                    length: 3,
+                });
+            }
             if block % 37 == 0 {
                 midi.push(MidiEvent {
                     frame: 40,

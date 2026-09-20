@@ -37,3 +37,6 @@ tools/fit-log.txt
 
 # Audio captures written by the ignored comparison tests.
 /plugins/concert-grand/*.f32
+
+# A/B renders stitched from two checkouts.
+/ab-*.wav

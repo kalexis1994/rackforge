@@ -1122,6 +1122,13 @@ const SECTION_SHIFT: u32 = STRING_SECTIONS.trailing_zeros();
 /// as long as the voice lives, and several of these loops touch other
 /// fields in the same breath. This borrows one section's array and nothing
 /// else, which is also exactly what a `parallel_render_v1` unit gets.
+/// One of a section's halos, by section and index.
+macro_rules! halo_at {
+    ($owner:expr, $section:expr, $index:expr) => {
+        $owner.sections[$section].halos[$index]
+    };
+}
+
 macro_rules! voice_at {
     ($owner:expr, $slot:expr) => {
         $owner.sections[$slot & (STRING_SECTIONS - 1)].voices[$slot >> SECTION_SHIFT]
@@ -1144,6 +1151,20 @@ pub static STEALS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32
 /// Room for the full transverse ladder of the lowest notes plus their
 /// nonlinear extras — A0 alone fills ~120 slots with real partials.
 const MAX_PARTIALS: usize = 144;
+
+/// A halo's ladder never holds more than the struck note's first two dozen
+/// partials, so it does not need a struck note's room.
+const HALO_PARTIALS: usize = 24;
+
+/// How many halos one section can ring at once.
+///
+/// Sized from what a pedalled performance actually reaches rather than
+/// from the slot count: `halo_share` measured fifteen halos sounding at the
+/// peak of a script that plays the pool over-subscribed throughout, so four
+/// per section is that peak with a halo to spare. One per slot was the
+/// first shape and it cost 96 KB, which put the instrument over the
+/// megabyte of stack it is built on before it is boxed.
+const HALOS_PER_SECTION: usize = 4;
 /// Ceiling on simultaneously active partials across all voices, so a pedalled
 /// fortissimo run degrades new notes' partial counts instead of the callback.
 ///
@@ -3692,12 +3713,24 @@ impl VoiceRecord {
 #[derive(Clone, Copy)]
 struct StringSection {
     voices: [Voice; VOICES_PER_SECTION],
+    /// The sympathetic halo of each of this section's voices.
+    ///
+    /// One per slot, beside the note that casts it, rather than a voice of
+    /// its own taken from the shared pool. Three things follow. A halo
+    /// never takes a slot a note wanted, in a pool that plays
+    /// over-subscribed. A halo is built by the section that struck the
+    /// note, so nothing reaches across sections -- which is what a
+    /// `parallel_render_v1` unit will need. And a halo holding
+    /// twenty-four partials stops occupying room for a hundred and
+    /// forty-four.
+    halos: [Voice<HALO_PARTIALS>; HALOS_PER_SECTION],
 }
 
 impl Default for StringSection {
     fn default() -> Self {
         Self {
             voices: [Voice::default(); VOICES_PER_SECTION],
+            halos: [Voice::default(); HALOS_PER_SECTION],
         }
     }
 }
@@ -3780,7 +3813,7 @@ struct VoiceFrame {
 
 #[derive(Clone, Copy)]
 
-struct Voice {
+struct Voice<const PARTIALS: usize = MAX_PARTIALS> {
     active: bool,
     note: u8,
     channel: u8,
@@ -3797,9 +3830,6 @@ struct Voice {
     /// far, so a moving pedal presses or relieves only the DIFFERENCE. A
     /// relieved damper stops removing energy; it never gives any back.
     damper_applied: f32,
-    /// A sympathetic halo shadow, not a struck note: never a re-strike
-    /// target.
-    halo: bool,
     /// The contact's ramp: a fresh voice fades in over ATTACK_RAMP_S from
     /// nothing, because the string is at rest when the hammer arrives and
     /// only reaches the state the integration hands over at the END of the
@@ -3815,7 +3845,7 @@ struct Voice {
     /// The largest pole radius this voice's phasors may be left holding,
     /// from the rate it was struck at. See `POLE_CEILING_T60_S`.
     pole_ceiling: f32,
-    partials: [Partial; MAX_PARTIALS],
+    partials: [Partial; PARTIALS],
     partial_count: usize,
     /// Hammer/soundboard thump: a decaying low-passed noise burst whose
     /// bandwidth contracts as it fades, like a tapped soundboard's.
@@ -3935,7 +3965,7 @@ struct Voice {
     clang_feed_decay: f32,
 }
 
-impl Default for Voice {
+impl<const PARTIALS: usize> Default for Voice<PARTIALS> {
     fn default() -> Self {
         Self {
             active: false,
@@ -3946,12 +3976,11 @@ impl Default for Voice {
             undamped: false,
             sostenuto: false,
             damper_applied: 0.0,
-            halo: false,
             onset: 1.0,
             onset_step: 0.0,
             firmness: 1.0,
             pole_ceiling: pole_ceiling(48_000.0),
-            partials: [Partial::default(); MAX_PARTIALS],
+            partials: [Partial::default(); PARTIALS],
             partial_count: 0,
             noise_amp: 0.0,
             noise_decay: 0.0,
@@ -4022,7 +4051,7 @@ impl Default for Voice {
     }
 }
 
-impl Voice {
+impl<const PARTIALS: usize> Voice<PARTIALS> {
     /// Renders one mono sample and advances every live component.
     #[inline(always)]
     fn tick(&mut self, sympathy: f32) -> f32 {
@@ -6715,7 +6744,7 @@ impl ConcertGrand {
         let grip = self.controls.damper_grip();
         for slot in section_slots(section) {
             let voice = &mut voice_at!(self, slot);
-            if !(voice.active && !voice.halo && voice.note == note && voice.channel == channel) {
+            if !(voice.active && voice.note == note && voice.channel == channel) {
                 continue;
             }
             if voice.damper_phase != 0 {
@@ -7714,7 +7743,7 @@ impl ConcertGrand {
             // do not change while they catch.
             let caught = (0..MAX_VOICES).any(|slot| {
                 let voice = &voice_at!(self, slot);
-                voice.active && !voice.halo && voice.note == note && voice.channel == channel
+                voice.active && voice.note == note && voice.channel == channel
             });
             if !caught {
                 self.hold_silent(note);
@@ -7951,7 +7980,6 @@ impl ConcertGrand {
             let voice = &mut voice_at!(self, slot);
             if self.restrike_merge
                 && voice.active
-                && !voice.halo
                 && voice.note == note
                 && voice.channel == channel
                 && (voice.held || voice.sustained)
@@ -9303,7 +9331,6 @@ impl ConcertGrand {
         voice.held = true;
         voice.sustained = false;
         voice.undamped = undamped;
-        voice.halo = false;
         voice.sostenuto = false;
         voice.damper_applied = 0.0;
         voice.firmness = firmness;
@@ -9490,12 +9517,12 @@ impl ConcertGrand {
         // slow decay, released by the pedal like any sustained string.
         phase!(4, mark);
         if pedal && placed > 0 {
-            let halo_count = placed.min(24);
+            let halo_count = placed.min(HALO_PARTIALS);
             // Twenty-four, which is every entry the loop below can reach --
             // `halo_count` is `placed.min(24)`. It was MAX_PARTIALS, so each
             // note-on zeroed 18.6 KB of scratch to fill at most 3.1 KB of it,
             // and a pedalled twelve-note chord did that twelve times.
-            let mut halo = [Partial::default(); 24];
+            let mut halo = [Partial::default(); HALO_PARTIALS];
             let rise = expf(-1.0 / (0.030 * sample_rate));
             for n in 0..halo_count {
                 let frequency = frequencies[n];
@@ -9515,24 +9542,49 @@ impl ConcertGrand {
                 );
                 halo[n] = built;
             }
-            if let Some(shadow) = self.allocate_halo(slot & (STRING_SECTIONS - 1)) {
-                *shadow = Voice::default();
-                shadow.pole_ceiling = pole_ceiling(sample_rate);
-                shadow.active = true;
-                shadow.halo = true;
-                shadow.note = note;
-                shadow.channel = channel;
-                shadow.held = false;
-                shadow.sustained = true;
-                shadow.partials[..halo_count].copy_from_slice(&halo[..halo_count]);
-                shadow.partial_count = halo_count;
-                shadow.pan_left = pan_left;
-                shadow.pan_right = pan_right;
-                shadow.energy = 0.01;
-                self.active_partials += halo_count;
-            }
+            // Into this section's own halos, which are not voices anybody
+            // else could have wanted: a halo never takes a slot a note was
+            // going to use, and it never leaves the section that struck it.
+            let section = slot & (STRING_SECTIONS - 1);
+            let index = self.pick_halo(section);
+            let carried = halo_at!(self, section, index).partial_count;
+            self.active_partials = self.active_partials.saturating_sub(carried);
+            let shadow = &mut halo_at!(self, section, index);
+            *shadow = Voice::default();
+            shadow.pole_ceiling = pole_ceiling(sample_rate);
+            shadow.active = true;
+            shadow.note = note;
+            shadow.channel = channel;
+            shadow.held = false;
+            shadow.sustained = true;
+            shadow.partials[..halo_count].copy_from_slice(&halo[..halo_count]);
+            shadow.partial_count = halo_count;
+            shadow.pan_left = pan_left;
+            shadow.pan_right = pan_right;
+            shadow.energy = 0.01;
+            self.active_partials += halo_count;
         }
         phase!(5, mark);
+    }
+
+    /// Which of a section's halos the next one takes: a silent one, or the
+    /// quietest of them.
+    ///
+    /// Halos compete only with halos. When they shared the voice pool the
+    /// loser of this choice was sometimes a struck note, which is a note
+    /// the player played going quiet so a sympathetic ring could start.
+    fn pick_halo(&mut self, section: usize) -> usize {
+        debug_assert!(section < STRING_SECTIONS, "seccion fuera de rango");
+        if let Some(index) = (0..HALOS_PER_SECTION).find(|&i| !halo_at!(self, section, i).active) {
+            return index;
+        }
+        (0..HALOS_PER_SECTION)
+            .min_by(|a, b| {
+                halo_at!(self, section, *a)
+                    .energy
+                    .total_cmp(&halo_at!(self, section, *b).energy)
+            })
+            .unwrap_or(0)
     }
 
     /// How much instrument this machine affords, from 1.0 down.
@@ -9646,33 +9698,6 @@ impl ConcertGrand {
         &mut voice_at!(self, slot)
     }
 
-    /// A voice for the halo of a note being struck.
-    ///
-    /// ACROSS ALL FOUR SECTIONS, which a `parallel_render_v1` unit will not
-    /// be able to do: the striking section builds the halo's ladder from
-    /// its own recipe and then writes it into whatever slot is quietest,
-    /// which may belong to another unit. This is the last thing in the
-    /// strike path that crosses the boundary, and it cannot simply be
-    /// narrowed -- binding the halo to its own section was measured at
-    /// -6.8 dB against the same script, because with the pool
-    /// over-subscribed a different slot means a different voice stolen.
-    fn allocate_halo(&mut self, section: usize) -> Option<&mut Voice> {
-        let _ = section;
-        if let Some(index) = (0..MAX_VOICES).find(|slot| !voice_at!(self, *slot).active) {
-            return Some(&mut voice_at!(self, index));
-        }
-        // All busy: steal the quietest, refunding its partials to the budget.
-        #[cfg(not(target_arch = "wasm32"))]
-        STEALS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-        // In slot order, so a tie still steals the same voice it always
-        // did: `min_by` keeps the FIRST of equal minima.
-        let index = (0..MAX_VOICES)
-            .min_by(|a, b| voice_at!(self, *a).energy.total_cmp(&voice_at!(self, *b).energy))?;
-        self.active_partials = self
-            .active_partials
-            .saturating_sub(voice_at!(self, index).partial_count);
-        Some(&mut voice_at!(self, index))
-    }
 
     /// Per-sample decay multiplier a falling damper applies: the note dies in
     /// tens of milliseconds instead of seconds.
@@ -10022,6 +10047,64 @@ impl ConcertGrand {
     /// catches the felts still travelling, and at any position it presses
     /// or relieves the ones already down. Both are per-voice arithmetic on
     /// state the voice carries, so a section can do its own.
+    /// What a rail coming up does to one string, note or halo.
+    ///
+    /// Generic over the ladder's length so the halos, which carry a
+    /// twenty-fourth of a struck note's room, go through the same felt as
+    /// the notes rather than through a copy of it.
+    fn lift_rail<const N: usize>(voice: &mut Voice<N>, pressure: f32) {
+        if voice.active && voice.damper_phase != 0 {
+            voice.cancel_damper();
+            voice.held = false;
+            voice.sustained = true;
+            voice.damper_applied = pressure;
+            let own = voice.damper_own;
+            voice.press_damper(own, pressure);
+        }
+    }
+
+    /// What a rail at a given position does to one string, note or halo.
+    fn seat_damper<const N: usize>(
+        voice: &mut Voice<N>,
+        pressure: f32,
+        sostenuto: bool,
+        serial: u32,
+        rate: f32,
+        grip: f32,
+        thud: (f32, f32),
+        release_gain: f32,
+    ) {
+        if !(voice.active && voice.sustained) || voice.undamped {
+            return;
+        }
+        if sostenuto && voice.sostenuto {
+            return;
+        }
+        // The voice's own damper, not one drawn per pedal event. Drawn
+        // per event, a press through a firm damper and its relief
+        // through a soft one left the string's decay factor ABOVE where
+        // it started, and a nocturne's three thousand pedal positions
+        // walked it past one: measured on the Op. 9 No. 2 file, the
+        // output grew for two seconds from 96 s in, sat on the ceiling
+        // for eight and went non-finite. Quantised to on/off the same
+        // passage was fine, which is what named the path.
+        let firmness = if pressure >= 0.98 {
+            Self::damper_firmness(serial, voice.note)
+        } else {
+            voice.firmness
+        };
+        let damper = Self::damper_for(voice.note, rate, grip * firmness, 1.0);
+        if pressure >= 0.98 {
+            // Seated: the legacy full damp, note over.
+            voice.damp(damper, thud.0, thud.1, release_gain * firmness);
+            voice.damper_applied = 0.0;
+        } else {
+            let delta = pressure - voice.damper_applied;
+            voice.press_damper(damper, delta);
+            voice.damper_applied = pressure;
+        }
+    }
+
     fn pedal_voices(
         &mut self,
         section: usize,
@@ -10039,54 +10122,38 @@ impl ConcertGrand {
             // that string is sustained from here, its press relieved through
             // the same damper it was made with.
             for slot in section_slots(section) {
-                let voice = &mut voice_at!(self, slot);
-                if voice.active && voice.damper_phase != 0 {
-                    voice.cancel_damper();
-                    voice.held = false;
-                    voice.sustained = true;
-                    voice.damper_applied = pressure;
-                    let own = voice.damper_own;
-                    voice.press_damper(own, pressure);
-                }
+                Self::lift_rail(&mut voice_at!(self, slot), pressure);
+            }
+            for index in 0..HALOS_PER_SECTION {
+                Self::lift_rail(&mut halo_at!(self, section, index), pressure);
             }
         }
+        // The halos with them: a halo is a string ringing with its damper
+        // up, so the rail lands on it exactly as it lands on a note.
+        let thud = (thud_coefficient, thud_decay);
         for slot in section_slots(section) {
-            let voice = &mut voice_at!(self, slot);
-            if !(voice.active && voice.sustained) || voice.undamped {
-                continue;
-            }
-            if sostenuto && voice.sostenuto {
-                continue;
-            }
-            // The voice's own damper, not one drawn per pedal event. Drawn
-            // per event, a press through a firm damper and its relief
-            // through a soft one left the string's decay factor ABOVE where
-            // it started, and a nocturne's three thousand pedal positions
-            // walked it past one: measured on the Op. 9 No. 2 file, the
-            // output grew for two seconds from 96 s in, sat on the ceiling
-            // for eight and went non-finite. Quantised to on/off the same
-            // passage was fine, which is what named the path.
-            let firmness = if pressure >= 0.98 {
-                Self::damper_firmness(serial, voice.note)
-            } else {
-                voice.firmness
-            };
-            if pressure >= 0.98 {
-                // Seated: the legacy full damp, note over.
-                let damper = Self::damper_for(voice.note, rate, grip * firmness, 1.0);
-                voice.damp(
-                    damper,
-                    thud_coefficient,
-                    thud_decay,
-                    release_gain * firmness,
-                );
-                voice.damper_applied = 0.0;
-            } else {
-                let delta = pressure - voice.damper_applied;
-                let damper = Self::damper_for(voice.note, rate, grip * firmness, 1.0);
-                voice.press_damper(damper, delta);
-                voice.damper_applied = pressure;
-            }
+            Self::seat_damper(
+                &mut voice_at!(self, slot),
+                pressure,
+                sostenuto,
+                serial,
+                rate,
+                grip,
+                thud,
+                release_gain,
+            );
+        }
+        for index in 0..HALOS_PER_SECTION {
+            Self::seat_damper(
+                &mut halo_at!(self, section, index),
+                pressure,
+                sostenuto,
+                serial,
+                rate,
+                grip,
+                thud,
+                release_gain,
+            );
         }
     }
 
@@ -10181,6 +10248,13 @@ impl ConcertGrand {
             if voice.active {
                 let damper = Self::damper_for(voice.note, rate, grip, 1.0);
                 voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+            }
+        }
+        for index in 0..HALOS_PER_SECTION {
+            let halo = &mut halo_at!(self, section, index);
+            if halo.active {
+                let damper = Self::damper_for(halo.note, rate, grip, 1.0);
+                halo.damp(damper, thud_coefficient, thud_decay, release_gain);
             }
         }
     }
@@ -11214,7 +11288,7 @@ impl Processor for ConcertGrand {
         self.note_sounding = [false; NOTE_COUNT];
         for slot in 0..MAX_VOICES {
             let voice = &voice_at!(self, slot);
-            if !(voice.active && !voice.halo && voice.note >= LOW_NOTE) {
+            if !(voice.active && voice.note >= LOW_NOTE) {
                 continue;
             }
             if let Some(slot) = self.note_sounding.get_mut((voice.note - LOW_NOTE) as usize) {
@@ -11388,11 +11462,22 @@ impl Processor for ConcertGrand {
                     refresh_busy = false;
                     bed_busy = [false; BED_COUNT];
                     for slot in 0..MAX_VOICES {
-                let voice = &voice_at!(self, slot);
-                        if voice.active {
-                            let slot = voice.note.saturating_sub(LOW_NOTE) as usize;
-                            if slot < BED_COUNT {
-                                bed_busy[slot] = true;
+                        // A halo is that note's strings ringing free, so the
+                        // bed it would have damped is busy for it too.
+                        let note = {
+                            let voice = &voice_at!(self, slot);
+                            voice.active.then_some(voice.note)
+                        };
+                        let halo_note = (slot >> SECTION_SHIFT < HALOS_PER_SECTION)
+                            .then(|| {
+                                let halo = &halo_at!(self, slot & (STRING_SECTIONS - 1), slot >> SECTION_SHIFT);
+                                halo.active.then_some(halo.note)
+                            })
+                            .flatten();
+                        for note in [note, halo_note].into_iter().flatten() {
+                            let bed = note.saturating_sub(LOW_NOTE) as usize;
+                            if bed < BED_COUNT {
+                                bed_busy[bed] = true;
                             }
                         }
                     }
@@ -11441,19 +11526,40 @@ impl Processor for ConcertGrand {
                 for slot in 0..MAX_VOICES {
                     let section = slot & (STRING_SECTIONS - 1);
                     let feed = feeds[section];
-                    let voice = &mut voice_at!(self, slot);
-                    if !voice.active {
-                        continue;
+                    // The note, then the halo it cast, then the next slot.
+                    // Both belong to this section and neither can be reached
+                    // from another one, which is the whole point of the halo
+                    // living here.
+                    let mut culled = 0usize;
+                    macro_rules! deposit {
+                        ($made:expr) => {{
+                            let made = $made;
+                            strings_total += made.sample;
+                            section_total[section] += made.sample;
+                            keybed_left += made.keybed_left;
+                            keybed_right += made.keybed_right;
+                            bridge_drive += made.force;
+                            drive_points[made.drive_index] += made.force * (1.0 - made.drive_frac);
+                            drive_points[made.drive_index + 1] += made.force * made.drive_frac;
+                            culled += made.culled;
+                        }};
                     }
-                    let made = voice.render_frame(feed, sympathy_rate, sostenuto_now);
-                    strings_total += made.sample;
-                    section_total[section] += made.sample;
-                    keybed_left += made.keybed_left;
-                    keybed_right += made.keybed_right;
-                    bridge_drive += made.force;
-                    drive_points[made.drive_index] += made.force * (1.0 - made.drive_frac);
-                    drive_points[made.drive_index + 1] += made.force * made.drive_frac;
-                    self.active_partials = self.active_partials.saturating_sub(made.culled);
+                    {
+                        let voice = &mut voice_at!(self, slot);
+                        if voice.active {
+                            deposit!(voice.render_frame(feed, sympathy_rate, sostenuto_now));
+                        }
+                    }
+                    // A section's halos ride with its first few slots, so
+                    // they are summed inside their own section and in an
+                    // order that does not depend on which note cast them.
+                    if slot >> SECTION_SHIFT < HALOS_PER_SECTION {
+                        let halo = &mut halo_at!(self, section, slot >> SECTION_SHIFT);
+                        if halo.active {
+                            deposit!(halo.render_frame(feed, sympathy_rate, sostenuto_now));
+                        }
+                    }
+                    self.active_partials = self.active_partials.saturating_sub(culled);
                 }
 
                 // Everything after this line is a stage that will one day run in
@@ -15218,7 +15324,7 @@ mod tests {
             piano
                 
                 .voices()
-                .filter(|v| v.active && !v.halo && v.note == 60)
+                .filter(|v| v.active && v.note == 60)
                 .map(|v| {
                     v.partials[..v.partial_count]
                         .iter()
@@ -15254,7 +15360,7 @@ mod tests {
         let before: f32 = piano
             
             .voices()
-            .filter(|v| v.active && !v.halo && v.note == 48)
+            .filter(|v| v.active && v.note == 48)
             .map(|v| {
                 v.partials[..v.partial_count]
                     .iter()
@@ -15270,13 +15376,13 @@ mod tests {
         let voices = piano
             
             .voices()
-            .filter(|v| v.active && !v.halo && v.note == 48)
+            .filter(|v| v.active && v.note == 48)
             .count();
         assert_eq!(voices, 1, "a re-strike must not mint a second voice");
         let after: f32 = piano
             
             .voices()
-            .filter(|v| v.active && !v.halo && v.note == 48)
+            .filter(|v| v.active && v.note == 48)
             .map(|v| {
                 v.partials[..v.partial_count]
                     .iter()
@@ -17471,6 +17577,128 @@ mod bench {
         );
     }
 
+    /// A pedalled passage, written out so two builds can be heard against
+    /// each other.
+    ///
+    /// The difference the halos' home makes lives where the pool is full:
+    /// under the pedal, with more ringing than there are slots. So this is
+    /// an arpeggio held down over four octaves, a bass octave under it, and
+    /// no lifting of the pedal until the end -- which is what a pedalled
+    /// romantic texture does to a voice pool and what a scale does not.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release halo_ab_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn halo_ab_render() {
+        const FRAMES: usize = 128;
+        // 128 frames at 48 kHz: a block is 2.667 ms.
+        const PER_SECOND: usize = 48_000 / FRAMES;
+        STEALS.store(0, core::sync::atomic::Ordering::Relaxed);
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let mut captured = std::vec::Vec::new();
+
+        let mut script: std::vec::Vec<(usize, [u8; 3])> = std::vec::Vec::new();
+        script.push((0, [0xB0, 64, 127]));
+        // Sixteen notes a second for six seconds, climbing in fifths so the
+        // same string is never asked for twice while it is still ringing --
+        // a repeated note takes its own voice back, and a figure that comes
+        // round never fills the pool. A bass octave on each bar under it.
+        // Nothing is ever let go, so the pedal holds all of it.
+        for step in 0..96usize {
+            let at = 8 + step * (PER_SECOND / 16);
+            script.push((at, [0x90, 28 + (step * 7 % 60) as u8, 84]));
+            if step % 16 == 0 {
+                script.push((at, [0x90, 33 + (step / 16 % 3) as u8 * 5, 104]));
+            }
+        }
+        let blocks = 11 * PER_SECOND;
+        for block in 0..blocks {
+            let midi: std::vec::Vec<MidiEvent> = script
+                .iter()
+                .filter(|(at, _)| *at == block)
+                .map(|(_, data)| MidiEvent {
+                    frame: 0,
+                    data: *data,
+                    length: 3,
+                })
+                .collect();
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            captured.extend(output.chunks(2).map(|frame| frame[0]));
+        }
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let path = std::format!("{directory}/halo-ab.f32");
+        let mut bytes = std::vec::Vec::with_capacity(captured.len() * 4);
+        for sample in &captured {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        std::fs::write(&path, bytes).expect("escribir el render");
+        let peak = captured.iter().fold(0.0f32, |a, b| a.max(b.abs()));
+        std::println!(
+            "escrito {path}: {:.1} s, pico {peak:.4}, {} robos de voz",
+            captured.len() as f64 / 48_000.0,
+            STEALS.load(core::sync::atomic::Ordering::Relaxed)
+        );
+    }
+
+    /// What share of the voice pool the halos hold, and what they cost in
+    /// partials -- which is what decides how big a home of their own would
+    /// have to be.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release halo_share -- --ignored --nocapture`
+    /// What the instrument weighs, which is what a stack has to carry when
+    /// it is built before it is boxed.
+    #[test]
+    #[ignore]
+    fn instrument_size() {
+        std::println!(
+            "ConcertGrand {} KB, Voice {} KB, Voice<HALO_PARTIALS> {} KB, seccion {} KB",
+            core::mem::size_of::<ConcertGrand>() / 1024,
+            core::mem::size_of::<Voice>() / 1024,
+            core::mem::size_of::<Voice<HALO_PARTIALS>>() / 1024,
+            core::mem::size_of::<StringSection>() / 1024,
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn halo_share() {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let (mut peak_notes, mut peak_halos) = (0usize, 0usize);
+        let (mut peak_note_partials, mut peak_halo_partials) = (0usize, 0usize);
+        for midi in pedal_script(300) {
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            let (mut notes, mut halos) = (0usize, 0usize);
+            let (mut note_partials, mut halo_partials) = (0usize, 0usize);
+            for slot in 0..MAX_VOICES {
+                let voice = &voice_at!(piano, slot);
+                if voice.active {
+                    notes += 1;
+                    note_partials += voice.partial_count;
+                }
+            }
+            for section in 0..STRING_SECTIONS {
+                for index in 0..HALOS_PER_SECTION {
+                    let halo = &halo_at!(piano, section, index);
+                    if halo.active {
+                        halos += 1;
+                        halo_partials += halo.partial_count;
+                    }
+                }
+            }
+            peak_notes = peak_notes.max(notes);
+            peak_halos = peak_halos.max(halos);
+            peak_note_partials = peak_note_partials.max(note_partials);
+            peak_halo_partials = peak_halo_partials.max(halo_partials);
+        }
+        std::println!("pico de notas sonando:  {peak_notes:>3} ({peak_note_partials} parciales)");
+        std::println!("pico de halos sonando:  {peak_halos:>3} ({peak_halo_partials} parciales)");
+    }
+
     #[test]
     #[ignore]
     fn pedal_capture() {
@@ -17699,19 +17927,33 @@ mod bench {
             }
             cost /= 300.0;
 
-            let active = piano.voices().filter(|voice| voice.active).count();
-            let partials: usize = piano
-                
-                .voices()
-                .filter(|voice| voice.active)
-                .map(|voice| voice.partial_count)
-                .sum();
-            let mut components = 0usize;
-            for voice in piano.voices().filter(|voice| voice.active) {
-                for partial in &voice.partials[..voice.partial_count] {
-                    for lane in 0..LANES {
-                        if partial.rc[lane] != 0.0 || partial.rs[lane] != 0.0 {
-                            components += 1;
+            // The halos counted with the notes: they are strings ringing and
+            // they are rendered every block, so a table that left them out
+            // would report a cheaper instrument than the one being timed.
+            let (mut active, mut partials, mut components) = (0usize, 0usize, 0usize);
+            {
+                let mut tally = |ladder: &[Partial]| {
+                    active += 1;
+                    partials += ladder.len();
+                    for partial in ladder {
+                        for lane in 0..LANES {
+                            if partial.rc[lane] != 0.0 || partial.rs[lane] != 0.0 {
+                                components += 1;
+                            }
+                        }
+                    }
+                };
+                for slot in 0..MAX_VOICES {
+                    let voice = &voice_at!(piano, slot);
+                    if voice.active {
+                        tally(&voice.partials[..voice.partial_count]);
+                    }
+                }
+                for section in 0..STRING_SECTIONS {
+                    for index in 0..HALOS_PER_SECTION {
+                        let halo = &halo_at!(piano, section, index);
+                        if halo.active {
+                            tally(&halo.partials[..halo.partial_count]);
                         }
                     }
                 }
@@ -17801,21 +18043,31 @@ mod bench {
                 // the WORK it is.
                 let (mut halo_voices, mut halo_components) = (0usize, 0usize);
                 let (mut note_voices, mut note_components) = (0usize, 0usize);
-                for voice in piano.voices().filter(|voice| voice.active) {
-                    let mut live = 0usize;
-                    for partial in &voice.partials[..voice.partial_count] {
+                let live = |partials: &[Partial]| {
+                    let mut count = 0usize;
+                    for partial in partials {
                         for lane in 0..LANES {
                             if partial.rc[lane] != 0.0 || partial.rs[lane] != 0.0 {
-                                live += 1;
+                                count += 1;
                             }
                         }
                     }
-                    if voice.halo {
-                        halo_voices += 1;
-                        halo_components += live;
-                    } else {
+                    count
+                };
+                for slot in 0..MAX_VOICES {
+                    let voice = &voice_at!(piano, slot);
+                    if voice.active {
                         note_voices += 1;
-                        note_components += live;
+                        note_components += live(&voice.partials[..voice.partial_count]);
+                    }
+                }
+                for section in 0..STRING_SECTIONS {
+                    for index in 0..HALOS_PER_SECTION {
+                        let halo = &halo_at!(piano, section, index);
+                        if halo.active {
+                            halo_voices += 1;
+                            halo_components += live(&halo.partials[..halo.partial_count]);
+                        }
                     }
                 }
                 let total = (note_components + halo_components).max(1);
@@ -18027,7 +18279,7 @@ mod bench {
             piano.process(
                 &[], &mut output, &[note_on(note, velocity)], &[], FRAMES as u32, 0, 2,
             );
-            let Some(voice) = piano.voices().find(|voice| voice.active && !voice.halo)
+            let Some(voice) = piano.voices().find(|voice| voice.active)
             else {
                 return std::vec::Vec::new();
             };

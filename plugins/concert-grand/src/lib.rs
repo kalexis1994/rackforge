@@ -3637,6 +3637,12 @@ impl VoiceRecord {
     /// A key pressed again below the repetition point: the jack has not
     /// reset, so no hammer flies. The key lifts its damper and that is all.
     const CATCH: u8 = 5;
+    /// A key struck again while a string of that note is still sounding but
+    /// NOT free to be re-struck -- under a damper, and so with its decay
+    /// rates already scaled. The old string is eased out over thirty
+    /// milliseconds and the new blow goes somewhere else. Every section
+    /// hears it, because any of them may be holding one.
+    const EASE: u8 = 6;
 
     /// The sustain pedal is down. A strike carries it because the
     /// sympathetic halo it places is sustained by it; a sostenuto release
@@ -3703,6 +3709,25 @@ impl VoiceRecord {
     }
 }
 
+/// What one section's strings made in one frame: everything the stages
+/// after them need, and nothing else.
+///
+/// This is the unit's output, and its width is the plugin's
+/// `UNIT_CHANNELS`. A section does not produce sound -- it produces the
+/// force on the bridge, where on the bridge that force lands, and what the
+/// keybed under it heard -- and a serial stage turns the four sections'
+/// worth of that into a piano.
+#[derive(Clone, Copy, Default)]
+struct SectionFrame {
+    /// The section's own string sound, which is what the next block's
+    /// sympathetic coupling hears from it.
+    sample: f32,
+    force: f32,
+    drive_points: [f32; BOARD_DRIVE_POINTS],
+    keybed_left: f32,
+    keybed_right: f32,
+}
+
 /// What the coordinator knows about a voice it does not own.
 ///
 /// Once the sections are `parallel_render_v1` units the voices live inside
@@ -3727,6 +3752,12 @@ struct VoiceSummary {
     channel: u8,
     /// As of the end of the last block. Nothing here can be fresher.
     energy: f32,
+    /// Held by the key or by a pedal, and so still ringing with its damper
+    /// clear -- which is the one condition under which a second blow on
+    /// the same key merges into this string instead of starting a stranger
+    /// beside it. The coordinator needs it to send the blow to the RIGHT
+    /// section, since a string is only reachable from the one that owns it.
+    ringing_free: bool,
 }
 
 /// One section's voices: what a `parallel_render_v1` unit owns.
@@ -5370,9 +5401,6 @@ pub struct ConcertGrand {
     /// and whether the sostenuto rod is engaged.
     pedal_pressure: f32,
     sostenuto: bool,
-    /// Last sample's total string signal, carried across block boundaries
-    /// for the sympathetic feed.
-    bridge_feed: f32,
     pedal_noise_lp: f32,
     pedal_noise_lp2: f32,
     pedal_noise_floor: f32,
@@ -5487,15 +5515,17 @@ impl Default for ConcertGrand {
                 note: 0,
                 channel: 0,
                 energy: 0.0,
+                ringing_free: false,
             }; MAX_VOICES],
             halo_summary: [VoiceSummary {
                 active: false,
                 note: 0,
                 channel: 0,
                 energy: 0.0,
+                ringing_free: false,
             }; STRING_SECTIONS * HALOS_PER_SECTION],
             voice_claimed: 0,
-            section_delay: 0,
+            section_delay: RENDER_SPAN,
             restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
             // Per-note calibration fitted against the YDP samples: ten
             // anchors from A0 to C8, nine multipliers each (felt, HF floor,
@@ -5596,7 +5626,6 @@ impl Default for ConcertGrand {
             pedal_noise_amp: 0.0,
             pedal_pressure: 1.0,
             sostenuto: false,
-            bridge_feed: 0.0,
             pedal_noise_lp: 0.0,
             pedal_noise_lp2: 0.0,
             pedal_noise_floor: 0.0,
@@ -7836,8 +7865,39 @@ impl ConcertGrand {
         // A struck string is its voice; a silent string it may have been is
         // that voice now.
         self.free_silent(note);
-        let Some(slot) = self.pick_voice_slot() else {
-            return;
+        // A RE-STRUCK STRING IS THE SAME STRING, and only the section that
+        // owns it can strike it. So the choice of WHICH string is made here,
+        // from the picture, and the section is told: this slot. When no
+        // string of this note is free to be re-struck, the blow goes to a
+        // fresh slot and every section eases out whatever it is holding of
+        // that note -- which is the path a string under a damper takes,
+        // since its decay rates have been scaled and it cannot honestly be
+        // re-lifted.
+        let merge = self.restrike_merge.then(|| {
+            self.summary.iter().position(|voice| {
+                voice.active
+                    && voice.note == note
+                    && voice.channel == channel
+                    && voice.ringing_free
+            })
+        });
+        let slot = match merge.flatten() {
+            Some(slot) => {
+                self.voice_claimed |= 1 << slot;
+                slot
+            }
+            None => {
+                let Some(slot) = self.pick_voice_slot() else {
+                    return;
+                };
+                self.broadcast_voice_work(VoiceRecord {
+                    kind: VoiceRecord::EASE,
+                    channel,
+                    note,
+                    ..VoiceRecord::EMPTY
+                });
+                slot
+            }
         };
         // The coordinator's half of what it knows, written where it decided.
         // The energy stays as it was until the block that renders this note
@@ -7846,6 +7906,9 @@ impl ConcertGrand {
         self.summary[slot].active = true;
         self.summary[slot].note = note;
         self.summary[slot].channel = channel;
+        // The key is down, so the string is free until something says
+        // otherwise. Which is what the next blow on this key will read.
+        self.summary[slot].ringing_free = true;
         self.push_voice_work(
             slot & (STRING_SECTIONS - 1),
             VoiceRecord {
@@ -7900,37 +7963,31 @@ impl ConcertGrand {
         self.voice_work_seq = seq.wrapping_add(1);
     }
 
-    /// Does every section's per-voice work for one frame, in the order it
+    /// Does ONE section's per-voice work for one frame, in the order it
     /// arrived.
     ///
-    /// Read out first, applied after: the handlers take all of `self`, and
-    /// the work they are reading lives there too. Sorted by `(seq, section)`
-    /// because each strike sizes its ladder from what the one before it
-    /// left, and a broadcast reaches the sections in their own order.
-    fn run_voice_work(&mut self, frame: u16) {
-        let mut due = [(0usize, VoiceRecord::EMPTY); MAX_VOICE_WORK_PER_FRAME];
-        let mut count = 0usize;
-        for section in 0..STRING_SECTIONS {
-            let written = self.voice_work_len[section];
-            if written == 0 {
-                continue;
-            }
-            for (at, bytes) in UnitWork::read(&self.voice_work[section][..written]) {
-                if at != frame || count == due.len() {
-                    continue;
-                }
-                if let Some(record) = VoiceRecord::from_bytes(bytes) {
-                    due[count] = (section, record);
-                    count += 1;
-                }
-            }
-        }
-        if count == 0 {
+    /// No sorting across sections any more, and none needed: every handler
+    /// touches only the voices of the section it was given, and a section's
+    /// records are already in the order the events came in. When this ran
+    /// for all four at once the order mattered, because the handlers still
+    /// reached across; now it cannot.
+    fn run_section_work(&mut self, section: usize, frame: u16) {
+        let written = self.voice_work_len[section];
+        if written == 0 {
             return;
         }
-        due[..count].sort_unstable_by_key(|(section, record)| (record.seq, *section));
-        for index in 0..count {
-            let (section, record) = due[index];
+        let mut due = [VoiceRecord::EMPTY; MAX_VOICE_WORK_PER_FRAME];
+        let mut count = 0usize;
+        for (at, bytes) in UnitWork::read(&self.voice_work[section][..written]) {
+            if at != frame || count == due.len() {
+                continue;
+            }
+            if let Some(record) = VoiceRecord::from_bytes(bytes) {
+                due[count] = record;
+                count += 1;
+            }
+        }
+        for record in due.iter().take(count).copied() {
             match record.kind {
                 VoiceRecord::STRIKE => {
                     self.voice_claimed &= !(1 << record.slot);
@@ -7972,9 +8029,82 @@ impl ConcertGrand {
                 ),
                 VoiceRecord::ALL_OFF => self.all_notes_off_voices(section),
                 VoiceRecord::CATCH => self.catch_voices(section, record.channel, record.note),
+                VoiceRecord::EASE => self.ease_voices(section, record.channel, record.note),
                 _ => debug_assert!(false, "clase de trabajo desconocida"),
             }
         }
+    }
+
+    /// One section's half of a note struck again over a string of its own
+    /// that is not free to be re-struck: ease that string out.
+    ///
+    fn ease_voices(&mut self, section: usize, channel: u8, note: u8) {
+        // Thirty milliseconds, from 250: the new voice covers the sound
+        // from its first cycle, and at 250 ms the old one lingered 1.7 s
+        // before the cull took it -- a ghost per repeated note, and on
+        // the Op. 9 No. 2 file 1351 voice steals against 185 with the
+        // merge. Thirty is still forty cycles of an A4, nothing steps.
+        let restrike = expf(-1.0 / (0.03 * self.sample_rate));
+        let (thud_coefficient, thud_decay) = self.damper_thud();
+        // WITHOUT the release thud. `damp` is the damper landing, and
+        // its thud is the felt meeting a moving string; here no damper
+        // lands -- the hammer re-strikes a string the pedal is holding
+        // half-clear -- yet the thud fired on every repeated note under
+        // a half pedal, because a half pedal leaves `damper_applied`
+        // above zero and every such re-strike takes this path. Heard on
+        // the Op. 9 No. 2 file as "un pequeño popeo" on the repeated
+        // B-flats at 1:11 (found by the score: both pops were re-strikes
+        // of note 70 under a moving pedal, and neither a steal nor a
+        // step). The ease-out stays; the knock goes.
+        for slot in section_slots(section) {
+            let voice = &mut voice_at!(self, slot);
+            if voice.active && voice.note == note && voice.channel == channel {
+                // Its felt too: an eased-out voice still ticks, and a
+                // bounce landing on it relieves a press against a pole
+                // `damp` has since moved.
+                voice.cancel_damper();
+                voice.damp(restrike, thud_coefficient, thud_decay, 0.0);
+            }
+        }
+    }
+
+    /// One section's strings for one frame: its eight voices and its four
+    /// halos, and what they put on the bridge.
+    fn render_section_frame(
+        &mut self,
+        section: usize,
+        feed: f32,
+        sympathy_rate: f32,
+        sostenuto: bool,
+    ) -> SectionFrame {
+        let mut made = SectionFrame::default();
+        let mut culled = 0usize;
+        macro_rules! deposit {
+            ($rendered:expr) => {{
+                let one = $rendered;
+                made.sample += one.sample;
+                made.keybed_left += one.keybed_left;
+                made.keybed_right += one.keybed_right;
+                made.force += one.force;
+                made.drive_points[one.drive_index] += one.force * (1.0 - one.drive_frac);
+                made.drive_points[one.drive_index + 1] += one.force * one.drive_frac;
+                culled += one.culled;
+            }};
+        }
+        for slot in section_slots(section) {
+            let voice = &mut voice_at!(self, slot);
+            if voice.active {
+                deposit!(voice.render_frame(feed, sympathy_rate, sostenuto));
+            }
+        }
+        for index in 0..HALOS_PER_SECTION {
+            let halo = &mut halo_at!(self, section, index);
+            if halo.active {
+                deposit!(halo.render_frame(feed, sympathy_rate, sostenuto));
+            }
+        }
+        self.section_partials[section] = self.section_partials[section].saturating_sub(culled);
+        made
     }
 
     /// The strike with its velocity already on the unit scale. Seven-bit
@@ -8051,7 +8181,13 @@ impl ConcertGrand {
         let mut restrike_target: Option<usize> = None;
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
-        for slot in 0..MAX_VOICES {
+        // The coordinator already chose: it sends a re-struck note back to
+        // the string it is already on, and a fresh one to a slot it emptied.
+        // So this asks only about the slot it was given -- which is all a
+        // section could ask anyway, since the others are not its to read.
+        // It still ASKS, because the picture the choice was made from is a
+        // block old in one respect: a string may have been damped since.
+        {
             let voice = &mut voice_at!(self, slot);
             if self.restrike_merge
                 && voice.active
@@ -8072,39 +8208,8 @@ impl ConcertGrand {
                     voice.damper_applied = 0.0;
                 }
                 restrike_target = Some(slot);
-                break;
             }
         }
-        if restrike_target.is_none() {
-            // Thirty milliseconds, from 250: the new voice covers the sound
-            // from its first cycle, and at 250 ms the old one lingered 1.7 s
-            // before the cull took it -- a ghost per repeated note, and on
-            // the Op. 9 No. 2 file 1351 voice steals against 185 with the
-            // merge. Thirty is still forty cycles of an A4, nothing steps.
-            let restrike = expf(-1.0 / (0.03 * self.sample_rate));
-            let (thud_coefficient, thud_decay) = self.damper_thud();
-            // WITHOUT the release thud. `damp` is the damper landing, and
-            // its thud is the felt meeting a moving string; here no damper
-            // lands -- the hammer re-strikes a string the pedal is holding
-            // half-clear -- yet the thud fired on every repeated note under
-            // a half pedal, because a half pedal leaves `damper_applied`
-            // above zero and every such re-strike takes this path. Heard on
-            // the Op. 9 No. 2 file as "un pequeño popeo" on the repeated
-            // B-flats at 1:11 (found by the score: both pops were re-strikes
-            // of note 70 under a moving pedal, and neither a steal nor a
-            // step). The ease-out stays; the knock goes.
-            for slot in 0..MAX_VOICES {
-            let voice = &mut voice_at!(self, slot);
-                if voice.active && voice.note == note && voice.channel == channel {
-                    // Its felt too: an eased-out voice still ticks, and a
-                    // bounce landing on it relieves a press against a pole
-                    // `damp` has since moved.
-                    voice.cancel_damper();
-                    voice.damp(restrike, thud_coefficient, thud_decay, 0.0);
-                }
-            }
-        }
-
         let f0 = self.fundamental[index];
         let b = self.inharmonicity[index];
         let x0 = self.strike_point(note);
@@ -11518,7 +11623,6 @@ impl Processor for ConcertGrand {
         // sample of latency around the loop keeps the order of voices
         // meaningless and the feedback explicit.
         let sympathy_rate = knob_sympathy_rate * self.controls.lab(15).min(4.0);
-        let mut bridge_feed = self.bridge_feed;
         // Read once per block, not per sample: it is a knob, and an atomic
         // load inside the hot loop is a barrier the optimiser has to honour.
         let board_feed_delay =
@@ -11542,10 +11646,18 @@ impl Processor for ConcertGrand {
         self.voice_claimed = 0;
         let mut deposits = [FrameDeposit::default(); RENDER_SPAN];
         let mut frame_states = [FrameState::default(); RENDER_SPAN];
+        // What phase one writes down for phase two, and what phase two hands
+        // to phase three.
+        let mut sostenuto_at = [false; RENDER_SPAN];
+        let mut others_at = [[0.0f32; STRING_SECTIONS]; RENDER_SPAN];
+        let mut unit_out = [[SectionFrame::default(); RENDER_SPAN]; STRING_SECTIONS];
         let mut span_start = 0usize;
         while span_start < frames as usize {
             let span = (frames as usize - span_start).min(RENDER_SPAN);
             self.silent_work_len = 0;
+            // PHASE ONE -- the coordinator: every event in the span, in
+            // order, and the picture each frame leaves behind. Nothing here
+            // reads a voice, which is what lets phase two be four things.
             for offset in 0..span {
                 let frame = span_start + offset;
                 self.span_offset = offset as u16;
@@ -11574,12 +11686,6 @@ impl Processor for ConcertGrand {
                     let _ = self.controls.set(event.index, event.value);
                     parameter_index += 1;
                 }
-
-                // The strikes this frame was given, before anything reads a
-                // voice. `bed_busy` below walks them, and today the strike
-                // has already landed when it does -- putting this after it
-                // moved the fingerprint, which is how I learned it.
-                self.run_voice_work(frame as u16);
 
                 if refresh_busy {
                     refresh_busy = false;
@@ -11624,84 +11730,29 @@ impl Processor for ConcertGrand {
                         }
                     }
                 }
-                let mut strings_total = 0.0f32;
-                let mut section_total = [0.0f32; STRING_SECTIONS];
-                let mut bridge_drive = 0.0f32;
-                let mut drive_points = [0.0f32; BOARD_DRIVE_POINTS];
-                // What each section hears of the rest of the instrument. With no
-                // section delay every section hears the same thing -- the whole
-                // bridge, one sample ago -- and this is the shipped instrument,
-                // taken from `bridge_feed` so the float summation order is
-                // unchanged and the render stays bit-identical.
-                let feeds = if self.section_delay == 0 {
-                    [bridge_feed; STRING_SECTIONS]
-                } else {
-                    let read = (self.section_cursor + MAX_SECTION_DELAY - self.section_delay)
-                        % MAX_SECTION_DELAY;
-                    let mut stale = 0.0f32;
-                    for section in 0..STRING_SECTIONS {
-                        stale += self.section_history[section][read];
-                    }
-                    // Itself from one sample ago, everyone else from a whole
-                    // block ago. A section that is the only one sounding hears
-                    // exactly what it hears today: the others' sums are zero, so
-                    // there is nothing to be late.
-                    core::array::from_fn(|section| {
-                        stale - self.section_history[section][read] + self.section_previous[section]
-                    })
-                };
-                let mut keybed_left = 0.0f32;
-                let mut keybed_right = 0.0f32;
-                let sostenuto_now = self.sostenuto;
-                // In slot order, because that is the order the sums were
-                // built in and the fingerprint knows it. What each voice needs
-                // is now explicit in the call -- its section's feed, the
-                // sympathy rate and the middle pedal -- and nothing else
-                // crosses, which is the boundary a unit will be given.
-                for slot in 0..MAX_VOICES {
-                    let section = slot & (STRING_SECTIONS - 1);
-                    let feed = feeds[section];
-                    // The note, then the halo it cast, then the next slot.
-                    // Both belong to this section and neither can be reached
-                    // from another one, which is the whole point of the halo
-                    // living here.
-                    let mut culled = 0usize;
-                    macro_rules! deposit {
-                        ($made:expr) => {{
-                            let made = $made;
-                            strings_total += made.sample;
-                            section_total[section] += made.sample;
-                            keybed_left += made.keybed_left;
-                            keybed_right += made.keybed_right;
-                            bridge_drive += made.force;
-                            drive_points[made.drive_index] += made.force * (1.0 - made.drive_frac);
-                            drive_points[made.drive_index + 1] += made.force * made.drive_frac;
-                            culled += made.culled;
-                        }};
-                    }
-                    {
-                        let voice = &mut voice_at!(self, slot);
-                        if voice.active {
-                            deposit!(voice.render_frame(feed, sympathy_rate, sostenuto_now));
-                        }
-                    }
-                    // A section's halos ride with its first few slots, so
-                    // they are summed inside their own section and in an
-                    // order that does not depend on which note cast them.
-                    if slot >> SECTION_SHIFT < HALOS_PER_SECTION {
-                        let halo = &mut halo_at!(self, section, slot >> SECTION_SHIFT);
-                        if halo.active {
-                            deposit!(halo.render_frame(feed, sympathy_rate, sostenuto_now));
-                        }
-                    }
-                    self.section_partials[section] =
-                        self.section_partials[section].saturating_sub(culled);
+                sostenuto_at[offset] = self.sostenuto;
+                // What each section will hear of the OTHERS: their sums from
+                // a block ago, which is the whole reason the four can run at
+                // once. Read here, before anything renders, because after
+                // this the sections write the same ring.
+                //
+                // The delay has to reach back past the span. Anything shorter
+                // would be asking for a sum this span has not produced yet,
+                // and the ring would hand back the block before it without
+                // saying so.
+                debug_assert!(
+                    self.section_delay >= span,
+                    "el retraso entre secciones no alcanza el tramo"
+                );
+                let read = (self.section_cursor + offset + MAX_SECTION_DELAY
+                    - self.section_delay)
+                    % MAX_SECTION_DELAY;
+                let mut stale = 0.0f32;
+                for section in 0..STRING_SECTIONS {
+                    stale += self.section_history[section][read];
                 }
-
-                // Everything after this line is a stage that will one day run in
-                // its own pass, so it reads the frame rather than `self`. In one
-                // pass the two are the same value, which is why the fingerprint
-                // can still guard this.
+                others_at[offset] =
+                    core::array::from_fn(|s| stale - self.section_history[s][read]);
                 frame_states[offset] = FrameState {
                     lab: [
                         self.controls.lab(14),
@@ -11716,10 +11767,46 @@ impl Processor for ConcertGrand {
                 if self.pedal_noise_amp > 1e-6 {
                     self.pedal_noise_amp *= pedal_decay;
                 }
-                bridge_feed = strings_total;
-                self.section_previous = section_total;
+            }
+
+            // PHASE TWO -- the sections. Each one renders its own strings for
+            // the whole span from its own state and what phase one wrote
+            // down, and nothing it touches belongs to another section. This
+            // is the loop a host with four cores runs four ways.
+            for section in 0..STRING_SECTIONS {
+                let mut previous = self.section_previous[section];
+                for offset in 0..span {
+                    self.run_section_work(section, (span_start + offset) as u16);
+                    // Itself from one sample ago, everyone else from a whole
+                    // block ago. A section that is the only one sounding
+                    // hears exactly what it always heard: the others' sums
+                    // are zero, so there is nothing to be late.
+                    let feed = others_at[offset][section] + previous;
+                    let made =
+                        self.render_section_frame(section, feed, sympathy_rate, sostenuto_at[offset]);
+                    previous = made.sample;
+                    unit_out[section][offset] = made;
+                }
+                self.section_previous[section] = previous;
+            }
+
+            // PHASE THREE -- the coordinator again: the four sections added
+            // up in ascending order, which is the order a host must combine
+            // their slots in, and then everything downstream of the strings.
+            for offset in 0..span {
+                let mut bridge_drive = 0.0f32;
+                let mut drive_points = [0.0f32; BOARD_DRIVE_POINTS];
+                let mut keybed_left = 0.0f32;
+                let mut keybed_right = 0.0f32;
                 for section in 0..STRING_SECTIONS {
-                    self.section_history[section][self.section_cursor] = section_total[section];
+                    let made = unit_out[section][offset];
+                    bridge_drive += made.force;
+                    for (point, made) in drive_points.iter_mut().zip(made.drive_points) {
+                        *point += made;
+                    }
+                    keybed_left += made.keybed_left;
+                    keybed_right += made.keybed_right;
+                    self.section_history[section][self.section_cursor] = made.sample;
                 }
                 self.section_cursor = (self.section_cursor + 1) % MAX_SECTION_DELAY;
                 deposits[offset] = FrameDeposit {
@@ -11729,6 +11816,7 @@ impl Processor for ConcertGrand {
                     keybed_right,
                 };
             }
+
             for offset in 0..span {
                 let frame = span_start + offset;
                 self.run_silent_work(offset as u16);
@@ -12139,6 +12227,7 @@ impl Processor for ConcertGrand {
                 note: voice.note,
                 channel: voice.channel,
                 energy: voice.energy,
+                ringing_free: voice.held || voice.sustained,
             };
         }
         for section in 0..STRING_SECTIONS {
@@ -12149,11 +12238,11 @@ impl Processor for ConcertGrand {
                     note: halo.note,
                     channel: halo.channel,
                     energy: halo.energy,
+                    ringing_free: halo.held || halo.sustained,
                 };
             }
         }
         self.share_the_budget();
-        self.bridge_feed = bridge_feed;
     }
 }
 

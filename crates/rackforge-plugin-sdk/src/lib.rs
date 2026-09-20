@@ -1985,7 +1985,15 @@ macro_rules! export_parallel_processor {
                     input_channels,
                     output_channels,
                 );
-                let samples = frames as usize * output_channels as usize;
+                // A unit writes its OWN width, and the derived sequential
+                // path has to hand it a slot that size. Sized by the
+                // plugin's output channels it is the wrong buffer for a
+                // widened unit, and a unit that writes twenty floats a frame
+                // into room for two does not misbehave quietly -- it panics
+                // inside the component, which takes the block down. The
+                // final mix is still the plugin's channels; only what a unit
+                // hands over is its own width.
+                let samples = frames as usize * RF_PARALLEL_UNIT_CHANNELS;
                 for index in 0..count {
                     // SAFETY: single-threaded component; the plan was just
                     // written by `rf_begin` and stays untouched until the
@@ -2015,17 +2023,24 @@ macro_rules! export_parallel_processor {
                         let reports = &mut (*core::ptr::addr_of_mut!(RF_REPORTS)).0;
                         let report = &mut reports[unit as usize * RF_PARALLEL_REPORT_STRIDE..]
                             [..RF_PARALLEL_REPORT_STRIDE];
+                        // Straight into the unit's own slot. It used to
+                        // render into `output` and copy, which works only
+                        // while a unit is exactly as wide as the plugin's
+                        // channels: `output` is the instrument's stereo
+                        // block, and a section that writes twenty floats a
+                        // frame into room for two panicked inside the
+                        // component and took the block with it.
+                        let mix = &mut *core::ptr::addr_of_mut!(RF_MIX);
+                        let slot = &mut mix[unit as usize * RF_PARALLEL_MIX_SLOT_SAMPLES..]
+                            [..samples];
                         <$processor as $crate::ParallelProcessor>::render_unit(
                             unit,
                             &mut self.units[unit as usize],
                             payload,
                             &context,
-                            &mut output[..samples],
+                            slot,
                             report,
                         );
-                        let mix = &mut *core::ptr::addr_of_mut!(RF_MIX);
-                        mix[unit as usize * RF_PARALLEL_MIX_SLOT_SAMPLES..][..samples]
-                            .copy_from_slice(&output[..samples]);
                     }
                 }
                 self.rf_end(output, frames, output_channels);

@@ -1209,7 +1209,15 @@ impl PortableInstance {
         // SAFETY: no arguments; reads the completion bitmask.
         let finished_mask = unsafe { host::rf_par_unit_mask() } as u32;
 
-        let mix_samples = checked_samples(frames, self.prepared_output_channels)?;
+        // The same width a unit actually writes, not the instrument's
+        // channels -- see the native host, where reading two channels of a
+        // twenty-channel unit silenced every section.
+        let unit_width = if layout.unit_channels > 0 {
+            layout.unit_channels as u32
+        } else {
+            self.prepared_output_channels
+        };
+        let mix_samples = checked_samples(frames, unit_width)?;
         for entry in &plan[..active] {
             let slot_offset =
                 mix_offset + (entry.unit as usize * layout.mix_slot_samples * 4) as i32;

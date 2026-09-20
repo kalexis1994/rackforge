@@ -12602,7 +12602,18 @@ const SHARED_ENGINE: usize = core::mem::size_of::<StringEngine>();
 const SHARED_ALLOWANCE: usize = SHARED_ENGINE + 4;
 const SHARED_HEAD: usize = SHARED_ALLOWANCE + STRING_SECTIONS * 4;
 const SHARED_PER_FRAME: usize = STRING_SECTIONS * 4 + 1;
-const SHARED_CAPACITY: usize = SHARED_HEAD + MAX_BLOCK_FRAMES * SHARED_PER_FRAME;
+const SHARED_CAPACITY: usize =
+    (SHARED_HEAD + MAX_BLOCK_FRAMES * SHARED_PER_FRAME).next_multiple_of(8);
+
+// The host requires it, and requires it at startup: the appliance refused to
+// start with "parallel-render shared capacity must be a positive multiple of
+// 8" the first time this shipped, because the header is the engine plus
+// twenty bytes and seventeen bytes a frame is not a multiple of anything
+// convenient. Cheaper to fail here.
+const _: () = assert!(
+    SHARED_CAPACITY.is_multiple_of(8) && SHARED_CAPACITY > 0,
+    "la capacidad compartida tiene que ser un multiplo positivo de 8"
+);
 
 impl SectionFrame {
     /// Into a unit's slot, and back out of it in `end_block`.

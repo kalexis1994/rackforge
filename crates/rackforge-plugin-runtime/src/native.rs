@@ -1378,9 +1378,22 @@ impl PortableInstance {
             bail!("portable plugin is not prepared for this audio block");
         }
         let input_samples = checked_samples(frames, self.prepared_input_channels)?;
-        let output_samples = checked_samples(frames, self.prepared_output_channels)?;
+        // A unit writes its OWN width, which is the plugin's output channels
+        // only when it declared none. The Concert Grand's sections hand over
+        // twenty floats a frame -- a bridge force, sixteen drive points and
+        // two keybed contributions -- and sizing their slot by the
+        // instrument's two channels rejected every block they rendered. The
+        // host then counted each unit as failed and filled its slot with
+        // silence: an instrument whose strings all stop while its body still
+        // rings, which measured as peak 0.001 and sounded like nothing.
+        let unit_width = if api.layout.unit_channels > 0 {
+            api.layout.unit_channels as u32
+        } else {
+            self.prepared_output_channels
+        };
+        let output_samples = checked_samples(frames, unit_width)?;
         if input.len() != input_samples || output.len() != output_samples {
-            bail!("audio buffer length does not match prepared input/output channels");
+            bail!("audio buffer length does not match the unit's width");
         }
         let memory_size = self.memory.data_size(&self.store);
         let input_range = memory_range(self.input_offset, input_samples, memory_size)?;
@@ -2340,6 +2353,57 @@ mod tests {
             )
             .unwrap_err();
         assert!(format!("{error:#}").contains("exceeds plugin capacity"));
+    }
+
+    /// A unit's slot is sized by the width the unit declares, not by the
+    /// instrument's channels.
+    ///
+    /// This silenced a whole instrument and no test saw it. The Concert
+    /// Grand's four string sections hand back twenty floats a frame -- a
+    /// bridge force, sixteen bridge drive points, two keybed contributions
+    /// -- and the host sized their slots at the plugin's two output
+    /// channels, rejected every block they rendered as the wrong length,
+    /// counted each unit as failed and filled its slot with silence. What
+    /// came out was an instrument whose strings had all stopped while its
+    /// body still rang: peak 0.001. It was found by ear, on the appliance,
+    /// by someone asking why the headphones were quiet.
+    #[test]
+    fn a_units_slot_is_sized_by_the_width_it_declares() {
+        const FRAMES: u32 = 64;
+        const WIDTH: usize = 5;
+        let source = PARALLEL_SYNTH.replace(
+            "(func (export \"rackforge_parallel_max_units\")",
+            &format!(
+                "(func (export \"rackforge_parallel_unit_channels\") (result i32) i32.const {WIDTH})\n          (func (export \"rackforge_parallel_max_units\")"
+            ),
+        );
+        let engine = parallel_engine();
+        let module = engine.compile(&wat::parse_str(&source).unwrap()).unwrap();
+        let mut worker = module.instantiate().unwrap();
+        worker.prepare(48_000.0, FRAMES, 0, 2).unwrap();
+        assert_eq!(
+            worker.parallel_layout().map(|layout| layout.unit_channels),
+            Some(WIDTH),
+            "the host did not read the declared width"
+        );
+
+        // The width the unit declares is accepted...
+        let mut declared = vec![0.0_f32; FRAMES as usize * WIDTH];
+        worker
+            .parallel_render_unit(0, 0, 0, &[], &mut declared, FRAMES)
+            .expect("a unit's own width must be accepted");
+
+        // ...and the instrument's channel count, which is what the host used
+        // to assume, is not: a buffer that size cannot hold what the unit
+        // writes, and silently reading two channels of it is exactly the bug.
+        let mut assumed = vec![0.0_f32; FRAMES as usize * 2];
+        let error = worker
+            .parallel_render_unit(0, 0, 0, &[], &mut assumed, FRAMES)
+            .expect_err("the instrument's channel count must not be accepted");
+        assert!(
+            format!("{error:#}").contains("width"),
+            "unexpected refusal: {error:#}"
+        );
     }
 
     #[test]

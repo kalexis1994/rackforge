@@ -163,7 +163,23 @@ fn percentile_micros(samples: &[u64], percentile: f64) -> f64 {
     kept[((kept.len() as f64 * percentile) as usize).min(kept.len() - 1)] as f64 / 1000.0
 }
 
+/// Loads a program on the coordinator and mirrors it to every unit, which
+/// is what the live host does: a unit that did not hear the program change
+/// renders the previous one.
+fn load_program(voice: &mut Voice, program: &str) {
+    voice
+        .instance
+        .load_preset(program)
+        .unwrap_or_else(|error| panic!("no se pudo cargar el programa {program}: {error}"));
+    if let Some(parallel) = voice.parallel.as_mut() {
+        parallel
+            .mirror(|instance| instance.load_preset(program))
+            .expect("espejar el programa a las unidades");
+    }
+}
+
 /// A held chord, so the instrument has something to render.
+
 fn chord() -> Vec<MidiEventV1> {
     [48_u8, 55, 60, 64, 67]
         .iter()
@@ -184,7 +200,12 @@ struct Phases {
     single: Vec<u64>,
 }
 
-fn measure(plugin: &'static LoadedPlugin, first_block: &[MidiEventV1], workers: usize) -> Phases {
+fn measure(
+    plugin: &'static LoadedPlugin,
+    first_block: &[MidiEventV1],
+    workers: usize,
+    program: Option<&str>,
+) -> Phases {
     let mut phases = Phases {
         begin: Vec::with_capacity(BLOCKS),
         units: Vec::with_capacity(BLOCKS),
@@ -197,6 +218,9 @@ fn measure(plugin: &'static LoadedPlugin, first_block: &[MidiEventV1], workers: 
     // One instance, whole block: what the sequential fallback costs.
     let telemetry = RenderTelemetry::new(1);
     let mut voices = vec![Voice::create(plugin, false)];
+    if let Some(program) = program {
+        load_program(&mut voices[0], program);
+    }
     voices[0].events = first_block.to_vec();
     for _ in 0..BLOCKS {
         let started = Instant::now();
@@ -207,6 +231,9 @@ fn measure(plugin: &'static LoadedPlugin, first_block: &[MidiEventV1], workers: 
 
     // The three phases, run inline on this thread so each one can be timed.
     let mut voices = vec![Voice::create(plugin, true)];
+    if let Some(program) = program {
+        load_program(&mut voices[0], program);
+    }
     voices[0].events = first_block.to_vec();
     for _ in 0..BLOCKS {
         let whole = Instant::now();
@@ -242,6 +269,9 @@ fn measure(plugin: &'static LoadedPlugin, first_block: &[MidiEventV1], workers: 
     let telemetry = RenderTelemetry::new(workers);
     let mut pool = RenderPool::with_workers(workers, telemetry);
     let mut voices = vec![Voice::create(plugin, true)];
+    if let Some(program) = program {
+        load_program(&mut voices[0], program);
+    }
     voices[0].events = first_block.to_vec();
     for _ in 0..BLOCKS {
         let started = Instant::now();
@@ -253,11 +283,82 @@ fn measure(plugin: &'static LoadedPlugin, first_block: &[MidiEventV1], workers: 
     phases
 }
 
+/// Every program in the catalogue, under the same chord, ranked by what its
+/// worst blocks cost.
+///
+/// A synthesiser's cost is not one number: two programs on the same engine
+/// can differ by a factor of three, and an author who measured the default
+/// has measured the one their users may never load. This is the answer to
+/// "some programs still miss the deadline -- which ones".
+fn sweep(plugin: &'static LoadedPlugin, workers: usize) {
+    const SWEEP_BLOCKS: usize = 700;
+    let deadline = deadline_micros();
+    let programs: Vec<(String, String)> = plugin
+        .presets()
+        .presets
+        .iter()
+        .map(|preset| (preset.id.clone(), preset.name.clone()))
+        .collect();
+    if programs.is_empty() {
+        eprintln!("este plugin no trae catalogo de programas.");
+        return;
+    }
+
+    let telemetry = RenderTelemetry::new(workers);
+    let mut pool = RenderPool::with_workers(workers, telemetry);
+    let mut rows = Vec::with_capacity(programs.len());
+    for (id, name) in &programs {
+        let mut voices = vec![Voice::create(plugin, true)];
+        load_program(&mut voices[0], id);
+        voices[0].events = chord();
+        let mut samples = Vec::with_capacity(SWEEP_BLOCKS);
+        for _ in 0..SWEEP_BLOCKS {
+            let started = Instant::now();
+            assert!(pool.process(&mut voices, FRAMES, CHANNELS, 1_000_000_000));
+            samples.push(started.elapsed().as_nanos() as u64);
+            voices[0].events.clear();
+        }
+        rows.push((
+            percentile_micros(&samples, 0.99),
+            mean_micros(&samples),
+            name.clone(),
+        ));
+    }
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+
+    println!();
+    println!("  {} programas, mismo acorde, en el pool de {workers} workers,", rows.len());
+    println!("  ordenados por el p99 (deadline {deadline:.0} us):");
+    println!();
+    println!("      p99      media   del deadline  programa");
+    for (p99, mean, name) in &rows {
+        let share = p99 / deadline * 100.0;
+        let flag = if share >= 100.0 {
+            "  <-- NO LLEGA"
+        } else if share >= 80.0 {
+            "  <-- al borde"
+        } else {
+            ""
+        };
+        println!("  {p99:8.1}  {mean:8.1}      {share:5.0} %    {name}{flag}");
+    }
+    let worst = &rows[0];
+    let best = &rows[rows.len() - 1];
+    println!();
+    println!(
+        "  el peor cuesta {:.1}x el mejor ({} contra {}), sobre el mismo motor:",
+        worst.0 / best.0.max(1e-9),
+        worst.2,
+        best.2
+    );
+    println!("  medir un solo programa mide el que quizas nadie carga.");
+}
+
 fn main() {
     let mut arguments = std::env::args().skip(1);
     let Some(root) = arguments.next() else {
         eprintln!(
-            "uso: plugin-profile <directorio-del-paquete> [workers]\n\
+            "uso: plugin-profile <directorio-del-paquete> [workers] [--program ID] [--sweep]\n\
              \n\
              El directorio es un paquete desplegado: `rackforge-plugin.toml`,\n\
              `component.wasm` y `metadata/`. En un aparato son los que estan\n\
@@ -265,10 +366,16 @@ fn main() {
         );
         std::process::exit(2);
     };
-    let workers: usize = arguments
-        .next()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(3);
+    let mut workers = 3_usize;
+    let mut chosen: Option<String> = None;
+    let mut sweeping = false;
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--sweep" => sweeping = true,
+            "--program" => chosen = arguments.next(),
+            other => workers = other.parse().unwrap_or(workers),
+        }
+    }
     let plugin = load(&PathBuf::from(root));
 
     let Some(layout) = plugin.parallel_layout() else {
@@ -307,8 +414,17 @@ fn main() {
         println!("    reportes             {reports:7} B");
     }
 
-    let idle = measure(plugin, &[], workers);
-    let busy = measure(plugin, &chord(), workers);
+    if sweeping {
+        sweep(plugin, workers);
+        return;
+    }
+    let program = chosen.as_deref();
+    if let Some(program) = program {
+        println!("  programa: {program}");
+        println!();
+    }
+    let idle = measure(plugin, &[], workers, program);
+    let busy = measure(plugin, &chord(), workers, program);
 
     let row = |label: &str, quiet: &[u64], loud: &[u64]| {
         let (quiet, loud) = (mean_micros(quiet), mean_micros(loud));

@@ -10269,6 +10269,475 @@ impl ConcertGrand {
 
     /// What the instrument is carrying, across all four sections.
     ///
+    /// Everything downstream of the strings, for one span of frames.
+    ///
+    /// The units' slots added up in ascending order -- the order a host
+    /// must combine them in -- and then the board, the sympathetic banks,
+    /// the keybed and the room. This is the shape `end_block` has: it reads
+    /// the frame pictures phase one left behind and the sums phase two
+    /// made, and nothing else of theirs.
+    ///
+    /// The units arrive as a function rather than an array because in one
+    /// instance they are a local and in four they are the host's slots, and
+    /// this does not need to know which.
+    ///
+    /// Its knobs are read here rather than passed in. They are registry
+    /// reads, the same values this block already saw, and a parameter that
+    /// moves mid-block moves `self.controls`, not these.
+    fn serial_stages(
+        &mut self,
+        unit: impl Fn(usize, usize) -> SectionFrame,
+        states: &[FrameState],
+        deposits: &mut [FrameDeposit],
+        span_start: usize,
+        span: usize,
+        output: &mut [f32],
+        channels: usize,
+    ) {
+        let knob_air_highpass = AIR_HIGHPASS.get();
+        let knob_bed_mix = BED_MIX.get();
+        let knob_board_mix = BOARD_MIX.get();
+        let knob_halo_mix = HALO_MIX.get();
+        let knob_headroom = HEADROOM.get();
+        let knob_open_mix = OPEN_MIX.get();
+        let knob_room_mix = ROOM_MIX.get();
+        let knob_undamped_mix = UNDAMPED_MIX.get();
+        let board_feed_delay =
+            (BOARD_FEED_DELAY.get().clamp(0.0, BOARD_FEED_HISTORY as f32 - 1.0)) as usize;
+        let pedal_c1 =
+            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.0 / self.engine.sample_rate);
+        let pedal_c2 =
+            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.1 / self.engine.sample_rate);
+        let pedal_c0 =
+            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.2 / self.engine.sample_rate);
+        let level = self.engine.controls.level_gain() * powf(10.0, OUTPUT_TRIM_DB / 20.0);
+        let preamp_gain = self.preamp_gain();
+        let knee_positive = PREAMP_KNEE.get().clamp(0.1, 0.95);
+        // The asymmetry: the negative half bends a little later.
+        let knee_negative =
+            (knee_positive * (1.0 + PREAMP_ASYMMETRY.get())).clamp(knee_positive, 0.99);
+        // PHASE THREE -- the coordinator again: the four sections added
+        // up in ascending order, which is the order a host must combine
+        // their slots in, and then everything downstream of the strings.
+        for offset in 0..span {
+            let mut bridge_drive = 0.0f32;
+            let mut drive_points = [0.0f32; BOARD_DRIVE_POINTS];
+            let mut keybed_left = 0.0f32;
+            let mut keybed_right = 0.0f32;
+            for section in 0..STRING_SECTIONS {
+                let made = unit(section, offset);
+                bridge_drive += made.force;
+                for (point, made) in drive_points.iter_mut().zip(made.drive_points) {
+                    *point += made;
+                }
+                keybed_left += made.keybed_left;
+                keybed_right += made.keybed_right;
+                self.section_history[section][self.section_cursor] = made.sample;
+            }
+            self.section_cursor = (self.section_cursor + 1) % MAX_SECTION_DELAY;
+            deposits[offset] = FrameDeposit {
+                bridge_drive,
+                drive_points,
+                keybed_left,
+                keybed_right,
+            };
+        }
+
+        for offset in 0..span {
+            let frame = span_start + offset;
+            self.run_silent_work(offset as u16);
+            let frame_state = states[offset];
+            let bed_busy = frame_state.bed_busy;
+            let FrameDeposit {
+                bridge_drive,
+                drive_points,
+                keybed_left,
+                keybed_right,
+            } = deposits[offset];
+            // Everything the strings produce radiates through the board --
+            // each string from its own point of the bridge (`BOARD_SHAPE`).
+            // What everything downstream of the strings hears, which is what
+            // those units could reach if they rendered beside the strings
+            // instead of after them. The board and the sympathetic banks move
+            // TOGETHER: the board is the through path and the banks sit
+            // beside it, so delaying one alone leaves two copies of the
+            // strike a block apart, and the ear heard that as the attack
+            // losing a pinch. At zero both are handed straight through and
+            // nothing is written, so the shipped render is untouched.
+            let (drive_points, excitation, keybed_left, keybed_right) =
+                if board_feed_delay == 0 {
+                    (drive_points, bridge_drive, keybed_left, keybed_right)
+                } else {
+                    let write = self.board_feed_cursor;
+                    let read =
+                        (write + BOARD_FEED_HISTORY - board_feed_delay) % BOARD_FEED_HISTORY;
+                    self.board_feed_history[write] = drive_points;
+                    self.bridge_feed_history[write] = bridge_drive;
+                    self.keybed_feed_history[write] = [keybed_left, keybed_right];
+                    self.board_feed_cursor = (write + 1) % BOARD_FEED_HISTORY;
+                    let keybed = self.keybed_feed_history[read];
+                    (
+                        self.board_feed_history[read],
+                        self.bridge_feed_history[read],
+                        keybed[0],
+                        keybed[1],
+                    )
+                };
+            let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
+            let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
+            // With nothing sounding every drive point is zero, and the
+            // projection below spends five hundred and twelve multiplies a
+            // frame proving that zero times a basis is zero. Skipping it is
+            // exact -- the arrays are already the zeros the loop would leave
+            // -- and it is 155 us of a Raspberry Pi's 2667 us block.
+            if drive_points.iter().any(|point| *point != 0.0) {
+                for q in 0..BOARD_DRIVE_POINTS {
+                    let mut c = 0.0f32;
+                    let mut s = 0.0f32;
+                    for ((basis_cos, basis_sin), point) in self.drive_basis_cos[q]
+                        .iter()
+                        .zip(self.drive_basis_sin[q].iter())
+                        .zip(drive_points.iter())
+                    {
+                        c += basis_cos * point;
+                        s += basis_sin * point;
+                    }
+                    cos_t[q] = c;
+                    sin_t[q] = s;
+                }
+            }
+            let mut board_left = 0.0;
+            let mut board_right = 0.0;
+            for mode in self.board.iter_mut().take(self.board_count) {
+                let (left, right) = mode.tick_pair(mode.excitation(&cos_t, &sin_t));
+                board_left += left;
+                board_right += right;
+            }
+            // The rim: below its first mode the board radiates almost nothing.
+            board_left = rim_pass(&mut self.rim[0], &self.rim_coef, board_left);
+            board_right = rim_pass(&mut self.rim[1], &self.rim_coef, board_right);
+            if self.body_gain != self.body_target {
+                let step = 1.0 / BANK_FADE_SAMPLES;
+                self.body_gain = if self.body_target > self.body_gain {
+                    (self.body_gain + step).min(self.body_target)
+                } else {
+                    (self.body_gain - step).max(self.body_target)
+                };
+            }
+            board_left *= self.body_gain;
+            board_right *= self.body_gain;
+            // The open top octave listens to the bridge and rings on.
+            let mut open_left = 0.0;
+            let mut open_right = 0.0;
+            for string in &mut self.open_strings {
+                let y = string.tick(excitation);
+                open_left += y * string.pan_left;
+                open_right += y * string.pan_right;
+            }
+            // Every other string's undamped length, listening to the bridge.
+            let mut undamped_left = 0.0;
+            let mut undamped_right = 0.0;
+            for (string, muted) in self
+                .undamped
+                .iter_mut()
+                .take(self.undamped_active)
+                .zip(self.undamped_muted.iter())
+            {
+                let y = string.tick(if *muted { 0.0 } else { excitation });
+                undamped_left += y * string.pan_left;
+                undamped_right += y * string.pan_right;
+            }
+            // The silent keys' strings, listening like the top octave's;
+            // one whose own voice is sounding is that voice.
+            for slot in 0..SILENT_SLOTS {
+                if frame_state.silent_state[slot] == SILENT_FREE {
+                    continue;
+                }
+                let owner = frame_state.silent_note[slot];
+                let sounding = owner >= LOW_NOTE && self.note_sounding[(owner - LOW_NOTE) as usize];
+                let feed = if sounding { 0.0 } else { excitation };
+                let base = slot * SILENT_MODES_PER_SLOT;
+                for string in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+                    let y = string.tick(feed);
+                    undamped_left += y * string.pan_left;
+                    undamped_right += y * string.pan_right;
+                }
+            }
+            undamped_left = rim_pass(&mut self.rim[2], &self.rim_coef, undamped_left);
+            undamped_right = rim_pass(&mut self.rim[3], &self.rim_coef, undamped_right);
+            undamped_left *= self.body_gain;
+            undamped_right *= self.body_gain;
+            let undamped_gain = knob_undamped_mix * frame_state.lab[1];
+            // The damped strings' bed, listening to the bridge like the
+            // undamped lengths do -- see BED_MIX.
+            let mut bed_left = 0.0;
+            let mut bed_right = 0.0;
+            for (string, busy) in self.bed.iter_mut().zip(bed_busy) {
+                let y = string.tick(if busy { 0.0 } else { excitation });
+                bed_left += y * string.pan_left;
+                bed_right += y * string.pan_right;
+            }
+            // The bed reaches the air through the board too: with the pedal
+            // down every bass string rings by sympathy, and below the
+            // board's first mode the rim cancels their fundamentals as it
+            // cancels the struck string's. Measured, the bed alone put A0's
+            // fundamental 12 dB over its partials, past the board.
+            bed_left = rim_pass(&mut self.rim[4], &self.rim_coef, bed_left);
+            bed_right = rim_pass(&mut self.rim[5], &self.rim_coef, bed_right);
+            bed_left *= self.body_gain;
+            bed_right *= self.body_gain;
+            let bed_gain = knob_bed_mix * frame_state.lab[1];
+
+            // The shimmer: everything above ~1.8 kHz feeds the undamped
+            // open register and rings on.
+            self.halo_lp += self.halo_hp_k * (excitation - self.halo_lp);
+            let bright = excitation - self.halo_lp;
+            let mut halo_outs = [0.0f32; 4];
+            let mut halo_sum = 0.0;
+            for (line, output) in halo_outs.iter_mut().enumerate() {
+                *output = self.halo[line][self.halo_index[line]];
+                halo_sum += *output;
+            }
+            let halo_householder = halo_sum * 0.5;
+            for (line, output) in halo_outs.iter().copied().enumerate() {
+                let feedback = (output - halo_householder) * self.halo_gain[line];
+                let index = self.halo_index[line];
+                self.halo[line][index] = bright * 0.5 + feedback;
+                let next = index + 1;
+                self.halo_index[line] = if next == self.halo_len[line] { 0 } else { next };
+            }
+            let sympathy = frame_state.lab[1];
+            let halo_left = (halo_outs[0] - halo_outs[1]) * knob_halo_mix * sympathy;
+            let halo_right = (halo_outs[2] - halo_outs[3]) * knob_halo_mix * sympathy;
+
+            // The lid and rim reflect the near field back a few dozen
+            // milliseconds late, differently per side.
+            // What the lid and the room reflect is what the board radiates,
+            // not the string's own motion: the string reaches the air only
+            // through the bridge and the board.
+            let staged = (board_left + board_right) * knob_board_mix
+                + (keybed_left + keybed_right) * knob_board_mix
+                + (undamped_left + undamped_right) * undamped_gain
+                + (bed_left + bed_right) * bed_gain
+                + (open_left + open_right) * knob_open_mix * sympathy
+                + halo_left
+                + halo_right;
+            // What drives the air is what the BOARD radiates, and the
+            // board radiates almost nothing below its first mode. The lid and
+            // the chamber were being fed the full signal instead, and the
+            // chamber is a six-line feedback network with a 1.4 s decay and
+            // only a 4.2 kHz lowpass in the loop -- nothing damps its low
+            // modes at all. So it rang at one of them, and it rang under
+            // everything.
+            //
+            // Measured: a fixed 46.2 Hz tone sat under every single note,
+            // following nothing, at -73.6 dB under C4 -- and setting the air
+            // control to zero was the only thing that removed it (-83.8 dB,
+            // and the peak moves off it entirely). Six voices of a chord each
+            // contribute their own copy, and it sums into an audible drone an
+            // octave and a half below the music. That is the octave
+            // discrepancy the user heard the moment they played chords on the
+            // packaged build, and no single-note render could show it.
+            //
+            // One pole at the radiation corner, subtracted: the ambience now
+            // receives the same spectrum the board actually puts into the
+            // room.
+            // Two poles, not one: a single pole rolls off at 6 dB an octave
+            // and the board's own measured law is sixth-order. Two is still
+            // gentler than the board, which is the safe direction -- it
+            // cannot remove anything the board would have radiated.
+            //
+            // The high-pass is cascaded, not the low-pass. Subtracting two
+            // cascaded low-passes gives `1 - H^2 = (1 - H)(1 + H)`, and near
+            // DC `1 + H` is nearly 2 -- so it lets through about twice what
+            // one pole does. Measured, that version was 5 dB WORSE than a
+            // single pole. Each stage has to high-pass what the last one
+            // handed it.
+            self.air_dc[0] += knob_air_highpass * (staged - self.air_dc[0]);
+            let once = staged - self.air_dc[0];
+            self.air_dc[1] += knob_air_highpass * (once - self.air_dc[1]);
+            let staged = once - self.air_dc[1];
+            // The early reflections: what the board radiates, mirrored in
+            // the six surfaces, three images read by each side of the pair.
+            self.early[self.early_write] = staged;
+            // Every surface reaches BOTH capsules, each by its own path and
+            // at its own polar angle. The floor and the ceiling arrive almost
+            // together, which is what holds the centre; the near and far walls
+            // arrive apart, which is what opens the image. Neither is decided
+            // here any more.
+            let mut early = [0.0f32; 2];
+            for (side, taps) in self.early_taps.iter().enumerate() {
+                for (offset, gain) in taps {
+                    early[side] +=
+                        self.early[(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER] * gain;
+                }
+            }
+            let (early_left, early_right) = (early[0], early[1]);
+            self.early_write = (self.early_write + 1) % ROOM_BUFFER;
+            // The lid's image, read from the same buffer (the write pointer
+            // has already moved on by one), through its own darkening pole.
+            let mut lid = [0.0f32; 2];
+            for ((taps, pole), out) in self
+                .lid_tap
+                .iter()
+                .zip(self.lid_lp.iter_mut())
+                .zip(lid.iter_mut())
+            {
+                let mut heard = 0.0;
+                for (offset, gain) in taps {
+                    heard += self.early
+                        [(self.early_write + ROOM_BUFFER - 1 - offset) % ROOM_BUFFER]
+                        * gain;
+                }
+                *pole += self.lid_damp * (heard - *pole);
+                *out = *pole * self.early_gain;
+            }
+            let (lid_left, lid_right) = (lid[0], lid[1]);
+
+            // The chamber: read every line, mix through the Householder
+            // matrix, damp the highs in the feedback, write back with the
+            // input. The recorded instrument the model is measured against
+            // lives in a room; the tail is part of the piano the ear knows.
+            let mut outs = [0.0f32; ROOM_LINES];
+            let mut outs_sum = 0.0;
+            for (line, output) in outs.iter_mut().enumerate() {
+                *output = self.room[line][self.room_index[line]];
+                outs_sum += *output;
+            }
+            let householder = outs_sum * (2.0 / ROOM_LINES as f32);
+            for (line, output) in outs.iter().copied().enumerate() {
+                let feedback = output - householder;
+                self.room_lp[line] += self.room_damp * (feedback - self.room_lp[line]);
+                // The low shelf: hard rooms let the bottom ring past the
+                // mids, soft ones take it down with everything else.
+                self.room_low[line] +=
+                    self.room_low_coeff * (self.room_lp[line] - self.room_low[line]);
+                let shaped = self.room_lp[line] + self.room_low_gain * self.room_low[line];
+                let index = self.room_index[line];
+                self.room[line][index] = staged * 0.25 + shaped * self.room_gain[line];
+                let next = index + 1;
+                self.room_index[line] = if next == self.room_len[line] { 0 } else { next };
+            }
+            let air = frame_state.lab[2];
+            let wet = knob_room_mix * air * self.reverb_gain;
+            let room_left =
+                (outs[0] - outs[1] + outs[2]) * wet + early_left * self.early_gain * air;
+            let room_right =
+                (outs[3] - outs[4] + outs[5]) * wet + early_right * self.early_gain * air;
+
+            // There is one board and it is the through path, so there is one
+            // gain. The pair it replaced was mixed 25 dB apart in the wrong
+            // direction, which let a sparse parallel comb own 78-87% of the
+            // output below 3 kHz.
+            // Headroom, so the instrument stops living inside its own
+            // limiter.
+            //
+            // Measured at what reaches `soften`, which clamps at 1.5: a
+            // single fortissimo bass note arrived at 1.60, a bass octave at
+            // 2.53, a five-note chord at 5.49 and a ten-note chord at 6.58 --
+            // more than four times into a brick wall. Everything above
+            // mezzoforte came out flat-topped, so a ten-note chord peaked at
+            // exactly the same 0.462 as one note.
+            //
+            // A piano whose dynamics stop at mezzoforte, whose attacks are
+            // decapitated because the attack IS the peak, and where raising
+            // any level control just pushes further into the clamp and
+            // returns the same flattened shape, is not a piano. It is an
+            // electric piano, which is what this has been called for forty
+            // versions -- and it also explains, at last, why moving the panel
+            // seemed to do so little.
+            //
+            // Sized so the loudest thing the instrument can be asked for, a
+            // ten-note fortissimo chord, lands near 1.2 and stays out of the
+            // clamp. That costs about 11 dB of output, which belongs in the
+            // host's gain and not in a saturator: the desktop already runs
+            // +6 dB and allows +12.
+            let board_mix = knob_board_mix * frame_state.lab[0] * knob_headroom;
+            let (near_left, near_right) = (self.direct_gain[0], self.direct_gain[1]);
+            let mut direct_left = board_left * board_mix * near_left
+                + keybed_left * board_mix * self.keybed_gain[0]
+                + undamped_left * undamped_gain * knob_headroom * near_left
+                + bed_left * bed_gain * knob_headroom * near_left
+                + open_left * knob_open_mix * sympathy * knob_headroom
+                + halo_left * knob_headroom
+                + lid_left * air * knob_headroom;
+            let mut direct_right = board_right * board_mix * near_right
+                + keybed_right * board_mix * self.keybed_gain[1]
+                + undamped_right * undamped_gain * knob_headroom * near_right
+                + bed_right * bed_gain * knob_headroom * near_right
+                + open_right * knob_open_mix * sympathy * knob_headroom
+                + halo_right * knob_headroom
+                + lid_right * air * knob_headroom;
+            if frame_state.pedal_noise_amp > 1e-6 {
+                self.pedal_noise_seed = self
+                    .pedal_noise_seed
+                    .wrapping_mul(1_664_525)
+                    .wrapping_add(1_013_904_223);
+                let white = (self.pedal_noise_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
+                // Dark and woody: the rail speaks through the case. Measured
+                // on the reference's own pedal samples (`PEDAL_NOISE_POLES_HZ`).
+                self.pedal_noise_lp += pedal_c1 * (white - self.pedal_noise_lp);
+                self.pedal_noise_lp2 += pedal_c2 * (self.pedal_noise_lp - self.pedal_noise_lp2);
+                self.pedal_noise_floor +=
+                    pedal_c0 * (self.pedal_noise_lp2 - self.pedal_noise_floor);
+                let knock =
+                    (self.pedal_noise_lp2 - self.pedal_noise_floor) * frame_state.pedal_noise_amp;
+                direct_left += knock;
+                direct_right += knock;
+            }
+            // Proximity: the pressure-gradient microphone's low end rises
+            // with 1/r. A 120 Hz shelf whose gain follows the pattern and
+            // the distance -- an omni has none, a ribbon up close blooms.
+            if self.proximity_gain[0] > 1e-3 || self.proximity_gain[1] > 1e-3 {
+                self.proximity[0] += self.proximity_coeff * (direct_left - self.proximity[0]);
+                self.proximity[1] += self.proximity_coeff * (direct_right - self.proximity[1]);
+                direct_left += self.proximity_gain[0] * self.proximity[0];
+                direct_right += self.proximity_gain[1] * self.proximity[1];
+            }
+            // The soft clip is a safety net on the output, not part of the
+            // voice, so it belongs AFTER the level control -- and it was sitting
+            // before it. Level is a gain of 0.518 by default (-5.7 dB), so
+            // the clip was defending against a 1.38 peak that the very next
+            // multiply was about to bring down to 0.71. Measured on a seven-note
+            // fortissimo chord against the sum of the same notes struck alone,
+            // which is what the chord would be if nothing here were nonlinear:
+            // 250-500 Hz came out 6.1 dB down and 500-1000 Hz 2.5 dB down, while
+            // 1-2 kHz ran 6.4 dB hot, 2-4 kHz 6.7 dB and 4-8 kHz 13.8 dB. That is
+            // not a piano's spectrum; it is the fundamentals being flattened and
+            // reappearing as intermodulation. It also flattened the dynamics: a
+            // chord at velocity 127 peaked 0.11 dB above the same chord at 100.
+            // A soundboard is linear to a very good approximation, so nothing
+            // here should compress until the output itself would clip.
+            let scaled_left = (direct_left + room_left * knob_headroom) * level;
+            let scaled_right = (direct_right + room_right * knob_headroom) * level;
+            // The preamplifier: the gain an engineer adds after the capsules,
+            // with the input stage's own bend above its knee -- a chord
+            // driven past it compresses a couple of decibels and warms; a
+            // single note never reaches it. `soften` stays behind it as the
+            // safety net it was.
+            let (scaled_left, scaled_right) = (
+                Self::transformer(scaled_left * preamp_gain, knee_positive, knee_negative),
+                Self::transformer(scaled_right * preamp_gain, knee_positive, knee_negative),
+            );
+            let left = Self::soften(scaled_left);
+            let right = Self::soften(scaled_right);
+            match channels {
+                0 => {}
+                // Two nearly identical channels ADDED are 6 dB louder than
+                // either, which the clip then had to give back. A mono host
+                // should hear the same instrument, not a louder distorted one.
+                1 => output[frame] = Self::soften(0.5 * (scaled_left + scaled_right)),
+                _ => {
+                    output[frame * channels] = left;
+                    output[frame * channels + 1] = right;
+                    for channel in 2..channels {
+                        output[frame * channels + channel] = 0.0;
+                    }
+                }
+            }
+        }
+    }
+
     /// What the instrument is carrying, across all four units.
     fn active_partials(&self) -> usize {
         self.sections.iter().map(|section| section.partials).sum()
@@ -11630,9 +12099,6 @@ impl Processor for ConcertGrand {
             self.retune();
         }
         // Knobs read once per call, not per sample.
-        let knob_air_highpass = AIR_HIGHPASS.get();
-        let knob_board_mix = BOARD_MIX.get();
-        let knob_halo_mix = HALO_MIX.get();
         self.tune_pair();
         for slot in 0..SILENT_SLOTS {
             if self.silent_state[slot] == SILENT_DAMPED {
@@ -11672,19 +12138,8 @@ impl Processor for ConcertGrand {
         {
             *muted = *owner >= LOW_NOTE && self.note_sounding[(*owner - LOW_NOTE) as usize];
         }
-        let knob_headroom = HEADROOM.get();
-        let knob_open_mix = OPEN_MIX.get();
-        let pedal_c1 =
-            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.0 / self.engine.sample_rate);
-        let pedal_c2 =
-            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.1 / self.engine.sample_rate);
-        let pedal_c0 =
-            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.2 / self.engine.sample_rate);
         let pedal_decay = expf(-LN_1000 / (PEDAL_NOISE_T60_S * self.engine.sample_rate));
-        let knob_room_mix = ROOM_MIX.get();
         let knob_sympathy_rate = SYMPATHY_RATE.get();
-        let knob_undamped_mix = UNDAMPED_MIX.get();
-        let knob_bed_mix = BED_MIX.get();
         let channels = output_channels as usize;
         // Every note-on in the buffer gets the full hammer-string integration.
         //
@@ -11749,12 +12204,6 @@ impl Processor for ConcertGrand {
             self.tune();
             self.tune_undamped();
         }
-        let level = self.engine.controls.level_gain() * powf(10.0, OUTPUT_TRIM_DB / 20.0);
-        let preamp_gain = self.preamp_gain();
-        let knee_positive = PREAMP_KNEE.get().clamp(0.1, 0.95);
-        // The asymmetry: the negative half bends a little later.
-        let knee_negative =
-            (knee_positive * (1.0 + PREAMP_ASYMMETRY.get())).clamp(knee_positive, 0.99);
         // The sympathetic feed: the bridge's total string signal from the
         // PREVIOUS sample, handed to every free string this sample. One
         // sample of latency around the loop keeps the order of voices
@@ -11762,8 +12211,6 @@ impl Processor for ConcertGrand {
         let sympathy_rate = knob_sympathy_rate * self.engine.controls.lab(15).min(4.0);
         // Read once per block, not per sample: it is a knob, and an atomic
         // load inside the hot loop is a barrier the optimiser has to honour.
-        let board_feed_delay =
-            (BOARD_FEED_DELAY.get().max(0.0) as usize).min(BOARD_FEED_HISTORY - 1);
         let mut midi_index = 0;
         let mut midi2_index = 0;
         let mut parameter_index = 0;
@@ -11941,426 +12388,15 @@ impl Processor for ConcertGrand {
                 self.sections[section].previous = previous;
             }
 
-            // PHASE THREE -- the coordinator again: the four sections added
-            // up in ascending order, which is the order a host must combine
-            // their slots in, and then everything downstream of the strings.
-            for offset in 0..span {
-                let mut bridge_drive = 0.0f32;
-                let mut drive_points = [0.0f32; BOARD_DRIVE_POINTS];
-                let mut keybed_left = 0.0f32;
-                let mut keybed_right = 0.0f32;
-                for section in 0..STRING_SECTIONS {
-                    let made = unit_out[section][offset];
-                    bridge_drive += made.force;
-                    for (point, made) in drive_points.iter_mut().zip(made.drive_points) {
-                        *point += made;
-                    }
-                    keybed_left += made.keybed_left;
-                    keybed_right += made.keybed_right;
-                    self.section_history[section][self.section_cursor] = made.sample;
-                }
-                self.section_cursor = (self.section_cursor + 1) % MAX_SECTION_DELAY;
-                deposits[offset] = FrameDeposit {
-                    bridge_drive,
-                    drive_points,
-                    keybed_left,
-                    keybed_right,
-                };
-            }
-
-            for offset in 0..span {
-                let frame = span_start + offset;
-                self.run_silent_work(offset as u16);
-                let frame_state = frame_states[offset];
-                let bed_busy = frame_state.bed_busy;
-                let FrameDeposit {
-                    bridge_drive,
-                    drive_points,
-                    keybed_left,
-                    keybed_right,
-                } = deposits[offset];
-                // Everything the strings produce radiates through the board --
-                // each string from its own point of the bridge (`BOARD_SHAPE`).
-                // What everything downstream of the strings hears, which is what
-                // those units could reach if they rendered beside the strings
-                // instead of after them. The board and the sympathetic banks move
-                // TOGETHER: the board is the through path and the banks sit
-                // beside it, so delaying one alone leaves two copies of the
-                // strike a block apart, and the ear heard that as the attack
-                // losing a pinch. At zero both are handed straight through and
-                // nothing is written, so the shipped render is untouched.
-                let (drive_points, excitation, keybed_left, keybed_right) =
-                    if board_feed_delay == 0 {
-                        (drive_points, bridge_drive, keybed_left, keybed_right)
-                    } else {
-                        let write = self.board_feed_cursor;
-                        let read =
-                            (write + BOARD_FEED_HISTORY - board_feed_delay) % BOARD_FEED_HISTORY;
-                        self.board_feed_history[write] = drive_points;
-                        self.bridge_feed_history[write] = bridge_drive;
-                        self.keybed_feed_history[write] = [keybed_left, keybed_right];
-                        self.board_feed_cursor = (write + 1) % BOARD_FEED_HISTORY;
-                        let keybed = self.keybed_feed_history[read];
-                        (
-                            self.board_feed_history[read],
-                            self.bridge_feed_history[read],
-                            keybed[0],
-                            keybed[1],
-                        )
-                    };
-                let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
-                let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
-                // With nothing sounding every drive point is zero, and the
-                // projection below spends five hundred and twelve multiplies a
-                // frame proving that zero times a basis is zero. Skipping it is
-                // exact -- the arrays are already the zeros the loop would leave
-                // -- and it is 155 us of a Raspberry Pi's 2667 us block.
-                if drive_points.iter().any(|point| *point != 0.0) {
-                    for q in 0..BOARD_DRIVE_POINTS {
-                        let mut c = 0.0f32;
-                        let mut s = 0.0f32;
-                        for ((basis_cos, basis_sin), point) in self.drive_basis_cos[q]
-                            .iter()
-                            .zip(self.drive_basis_sin[q].iter())
-                            .zip(drive_points.iter())
-                        {
-                            c += basis_cos * point;
-                            s += basis_sin * point;
-                        }
-                        cos_t[q] = c;
-                        sin_t[q] = s;
-                    }
-                }
-                let mut board_left = 0.0;
-                let mut board_right = 0.0;
-                for mode in self.board.iter_mut().take(self.board_count) {
-                    let (left, right) = mode.tick_pair(mode.excitation(&cos_t, &sin_t));
-                    board_left += left;
-                    board_right += right;
-                }
-                // The rim: below its first mode the board radiates almost nothing.
-                board_left = rim_pass(&mut self.rim[0], &self.rim_coef, board_left);
-                board_right = rim_pass(&mut self.rim[1], &self.rim_coef, board_right);
-                if self.body_gain != self.body_target {
-                    let step = 1.0 / BANK_FADE_SAMPLES;
-                    self.body_gain = if self.body_target > self.body_gain {
-                        (self.body_gain + step).min(self.body_target)
-                    } else {
-                        (self.body_gain - step).max(self.body_target)
-                    };
-                }
-                board_left *= self.body_gain;
-                board_right *= self.body_gain;
-                // The open top octave listens to the bridge and rings on.
-                let mut open_left = 0.0;
-                let mut open_right = 0.0;
-                for string in &mut self.open_strings {
-                    let y = string.tick(excitation);
-                    open_left += y * string.pan_left;
-                    open_right += y * string.pan_right;
-                }
-                // Every other string's undamped length, listening to the bridge.
-                let mut undamped_left = 0.0;
-                let mut undamped_right = 0.0;
-                for (string, muted) in self
-                    .undamped
-                    .iter_mut()
-                    .take(self.undamped_active)
-                    .zip(self.undamped_muted.iter())
-                {
-                    let y = string.tick(if *muted { 0.0 } else { excitation });
-                    undamped_left += y * string.pan_left;
-                    undamped_right += y * string.pan_right;
-                }
-                // The silent keys' strings, listening like the top octave's;
-                // one whose own voice is sounding is that voice.
-                for slot in 0..SILENT_SLOTS {
-                    if frame_state.silent_state[slot] == SILENT_FREE {
-                        continue;
-                    }
-                    let owner = frame_state.silent_note[slot];
-                    let sounding = owner >= LOW_NOTE && self.note_sounding[(owner - LOW_NOTE) as usize];
-                    let feed = if sounding { 0.0 } else { excitation };
-                    let base = slot * SILENT_MODES_PER_SLOT;
-                    for string in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
-                        let y = string.tick(feed);
-                        undamped_left += y * string.pan_left;
-                        undamped_right += y * string.pan_right;
-                    }
-                }
-                undamped_left = rim_pass(&mut self.rim[2], &self.rim_coef, undamped_left);
-                undamped_right = rim_pass(&mut self.rim[3], &self.rim_coef, undamped_right);
-                undamped_left *= self.body_gain;
-                undamped_right *= self.body_gain;
-                let undamped_gain = knob_undamped_mix * frame_state.lab[1];
-                // The damped strings' bed, listening to the bridge like the
-                // undamped lengths do -- see BED_MIX.
-                let mut bed_left = 0.0;
-                let mut bed_right = 0.0;
-                for (string, busy) in self.bed.iter_mut().zip(bed_busy) {
-                    let y = string.tick(if busy { 0.0 } else { excitation });
-                    bed_left += y * string.pan_left;
-                    bed_right += y * string.pan_right;
-                }
-                // The bed reaches the air through the board too: with the pedal
-                // down every bass string rings by sympathy, and below the
-                // board's first mode the rim cancels their fundamentals as it
-                // cancels the struck string's. Measured, the bed alone put A0's
-                // fundamental 12 dB over its partials, past the board.
-                bed_left = rim_pass(&mut self.rim[4], &self.rim_coef, bed_left);
-                bed_right = rim_pass(&mut self.rim[5], &self.rim_coef, bed_right);
-                bed_left *= self.body_gain;
-                bed_right *= self.body_gain;
-                let bed_gain = knob_bed_mix * frame_state.lab[1];
-
-                // The shimmer: everything above ~1.8 kHz feeds the undamped
-                // open register and rings on.
-                self.halo_lp += self.halo_hp_k * (excitation - self.halo_lp);
-                let bright = excitation - self.halo_lp;
-                let mut halo_outs = [0.0f32; 4];
-                let mut halo_sum = 0.0;
-                for (line, output) in halo_outs.iter_mut().enumerate() {
-                    *output = self.halo[line][self.halo_index[line]];
-                    halo_sum += *output;
-                }
-                let halo_householder = halo_sum * 0.5;
-                for (line, output) in halo_outs.iter().copied().enumerate() {
-                    let feedback = (output - halo_householder) * self.halo_gain[line];
-                    let index = self.halo_index[line];
-                    self.halo[line][index] = bright * 0.5 + feedback;
-                    let next = index + 1;
-                    self.halo_index[line] = if next == self.halo_len[line] { 0 } else { next };
-                }
-                let sympathy = frame_state.lab[1];
-                let halo_left = (halo_outs[0] - halo_outs[1]) * knob_halo_mix * sympathy;
-                let halo_right = (halo_outs[2] - halo_outs[3]) * knob_halo_mix * sympathy;
-
-                // The lid and rim reflect the near field back a few dozen
-                // milliseconds late, differently per side.
-                // What the lid and the room reflect is what the board radiates,
-                // not the string's own motion: the string reaches the air only
-                // through the bridge and the board.
-                let staged = (board_left + board_right) * knob_board_mix
-                    + (keybed_left + keybed_right) * knob_board_mix
-                    + (undamped_left + undamped_right) * undamped_gain
-                    + (bed_left + bed_right) * bed_gain
-                    + (open_left + open_right) * knob_open_mix * sympathy
-                    + halo_left
-                    + halo_right;
-                // What drives the air is what the BOARD radiates, and the
-                // board radiates almost nothing below its first mode. The lid and
-                // the chamber were being fed the full signal instead, and the
-                // chamber is a six-line feedback network with a 1.4 s decay and
-                // only a 4.2 kHz lowpass in the loop -- nothing damps its low
-                // modes at all. So it rang at one of them, and it rang under
-                // everything.
-                //
-                // Measured: a fixed 46.2 Hz tone sat under every single note,
-                // following nothing, at -73.6 dB under C4 -- and setting the air
-                // control to zero was the only thing that removed it (-83.8 dB,
-                // and the peak moves off it entirely). Six voices of a chord each
-                // contribute their own copy, and it sums into an audible drone an
-                // octave and a half below the music. That is the octave
-                // discrepancy the user heard the moment they played chords on the
-                // packaged build, and no single-note render could show it.
-                //
-                // One pole at the radiation corner, subtracted: the ambience now
-                // receives the same spectrum the board actually puts into the
-                // room.
-                // Two poles, not one: a single pole rolls off at 6 dB an octave
-                // and the board's own measured law is sixth-order. Two is still
-                // gentler than the board, which is the safe direction -- it
-                // cannot remove anything the board would have radiated.
-                //
-                // The high-pass is cascaded, not the low-pass. Subtracting two
-                // cascaded low-passes gives `1 - H^2 = (1 - H)(1 + H)`, and near
-                // DC `1 + H` is nearly 2 -- so it lets through about twice what
-                // one pole does. Measured, that version was 5 dB WORSE than a
-                // single pole. Each stage has to high-pass what the last one
-                // handed it.
-                self.air_dc[0] += knob_air_highpass * (staged - self.air_dc[0]);
-                let once = staged - self.air_dc[0];
-                self.air_dc[1] += knob_air_highpass * (once - self.air_dc[1]);
-                let staged = once - self.air_dc[1];
-                // The early reflections: what the board radiates, mirrored in
-                // the six surfaces, three images read by each side of the pair.
-                self.early[self.early_write] = staged;
-                // Every surface reaches BOTH capsules, each by its own path and
-                // at its own polar angle. The floor and the ceiling arrive almost
-                // together, which is what holds the centre; the near and far walls
-                // arrive apart, which is what opens the image. Neither is decided
-                // here any more.
-                let mut early = [0.0f32; 2];
-                for (side, taps) in self.early_taps.iter().enumerate() {
-                    for (offset, gain) in taps {
-                        early[side] +=
-                            self.early[(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER] * gain;
-                    }
-                }
-                let (early_left, early_right) = (early[0], early[1]);
-                self.early_write = (self.early_write + 1) % ROOM_BUFFER;
-                // The lid's image, read from the same buffer (the write pointer
-                // has already moved on by one), through its own darkening pole.
-                let mut lid = [0.0f32; 2];
-                for ((taps, pole), out) in self
-                    .lid_tap
-                    .iter()
-                    .zip(self.lid_lp.iter_mut())
-                    .zip(lid.iter_mut())
-                {
-                    let mut heard = 0.0;
-                    for (offset, gain) in taps {
-                        heard += self.early
-                            [(self.early_write + ROOM_BUFFER - 1 - offset) % ROOM_BUFFER]
-                            * gain;
-                    }
-                    *pole += self.lid_damp * (heard - *pole);
-                    *out = *pole * self.early_gain;
-                }
-                let (lid_left, lid_right) = (lid[0], lid[1]);
-
-                // The chamber: read every line, mix through the Householder
-                // matrix, damp the highs in the feedback, write back with the
-                // input. The recorded instrument the model is measured against
-                // lives in a room; the tail is part of the piano the ear knows.
-                let mut outs = [0.0f32; ROOM_LINES];
-                let mut outs_sum = 0.0;
-                for (line, output) in outs.iter_mut().enumerate() {
-                    *output = self.room[line][self.room_index[line]];
-                    outs_sum += *output;
-                }
-                let householder = outs_sum * (2.0 / ROOM_LINES as f32);
-                for (line, output) in outs.iter().copied().enumerate() {
-                    let feedback = output - householder;
-                    self.room_lp[line] += self.room_damp * (feedback - self.room_lp[line]);
-                    // The low shelf: hard rooms let the bottom ring past the
-                    // mids, soft ones take it down with everything else.
-                    self.room_low[line] +=
-                        self.room_low_coeff * (self.room_lp[line] - self.room_low[line]);
-                    let shaped = self.room_lp[line] + self.room_low_gain * self.room_low[line];
-                    let index = self.room_index[line];
-                    self.room[line][index] = staged * 0.25 + shaped * self.room_gain[line];
-                    let next = index + 1;
-                    self.room_index[line] = if next == self.room_len[line] { 0 } else { next };
-                }
-                let air = frame_state.lab[2];
-                let wet = knob_room_mix * air * self.reverb_gain;
-                let room_left =
-                    (outs[0] - outs[1] + outs[2]) * wet + early_left * self.early_gain * air;
-                let room_right =
-                    (outs[3] - outs[4] + outs[5]) * wet + early_right * self.early_gain * air;
-
-                // There is one board and it is the through path, so there is one
-                // gain. The pair it replaced was mixed 25 dB apart in the wrong
-                // direction, which let a sparse parallel comb own 78-87% of the
-                // output below 3 kHz.
-                // Headroom, so the instrument stops living inside its own
-                // limiter.
-                //
-                // Measured at what reaches `soften`, which clamps at 1.5: a
-                // single fortissimo bass note arrived at 1.60, a bass octave at
-                // 2.53, a five-note chord at 5.49 and a ten-note chord at 6.58 --
-                // more than four times into a brick wall. Everything above
-                // mezzoforte came out flat-topped, so a ten-note chord peaked at
-                // exactly the same 0.462 as one note.
-                //
-                // A piano whose dynamics stop at mezzoforte, whose attacks are
-                // decapitated because the attack IS the peak, and where raising
-                // any level control just pushes further into the clamp and
-                // returns the same flattened shape, is not a piano. It is an
-                // electric piano, which is what this has been called for forty
-                // versions -- and it also explains, at last, why moving the panel
-                // seemed to do so little.
-                //
-                // Sized so the loudest thing the instrument can be asked for, a
-                // ten-note fortissimo chord, lands near 1.2 and stays out of the
-                // clamp. That costs about 11 dB of output, which belongs in the
-                // host's gain and not in a saturator: the desktop already runs
-                // +6 dB and allows +12.
-                let board_mix = knob_board_mix * frame_state.lab[0] * knob_headroom;
-                let (near_left, near_right) = (self.direct_gain[0], self.direct_gain[1]);
-                let mut direct_left = board_left * board_mix * near_left
-                    + keybed_left * board_mix * self.keybed_gain[0]
-                    + undamped_left * undamped_gain * knob_headroom * near_left
-                    + bed_left * bed_gain * knob_headroom * near_left
-                    + open_left * knob_open_mix * sympathy * knob_headroom
-                    + halo_left * knob_headroom
-                    + lid_left * air * knob_headroom;
-                let mut direct_right = board_right * board_mix * near_right
-                    + keybed_right * board_mix * self.keybed_gain[1]
-                    + undamped_right * undamped_gain * knob_headroom * near_right
-                    + bed_right * bed_gain * knob_headroom * near_right
-                    + open_right * knob_open_mix * sympathy * knob_headroom
-                    + halo_right * knob_headroom
-                    + lid_right * air * knob_headroom;
-                if frame_state.pedal_noise_amp > 1e-6 {
-                    self.pedal_noise_seed = self
-                        .pedal_noise_seed
-                        .wrapping_mul(1_664_525)
-                        .wrapping_add(1_013_904_223);
-                    let white = (self.pedal_noise_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
-                    // Dark and woody: the rail speaks through the case. Measured
-                    // on the reference's own pedal samples (`PEDAL_NOISE_POLES_HZ`).
-                    self.pedal_noise_lp += pedal_c1 * (white - self.pedal_noise_lp);
-                    self.pedal_noise_lp2 += pedal_c2 * (self.pedal_noise_lp - self.pedal_noise_lp2);
-                    self.pedal_noise_floor +=
-                        pedal_c0 * (self.pedal_noise_lp2 - self.pedal_noise_floor);
-                    let knock =
-                        (self.pedal_noise_lp2 - self.pedal_noise_floor) * frame_state.pedal_noise_amp;
-                    direct_left += knock;
-                    direct_right += knock;
-                }
-                // Proximity: the pressure-gradient microphone's low end rises
-                // with 1/r. A 120 Hz shelf whose gain follows the pattern and
-                // the distance -- an omni has none, a ribbon up close blooms.
-                if self.proximity_gain[0] > 1e-3 || self.proximity_gain[1] > 1e-3 {
-                    self.proximity[0] += self.proximity_coeff * (direct_left - self.proximity[0]);
-                    self.proximity[1] += self.proximity_coeff * (direct_right - self.proximity[1]);
-                    direct_left += self.proximity_gain[0] * self.proximity[0];
-                    direct_right += self.proximity_gain[1] * self.proximity[1];
-                }
-                // The soft clip is a safety net on the output, not part of the
-                // voice, so it belongs AFTER the level control -- and it was sitting
-                // before it. Level is a gain of 0.518 by default (-5.7 dB), so
-                // the clip was defending against a 1.38 peak that the very next
-                // multiply was about to bring down to 0.71. Measured on a seven-note
-                // fortissimo chord against the sum of the same notes struck alone,
-                // which is what the chord would be if nothing here were nonlinear:
-                // 250-500 Hz came out 6.1 dB down and 500-1000 Hz 2.5 dB down, while
-                // 1-2 kHz ran 6.4 dB hot, 2-4 kHz 6.7 dB and 4-8 kHz 13.8 dB. That is
-                // not a piano's spectrum; it is the fundamentals being flattened and
-                // reappearing as intermodulation. It also flattened the dynamics: a
-                // chord at velocity 127 peaked 0.11 dB above the same chord at 100.
-                // A soundboard is linear to a very good approximation, so nothing
-                // here should compress until the output itself would clip.
-                let scaled_left = (direct_left + room_left * knob_headroom) * level;
-                let scaled_right = (direct_right + room_right * knob_headroom) * level;
-                // The preamplifier: the gain an engineer adds after the capsules,
-                // with the input stage's own bend above its knee -- a chord
-                // driven past it compresses a couple of decibels and warms; a
-                // single note never reaches it. `soften` stays behind it as the
-                // safety net it was.
-                let (scaled_left, scaled_right) = (
-                    Self::transformer(scaled_left * preamp_gain, knee_positive, knee_negative),
-                    Self::transformer(scaled_right * preamp_gain, knee_positive, knee_negative),
-                );
-                let left = Self::soften(scaled_left);
-                let right = Self::soften(scaled_right);
-                match channels {
-                    0 => {}
-                    // Two nearly identical channels ADDED are 6 dB louder than
-                    // either, which the clip then had to give back. A mono host
-                    // should hear the same instrument, not a louder distorted one.
-                    1 => output[frame] = Self::soften(0.5 * (scaled_left + scaled_right)),
-                    _ => {
-                        output[frame * channels] = left;
-                        output[frame * channels + 1] = right;
-                        for channel in 2..channels {
-                            output[frame * channels + channel] = 0.0;
-                        }
-                    }
-                }
-            }
+            self.serial_stages(
+                |section, offset| unit_out[section][offset],
+                &frame_states,
+                &mut deposits,
+                span_start,
+                span,
+                output,
+                channels,
+            );
             span_start += span;
         }
         // What the sections have to say about their own voices, gathered

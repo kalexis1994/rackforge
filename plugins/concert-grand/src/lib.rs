@@ -5180,7 +5180,18 @@ pub struct ConcertGrand {
     /// and everything at the halfway mark.
     soft: f32,
     /// Live count of active partials, the budget the callback answers to.
-    active_partials: usize,
+    /// How many partials each section is carrying, and therefore what is
+    /// left of its share of the budget.
+    ///
+    /// One number per section rather than one for the instrument, because
+    /// a `parallel_render_v1` unit cannot read a running total that
+    /// another unit is also adding to -- and a ladder is sized from what is
+    /// left, so this is read on the hot path of every note-on. Four
+    /// workers, four purses. The governor still sets one budget and still
+    /// reads one total; only the spending is divided.
+    section_partials: [usize; STRING_SECTIONS],
+    /// What each section may spend this block. See `share_the_budget`.
+    section_allowance: [usize; STRING_SECTIONS],
     /// Each section's per-frame string sum for the last `MAX_SECTION_DELAY`
     /// frames, as a ring. Read by the sections that did not write it.
     section_history: [[f32; MAX_SECTION_DELAY]; STRING_SECTIONS],
@@ -5438,7 +5449,8 @@ impl Default for ConcertGrand {
             sections: [StringSection::default(); STRING_SECTIONS],
             pedal: false,
             soft: 0.0,
-            active_partials: 0,
+            section_partials: [0; STRING_SECTIONS],
+            section_allowance: [PARTIAL_BUDGET / STRING_SECTIONS; STRING_SECTIONS],
             section_history: [[0.0; MAX_SECTION_DELAY]; STRING_SECTIONS],
             section_cursor: 0,
             section_previous: [0.0; STRING_SECTIONS],
@@ -8668,7 +8680,9 @@ impl ConcertGrand {
         }
 
         let floor = peak * 1e-3;
-        let budget_left = self.partial_budget.saturating_sub(self.active_partials);
+        let section = slot & (STRING_SECTIONS - 1);
+        let budget_left =
+            self.section_allowance[section].saturating_sub(self.section_partials[section]);
         // Sixteen slots stay reserved for the nonlinear extras (phantoms and
         // the longitudinal clang): the lowest notes fill the whole array with
         // their transverse ladder otherwise, and the growl never fits.
@@ -9304,7 +9318,7 @@ impl ConcertGrand {
                     appended += 1;
                 }
             }
-            self.active_partials += appended;
+            self.section_partials[section] += appended;
             voice.push_in = merge_ramp;
             // The key bottoms out on every blow, this one included, the
             // aftertouch after the strike.
@@ -9547,7 +9561,7 @@ impl ConcertGrand {
         // by the mechanism that also couples the modes to each other.
         voice.glide_rate = 0.0;
         voice.glide_steps = 0;
-        self.active_partials += placed;
+        self.section_partials[section] += placed;
 
         // Sympathetic resonance, the pedal's halo: with the dampers up, the
         // other strings' coinciding partials pick the struck note's energy up
@@ -9588,7 +9602,8 @@ impl ConcertGrand {
             let section = slot & (STRING_SECTIONS - 1);
             let index = self.pick_halo(section);
             let carried = halo_at!(self, section, index).partial_count;
-            self.active_partials = self.active_partials.saturating_sub(carried);
+            self.section_partials[section] =
+                self.section_partials[section].saturating_sub(carried);
             let shadow = &mut halo_at!(self, section, index);
             *shadow = Voice::default();
             shadow.pole_ceiling = pole_ceiling(sample_rate);
@@ -9602,7 +9617,7 @@ impl ConcertGrand {
             shadow.pan_left = pan_left;
             shadow.pan_right = pan_right;
             shadow.energy = 0.01;
-            self.active_partials += halo_count;
+            self.section_partials[section] += halo_count;
         }
         phase!(5, mark);
     }
@@ -9625,6 +9640,41 @@ impl ConcertGrand {
                     .total_cmp(&halo_at!(self, section, *b).energy)
             })
             .unwrap_or(0)
+    }
+
+    /// What the instrument is carrying, across all four sections.
+    ///
+    /// Nothing in the render asks this any more -- that is the point of the
+    /// change -- so it is the tests' window onto a number that used to be a
+    /// field.
+    #[cfg(test)]
+    fn active_partials(&self) -> usize {
+        self.section_partials.iter().sum()
+    }
+
+    /// Divides the budget among the sections for the coming block.
+    ///
+    /// A flat quarter each was the first shape and it costs too much: a
+    /// section running long ladders hits its own wall while another sits
+    /// half empty, and the pedalled arpeggio lost 21.7 dB to it.
+    ///
+    /// So a section keeps what it is already carrying -- those partials
+    /// exist, they are sounding, and nothing is gained by pretending
+    /// otherwise -- and only what is FREE is divided evenly. The four
+    /// allowances still sum to exactly the budget, so the instrument spends
+    /// what the governor gave it and no more. A section over its share
+    /// simply gets nothing new until it sheds some, which is what a full
+    /// pool should do.
+    ///
+    /// Fixed for the whole block, which is what makes it work in four
+    /// instances: a unit reads a number nobody else is writing.
+    fn share_the_budget(&mut self) {
+        let carried: usize = self.section_partials.iter().sum();
+        let free = self.partial_budget.saturating_sub(carried);
+        for section in 0..STRING_SECTIONS {
+            self.section_allowance[section] =
+                self.section_partials[section] + free / STRING_SECTIONS;
+        }
     }
 
     /// How much instrument this machine affords, from 1.0 down.
@@ -9695,7 +9745,7 @@ impl ConcertGrand {
     /// coordinator has to choose the slot -- and with it the SECTION, and
     /// with that which worker does the work -- before any of the work
     /// happens, while the refund has to stay where it always was. The
-    /// partial ladder is sized from `active_partials` seven hundred lines
+    /// partial ladder is sized from the section's allowance seven hundred lines
     /// before the old `allocate_voice` was reached, so refunding earlier
     /// would size every stolen note's ladder against a larger budget. That
     /// is a different instrument, and the fingerprint says so.
@@ -9734,8 +9784,8 @@ impl ConcertGrand {
     /// Takes the slot `pick_voice_slot` chose, refunding what it was
     /// carrying. This is where the budget moves, and it has not moved.
     fn claim_voice(&mut self, slot: usize) -> &mut Voice {
-        self.active_partials = self
-            .active_partials
+        let section = slot & (STRING_SECTIONS - 1);
+        self.section_partials[section] = self.section_partials[section]
             .saturating_sub(voice_at!(self, slot).partial_count);
         &mut voice_at!(self, slot)
     }
@@ -10638,7 +10688,8 @@ impl Processor for ConcertGrand {
         self.sections = [StringSection::default(); STRING_SECTIONS];
         self.summary = [VoiceSummary::default(); MAX_VOICES];
         self.pedal = false;
-        self.active_partials = 0;
+        self.section_partials = [0; STRING_SECTIONS];
+        self.section_allowance = [self.partial_budget / STRING_SECTIONS; STRING_SECTIONS];
         for string in &mut self.undamped {
             string.y1 = 0.0;
             string.y2 = 0.0;
@@ -11400,6 +11451,10 @@ impl Processor for ConcertGrand {
             if (quality - self.quality).abs() > 0.05 {
                 self.quality = quality;
                 self.apply_quality();
+                // A budget that just moved is divided at once rather than at
+                // the end of the block: the governor's cut is the moment the
+                // allowances are most wrong.
+                self.share_the_budget();
             }
         }
         if (self.rebuild_board_after_fade || self.rebuild_undamped_after_fade)
@@ -11610,7 +11665,8 @@ impl Processor for ConcertGrand {
                             deposit!(halo.render_frame(feed, sympathy_rate, sostenuto_now));
                         }
                     }
-                    self.active_partials = self.active_partials.saturating_sub(culled);
+                    self.section_partials[section] =
+                        self.section_partials[section].saturating_sub(culled);
                 }
 
                 // Everything after this line is a stage that will one day run in
@@ -12056,6 +12112,7 @@ impl Processor for ConcertGrand {
                 energy: voice.energy,
             };
         }
+        self.share_the_budget();
         self.bridge_feed = bridge_feed;
     }
 }
@@ -15871,7 +15928,7 @@ mod tests {";
         // than the same strike without the pedal: the shadow voice is there.
         let mut dry = prepared();
         render(&mut dry, 64, &[note_on(60, 100)]);
-        let without = dry.active_partials;
+        let without = dry.active_partials();
         let mut pedalled = prepared();
         let pedal = MidiEvent {
             frame: 0,
@@ -15880,9 +15937,9 @@ mod tests {";
         };
         render(&mut pedalled, 64, &[pedal, note_on(60, 100)]);
         assert!(
-            pedalled.active_partials > without,
+            pedalled.active_partials() > without,
             "pedalled {} vs dry {without}",
-            pedalled.active_partials
+            pedalled.active_partials()
         );
         // And lifting the pedal releases the halo with everything else.
         let lift = MidiEvent {
@@ -16009,7 +16066,7 @@ mod tests {";
             let live: usize = piano.voices().filter(|v| v.active).count();
             std::println!(
                 "{held} pedalled notes ({live} voices, {} partials): {per:.2} ms ({:.0}% of budget)",
-                piano.active_partials,
+                piano.active_partials(),
                 per / 10.67 * 100.0
             );
         }
@@ -17401,14 +17458,14 @@ mod tests {";
     fn dead_partials_are_retired_from_the_budget() {
         let mut piano = prepared();
         render(&mut piano, 64, &[note_on(96, 90)]);
-        let at_start = piano.active_partials;
+        let at_start = piano.active_partials();
         assert!(at_start > 0);
         render(&mut piano, 64, &[note_off(96)]);
         // Damped treble partials die in tens of milliseconds; a second later
         // the budget must have been refunded.
         render(&mut piano, FS as usize, &[]);
         assert!(
-            piano.active_partials < at_start,
+            piano.active_partials() < at_start,
             "budget still {at_start} after the note died"
         );
     }
@@ -17643,6 +17700,61 @@ mod bench {
             "robos de voz en el guion: {}",
             STEALS.load(core::sync::atomic::Ordering::Relaxed)
         );
+    }
+
+    /// The four purses add up to the one budget.
+    ///
+    /// This is the whole reason the division is safe: a section spends
+    /// against a number nobody else is writing, and the four numbers
+    /// together are what the governor granted. If they ever add up to more,
+    /// the instrument is spending money the machine did not give it.
+    #[test]
+    fn the_sections_share_exactly_one_budget() {
+        const FRAMES: u32 = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        let mut output = vec![0.0f32; FRAMES as usize * 2];
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES, 0, 2);
+        for block in 0..96u32 {
+            let midi: std::vec::Vec<MidiEvent> = (0..4)
+                .map(|voice| MidiEvent {
+                    frame: voice * 5,
+                    data: [0x90, 28 + (block * 7 + voice * 11) as u8 % 60, 96],
+                    length: 3,
+                })
+                .collect();
+            piano.process(&[], &mut output, &midi, &[], FRAMES, 0, 2);
+            let granted: usize = piano.section_allowance.iter().sum();
+            let carried: usize = piano.section_partials.iter().sum();
+            // The four purses hold the budget, or -- when the instrument is
+            // already over it -- exactly what is sounding and not a partial
+            // more. Over it is reachable: a note may always place twelve
+            // partials however empty its purse, so that a note is never
+            // silent, and that floor is older than this division. What the
+            // division must never do is GRANT the overshoot.
+            let ceiling = carried.max(piano.partial_budget);
+            assert!(
+                granted <= ceiling && granted + STRING_SECTIONS > ceiling,
+                "bloque {block}: repartidos {granted}, techo {ceiling}                  (presupuesto {}, en uso {carried})",
+                piano.partial_budget
+            );
+            // And nothing is allowed to sit below what it is already
+            // carrying, which would be asking a section to un-ring a string.
+            for section in 0..STRING_SECTIONS {
+                assert!(
+                    piano.section_allowance[section] >= piano.section_partials[section]
+                        || piano.section_partials[section] > piano.partial_budget,
+                    "bloque {block}, seccion {section}: {} permitidos, {} en uso",
+                    piano.section_allowance[section],
+                    piano.section_partials[section]
+                );
+            }
+        }
     }
 
     /// The coordinator's picture of the voices is what the sections last

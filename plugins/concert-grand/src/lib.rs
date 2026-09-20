@@ -88,10 +88,10 @@ macro_rules! phase {
 }
 
 use rackforge_plugin_sdk::{
-    UnitWork,
+    BlockContext, ParallelProcessor, PlanWriter, UnitContext, UnitMix, UnitWork,
     MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_FLAG_RELEASE_MEASURED,
     MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF, MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2,
-    ParameterEvent, Processor, export_processor,
+    ParameterEvent, export_processor,
 };
 
 /// A tunable constant of the model: it ships with the value the constant had,
@@ -3775,7 +3775,7 @@ struct VoiceSummary {
 /// than a bare array because the trait wants `Default` and because a unit is
 /// a thing, not an anonymous row.
 #[derive(Clone, Copy)]
-struct StringUnit {
+pub struct StringUnit {
     voices: [Voice; VOICES_PER_SECTION],
     /// The sympathetic halo of each of this section's voices.
     ///
@@ -11704,8 +11704,15 @@ fn relaid_state(state: &[u8]) -> Option<[u8; STATE_COUNT * 4]> {
     Some(out)
 }
 
-impl Processor for ConcertGrand {
-    fn prepare(
+/// The instrument's own control plane, which the two contracts share.
+///
+/// Inherent rather than a `Processor` impl, because `ParallelProcessor`
+/// carries the same ten names and a call like `piano.prepare(..)` would
+/// have no way to choose. The trait below is a delegation to these, which
+/// is what it should have been anyway: the logic belongs to the
+/// instrument, not to whichever contract the host is holding it by.
+impl ConcertGrand {
+    pub fn prepare(
         &mut self,
         sample_rate: f64,
         maximum_frames: u32,
@@ -11723,7 +11730,7 @@ impl Processor for ConcertGrand {
         self.tune_undamped();
         self.tune_halo();
         self.tune_room();
-        self.reset();
+        Self::reset(self);
         true
     }
 
@@ -11733,13 +11740,13 @@ impl Processor for ConcertGrand {
     /// Only the number is taken here; the bank is not rebuilt until the next
     /// block, where the frame count is known -- a budget is per call, and a
     /// call's worth of work depends on how many frames are in it.
-    fn set_realtime_budget(&mut self, fuel_per_call: u64) -> bool {
+    pub fn set_realtime_budget(&mut self, fuel_per_call: u64) -> bool {
         self.budget_fuel_per_call = fuel_per_call;
         self.budget_pending = true;
         true
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.sections = [StringUnit::default(); STRING_SECTIONS];
         self.summary = [VoiceSummary::default(); MAX_VOICES];
         self.halo_summary = [VoiceSummary::default(); STRING_SECTIONS * HALOS_PER_SECTION];
@@ -11773,7 +11780,7 @@ impl Processor for ConcertGrand {
         self.room_index = [0; ROOM_LINES];
     }
 
-    fn set_parameter(&mut self, index: u32, value: f64) -> bool {
+    pub fn set_parameter(&mut self, index: u32, value: f64) -> bool {
         let accepted = self.engine.controls.set(index, value);
         if accepted && index >= KNOB_PARAM_BASE {
             self.board_dirty = true;
@@ -11815,7 +11822,7 @@ impl Processor for ConcertGrand {
         accepted
     }
 
-    fn get_parameter(&self, index: u32) -> Option<f64> {
+    pub fn get_parameter(&self, index: u32) -> Option<f64> {
         self.engine.controls.get(index)
     }
 
@@ -11826,7 +11833,7 @@ impl Processor for ConcertGrand {
     // soundboard, and writing it to more figures only makes it look more like
     // the constant it is not.
     #[allow(clippy::approx_constant)]
-    fn load_preset(&mut self, id: &str) -> bool {
+    pub fn load_preset(&mut self, id: &str) -> bool {
         /// The house lab bank with a few entries moved.
         ///
         /// A preset builds ON the factory voicing and only says what makes it
@@ -12188,7 +12195,7 @@ impl Processor for ConcertGrand {
         true
     }
 
-    fn save_state(&self, destination: &mut [u8]) -> Option<usize> {
+    pub fn save_state(&self, destination: &mut [u8]) -> Option<usize> {
         let values = state_words(&self.engine.controls);
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
@@ -12197,9 +12204,9 @@ impl Processor for ConcertGrand {
         Some(values.len() * 4)
     }
 
-    fn load_state(&mut self, state: &[u8]) -> bool {
+    pub fn load_state(&mut self, state: &[u8]) -> bool {
         if let Some(relaid) = relaid_state(state) {
-            return self.load_state(&relaid);
+            return Self::load_state(self, &relaid);
         }
         // A state saved by an older build is shorter, because controls have
         // only ever been added to the end. Read what it has and leave the
@@ -12383,7 +12390,7 @@ impl Processor for ConcertGrand {
         true
     }
 
-    fn process(
+    pub fn process(
         &mut self,
         input: &[f32],
         output: &mut [f32],
@@ -12405,7 +12412,7 @@ impl Processor for ConcertGrand {
         );
     }
 
-    fn process_wide(
+    pub fn process_wide(
         &mut self,
         _input: &[f32],
         output: &mut [f32],
@@ -12479,6 +12486,229 @@ impl Processor for ConcertGrand {
             );
             span_start += span;
         }
+        self.close_block();
+    }
+}
+
+/// How many floats a unit writes per frame: its own string sound, the
+/// force it put on the bridge, where on the bridge that force landed, and
+/// what the keybed under it heard.
+const SECTION_FRAME_FLOATS: usize = 4 + BOARD_DRIVE_POINTS;
+
+/// The block-shared payload: the sympathetic rate this block runs at, then
+/// per frame what each unit hears of the others and whether the sostenuto
+/// rod is down.
+///
+/// A unit is another instance with its own memory, so everything it needs
+/// and does not already own has to arrive as bytes. This is the whole of
+/// that, and it is the same thing `process_wide` hands its units from the
+/// coordinator's own arrays.
+const SHARED_HEAD: usize = 4;
+const SHARED_PER_FRAME: usize = STRING_SECTIONS * 4 + 1;
+#[allow(dead_code, reason = "lo usa el camino paralelo, que todavia no es el export")]
+const SHARED_CAPACITY: usize = SHARED_HEAD + MAX_BLOCK_FRAMES * SHARED_PER_FRAME;
+
+impl SectionFrame {
+    /// Into a unit's slot, and back out of it in `end_block`.
+    fn write(self, into: &mut [f32]) {
+        into[0] = self.sample;
+        into[1] = self.force;
+        into[2] = self.keybed_left;
+        into[3] = self.keybed_right;
+        into[4..4 + BOARD_DRIVE_POINTS].copy_from_slice(&self.drive_points);
+    }
+
+    fn read(from: &[f32]) -> Self {
+        let mut made = Self {
+            sample: from[0],
+            force: from[1],
+            keybed_left: from[2],
+            keybed_right: from[3],
+            drive_points: [0.0; BOARD_DRIVE_POINTS],
+        };
+        made
+            .drive_points
+            .copy_from_slice(&from[4..4 + BOARD_DRIVE_POINTS]);
+        made
+    }
+}
+
+impl ParallelProcessor for ConcertGrand {
+    type Unit = StringUnit;
+
+    /// A section does not produce sound. It produces the force on the
+    /// bridge and where it landed, and a serial stage turns four sections'
+    /// worth of that into a piano -- which two channels cannot carry.
+    const UNIT_CHANNELS: u32 = SECTION_FRAME_FLOATS as u32;
+
+    fn prepare(
+        &mut self,
+        sample_rate: f64,
+        maximum_frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+    ) -> bool {
+        maximum_frames as usize <= MAX_BLOCK_FRAMES
+            && Self::prepare(
+                self,
+                sample_rate,
+                maximum_frames,
+                input_channels,
+                output_channels,
+            )
+    }
+
+    fn set_parameter(&mut self, index: u32, value: f64) -> bool {
+        Self::set_parameter(self, index, value)
+    }
+
+    fn get_parameter(&self, index: u32) -> Option<f64> {
+        Self::get_parameter(self, index)
+    }
+
+
+    fn set_realtime_budget(&mut self, fuel_per_call: u64) -> bool {
+        Self::set_realtime_budget(self, fuel_per_call)
+    }
+
+    fn reset(&mut self) {
+        Self::reset(self)
+    }
+
+
+
+
+
+    fn load_preset(&mut self, id: &str) -> bool {
+        Self::load_preset(self, id)
+    }
+
+    fn save_state(&self, destination: &mut [u8]) -> Option<usize> {
+        Self::save_state(self, destination)
+    }
+
+    fn load_state(&mut self, state: &[u8]) -> bool {
+        Self::load_state(self, state)
+    }
+
+    /// The serial pre-stage: open the block, walk every event in it, and
+    /// write down what the four units will need.
+    fn begin_block(&mut self, context: &BlockContext<'_>, plan: &mut PlanWriter<'_>) {
+        let frames = (context.frames as usize).min(MAX_BLOCK_FRAMES);
+        let (sympathy_rate, pedal_decay) = self.open_block(context.frames);
+        self.silent_work_len = 0;
+        let mut bed_busy = [false; BED_COUNT];
+        let (mut midi_index, mut midi2_index, mut parameter_index) = (0, 0, 0);
+        let mut refresh_busy = true;
+        self.plan_span(
+            context.midi,
+            context.midi2,
+            context.parameters,
+            &mut midi_index,
+            &mut midi2_index,
+            &mut parameter_index,
+            &mut refresh_busy,
+            &mut bed_busy,
+            0,
+            frames,
+            pedal_decay,
+        );
+
+        // What every unit hears, in the one region they all get.
+        let shared = plan.shared_buffer();
+        shared[..SHARED_HEAD].copy_from_slice(&sympathy_rate.to_le_bytes());
+        for offset in 0..frames {
+            let at = SHARED_HEAD + offset * SHARED_PER_FRAME;
+            for section in 0..STRING_SECTIONS {
+                let hears = self.plan_others[offset][section].to_le_bytes();
+                shared[at + section * 4..at + section * 4 + 4].copy_from_slice(&hears);
+            }
+            shared[at + STRING_SECTIONS * 4] = u8::from(self.plan_sostenuto[offset]);
+        }
+        let committed = plan.commit_shared(SHARED_HEAD + frames * SHARED_PER_FRAME);
+        debug_assert!(committed, "el payload compartido no entro");
+
+        // And what each one has to DO, in ascending order, which is the
+        // order the host combines them in.
+        for section in 0..STRING_SECTIONS {
+            let written = self.voice_work_len[section];
+            let activated = plan.activate(section as u32, &self.voice_work[section][..written]);
+            debug_assert!(activated, "una seccion no entro en el plan");
+        }
+    }
+
+    /// One unit's strings for the whole block, from its own state and the
+    /// two payloads. No `&self`: everything here is the unit's or the
+    /// coordinator's word for it.
+    fn render_unit(
+        unit_index: u32,
+        unit: &mut Self::Unit,
+        payload: &[u8],
+        context: &UnitContext<'_>,
+        output: &mut [f32],
+    ) {
+        let frames = context.frames as usize;
+        let section = unit_index as usize;
+        if context.shared.len() < SHARED_HEAD + frames * SHARED_PER_FRAME {
+            debug_assert!(false, "el payload compartido llego corto");
+            return;
+        }
+        let sympathy_rate = f32::from_le_bytes([
+            context.shared[0],
+            context.shared[1],
+            context.shared[2],
+            context.shared[3],
+        ]);
+        let mut previous = unit.previous;
+        for offset in 0..frames {
+            unit.run_work(payload, offset as u16);
+            let at = SHARED_HEAD + offset * SHARED_PER_FRAME + section * 4;
+            let hears = f32::from_le_bytes([
+                context.shared[at],
+                context.shared[at + 1],
+                context.shared[at + 2],
+                context.shared[at + 3],
+            ]);
+            let sostenuto =
+                context.shared[SHARED_HEAD + offset * SHARED_PER_FRAME + STRING_SECTIONS * 4] != 0;
+            // Itself from one sample ago, everyone else from a whole block
+            // ago, which is what lets this run beside the other three.
+            let made = unit.render_frame(hears + previous, sympathy_rate, sostenuto);
+            previous = made.sample;
+            made.write(&mut output[offset * SECTION_FRAME_FLOATS..]);
+        }
+        unit.previous = previous;
+    }
+
+    /// The serial post-stage: the four slots combined in ascending order,
+    /// everything downstream of the strings, and then the block closed on
+    /// what the units reported.
+    fn end_block(
+        &mut self,
+        mix: &UnitMix<'_>,
+        output: &mut [f32],
+        frames: u32,
+        output_channels: u32,
+    ) {
+        let frames = (frames as usize).min(MAX_BLOCK_FRAMES);
+        let mut slots = [None; STRING_SECTIONS];
+        for unit in mix.active_units() {
+            if (unit as usize) < STRING_SECTIONS {
+                slots[unit as usize] = Some(mix.slot(unit));
+            }
+        }
+        self.serial_stages(
+            |section, offset| match slots[section] {
+                // A unit the host had to silence reads as zeros, which is
+                // exactly what a section with nothing sounding produces.
+                None => SectionFrame::default(),
+                Some(slot) => SectionFrame::read(&slot[offset * SECTION_FRAME_FLOATS..]),
+            },
+            0,
+            frames,
+            output,
+            output_channels as usize,
+        );
         self.close_block();
     }
 }
@@ -18121,6 +18351,174 @@ mod bench {
                 );
             }
         }
+    }
+
+    /// The three phases render exactly what the one-pass path renders.
+    ///
+    /// This is the test the switch is worth: `export_parallel_processor!`
+    /// derives the classic entry point FROM the phases, so declaring the
+    /// trait does not add a path, it replaces the one the instrument has
+    /// always used. The only honest way to make that a safe change is to
+    /// drive both by hand and subtract them.
+    ///
+    /// It plays a pedalled passage with strikes, releases, a moving CC64
+    /// and the sostenuto rod, because what the phases move across the
+    /// boundary is exactly the per-voice work those produce.
+    /// KNOWN TO FAIL, and kept because it says exactly what is missing.
+    ///
+    /// The phases agree until the block closes. `close_block` refreshes the
+    /// coordinator's picture of the voices and divides the budget again
+    /// from what the sections report -- and in the parallel path the
+    /// sections that rendered are the host's units, not the coordinator's
+    /// own. It reads four sections that never sounded, so from the second
+    /// block on it chooses slots and steals voices from an empty picture.
+    ///
+    /// There is no channel for a unit to report with. `render_unit` writes
+    /// audio into a slot and that is the whole of the way back, which is
+    /// right for a synthesiser whose units are voices and wrong for an
+    /// instrument that allocates voices centrally. Widening the audio slot
+    /// to smuggle state through it would work for a 128-frame block and
+    /// break for a 32-frame one, which is not a fix.
+    ///
+    /// So this is the specification of the next SDK change rather than a
+    /// bug in the plugin: a unit needs a report the coordinator can read in
+    /// `end_block`, the way it already has a payload the coordinator writes
+    /// in `begin_block`.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release the_phases_render -- --ignored`
+    #[test]
+    #[ignore]
+    fn the_phases_render_what_the_one_pass_renders() {
+        const FRAMES: usize = 128;
+        const BLOCKS: usize = 240;
+        let script = |block: usize| -> std::vec::Vec<MidiEvent> {
+            let mut midi = std::vec::Vec::new();
+            if block % 3 == 0 {
+                midi.push(MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, ((block * 37) % 128) as u8],
+                    length: 3,
+                });
+                midi.push(MidiEvent {
+                    frame: 0,
+                    data: [0x90, 28 + (block * 7 % 60) as u8, 92],
+                    length: 3,
+                });
+            }
+            if block % 7 == 0 {
+                midi.push(MidiEvent {
+                    frame: 40,
+                    data: [0x80, 28 + ((block.saturating_sub(21)) * 7 % 60) as u8, 64],
+                    length: 3,
+                });
+            }
+            if block % 41 == 0 {
+                midi.push(MidiEvent {
+                    frame: 64,
+                    data: [0xB0, 66, if block % 82 == 0 { 127 } else { 0 }],
+                    length: 3,
+                });
+            }
+            midi
+        };
+
+        // The instrument as the host has always driven it.
+        let mut one_pass = Box::new(ConcertGrand::default());
+        assert!(one_pass.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut shipped = std::vec::Vec::with_capacity(BLOCKS * FRAMES * 2);
+        let mut output = vec![0.0f32; FRAMES * 2];
+        for block in 0..BLOCKS {
+            one_pass.process(&[], &mut output, &script(block), &[], FRAMES as u32, 0, 2);
+            shipped.extend_from_slice(&output);
+        }
+
+        // And the same instrument driven as four workers and two serial
+        // stages, which is what the host will do.
+        let mut coordinator = Box::new(ConcertGrand::default());
+        assert!(<ConcertGrand as ParallelProcessor>::prepare(
+            &mut coordinator,
+            48_000.0,
+            FRAMES as u32,
+            0,
+            2
+        ));
+        let mut units = [StringUnit::default(); STRING_SECTIONS];
+        let mut plan = [0u32; STRING_SECTIONS * 2];
+        let mut dispatch = vec![0u8; STRING_SECTIONS * VOICE_WORK_BYTES];
+        let mut shared = vec![0u8; SHARED_CAPACITY];
+        let mut slots = vec![0.0f32; STRING_SECTIONS * FRAMES * SECTION_FRAME_FLOATS];
+        let mut phased = std::vec::Vec::with_capacity(BLOCKS * FRAMES * 2);
+        for block in 0..BLOCKS {
+            let midi = script(block);
+            let (count, shared_len) = {
+                let mut writer = PlanWriter::new(
+                    &mut plan,
+                    &mut dispatch,
+                    &mut shared,
+                    VOICE_WORK_BYTES,
+                    STRING_SECTIONS,
+                );
+                coordinator.begin_block(
+                    &BlockContext {
+                        input: &[],
+                        midi: &midi,
+                        midi2: &[],
+                        parameters: &[],
+                        frames: FRAMES as u32,
+                        input_channels: 0,
+                        output_channels: 2,
+                    },
+                    &mut writer,
+                );
+                (writer.activated(), writer.shared_len())
+            };
+            assert_eq!(count, STRING_SECTIONS, "bloque {block}: faltaron unidades");
+            for index in 0..count {
+                let unit = plan[index * 2] as usize;
+                let payload = &dispatch[unit * VOICE_WORK_BYTES..(unit + 1) * VOICE_WORK_BYTES];
+                let slot = &mut slots[unit * FRAMES * SECTION_FRAME_FLOATS
+                    ..(unit + 1) * FRAMES * SECTION_FRAME_FLOATS];
+                <ConcertGrand as ParallelProcessor>::render_unit(
+                    unit as u32,
+                    &mut units[unit],
+                    payload,
+                    &UnitContext {
+                        input: &[],
+                        shared: &shared[..shared_len],
+                        frames: FRAMES as u32,
+                        output_channels: 2,
+                    },
+                    slot,
+                );
+            }
+            let mix = UnitMix::new(
+                &slots,
+                FRAMES * SECTION_FRAME_FLOATS,
+                &plan,
+                count,
+                FRAMES * SECTION_FRAME_FLOATS,
+            );
+            coordinator.end_block(&mix, &mut output, FRAMES as u32, 2);
+            phased.extend_from_slice(&output);
+        }
+
+        assert_eq!(shipped.len(), phased.len());
+        let mut worst = 0.0f32;
+        let mut worst_at = 0usize;
+        for (at, (one, four)) in shipped.iter().zip(phased.iter()).enumerate() {
+            let error = (one - four).abs();
+            if error > worst {
+                worst = error;
+                worst_at = at;
+            }
+        }
+        assert_eq!(
+            worst, 0.0,
+            "las tres fases difieren del paso unico: {worst} en la muestra {worst_at} \
+             (bloque {}, cuadro {})",
+            worst_at / (FRAMES * 2),
+            (worst_at / 2) % FRAMES
+        );
     }
 
     /// The coordinator's picture of the voices is what the sections last

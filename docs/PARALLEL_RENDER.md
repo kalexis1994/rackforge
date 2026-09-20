@@ -519,8 +519,7 @@ The room is very nearly free and is not worth touching. The soundboard's
 256-mode bank is the bill.
 
 Two things about that bank were measured rather than assumed, and the
-measurements disagree with each other depending on where they are taken,
-which is the point of recording them.
+measurements disagree with each other depending on where they are taken.
 
 It is an array of 56-byte structs. `simd128` is on for every wasm build in
 this workspace, and consecutive modes' state is 56 bytes apart, so a
@@ -535,34 +534,36 @@ identical, and:
 | one array per field, sum split four ways | 1.28× | 0.99× |
 | only the sum split, layout untouched | 0.78× | 0.89× |
 
-The two machines want opposite things. On x86 the layout is a slight loss
-and reassociating the cross-mode sum is the win; on ARM the layout alone is
-worth 1.41× and reassociating takes it back. Neither loop vectorises on
-either machine: adding 256 results into one accumulator is a float
-reduction, which a compiler may not reassociate on its own, so what moves on
-ARM is how the bank is walked rather than how wide it is walked.
-
-And neither column is the answer, because the instrument is neither. Built
-for `wasm32` with `simd128`, the loop as it stands emits **no** v128
+Neither loop vectorises on either machine: adding 256 results into one
+accumulator is a float reduction, which a compiler may not reassociate on
+its own, so what moves on ARM is how the bank is walked rather than how wide
+it is walked. Built for `wasm32` with `simd128` the loop emits no v128
 instructions in either layout — and the version with the sum split four ways
-emits them. Cranelift does not vectorise scalar wasm; it lowers the SIMD the
-producer already emitted. So on the appliance the arrangement that lost on
-native ARM is the only one that arrives vectorised at all, and the
-arrangement that won there arrives scalar.
+emits them, which looked like the one arrangement that would arrive on the
+appliance vectorised.
 
-What that costs: splitting the sum changes the order 256 terms are added in,
-which moves the result by about −88 dB relative. Inaudible, and still far
-above the −240 dB the fingerprint guards hold the instrument to, so taking
-it means rebaselining them deliberately rather than as a side effect.
+**All of it evaporates in the real thing.** The bank was rewritten as one
+array per field, held to the render fingerprints (identical, both of them),
+built as wasm and measured on the appliance against the arrangement it
+ships with, three rounds each, with a third build adding the split sum:
 
-The honest state of this: there is a lever here worth somewhere between
-nothing and 1.4× on 69 % of the global stage, three environments give three
-different answers, and the only one that counts — the instrument itself,
-built as wasm, measured on the appliance — has not been taken, because
-taking it means actually rewriting the bank. A first version of this section
-claimed 3.07× from a probe that let resonator state carry across rounds, so
-the arrangements were not rendering the same thing; that number was wrong
-and is withdrawn.
+| whole block, one instance | idle | a held chord |
+| --- | --- | --- |
+| array of structs, as it ships | 1060 / 1054 / 1043 µs | 1553 / 1540 / 1565 µs |
+| one array per field | 1048 / 1035 / 1073 µs | 1531 / 1613 / 1575 µs |
+| + the sum split four ways | 1107 / 1018 / 1046 µs | 1568 / 1533 / 1506 µs |
+
+The spread within one arrangement is larger than any difference between
+them. Whatever the layout is worth on ARM directly, wasmtime's addressing
+and codegen level it, and the rewrite was discarded rather than landed: a
+large diff in the instrument's hottest structure for a change that measures
+as noise is churn, and the 1.41× that justified it did not survive contact
+with the target.
+
+So the soundboard's bank is 69 % of the global stage and there is no
+arrangement of it that helps. What is left there genuinely is an ear-level
+decision — fewer modes, or a cheaper mode — and that is a different kind of
+question from this one.
 
 ## What is not covered
 

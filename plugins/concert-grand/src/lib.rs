@@ -3566,14 +3566,6 @@ pub static AIR_HIGHPASS: Knob = Knob::new(0.0094);
 const ROOM_BUFFER: usize = 4096;
 /// Wet level of the chamber against the direct sound.
 pub static ROOM_MIX: Knob = Knob::new(0.09);
-/// What a span of strings leaves for the stages after them.
-#[derive(Clone, Copy, Default)]
-struct FrameDeposit {
-    bridge_drive: f32,
-    drive_points: [f32; BOARD_DRIVE_POINTS],
-    keybed_left: f32,
-    keybed_right: f32,
-}
 
 /// How many frames render in one span. The appliance's period.
 const RENDER_SPAN: usize = 128;
@@ -10431,7 +10423,6 @@ impl ConcertGrand {
         &mut self,
         unit: impl Fn(usize, usize) -> SectionFrame,
         states: &[FrameState],
-        deposits: &mut [FrameDeposit],
         span_start: usize,
         span: usize,
         output: &mut [f32],
@@ -10478,25 +10469,11 @@ impl ConcertGrand {
                 self.section_history[section][self.section_cursor] = made.sample;
             }
             self.section_cursor = (self.section_cursor + 1) % MAX_SECTION_DELAY;
-            deposits[offset] = FrameDeposit {
-                bridge_drive,
-                drive_points,
-                keybed_left,
-                keybed_right,
-            };
-        }
 
-        for offset in 0..span {
             let frame = span_start + offset;
             self.run_silent_work(offset as u16);
             let frame_state = states[offset];
             let bed_busy = frame_state.bed_busy;
-            let FrameDeposit {
-                bridge_drive,
-                drive_points,
-                keybed_left,
-                keybed_right,
-            } = deposits[offset];
             // Everything the strings produce radiates through the board --
             // each string from its own point of the bridge (`BOARD_SHAPE`).
             // What everything downstream of the strings hears, which is what
@@ -12379,7 +12356,6 @@ impl Processor for ConcertGrand {
         self.voice_work_len = [0; STRING_SECTIONS];
         self.voice_work_seq = 0;
         self.voice_claimed = 0;
-        let mut deposits = [FrameDeposit::default(); RENDER_SPAN];
         let mut frame_states = [FrameState::default(); RENDER_SPAN];
         // What phase one writes down for phase two, and what phase two hands
         // to phase three.
@@ -12436,7 +12412,6 @@ impl Processor for ConcertGrand {
             self.serial_stages(
                 |section, offset| unit_out[section][offset],
                 &frame_states,
-                &mut deposits,
                 span_start,
                 span,
                 output,

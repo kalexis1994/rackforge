@@ -268,6 +268,39 @@ large resident resources (multi-hundred-megabyte sample banks) should weigh
 it before declaring the capability. The sequential fallback is always legal
 for a host under memory pressure.
 
+### Timed work for a unit
+
+`PlanWriter::activate` takes bytes, which is the right primitive and the
+wrong place to stop. A unit renders a whole span at once and cannot be told
+anything halfway through, so an instrument needs to hand it a LIST: a note
+struck at frame 5, a damper released at frame 37. Without a shared shape for
+that, every plugin invents one and makes its own mistakes about bounds and
+about frames outside the block.
+
+`UnitWork` is that shape. Records of `{frame: u16, length: u16, bytes}`,
+four-byte aligned, pushed in ascending frame order and read back the same
+way:
+
+```rust
+// begin_block, on the coordinator
+let mut work = UnitWork::new(plan.dispatch_buffer(unit));
+work.push(5, &strike.to_bytes());
+work.push(37, &release.to_bytes());
+plan.activate(unit, work.finish());
+
+// render_unit, in the worker
+for (frame, bytes) in UnitWork::read(payload) {
+    // apply it where it belongs
+}
+```
+
+The bytes inside a record stay the plugin's own business -- the host never
+looks at a payload. What the shape buys is the three refusals: a record
+longer than a `u16`, a frame that goes backwards, and a payload that is
+full are all refused at the push rather than truncated at the read. And a
+malformed payload ends the walk instead of panicking, because a unit is on
+the audio thread.
+
 ## Determinism rules (normative)
 
 1. Unit output may depend only on: the unit's persistent state, its

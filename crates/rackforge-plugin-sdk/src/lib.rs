@@ -320,6 +320,115 @@ pub struct BlockContext<'a> {
     pub output_channels: u32,
 }
 
+/// A unit's timed work for one block, written into its dispatch payload.
+///
+/// [`PlanWriter::activate`] takes bytes, which is the right primitive and the
+/// wrong place to stop: every plugin that dispatches EVENTS then invents its
+/// own encoding for "this, at this frame", and gets to make its own mistakes
+/// about bounds and about frames that fall outside the block. An instrument
+/// needs one per unit every block -- a note struck at frame 5, a damper
+/// released at frame 37 -- because a unit renders a whole span at once and
+/// cannot be told anything halfway through.
+///
+/// So: fixed records of `{frame: u16, length: u16, bytes}`, four-byte
+/// aligned, written in ascending frame order and read back the same way. The
+/// payload stays opaque to the host, which is the contract's own rule.
+///
+/// ```ignore
+/// // begin_block, on the coordinator:
+/// let mut work = UnitWork::new(&mut buffer);
+/// work.push(5, &strike.to_bytes());
+/// work.push(37, &release.to_bytes());
+/// plan.activate(section, work.finish());
+///
+/// // render_unit, in the worker:
+/// for (frame, bytes) in UnitWork::read(payload) {
+///     // apply at `frame`, which is where it belongs
+/// }
+/// ```
+pub struct UnitWork<'a> {
+    buffer: &'a mut [u8],
+    written: usize,
+    last_frame: Option<u16>,
+}
+
+impl<'a> UnitWork<'a> {
+    pub fn new(buffer: &'a mut [u8]) -> Self {
+        Self {
+            buffer,
+            written: 0,
+            last_frame: None,
+        }
+    }
+
+    /// Adds one record. Returns `false` and writes nothing when the payload
+    /// is full, the record is longer than a `u16`, or the frame goes
+    /// backwards -- reading back in the order it was written is the point,
+    /// and a unit that has to sort its own work has been handed a puzzle
+    /// rather than a plan.
+    pub fn push(&mut self, frame: u16, bytes: &[u8]) -> bool {
+        if bytes.len() > u16::MAX as usize {
+            return false;
+        }
+        if self.last_frame.is_some_and(|previous| frame < previous) {
+            return false;
+        }
+        let record = 4 + bytes.len();
+        let padded = (record + 3) & !3;
+        if self.written + padded > self.buffer.len() {
+            return false;
+        }
+        let at = self.written;
+        self.buffer[at..at + 2].copy_from_slice(&frame.to_le_bytes());
+        self.buffer[at + 2..at + 4].copy_from_slice(&(bytes.len() as u16).to_le_bytes());
+        self.buffer[at + 4..at + 4 + bytes.len()].copy_from_slice(bytes);
+        for filler in &mut self.buffer[at + record..at + padded] {
+            *filler = 0;
+        }
+        self.written += padded;
+        self.last_frame = Some(frame);
+        true
+    }
+
+    /// The bytes to hand [`PlanWriter::activate`].
+    pub fn finish(self) -> &'a [u8] {
+        &self.buffer[..self.written]
+    }
+
+    /// The records a unit was given, in the order they were written.
+    pub fn read(payload: &[u8]) -> UnitWorkIter<'_> {
+        UnitWorkIter { payload, at: 0 }
+    }
+}
+
+/// Walks the records [`UnitWork`] wrote. A malformed payload ends the walk
+/// rather than panicking: a unit is on the audio thread.
+pub struct UnitWorkIter<'a> {
+    payload: &'a [u8],
+    at: usize,
+}
+
+impl<'a> Iterator for UnitWorkIter<'a> {
+    type Item = (u16, &'a [u8]);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.at + 4 > self.payload.len() {
+            return None;
+        }
+        let frame = u16::from_le_bytes([self.payload[self.at], self.payload[self.at + 1]]);
+        let length =
+            u16::from_le_bytes([self.payload[self.at + 2], self.payload[self.at + 3]]) as usize;
+        let start = self.at + 4;
+        if start + length > self.payload.len() {
+            return None;
+        }
+        // The next record starts on the next four-byte boundary, which is
+        // where `push` left it.
+        self.at = (start + length + 3) & !3;
+        Some((frame, &self.payload[start..start + length]))
+    }
+}
+
 /// Collects the block plan inside `begin_block`: which units render this
 /// block and the dispatch payload each receives. Units must be activated in
 /// ascending order, which is also the deterministic combine order.
@@ -1994,4 +2103,60 @@ macro_rules! export_parallel_processor {
             }
         }
     };
+}
+
+#[cfg(test)]
+mod unit_work_tests {
+    use super::UnitWork;
+
+    #[test]
+    fn records_read_back_in_the_order_they_were_written() {
+        let mut buffer = [0u8; 256];
+        let mut work = UnitWork::new(&mut buffer);
+        assert!(work.push(5, &[1, 2, 3]));
+        assert!(work.push(5, &[]));
+        assert!(work.push(37, &[9]));
+        assert!(work.push(127, &[4; 17]));
+        let payload = work.finish();
+        let mut read = UnitWork::read(payload);
+        assert_eq!(read.next(), Some((5, &[1, 2, 3][..])));
+        assert_eq!(read.next(), Some((5, &[][..])));
+        assert_eq!(read.next(), Some((37, &[9][..])));
+        let last = read.next().expect("the fourth record");
+        assert_eq!(last.0, 127);
+        assert_eq!(last.1.len(), 17);
+        assert_eq!(read.next(), None);
+    }
+
+    #[test]
+    fn a_frame_that_goes_backwards_is_refused() {
+        // A unit reads in the order it was given; one that has to sort its
+        // own work has been handed a puzzle rather than a plan.
+        let mut buffer = [0u8; 64];
+        let mut work = UnitWork::new(&mut buffer);
+        assert!(work.push(10, &[1]));
+        assert!(!work.push(9, &[2]));
+        assert!(work.push(10, &[3]));
+        assert_eq!(UnitWork::read(work.finish()).count(), 2);
+    }
+
+    #[test]
+    fn a_full_payload_refuses_rather_than_truncating() {
+        let mut buffer = [0u8; 16];
+        let mut work = UnitWork::new(&mut buffer);
+        assert!(work.push(0, &[1, 2, 3, 4]));
+        assert!(work.push(1, &[5, 6, 7, 8]));
+        assert!(!work.push(2, &[9]));
+        let payload = work.finish();
+        assert_eq!(payload.len(), 16);
+        assert_eq!(UnitWork::read(payload).count(), 2);
+    }
+
+    #[test]
+    fn a_malformed_payload_ends_the_walk_instead_of_panicking() {
+        // A unit is on the audio thread. Whatever it is handed, it returns.
+        assert_eq!(UnitWork::read(&[1, 2, 3]).count(), 0);
+        assert_eq!(UnitWork::read(&[0, 0, 200, 0, 1]).count(), 0);
+        assert_eq!(UnitWork::read(&[]).count(), 0);
+    }
 }

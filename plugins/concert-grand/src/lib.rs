@@ -6636,8 +6636,15 @@ impl ConcertGrand {
     /// the action's calibrated law, the keyboard's knee under it, and the
     /// flight's toll between the two. See `LETOFF_DISTANCE_MM`.
     fn hammer_speeds(&self, velocity: f32) -> (f32, f32) {
+        self.hammer_speeds_at(self.repetition_scale, velocity)
+    }
+
+    /// The same, for a repetition scaling that is not on `self` yet --
+    /// which is the coordinator's case: it is deciding whether there is a
+    /// blow at all, and the section is the one that will make it.
+    fn hammer_speeds_at(&self, repetition: f32, velocity: f32) -> (f32, f32) {
         let span = ACTION_SPAN_BASE.get() + ACTION_SPAN_PER_DYNAMICS.get() * self.controls.dynamics;
-        let mut letoff = HAMMER_V_FF.get() * powf(span, velocity - 1.0) * self.repetition_scale;
+        let mut letoff = HAMMER_V_FF.get() * powf(span, velocity - 1.0) * repetition;
         let knee = (LETOFF_KNEE.get() / 127.0).clamp(0.0, 1.0);
         if knee > 0.0 && velocity < knee {
             letoff *= velocity / knee;
@@ -6645,6 +6652,31 @@ impl ConcertGrand {
         let toll = 2.0 * 9.81 * LETOFF_DISTANCE_MM.get().max(0.0) * 1.0e-3;
         let at_string = sqrtf((letoff * letoff - toll).max(0.0));
         (letoff, at_string)
+    }
+
+    /// What the action makes of a blow before any string is touched: what
+    /// the una corda leaves of it, how much of the hammer's travel the
+    /// shift took, the back-check scaling from the key's return, and
+    /// whether the hammer reaches the string at all.
+    ///
+    /// Pure, and asked twice. The coordinator asks to decide whether a
+    /// voice is taken and whether the key is held silent instead -- the
+    /// silent bank and the slots are its own state, and a section cannot
+    /// write either. The section asks again to make the blow. Two callers
+    /// of one function rather than two copies of one formula, because the
+    /// two answers have to agree exactly.
+    fn action_blow(&self, velocity: f32, soft: f32, returned: f32) -> (f32, f32, f32, f32) {
+        // A grand's shift takes 22% of the blow because the felt it lands
+        // on is softer, and it takes strings away as well; an upright's
+        // rail only shortens the travel. See the note at the strike.
+        let shift = soft * (1.0 - self.controls.action);
+        let half_blow = soft * self.controls.action;
+        let struck = velocity * (1.0 - 0.22 * shift - 0.15 * half_blow);
+        let point = KEY_REPETITION_POINT.get().clamp(0.0, 0.99);
+        let from_check = REPETITION_FROM_CHECK.get().clamp(0.1, 1.0);
+        let repetition = from_check + (1.0 - from_check) * (returned - point) / (1.0 - point);
+        let (_, at_string) = self.hammer_speeds_at(repetition, struck);
+        (struck, shift, repetition, at_string)
     }
 
     /// A key down without a strike: its string, damper up, joins the
@@ -7695,6 +7727,18 @@ impl ConcertGrand {
             });
             return;
         }
+        // The escapement: the hammer flies the let-off on its own, and a
+        // hammer let off too slowly turns back short of the string. The key
+        // is down and its damper is up; the string is free and silent -- and
+        // no voice is taken, which is why this is decided here.
+        let (_, _, _, at_string) = self.action_blow(velocity, self.soft, returned);
+        if at_string <= 0.0 {
+            self.hold_silent(note);
+            return;
+        }
+        // A struck string is its voice; a silent string it may have been is
+        // that voice now.
+        self.free_silent(note);
         let Some(slot) = self.pick_voice_slot() else {
             return;
         };
@@ -7850,7 +7894,7 @@ impl ConcertGrand {
         #[cfg(test)]
         let mut mark = std::time::Instant::now();
         let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
-        let mut velocity = velocity;
+
         // Una corda: the shifted hammer meets the strings with softer felt
         // (the unworn side) and strikes one string fewer.
         // The left pedal, through whichever mechanism this instrument has.
@@ -7868,25 +7912,14 @@ impl ConcertGrand {
         // here: 37 mm turns up among technicians as a shortened figure and
         // ~46 mm as the regulated one. The mechanism is certain; the fraction
         // is judgement, like the strike skew and the damper's spread.
-        let shift = soft * (1.0 - self.controls.action);
-        let half_blow = soft * self.controls.action;
-        velocity *= 1.0 - 0.22 * shift - 0.15 * half_blow;
-
-        let point = KEY_REPETITION_POINT.get().clamp(0.0, 0.99);
-        let from_check = REPETITION_FROM_CHECK.get().clamp(0.1, 1.0);
-        self.repetition_scale =
-            from_check + (1.0 - from_check) * (returned - point) / (1.0 - point);
-        // The escapement: the hammer flies the let-off on its own, and a
-        // hammer let off too slowly turns back short of the string. The key
-        // is down and its damper is up; the string is free and silent.
-        let (letoff, at_string) = self.hammer_speeds(velocity);
-        if at_string <= 0.0 {
-            self.hold_silent(note);
-            return;
-        }
-        // A struck string is its voice; a silent string it may have been is
-        // that voice now.
-        self.free_silent(note);
+        let (velocity, shift, repetition, at_string) = self.action_blow(velocity, soft, returned);
+        self.repetition_scale = repetition;
+        // The coordinator asked the same question of the same function
+        // before it took this slot, so a hammer that stops short cannot
+        // arrive here -- and if it ever did, it would be a silent note
+        // holding a voice, not a wrong sound.
+        debug_assert!(at_string > 0.0, "un martillo que no llega se quedo con una voz");
+        let (letoff, _) = self.hammer_speeds(velocity);
 
         // A RE-STRUCK STRING IS THE SAME STRING. If this note is still
         // ringing free -- held, or sustained with its damper clear -- the

@@ -17103,6 +17103,90 @@ mod bench {
         std::println!("huella del render: {hash:#018x}");
     }
 
+    /// The same idea, for the frames the plain fingerprint never crosses.
+    ///
+    /// `render_fingerprint` presses the sustain pedal once, before the
+    /// first note, and then only strikes -- so it says nothing about the
+    /// ORDER of a pedal against a strike inside one frame. That order is a
+    /// real dependency: a strike reads `self.pedal`, because the
+    /// sympathetic shadow it places is sustained by it. Moving the pedal
+    /// across the coordinator/unit boundary can reorder exactly that and
+    /// leave the plain fingerprint unmoved.
+    ///
+    /// So this one puts a continuous CC64, a CC66 and an all-notes-off in
+    /// the SAME frames as the strikes and the releases, which is what a
+    /// pedalled performance does: the pedal moves under the hands, not
+    /// between them.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release render_fingerprint_pedals -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn render_fingerprint_pedals() {
+        const FRAMES: usize = 128;
+        fn step(state: &mut u32) -> u32 {
+            *state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *state >> 16
+        }
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut state: u32 = 0x1234_5678;
+        let mut sounding = [0u8; 8];
+        for block in 0..300u32 {
+            let mut midi = std::vec::Vec::new();
+            let note = 33 + (step(&mut state) % 52) as u8;
+            // Frame zero: the pedal at a level, a note under it, and twice
+            // in the run everything lifted -- all in one frame.
+            midi.push(MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, (step(&mut state) % 128) as u8],
+                length: 3,
+            });
+            midi.push(MidiEvent {
+                frame: 0,
+                data: [0x90, note, 64 + (step(&mut state) % 63) as u8],
+                length: 3,
+            });
+            if block == 150 || block == 275 {
+                midi.push(MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 123, 0],
+                    length: 3,
+                });
+            }
+            // Frame forty: a key let go with a measured velocity, another
+            // struck, and the sostenuto rod moving against both.
+            let older = sounding[(block % 8) as usize];
+            if older != 0 {
+                midi.push(MidiEvent {
+                    frame: 40,
+                    data: [0x80, older, (step(&mut state) % 128) as u8],
+                    length: 3,
+                });
+            }
+            sounding[(block % 8) as usize] = note;
+            midi.push(MidiEvent {
+                frame: 40,
+                data: [0x90, note.saturating_add(12), 80],
+                length: 3,
+            });
+            if block % 37 == 0 {
+                midi.push(MidiEvent {
+                    frame: 40,
+                    data: [0xB0, 66, if block % 74 == 0 { 127 } else { 0 }],
+                    length: 3,
+                });
+            }
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            for sample in &output {
+                hash ^= sample.to_bits() as u64;
+                hash = hash.wrapping_mul(0x100_0000_01b3);
+            }
+        }
+        std::println!("huella con pedales: {hash:#018x}");
+    }
+
     /// Renders a script and returns the left channel.
     #[cfg(test)]
     fn render_script(delay: usize, chord: &[u8], blocks: usize) -> std::vec::Vec<f32> {

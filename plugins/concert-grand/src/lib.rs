@@ -3559,10 +3559,11 @@ const RENDER_SPAN: usize = 128;
 
 /// The most per-voice records one frame can carry across all four sections.
 ///
-/// A broadcast record lands in every section, so one release is four of
-/// these. Thirty-two is a chord and a release in the same frame with room
-/// left over.
-const MAX_VOICE_WORK_PER_FRAME: usize = 32;
+/// A broadcast record lands in every section, so one release, one pedal
+/// motion, one sostenuto and one all-notes-off are four of these each.
+/// Sixty-four is what a section's block can hold at all, so a frame can
+/// never be the thing that drops work.
+const MAX_VOICE_WORK_PER_FRAME: usize = 64;
 /// Dispatch bytes per section per block. A record is sixteen bytes behind a
 /// four-byte header, so this is sixty-four of them.
 const VOICE_WORK_BYTES: usize = 1_280;
@@ -3587,6 +3588,11 @@ struct VoiceRecord {
     note: u8,
     /// A release velocity plus one, so zero can mean "not measured".
     release: u8,
+    /// The coordinator-side state this work depends on, which a unit cannot
+    /// read for itself once the two are different instances -- and which,
+    /// even in one instance, a later event in the same frame may already
+    /// have moved by the time the work runs.
+    flags: u8,
     velocity: f32,
     serial: u32,
 }
@@ -3594,6 +3600,21 @@ struct VoiceRecord {
 impl VoiceRecord {
     const STRIKE: u8 = 0;
     const RELEASE: u8 = 1;
+    const PEDAL: u8 = 2;
+    const SOSTENUTO: u8 = 3;
+    const ALL_OFF: u8 = 4;
+
+    /// The sustain pedal is down. A strike carries it because the
+    /// sympathetic halo it places is sustained by it; a sostenuto release
+    /// carries it because a caught note falls into whatever CC64 is doing.
+    const FLAG_PEDAL: u8 = 1 << 0;
+    /// The rail is coming UP this event, so the felts still travelling are
+    /// caught. `PEDAL` only.
+    const FLAG_RAIL_LIFTED: u8 = 1 << 1;
+    /// The sostenuto rod is down: for `PEDAL`, the notes it holds are not
+    /// the sustain pedal's to damp; for `SOSTENUTO`, it is the transition.
+    const FLAG_SOSTENUTO: u8 = 1 << 2;
+
     const EMPTY: Self = Self {
         kind: Self::STRIKE,
         seq: 0,
@@ -3601,9 +3622,14 @@ impl VoiceRecord {
         channel: 0,
         note: 0,
         release: 0,
+        flags: 0,
         velocity: 0.0,
         serial: 0,
     };
+
+    fn has(self, flag: u8) -> bool {
+        self.flags & flag != 0
+    }
 
     fn to_bytes(self) -> [u8; 16] {
         let mut bytes = [0u8; 16];
@@ -3613,6 +3639,7 @@ impl VoiceRecord {
         bytes[3] = self.channel;
         bytes[4] = self.note;
         bytes[5] = self.release;
+        bytes[6] = self.flags;
         bytes[8..12].copy_from_slice(&self.velocity.to_le_bytes());
         bytes[12..16].copy_from_slice(&self.serial.to_le_bytes());
         bytes
@@ -3629,6 +3656,7 @@ impl VoiceRecord {
             channel: bytes[3],
             note: bytes[4],
             release: bytes[5],
+            flags: bytes[6],
             velocity: f32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             serial: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
         })
@@ -3665,6 +3693,12 @@ impl Default for StringSection {
 ///
 /// The RENDER loop is a different matter and keeps slot order, because it
 /// sums into shared accumulators and the float order is the fingerprint.
+/// The slots one section owns, in the order it owns them.
+fn section_slots(section: usize) -> impl Iterator<Item = usize> {
+    debug_assert!(section < STRING_SECTIONS, "seccion fuera de rango");
+    (0..VOICES_PER_SECTION).map(move |index| (index << SECTION_SHIFT) | section)
+}
+
 fn section_major_slots() -> impl Iterator<Item = usize> {
     (0..STRING_SECTIONS).flat_map(|section| {
         (0..VOICES_PER_SECTION).map(move |index| (index << SECTION_SHIFT) | section)
@@ -7623,6 +7657,7 @@ impl ConcertGrand {
                 slot: slot as u8,
                 channel,
                 note,
+                flags: if self.pedal { VoiceRecord::FLAG_PEDAL } else { 0 },
                 velocity,
                 ..VoiceRecord::EMPTY
             },
@@ -7643,6 +7678,11 @@ impl ConcertGrand {
         let mut work = UnitWork::resume(&mut self.voice_work[section], written);
         if work.push(frame, &record.to_bytes()) {
             self.voice_work_len[section] = work.written();
+        } else {
+            // A full block's work: the note is lost rather than late, which
+            // is the right trade in a render thread and the wrong thing to
+            // discover in the dark.
+            debug_assert!(false, "el trabajo por voz de un bloque se lleno");
         }
     }
 
@@ -7701,12 +7741,36 @@ impl ConcertGrand {
                         record.note,
                         record.velocity,
                         record.slot as usize,
+                        record.has(VoiceRecord::FLAG_PEDAL),
                     );
                 }
                 VoiceRecord::RELEASE => {
                     let release = (record.release > 0).then(|| record.release - 1);
-                    self.release_voices(section, record.channel, record.note, release, record.serial);
+                    self.release_voices(
+                        section,
+                        record.channel,
+                        record.note,
+                        release,
+                        record.serial,
+                        record.has(VoiceRecord::FLAG_PEDAL),
+                        record.has(VoiceRecord::FLAG_SOSTENUTO),
+                        record.velocity,
+                    );
                 }
+                VoiceRecord::PEDAL => self.pedal_voices(
+                    section,
+                    record.velocity,
+                    record.has(VoiceRecord::FLAG_RAIL_LIFTED),
+                    record.has(VoiceRecord::FLAG_SOSTENUTO),
+                    record.serial,
+                ),
+                VoiceRecord::SOSTENUTO => self.sostenuto_voices(
+                    section,
+                    record.has(VoiceRecord::FLAG_SOSTENUTO),
+                    record.has(VoiceRecord::FLAG_PEDAL),
+                    record.velocity,
+                ),
+                VoiceRecord::ALL_OFF => self.all_notes_off_voices(section),
                 _ => debug_assert!(false, "clase de trabajo desconocida"),
             }
         }
@@ -7720,7 +7784,14 @@ impl ConcertGrand {
     /// `slot` decides the section, and the section decides which worker does
     /// this work: the recipe, the contact integration and the ladder are
     /// 42-47 %, 37 % and the rest of a note-on, and all of it happens here.
-    fn start_voice_unit(&mut self, channel: u8, note: u8, velocity: f32, slot: usize) {
+    fn start_voice_unit(
+        &mut self,
+        channel: u8,
+        note: u8,
+        velocity: f32,
+        slot: usize,
+        pedal: bool,
+    ) {
         #[cfg(test)]
         let mut mark = std::time::Instant::now();
         let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
@@ -9348,7 +9419,7 @@ impl ConcertGrand {
         // own few cents (many strings, none exactly aligned), single-stage
         // slow decay, released by the pedal like any sustained string.
         phase!(4, mark);
-        if self.pedal && placed > 0 {
+        if pedal && placed > 0 {
             let halo_count = placed.min(24);
             // Twenty-four, which is every entry the loop below can reach --
             // `halo_count` is `placed.min(24)`. It was MAX_PARTIALS, so each
@@ -9697,11 +9768,20 @@ impl ConcertGrand {
         // Every section hears it. Which of them carries this note is a
         // thing only a unit knows about its own voices, so the matching
         // happens there and the coordinator only says what happened.
+        let mut flags = 0;
+        if self.pedal {
+            flags |= VoiceRecord::FLAG_PEDAL;
+        }
+        if self.sostenuto {
+            flags |= VoiceRecord::FLAG_SOSTENUTO;
+        }
         self.broadcast_voice_work(VoiceRecord {
             kind: VoiceRecord::RELEASE,
             channel,
             note,
             release: release.map_or(0, |velocity| velocity.saturating_add(1)),
+            flags,
+            velocity: self.pedal_pressure,
             serial: self.damp_serial,
             ..VoiceRecord::EMPTY
         });
@@ -9721,6 +9801,9 @@ impl ConcertGrand {
         note: u8,
         release: Option<u8>,
         serial: u32,
+        pedal: bool,
+        sostenuto: bool,
+        pressure: f32,
     ) {
         let firmness = Self::damper_firmness(serial, note);
         // With a measured return the random landing becomes a residual: the
@@ -9738,7 +9821,6 @@ impl ConcertGrand {
         let damper = self.damper_factor(note, firmness, span);
         let (thud_coefficient, thud_decay) = self.damper_thud();
         let release_gain = Controls::noise_gain(self.controls.release_noise) * firmness * knock;
-        let pressure = self.pedal_pressure;
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
         let key_off = KEYOFF_KNOCK * release_gain;
@@ -9747,7 +9829,7 @@ impl ConcertGrand {
         let key_off_seed = serial
             .wrapping_mul(0x9E37_79B9)
             .wrapping_add((note as u32).wrapping_mul(2_654_435_761));
-        for slot in (0..VOICES_PER_SECTION).map(|index| (index << SECTION_SHIFT) | section) {
+        for slot in section_slots(section) {
             let voice = &mut voice_at!(self, slot);
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
                 voice.key_off_knock(key_off, key_off_decay, key_off_rise, key_off_seed, rate);
@@ -9761,13 +9843,13 @@ impl ConcertGrand {
                     voice.damper_applied = 0.0;
                     continue;
                 }
-                if self.sostenuto && voice.sostenuto {
+                if sostenuto && voice.sostenuto {
                     // The sostenuto rod holds THIS damper clear, whatever
                     // the sustain pedal does.
                     voice.held = false;
                     voice.sustained = true;
                     voice.damper_applied = 0.0;
-                } else if self.pedal {
+                } else if pedal {
                     // Released into a partially lifted rail: the felt takes
                     // the string with whatever weight the pedal leaves it.
                     voice.held = false;
@@ -9822,26 +9904,8 @@ impl ConcertGrand {
         let rail_lifted = down && !self.pedal;
         self.pedal = down;
         self.pedal_pressure = pressure;
-        let (thud_coefficient, thud_decay) = self.damper_thud();
-        let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
-        if rail_lifted {
-            // The rail coming up catches every felt still on its way down:
-            // that string is sustained from here, its press relieved through
-            // the same damper it was made with.
-            for slot in section_major_slots() {
-            let voice = &mut voice_at!(self, slot);
-                if voice.active && voice.damper_phase != 0 {
-                    voice.cancel_damper();
-                    voice.held = false;
-                    voice.sustained = true;
-                    voice.damper_applied = pressure;
-                    let own = voice.damper_own;
-                    voice.press_damper(own, pressure);
-                }
-            }
-        }
         if !down {
             // The rail coming down seats the silent strings whose keys
             // are already up.
@@ -9856,13 +9920,62 @@ impl ConcertGrand {
         // string. Sharing a single factor across the rail was audible as a
         // chord ending like a gate rather than like felt.
         self.damp_serial = self.damp_serial.wrapping_add(1);
-        let serial = self.damp_serial;
-        for slot in section_major_slots() {
+        let mut flags = 0;
+        if rail_lifted {
+            flags |= VoiceRecord::FLAG_RAIL_LIFTED;
+        }
+        if self.sostenuto {
+            flags |= VoiceRecord::FLAG_SOSTENUTO;
+        }
+        self.broadcast_voice_work(VoiceRecord {
+            kind: VoiceRecord::PEDAL,
+            flags,
+            velocity: pressure,
+            serial: self.damp_serial,
+            ..VoiceRecord::EMPTY
+        });
+    }
+
+    /// The voice half of a pedal motion, for one section's voices.
+    ///
+    /// Two loops, because the rail does two things at once: coming up it
+    /// catches the felts still travelling, and at any position it presses
+    /// or relieves the ones already down. Both are per-voice arithmetic on
+    /// state the voice carries, so a section can do its own.
+    fn pedal_voices(
+        &mut self,
+        section: usize,
+        pressure: f32,
+        rail_lifted: bool,
+        sostenuto: bool,
+        serial: u32,
+    ) {
+        let (thud_coefficient, thud_decay) = self.damper_thud();
+        let release_gain = Controls::noise_gain(self.controls.release_noise);
+        let rate = self.sample_rate;
+        let grip = self.controls.damper_grip();
+        if rail_lifted {
+            // The rail coming up catches every felt still on its way down:
+            // that string is sustained from here, its press relieved through
+            // the same damper it was made with.
+            for slot in section_slots(section) {
+                let voice = &mut voice_at!(self, slot);
+                if voice.active && voice.damper_phase != 0 {
+                    voice.cancel_damper();
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = pressure;
+                    let own = voice.damper_own;
+                    voice.press_damper(own, pressure);
+                }
+            }
+        }
+        for slot in section_slots(section) {
             let voice = &mut voice_at!(self, slot);
             if !(voice.active && voice.sustained) || voice.undamped {
                 continue;
             }
-            if self.sostenuto && voice.sostenuto {
+            if sostenuto && voice.sostenuto {
                 continue;
             }
             // The voice's own damper, not one drawn per pedal event. Drawn
@@ -9907,9 +10020,26 @@ impl ConcertGrand {
         self.sostenuto = down;
         let knock = 0.0025 * Controls::noise_gain(self.controls.pedal_noise);
         self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
+        let mut flags = 0;
         if down {
-            for slot in section_major_slots() {
-            let voice = &mut voice_at!(self, slot);
+            flags |= VoiceRecord::FLAG_SOSTENUTO;
+        }
+        if self.pedal {
+            flags |= VoiceRecord::FLAG_PEDAL;
+        }
+        self.broadcast_voice_work(VoiceRecord {
+            kind: VoiceRecord::SOSTENUTO,
+            flags,
+            velocity: self.pedal_pressure,
+            ..VoiceRecord::EMPTY
+        });
+    }
+
+    /// The voice half of the sostenuto rod, for one section's voices.
+    fn sostenuto_voices(&mut self, section: usize, down: bool, pedal: bool, pressure: f32) {
+        if down {
+            for slot in section_slots(section) {
+                let voice = &mut voice_at!(self, slot);
                 if voice.active && voice.held {
                     voice.sostenuto = true;
                 }
@@ -9922,8 +10052,7 @@ impl ConcertGrand {
         let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
-        let pressure = self.pedal_pressure;
-        for slot in section_major_slots() {
+        for slot in section_slots(section) {
             let voice = &mut voice_at!(self, slot);
             if !(voice.active && voice.sostenuto) {
                 continue;
@@ -9932,7 +10061,7 @@ impl ConcertGrand {
             if voice.held || !voice.sustained || voice.undamped {
                 continue;
             }
-            if self.pedal && pressure < 0.98 {
+            if pedal && pressure < 0.98 {
                 let damper = Self::damper_for(voice.note, rate, grip, 1.0);
                 voice.press_damper(damper, pressure - voice.damper_applied);
                 voice.damper_applied = pressure;
@@ -9945,17 +10074,12 @@ impl ConcertGrand {
     }
 
     fn all_notes_off(&mut self) {
-        let (thud_coefficient, thud_decay) = self.damper_thud();
-        let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
-        for slot in section_major_slots() {
-            let voice = &mut voice_at!(self, slot);
-            if voice.active {
-                let damper = Self::damper_for(voice.note, rate, grip, 1.0);
-                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
-            }
-        }
+        self.broadcast_voice_work(VoiceRecord {
+            kind: VoiceRecord::ALL_OFF,
+            ..VoiceRecord::EMPTY
+        });
         self.key_down = [false; NOTE_COUNT];
         for slot in 0..SILENT_SLOTS {
             if self.silent_state[slot] != SILENT_FREE {
@@ -9964,6 +10088,21 @@ impl ConcertGrand {
             }
         }
         self.pedal = false;
+    }
+
+    /// The voice half of an all-notes-off, for one section's voices.
+    fn all_notes_off_voices(&mut self, section: usize) {
+        let (thud_coefficient, thud_decay) = self.damper_thud();
+        let release_gain = Controls::noise_gain(self.controls.release_noise);
+        let rate = self.sample_rate;
+        let grip = self.controls.damper_grip();
+        for slot in section_slots(section) {
+            let voice = &mut voice_at!(self, slot);
+            if voice.active {
+                let damper = Self::damper_for(voice.note, rate, grip, 1.0);
+                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+            }
+        }
     }
 
     fn handle_midi(&mut self, event: &MidiEvent) {
@@ -17103,37 +17242,18 @@ mod bench {
         std::println!("huella del render: {hash:#018x}");
     }
 
-    /// The same idea, for the frames the plain fingerprint never crosses.
+    /// The pedalled script, built once and played by three tests.
     ///
-    /// `render_fingerprint` presses the sustain pedal once, before the
-    /// first note, and then only strikes -- so it says nothing about the
-    /// ORDER of a pedal against a strike inside one frame. That order is a
-    /// real dependency: a strike reads `self.pedal`, because the
-    /// sympathetic shadow it places is sustained by it. Moving the pedal
-    /// across the coordinator/unit boundary can reorder exactly that and
-    /// leave the plain fingerprint unmoved.
-    ///
-    /// So this one puts a continuous CC64, a CC66 and an all-notes-off in
-    /// the SAME frames as the strikes and the releases, which is what a
-    /// pedalled performance does: the pedal moves under the hands, not
-    /// between them.
-    ///
-    /// `cargo test -p rackforge-concert-grand --release render_fingerprint_pedals -- --ignored --nocapture`
-    #[test]
-    #[ignore]
-    fn render_fingerprint_pedals() {
-        const FRAMES: usize = 128;
+    /// Deterministic: the same events every run, on any machine.
+    fn pedal_script(blocks: u32) -> std::vec::Vec<std::vec::Vec<MidiEvent>> {
         fn step(state: &mut u32) -> u32 {
             *state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             *state >> 16
         }
-        let mut piano = Box::new(ConcertGrand::default());
-        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
-        let mut output = vec![0.0f32; FRAMES * 2];
-        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         let mut state: u32 = 0x1234_5678;
         let mut sounding = [0u8; 8];
-        for block in 0..300u32 {
+        let mut script = std::vec::Vec::with_capacity(blocks as usize);
+        for block in 0..blocks {
             let mut midi = std::vec::Vec::new();
             let note = 33 + (step(&mut state) % 52) as u8;
             // Frame zero: the pedal at a level, a note under it, and twice
@@ -17178,13 +17298,114 @@ mod bench {
                     length: 3,
                 });
             }
+            script.push(midi);
+        }
+        script
+    }
+
+    /// Plays the pedalled script and returns the left channel.
+    fn play_pedal_script(blocks: u32) -> std::vec::Vec<f32> {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let mut captured = std::vec::Vec::with_capacity(blocks as usize * FRAMES);
+        for midi in pedal_script(blocks) {
             piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
-            for sample in &output {
-                hash ^= sample.to_bits() as u64;
-                hash = hash.wrapping_mul(0x100_0000_01b3);
-            }
+            captured.extend(output.chunks(2).map(|frame| frame[0]));
+        }
+        captured
+    }
+
+    /// The same idea as `render_fingerprint`, for the frames it never crosses.
+    ///
+    /// `render_fingerprint` presses the sustain pedal once, before the
+    /// first note, and then only strikes -- so it says nothing about the
+    /// ORDER of a pedal against a strike inside one frame. That order is a
+    /// real dependency: a strike reads `self.pedal`, because the
+    /// sympathetic halo it places is sustained by it, and a release reads
+    /// the pedal, its pressure and the sostenuto rod. Moving any of them
+    /// across the coordinator/unit boundary can reorder exactly that and
+    /// leave the plain fingerprint unmoved -- which is what happened twice
+    /// before this test existed.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release render_fingerprint_pedals -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn render_fingerprint_pedals() {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for sample in play_pedal_script(300) {
+            hash ^= sample.to_bits() as u64;
+            hash = hash.wrapping_mul(0x100_0000_01b3);
         }
         std::println!("huella con pedales: {hash:#018x}");
+    }
+
+    /// Writes the pedalled script's audio, to compare two builds sample by
+    /// sample rather than by one number -- a hash says THAT two builds
+    /// differ, this says WHERE, and the where names the event.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release pedal_capture -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn pedal_capture() {
+        let captured = play_pedal_script(300);
+        let mut bytes = std::vec::Vec::with_capacity(captured.len() * 4);
+        for sample in &captured {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        std::fs::write("./pedales-128.f32", &bytes).expect("escribir la captura");
+        std::println!("escrito ./pedales-128.f32: {} muestras", captured.len());
+    }
+
+    /// `cargo test -p rackforge-concert-grand --release pedal_compare -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn pedal_compare() {
+        const FRAMES: usize = 128;
+        let raw = std::fs::read("./pedales-128.f32").expect("primero corre pedal_capture");
+        let reference: std::vec::Vec<f32> = raw
+            .chunks_exact(4)
+            .map(|four| f32::from_le_bytes([four[0], four[1], four[2], four[3]]))
+            .collect();
+        let mine = play_pedal_script(300);
+        assert_eq!(reference.len(), mine.len(), "capturas de distinto largo");
+        let mut first: Option<usize> = None;
+        let mut worst = 0.0f32;
+        let mut worst_at = 0usize;
+        for (at, (want, got)) in reference.iter().zip(mine.iter()).enumerate() {
+            let error = (want - got).abs();
+            if error > 0.0 && first.is_none() {
+                first = Some(at);
+            }
+            if error > worst {
+                worst = error;
+                worst_at = at;
+            }
+        }
+        let peak = reference.iter().fold(0.0f32, |a, b| a.max(b.abs()));
+        let db = |value: f32| if value > 0.0 { 20.0 * (value / peak).log10() } else { -240.0 };
+        match first {
+            None => std::println!("identico a la captura"),
+            Some(at) => {
+                let block = at / FRAMES;
+                std::println!(
+                    "primera diferencia: muestra {at} (bloque {block}, cuadro {} del bloque)",
+                    at % FRAMES
+                );
+                for event in &pedal_script(300)[block] {
+                    std::println!(
+                        "  evento en el cuadro {}: {:02x} {} {}",
+                        event.frame, event.data[0], event.data[1], event.data[2]
+                    );
+                }
+            }
+        }
+        std::println!(
+            "peor {:.1} dB bajo el pico, en la muestra {worst_at} (bloque {})",
+            db(worst),
+            worst_at / FRAMES
+        );
     }
 
     /// Renders a script and returns the left channel.

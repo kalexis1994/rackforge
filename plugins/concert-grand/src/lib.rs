@@ -3760,7 +3760,12 @@ struct VoiceSummary {
     ringing_free: bool,
 }
 
-/// One section's voices: what a `parallel_render_v1` unit owns.
+/// One section's voices and everything else it owns.
+///
+/// This is `Self::Unit`: what a `parallel_render_v1` worker holds between
+/// blocks and what nothing else may touch. The engine travels with it
+/// because a unit is handed no `&self` and has to be able to answer its
+/// own questions about the instrument.
 ///
 /// A voice's section is its slot masked, so the eight slots a section holds
 /// are `section`, `section + 4`, `section + 8` ... This is the type that
@@ -3768,7 +3773,7 @@ struct VoiceSummary {
 /// than a bare array because the trait wants `Default` and because a unit is
 /// a thing, not an anonymous row.
 #[derive(Clone, Copy)]
-struct StringSection {
+struct StringUnit {
     voices: [Voice; VOICES_PER_SECTION],
     /// The sympathetic halo of each of this section's voices.
     ///
@@ -3781,13 +3786,27 @@ struct StringSection {
     /// twenty-four partials stops occupying room for a hundred and
     /// forty-four.
     halos: [Voice<HALO_PARTIALS>; HALOS_PER_SECTION],
+    /// Everything about the instrument a string needs. A copy per unit,
+    /// because in four instances there is no other way to have it.
+    engine: StringEngine,
+    /// How many partials this unit is carrying, and what it may spend this
+    /// block. Its own purse; see `share_the_budget`.
+    partials: usize,
+    allowance: usize,
+    /// Its own string sum from the previous frame, which is the half of the
+    /// sympathetic feed that is not a block old.
+    previous: f32,
 }
 
-impl Default for StringSection {
+impl Default for StringUnit {
     fn default() -> Self {
         Self {
             voices: [Voice::default(); VOICES_PER_SECTION],
             halos: [Voice::default(); HALOS_PER_SECTION],
+            engine: StringEngine::default(),
+            partials: 0,
+            allowance: PARTIAL_BUDGET / STRING_SECTIONS,
+            previous: 0.0,
         }
     }
 }
@@ -3802,11 +3821,6 @@ impl Default for StringSection {
 ///
 /// The RENDER loop is a different matter and keeps slot order, because it
 /// sums into shared accumulators and the float order is the fingerprint.
-/// The slots one section owns, in the order it owns them.
-fn section_slots(section: usize) -> impl Iterator<Item = usize> {
-    debug_assert!(section < STRING_SECTIONS, "seccion fuera de rango");
-    (0..VOICES_PER_SECTION).map(move |index| (index << SECTION_SHIFT) | section)
-}
 
 /// What the stages after the strings need to know about the frame they are
 /// rendering, captured where the events for that frame have just landed.
@@ -5191,7 +5205,7 @@ pub struct ConcertGrand {
     /// slots 0, 1, 2 ... in order, so the float summation order -- and the
     /// render fingerprint with it -- is unchanged. This moves bytes, not
     /// sound.
-    sections: [StringSection; STRING_SECTIONS],
+    sections: [StringUnit; STRING_SECTIONS],
     pedal: bool,
     /// Una corda (CC 67): the shifted hammer strikes two of the three
     /// strings, softer and darker, and the free third string feeds the
@@ -5206,26 +5220,12 @@ pub struct ConcertGrand {
     /// `>= 64` test threw every one of them away and snapped between nothing
     /// and everything at the halfway mark.
     soft: f32,
-    /// Live count of active partials, the budget the callback answers to.
-    /// How many partials each section is carrying, and therefore what is
-    /// left of its share of the budget.
-    ///
-    /// One number per section rather than one for the instrument, because
-    /// a `parallel_render_v1` unit cannot read a running total that
-    /// another unit is also adding to -- and a ladder is sized from what is
-    /// left, so this is read on the hot path of every note-on. Four
-    /// workers, four purses. The governor still sets one budget and still
-    /// reads one total; only the spending is divided.
-    section_partials: [usize; STRING_SECTIONS],
-    /// What each section may spend this block. See `share_the_budget`.
-    section_allowance: [usize; STRING_SECTIONS],
     /// Each section's per-frame string sum for the last `MAX_SECTION_DELAY`
     /// frames, as a ring. Read by the sections that did not write it.
     section_history: [[f32; MAX_SECTION_DELAY]; STRING_SECTIONS],
     section_cursor: usize,
     /// The previous frame's sum, per section: what a section hears of itself,
     /// which is never delayed.
-    section_previous: [f32; STRING_SECTIONS],
     /// The bridge's drive points for the last `BOARD_FEED_HISTORY` frames,
     /// so `BOARD_FEED_DELAY` can hand the board a stale copy. Only written
     /// when that delay is non-zero, so the shipped path does not pay for it.
@@ -5470,14 +5470,11 @@ impl Default for ConcertGrand {
     fn default() -> Self {
         let mut piano = Self {
             engine: StringEngine::default(),
-            sections: [StringSection::default(); STRING_SECTIONS],
+            sections: [StringUnit::default(); STRING_SECTIONS],
             pedal: false,
             soft: 0.0,
-            section_partials: [0; STRING_SECTIONS],
-            section_allowance: [PARTIAL_BUDGET / STRING_SECTIONS; STRING_SECTIONS],
             section_history: [[0.0; MAX_SECTION_DELAY]; STRING_SECTIONS],
             section_cursor: 0,
-            section_previous: [0.0; STRING_SECTIONS],
             board_feed_history: [[0.0; BOARD_DRIVE_POINTS]; BOARD_FEED_HISTORY],
             bridge_feed_history: [0.0; BOARD_FEED_HISTORY],
             keybed_feed_history: [[0.0; 2]; BOARD_FEED_HISTORY],
@@ -6266,6 +6263,7 @@ fn simulate_strike(
 /// `ConcertGrand` would carry a soundboard and a room it never renders,
 /// and five of those is four and a half megabytes built by value on an
 /// eight megabyte stack -- which does not fit, twice over.
+#[derive(Clone, Copy)]
 struct StringEngine {
     /// Per-note calibration table: [anchor][param] multipliers.
     cal: [[f32; CAL_PARAMS]; 10],
@@ -7113,6 +7111,2067 @@ impl StringEngine {
     }
 }
 
+/// The slots a unit owns, as the unit numbers them.
+///
+/// A unit does not know which section it is, and does not need to: the
+/// section bits of a slot are its own, so shifting them away gives the
+/// index into its voices whether the slot came from this iterator or from
+/// a strike the coordinator addressed to it.
+fn unit_slots() -> impl Iterator<Item = usize> {
+    (0..VOICES_PER_SECTION).map(|index| index << SECTION_SHIFT)
+}
+
+/// One of a unit's voices, by the slot the coordinator calls it.
+macro_rules! unit_voice {
+    ($unit:expr, $slot:expr) => {
+        $unit.voices[$slot >> SECTION_SHIFT]
+    };
+}
+
+impl StringUnit {
+    /// The strike with its velocity already on the unit scale. Seven-bit
+    /// sources come through `start_voice` and land here at exactly the value
+    /// they always produced; a 16-bit velocity lands between those steps.
+    /// The strike, into a slot the coordinator already chose.
+    ///
+    /// `slot` decides the section, and the section decides which worker does
+    /// this work: the recipe, the contact integration and the ladder are
+    /// 42-47 %, 37 % and the rest of a note-on, and all of it happens here.
+    fn start_voice_unit(
+        &mut self,
+        channel: u8,
+        note: u8,
+        velocity: f32,
+        slot: usize,
+        pedal: bool,
+        soft: f32,
+        returned: f32,
+        serial: u32,
+    ) {
+        #[cfg(test)]
+        let mut mark = std::time::Instant::now();
+        let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
+
+        // Una corda: the shifted hammer meets the strings with softer felt
+        // (the unworn side) and strikes one string fewer.
+        // The left pedal, through whichever mechanism this instrument has.
+        //
+        // A grand's shift takes 22% of the blow because the felt it lands on
+        // is softer, and it takes strings away as well. An upright's rail only
+        // shortens the travel: the hammer accelerates over a shorter distance,
+        // so its speed goes as the square root of it, and a rail that brings a
+        // regulated ~46 mm blow down into the mid-thirties gives about 0.85.
+        // So an upright's pedal is WEAKER than a grand's and purely a level --
+        // which is the well-known disappointment of playing one after the
+        // other, and the thing a single mechanism could not say.
+        //
+        // The blow distances are regulation practice, not something measured
+        // here: 37 mm turns up among technicians as a shortened figure and
+        // ~46 mm as the regulated one. The mechanism is certain; the fraction
+        // is judgement, like the strike skew and the damper's spread.
+        let (velocity, shift, repetition, at_string) = self.engine.action_blow(velocity, soft, returned);
+        // The coordinator asked the same question of the same function
+        // before it took this slot, so a hammer that stops short cannot
+        // arrive here -- and if it ever did, it would be a silent note
+        // holding a voice, not a wrong sound.
+        debug_assert!(at_string > 0.0, "un martillo que no llega se quedo con una voz");
+        let (letoff, _) = self.engine.hammer_speeds_at(repetition, velocity);
+
+        // A RE-STRUCK STRING IS THE SAME STRING. If this note is still
+        // ringing free -- held, or sustained with its damper clear -- the
+        // hammer meets a wire already in motion, and the new blow ADDS to
+        // the modal state it finds: partials in phase with the strike grow,
+        // partials against it cancel, which is the flutter of a fast
+        // repetition and the shimmer of a tremolo. The old build damped the
+        // living voice over 250 ms and started a stranger next to it.
+        //
+        // A voice already under a damper (released, or half-pedalled) has
+        // had its decay rates scaled and cannot be honestly re-lifted, so
+        // those still take the legacy path: ease the dying voice out and
+        // strike fresh.
+        //
+        // A voice under a HALF pedal can be re-lifted now: since 0.170.1 it
+        // carries its own damper's firmness, so relieving what was pressed
+        // restores its free rates exactly -- which is what the key does, the
+        // damper rising with the key whatever the pedal is doing -- and
+        // then the blow merges as it would into a free string. It used to
+        // take the legacy path instead, and on the Op. 9 No. 2 file every
+        // repeated melody note under the moving pedal was an ease-out plus a
+        // stranger: two B-flats a few cents apart, beating in the first
+        // milliseconds -- heard as "un pequeño popeo" that the thud fix did
+        // not remove.
+        let mut restrike_target: Option<usize> = None;
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        // The coordinator already chose: it sends a re-struck note back to
+        // the string it is already on, and a fresh one to a slot it emptied.
+        // So this asks only about the slot it was given -- which is all a
+        // section could ask anyway, since the others are not its to read.
+        // It still ASKS, because the picture the choice was made from is a
+        // block old in one respect: a string may have been damped since.
+        {
+            let voice = &mut unit_voice!(self, slot);
+            if self.engine.restrike_merge
+                && voice.active
+                && voice.note == note
+                && voice.channel == channel
+                && (voice.held || voice.sustained)
+            {
+                // The felt is still bouncing on this string, and the
+                // hammer is about to reset every lane that has decayed
+                // to a fresh, undamped phasor. Whatever press is
+                // standing has to be relieved HERE, against the pole it
+                // was applied to -- and the bounce disarmed, so no later
+                // contact relieves a press that no longer stands.
+                voice.cancel_damper();
+                if voice.sustained && voice.damper_applied > 0.0 {
+                    let own = StringEngine::damper_for(note, rate, grip * voice.firmness, 1.0);
+                    voice.press_damper(own, -voice.damper_applied);
+                    voice.damper_applied = 0.0;
+                }
+                restrike_target = Some(slot);
+            }
+        }
+        let f0 = self.engine.fundamental[index];
+        let b = self.engine.inharmonicity[index];
+        let x0 = self.engine.strike_point(note);
+        let width = StringEngine::hammer_width(note);
+        let nyquist = 0.47 * self.engine.sample_rate;
+        // A piano's ladder is spent long before nyquist: past ~11 kHz the
+        // felt cliff has every partial on the noise floor, inaudible but
+        // still billing four oscillators a sample. Carrying it that far was
+        // most of why one note ate a quarter of the audio call's fuel.
+        let audible_top = nyquist.min(11_000.0);
+
+        // Felt low-pass. The cutoff scales with the reciprocal of the contact
+        // time; the constant is empirical — a strict 1/(2·t) reading of the
+        // pulse width lands far darker than measured piano spectra, because
+        // the felt hardens during contact. Floored above the fundamental so
+        // the shortest treble strings keep their first partial.
+        let position = index as f32 / (NOTE_COUNT - 1) as f32;
+        // Tension modulation: a hard blow stretches the string, starting the
+        // note sharp; the extra tension relaxes over ~250 ms. Strongest on
+        // the heavy bass strings (Askenfelt & Jansson report several cents).
+        // Kept small: at ~14 cents the settle reads as an oriental string's
+        // bend, not a piano's live blow. Measured piano glides are a few
+        // cents at most.
+        let glide_cents = if velocity > 0.6 {
+            11.5 * self.engine.controls.lab(10)
+                * velocity
+                * velocity
+                * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let f0 = f0 * powf(2.0, glide_cents / 1200.0);
+        let string_scale = powf(f0 / 220.0, 0.55).clamp(0.35, 1.8);
+        let treble_life = self.engine.cal(note, 8) * self.engine.controls.lab(1);
+        let contact = self.engine.contact_time(note, velocity);
+        // The contact as THIS program voices it: the Felt control scales
+        // the felt's cutoff, and a cutoff is one over a contact time, so a
+        // program with a softer felt (Mellow, the Bösendorfer) has its
+        // hammers on the string longer and a brighter one (Concert 308,
+        // the uprights) shorter. One knob, and each piano its own time.
+        let ramp_s = MERGE_RAMP_S.get()
+            + MERGE_RAMP_CONTACT.get() * contact / self.engine.controls.lab(0).max(0.05);
+        // The nonlinear forest keeps the bass ladder open far above what the
+        // soft bass hammer alone would give; the felt corner widens with it.
+        let bass_top = 1.0 + 2.2 * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0);
+        let cutoff = ((1.9 * self.engine.cal(note, 0) / contact)
+            * bass_top
+            * self.engine.controls.lab(0)
+            * (0.5 + 1.5 * self.engine.controls.brightness))
+            .max(StringEngine::felt_floor_ratio(position) * f0);
+
+        // Aftersound detune: a fraction of a cent in the bass, over a cent in
+        // the treble, scaled by the unison control.
+        // Unison detune, in cents. The bass end was 0.3, which at the default
+        // unison setting is 0.43 cents -- against a measured 2.9 on the YDP
+        // A0, whose 2-4 kHz partials split into clusters about 5 Hz wide.
+        //
+        // It sits at 0.9 rather than the measured width because the two are
+        // in tension and the tension is worth stating. Widening it walks the
+        // fit cost the wrong way (19.59 at 0.3, 19.91 here, 20.45 at 1.5)
+        // while walking the DENSITY the right way (24, 36 and 41 audible
+        // peaks in A0's 2-4 kHz against the instrument's 82). The fit cost
+        // scores band levels inside windows and cannot see whether a band's
+        // energy sits in 24 components or 82; it also reads the beating as
+        // decay error. Where the two disagree this far, neither should be
+        // followed alone.
+        // No two unisons on a real piano are tuned equally well, and no two
+        // strings carry equal losses: the tuner's precision, the damper's
+        // seat and the termination's grip all vary note to note. Measured on
+        // the reference, the early T60 across one bass octave swings from
+        // 9.2 s to 20.7 s -- adjacent semitones 2.25x apart -- while this
+        // model ran a uniform +/-7%. Two hashed per-note factors carry that
+        // fingerprint: the unison's tuning precision (through which the
+        // decay unevenness partly EMERGES -- a wider unison dephases sooner,
+        // traps its energy, and sings; a just one stays coherent and drains)
+        // and a modest spread in the string's own losses.
+        let unison_precision = 0.5 + 1.0 * hash01((note as u32).wrapping_mul(2_654_435_761) ^ 0x51);
+        let string_life = 0.88 + 0.24 * hash01((note as u32).wrapping_mul(2_246_822_519) ^ 0xA7);
+        // Measured (2026-09-02) against both references: at the old width
+        // the unisons dephased inside the first third of a second and the
+        // tenor's and treble's early decays ran two to three times slower
+        // than the references' (the energy escaped the bridge's drain before
+        // the drain had done its work); at half the width the early decays
+        // land on them, and the late ones hold. Kirk's tuners preferred one
+        // to two cents; this is a cent and a bit through the middle.
+        // The top octave's unison is tuned clean. Measured (2026-09-07,
+        // Salamander C7, D#7, C8 at four velocities, the fundamental's
+        // envelope in 0.1 s windows): the reference decays monotonically,
+        // ten decibels in the first 50 ms and then two slopes; the model's
+        // top notes fell twenty in 100 ms, came BACK five to eight by 0.3 s
+        // and fell again -- a beat near the 2 Hz cap, a wobble on every top
+        // note and, under the pedal, on all of them at once. With the width
+        // at zero the envelope is monotone and within three decibels of the
+        // reference to half a second; at 0.05 a slower beat appears at 1 s.
+        // The taper follows `top_octave`.
+        let detune_cents = UNISON_WIDTH.get()
+            * (0.9 + 0.9 * position)
+            * (1.0 - StringEngine::top_octave(position))
+            * (self.engine.controls.unison * 2.86)
+            * self.engine.controls.lab(13)
+            * unison_precision;
+        // A tuner hears beats, not cents: the same three cents that pass
+        // unnoticed on a C2 beat twenty times a second on a C7's second
+        // partial, and that is the chirp the user heard on the high notes
+        // ("como si la cuerda trasteara"). The unison is therefore capped by
+        // the beat rate it may leave at the fundamental, which a tuner in
+        // the treble brings down to a couple of hertz; in the tenor and the
+        // bass the cap is above the law and changes nothing.
+        let beat_cap_cents = UNISON_BEAT_CAP_HZ.get() * 1731.0 / f0.max(1.0);
+        let detune_cents = detune_cents.min(beat_cap_cents);
+
+        // First pass: partial frequencies and unnormalised amplitudes. The
+        // comb keeps the sign of sin(n·π·x0): a struck string's partials
+        // alternate polarity around each node, and discarding that alternation
+        // is part of what makes additive attacks sound synthetic. On top, a
+        // deterministic ±1.5 dB irregularity stands in for the bridge
+        // admittance the smooth 1/n law ignores — real piano spectra are
+        // ragged, and the raggedness is fixed per note, not random per strike.
+        let mut frequencies = [0.0_f32; MAX_PARTIALS];
+        let mut amplitudes = [0.0_f32; MAX_PARTIALS];
+        // Board/radiation/winding colour per partial, and the attack phase
+        // states the hammer simulation leaves behind ((q, v/w) unit vector).
+        let mut colour = [0.0_f32; MAX_PARTIALS];
+        let mut phase_q = [0.0_f32; MAX_PARTIALS];
+        let mut phase_o = [1.0_f32; MAX_PARTIALS];
+        let mut count = 0;
+        let mut peak = 0.0_f32;
+        for n in 1..=MAX_PARTIALS {
+            let nf = n as f32;
+            // Wound strings deviate from Fletcher's formula in the high
+            // partials (the winding is not part of the ideal stiff core);
+            // the drift grows with n and roughens the bass ladder's texture.
+            let winding = 1.0
+                + ((0.35 - position) / 0.35).clamp(0.0, 1.0)
+                    * 0.0012
+                    * (nf / 40.0)
+                    * (hash01((note as u32) << 11 | (n as u32) << 4 | 9) - 0.5);
+            let frequency = nf * f0 * sqrtf(1.0 + b * nf * nf) * winding;
+            if frequency >= audible_top {
+                break;
+            }
+            let (ideal_comb, _) = sincosf(core::f32::consts::PI * nf * x0);
+            // The strike-point comb, floored, because the bridge is not a
+            // rigid node. It has finite admittance -- that is the whole
+            // reason the instrument makes any sound at all -- so the mode
+            // shapes are not exact sines with a perfect node at the
+            // termination, and the comb never reaches a true null. Measured
+            // combs in real pianos are dips of 10-20 dB.
+            //
+            // In the bass the strike point is almost exactly 1/8, so an ideal
+            // comb is exactly periodic and deletes every eighth partial
+            // outright. Those are partials the model has already computed and
+            // already pays for: A0 places 38 between 2 and 4 kHz and only 19
+            // survive to be audible, while the real instrument has 66 audible
+            // things in that band -- its densest, and the growl of a concert
+            // grand's bottom octave.
+            let comb = if ideal_comb < 0.0 { -1.0 } else { 1.0 }
+                * sqrtf(
+                    ideal_comb * ideal_comb
+                        + comb_floor_at(n, COMB_FLOOR.get()) * comb_floor_at(n, COMB_FLOOR.get()),
+                );
+            // Finite contact width. The felt's force distribution is smooth,
+            // so its transform is a Gaussian-like rolloff with no nulls — a
+            // sinc (the rectangle's transform) put its first null at partial
+            // ~33 on A0 and erased the top three octaves of the bass ladder.
+            // Hard blows compress the felt and narrow the contact: the
+            // window widens the spectrum with velocity.
+            let effective = width * (1.05 - 0.45 * velocity);
+            let argument = nf * effective;
+            let window = expf(-1.2 * argument * argument);
+            // Gaussian felt. The measured sustained spectrum falls off a
+            // cliff (C4 ff: partial 9 at -12 dB, partial 11 at -45) — the
+            // transform of the felt's smooth force pulse, super-polynomial
+            // past the corner. The band energy above the cliff is the
+            // attack transient's (noise, clang, phantoms), not the sustained
+            // ladder's: a ladder that sustains up there is a guitar. An
+            // earlier revision conflated those two measurements.
+            let felt_r = frequency / cutoff;
+            // Cliff, then floor: past the felt cliff the measured spectrum
+            // does not vanish — it sits on a ragged −30…−45 dB shelf out to
+            // 8 kHz, the sustained nonlinear forest, growing as the square
+            // of velocity. A cliff to silence sounds hollowed out.
+            let floor = 0.0455 * velocity * velocity * self.engine.controls.lab(6) * self.engine.cal(note, 1);
+            let felt = expf(-1.2 * felt_r * felt_r).max(floor);
+            // The board barely radiates below its first mode: the lowest
+            // notes' fundamentals (and even second partials) come out tens of
+            // dB down, and the ear reconstructs the pitch from the partial
+            // ladder. Radiating them at full strength is a synthesizer's
+            // sub bass, not a piano's. Sixth-order: the YDP measurements show
+            // -40 dB at 27.5 Hz against ~0 dB by 78 Hz.
+            // The string's own amplitudes carry no board colour: what the
+            // board does to them happens once, in the bank that radiates
+            // them, not twice.
+            let rough = 1.0;
+            colour[count] = rough;
+            // Bridge force, not string displacement: the ear hears the force
+            // the string exerts on the bridge, proportional to the string's
+            // slope at its termination. Modal displacement after a strike
+            // falls as sin(n·π·x0)/n, but the slope multiplies each mode by
+            // n — the factors cancel, so the radiated spectrum is the comb
+            // times the felt filter, with no 1/n law. The 1/n version is a
+            // Rhodes: fundamental-heavy, partials 5–30 missing in action.
+            let amplitude = comb * window * felt * rough;
+            frequencies[count] = frequency;
+            amplitudes[count] = amplitude;
+            peak = peak.max(amplitude.abs());
+            count += 1;
+        }
+        phase!(0, mark);
+        if count == 0 || peak <= 0.0 {
+            return;
+        }
+
+        // The hammer as an event, not a formula: integrate the nonlinear
+        // felt against the returning waves and keep each mode's amplitude
+        // AND phase wherever the simulation speaks louder than the
+        // calibrated floor. Comb, contact width and felt filtering are
+        // emergent in it; radiation and board colour still apply.
+        {
+            let mut sim_modes = 0;
+            // Above ~8 kHz a mode contributes almost nothing to the contact
+            // shape, and the strike runs on the audio thread: modes past it
+            // keep the calibrated recipe's amplitude instead.
+            while sim_modes < SIM_MODES.min(count)
+                && frequencies[sim_modes] < SIM_TOP_HZ.get().min(0.9 * nyquist)
+            {
+                sim_modes += 1;
+            }
+            // Four simulated modes or the recipe. Above G#6 a note has fewer
+            // than four partials under SIM_TOP_HZ, so the top octave and a
+            // half is drawn, not struck. Simulating whatever a note has was
+            // tried against the reference (2026-09-07, `trebsim` against
+            // `span12`): the treble came out 0.2 points WORSE, its pianissimo
+            // second partial at -18 dB under the first either way where the
+            // reference has -29 -- the integration's own pianissimo at the
+            // top is as bright as its fortissimo (C6 contact 1.40 ms pp,
+            // 1.08 ms ff; the reference's ladder wants about two to one), so
+            // the strike and the recipe are wrong in the same place, and the
+            // recipe is cheaper. The treble's hammer is the open item, not
+            // this gate.
+            phase!(1, mark);
+            if sim_modes >= SIM_MIN_MODES.get().max(1.0) as usize && self.engine.strike_budget > 0 {
+                self.engine.strike_budget -= 1;
+                // Everything the contact needs, in physical units.
+                //
+                // The old block derived the stiffness FROM the desired
+                // contact time (K = m*(pi/contact)^2*34) and then cut the
+                // integration at that same time -- circular, so the contact
+                // could never emerge and the Dynamics control had to swing it
+                // by hand. None of m, K, v0 were in units of anything, and
+                // the mass had already needed one "about a hundred times too
+                // heavy" correction found by measurement; with arbitrary
+                // units nothing flags the regime being wrong.
+                //
+                // Now: the string's linear density falls out of the scale's
+                // tension and the speaking length (c = 2*L*f0, mu = T/c^2);
+                // the hammer head's mass is Askenfelt's curve in kilograms,
+                // shared between the strings it strikes; its speed is in
+                // metres per second with the span a real action delivers;
+                // and the felt's K is a material property in N/m^p,
+                // calibrated once against measured contact times and then
+                // left alone. The contact time is an OUTCOME.
+                let length = self.engine.string_length(position);
+                let wave_speed = 2.0 * length * f0;
+                let string_mass =
+                    self.engine.controls.tension_newtons() / (wave_speed * wave_speed) * length;
+                // A0 to ~E1 single-strung, doubled through the wound bass,
+                // three from ~C2 -- the same stringing the unison uses.
+                let strings_struck = 1.0
+                    + ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0)
+                    + ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0);
+                // Curved, not linear: hammer heads taper fast out of the
+                // bass. 11 g at A0, ~5.2 g at C4, 3.5 g at the top -- the
+                // published Yamaha/Renner schedules. A linear taper put 7.8 g
+                // on C4 and the contact rode 1.5x long, because with the
+                // felt stiff the contact time is the hammer bouncing off the
+                // string-as-spring, tau = pi*sqrt(m / (T*L/(x0*(L-x0)))),
+                // and that is proportional to sqrt(m).
+                let head = 0.0035 + 0.0075 * powf(1.0 - position, 2.5);
+                let mass = (head / strings_struck * self.engine.controls.lab(8) * HAMMER_MASS_SCALE.get())
+                    .max(1e-4);
+                // The action's dynamic span: how much faster the hammer
+                // arrives at full velocity than at none. `dynamics` is the
+                // regulation -- a shallow action compresses the span, a deep
+                // one spreads it.
+                // The speed at the string: the action's law at let-off, less
+                // the flight's toll -- see `LETOFF_DISTANCE_MM`.
+                let (_, velocity0) = self.engine.hammer_speeds_at(repetition, velocity);
+                // The felt: K in N/m^p, hardening steeply toward the treble.
+                // Brightness and the Hammer Hard control are voicing -- the
+                // needle and the lacquer act on exactly this property.
+                // THE FELT'S EXPONENT BELONGS TO THE REGISTER, NOT TO THE
+                // VOICING -- and letting Brightness move it inverted the
+                // control.
+                //
+                // F = K*x^p, so K carries units of N/m^p: its meaning
+                // DEPENDS on p. Brightness used to raise both, K by 2.65x
+                // and p from 2.9 to 5.0, and at the half-millimetre a real
+                // hammer compresses, x^p collapses. Measured on A3
+                // fortissimo, the force at 0.5 mm ran 10968 N at the bottom
+                // of the travel and essentially zero at the top -- five
+                // orders of magnitude SOFTER for "brighter" -- and the
+                // contact went 0.05 ms to 2.80 ms. The rendered tone
+                // followed: 4-8 kHz fell from -18.5 to -44.5 dB as the fader
+                // rose. The user found it by ear before any metric did:
+                // "lo que yo interpreto como brillo es lo que ocurre al
+                // bajar el fader".
+                //
+                // It also made the strike stand out. With the tone under it
+                // collapsing while the transient did not, A3's attack sat
+                // +24.9 dB over its own sustain in 4-8 kHz at the top of the
+                // travel against +1.5 dB at the bottom: a bare knock over a
+                // dark note, which is the metallic strike reported on A3 and
+                // B3 -- and why turning the noise faders down never touched
+                // it. It was never noise; it was the strike left uncovered.
+                //
+                // Chabassier et al. measure the exponent varying by REGISTER
+                // (~1.5 bass to ~3.5 treble), not by regulation. Voicing --
+                // needling the felt, lacquering it -- is stiffness. So the
+                // exponent is the note's alone, and Brightness moves K over
+                // two decades, which is a voicer's range. The constants are
+                // arranged so the house voicing at 0.4 lands exactly where
+                // it did: only the fader's behaviour changes, not the
+                // instrument's default sound.
+                const HOUSE_BRIGHTNESS: f32 = 0.44;
+                // The felt as measured (Hall and Askenfelt; Chaigne and
+                // Askenfelt 1994): stiffness K and exponent p per note, C2
+                // 4e8 N/m^p and 2.3, C4 4.5e9 and 2.5, C7 1e12 and 3.0, both
+                // log-linear in position between them. The faders act on
+                // these as multipliers that are exactly one at the house
+                // voicing -- there is no second set of house factors.
+                // The tables stop at C2: below it the felt is C2's, not an
+                // extrapolation into a cushion that kept the A0 hammer on the
+                // string for eight milliseconds.
+                let felt_position = position.max(FELT_TABLE_FLOOR.get());
+                // Below C2 the hammers grow heavier faster than their felt
+                // softens: the bass felt is C2's times a gain that reaches
+                // FELT_BASS_GAIN at A0.
+                let bass_gain = 1.0
+                    + (FELT_BASS_GAIN.get() - 1.0)
+                        * (1.0 - position / FELT_TABLE_FLOOR.get().max(1e-3)).clamp(0.0, 1.0);
+                // And above C4 the measured C7 value leaves the second partial
+                // of the top octave as loud as its fundamental where both
+                // references have it 20 dB down: the top felt is voiced
+                // softer than the table by FELT_TREBLE_GAIN at C8, fading to
+                // one at C4.
+                let treble_gain = 1.0
+                    + (FELT_TREBLE_GAIN.get() - 1.0)
+                        * ((position - 0.448) / (1.0 - 0.448)).clamp(0.0, 1.0);
+                // And a second softening, in DECADES from C4 to C8, because
+                // the linear one above is half applied at C6 and a quarter
+                // at C7: "the top felt at a thirtieth" was a half at C6, which
+                // is why every felt sweep of 2026-09-07 read as saturated.
+                // The force pulse the integration hands C6 has its second
+                // partial 22 dB under its first at pp where the reference's
+                // ladder wants 35 (the comb gives n2 six back): the contact is
+                // 1.0 ms and needs nearer two.
+                let treble_gain = treble_gain
+                    * powf(
+                        10.0,
+                        -FELT_TREBLE_DECADES.get()
+                            * ((position - 0.448) / (1.0 - 0.448)).clamp(0.0, 1.0),
+                    );
+                let house = FELT_EXPONENT_AT_BASS.get() + FELT_EXPONENT_RISE.get() * felt_position;
+                let reach = self.engine.controls.felt_corner_travel();
+                // The top's own hardening, on top of the line: from the end
+                // of the tenor (position 0.55, about A4) to C8. It rides in
+                // `exponent`, not in `house`, so the constant-force
+                // compensation below holds the felt's force at the reference
+                // compression and only the hardening moves -- put into
+                // `house` it would soften the felt forty-fold at half a
+                // millimetre, the trap the comment below describes.
+                let treble_ramp = ((position - 0.55) / 0.45).clamp(0.0, 1.0);
+                let exponent = (if reach < 0.0 {
+                    house + reach * (house - FELT_EXPONENT_MIN.get())
+                } else {
+                    house + reach * (FELT_EXPONENT_MAX.get() - house)
+                } + FELT_EXPONENT_TREBLE.get() * treble_ramp)
+                    .clamp(
+                        FELT_EXPONENT_MIN.get().min(FELT_EXPONENT_MAX.get()),
+                        FELT_EXPONENT_MIN.get().max(FELT_EXPONENT_MAX.get()),
+                    );
+                // K carries units of N/m^p, so moving p without moving K
+                // changes the FORCE, not the hardness. At the half millimetre
+                // a real hammer compresses, x^p collapses as p grows: raising
+                // the exponent alone makes the felt softer, which is the trap
+                // that once inverted the Brightness control, and which showed
+                // up again the moment Felt Corner got its full travel --
+                // sweeping it up took the attack's 4-8 kHz from -7.5 to -20.8
+                // dB against the reference and the chromatic cost from 995 to
+                // 1402.
+                //
+                // So the exponent is moved at CONSTANT FORCE: K is
+                // compensated by the reference compression raised to the
+                // change in p, which leaves F(x_ref) exactly where it was and
+                // lets p do the only thing it should be doing -- setting how
+                // sharply the felt hardens as it is squeezed, and with it how
+                // the contact time shortens when the blow gets harder.
+                // Clamped the same way the live exponent is. Without that, the
+                // top of the compass -- where the house exponent already sits
+                // against the 5.0 ceiling -- got a compensation for travel it
+                // had not made, and A6 came out with K cut elevenfold at the
+                // factory setting. One note in thirty moved, which is exactly
+                // how much of a bug this kind is: invisible unless every note
+                // is compared.
+                let house_exponent =
+                    clamp_between(house, FELT_EXPONENT_MIN.get(), FELT_EXPONENT_MAX.get());
+                let stiffness = FELT_K_A0.get()
+                    * powf(10.0, FELT_K_DECADES.get() * felt_position)
+                    * bass_gain
+                    * treble_gain
+                    * self.engine.controls.lab(7)
+                    * powf(10.0, 2.0 * (self.engine.controls.brightness - HOUSE_BRIGHTNESS))
+                    * powf(
+                        1.0 / FELT_REFERENCE_COMPRESSION_M.get(),
+                        exponent - house_exponent,
+                    );
+                let (q, over_omega) = simulate_strike(
+                    &frequencies,
+                    sim_modes,
+                    StrikeConfiguration {
+                        x0,
+                        // Hard blows compress the felt and narrow the contact,
+                        // the same law the recipe used.
+                        contact_width: width * (1.05 - 0.45 * velocity),
+                        mass,
+                        string_mass,
+                        stiffness,
+                        exponent,
+                        velocity: velocity0,
+                        // A cap only: the hammer leaves when the string throws
+                        // it off. 20 ms is several times any physical contact.
+                        contact_seconds: 0.020 * CONTACT_STRETCH.get(),
+                        // The hysteresis depth came down from 0.85 on 0.88.0,
+                        // and the story is worth keeping. At 0.85 with the
+                        // half-millisecond relaxation, the unloading force is
+                        // clamped to zero against the remembered deeper
+                        // compression -- the fortissimo hammer buries ~1 mm
+                        // into crushed felt and HOVERS there at zero force
+                        // (traced by `strike_profile`: 4 ms of F=0 with the
+                        // hammer nearly stationary) until the agraffe
+                        // reflection digs it out. Measured, A0 ff stayed
+                        // 3.55x the asked contact and the pp/ff contact
+                        // ratio ran 1.23 where the instrument runs ~2.6:
+                        // the one mechanism that carries touch into timbre,
+                        // compressed exactly where it matters most.
+                        //
+                        // At 0.5 the felt still dissipates (the loop loses
+                        // half its unloading force) but keeps enough spring
+                        // to eject the hammer: A0 ff 7.10 -> 4.06 ms, C2 ff
+                        // 3.57 -> 3.17, C4 ff 2.43 -> 2.11, C4 pp lands on
+                        // its ask (0.90x), and the pp/ff ratio recovers to
+                        // 1.89. Sweeping deeper (0.3, 0.0) buys almost no
+                        // further contact -- the residue is the genuine
+                        // physics of a light hammer on a heavy string --
+                        // while the brightness keeps climbing, so 0.5 is
+                        // where the trade stops paying. The felt sweep that
+                        // measured all of this is `felt_sweep`; the K
+                        // compensation lives in FELT_K_A0.
+                        stulov_epsilon: STULOV_EPSILON.get(),
+                        stulov_tau: STULOV_TAU_S.get(),
+                        comb_floor: COMB_FLOOR.get(),
+                    },
+                );
+                // Scale the simulated strike to the recipe's level.
+                //
+                // Measured, `peak / sim_peak` runs from about 1,000 to over
+                // 4,000,000 depending on note and velocity, and soft blows get
+                // a factor twenty-six to forty times larger than hard ones. It
+                // is not a unit change: it erases the level the integration
+                // just computed and substitutes the drawn law, which is where
+                // the touch went and the hammer's mass with it.
+                //
+                // Scaling the simulation by v^3 to undo that was tried and
+                // reverted. It pushes soft strikes BELOW the recipe floor, so
+                // quiet notes became pure recipe and loud ones pure
+                // simulation, and F#1's brightness ratio inverted from 1.44x
+                // to 0.90x -- a soft blow brighter than a hard one.
+                //
+                // The repair is a per-note reference: normalise by what the
+                // strike produces at ONE fixed velocity, cached per note, so
+                // the compass stays balanced (the simulation's absolute units
+                // are arbitrary and would make the treble hundreds of times
+                // quieter) while the strike's own velocity response passes
+                // through untouched.
+                //
+                // `peak / sim_peak` used to do both, and measuring it showed
+                // what that cost: the factor runs from about 1,000 to over
+                // 4,000,000 depending on note and velocity, and soft blows get
+                // a factor twenty-six to forty times larger than hard ones. It
+                // was not a unit change. It was erasing the level the
+                // integration had just computed and substituting the drawn
+                // law -- which is where the touch went, and where the hammer's
+                // mass went with it.
+                //
+                // The compass part is kept, because the simulation's absolute
+                // units are arbitrary and letting them set the balance would
+                // make the treble hundreds of times quieter than the bass. The
+                // velocity part is given back: the measured exponent is close
+                // to three across the bass and tenor, and undoing it restores
+                // roughly 30 dB of range between a soft blow and a hard one,
+                // which is what a piano has and what this did not.
+                //
+                // Full velocity is the fixed point, so the loudest notes keep
+                // the level they were calibrated at and the headroom holds.
+                let mut sim_peak = 0.0f32;
+                let mut magnitudes = [0.0f32; SIM_MODES];
+                for n in 0..sim_modes {
+                    let bridge = (n + 1) as f32;
+                    magnitudes[n] = bridge * sqrtf(q[n] * q[n] + over_omega[n] * over_omega[n]);
+                    sim_peak = sim_peak.max(magnitudes[n] * colour[n]);
+                }
+                if sim_peak > 0.0 {
+                    // The strike SETS the spectrum; the recipe is a floor.
+                    //
+                    // This used to be a maximum, so the analytic curve won
+                    // wherever it was louder and the integration only ever
+                    // added brightness on top of it. The result was that the
+                    // note's spectrum was drawn rather than generated -- a
+                    // product of comb, contact window, felt curve and board
+                    // colour, which is a filter, not a force.
+                    //
+                    // The colour term stays: that is the board and the
+                    // radiation, which the strike's output legitimately
+                    // passes through on its way out. What is gone is the
+                    // recipe competing with the simulation for the amplitude.
+                    let normalise = peak / sim_peak;
+                    let mut seam = 1.0f32;
+                    for n in 0..sim_modes {
+                        let candidate = magnitudes[n] * colour[n] * normalise;
+                        let magnitude = magnitudes[n].max(1e-12);
+                        let recipe = amplitudes[n].abs().max(1e-12);
+                        // The last simulated partial says how far the strike's
+                        // spectrum sits from the recipe's at the boundary.
+                        seam = candidate / recipe;
+                        amplitudes[n] = candidate.max(recipe * RECIPE_FLOOR.get());
+                        phase_q[n] = (n + 1) as f32 * q[n] / magnitude;
+                        phase_o[n] = (n + 1) as f32 * over_omega[n] / magnitude;
+                    }
+                    // Above the simulated range the recipe is all there is,
+                    // and leaving it at its own level left a seam.
+                    //
+                    // The integration stops at 8 kHz, so partials past it kept
+                    // the amplitude the analytic curve gave them while
+                    // everything below became the strike's, which is quieter.
+                    // Measured on C2's first 30 ms, the spectrum fell -29,
+                    // -39, -51 dB through the upper bands and then JUMPED to
+                    // -23 in 6-12 kHz: a 28 dB step upward, exactly at the
+                    // boundary. A band of top-octave hash floating above the
+                    // note is heard as a click, which is what the user
+                    // reported -- "se escucha como un click" -- and no
+                    // ingredient could account for it because it was a seam,
+                    // not an ingredient.
+                    for slot in amplitudes.iter_mut().take(count).skip(sim_modes) {
+                        *slot *= seam;
+                    }
+                }
+            }
+        }
+
+        // Drop partials the strike already made inaudible, then respect the
+        // global budget: a saturated instrument thins new notes, never the
+        // audio callback.
+        // Measured on the YDP bass (item 2, PIANO_RESEARCH.md): the first
+        // partials of a real bass attack carry a smooth progressive phase
+        // lag (~-25 deg per partial at A0: 0, 0, -49, -88...) — the
+        // dispersive delay of the strike pulse. Impose that order on the
+        // lowest partials of wound strings; above them the simulation's
+        // phases stand.
+        let bass_phase_gate = ((0.35 - position) / 0.35).clamp(0.0, 1.0);
+        if bass_phase_gate > 0.3 {
+            for n in 0..count.min(6) {
+                let theta = -0.44 * n as f32 * bass_phase_gate;
+                let (sin_t, cos_t) = sincosf(theta);
+                phase_q[n] = sin_t;
+                phase_o[n] = cos_t;
+            }
+        }
+        // And a dispersion over the whole ladder: each partial's initial
+        // phase turned back by ATTACK_DISPERSION radians per harmonic. With
+        // every partial starting in step the first millisecond of a note is
+        // a pulse -- measured, the model's A3 at velocity 73 peaks 8 dB
+        // above its own 4-7.5 ms body inside 1.5 ms where the reference's
+        // sits 10 to 14 dB BELOW it and rises into it -- and a pulse at the
+        // top of every attack is heard as a pick. Dispersion is what a
+        // stiff string and a bridge with delay do to a strike's phases.
+        let dispersion = ATTACK_DISPERSION.get();
+        if dispersion > 0.0 {
+            for n in 0..count {
+                let theta = -dispersion * n as f32;
+                let (sin_t, cos_t) = sincosf(theta);
+                let (q, o) = (phase_q[n], phase_o[n]);
+                phase_q[n] = q * cos_t + o * sin_t;
+                phase_o[n] = o * cos_t - q * sin_t;
+            }
+        }
+
+        let floor = peak * 1e-3;
+        let budget_left =
+            self.allowance.saturating_sub(self.partials);
+        // Sixteen slots stay reserved for the nonlinear extras (phantoms and
+        // the longitudinal clang): the lowest notes fill the whole array with
+        // their transverse ladder otherwise, and the growl never fits.
+        let cap = if budget_left < count {
+            budget_left.max(12)
+        } else {
+            count
+        }
+        .min(MAX_PARTIALS - 16);
+
+        // Energy normalisation, then the velocity curve: level roughly
+        // velocity^1.7 (sound pressure grows faster than hammer speed).
+        let mut energy = 0.0;
+        for amplitude in amplitudes.iter().take(count).copied() {
+            if amplitude.abs() >= floor {
+                energy += amplitude * amplitude;
+            }
+        }
+        let scale = 0.28 * self.engine.cal(note, 7) * powf(velocity.max(0.01), LEVEL_VELOCITY_POWER.get())
+            / sqrtf(energy.max(1e-9));
+
+        // Everything a partial needs, computed before a voice is borrowed:
+        // both components draw their decay from the same loss curve, read at
+        // the partial's own frequency — the prompt dies ~3× faster, the
+        // aftersound lingers past it.
+        //
+        // The aftersound is not one chorus: each partial gets its own detune
+        // (a fixed per-note jitter around the nominal cents) and its level
+        // falls with partial number, because bridge coupling feeds the slow,
+        // poorly-radiating configurations mostly at low partials. A uniform
+        // detune ratio across the whole spectrum beats every partial at a
+        // rate proportional to its frequency — precisely the synthesizer
+        // "shimmer" a real unison does not have.
+        let sample_rate = self.engine.sample_rate;
+        // Out of the ladder loop, because none of it depends on the partial.
+        // Measured, a note-on is 8.55 us per partial and almost nothing else,
+        // so what the loop does per partial is the whole of the note-on block
+        // -- and it was paying for a power of the strike position, and for
+        // nine atomic reads of knobs that cannot change inside it, once for
+        // every partial it built.
+        let horizontal_share =
+            HORIZONTAL_SHARE.get() * (0.65 + 1.2 * powf(1.0 - position, 1.5));
+        let horizontal_bridge = HORIZONTAL_BRIDGE.get();
+        let unison_jitter_spread = UNISON_JITTER_SPREAD.get();
+        let polarisation_cents = POLARISATION_CENTS.get();
+        let prompt_measured_power = PROMPT_MEASURED_POWER.get();
+        let mut partials = [Partial::default(); MAX_PARTIALS];
+        let mut placed = 0;
+        phase!(6, mark);
+        for n in 0..count {
+            if placed >= cap || amplitudes[n].abs() < floor {
+                continue;
+            }
+            let frequency = frequencies[n];
+            let amplitude = amplitudes[n] * scale;
+            let (_, board_decay) = StringEngine::board_response(frequency);
+            // The aftersound sustains much flatter than the prompt: measured
+            // A4 holds nearly level from 1 s to 2 s while a shared decay
+            // curve kept falling. ×1.8 on the slow stage matches the
+            // measured plateau.
+            let mut t60 = self.engine.t60_seconds(frequency, f0, string_scale, treble_life);
+            if n == 0 {
+                // The fundamental's prompt stage as the reference measured
+                // it at this key -- the bridge's conductance at this point
+                // and pitch, which no smooth law carries. The law's own
+                // controls (the Decay fader, the treble life) stay on top
+                // of it: the table is the mechanism, not the setting.
+                let controls =
+                    (0.5 + 1.5 * self.engine.controls.decay) * self.engine.hf_life(frequency * string_scale);
+                let measured = measured_prompt_t60(note) * controls;
+                t60 *= powf(
+                    measured / t60.max(1e-3),
+                    prompt_measured_power * measured_prompt_share(note),
+                );
+            }
+            let t60 = t60 * board_decay * self.engine.cal(note, 4) * string_life;
+            // Geometric, and WIDE. The linear x0.55-1.45 spread kept every
+            // cluster's beat rate within a factor 2.6, so with rate
+            // proportional to frequency the FIRST nulls of every 2-4 kHz
+            // cluster landed together inside 0.1-0.3 s -- measured on C2 as
+            // a 5 dB band dip at 0.08-0.25 s that swings back by 0.5 s, a
+            // breath the real note does not take (its clusters are dense and
+            // their nulls shallow). A factor-6 geometric spread scatters the
+            // null times; the geometric mean keeps the average width the
+            // ear already approved.
+            let jitter = 0.95
+                * powf(
+                    unison_jitter_spread,
+                    hash01((note as u32) << 10 | (n as u32) << 2 | 1) - 0.5,
+                );
+            let cents = detune_cents * jitter;
+            // The strings of the unison, struck together and equal: their
+            // subsequent life -- fast coherent decay, dephasing, the long
+            // trapped tail, the churn -- is simulated through the bridge
+            // coupling below, not scripted here.
+            // How many strings this note actually has: single to ~E1,
+            // doubled through the wound bass, three from ~C2 upward -- the
+            // same stringing the hammer divides its mass over.
+            let second = ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0) * (1.0 - 0.4 * shift);
+            let third_string = ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0) * (1.0 - 0.75 * shift);
+            // Equal strings, equal shares. The old split gave the "second
+            // string" 0.44 and the third 0.22 of the note, which is not how
+            // a unison is strung.
+            // No unison is balanced: the tuner's mutes, the felt's wear and
+            // the strike line's tilt give each string of the trio a different
+            // share of every partial, varying along the ladder. Equal shares
+            // made each partial's cluster a symmetric two-or-three phasor sum
+            // whose FIRST collective null is deep -- and with C2's 2-4 kHz
+            // detunes all nulling inside 0.08-0.25 s, the band's energy
+            // measurably dipped 4-5 dB there and swung back by 0.5 s (a V
+            // the real note does not have: its clusters are uneven and dense,
+            // so their nulls are shallow and scattered). Hashed per partial,
+            // fixed per note: character, not randomness.
+            let unbalance_a = 0.65 + 0.7 * hash01((note as u32) << 12 | (n as u32) << 3 | 0x15);
+            let unbalance_b = 0.65 + 0.7 * hash01((note as u32) << 12 | (n as u32) << 3 | 0x2B);
+            let second = second * unbalance_a;
+            let third_string = third_string * unbalance_b;
+            let split = 1.0 / (1.0 + second + third_string);
+            let shares = [split, split * second, split * third_string];
+            let ratios = [
+                exp2f(-cents / 2400.0),
+                exp2f(cents / 2400.0),
+                exp2f(
+                    cents * (0.9 + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3)) / 1200.0,
+                ),
+            ];
+            // THE TWO-STAGE DECAY, WITHOUT A SCRIPT.
+            //
+            // Each component's own rotation carries only the string's
+            // internal and air losses -- the SLOW stage, what a string does
+            // when the bridge takes nothing from it. The bridge drain then
+            // removes energy from the coherent configuration at exactly the
+            // rate that turns slow into the measured audible decay -- the
+            // FAST stage. A fresh note is coherent and dies at the fast
+            // rate; as the detuned strings dephase and the horizontal
+            // outlives them, what remains escapes the drain and rings at
+            // the slow rate. The knee between the stages, its depth, and
+            // its register dependence all fall out of the same three
+            // numbers instead of being drawn.
+            //
+            // What this deletes: `tail = 1.8 + 2.6/(1+(f/420)^1.2)` (the
+            // scripted stage ratio), `prompt_t60 = t60*1.94/(1.4+1.1*pos)`
+            // (the scripted fast stage), and the 300 Hz coupling fade (the
+            // fast/slow difference now carries the frequency dependence,
+            // and it comes from the measured radiation curve rather than a
+            // drawn rolloff).
+            // The per-note calibration and the board's per-partial pull
+            // apply to BOTH stages: they express where this note's energy
+            // goes, not which configuration it is in. Without them the slow
+            // stage ignored the calibration that the audible curve was
+            // fitted through, and the top of the compass rang 2.7x long
+            // once it dephased.
+            let slow_t60 = (self.engine.slow_t60_seconds(frequency, f0, string_scale)
+                * board_decay
+                * self.engine.cal(note, 4)
+                * string_life
+                * self.engine.controls.lab(12))
+            .max(0.05);
+            let fast_t60 = (t60 * self.engine.controls.lab(11)).max(0.02);
+            let intrinsic = self.engine.decay_per_sample(slow_t60);
+            let bridge_rate = (6.907_755 * (1.0 / fast_t60 - 1.0 / slow_t60)).max(0.0);
+            let drained = 1.0 - expf(-bridge_rate * CULL_INTERVAL as f32 / sample_rate);
+            // Normalised by the weight vector's square sum: with I - k*w*w^T
+            // the coherent mode loses k*(w.w) per step, so dividing makes it
+            // lose exactly `drained`, and the fast stage means what the
+            // curve says.
+            let weights = shares[0] * 0.0
+                + 1.0
+                + second * second
+                + third_string * third_string
+                + horizontal_bridge * horizontal_bridge;
+            let coupling = drained / weights;
+            // How fast a partial reaches its amplitude. It is NOT a swell.
+            //
+            // This used to read "a bass note does not arrive, it gathers",
+            // with Bloom shipping at 0.56, and that was taste rather than
+            // measurement. A C3's fundamental took 53 ms to build, and since
+            // the law goes as 5/f the lowest partials took longest of all --
+            // so the model played the blow and then let the thick string walk
+            // in behind it. The player heard it as two events, "GOLPE ->
+            // CUERDA GRUESA", and said it had always been there.
+            //
+            // Measured on the reference: a real C3's 100-300 Hz band is at its
+            // maximum 30 ms after the strike and already falling by 200 ms. It
+            // rises 0.1 dB. Ours rose 5.1. At 0.15 the build is under one
+            // period, which is what a hammer setting mode amplitudes during a
+            // two-millisecond contact actually does, and the swell measures
+            // 0.3 dB. The chromatic cost falls 41 points with it.
+            //
+            // What legitimately gathers -- the horizontal polarisation, the
+            // aftersound as the unison dephases -- gathers through the
+            // two-stage decay and the halo, not through here.
+            let rise_seconds = ((5.0 / frequency) * self.engine.controls.lab(9)).clamp(0.0008, 0.15);
+            let rise = expf(-1.0 / (rise_seconds * sample_rate));
+            // The horizontal picks up more of the blow in the bass: a wound
+            // string's mass sits far off its bending axis and the bridge's
+            // cross-coupling hands a larger share of the vertical motion
+            // sideways. This is also where the second decay stage is most
+            // prominent in measured pianos.
+            let (pq, po) = (phase_q[n], phase_o[n]);
+            let mut built = Partial::default();
+            built.set_lane(
+                LANE_HORIZONTAL,
+                Component::start_state(
+                    amplitude * horizontal_share * pq,
+                    amplitude * horizontal_share * po,
+                    (frequency
+                        * exp2f(
+                            polarisation_cents
+                                * (0.6 + 0.8 * hash01((note as u32) << 7 | (n as u32) << 2 | 5))
+                                / 1200.0,
+                        ))
+                    .min(nyquist),
+                    intrinsic,
+                    sample_rate,
+                ),
+            );
+            built.set_lane(
+                LANE_BLOOM,
+                Component::start_state(
+                    -amplitude * (1.0 + horizontal_share) * pq,
+                    -amplitude * (1.0 + horizontal_share) * po,
+                    frequency,
+                    rise,
+                    sample_rate,
+                ),
+            );
+            built.coupling = coupling;
+            built.drain = Partial::drain_per_sample(coupling, horizontal_bridge);
+            built.slope = {
+                let h = (n + 1) as f32;
+                let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+                sign * h * (1.0 / 16.0)
+            };
+            for (lane, (share, ratio)) in shares.iter().zip(ratios.iter()).enumerate() {
+                if *share > 0.0 {
+                    // Each string of the trio meets the hammer at its own
+                    // instant, fixed per note -- a piano's strike line does not
+                    // re-tilt between blows. Lane 0 is the reference; the other
+                    // two carry a skew of a few tens of microseconds either way.
+                    let skew = if lane == 0 {
+                        0.0
+                    } else {
+                        let speed = (velocity * HAMMER_V_FF.get()).max(0.3);
+                        (STRIKE_SKEW_M.get() / speed)
+                            * (2.0 * hash01((note as u32) << 5 | (lane as u32) << 2 | 0xB) - 1.0)
+                    };
+                    let angle = core::f32::consts::TAU * frequency * skew;
+                    let (sin_a, cos_a) = sincosf(angle);
+                    let (rq, ro) = (pq * cos_a - po * sin_a, pq * sin_a + po * cos_a);
+                    built.set_lane(
+                        lane,
+                        Component::start_state(
+                            amplitude * share * rq,
+                            amplitude * share * ro,
+                            (frequency * ratio).min(nyquist),
+                            intrinsic,
+                            sample_rate,
+                        ),
+                    );
+                }
+            }
+            partials[placed] = built;
+            placed += 1;
+        }
+        phase!(2, mark);
+        if placed == 0 {
+            return;
+        }
+
+        // Phantom partials: nonlinear transverse→longitudinal mixing puts
+        // extra components near twice each low partial's frequency, growing
+        // fast with amplitude — the metallic edge of a hard bass note
+        // (Conklin 1999; Bank & Sujbert 2005). Rendered for the bottom third
+        // of the compass, from the strongest low partials, at a level that
+        // scales with the square of velocity.
+        // Strongest in the bass but present through the mids: C4 ff carries
+        // measurable 3-8 kHz forest energy the gated version lacked entirely.
+        let bass_gate = powf((1.0 - 1.1 * position).clamp(0.0, 1.0), 1.5);
+        // The phantom forest and the longitudinal clang are no longer
+        // PLACED here. Both were scripted stand-ins -- partials parked at
+        // 2*f_n and a formant parked at 17*f0, with levels drawn against
+        // velocity -- for content the longitudinal bank now GENERATES from
+        // the live bridge slope: every pair product, at its own level,
+        // following the strings for as long as they actually move.
+        // The chiff sits only ~15–20 dB under the tone's peak in a real
+        // instrument and lasts longer on the heavy bass hammers.
+        // The action's noise is not a click: the key bed, the shank and the
+        // damper keep radiating for tens of milliseconds, which is why the
+        // reference carries a noise floor through its whole attack. A 12 ms
+        // burst is spent before the window the measurement looks at.
+        let noise_decay = expf(-1.0 / ((0.060 - 0.042 * position) * sample_rate));
+        // The knock starts wide — brighter for harder blows — and its
+        // bandwidth contracts with a ~25 ms time constant as it fades.
+        let noise_coefficient = 1.0
+            - expf(
+                -core::f32::consts::TAU * (1200.0 + 2500.0 * position + 6000.0 * velocity)
+                    / sample_rate,
+            );
+        let noise_shrink = expf(-1.0 / (0.070 * sample_rate));
+        // The knock's low body survives in every register: the old corner
+        // climbed to ~940 Hz at the top, which removed exactly the 300-1200
+        // band the measurement found missing. The keybed under a treble key
+        // is the same keybed.
+        let noise_body_coefficient = 1.0
+            - expf(-core::f32::consts::TAU * (40.0 + 120.0 * position * position) / sample_rate);
+        // Measured against every sampled note's own attack (inter-partial
+        // floor, 300-3200 Hz, first 60 ms): the flat-ish law was right on
+        // average -- the mechanism IS the same size everywhere, and the
+        // knock's prominence up top is masking, not louder hardware -- but
+        // it carried a real bump around A5-F6, +4 dB against the samples,
+        // while the very top ran a few dB shy. One measured notch and a
+        // lift at the extreme.
+        let bump = {
+            let d = (position - 0.72) / 0.14;
+            expf(-d * d)
+        };
+        let action = (1.0 - 0.25 * ((position - 0.5) / 0.5).max(0.0))
+            * (1.0 - 0.38 * bump)
+            * (1.0 + 0.9 * ((position - 0.88) / 0.12).max(0.0));
+        // The clack: the let-off and the hammer shank are WOOD, and wood
+        // knocked rings briefly at its own modes rather than hissing. Three
+        // short damped components in the knock's 0.7-3 kHz body -- the "toc"
+        // a treble note keeps when its tone is too small to mask anything.
+        // Level rides the same law as the burst; T60s of tens of
+        // milliseconds; frequencies jittered per note so the rack of keys
+        // does not ring as one bell.
+        // The x8 that matched the recordings' measured attack floor reads
+        // exaggerated at the keyboard: a synthetic three-mode ring is far
+        // more salient than the same energy smeared through a real action
+        // and a real room. The default now sits ~10 dB under the measured
+        // ceiling -- present, discreet -- and the fader still reaches the
+        // recording level at ~0.65 and x16 above it at the top.
+        let strike_salt = serial.wrapping_mul(0x9E37_79B9);
+        let clack_level = action_noise_dynamic(velocity)
+            * KNOCK_LEVEL.get()
+            * 3.4
+            * (0.75 + 0.5 * hash01(strike_salt ^ 0xA5))
+            * action
+            * self.engine.controls.lab(3)
+            * Controls::noise_gain(self.engine.controls.action_noise);
+        if clack_level > 1e-5 {
+            let rise = expf(-1.0 / (0.0012 * sample_rate));
+            // The shank is shorter under a treble hammer, so its knock
+            // sits higher: the modes climb ~30% across the compass.
+            let shank = 1.0 + 0.3 * position;
+            for (freq, level, t60, seed) in [
+                (720.0_f32 * shank, 0.9_f32, 0.045_f32, 51u32),
+                (1560.0 * shank, 1.0, 0.035, 57),
+                (2740.0 * shank, 1.3, 0.025, 63),
+            ] {
+                if placed >= MAX_PARTIALS {
+                    break;
+                }
+                // Per STRIKE, not per note: a note whose knock is bit-for-
+                // bit identical on every repetition reads as a machine, and
+                // the ear flags it long before it can name it. A real action
+                // never lands twice the same way.
+                let jitter = 1.0
+                    + CLACK_SCATTER.get() * (hash01((note as u32) << 8 | seed) - 0.5)
+                    + 0.06 * (hash01(strike_salt ^ seed) - 0.5);
+                let amplitude = clack_level * level;
+                let decay = self.engine.decay_per_sample(t60);
+                let mut built = Partial::default();
+                built.set_lane(
+                    0,
+                    Component::start(amplitude, freq * jitter, decay, sample_rate),
+                );
+                built.set_lane(
+                    LANE_BLOOM,
+                    Component::start(-amplitude, freq * jitter, rise, sample_rate),
+                );
+                partials[placed] = built;
+                placed += 1;
+            }
+        }
+
+        // Constant-power pan by key position, narrowed by the width control.
+        let spread = (position - 0.5) * self.engine.controls.width;
+        let angle = (0.5 + spread * 0.8) * core::f32::consts::FRAC_PI_2;
+        let (pan_right, pan_left) = sincosf(angle);
+
+        // The key-bottom thump: the action landing on the keybed and the
+        // board's whole-body motion put a low-frequency thud under every
+        // note, treble included — the A/B against the YDP renders shows the
+        // real instrument carrying tens of dB more 30–120 Hz energy under
+        // mid and treble notes than strings alone can explain. A dark noise
+        // burst stands in for it (`THUMP_NOISE_GAIN` says why a noise and
+        // not the eight components it replaced).
+        // A different burst every time, and a different one per key: the
+        // components this replaces rang the same note on every strike.
+        let thump_seed = strike_salt.wrapping_add((note as u32).wrapping_mul(2_654_435_761)) | 1;
+        let undamped = note > self.engine.controls.last_damper;
+        let (thump_amp, thump_decay, thump_rise_step) = {
+            let thump_level = powf(velocity.max(0.01), THUMP_VELOCITY_POWER.get())
+                * 0.095
+                // Shortening the thud from 300 ms to 60 ms takes its energy
+                // with it, and that energy is wanted: the model already sits
+                // 26 dB under the reference's attack floor in the band the
+                // thud occupies. Amplitude goes as the square root of the
+                // ratio of the two ring times, so the knock keeps the weight
+                // it had while losing the tail that made it stack.
+                * 0.32
+                * sqrtf(0.30 / THUMP_T60_S.get())
+                * THUMP_BASE.get()
+                * powf(10.0, THUMP_RISE_DB.get() * position.min(THUMP_RISE_TO) / 20.0)
+                * powf(
+                    10.0,
+                    (THUMP_TREBLE_DB - THUMP_TREBLE_FF_DROP_DB * velocity)
+                        * ((position - 0.5) / 0.5).clamp(0.0, 1.0)
+                        / 20.0,
+                )
+                * Controls::noise_gain(self.engine.controls.action_noise)
+                * self.engine.controls.lab(2)
+                * self.engine.cal(note, 2);
+            let rise = expf(-1.0 / (0.004 * sample_rate));
+            (
+                thump_level * THUMP_NOISE_GAIN,
+                self.engine.decay_per_sample(THUMP_T60_S.get()),
+                rise,
+            )
+        };
+
+        // Duplex scale: the string segments behind the bridge, tuned high,
+        // struck only through the bridge, and — crucially — undamped, so a
+        // staccato treble note leaves their faint ping ringing. Fitted on the
+        // treble half of the compass, where builders fit them.
+        let mut duplex = [Component::default(); 2];
+        if position > 0.45 {
+            // Faint and barely off-harmonic: at −25 dB the duplex reads as
+            // shimmer and afterglow; louder or wider it reads as a detuned
+            // bell riding every strike. Compressed against velocity — the
+            // tone grows with v^1.7 and masks it while held, but after the
+            // damper falls the ring stands alone, so a hard strike must not
+            // leave proportionally more of it.
+            let level = DUPLEX_LEVEL.get() * powf(velocity, 1.7) * (1.0 - 0.45 * velocity) * 0.32;
+            for (slot, (ratio, seed)) in duplex.iter_mut().zip([(2.015_f32, 11), (4.03, 29)]) {
+                let jitter = powf(
+                    2.0,
+                    (hash01((note as u32) << 6 | seed) - 0.5) * 10.0 / 1200.0,
+                );
+                let frequency = f0 * ratio * jitter;
+                if frequency < nyquist {
+                    // Short segments, short ring: undamped is not endless.
+                    let t60 = (self.engine.t60_seconds(frequency, f0, 1.0, 1.0) * 0.35).min(0.9);
+                    let decay = self.engine.decay_per_sample(t60);
+                    *slot = Component::start(level, frequency, decay, sample_rate);
+                }
+            }
+        }
+
+        let chiff_mult = self.engine.controls.lab(3) * self.engine.cal(note, 3);
+        // How hard this string's own stretch pulls it sharp. The bass gate is
+        // the amplitude-to-length ratio in disguise: a treble string is short
+        // and stiff and barely stretches, a bass string is long and slack and
+        // stretches plenty.
+        let tension_gain =
+            TENSION_GAIN.get() * bass_gate / (1.0 + 40.0 * position) * self.engine.controls.lab(10);
+        let longitudinal_gain = LONGITUDINAL_MIX.get() * self.engine.controls.lab(5);
+        // The attack surplus into the upper compressional modes. This was
+        // x16, calibrated against a normalization that turned out not to be
+        // comparable; measured the same way the YDP targets are measured
+        // (same windows, bands and normalization on both sides), x16 put
+        // the bass attack 10-25 dB HOT in 0.5-4 kHz relative to its own
+        // sustain -- and, through the y^2 drive's low-frequency content
+        // passing the resonators' stiffness response, +16 dB of 30 Hz thump
+        // -- where the real bass attack sits BELOW its sustain there: the
+        // note swells, it does not knock. The user heard the difference as
+        // "el golpe del martillo exagerado en notas bajas". Swept 2/4/6
+        // against the targets on C2 and A0: x2 lands the 2 kHz band and
+        // the thump on the reference; anything higher re-grows the knock.
+        let longitudinal_upper = self.engine.controls.lab(4) * 2.0 * powf(1.0 - position, 1.5);
+        let action_gain = Controls::noise_gain(self.engine.controls.action_noise);
+        let impact_gain = Controls::noise_gain(self.engine.controls.impact);
+        if let Some(slot) = restrike_target {
+            // The hammer lands on the wire it finds. Ladder partials merge
+            // by harmonic number (each carries it in its slope weight);
+            // everything else -- noise, clack, phantoms of the NEW blow, or
+            // ladder partials the old voice has already culled -- appends
+            // into free slots.
+            let voice = &mut unit_voice!(self, slot);
+            let mut by_harmonic = [usize::MAX; MAX_PARTIALS];
+            for (index, partial) in voice.partials[..voice.partial_count].iter().enumerate() {
+                if partial.slope != 0.0 {
+                    let h = roundf(partial.slope.abs() * 16.0) as usize;
+                    if h < MAX_PARTIALS {
+                        by_harmonic[h] = index;
+                    }
+                }
+            }
+            let mut appended = 0usize;
+            // The contact, as the fixed time and the blow's own, added.
+            let merge_ramp = ((ramp_s * sample_rate) as u32).max(1);
+            for partial in voice.partials[..voice.partial_count].iter_mut() {
+                partial.push = [0.0; LANES];
+                partial.push_s = [0.0; LANES];
+            }
+            for fresh in partials[..placed].iter() {
+                let target = if fresh.slope != 0.0 {
+                    let h = roundf(fresh.slope.abs() * 16.0) as usize;
+                    if h < MAX_PARTIALS {
+                        by_harmonic[h]
+                    } else {
+                        usize::MAX
+                    }
+                } else {
+                    usize::MAX
+                };
+                if target != usize::MAX {
+                    let existing = &mut voice.partials[target];
+                    for lane in 0..LANES {
+                        // A hammer meeting a string that is already moving
+                        // gives it MOMENTUM. It does not teleport the string:
+                        // the displacement is continuous across the blow and
+                        // only the velocity jumps.
+                        //
+                        // Adding the fresh state into both quadratures put a
+                        // step into `s`, which IS the output -- the comment on
+                        // `Component::start` says exactly that about note-on,
+                        // where the state deliberately begins at (0, amp) so
+                        // the output rises from zero "with no click". The
+                        // restrike path did not honour it, so every repeated
+                        // note carried a step, and a step is broadband.
+                        //
+                        // Measured on the Chopin nocturne by the height of the
+                        // 9-20 kHz needle over its surroundings at each onset,
+                        // against how long since that same note last sounded:
+                        //
+                        // ```text
+                        //   never before   2.6 dB      2-10 s     3.8 dB
+                        //   over 10 s      2.5 dB      0.5-2 s    6.1 dB
+                        //                              under 0.5 s 10.3 dB
+                        // ```
+                        //
+                        // Monotonic in exactly the way the mechanism predicts:
+                        // the sooner the note is struck again, the more old
+                        // state is still there to be stepped over. The user
+                        // saw them as vertical needles in a spectrogram and
+                        // described them as a micro saturation on the attack.
+                        // An earlier pass in the same session cleared the
+                        // restrike path by measuring PEAK level, which cannot
+                        // see this: the step is small in amplitude and wide in
+                        // spectrum.
+                        //
+                        // The blow's whole contribution therefore arrives as
+                        // velocity, keeping its size and losing its
+                        // discontinuity.
+                        //
+                        // Unless the living voice has RETIRED this lane (the
+                        // cull zeroed its rotation): then the fresh lane comes
+                        // in whole, its rotation with it, with the output
+                        // quadrature at zero so nothing steps. The bloom lane
+                        // is the one that matters -- it is dead within tens of
+                        // milliseconds of every strike, so a merged blow used
+                        // to arrive with no negative bloom at all, at full
+                        // amplitude inside a quarter cycle: measured, a
+                        // re-struck note reached -42 dB in half a millisecond
+                        // where a fresh one takes three to bloom. That hard
+                        // edge on every repeated melody note was the
+                        // "pequeño popeo" of the Op. 9 No. 2 file, which no
+                        // thud, steal or step explained. A long-decayed
+                        // voice's retired vertical lanes come back the same
+                        // way, so a re-struck note has its high partials.
+                        //
+                        // And over the contact like every other lane. A fresh
+                        // onset is click-free by cancellation ACROSS its lanes
+                        // and partials -- the bloom lane negative, the phases
+                        // dispersed -- and a one-sample push reproduces a
+                        // fresh onset exactly. Spreading only the living lanes
+                        // while the retired ones and the appended partials
+                        // arrived whole broke that cancellation: the ramp
+                        // measured four times rougher than the step, from two
+                        // samples up, and the roughness was the bloom lane's
+                        // negative energy landing alone (2026-09-08).
+                        if existing.rc[lane] == 0.0 && existing.rs[lane] == 0.0 {
+                            let energy = sqrtf(
+                                fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane],
+                            );
+                            let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
+                            existing.s[lane] = 0.0;
+                            existing.c[lane] = 0.0;
+                            existing.push[lane] = signed / merge_ramp as f32;
+                            existing.push_s[lane] = 0.0;
+                            existing.rc[lane] = fresh.rc[lane];
+                            existing.rs[lane] = fresh.rs[lane];
+                            continue;
+                        }
+                        //
+                        // With the strike's phases dispersed (ATTACK_DISPERSION)
+                        // the fresh phasors no longer add up to a pulse, and a
+                        // fresh note starts from exactly this sum with no click
+                        // measured; so the merge takes the fresh phasor whole,
+                        // both quadratures, and keeps the dispersion. Pushing
+                        // the magnitude into `c` alone put every merged
+                        // partial back in step -- the pulse the dispersion had
+                        // just removed, on every repeated note.
+                        //
+                        // Into `c` alone, after all: a living voice cannot be
+                        // ramped from rest, so the merged blow must not step
+                        // the output, and only the cosine quadrature keeps
+                        // `s` continuous. The repeated note starts more in
+                        // step than a fresh one; it does not click.
+                        //
+                        // And over the contact, not in one sample: the
+                        // momentum arrives in `push_in` equal steps
+                        // (MERGE_RAMP_S), which is what the step that
+                        // switched the merge off needed.
+                        let energy =
+                            sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
+                        let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
+                        existing.push[lane] = signed / merge_ramp as f32;
+                        existing.push_s[lane] = 0.0;
+                    }
+                    existing.coupling = fresh.coupling;
+                    existing.drain = fresh.drain;
+                } else if voice.partial_count < MAX_PARTIALS {
+                    // A partial the living voice did not have arrives over
+                    // the contact too: its velocity quadrature pushed in
+                    // from nought, its output quadrature already at rest.
+                    let mut arriving = *fresh;
+                    for lane in 0..LANES {
+                        let energy =
+                            sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
+                        let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
+                        arriving.push[lane] = signed / merge_ramp as f32;
+                        arriving.push_s[lane] = 0.0;
+                        arriving.s[lane] = 0.0;
+                        arriving.c[lane] = 0.0;
+                    }
+                    voice.partials[voice.partial_count] = arriving;
+                    voice.partial_count += 1;
+                    appended += 1;
+                }
+            }
+            self.partials += appended;
+            voice.push_in = merge_ramp;
+            // The key bottoms out on every blow, this one included, the
+            // aftertouch after the strike.
+            voice.thump_amp = voice.thump_amp.max(thump_amp);
+            voice.thump_rise = 1.0;
+            voice.thump_in = keybed_delay(letoff, sample_rate);
+            for (mine, theirs) in voice.duplex.iter_mut().zip(duplex.iter()) {
+                // Into the cosine quadrature alone, as the partials: the
+                // output quadrature stays continuous across the blow.
+                let magnitude = sqrtf(theirs.s * theirs.s + theirs.c * theirs.c);
+                mine.c += if theirs.c < 0.0 {
+                    -magnitude
+                } else {
+                    magnitude
+                };
+            }
+            voice.held = true;
+            voice.sustained = false;
+            voice.damper_applied = 0.0;
+            voice.energy = 1.0;
+            // The mechanism knocks again in full.
+            let knock_before = voice.noise_amp;
+            voice.noise_amp = voice.noise_amp.max(
+                action_noise_dynamic(velocity)
+                    * KNOCK_LEVEL.get()
+                    * action
+                    * chiff_mult
+                    * Controls::noise_gain(self.engine.controls.action_noise),
+            );
+            voice.noise_hold = voice.noise_amp - knock_before;
+            voice.noise_decay = noise_decay;
+            voice.noise_coefficient = noise_coefficient;
+            voice.noise_body_coefficient = noise_body_coefficient;
+            voice.noise_shrink = noise_shrink;
+            // And rises over the contact, as a fresh voice's knock rises
+            // under its onset: a living voice cannot be ramped from rest,
+            // so the knock carries its own rise.
+            voice.noise_rise = 1.0;
+            voice.noise_rise_step = expf(-1.0 / (MERGE_RAMP_S.get().max(1e-4) * sample_rate));
+            // The impact's tension pulse fires again on the wire it finds.
+            let clang_kick = IMPACT_CLANG.get()
+                * impact_dynamic(velocity)
+                * powf(1.0 - position, 1.2)
+                * self.engine.clang_register(position)
+                * impact_gain;
+            unit_voice!(self, slot).clang_feed += clang_kick;
+            unit_voice!(self, slot).clang_hold = clang_kick;
+            unit_voice!(self, slot).clang_feed_decay =
+                expf(-1.0 / (IMPACT_PULSE_TAU_S.get() * sample_rate));
+            // The re-struck wire is full of fresh high partials again.
+            unit_voice!(self, slot).longitudinal_upper = longitudinal_upper;
+            unit_voice!(self, slot).upper_env = 1.0;
+            return;
+        }
+        // Read before the voice is borrowed: this consults the scale, and the
+        // borrow checker is right that the two cannot overlap.
+        let clang_register = self.engine.clang_register(position);
+        let firmness = StringEngine::damper_firmness(serial, note);
+        phase!(3, mark);
+        let voice = self.claim_voice(slot);
+        voice.active = true;
+        voice.note = note;
+        voice.channel = channel;
+        voice.held = true;
+        voice.sustained = false;
+        voice.undamped = undamped;
+        voice.sostenuto = false;
+        voice.damper_applied = 0.0;
+        voice.firmness = firmness;
+        voice.pole_ceiling = pole_ceiling(sample_rate);
+        voice.onset = 0.0;
+        voice.onset_step = 1.0 / (ATTACK_RAMP_S.get().max(1e-4) * sample_rate);
+        // Only what was placed. `voice.partials` is sized for the largest
+        // ladder any note could want -- 144 partials of 132 bytes, 18.6 KB --
+        // and assigning the whole array copied all of it on every note-on,
+        // however few partials the note actually has. Measured across the
+        // compass, a note uses 6 % of it at the top and 56 % at the bottom.
+        //
+        // Nothing reads past `partial_count`, so the stale tail a reused
+        // voice slot keeps is never looked at. Every read in the render path
+        // is `partials[..partial_count]`.
+        voice.partials[..placed].copy_from_slice(&partials[..placed]);
+        voice.partial_count = placed;
+        voice.duplex = duplex;
+        voice.cull_in = CULL_INTERVAL;
+        voice.tension_in = TENSION_INTERVAL;
+        voice.damper_phase = 0;
+        voice.damper_pressed = false;
+        voice.push_in = 0;
+        voice.noise_rise = 0.0;
+        voice.noise_rise_step = 0.0;
+        voice.noise_hold = 0.0;
+        voice.clang_hold = 0.0;
+        // The string is tuned at rest, so the stretch it carries once the
+        // note has died away must pull it nowhere: the rest value is zero and
+        // everything above it is the note sharpening itself.
+        voice.tension_rest = 0.0;
+        voice.tension_applied = 0.0;
+        voice.tension_smoothed = 0.0;
+        // The longitudinal modes sit at k*c_L/(2L), and the speaking length
+        // follows from the pitch and the transverse speed: L = c/(2*f0) with
+        // c = 2*L*f0. So f_L,k = k * f0 * c_L / c, and the ratio c_L/c is what
+        // makes them land in the low kilohertz for a bass string and above
+        // hearing for a treble one -- which is why this is a bass phenomenon.
+        // A fixed ratio to the note's own pitch, not a frequency derived from
+        // a guessed string length.
+        //
+        // Deriving it from length gave a ratio that slid across the compass --
+        // 22x the fundamental at A0 but only 10x at C4 -- and ten against
+        // twenty is an octave, which is exactly what the user heard: "es como
+        // que la octava de eso que agregaste no esta bien". Bank states the
+        // figure directly: the longitudinal fundamental sits "around 16 to 20
+        // times higher than that of the transverse vibration", and it holds
+        // across the instrument because scale design keeps it there.
+        let longitudinal_first = LONGITUDINAL_RATIO.get() * f0;
+        // The strike's own kick into the compressional modes: a pulse the
+        // length of the contact, rung at their own frequencies and dead
+        // within tens of milliseconds. Wound strings take it hardest, and
+        // the DYNAMIC gate is steep on purpose: the compressional
+        // excitation goes as the square of the transverse amplitude, and
+        // the amplitude itself grows faster than the blow because the felt
+        // stiffens into it -- the burst belongs to fortissimo. v^2 made it
+        // sound on every note at every touch, and the user's verdict was
+        // that "no siempre se debe escuchar fuerte eso": v^4 keeps the
+        // pianissimo clean and saves the bark for the hard strike.
+        let clang_kick = IMPACT_CLANG.get()
+            * impact_dynamic(velocity)
+            * powf(1.0 - position, 1.2)
+            * clang_register
+            * impact_gain;
+        for (k, mode) in voice.longitudinal.iter_mut().enumerate() {
+            let hz = longitudinal_first * (k + 1) as f32;
+            if hz < nyquist * 0.9 {
+                // BROAD, not ringing: the compressional wave damps in tens
+                // of milliseconds, and the formant Bank measures is a wide
+                // hump, not a line. With 0.9 s here the bank was four narrow
+                // peaks that rang over the note instead of a formant that
+                // colours it -- and the phantom forest between the transverse
+                // partials, which rides through these resonators' skirts, was
+                // filtered out by their narrowness.
+                let t60 = (0.06 - 0.008 * k as f32).max(0.03);
+                let pan = 0.5 + 0.3 * (hash01((note as u32) << 3 | k as u32) - 0.5);
+                *mode = BodyMode::tune(hz, t60, pan, sample_rate);
+                // The upper compressional modes carry the attack's
+                // broadband burst and the growl's 2-4 kHz body -- measured
+                // on C2, both ran 6-13 dB under the reference with a flat
+                // bank. The profile rises into modes two and three and
+                // falls away at the fourth, whose band the reference keeps
+                // 21 dB down in the sustain.
+                const MODE_PROFILE: [f32; LONGITUDINAL_MODES] = [1.0, 1.2, 1.0, 0.22];
+                mode.drive *= MODE_PROFILE[k];
+            } else {
+                *mode = BodyMode::default();
+            }
+        }
+        // Scaled so a fortissimo bass strike sharpens by a few cents, which
+        // is what the measured glides are, and so it fades with the note
+        // rather than on a timer. The bass gate is the amplitude-to-length
+        // ratio in disguise: a treble string is short and stiff and barely
+        // stretches, a bass string is long and slack and stretches plenty.
+        voice.longitudinal_gain = longitudinal_gain;
+        voice.longitudinal_upper = longitudinal_upper;
+        voice.upper_env = 1.0;
+        voice.upper_env_decay = expf(-1.0 / (0.08 * sample_rate));
+        voice.clang_feed = clang_kick;
+        voice.clang_feed_decay = expf(-1.0 / (IMPACT_PULSE_TAU_S.get() * sample_rate));
+        voice.tension_gain = tension_gain;
+        voice.energy = 1.0;
+        // The hammer/soundboard thump: heavier and darker in the bass.
+        // Flat through the bass and the tenor, where the measurement wanted
+        // far more knock than the model had, and eased above it: a treble
+        // hammer is a fraction of a bass hammer's mass and its action moves
+        // less. Part of what reads as too much noise up there is the treble's
+        // own tone measuring 6-22 dB under the reference in 1-4 kHz, since
+        // noisiness is a share of the total — fixing that is the real repair,
+        // and this taper is not a substitute for it.
+        // The action does not shrink to nothing at the top of the compass.
+        // A taper here used to cut the treble knock by up to 16 dB, put in
+        // when the treble's own tone measured far too weak and everything
+        // read as noise on top of it. The tone is healthy now, and measured
+        // against the samples the truth is the opposite of the taper:
+        // A6's mechanism noise sits only ~10 dB under its fundamental in the
+        // recording, and this model had it 25 to 31 dB short between 300 Hz
+        // and 3 kHz. The key, the jack and the shank are the same size up
+        // there; only the string got small.
+        voice.noise_amp =
+            velocity * velocity * KNOCK_LEVEL.get() * action * chiff_mult * action_gain;
+        voice.noise_decay = noise_decay;
+        voice.noise_coefficient = noise_coefficient;
+        voice.noise_body = 0.0;
+        voice.noise_body_coefficient = noise_body_coefficient;
+        voice.noise_shrink = noise_shrink;
+        voice.noise_lp = 0.0;
+        voice.noise_seed = 0x9E37_79B9 ^ (note as u32).wrapping_mul(2_654_435_761);
+        voice.thump_amp = thump_amp;
+        // The string is struck first; the key lands on its bed the
+        // aftertouch later, the hammer's flight sooner. See ACTION_RATIO.
+        voice.thump_in = keybed_delay(letoff, sample_rate);
+        voice.thump_keybed = false;
+        voice.thump_decay = thump_decay;
+        voice.thump_rise = 1.0;
+        voice.thump_rise_step = thump_rise_step;
+        voice.thump_x1 = 0.0;
+        voice.thump_x2 = 0.0;
+        voice.thump_y1 = 0.0;
+        voice.thump_y2 = 0.0;
+        voice.thump_z1 = 0.0;
+        voice.thump_z2 = 0.0;
+        {
+            // RBJ low-pass at the register's corner with quality THUMP_Q.
+            let corner = THUMP_CORNER_HZ * powf(THUMP_CORNER_TOP_HZ / THUMP_CORNER_HZ, position);
+            let w0 = core::f32::consts::TAU * corner / sample_rate;
+            let (sin_w0, cos_w0) = sincosf(w0);
+            let alpha = sin_w0 / (2.0 * THUMP_Q);
+            let a0 = 1.0 + alpha;
+            voice.thump_b0 = (1.0 - cos_w0) * 0.5 / a0;
+            voice.thump_b1 = (1.0 - cos_w0) / a0;
+            voice.thump_a1 = -2.0 * cos_w0 / a0;
+            voice.thump_a2 = (1.0 - alpha) / a0;
+        }
+        voice.thump_floor = 0.0;
+        voice.thump_c0 = 1.0 - expf(-core::f32::consts::TAU * THUMP_FLOOR_HZ / sample_rate);
+        // A different burst every time, and a different one per key: the
+        // components this replaces rang the same note on every strike.
+        voice.thump_seed = thump_seed;
+        voice.pan_left = pan_left;
+        {
+            // The bridge from A0 to C8, as the key position for now: the
+            // bass bridge's own geometry is a later measurement.
+            let along = position.clamp(0.0, 1.0) * (BOARD_DRIVE_POINTS - 1) as f32;
+            let index = (along as usize).min(BOARD_DRIVE_POINTS - 2);
+            voice.drive_index = index;
+            voice.drive_frac = (along - index as f32).clamp(0.0, 1.0);
+        }
+        voice.pan_right = pan_right;
+        // The glide is no longer scripted. It used to be a 28-step ramp of a
+        // hand-set size; it now falls out of the tension law above, which
+        // sharpens the string while it is displaced and lets it settle as the
+        // note decays -- the same curve, but produced rather than drawn, and
+        // by the mechanism that also couples the modes to each other.
+        voice.glide_rate = 0.0;
+        voice.glide_steps = 0;
+        self.partials += placed;
+
+        // Sympathetic resonance, the pedal's halo: with the dampers up, the
+        // other strings' coinciding partials pick the struck note's energy up
+        // through the bridge and ring on slowly. Rendered as a shadow voice —
+        // the same partial ladder ~24 dB down, each component detuned by its
+        // own few cents (many strings, none exactly aligned), single-stage
+        // slow decay, released by the pedal like any sustained string.
+        phase!(4, mark);
+        if pedal && placed > 0 {
+            let halo_count = placed.min(HALO_PARTIALS);
+            // Twenty-four, which is every entry the loop below can reach --
+            // `halo_count` is `placed.min(24)`. It was MAX_PARTIALS, so each
+            // note-on zeroed 18.6 KB of scratch to fill at most 3.1 KB of it,
+            // and a pedalled twelve-note chord did that twelve times.
+            let mut halo = [Partial::default(); HALO_PARTIALS];
+            let rise = expf(-1.0 / (0.030 * sample_rate));
+            for n in 0..halo_count {
+                let frequency = frequencies[n];
+                let spread = powf(
+                    2.0,
+                    (hash01((note as u32) << 12 | (n as u32) << 3 | 5) - 0.5) * 5.0 / 1200.0,
+                );
+                let detuned = (frequency * spread).min(nyquist);
+                let amplitude = amplitudes[n] * scale * 0.063;
+                let t60 = self.engine.t60_seconds(frequency, f0, string_scale, treble_life) * 1.5;
+                let slow = self.engine.decay_per_sample(t60);
+                let mut built = Partial::default();
+                built.set_lane(0, Component::start(amplitude, detuned, slow, sample_rate));
+                built.set_lane(
+                    LANE_BLOOM,
+                    Component::start(-amplitude, detuned, rise, sample_rate),
+                );
+                halo[n] = built;
+            }
+            // Into this section's own halos, which are not voices anybody
+            // else could have wanted: a halo never takes a slot a note was
+            // going to use, and it never leaves the section that struck it.
+            let index = self.pick_halo();
+            let carried = self.halos[index].partial_count;
+            self.partials =
+                self.partials.saturating_sub(carried);
+            let shadow = &mut self.halos[index];
+            *shadow = Voice::default();
+            shadow.pole_ceiling = pole_ceiling(sample_rate);
+            shadow.active = true;
+            shadow.note = note;
+            shadow.channel = channel;
+            shadow.held = false;
+            shadow.sustained = true;
+            shadow.partials[..halo_count].copy_from_slice(&halo[..halo_count]);
+            shadow.partial_count = halo_count;
+            shadow.pan_left = pan_left;
+            shadow.pan_right = pan_right;
+            shadow.energy = 0.01;
+            self.partials += halo_count;
+        }
+        phase!(5, mark);
+    }
+
+    /// The voice half of a release, for one section's voices.
+    ///
+    /// The scalars are recomputed from the record rather than carried in
+    /// it: they are pure arithmetic on the note, the release velocity and
+    /// the damper serial, and a worker has the same tables. What a worker
+    /// does NOT have is the coordinator's key tracking or its silent bank,
+    /// so those writes stay on the other side.
+    fn release_voices(
+        &mut self,
+        channel: u8,
+        note: u8,
+        release: Option<u8>,
+        serial: u32,
+        pedal: bool,
+        sostenuto: bool,
+        pressure: f32,
+    ) {
+        let firmness = StringEngine::damper_firmness(serial, note);
+        // With a measured return the random landing becomes a residual: the
+        // felt still seats where it seats, but how fast the key came back is
+        // no longer a guess. Without one, the variation carries the landing
+        // exactly as it did before release velocity was read at all.
+        let (span, knock, firmness) = match release {
+            Some(velocity) => (
+                StringEngine::damper_span(velocity),
+                StringEngine::damper_knock(velocity),
+                1.0 + (firmness - 1.0) * ConcertGrand::RELEASE_RESIDUAL,
+            ),
+            None => (1.0, 1.0, firmness),
+        };
+        let damper = self.engine.damper_factor(note, firmness, span);
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        let release_gain = Controls::noise_gain(self.engine.controls.release_noise) * firmness * knock;
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        let key_off = KEYOFF_KNOCK * release_gain;
+        let key_off_decay = expf(-LN_1000 / (KEYOFF_T60_S * rate));
+        let key_off_rise = expf(-1.0 / (0.002 * rate));
+        let key_off_seed = serial
+            .wrapping_mul(0x9E37_79B9)
+            .wrapping_add((note as u32).wrapping_mul(2_654_435_761));
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if voice.active && voice.note == note && voice.channel == channel && voice.held {
+                voice.key_off_knock(key_off, key_off_decay, key_off_rise, key_off_seed, rate);
+                if voice.undamped {
+                    // No felt lands: the key comes up and the string goes
+                    // on ringing exactly as it was. `sustained` keeps it
+                    // out of the re-strike's damper path; the pedal loops
+                    // skip it by the flag.
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = 0.0;
+                    continue;
+                }
+                if sostenuto && voice.sostenuto {
+                    // The sostenuto rod holds THIS damper clear, whatever
+                    // the sustain pedal does.
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = 0.0;
+                } else if pedal {
+                    // Released into a partially lifted rail: the felt takes
+                    // the string with whatever weight the pedal leaves it.
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = pressure;
+                    // Through the voice's OWN damper: the half pedal will
+                    // relieve this press through the same one, and a press
+                    // through one damper relieved through another is the
+                    // energy walk `a_half_pedal_never_adds_energy` guards.
+                    let own = StringEngine::damper_for(note, rate, grip * voice.firmness, span);
+                    voice.press_damper(own, pressure);
+                } else {
+                    // The felt is on its way, not down: see DAMPER_LAND_MS.
+                    // A key let go fast lands it sooner (`span` < 1), a key
+                    // eased up later.
+                    let own = StringEngine::damper_for(note, rate, grip * voice.firmness, span);
+                    voice.arm_damper(
+                        (DAMPER_LAND_MS.get() * 0.001 * rate * span) as u32,
+                        damper,
+                        own,
+                        DAMPER_BOUNCES.get().clamp(0.0, 12.0) as u8,
+                        DAMPER_HANG_MS.get() * 0.001 * rate,
+                        DAMPER_RESTITUTION.get(),
+                        (DAMPER_DWELL_MS.get() * 0.001 * rate) as u32,
+                        [thud_coefficient, thud_decay, release_gain],
+                    );
+                }
+            }
+        }
+    }
+
+    fn pedal_voices(
+        &mut self,
+        pressure: f32,
+        rail_lifted: bool,
+        sostenuto: bool,
+        serial: u32,
+    ) {
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        if rail_lifted {
+            // The rail coming up catches every felt still on its way down:
+            // that string is sustained from here, its press relieved through
+            // the same damper it was made with.
+            for slot in unit_slots() {
+                StringEngine::lift_rail(&mut unit_voice!(self, slot), pressure);
+            }
+            for index in 0..HALOS_PER_SECTION {
+                StringEngine::lift_rail(&mut self.halos[index], pressure);
+            }
+        }
+        // The halos with them: a halo is a string ringing with its damper
+        // up, so the rail lands on it exactly as it lands on a note.
+        let thud = (thud_coefficient, thud_decay);
+        for slot in unit_slots() {
+            StringEngine::seat_damper(
+                &mut unit_voice!(self, slot),
+                pressure,
+                sostenuto,
+                serial,
+                rate,
+                grip,
+                thud,
+                release_gain,
+            );
+        }
+        for index in 0..HALOS_PER_SECTION {
+            StringEngine::seat_damper(
+                &mut self.halos[index],
+                pressure,
+                sostenuto,
+                serial,
+                rate,
+                grip,
+                thud,
+                release_gain,
+            );
+        }
+    }
+
+    /// The voice half of the sostenuto rod, for one section's voices.
+    fn sostenuto_voices(&mut self, down: bool, pedal: bool, pressure: f32) {
+        if down {
+            for slot in unit_slots() {
+                let voice = &mut unit_voice!(self, slot);
+                if voice.active && voice.held {
+                    voice.sostenuto = true;
+                }
+            }
+            return;
+        }
+        // Released: every captured note falls into whatever the sustain
+        // pedal is doing right now.
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if !(voice.active && voice.sostenuto) {
+                continue;
+            }
+            voice.sostenuto = false;
+            if voice.held || !voice.sustained || voice.undamped {
+                continue;
+            }
+            if pedal && pressure < 0.98 {
+                let damper = StringEngine::damper_for(voice.note, rate, grip, 1.0);
+                voice.press_damper(damper, pressure - voice.damper_applied);
+                voice.damper_applied = pressure;
+            } else {
+                let damper = StringEngine::damper_for(voice.note, rate, grip, 1.0);
+                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+                voice.damper_applied = 0.0;
+            }
+        }
+    }
+
+    /// The voice half of an all-notes-off, for one section's voices.
+    fn all_notes_off_voices(&mut self) {
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if voice.active {
+                let damper = StringEngine::damper_for(voice.note, rate, grip, 1.0);
+                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+            }
+        }
+        for index in 0..HALOS_PER_SECTION {
+            let halo = &mut self.halos[index];
+            if halo.active {
+                let damper = StringEngine::damper_for(halo.note, rate, grip, 1.0);
+                halo.damp(damper, thud_coefficient, thud_decay, release_gain);
+            }
+        }
+    }
+
+    /// A key pressed again before the jack reset: no blow, but the key is
+    /// down and its damper is up again. A felt on its way down is caught;
+    /// a string under the pedal is held by the key from here; a string with
+    /// no voice is a silent key.
+    /// The voice half of a key caught below the repetition point, for one
+    /// section's voices. Whether anything was caught at all is the
+    /// coordinator's to know, and it reads it before this runs.
+    fn catch_voices(&mut self, channel: u8, note: u8) {
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if !(voice.active && voice.note == note && voice.channel == channel) {
+                continue;
+            }
+            if voice.damper_phase != 0 {
+                voice.cancel_damper();
+            }
+            if voice.sustained && voice.damper_applied > 0.0 {
+                let own = StringEngine::damper_for(note, rate, grip * voice.firmness, 1.0);
+                voice.press_damper(own, -voice.damper_applied);
+                voice.damper_applied = 0.0;
+            }
+            voice.held = true;
+            voice.sustained = false;
+        }
+    }
+
+    /// One section's half of a note struck again over a string of its own
+    /// that is not free to be re-struck: ease that string out.
+    ///
+    fn ease_voices(&mut self, channel: u8, note: u8) {
+        // Thirty milliseconds, from 250: the new voice covers the sound
+        // from its first cycle, and at 250 ms the old one lingered 1.7 s
+        // before the cull took it -- a ghost per repeated note, and on
+        // the Op. 9 No. 2 file 1351 voice steals against 185 with the
+        // merge. Thirty is still forty cycles of an A4, nothing steps.
+        let restrike = expf(-1.0 / (0.03 * self.engine.sample_rate));
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        // WITHOUT the release thud. `damp` is the damper landing, and
+        // its thud is the felt meeting a moving string; here no damper
+        // lands -- the hammer re-strikes a string the pedal is holding
+        // half-clear -- yet the thud fired on every repeated note under
+        // a half pedal, because a half pedal leaves `damper_applied`
+        // above zero and every such re-strike takes this path. Heard on
+        // the Op. 9 No. 2 file as "un pequeño popeo" on the repeated
+        // B-flats at 1:11 (found by the score: both pops were re-strikes
+        // of note 70 under a moving pedal, and neither a steal nor a
+        // step). The ease-out stays; the knock goes.
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if voice.active && voice.note == note && voice.channel == channel {
+                // Its felt too: an eased-out voice still ticks, and a
+                // bounce landing on it relieves a press against a pole
+                // `damp` has since moved.
+                voice.cancel_damper();
+                voice.damp(restrike, thud_coefficient, thud_decay, 0.0);
+            }
+        }
+    }
+
+    /// This unit's strings for one frame: its eight voices and its four
+    /// halos, and what they put on the bridge.
+    fn render_frame(
+        &mut self,
+        feed: f32,
+        sympathy_rate: f32,
+        sostenuto: bool,
+    ) -> SectionFrame {
+        let mut made = SectionFrame::default();
+        let mut culled = 0usize;
+        macro_rules! deposit {
+            ($rendered:expr) => {{
+                let one = $rendered;
+                made.sample += one.sample;
+                made.keybed_left += one.keybed_left;
+                made.keybed_right += one.keybed_right;
+                made.force += one.force;
+                made.drive_points[one.drive_index] += one.force * (1.0 - one.drive_frac);
+                made.drive_points[one.drive_index + 1] += one.force * one.drive_frac;
+                culled += one.culled;
+            }};
+        }
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if voice.active {
+                deposit!(voice.render_frame(feed, sympathy_rate, sostenuto));
+            }
+        }
+        for index in 0..HALOS_PER_SECTION {
+            let halo = &mut self.halos[index];
+            if halo.active {
+                deposit!(halo.render_frame(feed, sympathy_rate, sostenuto));
+            }
+        }
+        self.partials = self.partials.saturating_sub(culled);
+        made
+    }
+
+    /// Does this unit's per-voice work for one frame, in the order it
+    /// arrived.
+    ///
+    /// No sorting across sections any more, and none needed: every handler
+    /// touches only the voices of the section it was given, and a section's
+    /// records are already in the order the events came in. When this ran
+    /// for all four at once the order mattered, because the handlers still
+    /// reached across; now it cannot.
+    fn run_work(&mut self, work: &[u8], frame: u16) {
+        if work.is_empty() {
+            return;
+        }
+        let mut due = [VoiceRecord::EMPTY; MAX_VOICE_WORK_PER_FRAME];
+        let mut count = 0usize;
+        for (at, bytes) in UnitWork::read(work) {
+            if at != frame || count == due.len() {
+                continue;
+            }
+            if let Some(record) = VoiceRecord::from_bytes(bytes) {
+                due[count] = record;
+                count += 1;
+            }
+        }
+        for record in due.iter().take(count).copied() {
+            match record.kind {
+                VoiceRecord::STRIKE => {
+                    // The claim is not released here any more. It was, back
+                    // when the strike ran in the same pass that chose the
+                    // next one; now every choice in the block is made before
+                    // any strike lands, so nothing reads the bit again and
+                    // clearing it was a section writing a coordinator's
+                    // word for no one.
+                    self.start_voice_unit(
+                        record.channel,
+                        record.note,
+                        record.velocity,
+                        record.slot as usize,
+                        record.has(VoiceRecord::FLAG_PEDAL),
+                        record.soft,
+                        record.returned,
+                        record.serial,
+                    );
+                }
+                VoiceRecord::RELEASE => {
+                    let release = (record.release > 0).then(|| record.release - 1);
+                    self.release_voices(
+                        record.channel,
+                        record.note,
+                        release,
+                        record.serial,
+                        record.has(VoiceRecord::FLAG_PEDAL),
+                        record.has(VoiceRecord::FLAG_SOSTENUTO),
+                        record.velocity,
+                    );
+                }
+                VoiceRecord::PEDAL => self.pedal_voices(
+                    record.velocity,
+                    record.has(VoiceRecord::FLAG_RAIL_LIFTED),
+                    record.has(VoiceRecord::FLAG_SOSTENUTO),
+                    record.serial,
+                ),
+                VoiceRecord::SOSTENUTO => self.sostenuto_voices(
+                    record.has(VoiceRecord::FLAG_SOSTENUTO),
+                    record.has(VoiceRecord::FLAG_PEDAL),
+                    record.velocity,
+                ),
+                VoiceRecord::ALL_OFF => self.all_notes_off_voices(),
+                VoiceRecord::CATCH => self.catch_voices(record.channel, record.note),
+                VoiceRecord::EASE => self.ease_voices(record.channel, record.note),
+                _ => debug_assert!(false, "clase de trabajo desconocida"),
+            }
+        }
+    }
+
+    /// Which of a section's halos the next one takes: a silent one, or the
+    /// quietest of them.
+    ///
+    /// Halos compete only with halos. When they shared the voice pool the
+    /// loser of this choice was sometimes a struck note, which is a note
+    /// the player played going quiet so a sympathetic ring could start.
+    fn pick_halo(&mut self) -> usize {
+        if let Some(index) = (0..HALOS_PER_SECTION).find(|&i| !self.halos[i].active) {
+            return index;
+        }
+        (0..HALOS_PER_SECTION)
+            .min_by(|a, b| {
+                self.halos[*a].energy.total_cmp(&self.halos[*b].energy)
+            })
+            .unwrap_or(0)
+    }
+
+    /// Takes the slot `pick_voice_slot` chose, refunding what it was
+    /// carrying. This is where the budget moves, and it has not moved.
+    fn claim_voice(&mut self, slot: usize) -> &mut Voice {
+        self.partials = self.partials
+            .saturating_sub(unit_voice!(self, slot).partial_count);
+        &mut unit_voice!(self, slot)
+    }
+}
+
 impl ConcertGrand {
     /// The lid's angle in radians, from the degrees the player set.
     fn lid_radians(&self) -> f32 {
@@ -7566,33 +9625,7 @@ impl ConcertGrand {
         self.silent_in[slot] = 0;
     }
 
-    /// A key pressed again before the jack reset: no blow, but the key is
-    /// down and its damper is up again. A felt on its way down is caught;
-    /// a string under the pedal is held by the key from here; a string with
-    /// no voice is a silent key.
-    /// The voice half of a key caught below the repetition point, for one
-    /// section's voices. Whether anything was caught at all is the
-    /// coordinator's to know, and it reads it before this runs.
-    fn catch_voices(&mut self, section: usize, channel: u8, note: u8) {
-        let rate = self.engine.sample_rate;
-        let grip = self.engine.controls.damper_grip();
-        for slot in section_slots(section) {
-            let voice = &mut voice_at!(self, slot);
-            if !(voice.active && voice.note == note && voice.channel == channel) {
-                continue;
-            }
-            if voice.damper_phase != 0 {
-                voice.cancel_damper();
-            }
-            if voice.sustained && voice.damper_applied > 0.0 {
-                let own = StringEngine::damper_for(note, rate, grip * voice.firmness, 1.0);
-                voice.press_damper(own, -voice.damper_applied);
-                voice.damper_applied = 0.0;
-            }
-            voice.held = true;
-            voice.sustained = false;
-        }
-    }
+
 
     fn silent_slot_of(&self, note: u8) -> Option<usize> {
         (0..SILENT_SLOTS)
@@ -8224,1826 +10257,21 @@ impl ConcertGrand {
         self.voice_work_seq = seq.wrapping_add(1);
     }
 
-    /// Does ONE section's per-voice work for one frame, in the order it
-    /// arrived.
-    ///
-    /// No sorting across sections any more, and none needed: every handler
-    /// touches only the voices of the section it was given, and a section's
-    /// records are already in the order the events came in. When this ran
-    /// for all four at once the order mattered, because the handlers still
-    /// reached across; now it cannot.
-    fn run_section_work(&mut self, section: usize, frame: u16) {
-        let written = self.voice_work_len[section];
-        if written == 0 {
-            return;
-        }
-        let mut due = [VoiceRecord::EMPTY; MAX_VOICE_WORK_PER_FRAME];
-        let mut count = 0usize;
-        for (at, bytes) in UnitWork::read(&self.voice_work[section][..written]) {
-            if at != frame || count == due.len() {
-                continue;
-            }
-            if let Some(record) = VoiceRecord::from_bytes(bytes) {
-                due[count] = record;
-                count += 1;
-            }
-        }
-        for record in due.iter().take(count).copied() {
-            match record.kind {
-                VoiceRecord::STRIKE => {
-                    // The claim is not released here any more. It was, back
-                    // when the strike ran in the same pass that chose the
-                    // next one; now every choice in the block is made before
-                    // any strike lands, so nothing reads the bit again and
-                    // clearing it was a section writing a coordinator's
-                    // word for no one.
-                    self.start_voice_unit(
-                        record.channel,
-                        record.note,
-                        record.velocity,
-                        record.slot as usize,
-                        record.has(VoiceRecord::FLAG_PEDAL),
-                        record.soft,
-                        record.returned,
-                        record.serial,
-                    );
-                }
-                VoiceRecord::RELEASE => {
-                    let release = (record.release > 0).then(|| record.release - 1);
-                    self.release_voices(
-                        section,
-                        record.channel,
-                        record.note,
-                        release,
-                        record.serial,
-                        record.has(VoiceRecord::FLAG_PEDAL),
-                        record.has(VoiceRecord::FLAG_SOSTENUTO),
-                        record.velocity,
-                    );
-                }
-                VoiceRecord::PEDAL => self.pedal_voices(
-                    section,
-                    record.velocity,
-                    record.has(VoiceRecord::FLAG_RAIL_LIFTED),
-                    record.has(VoiceRecord::FLAG_SOSTENUTO),
-                    record.serial,
-                ),
-                VoiceRecord::SOSTENUTO => self.sostenuto_voices(
-                    section,
-                    record.has(VoiceRecord::FLAG_SOSTENUTO),
-                    record.has(VoiceRecord::FLAG_PEDAL),
-                    record.velocity,
-                ),
-                VoiceRecord::ALL_OFF => self.all_notes_off_voices(section),
-                VoiceRecord::CATCH => self.catch_voices(section, record.channel, record.note),
-                VoiceRecord::EASE => self.ease_voices(section, record.channel, record.note),
-                _ => debug_assert!(false, "clase de trabajo desconocida"),
-            }
-        }
-    }
 
-    /// One section's half of a note struck again over a string of its own
-    /// that is not free to be re-struck: ease that string out.
-    ///
-    fn ease_voices(&mut self, section: usize, channel: u8, note: u8) {
-        // Thirty milliseconds, from 250: the new voice covers the sound
-        // from its first cycle, and at 250 ms the old one lingered 1.7 s
-        // before the cull took it -- a ghost per repeated note, and on
-        // the Op. 9 No. 2 file 1351 voice steals against 185 with the
-        // merge. Thirty is still forty cycles of an A4, nothing steps.
-        let restrike = expf(-1.0 / (0.03 * self.engine.sample_rate));
-        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
-        // WITHOUT the release thud. `damp` is the damper landing, and
-        // its thud is the felt meeting a moving string; here no damper
-        // lands -- the hammer re-strikes a string the pedal is holding
-        // half-clear -- yet the thud fired on every repeated note under
-        // a half pedal, because a half pedal leaves `damper_applied`
-        // above zero and every such re-strike takes this path. Heard on
-        // the Op. 9 No. 2 file as "un pequeño popeo" on the repeated
-        // B-flats at 1:11 (found by the score: both pops were re-strikes
-        // of note 70 under a moving pedal, and neither a steal nor a
-        // step). The ease-out stays; the knock goes.
-        for slot in section_slots(section) {
-            let voice = &mut voice_at!(self, slot);
-            if voice.active && voice.note == note && voice.channel == channel {
-                // Its felt too: an eased-out voice still ticks, and a
-                // bounce landing on it relieves a press against a pole
-                // `damp` has since moved.
-                voice.cancel_damper();
-                voice.damp(restrike, thud_coefficient, thud_decay, 0.0);
-            }
-        }
-    }
 
-    /// One section's strings for one frame: its eight voices and its four
-    /// halos, and what they put on the bridge.
-    fn render_section_frame(
-        &mut self,
-        section: usize,
-        feed: f32,
-        sympathy_rate: f32,
-        sostenuto: bool,
-    ) -> SectionFrame {
-        let mut made = SectionFrame::default();
-        let mut culled = 0usize;
-        macro_rules! deposit {
-            ($rendered:expr) => {{
-                let one = $rendered;
-                made.sample += one.sample;
-                made.keybed_left += one.keybed_left;
-                made.keybed_right += one.keybed_right;
-                made.force += one.force;
-                made.drive_points[one.drive_index] += one.force * (1.0 - one.drive_frac);
-                made.drive_points[one.drive_index + 1] += one.force * one.drive_frac;
-                culled += one.culled;
-            }};
-        }
-        for slot in section_slots(section) {
-            let voice = &mut voice_at!(self, slot);
-            if voice.active {
-                deposit!(voice.render_frame(feed, sympathy_rate, sostenuto));
-            }
-        }
-        for index in 0..HALOS_PER_SECTION {
-            let halo = &mut halo_at!(self, section, index);
-            if halo.active {
-                deposit!(halo.render_frame(feed, sympathy_rate, sostenuto));
-            }
-        }
-        self.section_partials[section] = self.section_partials[section].saturating_sub(culled);
-        made
-    }
 
-    /// The strike with its velocity already on the unit scale. Seven-bit
-    /// sources come through `start_voice` and land here at exactly the value
-    /// they always produced; a 16-bit velocity lands between those steps.
-    /// The strike, into a slot the coordinator already chose.
-    ///
-    /// `slot` decides the section, and the section decides which worker does
-    /// this work: the recipe, the contact integration and the ladder are
-    /// 42-47 %, 37 % and the rest of a note-on, and all of it happens here.
-    fn start_voice_unit(
-        &mut self,
-        channel: u8,
-        note: u8,
-        velocity: f32,
-        slot: usize,
-        pedal: bool,
-        soft: f32,
-        returned: f32,
-        serial: u32,
-    ) {
-        #[cfg(test)]
-        let mut mark = std::time::Instant::now();
-        let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
 
-        // Una corda: the shifted hammer meets the strings with softer felt
-        // (the unworn side) and strikes one string fewer.
-        // The left pedal, through whichever mechanism this instrument has.
-        //
-        // A grand's shift takes 22% of the blow because the felt it lands on
-        // is softer, and it takes strings away as well. An upright's rail only
-        // shortens the travel: the hammer accelerates over a shorter distance,
-        // so its speed goes as the square root of it, and a rail that brings a
-        // regulated ~46 mm blow down into the mid-thirties gives about 0.85.
-        // So an upright's pedal is WEAKER than a grand's and purely a level --
-        // which is the well-known disappointment of playing one after the
-        // other, and the thing a single mechanism could not say.
-        //
-        // The blow distances are regulation practice, not something measured
-        // here: 37 mm turns up among technicians as a shortened figure and
-        // ~46 mm as the regulated one. The mechanism is certain; the fraction
-        // is judgement, like the strike skew and the damper's spread.
-        let (velocity, shift, repetition, at_string) = self.engine.action_blow(velocity, soft, returned);
-        // The coordinator asked the same question of the same function
-        // before it took this slot, so a hammer that stops short cannot
-        // arrive here -- and if it ever did, it would be a silent note
-        // holding a voice, not a wrong sound.
-        debug_assert!(at_string > 0.0, "un martillo que no llega se quedo con una voz");
-        let (letoff, _) = self.engine.hammer_speeds_at(repetition, velocity);
 
-        // A RE-STRUCK STRING IS THE SAME STRING. If this note is still
-        // ringing free -- held, or sustained with its damper clear -- the
-        // hammer meets a wire already in motion, and the new blow ADDS to
-        // the modal state it finds: partials in phase with the strike grow,
-        // partials against it cancel, which is the flutter of a fast
-        // repetition and the shimmer of a tremolo. The old build damped the
-        // living voice over 250 ms and started a stranger next to it.
-        //
-        // A voice already under a damper (released, or half-pedalled) has
-        // had its decay rates scaled and cannot be honestly re-lifted, so
-        // those still take the legacy path: ease the dying voice out and
-        // strike fresh.
-        //
-        // A voice under a HALF pedal can be re-lifted now: since 0.170.1 it
-        // carries its own damper's firmness, so relieving what was pressed
-        // restores its free rates exactly -- which is what the key does, the
-        // damper rising with the key whatever the pedal is doing -- and
-        // then the blow merges as it would into a free string. It used to
-        // take the legacy path instead, and on the Op. 9 No. 2 file every
-        // repeated melody note under the moving pedal was an ease-out plus a
-        // stranger: two B-flats a few cents apart, beating in the first
-        // milliseconds -- heard as "un pequeño popeo" that the thud fix did
-        // not remove.
-        let mut restrike_target: Option<usize> = None;
-        let rate = self.engine.sample_rate;
-        let grip = self.engine.controls.damper_grip();
-        // The coordinator already chose: it sends a re-struck note back to
-        // the string it is already on, and a fresh one to a slot it emptied.
-        // So this asks only about the slot it was given -- which is all a
-        // section could ask anyway, since the others are not its to read.
-        // It still ASKS, because the picture the choice was made from is a
-        // block old in one respect: a string may have been damped since.
-        {
-            let voice = &mut voice_at!(self, slot);
-            if self.engine.restrike_merge
-                && voice.active
-                && voice.note == note
-                && voice.channel == channel
-                && (voice.held || voice.sustained)
-            {
-                // The felt is still bouncing on this string, and the
-                // hammer is about to reset every lane that has decayed
-                // to a fresh, undamped phasor. Whatever press is
-                // standing has to be relieved HERE, against the pole it
-                // was applied to -- and the bounce disarmed, so no later
-                // contact relieves a press that no longer stands.
-                voice.cancel_damper();
-                if voice.sustained && voice.damper_applied > 0.0 {
-                    let own = StringEngine::damper_for(note, rate, grip * voice.firmness, 1.0);
-                    voice.press_damper(own, -voice.damper_applied);
-                    voice.damper_applied = 0.0;
-                }
-                restrike_target = Some(slot);
-            }
-        }
-        let f0 = self.engine.fundamental[index];
-        let b = self.engine.inharmonicity[index];
-        let x0 = self.engine.strike_point(note);
-        let width = StringEngine::hammer_width(note);
-        let nyquist = 0.47 * self.engine.sample_rate;
-        // A piano's ladder is spent long before nyquist: past ~11 kHz the
-        // felt cliff has every partial on the noise floor, inaudible but
-        // still billing four oscillators a sample. Carrying it that far was
-        // most of why one note ate a quarter of the audio call's fuel.
-        let audible_top = nyquist.min(11_000.0);
 
-        // Felt low-pass. The cutoff scales with the reciprocal of the contact
-        // time; the constant is empirical — a strict 1/(2·t) reading of the
-        // pulse width lands far darker than measured piano spectra, because
-        // the felt hardens during contact. Floored above the fundamental so
-        // the shortest treble strings keep their first partial.
-        let position = index as f32 / (NOTE_COUNT - 1) as f32;
-        // Tension modulation: a hard blow stretches the string, starting the
-        // note sharp; the extra tension relaxes over ~250 ms. Strongest on
-        // the heavy bass strings (Askenfelt & Jansson report several cents).
-        // Kept small: at ~14 cents the settle reads as an oriental string's
-        // bend, not a piano's live blow. Measured piano glides are a few
-        // cents at most.
-        let glide_cents = if velocity > 0.6 {
-            11.5 * self.engine.controls.lab(10)
-                * velocity
-                * velocity
-                * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let f0 = f0 * powf(2.0, glide_cents / 1200.0);
-        let string_scale = powf(f0 / 220.0, 0.55).clamp(0.35, 1.8);
-        let treble_life = self.engine.cal(note, 8) * self.engine.controls.lab(1);
-        let contact = self.engine.contact_time(note, velocity);
-        // The contact as THIS program voices it: the Felt control scales
-        // the felt's cutoff, and a cutoff is one over a contact time, so a
-        // program with a softer felt (Mellow, the Bösendorfer) has its
-        // hammers on the string longer and a brighter one (Concert 308,
-        // the uprights) shorter. One knob, and each piano its own time.
-        let ramp_s = MERGE_RAMP_S.get()
-            + MERGE_RAMP_CONTACT.get() * contact / self.engine.controls.lab(0).max(0.05);
-        // The nonlinear forest keeps the bass ladder open far above what the
-        // soft bass hammer alone would give; the felt corner widens with it.
-        let bass_top = 1.0 + 2.2 * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0);
-        let cutoff = ((1.9 * self.engine.cal(note, 0) / contact)
-            * bass_top
-            * self.engine.controls.lab(0)
-            * (0.5 + 1.5 * self.engine.controls.brightness))
-            .max(StringEngine::felt_floor_ratio(position) * f0);
 
-        // Aftersound detune: a fraction of a cent in the bass, over a cent in
-        // the treble, scaled by the unison control.
-        // Unison detune, in cents. The bass end was 0.3, which at the default
-        // unison setting is 0.43 cents -- against a measured 2.9 on the YDP
-        // A0, whose 2-4 kHz partials split into clusters about 5 Hz wide.
-        //
-        // It sits at 0.9 rather than the measured width because the two are
-        // in tension and the tension is worth stating. Widening it walks the
-        // fit cost the wrong way (19.59 at 0.3, 19.91 here, 20.45 at 1.5)
-        // while walking the DENSITY the right way (24, 36 and 41 audible
-        // peaks in A0's 2-4 kHz against the instrument's 82). The fit cost
-        // scores band levels inside windows and cannot see whether a band's
-        // energy sits in 24 components or 82; it also reads the beating as
-        // decay error. Where the two disagree this far, neither should be
-        // followed alone.
-        // No two unisons on a real piano are tuned equally well, and no two
-        // strings carry equal losses: the tuner's precision, the damper's
-        // seat and the termination's grip all vary note to note. Measured on
-        // the reference, the early T60 across one bass octave swings from
-        // 9.2 s to 20.7 s -- adjacent semitones 2.25x apart -- while this
-        // model ran a uniform +/-7%. Two hashed per-note factors carry that
-        // fingerprint: the unison's tuning precision (through which the
-        // decay unevenness partly EMERGES -- a wider unison dephases sooner,
-        // traps its energy, and sings; a just one stays coherent and drains)
-        // and a modest spread in the string's own losses.
-        let unison_precision = 0.5 + 1.0 * hash01((note as u32).wrapping_mul(2_654_435_761) ^ 0x51);
-        let string_life = 0.88 + 0.24 * hash01((note as u32).wrapping_mul(2_246_822_519) ^ 0xA7);
-        // Measured (2026-09-02) against both references: at the old width
-        // the unisons dephased inside the first third of a second and the
-        // tenor's and treble's early decays ran two to three times slower
-        // than the references' (the energy escaped the bridge's drain before
-        // the drain had done its work); at half the width the early decays
-        // land on them, and the late ones hold. Kirk's tuners preferred one
-        // to two cents; this is a cent and a bit through the middle.
-        // The top octave's unison is tuned clean. Measured (2026-09-07,
-        // Salamander C7, D#7, C8 at four velocities, the fundamental's
-        // envelope in 0.1 s windows): the reference decays monotonically,
-        // ten decibels in the first 50 ms and then two slopes; the model's
-        // top notes fell twenty in 100 ms, came BACK five to eight by 0.3 s
-        // and fell again -- a beat near the 2 Hz cap, a wobble on every top
-        // note and, under the pedal, on all of them at once. With the width
-        // at zero the envelope is monotone and within three decibels of the
-        // reference to half a second; at 0.05 a slower beat appears at 1 s.
-        // The taper follows `top_octave`.
-        let detune_cents = UNISON_WIDTH.get()
-            * (0.9 + 0.9 * position)
-            * (1.0 - StringEngine::top_octave(position))
-            * (self.engine.controls.unison * 2.86)
-            * self.engine.controls.lab(13)
-            * unison_precision;
-        // A tuner hears beats, not cents: the same three cents that pass
-        // unnoticed on a C2 beat twenty times a second on a C7's second
-        // partial, and that is the chirp the user heard on the high notes
-        // ("como si la cuerda trasteara"). The unison is therefore capped by
-        // the beat rate it may leave at the fundamental, which a tuner in
-        // the treble brings down to a couple of hertz; in the tenor and the
-        // bass the cap is above the law and changes nothing.
-        let beat_cap_cents = UNISON_BEAT_CAP_HZ.get() * 1731.0 / f0.max(1.0);
-        let detune_cents = detune_cents.min(beat_cap_cents);
 
-        // First pass: partial frequencies and unnormalised amplitudes. The
-        // comb keeps the sign of sin(n·π·x0): a struck string's partials
-        // alternate polarity around each node, and discarding that alternation
-        // is part of what makes additive attacks sound synthetic. On top, a
-        // deterministic ±1.5 dB irregularity stands in for the bridge
-        // admittance the smooth 1/n law ignores — real piano spectra are
-        // ragged, and the raggedness is fixed per note, not random per strike.
-        let mut frequencies = [0.0_f32; MAX_PARTIALS];
-        let mut amplitudes = [0.0_f32; MAX_PARTIALS];
-        // Board/radiation/winding colour per partial, and the attack phase
-        // states the hammer simulation leaves behind ((q, v/w) unit vector).
-        let mut colour = [0.0_f32; MAX_PARTIALS];
-        let mut phase_q = [0.0_f32; MAX_PARTIALS];
-        let mut phase_o = [1.0_f32; MAX_PARTIALS];
-        let mut count = 0;
-        let mut peak = 0.0_f32;
-        for n in 1..=MAX_PARTIALS {
-            let nf = n as f32;
-            // Wound strings deviate from Fletcher's formula in the high
-            // partials (the winding is not part of the ideal stiff core);
-            // the drift grows with n and roughens the bass ladder's texture.
-            let winding = 1.0
-                + ((0.35 - position) / 0.35).clamp(0.0, 1.0)
-                    * 0.0012
-                    * (nf / 40.0)
-                    * (hash01((note as u32) << 11 | (n as u32) << 4 | 9) - 0.5);
-            let frequency = nf * f0 * sqrtf(1.0 + b * nf * nf) * winding;
-            if frequency >= audible_top {
-                break;
-            }
-            let (ideal_comb, _) = sincosf(core::f32::consts::PI * nf * x0);
-            // The strike-point comb, floored, because the bridge is not a
-            // rigid node. It has finite admittance -- that is the whole
-            // reason the instrument makes any sound at all -- so the mode
-            // shapes are not exact sines with a perfect node at the
-            // termination, and the comb never reaches a true null. Measured
-            // combs in real pianos are dips of 10-20 dB.
-            //
-            // In the bass the strike point is almost exactly 1/8, so an ideal
-            // comb is exactly periodic and deletes every eighth partial
-            // outright. Those are partials the model has already computed and
-            // already pays for: A0 places 38 between 2 and 4 kHz and only 19
-            // survive to be audible, while the real instrument has 66 audible
-            // things in that band -- its densest, and the growl of a concert
-            // grand's bottom octave.
-            let comb = if ideal_comb < 0.0 { -1.0 } else { 1.0 }
-                * sqrtf(
-                    ideal_comb * ideal_comb
-                        + comb_floor_at(n, COMB_FLOOR.get()) * comb_floor_at(n, COMB_FLOOR.get()),
-                );
-            // Finite contact width. The felt's force distribution is smooth,
-            // so its transform is a Gaussian-like rolloff with no nulls — a
-            // sinc (the rectangle's transform) put its first null at partial
-            // ~33 on A0 and erased the top three octaves of the bass ladder.
-            // Hard blows compress the felt and narrow the contact: the
-            // window widens the spectrum with velocity.
-            let effective = width * (1.05 - 0.45 * velocity);
-            let argument = nf * effective;
-            let window = expf(-1.2 * argument * argument);
-            // Gaussian felt. The measured sustained spectrum falls off a
-            // cliff (C4 ff: partial 9 at -12 dB, partial 11 at -45) — the
-            // transform of the felt's smooth force pulse, super-polynomial
-            // past the corner. The band energy above the cliff is the
-            // attack transient's (noise, clang, phantoms), not the sustained
-            // ladder's: a ladder that sustains up there is a guitar. An
-            // earlier revision conflated those two measurements.
-            let felt_r = frequency / cutoff;
-            // Cliff, then floor: past the felt cliff the measured spectrum
-            // does not vanish — it sits on a ragged −30…−45 dB shelf out to
-            // 8 kHz, the sustained nonlinear forest, growing as the square
-            // of velocity. A cliff to silence sounds hollowed out.
-            let floor = 0.0455 * velocity * velocity * self.engine.controls.lab(6) * self.engine.cal(note, 1);
-            let felt = expf(-1.2 * felt_r * felt_r).max(floor);
-            // The board barely radiates below its first mode: the lowest
-            // notes' fundamentals (and even second partials) come out tens of
-            // dB down, and the ear reconstructs the pitch from the partial
-            // ladder. Radiating them at full strength is a synthesizer's
-            // sub bass, not a piano's. Sixth-order: the YDP measurements show
-            // -40 dB at 27.5 Hz against ~0 dB by 78 Hz.
-            // The string's own amplitudes carry no board colour: what the
-            // board does to them happens once, in the bank that radiates
-            // them, not twice.
-            let rough = 1.0;
-            colour[count] = rough;
-            // Bridge force, not string displacement: the ear hears the force
-            // the string exerts on the bridge, proportional to the string's
-            // slope at its termination. Modal displacement after a strike
-            // falls as sin(n·π·x0)/n, but the slope multiplies each mode by
-            // n — the factors cancel, so the radiated spectrum is the comb
-            // times the felt filter, with no 1/n law. The 1/n version is a
-            // Rhodes: fundamental-heavy, partials 5–30 missing in action.
-            let amplitude = comb * window * felt * rough;
-            frequencies[count] = frequency;
-            amplitudes[count] = amplitude;
-            peak = peak.max(amplitude.abs());
-            count += 1;
-        }
-        phase!(0, mark);
-        if count == 0 || peak <= 0.0 {
-            return;
-        }
 
-        // The hammer as an event, not a formula: integrate the nonlinear
-        // felt against the returning waves and keep each mode's amplitude
-        // AND phase wherever the simulation speaks louder than the
-        // calibrated floor. Comb, contact width and felt filtering are
-        // emergent in it; radiation and board colour still apply.
-        {
-            let mut sim_modes = 0;
-            // Above ~8 kHz a mode contributes almost nothing to the contact
-            // shape, and the strike runs on the audio thread: modes past it
-            // keep the calibrated recipe's amplitude instead.
-            while sim_modes < SIM_MODES.min(count)
-                && frequencies[sim_modes] < SIM_TOP_HZ.get().min(0.9 * nyquist)
-            {
-                sim_modes += 1;
-            }
-            // Four simulated modes or the recipe. Above G#6 a note has fewer
-            // than four partials under SIM_TOP_HZ, so the top octave and a
-            // half is drawn, not struck. Simulating whatever a note has was
-            // tried against the reference (2026-09-07, `trebsim` against
-            // `span12`): the treble came out 0.2 points WORSE, its pianissimo
-            // second partial at -18 dB under the first either way where the
-            // reference has -29 -- the integration's own pianissimo at the
-            // top is as bright as its fortissimo (C6 contact 1.40 ms pp,
-            // 1.08 ms ff; the reference's ladder wants about two to one), so
-            // the strike and the recipe are wrong in the same place, and the
-            // recipe is cheaper. The treble's hammer is the open item, not
-            // this gate.
-            phase!(1, mark);
-            if sim_modes >= SIM_MIN_MODES.get().max(1.0) as usize && self.engine.strike_budget > 0 {
-                self.engine.strike_budget -= 1;
-                // Everything the contact needs, in physical units.
-                //
-                // The old block derived the stiffness FROM the desired
-                // contact time (K = m*(pi/contact)^2*34) and then cut the
-                // integration at that same time -- circular, so the contact
-                // could never emerge and the Dynamics control had to swing it
-                // by hand. None of m, K, v0 were in units of anything, and
-                // the mass had already needed one "about a hundred times too
-                // heavy" correction found by measurement; with arbitrary
-                // units nothing flags the regime being wrong.
-                //
-                // Now: the string's linear density falls out of the scale's
-                // tension and the speaking length (c = 2*L*f0, mu = T/c^2);
-                // the hammer head's mass is Askenfelt's curve in kilograms,
-                // shared between the strings it strikes; its speed is in
-                // metres per second with the span a real action delivers;
-                // and the felt's K is a material property in N/m^p,
-                // calibrated once against measured contact times and then
-                // left alone. The contact time is an OUTCOME.
-                let length = self.engine.string_length(position);
-                let wave_speed = 2.0 * length * f0;
-                let string_mass =
-                    self.engine.controls.tension_newtons() / (wave_speed * wave_speed) * length;
-                // A0 to ~E1 single-strung, doubled through the wound bass,
-                // three from ~C2 -- the same stringing the unison uses.
-                let strings_struck = 1.0
-                    + ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0)
-                    + ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0);
-                // Curved, not linear: hammer heads taper fast out of the
-                // bass. 11 g at A0, ~5.2 g at C4, 3.5 g at the top -- the
-                // published Yamaha/Renner schedules. A linear taper put 7.8 g
-                // on C4 and the contact rode 1.5x long, because with the
-                // felt stiff the contact time is the hammer bouncing off the
-                // string-as-spring, tau = pi*sqrt(m / (T*L/(x0*(L-x0)))),
-                // and that is proportional to sqrt(m).
-                let head = 0.0035 + 0.0075 * powf(1.0 - position, 2.5);
-                let mass = (head / strings_struck * self.engine.controls.lab(8) * HAMMER_MASS_SCALE.get())
-                    .max(1e-4);
-                // The action's dynamic span: how much faster the hammer
-                // arrives at full velocity than at none. `dynamics` is the
-                // regulation -- a shallow action compresses the span, a deep
-                // one spreads it.
-                // The speed at the string: the action's law at let-off, less
-                // the flight's toll -- see `LETOFF_DISTANCE_MM`.
-                let (_, velocity0) = self.engine.hammer_speeds_at(repetition, velocity);
-                // The felt: K in N/m^p, hardening steeply toward the treble.
-                // Brightness and the Hammer Hard control are voicing -- the
-                // needle and the lacquer act on exactly this property.
-                // THE FELT'S EXPONENT BELONGS TO THE REGISTER, NOT TO THE
-                // VOICING -- and letting Brightness move it inverted the
-                // control.
-                //
-                // F = K*x^p, so K carries units of N/m^p: its meaning
-                // DEPENDS on p. Brightness used to raise both, K by 2.65x
-                // and p from 2.9 to 5.0, and at the half-millimetre a real
-                // hammer compresses, x^p collapses. Measured on A3
-                // fortissimo, the force at 0.5 mm ran 10968 N at the bottom
-                // of the travel and essentially zero at the top -- five
-                // orders of magnitude SOFTER for "brighter" -- and the
-                // contact went 0.05 ms to 2.80 ms. The rendered tone
-                // followed: 4-8 kHz fell from -18.5 to -44.5 dB as the fader
-                // rose. The user found it by ear before any metric did:
-                // "lo que yo interpreto como brillo es lo que ocurre al
-                // bajar el fader".
-                //
-                // It also made the strike stand out. With the tone under it
-                // collapsing while the transient did not, A3's attack sat
-                // +24.9 dB over its own sustain in 4-8 kHz at the top of the
-                // travel against +1.5 dB at the bottom: a bare knock over a
-                // dark note, which is the metallic strike reported on A3 and
-                // B3 -- and why turning the noise faders down never touched
-                // it. It was never noise; it was the strike left uncovered.
-                //
-                // Chabassier et al. measure the exponent varying by REGISTER
-                // (~1.5 bass to ~3.5 treble), not by regulation. Voicing --
-                // needling the felt, lacquering it -- is stiffness. So the
-                // exponent is the note's alone, and Brightness moves K over
-                // two decades, which is a voicer's range. The constants are
-                // arranged so the house voicing at 0.4 lands exactly where
-                // it did: only the fader's behaviour changes, not the
-                // instrument's default sound.
-                const HOUSE_BRIGHTNESS: f32 = 0.44;
-                // The felt as measured (Hall and Askenfelt; Chaigne and
-                // Askenfelt 1994): stiffness K and exponent p per note, C2
-                // 4e8 N/m^p and 2.3, C4 4.5e9 and 2.5, C7 1e12 and 3.0, both
-                // log-linear in position between them. The faders act on
-                // these as multipliers that are exactly one at the house
-                // voicing -- there is no second set of house factors.
-                // The tables stop at C2: below it the felt is C2's, not an
-                // extrapolation into a cushion that kept the A0 hammer on the
-                // string for eight milliseconds.
-                let felt_position = position.max(FELT_TABLE_FLOOR.get());
-                // Below C2 the hammers grow heavier faster than their felt
-                // softens: the bass felt is C2's times a gain that reaches
-                // FELT_BASS_GAIN at A0.
-                let bass_gain = 1.0
-                    + (FELT_BASS_GAIN.get() - 1.0)
-                        * (1.0 - position / FELT_TABLE_FLOOR.get().max(1e-3)).clamp(0.0, 1.0);
-                // And above C4 the measured C7 value leaves the second partial
-                // of the top octave as loud as its fundamental where both
-                // references have it 20 dB down: the top felt is voiced
-                // softer than the table by FELT_TREBLE_GAIN at C8, fading to
-                // one at C4.
-                let treble_gain = 1.0
-                    + (FELT_TREBLE_GAIN.get() - 1.0)
-                        * ((position - 0.448) / (1.0 - 0.448)).clamp(0.0, 1.0);
-                // And a second softening, in DECADES from C4 to C8, because
-                // the linear one above is half applied at C6 and a quarter
-                // at C7: "the top felt at a thirtieth" was a half at C6, which
-                // is why every felt sweep of 2026-09-07 read as saturated.
-                // The force pulse the integration hands C6 has its second
-                // partial 22 dB under its first at pp where the reference's
-                // ladder wants 35 (the comb gives n2 six back): the contact is
-                // 1.0 ms and needs nearer two.
-                let treble_gain = treble_gain
-                    * powf(
-                        10.0,
-                        -FELT_TREBLE_DECADES.get()
-                            * ((position - 0.448) / (1.0 - 0.448)).clamp(0.0, 1.0),
-                    );
-                let house = FELT_EXPONENT_AT_BASS.get() + FELT_EXPONENT_RISE.get() * felt_position;
-                let reach = self.engine.controls.felt_corner_travel();
-                // The top's own hardening, on top of the line: from the end
-                // of the tenor (position 0.55, about A4) to C8. It rides in
-                // `exponent`, not in `house`, so the constant-force
-                // compensation below holds the felt's force at the reference
-                // compression and only the hardening moves -- put into
-                // `house` it would soften the felt forty-fold at half a
-                // millimetre, the trap the comment below describes.
-                let treble_ramp = ((position - 0.55) / 0.45).clamp(0.0, 1.0);
-                let exponent = (if reach < 0.0 {
-                    house + reach * (house - FELT_EXPONENT_MIN.get())
-                } else {
-                    house + reach * (FELT_EXPONENT_MAX.get() - house)
-                } + FELT_EXPONENT_TREBLE.get() * treble_ramp)
-                    .clamp(
-                        FELT_EXPONENT_MIN.get().min(FELT_EXPONENT_MAX.get()),
-                        FELT_EXPONENT_MIN.get().max(FELT_EXPONENT_MAX.get()),
-                    );
-                // K carries units of N/m^p, so moving p without moving K
-                // changes the FORCE, not the hardness. At the half millimetre
-                // a real hammer compresses, x^p collapses as p grows: raising
-                // the exponent alone makes the felt softer, which is the trap
-                // that once inverted the Brightness control, and which showed
-                // up again the moment Felt Corner got its full travel --
-                // sweeping it up took the attack's 4-8 kHz from -7.5 to -20.8
-                // dB against the reference and the chromatic cost from 995 to
-                // 1402.
-                //
-                // So the exponent is moved at CONSTANT FORCE: K is
-                // compensated by the reference compression raised to the
-                // change in p, which leaves F(x_ref) exactly where it was and
-                // lets p do the only thing it should be doing -- setting how
-                // sharply the felt hardens as it is squeezed, and with it how
-                // the contact time shortens when the blow gets harder.
-                // Clamped the same way the live exponent is. Without that, the
-                // top of the compass -- where the house exponent already sits
-                // against the 5.0 ceiling -- got a compensation for travel it
-                // had not made, and A6 came out with K cut elevenfold at the
-                // factory setting. One note in thirty moved, which is exactly
-                // how much of a bug this kind is: invisible unless every note
-                // is compared.
-                let house_exponent =
-                    clamp_between(house, FELT_EXPONENT_MIN.get(), FELT_EXPONENT_MAX.get());
-                let stiffness = FELT_K_A0.get()
-                    * powf(10.0, FELT_K_DECADES.get() * felt_position)
-                    * bass_gain
-                    * treble_gain
-                    * self.engine.controls.lab(7)
-                    * powf(10.0, 2.0 * (self.engine.controls.brightness - HOUSE_BRIGHTNESS))
-                    * powf(
-                        1.0 / FELT_REFERENCE_COMPRESSION_M.get(),
-                        exponent - house_exponent,
-                    );
-                let (q, over_omega) = simulate_strike(
-                    &frequencies,
-                    sim_modes,
-                    StrikeConfiguration {
-                        x0,
-                        // Hard blows compress the felt and narrow the contact,
-                        // the same law the recipe used.
-                        contact_width: width * (1.05 - 0.45 * velocity),
-                        mass,
-                        string_mass,
-                        stiffness,
-                        exponent,
-                        velocity: velocity0,
-                        // A cap only: the hammer leaves when the string throws
-                        // it off. 20 ms is several times any physical contact.
-                        contact_seconds: 0.020 * CONTACT_STRETCH.get(),
-                        // The hysteresis depth came down from 0.85 on 0.88.0,
-                        // and the story is worth keeping. At 0.85 with the
-                        // half-millisecond relaxation, the unloading force is
-                        // clamped to zero against the remembered deeper
-                        // compression -- the fortissimo hammer buries ~1 mm
-                        // into crushed felt and HOVERS there at zero force
-                        // (traced by `strike_profile`: 4 ms of F=0 with the
-                        // hammer nearly stationary) until the agraffe
-                        // reflection digs it out. Measured, A0 ff stayed
-                        // 3.55x the asked contact and the pp/ff contact
-                        // ratio ran 1.23 where the instrument runs ~2.6:
-                        // the one mechanism that carries touch into timbre,
-                        // compressed exactly where it matters most.
-                        //
-                        // At 0.5 the felt still dissipates (the loop loses
-                        // half its unloading force) but keeps enough spring
-                        // to eject the hammer: A0 ff 7.10 -> 4.06 ms, C2 ff
-                        // 3.57 -> 3.17, C4 ff 2.43 -> 2.11, C4 pp lands on
-                        // its ask (0.90x), and the pp/ff ratio recovers to
-                        // 1.89. Sweeping deeper (0.3, 0.0) buys almost no
-                        // further contact -- the residue is the genuine
-                        // physics of a light hammer on a heavy string --
-                        // while the brightness keeps climbing, so 0.5 is
-                        // where the trade stops paying. The felt sweep that
-                        // measured all of this is `felt_sweep`; the K
-                        // compensation lives in FELT_K_A0.
-                        stulov_epsilon: STULOV_EPSILON.get(),
-                        stulov_tau: STULOV_TAU_S.get(),
-                        comb_floor: COMB_FLOOR.get(),
-                    },
-                );
-                // Scale the simulated strike to the recipe's level.
-                //
-                // Measured, `peak / sim_peak` runs from about 1,000 to over
-                // 4,000,000 depending on note and velocity, and soft blows get
-                // a factor twenty-six to forty times larger than hard ones. It
-                // is not a unit change: it erases the level the integration
-                // just computed and substitutes the drawn law, which is where
-                // the touch went and the hammer's mass with it.
-                //
-                // Scaling the simulation by v^3 to undo that was tried and
-                // reverted. It pushes soft strikes BELOW the recipe floor, so
-                // quiet notes became pure recipe and loud ones pure
-                // simulation, and F#1's brightness ratio inverted from 1.44x
-                // to 0.90x -- a soft blow brighter than a hard one.
-                //
-                // The repair is a per-note reference: normalise by what the
-                // strike produces at ONE fixed velocity, cached per note, so
-                // the compass stays balanced (the simulation's absolute units
-                // are arbitrary and would make the treble hundreds of times
-                // quieter) while the strike's own velocity response passes
-                // through untouched.
-                //
-                // `peak / sim_peak` used to do both, and measuring it showed
-                // what that cost: the factor runs from about 1,000 to over
-                // 4,000,000 depending on note and velocity, and soft blows get
-                // a factor twenty-six to forty times larger than hard ones. It
-                // was not a unit change. It was erasing the level the
-                // integration had just computed and substituting the drawn
-                // law -- which is where the touch went, and where the hammer's
-                // mass went with it.
-                //
-                // The compass part is kept, because the simulation's absolute
-                // units are arbitrary and letting them set the balance would
-                // make the treble hundreds of times quieter than the bass. The
-                // velocity part is given back: the measured exponent is close
-                // to three across the bass and tenor, and undoing it restores
-                // roughly 30 dB of range between a soft blow and a hard one,
-                // which is what a piano has and what this did not.
-                //
-                // Full velocity is the fixed point, so the loudest notes keep
-                // the level they were calibrated at and the headroom holds.
-                let mut sim_peak = 0.0f32;
-                let mut magnitudes = [0.0f32; SIM_MODES];
-                for n in 0..sim_modes {
-                    let bridge = (n + 1) as f32;
-                    magnitudes[n] = bridge * sqrtf(q[n] * q[n] + over_omega[n] * over_omega[n]);
-                    sim_peak = sim_peak.max(magnitudes[n] * colour[n]);
-                }
-                if sim_peak > 0.0 {
-                    // The strike SETS the spectrum; the recipe is a floor.
-                    //
-                    // This used to be a maximum, so the analytic curve won
-                    // wherever it was louder and the integration only ever
-                    // added brightness on top of it. The result was that the
-                    // note's spectrum was drawn rather than generated -- a
-                    // product of comb, contact window, felt curve and board
-                    // colour, which is a filter, not a force.
-                    //
-                    // The colour term stays: that is the board and the
-                    // radiation, which the strike's output legitimately
-                    // passes through on its way out. What is gone is the
-                    // recipe competing with the simulation for the amplitude.
-                    let normalise = peak / sim_peak;
-                    let mut seam = 1.0f32;
-                    for n in 0..sim_modes {
-                        let candidate = magnitudes[n] * colour[n] * normalise;
-                        let magnitude = magnitudes[n].max(1e-12);
-                        let recipe = amplitudes[n].abs().max(1e-12);
-                        // The last simulated partial says how far the strike's
-                        // spectrum sits from the recipe's at the boundary.
-                        seam = candidate / recipe;
-                        amplitudes[n] = candidate.max(recipe * RECIPE_FLOOR.get());
-                        phase_q[n] = (n + 1) as f32 * q[n] / magnitude;
-                        phase_o[n] = (n + 1) as f32 * over_omega[n] / magnitude;
-                    }
-                    // Above the simulated range the recipe is all there is,
-                    // and leaving it at its own level left a seam.
-                    //
-                    // The integration stops at 8 kHz, so partials past it kept
-                    // the amplitude the analytic curve gave them while
-                    // everything below became the strike's, which is quieter.
-                    // Measured on C2's first 30 ms, the spectrum fell -29,
-                    // -39, -51 dB through the upper bands and then JUMPED to
-                    // -23 in 6-12 kHz: a 28 dB step upward, exactly at the
-                    // boundary. A band of top-octave hash floating above the
-                    // note is heard as a click, which is what the user
-                    // reported -- "se escucha como un click" -- and no
-                    // ingredient could account for it because it was a seam,
-                    // not an ingredient.
-                    for slot in amplitudes.iter_mut().take(count).skip(sim_modes) {
-                        *slot *= seam;
-                    }
-                }
-            }
-        }
-
-        // Drop partials the strike already made inaudible, then respect the
-        // global budget: a saturated instrument thins new notes, never the
-        // audio callback.
-        // Measured on the YDP bass (item 2, PIANO_RESEARCH.md): the first
-        // partials of a real bass attack carry a smooth progressive phase
-        // lag (~-25 deg per partial at A0: 0, 0, -49, -88...) — the
-        // dispersive delay of the strike pulse. Impose that order on the
-        // lowest partials of wound strings; above them the simulation's
-        // phases stand.
-        let bass_phase_gate = ((0.35 - position) / 0.35).clamp(0.0, 1.0);
-        if bass_phase_gate > 0.3 {
-            for n in 0..count.min(6) {
-                let theta = -0.44 * n as f32 * bass_phase_gate;
-                let (sin_t, cos_t) = sincosf(theta);
-                phase_q[n] = sin_t;
-                phase_o[n] = cos_t;
-            }
-        }
-        // And a dispersion over the whole ladder: each partial's initial
-        // phase turned back by ATTACK_DISPERSION radians per harmonic. With
-        // every partial starting in step the first millisecond of a note is
-        // a pulse -- measured, the model's A3 at velocity 73 peaks 8 dB
-        // above its own 4-7.5 ms body inside 1.5 ms where the reference's
-        // sits 10 to 14 dB BELOW it and rises into it -- and a pulse at the
-        // top of every attack is heard as a pick. Dispersion is what a
-        // stiff string and a bridge with delay do to a strike's phases.
-        let dispersion = ATTACK_DISPERSION.get();
-        if dispersion > 0.0 {
-            for n in 0..count {
-                let theta = -dispersion * n as f32;
-                let (sin_t, cos_t) = sincosf(theta);
-                let (q, o) = (phase_q[n], phase_o[n]);
-                phase_q[n] = q * cos_t + o * sin_t;
-                phase_o[n] = o * cos_t - q * sin_t;
-            }
-        }
-
-        let floor = peak * 1e-3;
-        let section = slot & (STRING_SECTIONS - 1);
-        let budget_left =
-            self.section_allowance[section].saturating_sub(self.section_partials[section]);
-        // Sixteen slots stay reserved for the nonlinear extras (phantoms and
-        // the longitudinal clang): the lowest notes fill the whole array with
-        // their transverse ladder otherwise, and the growl never fits.
-        let cap = if budget_left < count {
-            budget_left.max(12)
-        } else {
-            count
-        }
-        .min(MAX_PARTIALS - 16);
-
-        // Energy normalisation, then the velocity curve: level roughly
-        // velocity^1.7 (sound pressure grows faster than hammer speed).
-        let mut energy = 0.0;
-        for amplitude in amplitudes.iter().take(count).copied() {
-            if amplitude.abs() >= floor {
-                energy += amplitude * amplitude;
-            }
-        }
-        let scale = 0.28 * self.engine.cal(note, 7) * powf(velocity.max(0.01), LEVEL_VELOCITY_POWER.get())
-            / sqrtf(energy.max(1e-9));
-
-        // Everything a partial needs, computed before a voice is borrowed:
-        // both components draw their decay from the same loss curve, read at
-        // the partial's own frequency — the prompt dies ~3× faster, the
-        // aftersound lingers past it.
-        //
-        // The aftersound is not one chorus: each partial gets its own detune
-        // (a fixed per-note jitter around the nominal cents) and its level
-        // falls with partial number, because bridge coupling feeds the slow,
-        // poorly-radiating configurations mostly at low partials. A uniform
-        // detune ratio across the whole spectrum beats every partial at a
-        // rate proportional to its frequency — precisely the synthesizer
-        // "shimmer" a real unison does not have.
-        let sample_rate = self.engine.sample_rate;
-        // Out of the ladder loop, because none of it depends on the partial.
-        // Measured, a note-on is 8.55 us per partial and almost nothing else,
-        // so what the loop does per partial is the whole of the note-on block
-        // -- and it was paying for a power of the strike position, and for
-        // nine atomic reads of knobs that cannot change inside it, once for
-        // every partial it built.
-        let horizontal_share =
-            HORIZONTAL_SHARE.get() * (0.65 + 1.2 * powf(1.0 - position, 1.5));
-        let horizontal_bridge = HORIZONTAL_BRIDGE.get();
-        let unison_jitter_spread = UNISON_JITTER_SPREAD.get();
-        let polarisation_cents = POLARISATION_CENTS.get();
-        let prompt_measured_power = PROMPT_MEASURED_POWER.get();
-        let mut partials = [Partial::default(); MAX_PARTIALS];
-        let mut placed = 0;
-        phase!(6, mark);
-        for n in 0..count {
-            if placed >= cap || amplitudes[n].abs() < floor {
-                continue;
-            }
-            let frequency = frequencies[n];
-            let amplitude = amplitudes[n] * scale;
-            let (_, board_decay) = StringEngine::board_response(frequency);
-            // The aftersound sustains much flatter than the prompt: measured
-            // A4 holds nearly level from 1 s to 2 s while a shared decay
-            // curve kept falling. ×1.8 on the slow stage matches the
-            // measured plateau.
-            let mut t60 = self.engine.t60_seconds(frequency, f0, string_scale, treble_life);
-            if n == 0 {
-                // The fundamental's prompt stage as the reference measured
-                // it at this key -- the bridge's conductance at this point
-                // and pitch, which no smooth law carries. The law's own
-                // controls (the Decay fader, the treble life) stay on top
-                // of it: the table is the mechanism, not the setting.
-                let controls =
-                    (0.5 + 1.5 * self.engine.controls.decay) * self.engine.hf_life(frequency * string_scale);
-                let measured = measured_prompt_t60(note) * controls;
-                t60 *= powf(
-                    measured / t60.max(1e-3),
-                    prompt_measured_power * measured_prompt_share(note),
-                );
-            }
-            let t60 = t60 * board_decay * self.engine.cal(note, 4) * string_life;
-            // Geometric, and WIDE. The linear x0.55-1.45 spread kept every
-            // cluster's beat rate within a factor 2.6, so with rate
-            // proportional to frequency the FIRST nulls of every 2-4 kHz
-            // cluster landed together inside 0.1-0.3 s -- measured on C2 as
-            // a 5 dB band dip at 0.08-0.25 s that swings back by 0.5 s, a
-            // breath the real note does not take (its clusters are dense and
-            // their nulls shallow). A factor-6 geometric spread scatters the
-            // null times; the geometric mean keeps the average width the
-            // ear already approved.
-            let jitter = 0.95
-                * powf(
-                    unison_jitter_spread,
-                    hash01((note as u32) << 10 | (n as u32) << 2 | 1) - 0.5,
-                );
-            let cents = detune_cents * jitter;
-            // The strings of the unison, struck together and equal: their
-            // subsequent life -- fast coherent decay, dephasing, the long
-            // trapped tail, the churn -- is simulated through the bridge
-            // coupling below, not scripted here.
-            // How many strings this note actually has: single to ~E1,
-            // doubled through the wound bass, three from ~C2 upward -- the
-            // same stringing the hammer divides its mass over.
-            let second = ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0) * (1.0 - 0.4 * shift);
-            let third_string = ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0) * (1.0 - 0.75 * shift);
-            // Equal strings, equal shares. The old split gave the "second
-            // string" 0.44 and the third 0.22 of the note, which is not how
-            // a unison is strung.
-            // No unison is balanced: the tuner's mutes, the felt's wear and
-            // the strike line's tilt give each string of the trio a different
-            // share of every partial, varying along the ladder. Equal shares
-            // made each partial's cluster a symmetric two-or-three phasor sum
-            // whose FIRST collective null is deep -- and with C2's 2-4 kHz
-            // detunes all nulling inside 0.08-0.25 s, the band's energy
-            // measurably dipped 4-5 dB there and swung back by 0.5 s (a V
-            // the real note does not have: its clusters are uneven and dense,
-            // so their nulls are shallow and scattered). Hashed per partial,
-            // fixed per note: character, not randomness.
-            let unbalance_a = 0.65 + 0.7 * hash01((note as u32) << 12 | (n as u32) << 3 | 0x15);
-            let unbalance_b = 0.65 + 0.7 * hash01((note as u32) << 12 | (n as u32) << 3 | 0x2B);
-            let second = second * unbalance_a;
-            let third_string = third_string * unbalance_b;
-            let split = 1.0 / (1.0 + second + third_string);
-            let shares = [split, split * second, split * third_string];
-            let ratios = [
-                exp2f(-cents / 2400.0),
-                exp2f(cents / 2400.0),
-                exp2f(
-                    cents * (0.9 + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3)) / 1200.0,
-                ),
-            ];
-            // THE TWO-STAGE DECAY, WITHOUT A SCRIPT.
-            //
-            // Each component's own rotation carries only the string's
-            // internal and air losses -- the SLOW stage, what a string does
-            // when the bridge takes nothing from it. The bridge drain then
-            // removes energy from the coherent configuration at exactly the
-            // rate that turns slow into the measured audible decay -- the
-            // FAST stage. A fresh note is coherent and dies at the fast
-            // rate; as the detuned strings dephase and the horizontal
-            // outlives them, what remains escapes the drain and rings at
-            // the slow rate. The knee between the stages, its depth, and
-            // its register dependence all fall out of the same three
-            // numbers instead of being drawn.
-            //
-            // What this deletes: `tail = 1.8 + 2.6/(1+(f/420)^1.2)` (the
-            // scripted stage ratio), `prompt_t60 = t60*1.94/(1.4+1.1*pos)`
-            // (the scripted fast stage), and the 300 Hz coupling fade (the
-            // fast/slow difference now carries the frequency dependence,
-            // and it comes from the measured radiation curve rather than a
-            // drawn rolloff).
-            // The per-note calibration and the board's per-partial pull
-            // apply to BOTH stages: they express where this note's energy
-            // goes, not which configuration it is in. Without them the slow
-            // stage ignored the calibration that the audible curve was
-            // fitted through, and the top of the compass rang 2.7x long
-            // once it dephased.
-            let slow_t60 = (self.engine.slow_t60_seconds(frequency, f0, string_scale)
-                * board_decay
-                * self.engine.cal(note, 4)
-                * string_life
-                * self.engine.controls.lab(12))
-            .max(0.05);
-            let fast_t60 = (t60 * self.engine.controls.lab(11)).max(0.02);
-            let intrinsic = self.engine.decay_per_sample(slow_t60);
-            let bridge_rate = (6.907_755 * (1.0 / fast_t60 - 1.0 / slow_t60)).max(0.0);
-            let drained = 1.0 - expf(-bridge_rate * CULL_INTERVAL as f32 / sample_rate);
-            // Normalised by the weight vector's square sum: with I - k*w*w^T
-            // the coherent mode loses k*(w.w) per step, so dividing makes it
-            // lose exactly `drained`, and the fast stage means what the
-            // curve says.
-            let weights = shares[0] * 0.0
-                + 1.0
-                + second * second
-                + third_string * third_string
-                + horizontal_bridge * horizontal_bridge;
-            let coupling = drained / weights;
-            // How fast a partial reaches its amplitude. It is NOT a swell.
-            //
-            // This used to read "a bass note does not arrive, it gathers",
-            // with Bloom shipping at 0.56, and that was taste rather than
-            // measurement. A C3's fundamental took 53 ms to build, and since
-            // the law goes as 5/f the lowest partials took longest of all --
-            // so the model played the blow and then let the thick string walk
-            // in behind it. The player heard it as two events, "GOLPE ->
-            // CUERDA GRUESA", and said it had always been there.
-            //
-            // Measured on the reference: a real C3's 100-300 Hz band is at its
-            // maximum 30 ms after the strike and already falling by 200 ms. It
-            // rises 0.1 dB. Ours rose 5.1. At 0.15 the build is under one
-            // period, which is what a hammer setting mode amplitudes during a
-            // two-millisecond contact actually does, and the swell measures
-            // 0.3 dB. The chromatic cost falls 41 points with it.
-            //
-            // What legitimately gathers -- the horizontal polarisation, the
-            // aftersound as the unison dephases -- gathers through the
-            // two-stage decay and the halo, not through here.
-            let rise_seconds = ((5.0 / frequency) * self.engine.controls.lab(9)).clamp(0.0008, 0.15);
-            let rise = expf(-1.0 / (rise_seconds * sample_rate));
-            // The horizontal picks up more of the blow in the bass: a wound
-            // string's mass sits far off its bending axis and the bridge's
-            // cross-coupling hands a larger share of the vertical motion
-            // sideways. This is also where the second decay stage is most
-            // prominent in measured pianos.
-            let (pq, po) = (phase_q[n], phase_o[n]);
-            let mut built = Partial::default();
-            built.set_lane(
-                LANE_HORIZONTAL,
-                Component::start_state(
-                    amplitude * horizontal_share * pq,
-                    amplitude * horizontal_share * po,
-                    (frequency
-                        * exp2f(
-                            polarisation_cents
-                                * (0.6 + 0.8 * hash01((note as u32) << 7 | (n as u32) << 2 | 5))
-                                / 1200.0,
-                        ))
-                    .min(nyquist),
-                    intrinsic,
-                    sample_rate,
-                ),
-            );
-            built.set_lane(
-                LANE_BLOOM,
-                Component::start_state(
-                    -amplitude * (1.0 + horizontal_share) * pq,
-                    -amplitude * (1.0 + horizontal_share) * po,
-                    frequency,
-                    rise,
-                    sample_rate,
-                ),
-            );
-            built.coupling = coupling;
-            built.drain = Partial::drain_per_sample(coupling, horizontal_bridge);
-            built.slope = {
-                let h = (n + 1) as f32;
-                let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
-                sign * h * (1.0 / 16.0)
-            };
-            for (lane, (share, ratio)) in shares.iter().zip(ratios.iter()).enumerate() {
-                if *share > 0.0 {
-                    // Each string of the trio meets the hammer at its own
-                    // instant, fixed per note -- a piano's strike line does not
-                    // re-tilt between blows. Lane 0 is the reference; the other
-                    // two carry a skew of a few tens of microseconds either way.
-                    let skew = if lane == 0 {
-                        0.0
-                    } else {
-                        let speed = (velocity * HAMMER_V_FF.get()).max(0.3);
-                        (STRIKE_SKEW_M.get() / speed)
-                            * (2.0 * hash01((note as u32) << 5 | (lane as u32) << 2 | 0xB) - 1.0)
-                    };
-                    let angle = core::f32::consts::TAU * frequency * skew;
-                    let (sin_a, cos_a) = sincosf(angle);
-                    let (rq, ro) = (pq * cos_a - po * sin_a, pq * sin_a + po * cos_a);
-                    built.set_lane(
-                        lane,
-                        Component::start_state(
-                            amplitude * share * rq,
-                            amplitude * share * ro,
-                            (frequency * ratio).min(nyquist),
-                            intrinsic,
-                            sample_rate,
-                        ),
-                    );
-                }
-            }
-            partials[placed] = built;
-            placed += 1;
-        }
-        phase!(2, mark);
-        if placed == 0 {
-            return;
-        }
-
-        // Phantom partials: nonlinear transverse→longitudinal mixing puts
-        // extra components near twice each low partial's frequency, growing
-        // fast with amplitude — the metallic edge of a hard bass note
-        // (Conklin 1999; Bank & Sujbert 2005). Rendered for the bottom third
-        // of the compass, from the strongest low partials, at a level that
-        // scales with the square of velocity.
-        // Strongest in the bass but present through the mids: C4 ff carries
-        // measurable 3-8 kHz forest energy the gated version lacked entirely.
-        let bass_gate = powf((1.0 - 1.1 * position).clamp(0.0, 1.0), 1.5);
-        // The phantom forest and the longitudinal clang are no longer
-        // PLACED here. Both were scripted stand-ins -- partials parked at
-        // 2*f_n and a formant parked at 17*f0, with levels drawn against
-        // velocity -- for content the longitudinal bank now GENERATES from
-        // the live bridge slope: every pair product, at its own level,
-        // following the strings for as long as they actually move.
-        // The chiff sits only ~15–20 dB under the tone's peak in a real
-        // instrument and lasts longer on the heavy bass hammers.
-        // The action's noise is not a click: the key bed, the shank and the
-        // damper keep radiating for tens of milliseconds, which is why the
-        // reference carries a noise floor through its whole attack. A 12 ms
-        // burst is spent before the window the measurement looks at.
-        let noise_decay = expf(-1.0 / ((0.060 - 0.042 * position) * sample_rate));
-        // The knock starts wide — brighter for harder blows — and its
-        // bandwidth contracts with a ~25 ms time constant as it fades.
-        let noise_coefficient = 1.0
-            - expf(
-                -core::f32::consts::TAU * (1200.0 + 2500.0 * position + 6000.0 * velocity)
-                    / sample_rate,
-            );
-        let noise_shrink = expf(-1.0 / (0.070 * sample_rate));
-        // The knock's low body survives in every register: the old corner
-        // climbed to ~940 Hz at the top, which removed exactly the 300-1200
-        // band the measurement found missing. The keybed under a treble key
-        // is the same keybed.
-        let noise_body_coefficient = 1.0
-            - expf(-core::f32::consts::TAU * (40.0 + 120.0 * position * position) / sample_rate);
-        // Measured against every sampled note's own attack (inter-partial
-        // floor, 300-3200 Hz, first 60 ms): the flat-ish law was right on
-        // average -- the mechanism IS the same size everywhere, and the
-        // knock's prominence up top is masking, not louder hardware -- but
-        // it carried a real bump around A5-F6, +4 dB against the samples,
-        // while the very top ran a few dB shy. One measured notch and a
-        // lift at the extreme.
-        let bump = {
-            let d = (position - 0.72) / 0.14;
-            expf(-d * d)
-        };
-        let action = (1.0 - 0.25 * ((position - 0.5) / 0.5).max(0.0))
-            * (1.0 - 0.38 * bump)
-            * (1.0 + 0.9 * ((position - 0.88) / 0.12).max(0.0));
-        // The clack: the let-off and the hammer shank are WOOD, and wood
-        // knocked rings briefly at its own modes rather than hissing. Three
-        // short damped components in the knock's 0.7-3 kHz body -- the "toc"
-        // a treble note keeps when its tone is too small to mask anything.
-        // Level rides the same law as the burst; T60s of tens of
-        // milliseconds; frequencies jittered per note so the rack of keys
-        // does not ring as one bell.
-        // The x8 that matched the recordings' measured attack floor reads
-        // exaggerated at the keyboard: a synthetic three-mode ring is far
-        // more salient than the same energy smeared through a real action
-        // and a real room. The default now sits ~10 dB under the measured
-        // ceiling -- present, discreet -- and the fader still reaches the
-        // recording level at ~0.65 and x16 above it at the top.
-        let strike_salt = serial.wrapping_mul(0x9E37_79B9);
-        let clack_level = action_noise_dynamic(velocity)
-            * KNOCK_LEVEL.get()
-            * 3.4
-            * (0.75 + 0.5 * hash01(strike_salt ^ 0xA5))
-            * action
-            * self.engine.controls.lab(3)
-            * Controls::noise_gain(self.engine.controls.action_noise);
-        if clack_level > 1e-5 {
-            let rise = expf(-1.0 / (0.0012 * sample_rate));
-            // The shank is shorter under a treble hammer, so its knock
-            // sits higher: the modes climb ~30% across the compass.
-            let shank = 1.0 + 0.3 * position;
-            for (freq, level, t60, seed) in [
-                (720.0_f32 * shank, 0.9_f32, 0.045_f32, 51u32),
-                (1560.0 * shank, 1.0, 0.035, 57),
-                (2740.0 * shank, 1.3, 0.025, 63),
-            ] {
-                if placed >= MAX_PARTIALS {
-                    break;
-                }
-                // Per STRIKE, not per note: a note whose knock is bit-for-
-                // bit identical on every repetition reads as a machine, and
-                // the ear flags it long before it can name it. A real action
-                // never lands twice the same way.
-                let jitter = 1.0
-                    + CLACK_SCATTER.get() * (hash01((note as u32) << 8 | seed) - 0.5)
-                    + 0.06 * (hash01(strike_salt ^ seed) - 0.5);
-                let amplitude = clack_level * level;
-                let decay = self.engine.decay_per_sample(t60);
-                let mut built = Partial::default();
-                built.set_lane(
-                    0,
-                    Component::start(amplitude, freq * jitter, decay, sample_rate),
-                );
-                built.set_lane(
-                    LANE_BLOOM,
-                    Component::start(-amplitude, freq * jitter, rise, sample_rate),
-                );
-                partials[placed] = built;
-                placed += 1;
-            }
-        }
-
-        // Constant-power pan by key position, narrowed by the width control.
-        let spread = (position - 0.5) * self.engine.controls.width;
-        let angle = (0.5 + spread * 0.8) * core::f32::consts::FRAC_PI_2;
-        let (pan_right, pan_left) = sincosf(angle);
-
-        // The key-bottom thump: the action landing on the keybed and the
-        // board's whole-body motion put a low-frequency thud under every
-        // note, treble included — the A/B against the YDP renders shows the
-        // real instrument carrying tens of dB more 30–120 Hz energy under
-        // mid and treble notes than strings alone can explain. A dark noise
-        // burst stands in for it (`THUMP_NOISE_GAIN` says why a noise and
-        // not the eight components it replaced).
-        // A different burst every time, and a different one per key: the
-        // components this replaces rang the same note on every strike.
-        let thump_seed = strike_salt.wrapping_add((note as u32).wrapping_mul(2_654_435_761)) | 1;
-        let undamped = note > self.engine.controls.last_damper;
-        let (thump_amp, thump_decay, thump_rise_step) = {
-            let thump_level = powf(velocity.max(0.01), THUMP_VELOCITY_POWER.get())
-                * 0.095
-                // Shortening the thud from 300 ms to 60 ms takes its energy
-                // with it, and that energy is wanted: the model already sits
-                // 26 dB under the reference's attack floor in the band the
-                // thud occupies. Amplitude goes as the square root of the
-                // ratio of the two ring times, so the knock keeps the weight
-                // it had while losing the tail that made it stack.
-                * 0.32
-                * sqrtf(0.30 / THUMP_T60_S.get())
-                * THUMP_BASE.get()
-                * powf(10.0, THUMP_RISE_DB.get() * position.min(THUMP_RISE_TO) / 20.0)
-                * powf(
-                    10.0,
-                    (THUMP_TREBLE_DB - THUMP_TREBLE_FF_DROP_DB * velocity)
-                        * ((position - 0.5) / 0.5).clamp(0.0, 1.0)
-                        / 20.0,
-                )
-                * Controls::noise_gain(self.engine.controls.action_noise)
-                * self.engine.controls.lab(2)
-                * self.engine.cal(note, 2);
-            let rise = expf(-1.0 / (0.004 * sample_rate));
-            (
-                thump_level * THUMP_NOISE_GAIN,
-                self.engine.decay_per_sample(THUMP_T60_S.get()),
-                rise,
-            )
-        };
-
-        // Duplex scale: the string segments behind the bridge, tuned high,
-        // struck only through the bridge, and — crucially — undamped, so a
-        // staccato treble note leaves their faint ping ringing. Fitted on the
-        // treble half of the compass, where builders fit them.
-        let mut duplex = [Component::default(); 2];
-        if position > 0.45 {
-            // Faint and barely off-harmonic: at −25 dB the duplex reads as
-            // shimmer and afterglow; louder or wider it reads as a detuned
-            // bell riding every strike. Compressed against velocity — the
-            // tone grows with v^1.7 and masks it while held, but after the
-            // damper falls the ring stands alone, so a hard strike must not
-            // leave proportionally more of it.
-            let level = DUPLEX_LEVEL.get() * powf(velocity, 1.7) * (1.0 - 0.45 * velocity) * 0.32;
-            for (slot, (ratio, seed)) in duplex.iter_mut().zip([(2.015_f32, 11), (4.03, 29)]) {
-                let jitter = powf(
-                    2.0,
-                    (hash01((note as u32) << 6 | seed) - 0.5) * 10.0 / 1200.0,
-                );
-                let frequency = f0 * ratio * jitter;
-                if frequency < nyquist {
-                    // Short segments, short ring: undamped is not endless.
-                    let t60 = (self.engine.t60_seconds(frequency, f0, 1.0, 1.0) * 0.35).min(0.9);
-                    let decay = self.engine.decay_per_sample(t60);
-                    *slot = Component::start(level, frequency, decay, sample_rate);
-                }
-            }
-        }
-
-        let chiff_mult = self.engine.controls.lab(3) * self.engine.cal(note, 3);
-        // How hard this string's own stretch pulls it sharp. The bass gate is
-        // the amplitude-to-length ratio in disguise: a treble string is short
-        // and stiff and barely stretches, a bass string is long and slack and
-        // stretches plenty.
-        let tension_gain =
-            TENSION_GAIN.get() * bass_gate / (1.0 + 40.0 * position) * self.engine.controls.lab(10);
-        let longitudinal_gain = LONGITUDINAL_MIX.get() * self.engine.controls.lab(5);
-        // The attack surplus into the upper compressional modes. This was
-        // x16, calibrated against a normalization that turned out not to be
-        // comparable; measured the same way the YDP targets are measured
-        // (same windows, bands and normalization on both sides), x16 put
-        // the bass attack 10-25 dB HOT in 0.5-4 kHz relative to its own
-        // sustain -- and, through the y^2 drive's low-frequency content
-        // passing the resonators' stiffness response, +16 dB of 30 Hz thump
-        // -- where the real bass attack sits BELOW its sustain there: the
-        // note swells, it does not knock. The user heard the difference as
-        // "el golpe del martillo exagerado en notas bajas". Swept 2/4/6
-        // against the targets on C2 and A0: x2 lands the 2 kHz band and
-        // the thump on the reference; anything higher re-grows the knock.
-        let longitudinal_upper = self.engine.controls.lab(4) * 2.0 * powf(1.0 - position, 1.5);
-        let action_gain = Controls::noise_gain(self.engine.controls.action_noise);
-        let impact_gain = Controls::noise_gain(self.engine.controls.impact);
-        if let Some(slot) = restrike_target {
-            // The hammer lands on the wire it finds. Ladder partials merge
-            // by harmonic number (each carries it in its slope weight);
-            // everything else -- noise, clack, phantoms of the NEW blow, or
-            // ladder partials the old voice has already culled -- appends
-            // into free slots.
-            let voice = &mut voice_at!(self, slot);
-            let mut by_harmonic = [usize::MAX; MAX_PARTIALS];
-            for (index, partial) in voice.partials[..voice.partial_count].iter().enumerate() {
-                if partial.slope != 0.0 {
-                    let h = roundf(partial.slope.abs() * 16.0) as usize;
-                    if h < MAX_PARTIALS {
-                        by_harmonic[h] = index;
-                    }
-                }
-            }
-            let mut appended = 0usize;
-            // The contact, as the fixed time and the blow's own, added.
-            let merge_ramp = ((ramp_s * sample_rate) as u32).max(1);
-            for partial in voice.partials[..voice.partial_count].iter_mut() {
-                partial.push = [0.0; LANES];
-                partial.push_s = [0.0; LANES];
-            }
-            for fresh in partials[..placed].iter() {
-                let target = if fresh.slope != 0.0 {
-                    let h = roundf(fresh.slope.abs() * 16.0) as usize;
-                    if h < MAX_PARTIALS {
-                        by_harmonic[h]
-                    } else {
-                        usize::MAX
-                    }
-                } else {
-                    usize::MAX
-                };
-                if target != usize::MAX {
-                    let existing = &mut voice.partials[target];
-                    for lane in 0..LANES {
-                        // A hammer meeting a string that is already moving
-                        // gives it MOMENTUM. It does not teleport the string:
-                        // the displacement is continuous across the blow and
-                        // only the velocity jumps.
-                        //
-                        // Adding the fresh state into both quadratures put a
-                        // step into `s`, which IS the output -- the comment on
-                        // `Component::start` says exactly that about note-on,
-                        // where the state deliberately begins at (0, amp) so
-                        // the output rises from zero "with no click". The
-                        // restrike path did not honour it, so every repeated
-                        // note carried a step, and a step is broadband.
-                        //
-                        // Measured on the Chopin nocturne by the height of the
-                        // 9-20 kHz needle over its surroundings at each onset,
-                        // against how long since that same note last sounded:
-                        //
-                        // ```text
-                        //   never before   2.6 dB      2-10 s     3.8 dB
-                        //   over 10 s      2.5 dB      0.5-2 s    6.1 dB
-                        //                              under 0.5 s 10.3 dB
-                        // ```
-                        //
-                        // Monotonic in exactly the way the mechanism predicts:
-                        // the sooner the note is struck again, the more old
-                        // state is still there to be stepped over. The user
-                        // saw them as vertical needles in a spectrogram and
-                        // described them as a micro saturation on the attack.
-                        // An earlier pass in the same session cleared the
-                        // restrike path by measuring PEAK level, which cannot
-                        // see this: the step is small in amplitude and wide in
-                        // spectrum.
-                        //
-                        // The blow's whole contribution therefore arrives as
-                        // velocity, keeping its size and losing its
-                        // discontinuity.
-                        //
-                        // Unless the living voice has RETIRED this lane (the
-                        // cull zeroed its rotation): then the fresh lane comes
-                        // in whole, its rotation with it, with the output
-                        // quadrature at zero so nothing steps. The bloom lane
-                        // is the one that matters -- it is dead within tens of
-                        // milliseconds of every strike, so a merged blow used
-                        // to arrive with no negative bloom at all, at full
-                        // amplitude inside a quarter cycle: measured, a
-                        // re-struck note reached -42 dB in half a millisecond
-                        // where a fresh one takes three to bloom. That hard
-                        // edge on every repeated melody note was the
-                        // "pequeño popeo" of the Op. 9 No. 2 file, which no
-                        // thud, steal or step explained. A long-decayed
-                        // voice's retired vertical lanes come back the same
-                        // way, so a re-struck note has its high partials.
-                        //
-                        // And over the contact like every other lane. A fresh
-                        // onset is click-free by cancellation ACROSS its lanes
-                        // and partials -- the bloom lane negative, the phases
-                        // dispersed -- and a one-sample push reproduces a
-                        // fresh onset exactly. Spreading only the living lanes
-                        // while the retired ones and the appended partials
-                        // arrived whole broke that cancellation: the ramp
-                        // measured four times rougher than the step, from two
-                        // samples up, and the roughness was the bloom lane's
-                        // negative energy landing alone (2026-09-08).
-                        if existing.rc[lane] == 0.0 && existing.rs[lane] == 0.0 {
-                            let energy = sqrtf(
-                                fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane],
-                            );
-                            let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
-                            existing.s[lane] = 0.0;
-                            existing.c[lane] = 0.0;
-                            existing.push[lane] = signed / merge_ramp as f32;
-                            existing.push_s[lane] = 0.0;
-                            existing.rc[lane] = fresh.rc[lane];
-                            existing.rs[lane] = fresh.rs[lane];
-                            continue;
-                        }
-                        //
-                        // With the strike's phases dispersed (ATTACK_DISPERSION)
-                        // the fresh phasors no longer add up to a pulse, and a
-                        // fresh note starts from exactly this sum with no click
-                        // measured; so the merge takes the fresh phasor whole,
-                        // both quadratures, and keeps the dispersion. Pushing
-                        // the magnitude into `c` alone put every merged
-                        // partial back in step -- the pulse the dispersion had
-                        // just removed, on every repeated note.
-                        //
-                        // Into `c` alone, after all: a living voice cannot be
-                        // ramped from rest, so the merged blow must not step
-                        // the output, and only the cosine quadrature keeps
-                        // `s` continuous. The repeated note starts more in
-                        // step than a fresh one; it does not click.
-                        //
-                        // And over the contact, not in one sample: the
-                        // momentum arrives in `push_in` equal steps
-                        // (MERGE_RAMP_S), which is what the step that
-                        // switched the merge off needed.
-                        let energy =
-                            sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
-                        let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
-                        existing.push[lane] = signed / merge_ramp as f32;
-                        existing.push_s[lane] = 0.0;
-                    }
-                    existing.coupling = fresh.coupling;
-                    existing.drain = fresh.drain;
-                } else if voice.partial_count < MAX_PARTIALS {
-                    // A partial the living voice did not have arrives over
-                    // the contact too: its velocity quadrature pushed in
-                    // from nought, its output quadrature already at rest.
-                    let mut arriving = *fresh;
-                    for lane in 0..LANES {
-                        let energy =
-                            sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
-                        let signed = if fresh.c[lane] < 0.0 { -energy } else { energy };
-                        arriving.push[lane] = signed / merge_ramp as f32;
-                        arriving.push_s[lane] = 0.0;
-                        arriving.s[lane] = 0.0;
-                        arriving.c[lane] = 0.0;
-                    }
-                    voice.partials[voice.partial_count] = arriving;
-                    voice.partial_count += 1;
-                    appended += 1;
-                }
-            }
-            self.section_partials[section] += appended;
-            voice.push_in = merge_ramp;
-            // The key bottoms out on every blow, this one included, the
-            // aftertouch after the strike.
-            voice.thump_amp = voice.thump_amp.max(thump_amp);
-            voice.thump_rise = 1.0;
-            voice.thump_in = keybed_delay(letoff, sample_rate);
-            for (mine, theirs) in voice.duplex.iter_mut().zip(duplex.iter()) {
-                // Into the cosine quadrature alone, as the partials: the
-                // output quadrature stays continuous across the blow.
-                let magnitude = sqrtf(theirs.s * theirs.s + theirs.c * theirs.c);
-                mine.c += if theirs.c < 0.0 {
-                    -magnitude
-                } else {
-                    magnitude
-                };
-            }
-            voice.held = true;
-            voice.sustained = false;
-            voice.damper_applied = 0.0;
-            voice.energy = 1.0;
-            // The mechanism knocks again in full.
-            let knock_before = voice.noise_amp;
-            voice.noise_amp = voice.noise_amp.max(
-                action_noise_dynamic(velocity)
-                    * KNOCK_LEVEL.get()
-                    * action
-                    * chiff_mult
-                    * Controls::noise_gain(self.engine.controls.action_noise),
-            );
-            voice.noise_hold = voice.noise_amp - knock_before;
-            voice.noise_decay = noise_decay;
-            voice.noise_coefficient = noise_coefficient;
-            voice.noise_body_coefficient = noise_body_coefficient;
-            voice.noise_shrink = noise_shrink;
-            // And rises over the contact, as a fresh voice's knock rises
-            // under its onset: a living voice cannot be ramped from rest,
-            // so the knock carries its own rise.
-            voice.noise_rise = 1.0;
-            voice.noise_rise_step = expf(-1.0 / (MERGE_RAMP_S.get().max(1e-4) * sample_rate));
-            // The impact's tension pulse fires again on the wire it finds.
-            let clang_kick = IMPACT_CLANG.get()
-                * impact_dynamic(velocity)
-                * powf(1.0 - position, 1.2)
-                * self.engine.clang_register(position)
-                * impact_gain;
-            voice_at!(self, slot).clang_feed += clang_kick;
-            voice_at!(self, slot).clang_hold = clang_kick;
-            voice_at!(self, slot).clang_feed_decay =
-                expf(-1.0 / (IMPACT_PULSE_TAU_S.get() * sample_rate));
-            // The re-struck wire is full of fresh high partials again.
-            voice_at!(self, slot).longitudinal_upper = longitudinal_upper;
-            voice_at!(self, slot).upper_env = 1.0;
-            return;
-        }
-        // Read before the voice is borrowed: this consults the scale, and the
-        // borrow checker is right that the two cannot overlap.
-        let clang_register = self.engine.clang_register(position);
-        let firmness = StringEngine::damper_firmness(serial, note);
-        phase!(3, mark);
-        let voice = self.claim_voice(slot);
-        voice.active = true;
-        voice.note = note;
-        voice.channel = channel;
-        voice.held = true;
-        voice.sustained = false;
-        voice.undamped = undamped;
-        voice.sostenuto = false;
-        voice.damper_applied = 0.0;
-        voice.firmness = firmness;
-        voice.pole_ceiling = pole_ceiling(sample_rate);
-        voice.onset = 0.0;
-        voice.onset_step = 1.0 / (ATTACK_RAMP_S.get().max(1e-4) * sample_rate);
-        // Only what was placed. `voice.partials` is sized for the largest
-        // ladder any note could want -- 144 partials of 132 bytes, 18.6 KB --
-        // and assigning the whole array copied all of it on every note-on,
-        // however few partials the note actually has. Measured across the
-        // compass, a note uses 6 % of it at the top and 56 % at the bottom.
-        //
-        // Nothing reads past `partial_count`, so the stale tail a reused
-        // voice slot keeps is never looked at. Every read in the render path
-        // is `partials[..partial_count]`.
-        voice.partials[..placed].copy_from_slice(&partials[..placed]);
-        voice.partial_count = placed;
-        voice.duplex = duplex;
-        voice.cull_in = CULL_INTERVAL;
-        voice.tension_in = TENSION_INTERVAL;
-        voice.damper_phase = 0;
-        voice.damper_pressed = false;
-        voice.push_in = 0;
-        voice.noise_rise = 0.0;
-        voice.noise_rise_step = 0.0;
-        voice.noise_hold = 0.0;
-        voice.clang_hold = 0.0;
-        // The string is tuned at rest, so the stretch it carries once the
-        // note has died away must pull it nowhere: the rest value is zero and
-        // everything above it is the note sharpening itself.
-        voice.tension_rest = 0.0;
-        voice.tension_applied = 0.0;
-        voice.tension_smoothed = 0.0;
-        // The longitudinal modes sit at k*c_L/(2L), and the speaking length
-        // follows from the pitch and the transverse speed: L = c/(2*f0) with
-        // c = 2*L*f0. So f_L,k = k * f0 * c_L / c, and the ratio c_L/c is what
-        // makes them land in the low kilohertz for a bass string and above
-        // hearing for a treble one -- which is why this is a bass phenomenon.
-        // A fixed ratio to the note's own pitch, not a frequency derived from
-        // a guessed string length.
-        //
-        // Deriving it from length gave a ratio that slid across the compass --
-        // 22x the fundamental at A0 but only 10x at C4 -- and ten against
-        // twenty is an octave, which is exactly what the user heard: "es como
-        // que la octava de eso que agregaste no esta bien". Bank states the
-        // figure directly: the longitudinal fundamental sits "around 16 to 20
-        // times higher than that of the transverse vibration", and it holds
-        // across the instrument because scale design keeps it there.
-        let longitudinal_first = LONGITUDINAL_RATIO.get() * f0;
-        // The strike's own kick into the compressional modes: a pulse the
-        // length of the contact, rung at their own frequencies and dead
-        // within tens of milliseconds. Wound strings take it hardest, and
-        // the DYNAMIC gate is steep on purpose: the compressional
-        // excitation goes as the square of the transverse amplitude, and
-        // the amplitude itself grows faster than the blow because the felt
-        // stiffens into it -- the burst belongs to fortissimo. v^2 made it
-        // sound on every note at every touch, and the user's verdict was
-        // that "no siempre se debe escuchar fuerte eso": v^4 keeps the
-        // pianissimo clean and saves the bark for the hard strike.
-        let clang_kick = IMPACT_CLANG.get()
-            * impact_dynamic(velocity)
-            * powf(1.0 - position, 1.2)
-            * clang_register
-            * impact_gain;
-        for (k, mode) in voice.longitudinal.iter_mut().enumerate() {
-            let hz = longitudinal_first * (k + 1) as f32;
-            if hz < nyquist * 0.9 {
-                // BROAD, not ringing: the compressional wave damps in tens
-                // of milliseconds, and the formant Bank measures is a wide
-                // hump, not a line. With 0.9 s here the bank was four narrow
-                // peaks that rang over the note instead of a formant that
-                // colours it -- and the phantom forest between the transverse
-                // partials, which rides through these resonators' skirts, was
-                // filtered out by their narrowness.
-                let t60 = (0.06 - 0.008 * k as f32).max(0.03);
-                let pan = 0.5 + 0.3 * (hash01((note as u32) << 3 | k as u32) - 0.5);
-                *mode = BodyMode::tune(hz, t60, pan, sample_rate);
-                // The upper compressional modes carry the attack's
-                // broadband burst and the growl's 2-4 kHz body -- measured
-                // on C2, both ran 6-13 dB under the reference with a flat
-                // bank. The profile rises into modes two and three and
-                // falls away at the fourth, whose band the reference keeps
-                // 21 dB down in the sustain.
-                const MODE_PROFILE: [f32; LONGITUDINAL_MODES] = [1.0, 1.2, 1.0, 0.22];
-                mode.drive *= MODE_PROFILE[k];
-            } else {
-                *mode = BodyMode::default();
-            }
-        }
-        // Scaled so a fortissimo bass strike sharpens by a few cents, which
-        // is what the measured glides are, and so it fades with the note
-        // rather than on a timer. The bass gate is the amplitude-to-length
-        // ratio in disguise: a treble string is short and stiff and barely
-        // stretches, a bass string is long and slack and stretches plenty.
-        voice.longitudinal_gain = longitudinal_gain;
-        voice.longitudinal_upper = longitudinal_upper;
-        voice.upper_env = 1.0;
-        voice.upper_env_decay = expf(-1.0 / (0.08 * sample_rate));
-        voice.clang_feed = clang_kick;
-        voice.clang_feed_decay = expf(-1.0 / (IMPACT_PULSE_TAU_S.get() * sample_rate));
-        voice.tension_gain = tension_gain;
-        voice.energy = 1.0;
-        // The hammer/soundboard thump: heavier and darker in the bass.
-        // Flat through the bass and the tenor, where the measurement wanted
-        // far more knock than the model had, and eased above it: a treble
-        // hammer is a fraction of a bass hammer's mass and its action moves
-        // less. Part of what reads as too much noise up there is the treble's
-        // own tone measuring 6-22 dB under the reference in 1-4 kHz, since
-        // noisiness is a share of the total — fixing that is the real repair,
-        // and this taper is not a substitute for it.
-        // The action does not shrink to nothing at the top of the compass.
-        // A taper here used to cut the treble knock by up to 16 dB, put in
-        // when the treble's own tone measured far too weak and everything
-        // read as noise on top of it. The tone is healthy now, and measured
-        // against the samples the truth is the opposite of the taper:
-        // A6's mechanism noise sits only ~10 dB under its fundamental in the
-        // recording, and this model had it 25 to 31 dB short between 300 Hz
-        // and 3 kHz. The key, the jack and the shank are the same size up
-        // there; only the string got small.
-        voice.noise_amp =
-            velocity * velocity * KNOCK_LEVEL.get() * action * chiff_mult * action_gain;
-        voice.noise_decay = noise_decay;
-        voice.noise_coefficient = noise_coefficient;
-        voice.noise_body = 0.0;
-        voice.noise_body_coefficient = noise_body_coefficient;
-        voice.noise_shrink = noise_shrink;
-        voice.noise_lp = 0.0;
-        voice.noise_seed = 0x9E37_79B9 ^ (note as u32).wrapping_mul(2_654_435_761);
-        voice.thump_amp = thump_amp;
-        // The string is struck first; the key lands on its bed the
-        // aftertouch later, the hammer's flight sooner. See ACTION_RATIO.
-        voice.thump_in = keybed_delay(letoff, sample_rate);
-        voice.thump_keybed = false;
-        voice.thump_decay = thump_decay;
-        voice.thump_rise = 1.0;
-        voice.thump_rise_step = thump_rise_step;
-        voice.thump_x1 = 0.0;
-        voice.thump_x2 = 0.0;
-        voice.thump_y1 = 0.0;
-        voice.thump_y2 = 0.0;
-        voice.thump_z1 = 0.0;
-        voice.thump_z2 = 0.0;
-        {
-            // RBJ low-pass at the register's corner with quality THUMP_Q.
-            let corner = THUMP_CORNER_HZ * powf(THUMP_CORNER_TOP_HZ / THUMP_CORNER_HZ, position);
-            let w0 = core::f32::consts::TAU * corner / sample_rate;
-            let (sin_w0, cos_w0) = sincosf(w0);
-            let alpha = sin_w0 / (2.0 * THUMP_Q);
-            let a0 = 1.0 + alpha;
-            voice.thump_b0 = (1.0 - cos_w0) * 0.5 / a0;
-            voice.thump_b1 = (1.0 - cos_w0) / a0;
-            voice.thump_a1 = -2.0 * cos_w0 / a0;
-            voice.thump_a2 = (1.0 - alpha) / a0;
-        }
-        voice.thump_floor = 0.0;
-        voice.thump_c0 = 1.0 - expf(-core::f32::consts::TAU * THUMP_FLOOR_HZ / sample_rate);
-        // A different burst every time, and a different one per key: the
-        // components this replaces rang the same note on every strike.
-        voice.thump_seed = thump_seed;
-        voice.pan_left = pan_left;
-        {
-            // The bridge from A0 to C8, as the key position for now: the
-            // bass bridge's own geometry is a later measurement.
-            let along = position.clamp(0.0, 1.0) * (BOARD_DRIVE_POINTS - 1) as f32;
-            let index = (along as usize).min(BOARD_DRIVE_POINTS - 2);
-            voice.drive_index = index;
-            voice.drive_frac = (along - index as f32).clamp(0.0, 1.0);
-        }
-        voice.pan_right = pan_right;
-        // The glide is no longer scripted. It used to be a 28-step ramp of a
-        // hand-set size; it now falls out of the tension law above, which
-        // sharpens the string while it is displaced and lets it settle as the
-        // note decays -- the same curve, but produced rather than drawn, and
-        // by the mechanism that also couples the modes to each other.
-        voice.glide_rate = 0.0;
-        voice.glide_steps = 0;
-        self.section_partials[section] += placed;
-
-        // Sympathetic resonance, the pedal's halo: with the dampers up, the
-        // other strings' coinciding partials pick the struck note's energy up
-        // through the bridge and ring on slowly. Rendered as a shadow voice —
-        // the same partial ladder ~24 dB down, each component detuned by its
-        // own few cents (many strings, none exactly aligned), single-stage
-        // slow decay, released by the pedal like any sustained string.
-        phase!(4, mark);
-        if pedal && placed > 0 {
-            let halo_count = placed.min(HALO_PARTIALS);
-            // Twenty-four, which is every entry the loop below can reach --
-            // `halo_count` is `placed.min(24)`. It was MAX_PARTIALS, so each
-            // note-on zeroed 18.6 KB of scratch to fill at most 3.1 KB of it,
-            // and a pedalled twelve-note chord did that twelve times.
-            let mut halo = [Partial::default(); HALO_PARTIALS];
-            let rise = expf(-1.0 / (0.030 * sample_rate));
-            for n in 0..halo_count {
-                let frequency = frequencies[n];
-                let spread = powf(
-                    2.0,
-                    (hash01((note as u32) << 12 | (n as u32) << 3 | 5) - 0.5) * 5.0 / 1200.0,
-                );
-                let detuned = (frequency * spread).min(nyquist);
-                let amplitude = amplitudes[n] * scale * 0.063;
-                let t60 = self.engine.t60_seconds(frequency, f0, string_scale, treble_life) * 1.5;
-                let slow = self.engine.decay_per_sample(t60);
-                let mut built = Partial::default();
-                built.set_lane(0, Component::start(amplitude, detuned, slow, sample_rate));
-                built.set_lane(
-                    LANE_BLOOM,
-                    Component::start(-amplitude, detuned, rise, sample_rate),
-                );
-                halo[n] = built;
-            }
-            // Into this section's own halos, which are not voices anybody
-            // else could have wanted: a halo never takes a slot a note was
-            // going to use, and it never leaves the section that struck it.
-            let section = slot & (STRING_SECTIONS - 1);
-            let index = self.pick_halo(section);
-            let carried = halo_at!(self, section, index).partial_count;
-            self.section_partials[section] =
-                self.section_partials[section].saturating_sub(carried);
-            let shadow = &mut halo_at!(self, section, index);
-            *shadow = Voice::default();
-            shadow.pole_ceiling = pole_ceiling(sample_rate);
-            shadow.active = true;
-            shadow.note = note;
-            shadow.channel = channel;
-            shadow.held = false;
-            shadow.sustained = true;
-            shadow.partials[..halo_count].copy_from_slice(&halo[..halo_count]);
-            shadow.partial_count = halo_count;
-            shadow.pan_left = pan_left;
-            shadow.pan_right = pan_right;
-            shadow.energy = 0.01;
-            self.section_partials[section] += halo_count;
-        }
-        phase!(5, mark);
-    }
-
-    /// Which of a section's halos the next one takes: a silent one, or the
-    /// quietest of them.
-    ///
-    /// Halos compete only with halos. When they shared the voice pool the
-    /// loser of this choice was sometimes a struck note, which is a note
-    /// the player played going quiet so a sympathetic ring could start.
-    fn pick_halo(&mut self, section: usize) -> usize {
-        debug_assert!(section < STRING_SECTIONS, "seccion fuera de rango");
-        if let Some(index) = (0..HALOS_PER_SECTION).find(|&i| !halo_at!(self, section, i).active) {
-            return index;
-        }
-        (0..HALOS_PER_SECTION)
-            .min_by(|a, b| {
-                halo_at!(self, section, *a)
-                    .energy
-                    .total_cmp(&halo_at!(self, section, *b).energy)
-            })
-            .unwrap_or(0)
-    }
 
     /// What the instrument is carrying, across all four sections.
     ///
-    /// Nothing in the render asks this any more -- that is the point of the
-    /// change -- so it is the tests' window onto a number that used to be a
-    /// field.
-    #[cfg(test)]
+    /// What the instrument is carrying, across all four units.
     fn active_partials(&self) -> usize {
-        self.section_partials.iter().sum()
+        self.sections.iter().map(|section| section.partials).sum()
     }
 
     /// Divides the budget among the sections for the coming block.
@@ -10063,11 +10291,10 @@ impl ConcertGrand {
     /// Fixed for the whole block, which is what makes it work in four
     /// instances: a unit reads a number nobody else is writing.
     fn share_the_budget(&mut self) {
-        let carried: usize = self.section_partials.iter().sum();
+        let carried = self.active_partials();
         let free = self.partial_budget.saturating_sub(carried);
-        for section in 0..STRING_SECTIONS {
-            self.section_allowance[section] =
-                self.section_partials[section] + free / STRING_SECTIONS;
+        for section in self.sections.iter_mut() {
+            section.allowance = section.partials + free / STRING_SECTIONS;
         }
     }
 
@@ -10175,14 +10402,7 @@ impl ConcertGrand {
         Some(chosen)
     }
 
-    /// Takes the slot `pick_voice_slot` chose, refunding what it was
-    /// carrying. This is where the budget moves, and it has not moved.
-    fn claim_voice(&mut self, slot: usize) -> &mut Voice {
-        let section = slot & (STRING_SECTIONS - 1);
-        self.section_partials[section] = self.section_partials[section]
-            .saturating_sub(voice_at!(self, slot).partial_count);
-        &mut voice_at!(self, slot)
-    }
+
 
 
     /// Per-sample decay multiplier a falling damper applies: the note dies in
@@ -10285,99 +10505,7 @@ impl ConcertGrand {
         });
     }
 
-    /// The voice half of a release, for one section's voices.
-    ///
-    /// The scalars are recomputed from the record rather than carried in
-    /// it: they are pure arithmetic on the note, the release velocity and
-    /// the damper serial, and a worker has the same tables. What a worker
-    /// does NOT have is the coordinator's key tracking or its silent bank,
-    /// so those writes stay on the other side.
-    fn release_voices(
-        &mut self,
-        section: usize,
-        channel: u8,
-        note: u8,
-        release: Option<u8>,
-        serial: u32,
-        pedal: bool,
-        sostenuto: bool,
-        pressure: f32,
-    ) {
-        let firmness = StringEngine::damper_firmness(serial, note);
-        // With a measured return the random landing becomes a residual: the
-        // felt still seats where it seats, but how fast the key came back is
-        // no longer a guess. Without one, the variation carries the landing
-        // exactly as it did before release velocity was read at all.
-        let (span, knock, firmness) = match release {
-            Some(velocity) => (
-                StringEngine::damper_span(velocity),
-                StringEngine::damper_knock(velocity),
-                1.0 + (firmness - 1.0) * Self::RELEASE_RESIDUAL,
-            ),
-            None => (1.0, 1.0, firmness),
-        };
-        let damper = self.engine.damper_factor(note, firmness, span);
-        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
-        let release_gain = Controls::noise_gain(self.engine.controls.release_noise) * firmness * knock;
-        let rate = self.engine.sample_rate;
-        let grip = self.engine.controls.damper_grip();
-        let key_off = KEYOFF_KNOCK * release_gain;
-        let key_off_decay = expf(-LN_1000 / (KEYOFF_T60_S * rate));
-        let key_off_rise = expf(-1.0 / (0.002 * rate));
-        let key_off_seed = serial
-            .wrapping_mul(0x9E37_79B9)
-            .wrapping_add((note as u32).wrapping_mul(2_654_435_761));
-        for slot in section_slots(section) {
-            let voice = &mut voice_at!(self, slot);
-            if voice.active && voice.note == note && voice.channel == channel && voice.held {
-                voice.key_off_knock(key_off, key_off_decay, key_off_rise, key_off_seed, rate);
-                if voice.undamped {
-                    // No felt lands: the key comes up and the string goes
-                    // on ringing exactly as it was. `sustained` keeps it
-                    // out of the re-strike's damper path; the pedal loops
-                    // skip it by the flag.
-                    voice.held = false;
-                    voice.sustained = true;
-                    voice.damper_applied = 0.0;
-                    continue;
-                }
-                if sostenuto && voice.sostenuto {
-                    // The sostenuto rod holds THIS damper clear, whatever
-                    // the sustain pedal does.
-                    voice.held = false;
-                    voice.sustained = true;
-                    voice.damper_applied = 0.0;
-                } else if pedal {
-                    // Released into a partially lifted rail: the felt takes
-                    // the string with whatever weight the pedal leaves it.
-                    voice.held = false;
-                    voice.sustained = true;
-                    voice.damper_applied = pressure;
-                    // Through the voice's OWN damper: the half pedal will
-                    // relieve this press through the same one, and a press
-                    // through one damper relieved through another is the
-                    // energy walk `a_half_pedal_never_adds_energy` guards.
-                    let own = StringEngine::damper_for(note, rate, grip * voice.firmness, span);
-                    voice.press_damper(own, pressure);
-                } else {
-                    // The felt is on its way, not down: see DAMPER_LAND_MS.
-                    // A key let go fast lands it sooner (`span` < 1), a key
-                    // eased up later.
-                    let own = StringEngine::damper_for(note, rate, grip * voice.firmness, span);
-                    voice.arm_damper(
-                        (DAMPER_LAND_MS.get() * 0.001 * rate * span) as u32,
-                        damper,
-                        own,
-                        DAMPER_BOUNCES.get().clamp(0.0, 12.0) as u8,
-                        DAMPER_HANG_MS.get() * 0.001 * rate,
-                        DAMPER_RESTITUTION.get(),
-                        (DAMPER_DWELL_MS.get() * 0.001 * rate) as u32,
-                        [thud_coefficient, thud_decay, release_gain],
-                    );
-                }
-            }
-        }
-    }
+
 
 
     /// CC64 as the continuous control it is. The bottom of the travel is
@@ -10438,57 +10566,7 @@ impl ConcertGrand {
 
 
 
-    fn pedal_voices(
-        &mut self,
-        section: usize,
-        pressure: f32,
-        rail_lifted: bool,
-        sostenuto: bool,
-        serial: u32,
-    ) {
-        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
-        let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
-        let rate = self.engine.sample_rate;
-        let grip = self.engine.controls.damper_grip();
-        if rail_lifted {
-            // The rail coming up catches every felt still on its way down:
-            // that string is sustained from here, its press relieved through
-            // the same damper it was made with.
-            for slot in section_slots(section) {
-                StringEngine::lift_rail(&mut voice_at!(self, slot), pressure);
-            }
-            for index in 0..HALOS_PER_SECTION {
-                StringEngine::lift_rail(&mut halo_at!(self, section, index), pressure);
-            }
-        }
-        // The halos with them: a halo is a string ringing with its damper
-        // up, so the rail lands on it exactly as it lands on a note.
-        let thud = (thud_coefficient, thud_decay);
-        for slot in section_slots(section) {
-            StringEngine::seat_damper(
-                &mut voice_at!(self, slot),
-                pressure,
-                sostenuto,
-                serial,
-                rate,
-                grip,
-                thud,
-                release_gain,
-            );
-        }
-        for index in 0..HALOS_PER_SECTION {
-            StringEngine::seat_damper(
-                &mut halo_at!(self, section, index),
-                pressure,
-                sostenuto,
-                serial,
-                rate,
-                grip,
-                thud,
-                release_gain,
-            );
-        }
-    }
+
 
     /// CC66: the sostenuto rod catches exactly the dampers that are up at
     /// the moment it is pressed -- the notes currently held -- and keeps
@@ -10515,43 +10593,7 @@ impl ConcertGrand {
         });
     }
 
-    /// The voice half of the sostenuto rod, for one section's voices.
-    fn sostenuto_voices(&mut self, section: usize, down: bool, pedal: bool, pressure: f32) {
-        if down {
-            for slot in section_slots(section) {
-                let voice = &mut voice_at!(self, slot);
-                if voice.active && voice.held {
-                    voice.sostenuto = true;
-                }
-            }
-            return;
-        }
-        // Released: every captured note falls into whatever the sustain
-        // pedal is doing right now.
-        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
-        let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
-        let rate = self.engine.sample_rate;
-        let grip = self.engine.controls.damper_grip();
-        for slot in section_slots(section) {
-            let voice = &mut voice_at!(self, slot);
-            if !(voice.active && voice.sostenuto) {
-                continue;
-            }
-            voice.sostenuto = false;
-            if voice.held || !voice.sustained || voice.undamped {
-                continue;
-            }
-            if pedal && pressure < 0.98 {
-                let damper = StringEngine::damper_for(voice.note, rate, grip, 1.0);
-                voice.press_damper(damper, pressure - voice.damper_applied);
-                voice.damper_applied = pressure;
-            } else {
-                let damper = StringEngine::damper_for(voice.note, rate, grip, 1.0);
-                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
-                voice.damper_applied = 0.0;
-            }
-        }
-    }
+
 
     fn all_notes_off(&mut self) {
         let rate = self.engine.sample_rate;
@@ -10570,27 +10612,7 @@ impl ConcertGrand {
         self.pedal = false;
     }
 
-    /// The voice half of an all-notes-off, for one section's voices.
-    fn all_notes_off_voices(&mut self, section: usize) {
-        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
-        let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
-        let rate = self.engine.sample_rate;
-        let grip = self.engine.controls.damper_grip();
-        for slot in section_slots(section) {
-            let voice = &mut voice_at!(self, slot);
-            if voice.active {
-                let damper = StringEngine::damper_for(voice.note, rate, grip, 1.0);
-                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
-            }
-        }
-        for index in 0..HALOS_PER_SECTION {
-            let halo = &mut halo_at!(self, section, index);
-            if halo.active {
-                let damper = StringEngine::damper_for(halo.note, rate, grip, 1.0);
-                halo.damp(damper, thud_coefficient, thud_decay, release_gain);
-            }
-        }
-    }
+
 
     fn handle_midi(&mut self, event: &MidiEvent) {
         let data = event.data;
@@ -10927,12 +10949,14 @@ impl Processor for ConcertGrand {
     }
 
     fn reset(&mut self) {
-        self.sections = [StringSection::default(); STRING_SECTIONS];
+        self.sections = [StringUnit::default(); STRING_SECTIONS];
         self.summary = [VoiceSummary::default(); MAX_VOICES];
         self.halo_summary = [VoiceSummary::default(); STRING_SECTIONS * HALOS_PER_SECTION];
         self.pedal = false;
-        self.section_partials = [0; STRING_SECTIONS];
-        self.section_allowance = [self.partial_budget / STRING_SECTIONS; STRING_SECTIONS];
+        for section in 0..STRING_SECTIONS {
+            self.sections[section].partials = 0;
+            self.sections[section].allowance = self.partial_budget / STRING_SECTIONS;
+        }
         for string in &mut self.undamped {
             string.y1 = 0.0;
             string.y2 = 0.0;
@@ -11754,6 +11778,14 @@ impl Processor for ConcertGrand {
         // frames rather than interleaved frame by frame -- what a
         // `parallel_render_v1` unit needs, since a unit renders a whole span
         // of its own voices and deposits what it made.
+        // Every unit gets this block's instrument. In four instances this is
+        // what the block-shared payload carries and each worker copies; in
+        // one it is the same copy, made here, where the tuning for the block
+        // has settled and before any unit has read a thing. A kilobyte four
+        // times per block, against a note-on that costs hundreds.
+        for unit in self.sections.iter_mut() {
+            unit.engine = self.engine;
+        }
         self.voice_work_len = [0; STRING_SECTIONS];
         self.voice_work_seq = 0;
         self.voice_claimed = 0;
@@ -11887,20 +11919,26 @@ impl Processor for ConcertGrand {
             // down, and nothing it touches belongs to another section. This
             // is the loop a host with four cores runs four ways.
             for section in 0..STRING_SECTIONS {
-                let mut previous = self.section_previous[section];
+                let mut previous = self.sections[section].previous;
                 for offset in 0..span {
-                    self.run_section_work(section, (span_start + offset) as u16);
+                    let written = self.voice_work_len[section];
+                    let (units, work) = (&mut self.sections, &self.voice_work);
+                    units[section]
+                        .run_work(&work[section][..written], (span_start + offset) as u16);
                     // Itself from one sample ago, everyone else from a whole
                     // block ago. A section that is the only one sounding
                     // hears exactly what it always heard: the others' sums
                     // are zero, so there is nothing to be late.
                     let feed = others_at[offset][section] + previous;
-                    let made =
-                        self.render_section_frame(section, feed, sympathy_rate, sostenuto_at[offset]);
+                    let made = self.sections[section].render_frame(
+                        feed,
+                        sympathy_rate,
+                        sostenuto_at[offset],
+                    );
                     previous = made.sample;
                     unit_out[section][offset] = made;
                 }
-                self.section_previous[section] = previous;
+                self.sections[section].previous = previous;
             }
 
             // PHASE THREE -- the coordinator again: the four sections added
@@ -17971,8 +18009,8 @@ mod bench {
                 })
                 .collect();
             piano.process(&[], &mut output, &midi, &[], FRAMES, 0, 2);
-            let granted: usize = piano.section_allowance.iter().sum();
-            let carried: usize = piano.section_partials.iter().sum();
+            let granted: usize = piano.sections.iter().map(|section| section.allowance).sum::<usize>();
+            let carried: usize = piano.sections.iter().map(|section| section.partials).sum::<usize>();
             // The four purses hold the budget, or -- when the instrument is
             // already over it -- exactly what is sounding and not a partial
             // more. Over it is reachable: a note may always place twelve
@@ -17989,11 +18027,11 @@ mod bench {
             // carrying, which would be asking a section to un-ring a string.
             for section in 0..STRING_SECTIONS {
                 assert!(
-                    piano.section_allowance[section] >= piano.section_partials[section]
-                        || piano.section_partials[section] > piano.partial_budget,
+                    piano.sections[section].allowance >= piano.sections[section].partials
+                        || piano.sections[section].partials > piano.partial_budget,
                     "bloque {block}, seccion {section}: {} permitidos, {} en uso",
-                    piano.section_allowance[section],
-                    piano.section_partials[section]
+                    piano.sections[section].allowance,
+                    piano.sections[section].partials
                 );
             }
         }
@@ -18120,12 +18158,12 @@ mod bench {
         std::println!(
             "ConcertGrand {} KB, seccion {} KB, motor {} KB;              una unidad seria {} KB y cinco de ellas {} KB,              contra {} KB si una unidad cargara el instrumento entero",
             core::mem::size_of::<ConcertGrand>() / 1024,
-            core::mem::size_of::<StringSection>() / 1024,
+            core::mem::size_of::<StringUnit>() / 1024,
             core::mem::size_of::<StringEngine>() / 1024,
-            (core::mem::size_of::<StringSection>() + core::mem::size_of::<StringEngine>()) / 1024,
+            (core::mem::size_of::<StringUnit>() + core::mem::size_of::<StringEngine>()) / 1024,
             (core::mem::size_of::<ConcertGrand>()
                 + STRING_SECTIONS
-                    * (core::mem::size_of::<StringSection>()
+                    * (core::mem::size_of::<StringUnit>()
                         + core::mem::size_of::<StringEngine>()))
                 / 1024,
             (core::mem::size_of::<ConcertGrand>() * (STRING_SECTIONS + 1)) / 1024,

@@ -63,6 +63,7 @@ impl ParallelProcessor for Probe {
         _payload: &[u8],
         context: &UnitContext<'_>,
         output: &mut [f32],
+        _report: &mut [u8],
     ) {
         // A unit sees the report through the shared payload, as it would on
         // a worker instance.

@@ -546,6 +546,8 @@ pub struct UnitContext<'a> {
 /// Slots are addressed by unit index, never by completion order, and a unit
 /// the host had to silence reads as zeros.
 pub struct UnitMix<'a> {
+    reports: &'a [u8],
+    report_stride: usize,
     mix: &'a [f32],
     slot_samples: usize,
     plan: &'a [u32],
@@ -561,6 +563,8 @@ impl<'a> UnitMix<'a> {
         plan: &'a [u32],
         count: usize,
         samples: usize,
+        reports: &'a [u8],
+        report_stride: usize,
     ) -> Self {
         Self {
             mix,
@@ -568,12 +572,24 @@ impl<'a> UnitMix<'a> {
             plan,
             count,
             samples,
+            reports,
+            report_stride,
         }
     }
 
     /// Units activated by this block's `begin_block`, in ascending order.
     pub fn active_units(&self) -> impl Iterator<Item = u32> + '_ {
         (0..self.count).map(|index| self.plan[index * 2])
+    }
+
+    /// What one unit had to say about itself this block.
+    ///
+    /// Empty when the plugin declared no `REPORT_BYTES`, and empty for a
+    /// unit the host had to silence -- which reads the same way its slot
+    /// does, as a unit that did nothing.
+    pub fn report(&self, unit: u32) -> &[u8] {
+        let at = unit as usize * self.report_stride;
+        self.reports.get(at..at + self.report_stride).unwrap_or(&[])
     }
 
     /// This block's samples for one unit slot.
@@ -621,6 +637,26 @@ pub trait ParallelProcessor: Default {
     /// inside that. The generated `render_unit` checks it and refuses the
     /// block rather than writing past the end.
     const UNIT_CHANNELS: u32 = 0;
+
+    /// How many bytes a unit may write back to the coordinator each block.
+    ///
+    /// Zero, the default, means a unit reports nothing, which is right when
+    /// a unit is a voice: it renders what it was told and the coordinator
+    /// already knows everything about it.
+    ///
+    /// It is not right for an instrument whose units are SECTIONS of one
+    /// keyboard. The coordinator there is the only thing that chooses which
+    /// string a note takes, and choosing means knowing which strings are
+    /// busy and which is quietest -- facts that only exist after the unit
+    /// has rendered, inside memory the coordinator cannot read. Without a
+    /// way back it allocates from a picture nobody is painting.
+    ///
+    /// The audio slot is not that way. It is sized from frames, so anything
+    /// smuggled through it works at one block size and overruns at another.
+    /// This region is sized per BLOCK, not per frame, because what a unit
+    /// has to say about its own state is one thing per block however long
+    /// the block is.
+    const REPORT_BYTES: u32 = 0;
 
     fn prepare(
         &mut self,
@@ -741,6 +777,7 @@ pub trait ParallelProcessor: Default {
         payload: &[u8],
         context: &UnitContext<'_>,
         output: &mut [f32],
+        report: &mut [u8],
     );
 
     /// Serial post-stage: combine the unit slots in ascending unit order and
@@ -1590,6 +1627,21 @@ macro_rules! export_parallel_processor {
 
         static mut RF_SHARED: RackForgeSharedBuffer =
             RackForgeSharedBuffer([0; RF_PARALLEL_SHARED_CAPACITY]);
+
+        /// What the units write back, one fixed region each. Sized per
+        /// BLOCK rather than per frame: what a unit has to say about its own
+        /// state is one thing per block however long the block is.
+        const RF_PARALLEL_REPORT_STRIDE: usize =
+            <$processor as $crate::ParallelProcessor>::REPORT_BYTES as usize;
+
+        /// The host requires an 8-aligned report region.
+        #[repr(C, align(8))]
+        pub struct RackForgeReportBuffer(
+            [u8; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_REPORT_STRIDE],
+        );
+
+        static mut RF_REPORTS: RackForgeReportBuffer =
+            RackForgeReportBuffer([0; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_REPORT_STRIDE]);
         /// Header (shared_bytes, reserved) followed by the plan entries.
         static mut RF_PLAN: [u32; 2 + RF_PARALLEL_MAX_UNITS * 2] =
             [0; 2 + RF_PARALLEL_MAX_UNITS * 2];
@@ -1769,6 +1821,8 @@ macro_rules! export_parallel_processor {
                         &plan_region[2..],
                         RF_PLAN_COUNT,
                         frames as usize * RF_PARALLEL_UNIT_CHANNELS,
+                        &(*core::ptr::addr_of!(RF_REPORTS)).0,
+                        RF_PARALLEL_REPORT_STRIDE,
                     );
                     $crate::ParallelProcessor::end_block(
                         &mut self.inner,
@@ -1958,12 +2012,16 @@ macro_rules! export_parallel_processor {
                             frames,
                             output_channels: RF_PARALLEL_UNIT_CHANNELS as u32,
                         };
+                        let reports = &mut (*core::ptr::addr_of_mut!(RF_REPORTS)).0;
+                        let report = &mut reports[unit as usize * RF_PARALLEL_REPORT_STRIDE..]
+                            [..RF_PARALLEL_REPORT_STRIDE];
                         <$processor as $crate::ParallelProcessor>::render_unit(
                             unit,
                             &mut self.units[unit as usize],
                             payload,
                             &context,
                             &mut output[..samples],
+                            report,
                         );
                         let mix = &mut *core::ptr::addr_of_mut!(RF_MIX);
                         mix[unit as usize * RF_PARALLEL_MIX_SLOT_SAMPLES..][..samples]
@@ -2010,6 +2068,19 @@ macro_rules! export_parallel_processor {
         #[unsafe(no_mangle)]
         pub extern "C" fn rackforge_parallel_mix_ptr() -> i32 {
             core::ptr::addr_of_mut!(RF_MIX).cast::<f32>() as usize as i32
+        }
+
+        /// Bytes each unit may report per block; zero when the plugin
+        /// declared none, which is every plugin built before this existed.
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_report_stride() -> i32 {
+            RF_PARALLEL_REPORT_STRIDE as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_report_ptr() -> i32 {
+            // SAFETY: a stable address in the component's own memory.
+            unsafe { core::ptr::addr_of!(RF_REPORTS) as i32 }
         }
 
         #[unsafe(no_mangle)]
@@ -2109,12 +2180,16 @@ macro_rules! export_parallel_processor {
                     frames: frames as u32,
                     output_channels: output_channels as u32,
                 };
+                let reports = &mut (*core::ptr::addr_of_mut!(RF_REPORTS)).0;
+                let report = &mut reports[unit as usize * RF_PARALLEL_REPORT_STRIDE..]
+                    [..RF_PARALLEL_REPORT_STRIDE];
                 <$processor as $crate::ParallelProcessor>::render_unit(
                     unit as u32,
                     &mut processor.units[unit as usize],
                     payload,
                     &context,
                     output,
+                    report,
                 );
                 $crate::STATUS_OK
             }

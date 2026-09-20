@@ -5238,11 +5238,22 @@ pub struct ConcertGrand {
     voice_claimed: u32,
     /// Samples of delay on the sympathetic coupling BETWEEN sections.
     ///
-    /// `0` couples every string to every other with the one sample of latency
-    /// the bridge has always had, which is the instrument as shipped and the
-    /// only setting that renders identically on every host. Anything larger
-    /// is the price of rendering sections concurrently, and what it costs the
-    /// ear is measured by `section_delay_audibility`, not asserted here.
+    /// `0` couples every string to every other with the one sample of
+    /// latency the bridge has always had. That is what the instrument
+    /// shipped with, and it is also what makes the four sections a single
+    /// serial computation: a section cannot render its next sample until
+    /// every other section has produced the one before it.
+    ///
+    /// A block's worth of delay breaks that, and it is the whole reason the
+    /// sections can be rendered at the same time. A section then hears the
+    /// others as they were at the start of the block and itself as it was a
+    /// sample ago -- which is a sympathetic path, not the direct one, and
+    /// 2.7 ms on a coupling that takes seconds to matter. It was rendered
+    /// against zero and judged by ear before it was shipped: "son iguales".
+    ///
+    /// `prepare` sets it to the host's block, because that is the smallest
+    /// delay that makes the block's sections independent. A test may set it
+    /// afterwards, which is how `section_delay_audibility` renders both.
     section_delay: usize,
     /// Whether a re-strike merges into the living voice, read from
     /// RESTRIKE_MERGE at prepare and at every retune -- a field and not a
@@ -10654,7 +10665,7 @@ impl Processor for ConcertGrand {
     fn prepare(
         &mut self,
         sample_rate: f64,
-        _maximum_frames: u32,
+        maximum_frames: u32,
         _input_channels: u32,
         _output_channels: u32,
     ) -> bool {
@@ -10662,6 +10673,7 @@ impl Processor for ConcertGrand {
             return false;
         }
         self.sample_rate = sample_rate as f32;
+        self.section_delay = (maximum_frames as usize).clamp(1, MAX_SECTION_DELAY);
         self.restrike_merge = RESTRIKE_FRESH.get() < 0.5;
         self.tune_board();
         self.tune_open_strings();

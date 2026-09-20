@@ -1550,6 +1550,10 @@ struct UnitCell<'plugin> {
     /// What this unit writes per frame, from the plugin's own declaration.
     /// Falls back to the output channels when it declares none.
     unit_channels: usize,
+    /// What the unit had to say about itself this block, staged here on the
+    /// way from the worker instance to the coordinator's. Empty for a
+    /// plugin that reports nothing.
+    report: Box<[u8]>,
 }
 
 /// Runs one unit inside its worker instance.
@@ -1593,7 +1597,8 @@ unsafe fn run_unit_cell(context: *mut (), _unit: u32, _frames: u32, _channels: u
         return false;
     }
     let output_samples = cell.output_samples;
-    cell.instance
+    if cell
+        .instance
         .parallel_render_unit(
             unit,
             payload_len,
@@ -1602,7 +1607,17 @@ unsafe fn run_unit_cell(context: *mut (), _unit: u32, _frames: u32, _channels: u
             &mut cell.output[..output_samples],
             frames,
         )
-        .is_ok()
+        .is_err()
+    {
+        return false;
+    }
+    // And what it had to say, read here in the worker thread rather than
+    // after the join: it is this unit's own memory and nobody else's, which
+    // is the same reason its audio is read here.
+    if cell.report.is_empty() {
+        return true;
+    }
+    cell.instance.parallel_read_report(unit, &mut cell.report).is_ok()
 }
 
 /// Host-owned worker instances and buffers for one `parallel_render_v1`
@@ -1693,6 +1708,7 @@ impl<'plugin> ParallelUnits<'plugin> {
                 input_len: 0,
                 output_samples: 0,
                 unit_channels,
+                report: vec![0_u8; layout.report_stride].into_boxed_slice(),
             }));
         }
         Ok(Some(Self {
@@ -1840,8 +1856,14 @@ impl<'plugin> ParallelUnits<'plugin> {
             let cell = &mut self.cells[unit as usize];
             if completed & bit == 0 {
                 cell.output[..samples].fill(0.0);
+                // A unit that did not finish says nothing, which reads the
+                // same way its silent slot does.
+                cell.report.fill(0);
             }
             coordinator.parallel_write_mix_slot(unit, &cell.output[..samples])?;
+            if !cell.report.is_empty() {
+                coordinator.parallel_write_report(unit, &cell.report)?;
+            }
         }
         coordinator.parallel_end_block(output, frames)
     }

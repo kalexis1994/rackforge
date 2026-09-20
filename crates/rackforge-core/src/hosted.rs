@@ -1017,6 +1017,32 @@ impl PluginInstance<'_> {
 
     /// Deposits one finished unit's audio in the coordinator's mix region.
     #[cfg(not(target_arch = "wasm32"))]
+    /// Reads what a worker had to say about one unit this block.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_read_report(&self, unit: u32, report: &mut [u8]) -> Result<()> {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_read_report(unit, report)
+            }
+        }
+    }
+
+    /// Deposits one unit's report into the coordinator, beside its audio.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_write_report(&mut self, unit: u32, report: &[u8]) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_write_report(unit, report)
+            }
+        }
+    }
+
     pub fn parallel_write_mix_slot(&mut self, unit: u32, samples: &[f32]) -> Result<()> {
         match &mut self.backend {
             PluginInstanceBackend::Native(_) => {

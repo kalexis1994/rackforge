@@ -84,6 +84,11 @@ pub mod export {
     /// before it existed does not export it, and the host then uses the
     /// output channels.
     pub const PARALLEL_UNIT_CHANNELS: i32 = 44;
+    /// How many bytes a unit writes BACK per block, and where those bytes
+    /// live. Optional in the same way: a component that reports nothing
+    /// does not export either, and the host then copies nothing back.
+    pub const PARALLEL_REPORT_STRIDE: i32 = 45;
+    pub const PARALLEL_REPORT_PTR: i32 = 46;
 }
 
 /// Raw imports the embedding page must supply.
@@ -406,6 +411,17 @@ impl PortableModule {
                 )
                 .unwrap_or(0)
                 .max(0);
+            // Optional, as on the native host: zero means a unit has
+            // nothing to say and there is nothing to bring back.
+            let report_stride = raw
+                .call_0(export::PARALLEL_REPORT_STRIDE, "parallel_report_stride")
+                .unwrap_or(0)
+                .max(0);
+            let report_offset = if report_stride > 0 {
+                raw.call_0(export::PARALLEL_REPORT_PTR, "parallel_report_ptr")?
+            } else {
+                0
+            };
             let shared_offset = raw.call_0(export::PARALLEL_SHARED_PTR, "parallel_shared_ptr")?;
             let shared_capacity =
                 raw.call_0(export::PARALLEL_SHARED_CAPACITY, "parallel_shared_capacity")?;
@@ -461,12 +477,14 @@ impl PortableModule {
                     dispatch_stride,
                     mix_slot_samples: output_capacity as usize,
                     unit_channels: unit_channels as usize,
+                    report_stride: report_stride as usize,
                     shared_capacity,
                 },
                 dispatch_offset,
                 plan_offset,
                 mix_offset,
                 shared_offset,
+                report_offset,
             })
         } else {
             None
@@ -515,6 +533,12 @@ struct PortableParallelApi {
     dispatch_offset: i32,
     plan_offset: i32,
     mix_offset: i32,
+    /// Where the component keeps what its units wrote back. Read from the
+    /// component and kept here, but nothing uses it yet: the worker arena
+    /// carries audio only, so a plugin that reports takes the sequential
+    /// fallback. This is the half of the wiring that is already done.
+    #[allow(dead_code)]
+    report_offset: i32,
     shared_offset: i32,
 }
 
@@ -1024,7 +1048,18 @@ impl PortableInstance {
         // the parallel path is taken only while a worker pool is actually
         // standing by. Everything serial about the block happens on this
         // thread either way.
-        if self.parallel_api.is_some() {
+        // A plugin that reports is one whose coordinator decides things from
+        // what its units did -- which string is busy, which is quietest --
+        // and the pool has no way home for that yet: the worker arena
+        // carries audio and nothing else. Running it there would leave the
+        // coordinator allocating from a picture nobody is painting, so the
+        // whole block goes through the sequential fallback instead, which is
+        // the same component rendering the same audio on one thread.
+        let carries_reports = self
+            .parallel_api
+            .as_ref()
+            .is_some_and(|api| api.layout.report_stride > 0);
+        if self.parallel_api.is_some() && !carries_reports {
             // SAFETY: no arguments; reports pool readiness.
             let workers = unsafe { host::rf_par_ready() };
             if workers > 0 {

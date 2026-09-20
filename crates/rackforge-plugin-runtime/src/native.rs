@@ -365,6 +365,24 @@ impl PortableModule {
                 .and_then(|call| call.call(&mut store, ()).ok())
                 .filter(|width| *width > 0)
                 .unwrap_or(0);
+                // Optional, like the unit width: a component built before
+                // the report existed does not export it, and zero means it
+                // has nothing to say.
+                let report_stride = typed::<(), i32>(
+                    &instance,
+                    &mut store,
+                    "rackforge_parallel_report_stride",
+                )
+                .ok()
+                .and_then(|call| call.call(&mut store, ()).ok())
+                .filter(|bytes| *bytes > 0)
+                .unwrap_or(0);
+                let report_offset = if report_stride > 0 {
+                    typed::<(), i32>(&instance, &mut store, "rackforge_parallel_report_ptr")?
+                        .call(&mut store, ())?
+                } else {
+                    0
+                };
                 let shared_offset =
                     typed::<(), i32>(&instance, &mut store, "rackforge_parallel_shared_ptr")?
                         .call(&mut store, ())?;
@@ -425,12 +443,14 @@ impl PortableModule {
                         dispatch_stride,
                         mix_slot_samples: output_capacity as usize,
                         unit_channels: unit_channels as usize,
+                        report_stride: report_stride as usize,
                         shared_capacity,
                     },
                     dispatch_offset,
                     plan_offset,
                     mix_offset,
                     shared_offset,
+                    report_offset,
                     begin_block: typed(&instance, &mut store, "rackforge_parallel_begin_block")?,
                     begin_block_v2,
                     render_unit: typed(&instance, &mut store, "rackforge_parallel_render_unit")?,
@@ -509,6 +529,7 @@ struct PortableParallelApi {
     plan_offset: i32,
     mix_offset: i32,
     shared_offset: i32,
+    report_offset: i32,
     begin_block: TypedFunc<(i32, i32, i32, i32, i32), i32>,
     /// The pre-stage that takes the wide count: present exactly when the
     /// component declared the wide-MIDI contract, and entered on every
@@ -1382,6 +1403,50 @@ impl PortableInstance {
         check_status(result?, "parallel_render_unit")?;
         read_f32(self.memory.data(&self.store), output_range, output);
         Ok(())
+    }
+
+    /// Copies what a worker had to say about one unit into a host buffer.
+    ///
+    /// Empty for a plugin that declared no report, which is the same as a
+    /// unit that had nothing to say.
+    pub fn parallel_read_report(&self, unit: u32, report: &mut [u8]) -> Result<()> {
+        let api = self
+            .parallel_api
+            .as_ref()
+            .context("portable plugin does not expose parallel render")?;
+        let range = self.parallel_report_range(api, unit, report.len())?;
+        report.copy_from_slice(&self.memory.data(&self.store)[range]);
+        Ok(())
+    }
+
+    /// Deposits one unit's report into the coordinator, beside its audio.
+    pub fn parallel_write_report(&mut self, unit: u32, report: &[u8]) -> Result<()> {
+        let api = self
+            .parallel_api
+            .as_ref()
+            .context("portable plugin does not expose parallel render")?;
+        let range = self.parallel_report_range(api, unit, report.len())?;
+        self.memory.data_mut(&mut self.store)[range].copy_from_slice(report);
+        Ok(())
+    }
+
+    fn parallel_report_range(
+        &self,
+        api: &PortableParallelApi,
+        unit: u32,
+        len: usize,
+    ) -> Result<core::ops::Range<usize>> {
+        if unit as usize >= api.layout.max_units {
+            bail!("parallel report unit {unit} is beyond max_units");
+        }
+        if len > api.layout.report_stride {
+            bail!("parallel report exceeds the declared stride");
+        }
+        let at = api
+            .report_offset
+            .checked_add((unit as usize * api.layout.report_stride) as i32)
+            .context("parallel report offset overflows")?;
+        byte_range(at, len, 1, 1, self.memory.data_size(&self.store))
     }
 
     /// Deposits one finished unit's audio into the coordinator's mix region.

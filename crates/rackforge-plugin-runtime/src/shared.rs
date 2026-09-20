@@ -54,6 +54,19 @@ pub struct ParallelLayout {
     /// output channels, which is what every plugin wanted before the export
     /// existed.
     pub unit_channels: usize,
+    /// Bytes each unit writes BACK, once per block.
+    ///
+    /// The other direction of the block-shared payload, and the one a
+    /// synthesiser does not need: when a unit is a voice the coordinator
+    /// already knows everything about it. An instrument whose units are
+    /// sections of one keyboard does need it -- the coordinator is the only
+    /// thing that chooses which string a note takes, and which strings are
+    /// busy is a fact that only exists after a unit has rendered, inside
+    /// memory the coordinator cannot read.
+    ///
+    /// Zero means the plugin reports nothing, which is every plugin built
+    /// before the export existed.
+    pub report_stride: usize,
     /// Bytes of the block-shared payload region every unit receives — the
     /// immutable per-block signals (per-frame LFO/noise arrays, wheel and
     /// bend curves, automation segments) the coordinator computes once.

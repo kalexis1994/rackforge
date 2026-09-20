@@ -1907,7 +1907,11 @@ impl<'plugin> ParallelUnits<'plugin> {
 
     /// How many floats one unit writes per frame: what it declared, or the
     /// instrument's channels when it declared nothing.
-    fn unit_width(&self, channels: u32) -> usize {
+    ///
+    /// Public so a test can state which of the two a fixture is exercising.
+    /// The distinction is invisible in audio whenever the two numbers agree,
+    /// which is how three separate places came to use the wrong one.
+    pub fn unit_width(&self, channels: u32) -> usize {
         if self.layout.unit_channels > 0 {
             self.layout.unit_channels
         } else {

@@ -10283,6 +10283,190 @@ impl ConcertGrand {
 
     /// What the instrument is carrying, across all four sections.
     ///
+    /// Everything a block needs settled before its first frame: the knobs
+    /// this block runs at, what a dirty control has to retune, the silent
+    /// bank's clock, which notes are sounding, and the copy of the engine
+    /// every unit works from.
+    ///
+    /// Returns what the phases after it need and nothing keeps: the rate
+    /// the sympathetic coupling runs at, and how fast the pedal's noise
+    /// decays.
+    fn open_block(&mut self, frames: u32) -> (f32, f32) {
+        if self.engine.controls.knobs_dirty {
+            self.engine.controls.knobs_dirty = false;
+            self.retune();
+        }
+        // Knobs read once per call, not per sample.
+        self.tune_pair();
+        for slot in 0..SILENT_SLOTS {
+            if self.silent_state[slot] == SILENT_DAMPED {
+                self.silent_in[slot] = self.silent_in[slot].saturating_sub(frames);
+                if self.silent_in[slot] == 0 {
+                    self.silent_state[slot] = SILENT_FREE;
+                    let base = slot * SILENT_MODES_PER_SLOT;
+                    for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+                        *mode = BodyMode::default();
+                    }
+                }
+            }
+        }
+        self.note_sounding = [false; NOTE_COUNT];
+        for slot in 0..MAX_VOICES {
+            let voice = self.summary[slot];
+            if !(voice.active && voice.note >= LOW_NOTE) {
+                continue;
+            }
+            if let Some(slot) = self.note_sounding.get_mut((voice.note - LOW_NOTE) as usize) {
+                *slot = true;
+            }
+        }
+        // `note_sounding` is rebuilt here and never changes inside the block,
+        // so which undamped lengths are muted is settled for the whole block
+        // too. It used to be asked per string per sample -- a hundred and
+        // ninety-two bounds-checked lookups, a hundred and twenty-eight times
+        // a block, all of them returning what the one before them returned.
+        //
+        // Measured on a Raspberry Pi 4 by taking each bank away: an undamped
+        // length cost 2.05 us a block where the open top octave's identical
+        // resonator cost 1.07 us, and this lookup was the whole difference.
+        for (muted, owner) in self
+            .undamped_muted
+            .iter_mut()
+            .zip(self.undamped_note.iter())
+        {
+            *muted = *owner >= LOW_NOTE && self.note_sounding[(*owner - LOW_NOTE) as usize];
+        }
+        let pedal_decay = expf(-LN_1000 / (PEDAL_NOISE_T60_S * self.engine.sample_rate));
+        let knob_sympathy_rate = SYMPATHY_RATE.get();
+        // Every note-on in the buffer gets the full hammer-string integration.
+        //
+        // This was three, to keep the callback affordable, and the fourth key
+        // in a chord fell back to the calibrated recipe instead. That is
+        // audibly a different instrument: measured note by note against the
+        // simulated strike, the recipe comes out about 4 dB light from 60 to
+        // 500 Hz and 17.9 dB heavy from 4 to 8 kHz, at the same peak level. A
+        // chord lost body and grew an edge from its fourth note on, and which
+        // notes those were depended on where the buffer boundary fell, so the
+        // same chord did not sound the same twice.
+        //
+        // The budget turns out to have been costing fuel as well as tone.
+        // Measured in the host's own currency (tests/concert_grand_fuel.rs),
+        // thirteen notes struck in one 1024-frame block spend 167.3M fuel with
+        // the budget at three and 149.7M with every strike simulated -- 84% of
+        // the ceiling against 75%. The cheap path is only cheap at the strike:
+        // it leaves a brighter, denser set of partials running, and that is
+        // billed on every sample afterwards.
+        //
+        // MAX_VOICES is the bound because no more than that can sound at once;
+        // it only limits a buffer carrying more note-ons than the instrument
+        // has voices, where the surplus would be stolen away regardless.
+        self.engine.strike_budget = MAX_VOICES as u32;
+        if self.room_dirty {
+            self.tune_room();
+        }
+        if self.budget_pending {
+            self.budget_pending = false;
+            let quality = self.budgeted_quality(frames);
+            if (quality - self.quality).abs() > 0.05 {
+                self.quality = quality;
+                self.apply_quality();
+                // A budget that just moved is divided at once rather than at
+                // the end of the block: the governor's cut is the moment the
+                // allowances are most wrong.
+                self.share_the_budget();
+            }
+        }
+        if (self.rebuild_board_after_fade || self.rebuild_undamped_after_fade)
+            && self.body_gain <= 0.0
+        {
+            if self.rebuild_board_after_fade {
+                self.rebuild_board_after_fade = false;
+                self.board_dirty = true;
+            }
+            if self.rebuild_undamped_after_fade {
+                self.rebuild_undamped_after_fade = false;
+                self.undamped_dirty = true;
+            }
+            self.body_target = 1.0;
+        }
+        if self.board_dirty {
+            self.tune_board();
+        }
+        if self.undamped_dirty {
+            self.undamped_dirty = false;
+            self.tune_undamped();
+        }
+        if self.scale_dirty {
+            self.scale_dirty = false;
+            self.tune();
+            self.tune_undamped();
+        }
+        // The sympathetic feed: the bridge's total string signal from the
+        // PREVIOUS sample, handed to every free string this sample. One
+        // sample of latency around the loop keeps the order of voices
+        // meaningless and the feedback explicit.
+        let sympathy_rate = knob_sympathy_rate * self.engine.controls.lab(15).min(4.0);
+        // Read once per block, not per sample: it is a knob, and an atomic
+        // load inside the hot loop is a barrier the optimiser has to honour.
+        // Which bed strings are sounding on their own right now: those are
+        // not damped, and their voice already carries the sympathy; the bed
+        // must not seed a second copy of a note's own onset and ring it for
+        // seconds. Refreshed whenever a MIDI event lands.
+
+        // The strings and the stages after them, in two passes over a span of
+        // frames rather than interleaved frame by frame -- what a
+        // `parallel_render_v1` unit needs, since a unit renders a whole span
+        // of its own voices and deposits what it made.
+        // Every unit gets this block's instrument. In four instances this is
+        // what the block-shared payload carries and each worker copies; in
+        // one it is the same copy, made here, where the tuning for the block
+        // has settled and before any unit has read a thing. A kilobyte four
+        // times per block, against a note-on that costs hundreds.
+        for unit in self.sections.iter_mut() {
+            unit.engine = self.engine;
+        }
+        self.voice_work_len = [0; STRING_SECTIONS];
+        self.voice_work_seq = 0;
+        self.voice_claimed = 0;
+        (sympathy_rate, pedal_decay)
+    }
+
+    /// What the units have to say about their own voices once the block is
+    /// rendered, and the budget divided again on what they said.
+    fn close_block(&mut self) {
+        // What the sections have to say about their own voices, gathered
+        // once. In one instance this is a read; in four it is what comes
+        // back through the unit's widened slot, and it is the only moment
+        // the coordinator learns that a note has died or how loud one is.
+        //
+        // Nothing here is what the coordinator already knows: a note it
+        // planned is busy from the moment it planned it, whether or not
+        // this walk has happened yet.
+        for slot in 0..MAX_VOICES {
+            let voice = &voice_at!(self, slot);
+            self.summary[slot] = VoiceSummary {
+                active: voice.active,
+                note: voice.note,
+                channel: voice.channel,
+                energy: voice.energy,
+                ringing_free: voice.held || voice.sustained,
+            };
+        }
+        for section in 0..STRING_SECTIONS {
+            for index in 0..HALOS_PER_SECTION {
+                let halo = &halo_at!(self, section, index);
+                self.halo_summary[section * HALOS_PER_SECTION + index] = VoiceSummary {
+                    active: halo.active,
+                    note: halo.note,
+                    channel: halo.channel,
+                    energy: halo.energy,
+                    ringing_free: halo.held || halo.sustained,
+                };
+            }
+        }
+        self.share_the_budget();
+    }
+
     /// Every event of a span, in order, and the picture each frame leaves
     /// behind.
     ///
@@ -12232,148 +12416,13 @@ impl Processor for ConcertGrand {
         _input_channels: u32,
         output_channels: u32,
     ) {
-        if self.engine.controls.knobs_dirty {
-            self.engine.controls.knobs_dirty = false;
-            self.retune();
-        }
-        // Knobs read once per call, not per sample.
-        self.tune_pair();
-        for slot in 0..SILENT_SLOTS {
-            if self.silent_state[slot] == SILENT_DAMPED {
-                self.silent_in[slot] = self.silent_in[slot].saturating_sub(frames);
-                if self.silent_in[slot] == 0 {
-                    self.silent_state[slot] = SILENT_FREE;
-                    let base = slot * SILENT_MODES_PER_SLOT;
-                    for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
-                        *mode = BodyMode::default();
-                    }
-                }
-            }
-        }
-        self.note_sounding = [false; NOTE_COUNT];
-        for slot in 0..MAX_VOICES {
-            let voice = self.summary[slot];
-            if !(voice.active && voice.note >= LOW_NOTE) {
-                continue;
-            }
-            if let Some(slot) = self.note_sounding.get_mut((voice.note - LOW_NOTE) as usize) {
-                *slot = true;
-            }
-        }
-        // `note_sounding` is rebuilt here and never changes inside the block,
-        // so which undamped lengths are muted is settled for the whole block
-        // too. It used to be asked per string per sample -- a hundred and
-        // ninety-two bounds-checked lookups, a hundred and twenty-eight times
-        // a block, all of them returning what the one before them returned.
-        //
-        // Measured on a Raspberry Pi 4 by taking each bank away: an undamped
-        // length cost 2.05 us a block where the open top octave's identical
-        // resonator cost 1.07 us, and this lookup was the whole difference.
-        for (muted, owner) in self
-            .undamped_muted
-            .iter_mut()
-            .zip(self.undamped_note.iter())
-        {
-            *muted = *owner >= LOW_NOTE && self.note_sounding[(*owner - LOW_NOTE) as usize];
-        }
-        let pedal_decay = expf(-LN_1000 / (PEDAL_NOISE_T60_S * self.engine.sample_rate));
-        let knob_sympathy_rate = SYMPATHY_RATE.get();
+        let (sympathy_rate, pedal_decay) = self.open_block(frames);
         let channels = output_channels as usize;
-        // Every note-on in the buffer gets the full hammer-string integration.
-        //
-        // This was three, to keep the callback affordable, and the fourth key
-        // in a chord fell back to the calibrated recipe instead. That is
-        // audibly a different instrument: measured note by note against the
-        // simulated strike, the recipe comes out about 4 dB light from 60 to
-        // 500 Hz and 17.9 dB heavy from 4 to 8 kHz, at the same peak level. A
-        // chord lost body and grew an edge from its fourth note on, and which
-        // notes those were depended on where the buffer boundary fell, so the
-        // same chord did not sound the same twice.
-        //
-        // The budget turns out to have been costing fuel as well as tone.
-        // Measured in the host's own currency (tests/concert_grand_fuel.rs),
-        // thirteen notes struck in one 1024-frame block spend 167.3M fuel with
-        // the budget at three and 149.7M with every strike simulated -- 84% of
-        // the ceiling against 75%. The cheap path is only cheap at the strike:
-        // it leaves a brighter, denser set of partials running, and that is
-        // billed on every sample afterwards.
-        //
-        // MAX_VOICES is the bound because no more than that can sound at once;
-        // it only limits a buffer carrying more note-ons than the instrument
-        // has voices, where the surplus would be stolen away regardless.
-        self.engine.strike_budget = MAX_VOICES as u32;
-        if self.room_dirty {
-            self.tune_room();
-        }
-        if self.budget_pending {
-            self.budget_pending = false;
-            let quality = self.budgeted_quality(frames);
-            if (quality - self.quality).abs() > 0.05 {
-                self.quality = quality;
-                self.apply_quality();
-                // A budget that just moved is divided at once rather than at
-                // the end of the block: the governor's cut is the moment the
-                // allowances are most wrong.
-                self.share_the_budget();
-            }
-        }
-        if (self.rebuild_board_after_fade || self.rebuild_undamped_after_fade)
-            && self.body_gain <= 0.0
-        {
-            if self.rebuild_board_after_fade {
-                self.rebuild_board_after_fade = false;
-                self.board_dirty = true;
-            }
-            if self.rebuild_undamped_after_fade {
-                self.rebuild_undamped_after_fade = false;
-                self.undamped_dirty = true;
-            }
-            self.body_target = 1.0;
-        }
-        if self.board_dirty {
-            self.tune_board();
-        }
-        if self.undamped_dirty {
-            self.undamped_dirty = false;
-            self.tune_undamped();
-        }
-        if self.scale_dirty {
-            self.scale_dirty = false;
-            self.tune();
-            self.tune_undamped();
-        }
-        // The sympathetic feed: the bridge's total string signal from the
-        // PREVIOUS sample, handed to every free string this sample. One
-        // sample of latency around the loop keeps the order of voices
-        // meaningless and the feedback explicit.
-        let sympathy_rate = knob_sympathy_rate * self.engine.controls.lab(15).min(4.0);
-        // Read once per block, not per sample: it is a knob, and an atomic
-        // load inside the hot loop is a barrier the optimiser has to honour.
         let mut midi_index = 0;
         let mut midi2_index = 0;
         let mut parameter_index = 0;
-        // Which bed strings are sounding on their own right now: those are
-        // not damped, and their voice already carries the sympathy; the bed
-        // must not seed a second copy of a note's own onset and ring it for
-        // seconds. Refreshed whenever a MIDI event lands.
         let mut bed_busy = [false; BED_COUNT];
         let mut refresh_busy = true;
-
-        // The strings and the stages after them, in two passes over a span of
-        // frames rather than interleaved frame by frame -- what a
-        // `parallel_render_v1` unit needs, since a unit renders a whole span
-        // of its own voices and deposits what it made.
-        // Every unit gets this block's instrument. In four instances this is
-        // what the block-shared payload carries and each worker copies; in
-        // one it is the same copy, made here, where the tuning for the block
-        // has settled and before any unit has read a thing. A kilobyte four
-        // times per block, against a note-on that costs hundreds.
-        for unit in self.sections.iter_mut() {
-            unit.engine = self.engine;
-        }
-        self.voice_work_len = [0; STRING_SECTIONS];
-        self.voice_work_seq = 0;
-        self.voice_claimed = 0;
         // What phase one writes down for phase two, and what phase two hands
         // to phase three.
         let mut unit_out = [[SectionFrame::default(); RENDER_SPAN]; STRING_SECTIONS];
@@ -12430,37 +12479,7 @@ impl Processor for ConcertGrand {
             );
             span_start += span;
         }
-        // What the sections have to say about their own voices, gathered
-        // once. In one instance this is a read; in four it is what comes
-        // back through the unit's widened slot, and it is the only moment
-        // the coordinator learns that a note has died or how loud one is.
-        //
-        // Nothing here is what the coordinator already knows: a note it
-        // planned is busy from the moment it planned it, whether or not
-        // this walk has happened yet.
-        for slot in 0..MAX_VOICES {
-            let voice = &voice_at!(self, slot);
-            self.summary[slot] = VoiceSummary {
-                active: voice.active,
-                note: voice.note,
-                channel: voice.channel,
-                energy: voice.energy,
-                ringing_free: voice.held || voice.sustained,
-            };
-        }
-        for section in 0..STRING_SECTIONS {
-            for index in 0..HALOS_PER_SECTION {
-                let halo = &halo_at!(self, section, index);
-                self.halo_summary[section * HALOS_PER_SECTION + index] = VoiceSummary {
-                    active: halo.active,
-                    note: halo.note,
-                    channel: halo.channel,
-                    energy: halo.energy,
-                    ringing_free: halo.held || halo.sustained,
-                };
-            }
-        }
-        self.share_the_budget();
+        self.close_block();
     }
 }
 

@@ -40,13 +40,26 @@ use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 const SAMPLE_RATE: f64 = 48_000.0;
 /// The appliance's period. Everything is reported against the deadline this
 /// implies, because that is the number a block either meets or does not.
-const FRAMES: u32 = 128;
+static FRAMES_CELL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(128);
+/// The host's period. Everything is reported against the deadline it
+/// implies, because that is the number a block either meets or does not.
+///
+/// It is settable because the period is a lever in its own right, and one
+/// that changes no audio at all: the per-frame work scales with the block
+/// but the per-BLOCK overheads -- waking workers, carrying the payload
+/// across the boundary, the coordinator parking and being woken -- do not.
+/// A longer period amortises them, at the price of latency.
+#[allow(non_snake_case)]
+fn FRAMES() -> u32 {
+    FRAMES_CELL.load(std::sync::atomic::Ordering::Relaxed)
+}
+const _FRAMES_DOC: u32 = 128;
 const CHANNELS: u32 = 2;
 const BLOCKS: usize = 2000;
 const WARMUP: usize = 200;
 
 fn deadline_micros() -> f64 {
-    FRAMES as f64 / SAMPLE_RATE * 1_000_000.0
+    FRAMES() as f64 / SAMPLE_RATE * 1_000_000.0
 }
 
 struct Voice {
@@ -62,10 +75,10 @@ impl Voice {
     fn create(plugin: &'static LoadedPlugin, with_units: bool) -> Self {
         let mut instance = plugin.create_instance().expect("instance");
         instance
-            .activate(SAMPLE_RATE, FRAMES, 0, CHANNELS)
+            .activate(SAMPLE_RATE, FRAMES(), 0, CHANNELS)
             .expect("activate");
         let parallel = if with_units {
-            ParallelUnits::create(plugin, SAMPLE_RATE, FRAMES, 0, CHANNELS).expect("units")
+            ParallelUnits::create(plugin, SAMPLE_RATE, FRAMES(), 0, CHANNELS).expect("units")
         } else {
             None
         };
@@ -73,7 +86,7 @@ impl Voice {
             instance,
             parallel,
             input: Vec::new(),
-            output: vec![0.0; FRAMES as usize * CHANNELS as usize],
+            output: vec![0.0; FRAMES() as usize * CHANNELS as usize],
             events: Vec::new(),
             parameter_events: Vec::new(),
         }
@@ -224,7 +237,7 @@ fn measure(
     voices[0].events = first_block.to_vec();
     for _ in 0..BLOCKS {
         let started = Instant::now();
-        process_slots_sequential(&mut voices, FRAMES, CHANNELS, &telemetry);
+        process_slots_sequential(&mut voices, FRAMES(), CHANNELS, &telemetry);
         phases.single.push(started.elapsed().as_nanos() as u64);
         voices[0].events.clear();
     }
@@ -238,7 +251,7 @@ fn measure(
     for _ in 0..BLOCKS {
         let whole = Instant::now();
         let at_begin = Instant::now();
-        let Some(mask) = voices[0].run_begin(FRAMES, CHANNELS) else {
+        let Some(mask) = voices[0].run_begin(FRAMES(), CHANNELS) else {
             panic!("begin_block fallo");
         };
         phases.begin.push(at_begin.elapsed().as_nanos() as u64);
@@ -249,17 +262,17 @@ fn measure(
         while pending != 0 {
             let unit = pending.trailing_zeros();
             pending &= !(1 << unit);
-            let job = voices[0].unit_job(unit, FRAMES, CHANNELS);
+            let job = voices[0].unit_job(unit, FRAMES(), CHANNELS);
             // SAFETY: the job was just published for this unit and nothing
             // else is touching it.
-            if unsafe { (job.run)(job.context, job.unit, FRAMES, CHANNELS) } {
+            if unsafe { (job.run)(job.context, job.unit, FRAMES(), CHANNELS) } {
                 completed |= 1 << unit;
             }
         }
         phases.units.push(at_units.elapsed().as_nanos() as u64);
 
         let at_finish = Instant::now();
-        assert!(voices[0].run_end(FRAMES, CHANNELS, completed), "end_block fallo");
+        assert!(voices[0].run_end(FRAMES(), CHANNELS, completed), "end_block fallo");
         phases.finish.push(at_finish.elapsed().as_nanos() as u64);
         phases.whole.push(whole.elapsed().as_nanos() as u64);
         voices[0].events.clear();
@@ -275,7 +288,7 @@ fn measure(
     voices[0].events = first_block.to_vec();
     for _ in 0..BLOCKS {
         let started = Instant::now();
-        assert!(pool.process(&mut voices, FRAMES, CHANNELS, 1_000_000_000));
+        assert!(pool.process(&mut voices, FRAMES(), CHANNELS, 1_000_000_000));
         phases.pooled.push(started.elapsed().as_nanos() as u64);
         voices[0].events.clear();
     }
@@ -314,7 +327,7 @@ fn sweep(plugin: &'static LoadedPlugin, workers: usize) {
         let mut samples = Vec::with_capacity(SWEEP_BLOCKS);
         for _ in 0..SWEEP_BLOCKS {
             let started = Instant::now();
-            assert!(pool.process(&mut voices, FRAMES, CHANNELS, 1_000_000_000));
+            assert!(pool.process(&mut voices, FRAMES(), CHANNELS, 1_000_000_000));
             samples.push(started.elapsed().as_nanos() as u64);
             voices[0].events.clear();
         }
@@ -373,6 +386,11 @@ fn main() {
         match argument.as_str() {
             "--sweep" => sweeping = true,
             "--program" => chosen = arguments.next(),
+            "--frames" => {
+                if let Some(value) = arguments.next().and_then(|v| v.parse().ok()) {
+                    FRAMES_CELL.store(value, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
             other => workers = other.parse().unwrap_or(workers),
         }
     }
@@ -385,8 +403,10 @@ fn main() {
 
     let deadline = deadline_micros();
     println!(
-        "\n{} unidades, bloque de {FRAMES} frames a {:.0} Hz, deadline {deadline:.0} us\n",
-        layout.max_units, SAMPLE_RATE
+        "\n{} unidades, bloque de {} frames a {:.0} Hz, deadline {deadline:.0} us\n",
+        layout.max_units,
+        FRAMES(),
+        SAMPLE_RATE
     );
 
     // What the host carries across the boundary every block, from the sizes
@@ -395,10 +415,10 @@ fn main() {
     let committed = {
         let mut probe = Voice::create(plugin, true);
         probe.events = chord();
-        probe.run_begin(FRAMES, CHANNELS);
+        probe.run_begin(FRAMES(), CHANNELS);
         probe.parallel.as_ref().map_or(0, ParallelUnits::shared_len)
     };
-    let mix = FRAMES as usize * unit_width * size_of::<f32>() * layout.max_units;
+    let mix = FRAMES() as usize * unit_width * size_of::<f32>() * layout.max_units;
     let reports = layout.report_stride * layout.max_units;
     println!("  lo que cruza la frontera por bloque:");
     println!(
@@ -426,15 +446,26 @@ fn main() {
     let idle = measure(plugin, &[], workers, program);
     let busy = measure(plugin, &chord(), workers, program);
 
-    let row = |label: &str, quiet: &[u64], loud: &[u64]| {
-        let (quiet, loud) = (mean_micros(quiet), mean_micros(loud));
+    // The tail matters more than the mean: a block either meets the
+    // deadline or it does not, and an xrun is one late block, never an
+    // average. A path whose p99 sits far above its own mean is not
+    // expensive, it is UNEVEN, and those are different problems with
+    // different fixes.
+    let row = |label: &str, quiet: &[u64], loud_samples: &[u64]| {
+        let loud = loud_samples;
+        let spread = percentile_micros(loud, 0.99) / mean_micros(loud).max(1e-9);
+        let (quiet, loud_mean) = (mean_micros(quiet), mean_micros(loud));
+        let loud = loud_mean;
+        let _ = spread;
         // A phase that costs the same either way is control-rate work
         // running at sample rate; it is paid on every block forever.
         let fixed = (quiet.min(loud) / loud.max(1e-9) * 100.0).min(100.0);
         println!(
-            "  {label:<24} {quiet:8.1} {loud:8.1}   {:5.0} %   {:5.0} %",
+            "  {label:<24} {quiet:8.1} {loud:8.1}   {:5.0} %   {:5.0} %  {:8.1}  {:5.2}x",
             loud / deadline * 100.0,
-            fixed
+            fixed,
+            percentile_micros(loud_samples, 0.99),
+            spread
         );
     };
 

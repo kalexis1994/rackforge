@@ -496,9 +496,9 @@ So any further gain has to come from the global stage itself, and the only
 obvious lever — not running it, or running it cheaper, when no string holds
 energy — is exactly the mechanism that cuts a decaying tail and silences the
 sympathetic bloom under a chord that is still breathing. That would be an
-ear-level decision, not a profiling one — but the measurement below says it
-is not the first thing to reach for, because the largest lever in the stage
-needs no decision about the sound at all.
+ear-level decision, not a profiling one — and the measurement below says to
+exhaust the arrangements of the bank first, because none of those requires a
+decision about how the instrument sounds.
 
 ### What the global stage is made of
 
@@ -518,28 +518,51 @@ about three and a half times these numbers.
 The room is very nearly free and is not worth touching. The soundboard's
 256-mode bank is the bill.
 
-Two things about that bank were measured rather than assumed, because the
-obvious answer was wrong. It is an array of 56-byte structs, which looks
-like a textbook failure to vectorise — `simd128` is on for every wasm build
-in this workspace, and consecutive modes' state is 56 bytes apart, so a
-four-wide load would need gathers. Laying it out as one array per field is
-**bit-identical and 0.93× — it does not help.** The layout was never the
-constraint.
+Two things about that bank were measured rather than assumed, and the
+measurements disagree with each other depending on where they are taken,
+which is the point of recording them.
 
-What is the constraint is the cross-mode sum. Each mode's own recurrence is
-independent and vectorises fine; adding the 256 results into one accumulator
-is a float reduction, and a vectoriser may not reassociate it. Splitting
-that accumulator into four partial sums makes the same loop **3.07×** faster
-— on a developer machine, on x86; the appliance runs wasm on NEON and has
-not been measured, because it was unreachable when this was written.
+It is an array of 56-byte structs. `simd128` is on for every wasm build in
+this workspace, and consecutive modes' state is 56 bytes apart, so a
+four-wide load would need gathers — it looks like a textbook failure to
+vectorise. Laying the bank out as one array per field is bit-for-bit
+identical, and:
 
-That 3× is not free. Summing 256 terms in a different order changes the
-result in its last bits, roughly −140 dB relative to the signal: far below
-anything audible and far above the −240 dB the fingerprint guards hold the
-instrument to. Taking it means rebaselining those fingerprints, which is a
-deliberate act and not one to slip into a performance change. It is the
-largest lever left, it does not require a single decision about how the
-instrument sounds, and it is worth doing properly rather than quickly.
+| | x86 | the appliance's ARM cores, natively |
+| --- | --- | --- |
+| array of structs, as it is | 1.00× | 1.00× |
+| one array per field | 0.93× | **1.41×** |
+| one array per field, sum split four ways | 1.28× | 0.99× |
+| only the sum split, layout untouched | 0.78× | 0.89× |
+
+The two machines want opposite things. On x86 the layout is a slight loss
+and reassociating the cross-mode sum is the win; on ARM the layout alone is
+worth 1.41× and reassociating takes it back. Neither loop vectorises on
+either machine: adding 256 results into one accumulator is a float
+reduction, which a compiler may not reassociate on its own, so what moves on
+ARM is how the bank is walked rather than how wide it is walked.
+
+And neither column is the answer, because the instrument is neither. Built
+for `wasm32` with `simd128`, the loop as it stands emits **no** v128
+instructions in either layout — and the version with the sum split four ways
+emits them. Cranelift does not vectorise scalar wasm; it lowers the SIMD the
+producer already emitted. So on the appliance the arrangement that lost on
+native ARM is the only one that arrives vectorised at all, and the
+arrangement that won there arrives scalar.
+
+What that costs: splitting the sum changes the order 256 terms are added in,
+which moves the result by about −88 dB relative. Inaudible, and still far
+above the −240 dB the fingerprint guards hold the instrument to, so taking
+it means rebaselining them deliberately rather than as a side effect.
+
+The honest state of this: there is a lever here worth somewhere between
+nothing and 1.4× on 69 % of the global stage, three environments give three
+different answers, and the only one that counts — the instrument itself,
+built as wasm, measured on the appliance — has not been taken, because
+taking it means actually rewriting the bank. A first version of this section
+claimed 3.07× from a probe that let resonator state carry across rounds, so
+the arrangements were not rendering the same thing; that number was wrong
+and is withdrawn.
 
 ## What is not covered
 

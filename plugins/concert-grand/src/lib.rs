@@ -9515,7 +9515,7 @@ impl ConcertGrand {
                 );
                 halo[n] = built;
             }
-            if let Some(shadow) = self.allocate_voice() {
+            if let Some(shadow) = self.allocate_halo(slot & (STRING_SECTIONS - 1)) {
                 *shadow = Voice::default();
                 shadow.pole_ceiling = pole_ceiling(sample_rate);
                 shadow.active = true;
@@ -9646,7 +9646,18 @@ impl ConcertGrand {
         &mut voice_at!(self, slot)
     }
 
-    fn allocate_voice(&mut self) -> Option<&mut Voice> {
+    /// A voice for the halo of a note being struck.
+    ///
+    /// ACROSS ALL FOUR SECTIONS, which a `parallel_render_v1` unit will not
+    /// be able to do: the striking section builds the halo's ladder from
+    /// its own recipe and then writes it into whatever slot is quietest,
+    /// which may belong to another unit. This is the last thing in the
+    /// strike path that crosses the boundary, and it cannot simply be
+    /// narrowed -- binding the halo to its own section was measured at
+    /// -6.8 dB against the same script, because with the pool
+    /// over-subscribed a different slot means a different voice stolen.
+    fn allocate_halo(&mut self, section: usize) -> Option<&mut Voice> {
+        let _ = section;
         if let Some(index) = (0..MAX_VOICES).find(|slot| !voice_at!(self, *slot).active) {
             return Some(&mut voice_at!(self, index));
         }
@@ -9654,8 +9665,7 @@ impl ConcertGrand {
         #[cfg(not(target_arch = "wasm32"))]
         STEALS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         // In slot order, so a tie still steals the same voice it always
-        // did: `min_by` keeps the FIRST of equal minima, and which slot that
-        // is decides the note's section.
+        // did: `min_by` keeps the FIRST of equal minima.
         let index = (0..MAX_VOICES)
             .min_by(|a, b| voice_at!(self, *a).energy.total_cmp(&voice_at!(self, *b).energy))?;
         self.active_partials = self
@@ -17446,6 +17456,21 @@ mod bench {
     /// differ, this says WHERE, and the where names the event.
     ///
     /// `cargo test -p rackforge-concert-grand --release pedal_capture -- --ignored --nocapture`
+    /// How hard the script presses on the voice pool, which is what tells a
+    /// re-ordering apart from a shortage.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release pedal_steals -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn pedal_steals() {
+        STEALS.store(0, core::sync::atomic::Ordering::Relaxed);
+        let _ = play_pedal_script(300);
+        std::println!(
+            "robos de voz en el guion: {}",
+            STEALS.load(core::sync::atomic::Ordering::Relaxed)
+        );
+    }
+
     #[test]
     #[ignore]
     fn pedal_capture() {

@@ -88,6 +88,7 @@ macro_rules! phase {
 }
 
 use rackforge_plugin_sdk::{
+    UnitWork,
     MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_FLAG_RELEASE_MEASURED,
     MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF, MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2,
     ParameterEvent, Processor, export_processor,
@@ -1123,7 +1124,7 @@ const SECTION_SHIFT: u32 = STRING_SECTIONS.trailing_zeros();
 /// else, which is also exactly what a `parallel_render_v1` unit gets.
 macro_rules! voice_at {
     ($owner:expr, $slot:expr) => {
-        $owner.sections[$slot & (STRING_SECTIONS - 1)][$slot >> SECTION_SHIFT]
+        $owner.sections[$slot & (STRING_SECTIONS - 1)].voices[$slot >> SECTION_SHIFT]
     };
 }
 /// How many samples of drive-point history the board may read through.
@@ -3556,6 +3557,93 @@ struct FrameDeposit {
 /// How many frames render in one span. The appliance's period.
 const RENDER_SPAN: usize = 128;
 
+/// The most strikes one frame of one section can carry.
+///
+/// Four sections, so a sixteen-note cluster landing in one frame puts four
+/// here. Eight is room to spare for a hand that does not exist.
+const MAX_STRIKES_PER_FRAME: usize = 8;
+/// A byte or two of dispatch per section per block is plenty: a strike is
+/// eight bytes and a block is 128 frames.
+const STRIKE_WORK_BYTES: usize = 512;
+
+/// What a coordinator tells a section about a note it must strike.
+///
+/// The slot and not just the note, because choosing the slot is what the
+/// coordinator does and the section's identity follows from it.
+#[derive(Clone, Copy)]
+struct StrikeRecord {
+    slot: u8,
+    channel: u8,
+    note: u8,
+    /// Where this strike sat in the block's event order.
+    ///
+    /// Strikes in ONE frame have to be done in the order they arrived, not
+    /// in section order: each sizes its partial ladder from
+    /// `active_partials`, which the one before it just spent. Applying four
+    /// sections in turn reordered a chord's ladders, and two chord tests
+    /// said so while the fingerprint -- whose passage has no two notes in a
+    /// frame -- did not.
+    seq: u8,
+    velocity: f32,
+}
+
+impl StrikeRecord {
+    const EMPTY: Self = Self {
+        slot: 0,
+        channel: 0,
+        note: 0,
+        seq: 0,
+        velocity: 0.0,
+    };
+
+    fn to_bytes(self) -> [u8; 8] {
+        let velocity = self.velocity.to_le_bytes();
+        [
+            self.slot,
+            self.channel,
+            self.note,
+            self.seq,
+            velocity[0],
+            velocity[1],
+            velocity[2],
+            velocity[3],
+        ]
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < 8 {
+            return None;
+        }
+        Some(Self {
+            slot: bytes[0],
+            channel: bytes[1],
+            note: bytes[2],
+            seq: bytes[3],
+            velocity: f32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+        })
+    }
+}
+
+/// One section's voices: what a `parallel_render_v1` unit owns.
+///
+/// A voice's section is its slot masked, so the eight slots a section holds
+/// are `section`, `section + 4`, `section + 8` ... This is the type that
+/// becomes `ParallelProcessor::Unit`, and it exists as a named struct rather
+/// than a bare array because the trait wants `Default` and because a unit is
+/// a thing, not an anonymous row.
+#[derive(Clone, Copy)]
+struct StringSection {
+    voices: [Voice; VOICES_PER_SECTION],
+}
+
+impl Default for StringSection {
+    fn default() -> Self {
+        Self {
+            voices: [Voice::default(); VOICES_PER_SECTION],
+        }
+    }
+}
+
 /// Every voice slot, section by section -- the order a unit walks them.
 ///
 /// The event handlers mutate each voice independently and write nothing to
@@ -4963,7 +5051,7 @@ pub struct ConcertGrand {
     /// slots 0, 1, 2 ... in order, so the float summation order -- and the
     /// render fingerprint with it -- is unchanged. This moves bytes, not
     /// sound.
-    sections: [[Voice; VOICES_PER_SECTION]; STRING_SECTIONS],
+    sections: [StringSection; STRING_SECTIONS],
     pedal: bool,
     /// Una corda (CC 67): the shifted hammer strikes two of the three
     /// strings, softer and darker, and the free third string feeds the
@@ -5010,6 +5098,18 @@ pub struct ConcertGrand {
     silent_work: [(u16, u8, f32); 64],
     silent_work_len: usize,
     span_offset: u16,
+    /// Which frame the events being handled belong to, so the coordinator
+    /// can write a strike into the frame it happened in.
+    event_frame: u16,
+    /// Per-section strike dispatch, written while the block's events are
+    /// walked and read back at the frame each strike was written for.
+    strike_work: [[u8; STRIKE_WORK_BYTES]; STRING_SECTIONS],
+    strike_len: [usize; STRING_SECTIONS],
+    /// Event order within the block, so a frame's strikes keep theirs.
+    strike_seq: u8,
+    /// Slots this block has already promised to a strike that has not
+    /// happened yet. One bit per slot; `MAX_VOICES` is 32.
+    strike_claimed: u32,
     /// Samples of delay on the sympathetic coupling BETWEEN sections.
     ///
     /// `0` couples every string to every other with the one sample of latency
@@ -5220,7 +5320,7 @@ impl Default for ConcertGrand {
             sample_rate: 48_000.0,
             fundamental: [0.0; NOTE_COUNT],
             inharmonicity: [0.0; NOTE_COUNT],
-            sections: [[Voice::default(); VOICES_PER_SECTION]; STRING_SECTIONS],
+            sections: [StringSection::default(); STRING_SECTIONS],
             pedal: false,
             soft: 0.0,
             active_partials: 0,
@@ -5234,6 +5334,11 @@ impl Default for ConcertGrand {
             silent_work: [(0, 0, 0.0); 64],
             silent_work_len: 0,
             span_offset: 0,
+            event_frame: 0,
+            strike_work: [[0; STRIKE_WORK_BYTES]; STRING_SECTIONS],
+            strike_len: [0; STRING_SECTIONS],
+            strike_seq: 0,
+            strike_claimed: 0,
             section_delay: 0,
             restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
             // Per-note calibration fitted against the YDP samples: ten
@@ -7487,13 +7592,86 @@ impl ConcertGrand {
     }
 
     fn start_voice(&mut self, channel: u8, note: u8, velocity: u8) {
-        self.start_voice_unit(channel, note, velocity as f32 / 127.0);
+        self.plan_strike(channel, note, velocity as f32 / 127.0);
+    }
+
+    /// The coordinator's half of a note-on: choose the slot, and write the
+    /// strike into the work of the section that owns it.
+    ///
+    /// Choosing is all that happens here. The work itself is read back and
+    /// done at the frame it was written for, which today is the same frame
+    /// in the same pass -- and is why the fingerprint can still guard this.
+    fn plan_strike(&mut self, channel: u8, note: u8, velocity: f32) {
+        let Some(slot) = self.pick_voice_slot() else {
+            return;
+        };
+        let section = slot & (STRING_SECTIONS - 1);
+        let frame = self.event_frame;
+        let record = StrikeRecord {
+            slot: slot as u8,
+            channel,
+            note,
+            seq: self.strike_seq,
+            velocity,
+        };
+        self.strike_seq = self.strike_seq.wrapping_add(1);
+        let written = self.strike_len[section];
+        let mut work = UnitWork::resume(&mut self.strike_work[section], written);
+        if work.push(frame, &record.to_bytes()) {
+            self.strike_len[section] = work.written();
+        }
+    }
+
+    /// Does every section's strikes for one frame, in the order they
+    /// arrived.
+    ///
+    /// Read out first, applied after: `start_voice_unit` takes all of
+    /// `self`, and the work it is reading lives there too. Sorted by `seq`
+    /// because each strike sizes its ladder from what the one before it
+    /// left.
+    fn run_strikes(&mut self, frame: u16) {
+        let mut due = [StrikeRecord::EMPTY; MAX_STRIKES_PER_FRAME];
+        let mut count = 0usize;
+        for section in 0..STRING_SECTIONS {
+            let written = self.strike_len[section];
+            if written == 0 {
+                continue;
+            }
+            for (at, bytes) in UnitWork::read(&self.strike_work[section][..written]) {
+                if at != frame || count == due.len() {
+                    continue;
+                }
+                if let Some(record) = StrikeRecord::from_bytes(bytes) {
+                    due[count] = record;
+                    count += 1;
+                }
+            }
+        }
+        if count == 0 {
+            return;
+        }
+        due[..count].sort_unstable_by_key(|record| record.seq);
+        for index in 0..count {
+            let record = due[index];
+            self.strike_claimed &= !(1 << record.slot);
+            self.start_voice_unit(
+                record.channel,
+                record.note,
+                record.velocity,
+                record.slot as usize,
+            );
+        }
     }
 
     /// The strike with its velocity already on the unit scale. Seven-bit
     /// sources come through `start_voice` and land here at exactly the value
     /// they always produced; a 16-bit velocity lands between those steps.
-    fn start_voice_unit(&mut self, channel: u8, note: u8, velocity: f32) {
+    /// The strike, into a slot the coordinator already chose.
+    ///
+    /// `slot` decides the section, and the section decides which worker does
+    /// this work: the recipe, the contact integration and the ladder are
+    /// 42-47 %, 37 % and the rest of a note-on, and all of it happens here.
+    fn start_voice_unit(&mut self, channel: u8, note: u8, velocity: f32, slot: usize) {
         #[cfg(test)]
         let mut mark = std::time::Instant::now();
         let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
@@ -8928,9 +9106,7 @@ impl ConcertGrand {
         let clang_register = self.clang_register(position);
         let firmness = Self::damper_firmness(self.strike_serial, note);
         phase!(3, mark);
-        let Some(voice) = self.allocate_voice() else {
-            return;
-        };
+        let voice = self.claim_voice(slot);
         voice.active = true;
         voice.note = note;
         voice.channel = channel;
@@ -9229,6 +9405,55 @@ impl ConcertGrand {
         // constant was written for and never got told about.
         self.partial_budget = ((PARTIAL_BUDGET as f32 * self.quality) as usize)
             .clamp(MINIMUM_PARTIAL_BUDGET, PARTIAL_BUDGET);
+    }
+
+    /// Which slot a new note takes, deciding nothing else.
+    ///
+    /// Separated from the refund below because a `parallel_render_v1`
+    /// coordinator has to choose the slot -- and with it the SECTION, and
+    /// with that which worker does the work -- before any of the work
+    /// happens, while the refund has to stay where it always was. The
+    /// partial ladder is sized from `active_partials` seven hundred lines
+    /// before the old `allocate_voice` was reached, so refunding earlier
+    /// would size every stolen note's ladder against a larger budget. That
+    /// is a different instrument, and the fingerprint says so.
+    ///
+    /// Nothing between here and the refund touches a voice, so choosing
+    /// early is safe: the answer is the same either way.
+    fn pick_voice_slot(&mut self) -> Option<usize> {
+        // A slot promised earlier in this block is taken, even though
+        // nothing has struck it yet. The old code could not have this
+        // problem: it allocated at the END of the strike, so the previous
+        // note was already active by the time the next one looked. Choosing
+        // up front, seven notes of one chord all chose slot zero, and
+        // `a_chord_is_the_sum_of_its_notes` said so.
+        let free = |owner: &Self, slot: usize| {
+            !voice_at!(owner, slot).active && owner.strike_claimed & (1 << slot) == 0
+        };
+        let chosen = if let Some(index) = (0..MAX_VOICES).find(|slot| free(self, *slot)) {
+            index
+        } else {
+            #[cfg(not(target_arch = "wasm32"))]
+            STEALS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            // In slot order, so a tie steals the same voice it always did,
+            // and never one this block has already promised away.
+            (0..MAX_VOICES)
+                .filter(|slot| self.strike_claimed & (1 << slot) == 0)
+                .min_by(|a, b| {
+                    voice_at!(self, *a).energy.total_cmp(&voice_at!(self, *b).energy)
+                })?
+        };
+        self.strike_claimed |= 1 << chosen;
+        Some(chosen)
+    }
+
+    /// Takes the slot `pick_voice_slot` chose, refunding what it was
+    /// carrying. This is where the budget moves, and it has not moved.
+    fn claim_voice(&mut self, slot: usize) -> &mut Voice {
+        self.active_partials = self
+            .active_partials
+            .saturating_sub(voice_at!(self, slot).partial_count);
+        &mut voice_at!(self, slot)
     }
 
     fn allocate_voice(&mut self) -> Option<&mut Voice> {
@@ -9716,7 +9941,7 @@ impl ConcertGrand {
                 // softest calibrated strike is one seven-bit step, and a
                 // hammer thrown slower than that is that strike.
                 let unit = (velocity as f32 / 65535.0).max(1.0 / 127.0);
-                self.start_voice_unit(channel, note, unit);
+                self.plan_strike(channel, note, unit);
             }
             MIDI2_KIND_NOTE_OFF => {
                 // The host raises `RELEASE_MEASURED` under exactly the rule
@@ -9984,7 +10209,7 @@ impl Processor for ConcertGrand {
     }
 
     fn reset(&mut self) {
-        self.sections = [[Voice::default(); VOICES_PER_SECTION]; STRING_SECTIONS];
+        self.sections = [StringSection::default(); STRING_SECTIONS];
         self.pedal = false;
         self.active_partials = 0;
         for string in &mut self.undamped {
@@ -10805,6 +11030,9 @@ impl Processor for ConcertGrand {
         // frames rather than interleaved frame by frame -- what a
         // `parallel_render_v1` unit needs, since a unit renders a whole span
         // of its own voices and deposits what it made.
+        self.strike_len = [0; STRING_SECTIONS];
+        self.strike_seq = 0;
+        self.strike_claimed = 0;
         let mut deposits = [FrameDeposit::default(); RENDER_SPAN];
         let mut frame_states = [FrameState::default(); RENDER_SPAN];
         let mut span_start = 0usize;
@@ -10814,6 +11042,7 @@ impl Processor for ConcertGrand {
             for offset in 0..span {
                 let frame = span_start + offset;
                 self.span_offset = offset as u16;
+                self.event_frame = frame as u16;
                 self.clock = self.clock.wrapping_add(1);
                 while let Some(event) = midi.get(midi_index) {
                     if event.frame as usize != frame {
@@ -10838,6 +11067,12 @@ impl Processor for ConcertGrand {
                     let _ = self.controls.set(event.index, event.value);
                     parameter_index += 1;
                 }
+
+                // The strikes this frame was given, before anything reads a
+                // voice. `bed_busy` below walks them, and today the strike
+                // has already landed when it does -- putting this after it
+                // moved the fingerprint, which is how I learned it.
+                self.run_strikes(frame as u16);
 
                 if refresh_busy {
                     refresh_busy = false;

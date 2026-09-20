@@ -390,6 +390,28 @@ impl<'a> UnitWork<'a> {
         true
     }
 
+    /// Picks a part-written payload back up.
+    ///
+    /// A coordinator builds a unit's work while it walks the block's events,
+    /// which is many calls rather than one, so it needs to put the buffer
+    /// down and take it up again. `written` is what the last `finish`
+    /// returned; anything longer than the buffer starts over rather than
+    /// index past the end.
+    pub fn resume(buffer: &'a mut [u8], written: usize) -> Self {
+        let written = if written > buffer.len() { 0 } else { written };
+        let last_frame = UnitWork::read(&buffer[..written]).last().map(|(at, _)| at);
+        Self {
+            buffer,
+            written,
+            last_frame,
+        }
+    }
+
+    /// How many bytes are written so far, to hand back to [`Self::resume`].
+    pub fn written(&self) -> usize {
+        self.written
+    }
+
     /// The bytes to hand [`PlanWriter::activate`].
     pub fn finish(self) -> &'a [u8] {
         &self.buffer[..self.written]
@@ -2125,6 +2147,29 @@ mod unit_work_tests {
         let last = read.next().expect("the fourth record");
         assert_eq!(last.0, 127);
         assert_eq!(last.1.len(), 17);
+        assert_eq!(read.next(), None);
+    }
+
+    #[test]
+    fn a_payload_can_be_put_down_and_taken_up_again() {
+        // A coordinator writes a unit's work while it walks the block's
+        // events, which is many calls and not one.
+        let mut buffer = [0u8; 128];
+        let written = {
+            let mut work = UnitWork::new(&mut buffer);
+            assert!(work.push(3, &[1]));
+            work.written()
+        };
+        let written = {
+            let mut work = UnitWork::resume(&mut buffer, written);
+            assert!(work.push(9, &[2, 3]));
+            // And the frame order still holds across the seam.
+            assert!(!work.push(8, &[4]));
+            work.written()
+        };
+        let mut read = UnitWork::read(&buffer[..written]);
+        assert_eq!(read.next(), Some((3, &[1][..])));
+        assert_eq!(read.next(), Some((9, &[2, 3][..])));
         assert_eq!(read.next(), None);
     }
 

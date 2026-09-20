@@ -18156,6 +18156,11 @@ mod bench {
     #[ignore]
     fn instrument_size() {
         std::println!(
+            "FrameState {} B, o {} KB por cada 4096 cuadros",
+            core::mem::size_of::<FrameState>(),
+            core::mem::size_of::<FrameState>() * 4096 / 1024,
+        );
+        std::println!(
             "ConcertGrand {} KB, seccion {} KB, motor {} KB;              una unidad seria {} KB y cinco de ellas {} KB,              contra {} KB si una unidad cargara el instrumento entero",
             core::mem::size_of::<ConcertGrand>() / 1024,
             core::mem::size_of::<StringUnit>() / 1024,

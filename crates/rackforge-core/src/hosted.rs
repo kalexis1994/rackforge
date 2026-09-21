@@ -1110,9 +1110,10 @@ impl PluginInstance<'_> {
     pub fn last_realtime_fuel_consumed(&self) -> Option<u64> {
         match &self.backend {
             PluginInstanceBackend::Native(_) => None,
-            PluginInstanceBackend::Portable(instance) => {
+            PluginInstanceBackend::Portable(instance) if instance.instance.is_metered() => {
                 Some(instance.instance.last_realtime_fuel_consumed())
             }
+            PluginInstanceBackend::Portable(_) => None,
         }
     }
 }

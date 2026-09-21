@@ -1002,6 +1002,11 @@ fn a_package_may_not_claim_the_capability_without_the_extension() {
 const WIDE_UNIT_SYNTH: &str = r#"
     (module
       (memory (export "memory") 4)
+      ;; Takes the budget, which is what asks the host to meter it. Without
+      ;; this the plugin is compiled into the engine guarded by the epoch
+      ;; instead, where there is no fuel figure to aggregate and nothing
+      ;; for this fixture to be about.
+      (func (export "rackforge_set_realtime_budget") (param i64) (result i32) i32.const 1)
       (global $lfo (mut f32) (f32.const 0))
       (global $active (mut i32) (i32.const 3))
       (global $last_active (mut i32) (i32.const 0))

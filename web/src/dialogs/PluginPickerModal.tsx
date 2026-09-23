@@ -114,9 +114,6 @@ export function PluginPickerModal({
         closeLabel="Close plugin selector"
         className="plugin-picker-modal"
       >
-        <div className="preset-modal-toolbar">
-          <p>Choose the instrument you want to play. The active plugin stays first.</p>
-        </div>
         {pendingPlugin && programDraft && (
           <section className="plugin-switch-confirm" role="alert">
             <div>

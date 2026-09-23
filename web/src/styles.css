@@ -1319,10 +1319,16 @@ textarea {
   gap: 9px;
 }
 
+/* The list begins right under the header's seam: there is no intro line
+   above it, so the list carries its own top margin. */
 .plugin-picker-modal .play-plugin-selector {
   width: 100%;
   margin: 0;
-  padding: 0 clamp(18px, 4vw, 30px) 28px;
+  padding: 20px clamp(18px, 4vw, 30px) 28px;
+}
+
+.plugin-picker-modal .plugin-switch-confirm {
+  margin-top: 20px;
 }
 
 .plugin-switch-confirm {

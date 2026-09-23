@@ -151,9 +151,10 @@ export function ParameterLinkHost({
       highlight.setAttribute("aria-hidden", "true");
       highlight.className = "rackforge-parameter-highlight";
       // Drawn inside the plugin's document, where RackForge's stylesheets do
-      // not reach: the theme's accent is read here and written in.
+      // not reach: the input's colour from the colour code (design/tokens.css)
+      // is read here and written in -- a link is MIDI, and MIDI is input.
       const accent = getComputedStyle(window.document.documentElement)
-        .getPropertyValue("--red").trim() || "#c1273d";
+        .getPropertyValue("--rf-color-input").trim() || "#5b3a8e";
       highlight.style.cssText = [
         "position:fixed",
         `left:${targetBounds.left - 3}px`,

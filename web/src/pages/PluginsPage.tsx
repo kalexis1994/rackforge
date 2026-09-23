@@ -308,7 +308,7 @@ export function PluginsPage({
         {selectedGroups.map((group) => (
           <section className="plugin-kind-group" key={group.kind}>
             <div className="plugin-grid expanded plugin-manager-grid">
-        {group.plugins.map((plugin, index) => {
+        {group.plugins.map((plugin) => {
           const instance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
           const busy = changingPluginId === plugin.plugin_id;
           const configAvailable = plugin.surfaces.some((surface) => surface.kind === "config");
@@ -326,7 +326,7 @@ export function PluginsPage({
                   <span className="plugin-manager-card-shade" aria-hidden="true" />
                 </>
               ) : null}
-              <div className={`plugin-tile tile-${index % 4}${plugin.branding ? " branded" : ""}`}>
+              <div className={`plugin-tile ${kind.className}${plugin.branding ? " branded" : ""}`}>
                 <PluginIcon plugin={plugin} name={plugin.plugin_name} />
                 {!plugin.branding && <i />}
               </div>

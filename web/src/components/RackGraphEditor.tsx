@@ -23,6 +23,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Settings2 } from "lucide-react";
+import { pluginKind, usePluginCatalog } from "../pluginCatalog";
+import { pluginKindPresentation } from "../pluginPresentation";
 import {
   memo,
   useCallback,
@@ -60,6 +62,9 @@ type CanvasNodeData = {
   title: string;
   subtitle: string;
   kind: RackGraphNode["kind"]["kind"] | "label";
+  /** What a plugin node's plugin is -- "instrument", "effect" or
+   *  "midi-processor" -- so it takes its kind's colour. */
+  pluginKind?: string;
   labelKind?: RackGraphLabel["kind"];
   tone?: RackGraphLabelTone;
 };
@@ -92,7 +97,7 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
   const emitsAudio = acceptsMidi;
   const acceptsAudio = data.kind === "plugin" || data.kind === "rack";
   return (
-    <div className={`rack-flow-node ${data.kind} ${selected ? "selected" : ""}`}>
+    <div className={`rack-flow-node ${data.kind}${data.pluginKind ? ` ${data.pluginKind}` : ""} ${selected ? "selected" : ""}`}>
       {acceptsMidi ? (
         <Handle
           id="midi:midi_in"
@@ -176,18 +181,27 @@ const nodeTypes: NodeTypes = {
   labelNode: LabelCard,
 };
 
+// The colour code's lit set (design/tokens.css): the canvas is dark in both
+// lighting modes. A plugin is its kind; a rack, a container, is grey; the
+// ins and outs are their signal, MIDI violet and audio amber.
 const graphNodeColors: Record<CanvasNodeData["kind"], string> = {
-  plugin: "#4d8dff",
-  rack: "#ad7cff",
-  midi_input: "#58d9ee",
-  audio_input: "#f2b25e",
-  midi_output: "#58d9ee",
-  audio_output: "#f2b25e",
+  plugin: "var(--rf-lit-instrument)",
+  rack: "var(--rf-lit-rack)",
+  midi_input: "var(--rf-lit-input)",
+  audio_input: "var(--rf-lit-sound)",
+  midi_output: "var(--rf-lit-input)",
+  audio_output: "var(--rf-lit-sound)",
   label: "#70838e",
 };
 
+const graphPluginColors: Record<string, string> = {
+  effect: "var(--rf-lit-sound)",
+  "midi-processor": "var(--rf-lit-input)",
+};
+
 function graphMiniMapNodeColor(node: CanvasNode) {
-  return graphNodeColors[node.data.kind];
+  return (node.data.pluginKind && graphPluginColors[node.data.pluginKind])
+    || graphNodeColors[node.data.kind];
 }
 
 const RackFlowEdge = memo(function RackFlowEdge({
@@ -291,15 +305,21 @@ function nodeTitle(node: RackGraphNode, rack: RackDefinition, racks: RackDefinit
 function toCanvasNodes(
   rack: RackDefinition,
   racks: RackDefinition[],
+  pluginKinds: ReadonlyMap<string, string>,
 ): CanvasNode[] {
   const graph = materializeRackGraph(rack).graph!;
   const nodes = graph.nodes.map((node): CanvasNode => {
     const [title, subtitle] = nodeTitle(node, rack, racks);
+    const slotId = node.kind.kind === "plugin" ? node.kind.slot_id : null;
+    const pluginId = slotId === null
+      ? null
+      : rack.slots.find((candidate) => candidate.id === slotId)?.plugin_id ?? null;
+    const kind = pluginId === null ? undefined : pluginKinds.get(pluginId);
     return {
       id: node.id,
       type: "rackNode",
       position: node.position,
-      data: { title, subtitle, kind: node.kind.kind },
+      data: { title, subtitle, kind: node.kind.kind, ...(kind ? { pluginKind: kind } : {}) },
       deletable: false,
     };
   });
@@ -351,7 +371,8 @@ function toCanvasEdges(
     animated: edge.signal === "midi",
     markerEnd: { type: MarkerType.ArrowClosed },
     style: {
-      stroke: edge.signal === "midi" ? "#62dff1" : "#f4b860",
+      // The signal's colour in the code's lit set: MIDI violet, audio amber.
+      stroke: edge.signal === "midi" ? "var(--rf-lit-input)" : "var(--rf-lit-sound)",
       strokeWidth: 2,
     },
   }));
@@ -595,9 +616,17 @@ export default function RackGraphEditor({
     },
     [finishPaneGesture],
   );
+  const { plugins: catalogPlugins } = usePluginCatalog();
+  const pluginKinds = useMemo(
+    () => new Map(catalogPlugins.map((plugin) => [
+      plugin.plugin_id,
+      pluginKindPresentation(pluginKind(plugin)).className,
+    ])),
+    [catalogPlugins],
+  );
   const mappedNodes = useMemo(
-    () => toCanvasNodes(materialized, racks),
-    [materialized, racks],
+    () => toCanvasNodes(materialized, racks, pluginKinds),
+    [materialized, racks, pluginKinds],
   );
   const [interactiveNodes, setInteractiveNodes] = useState(mappedNodes);
   const interactiveRackIdRef = useRef(rack.id);

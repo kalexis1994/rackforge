@@ -243,7 +243,7 @@
 .nav-tint-home { --nav-tint: var(--nav-home); }
 .nav-tint-live { --nav-tint: var(--nav-live); }
 .nav-tint-play { --nav-tint: var(--nav-play); }
-.nav-tint-controller { --nav-tint: var(--nav-controller); }
+.nav-tint-controller { --nav-tint: var(--rf-color-input); }
 .nav-tint-diagnostics { --nav-tint: var(--nav-diagnostics); }
 .nav-tint-system { --nav-tint: var(--nav-system); }
 
@@ -937,32 +937,24 @@
   pointer-events: none;
   border-radius: inherit;
   box-shadow:
-    inset 0 0 0 1px var(--entity-instrument),
-    inset 0 0 12px -3px var(--entity-instrument);
+    inset 0 0 0 1px var(--tile-colour),
+    inset 0 0 12px -3px var(--tile-colour);
 }
 
-.plugin-tile.tile-0::before {
-  box-shadow:
-    inset 0 0 0 1px var(--blue),
-    inset 0 0 12px -3px var(--blue);
+/* The colour is the plugin's kind in the colour code (design/tokens.css),
+   where it used to be the tile's place in the list -- blue, red, amber,
+   ember in turn -- which said nothing about the plugin. */
+.plugin-tile {
+  --tile-colour: var(--rf-color-instrument);
 }
 
-.plugin-tile.tile-1::before {
-  box-shadow:
-    inset 0 0 0 1px var(--red),
-    inset 0 0 12px -3px var(--red);
+.plugin-tile.effect {
+  --tile-colour: var(--rf-color-sound);
 }
 
-.plugin-tile.tile-2::before {
-  box-shadow:
-    inset 0 0 0 1px var(--amber),
-    inset 0 0 12px -3px var(--amber);
-}
-
-.plugin-tile.tile-3::before {
-  box-shadow:
-    inset 0 0 0 1px var(--ember),
-    inset 0 0 12px -3px var(--ember);
+.plugin-tile.midi-processor,
+.plugin-tile.controller-tile {
+  --tile-colour: var(--rf-color-input);
 }
 
 .plugin-icon {
@@ -1761,9 +1753,9 @@
 
 /* Struck pads go down into the panel rather than lighting up like a lamp. */
 .touch-pad.active {
-  color: var(--red-ink) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--acid) 88%, #000), var(--acid)) !important;
-  border-color: var(--acid) !important;
+  color: var(--rf-color-on-code) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--rf-color-input) 88%, #000), var(--rf-color-input)) !important;
+  border-color: var(--rf-color-input) !important;
   box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.34) !important;
   transform: translateY(1px) scale(0.996) !important;
 }
@@ -1866,7 +1858,7 @@
   border-color: var(--line) !important;
   box-shadow:
     inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.28),
-    inset 3px 0 0 var(--acid) !important;
+    inset 3px 0 0 var(--rf-color-input) !important;
 }
 
 .touch-controller-dockbar > button:disabled {
@@ -1918,7 +1910,7 @@
 /* The window is a moulded cursor sliding in its slot, not a neon selection. */
 .touch-keyboard-navigator-window {
   background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
-  border: 1px solid var(--acid) !important;
+  border: 1px solid var(--rf-color-input) !important;
   border-radius: var(--fp-radius-key) !important;
   box-shadow:
     inset 0 1px 0 rgba(var(--edge-light-rgb), 0.8),
@@ -1926,7 +1918,7 @@
 }
 
 .touch-keyboard-navigator-window button {
-  color: var(--acid) !important;
+  color: var(--rf-color-input) !important;
 }
 
 /* ------------------------------------------------------- the menu button --- */
@@ -2036,7 +2028,7 @@
 .touch-controller-menu .touch-mode-switch button.active {
   color: var(--ink) !important;
   background: var(--panel-inset) !important;
-  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--rf-color-input) !important;
 }
 
 .touch-controller-menu .touch-mode-switch button:active {
@@ -2148,7 +2140,7 @@
   border-color: var(--line) !important;
   box-shadow:
     inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.28),
-    inset 3px 0 0 var(--acid) !important;
+    inset 3px 0 0 var(--rf-color-input) !important;
 }
 
 /* -- the pad matrix picker: a grid of cut cells -- */
@@ -2168,12 +2160,12 @@
 }
 
 .touch-pad-matrix-picker button.selected {
-  background: color-mix(in srgb, var(--acid) 34%, var(--paper)) !important;
-  border-color: var(--acid) !important;
+  background: color-mix(in srgb, var(--rf-color-input) 34%, var(--paper)) !important;
+  border-color: var(--rf-color-input) !important;
 }
 
 .touch-pad-matrix-picker button[aria-selected="true"] {
-  background: var(--acid) !important;
+  background: var(--rf-color-input) !important;
   box-shadow: none !important;
 }
 
@@ -2201,7 +2193,7 @@
   background: var(--panel-inset) !important;
   box-shadow:
     inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.28),
-    inset 3px 0 0 var(--acid) !important;
+    inset 3px 0 0 var(--rf-color-input) !important;
 }
 
 /* Panic is the one red block on this surface: it stops every note, and it is
@@ -3178,7 +3170,7 @@
 }
 
 /* A tag is its kind's colour in the colour code (design/tokens.css):
-   instruments blue, effects amber, MIDI processors cyan, controllers red
+   instruments blue, effects amber, MIDI processors and controllers violet
    -- where they were cyan, violet, green and peach, a palette of their own
    that meant nothing anywhere else. */
 .plugin-kind-tag.instrument {
@@ -3191,13 +3183,9 @@
   background: var(--rf-color-sound);
 }
 
-.plugin-kind-tag.midi-processor {
-  color: var(--rf-color-on-code);
-  background: var(--rf-color-midi);
-}
-
+.plugin-kind-tag.midi-processor,
 .plugin-kind-tag.controller {
-  color: var(--red-ink);
+  color: var(--rf-color-on-code);
   background: var(--rf-color-input);
 }
 
@@ -3216,10 +3204,7 @@
   --kind-colour: var(--rf-color-sound);
 }
 
-.plugin-kind-tabs button.midi-processor {
-  --kind-colour: var(--rf-color-midi);
-}
-
+.plugin-kind-tabs button.midi-processor,
 .plugin-kind-tabs button.controller {
   --kind-colour: var(--rf-color-input);
 }
@@ -3783,10 +3768,10 @@
 }
 
 /* A controller is hardware, so its tile mark is a legend plate like any other,
-   in the palette's amber rather than a hardcoded one. */
+   in the input's violet from the colour code. */
 .controller-tile-mark {
-  color: var(--amber-ink) !important;
-  background: color-mix(in srgb, var(--amber) 14%, transparent) !important;
+  color: var(--rf-color-input) !important;
+  background: color-mix(in srgb, var(--rf-color-input) 14%, transparent) !important;
   border: var(--fp-seam) !important;
   border-radius: var(--fp-radius-key) !important;
 }
@@ -3830,17 +3815,17 @@
   height: 8px;
   flex: 0 0 auto;
   border-radius: 1px;
-  background: color-mix(in srgb, var(--nav-controller) 20%, var(--panel-inset));
+  background: color-mix(in srgb, var(--rf-color-input) 20%, var(--panel-inset));
   box-shadow:
     inset 0 1px 2px rgba(var(--edge-dark-rgb), 0.55),
     0 1px 0 rgba(var(--edge-light-rgb), 0.55);
 }
 
 .controller-dock-toggle.open::before {
-  background: var(--nav-controller);
+  background: var(--rf-color-input);
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--nav-controller) 60%, #fff),
-    0 0 7px color-mix(in srgb, var(--nav-controller) 72%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--rf-color-input) 60%, #fff),
+    0 0 7px color-mix(in srgb, var(--rf-color-input) 72%, transparent);
 }
 
 /* The pictogram is the fallback legend, so it is hidden while the words fit. */
@@ -5362,6 +5347,41 @@
   background: linear-gradient(180deg, #202225, #17191c) !important;
 }
 
+/* A node's colour is what it is, from the colour code's lit set -- the
+   canvas is dark in both modes: an instrument blue, an effect amber, a
+   MIDI processor violet, a rack grey (a container, neither); the ins and
+   outs are their signal, MIDI violet and audio amber. It shows on the
+   node's edge when selected, and in the minimap. */
+.rack-flow-node,
+.rack-flow-node.plugin {
+  --node-color: var(--rf-lit-instrument);
+}
+
+.rack-flow-node.plugin.effect,
+.rack-flow-node.audio_input,
+.rack-flow-node.audio_output {
+  --node-color: var(--rf-lit-sound);
+}
+
+.rack-flow-node.plugin.midi-processor,
+.rack-flow-node.midi_input,
+.rack-flow-node.midi_output {
+  --node-color: var(--rf-lit-input);
+}
+
+.rack-flow-node.rack {
+  --node-color: var(--rf-lit-rack);
+}
+
+/* The ports are their signal's colour: MIDI violet, audio amber. */
+.rack-flow-node .midi-handle {
+  background: var(--rf-lit-input);
+}
+
+.rack-flow-node .audio-handle {
+  background: var(--rf-lit-sound);
+}
+
 .rack-flow-node.selected {
   border-color: var(--node-color) !important;
   box-shadow:
@@ -5651,7 +5671,7 @@
 }
 
 .rack-midi-check input {
-  accent-color: var(--red) !important;
+  accent-color: var(--rf-color-input) !important;
 }
 
 .rack-midi-curve {
@@ -5666,7 +5686,11 @@
 }
 
 .rack-midi-curve polyline {
-  stroke: var(--ink) !important;
+  stroke: var(--rf-color-input) !important;
+}
+
+.rack-midi-section h3 {
+  color: var(--rf-color-input) !important;
 }
 
 .rack-midi-link-editor > footer {
@@ -5674,13 +5698,14 @@
   border-top: var(--fp-seam) !important;
 }
 
-/* Apply is the one lit key on the panel, the same red every primary wears. */
+/* Apply is the one lit key on the panel, in the input's violet: a MIDI
+   link is input (see the colour code in design/tokens.css). */
 .rack-midi-link-editor > footer .primary,
 .rack-midi-link-editor > footer .primary:hover:not(:disabled),
 .rack-midi-link-editor > footer .primary:focus-visible {
-  color: var(--red-ink) !important;
-  background: var(--red) !important;
-  border-color: var(--red) !important;
+  color: var(--rf-color-on-code) !important;
+  background: var(--rf-color-input) !important;
+  border-color: var(--rf-color-input) !important;
   box-shadow: var(--fp-lip), var(--fp-drop) !important;
 }
 
@@ -5868,9 +5893,9 @@
 
 /* Add is a key, the one lit thing in a row that can take it. */
 .play-chain-suggestion-add {
-  color: var(--red-ink);
-  background: var(--red);
-  border: 1px solid color-mix(in srgb, var(--red) 70%, #000);
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-sound);
+  border: 1px solid color-mix(in srgb, var(--rf-color-sound) 70%, #000);
   border-radius: var(--fp-radius-key);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
@@ -5881,7 +5906,7 @@
 }
 
 .play-chain-suggestion-add:hover {
-  background: color-mix(in srgb, var(--red) 88%, #fff);
+  background: color-mix(in srgb, var(--rf-color-sound) 88%, #fff);
 }
 
 .play-chain-suggestion-add:active {
@@ -5913,7 +5938,7 @@
   background: linear-gradient(180deg, var(--glass), var(--paper));
   border: var(--fp-seam);
   border-radius: var(--fp-radius-key);
-  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--red);
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--rf-color-sound);
   font: 700 10px/1 var(--display-font);
   letter-spacing: var(--fp-track);
   text-transform: uppercase;
@@ -6049,14 +6074,14 @@
   box-shadow: var(--fp-well);
 }
 
-/* New, Save and Rename's confirm are the lit keys: the red every primary
-   wears, where the old theme filled them with acid. */
+/* New, Save and Rename's confirm are the lit keys, in the presets' green
+   from the colour code (design/tokens.css). Delete keeps its red. */
 .preset-create-button,
 .preset-create-form button[type="submit"],
 .preset-rename-form button[type="submit"] {
-  color: var(--red-ink);
-  background: var(--red);
-  border: 1px solid color-mix(in srgb, var(--red) 70%, #000);
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-preset);
+  border: 1px solid color-mix(in srgb, var(--rf-color-preset) 70%, #000);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
     inset 0 -2px 0 rgba(0, 0, 0, 0.25);
@@ -6065,7 +6090,7 @@
 .preset-create-button:hover:not(:disabled),
 .preset-create-form button[type="submit"]:hover:not(:disabled),
 .preset-rename-form button[type="submit"]:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--red) 88%, #fff);
+  background: color-mix(in srgb, var(--rf-color-preset) 88%, #fff);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
     inset 0 -2px 0 rgba(0, 0, 0, 0.25);
@@ -6074,7 +6099,7 @@
 .preset-create-button:active:not(:disabled),
 .preset-create-form button[type="submit"]:active:not(:disabled),
 .preset-rename-form button[type="submit"]:active:not(:disabled) {
-  background: var(--red);
+  background: var(--rf-color-preset);
   box-shadow: var(--fp-well);
 }
 
@@ -6304,7 +6329,12 @@
 }
 
 .parameter-link-options input[type="checkbox"] {
-  accent-color: var(--red);
+  accent-color: var(--rf-color-input);
+}
+
+/* The MIDI inputs chosen in Settings are input too. */
+.host-audio-form fieldset.midi-ports input[type="checkbox"] {
+  accent-color: var(--rf-color-input);
 }
 
 .midi-learn-button {
@@ -6324,14 +6354,15 @@
   box-shadow: var(--fp-well);
 }
 
-/* Listening: held down, its edge lit amber like a lamp behind the key. */
+/* Listening: held down, its edge lit like a lamp behind the key, in the
+   input's violet -- it is waiting for MIDI. */
 .midi-learn-button.learning {
   background: var(--panel-inset);
-  border-color: var(--amber);
+  border-color: var(--rf-color-input);
   box-shadow:
     var(--fp-well),
-    inset 0 0 0 1px var(--amber),
-    inset 0 0 14px -4px var(--amber);
+    inset 0 0 0 1px var(--rf-color-input),
+    inset 0 0 14px -4px var(--rf-color-input);
 }
 
 .parameter-link-error {
@@ -6344,7 +6375,7 @@
 }
 
 .parameter-link-pending {
-  color: var(--amber);
+  color: var(--rf-color-input);
   font: 600 12px/1.5 var(--display-font);
 }
 

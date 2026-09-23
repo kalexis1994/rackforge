@@ -74,6 +74,10 @@ type CanvasNodeData = {
   /** What a plugin node's plugin is -- "instrument", "effect" or
    *  "midi-processor" -- so it takes its kind's colour. */
   pluginKind?: string;
+  /** The plugin's own artwork, when it has any: its banner behind the node
+   *  and its icon in place of the generic mark. */
+  bannerUrl?: string;
+  iconUrl?: string;
   /** The worst problem this node has as it is wired; see rackGraphProblems. */
   problem?: "error" | "warning";
   labelKind?: RackGraphLabel["kind"];
@@ -108,7 +112,14 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
   const emitsAudio = acceptsMidi;
   const acceptsAudio = data.kind === "plugin" || data.kind === "rack";
   return (
-    <div className={`rack-flow-node ${data.kind}${data.pluginKind ? ` ${data.pluginKind}` : ""}${data.problem ? ` has-${data.problem}` : ""} ${selected ? "selected" : ""}`}>
+    <div className={`rack-flow-node ${data.kind}${data.pluginKind ? ` ${data.pluginKind}` : ""}${data.bannerUrl ? " branded" : ""}${data.problem ? ` has-${data.problem}` : ""} ${selected ? "selected" : ""}`}>
+      {data.bannerUrl ? (
+        // Clipped on its own: the node itself cannot hide its overflow, the
+        // ports sit half outside its edge.
+        <span className="rack-flow-node-art" aria-hidden="true">
+          <img src={data.bannerUrl} alt="" draggable={false} />
+        </span>
+      ) : null}
       {acceptsMidi ? (
         <Handle
           id="midi:midi_in"
@@ -133,8 +144,10 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
           className="audio-handle rack-audio-input-handle"
         />
       ) : null}
-      <span className="rack-flow-node-icon">
-        {data.kind === "midi_input"
+      <span className={`rack-flow-node-icon${data.iconUrl ? " has-art" : ""}`}>
+        {data.iconUrl ? (
+          <img src={data.iconUrl} alt="" draggable={false} />
+        ) : data.kind === "midi_input"
           ? "MIDI"
           : data.kind === "audio_input"
             ? "IN"
@@ -146,7 +159,7 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
       </span>
       <div>
         <strong>{data.title}</strong>
-        <small>{data.subtitle}</small>
+        {data.subtitle ? <small>{data.subtitle}</small> : null}
       </div>
       {data.kind === "midi_input" ? (
         <Handle
@@ -318,7 +331,8 @@ function nodeTitle(node: RackGraphNode, rack: RackDefinition, racks: RackDefinit
     case "plugin": {
       const slotId = node.kind.slot_id;
       const slot = rack.slots.find((candidate) => candidate.id === slotId);
-      return [slot?.name ?? "Missing Slot", slot?.plugin_id ?? slotId];
+      // The plugin's name alone: its id says nothing on a stage.
+      return [slot?.name ?? "Missing Slot", slot ? "" : slotId];
     }
     case "rack": {
       const rackId = node.kind.rack_id;
@@ -332,6 +346,7 @@ function toCanvasNodes(
   rack: RackDefinition,
   racks: RackDefinition[],
   pluginKinds: ReadonlyMap<string, string>,
+  pluginArt: ReadonlyMap<string, { bannerUrl?: string; iconUrl?: string; version?: string }> = new Map(),
 ): CanvasNode[] {
   const graph = materializeRackGraph(rack).graph!;
   const nodes = graph.nodes.map((node): CanvasNode => {
@@ -345,7 +360,17 @@ function toCanvasNodes(
       id: node.id,
       type: "rackNode",
       position: node.position,
-      data: { title, subtitle, kind: node.kind.kind, ...(kind ? { pluginKind: kind } : {}) },
+      data: {
+        title,
+        // A plugin node's small line is its version, in the catalog's words.
+        subtitle: (pluginId && pluginArt.get(pluginId)?.version) || subtitle,
+        kind: node.kind.kind,
+        ...(kind ? { pluginKind: kind } : {}),
+        ...(pluginId ? {
+          bannerUrl: pluginArt.get(pluginId)?.bannerUrl,
+          iconUrl: pluginArt.get(pluginId)?.iconUrl,
+        } : {}),
+      },
       deletable: false,
     };
   });
@@ -715,6 +740,18 @@ export default function RackGraphEditor({
     [finishPaneGesture],
   );
   const { plugins: catalogPlugins } = usePluginCatalog();
+  const pluginArt = useMemo(
+    () => new Map(catalogPlugins.map((plugin) => [
+      plugin.plugin_id,
+      {
+        ...(plugin.branding
+          ? { bannerUrl: plugin.branding.banner_url, iconUrl: plugin.branding.icon_url }
+          : {}),
+        ...(plugin.version ? { version: `v${plugin.version.replace(/^v/i, "")}` } : {}),
+      },
+    ])),
+    [catalogPlugins],
+  );
   const pluginKinds = useMemo(
     () => new Map(catalogPlugins.map((plugin) => [
       plugin.plugin_id,
@@ -739,11 +776,11 @@ export default function RackGraphEditor({
     for (const problem of problems) {
       if (!worst.has(problem.nodeId)) worst.set(problem.nodeId, problem.severity);
     }
-    return toCanvasNodes(materialized, racks, pluginKinds).map((node) => {
+    return toCanvasNodes(materialized, racks, pluginKinds, pluginArt).map((node) => {
       const problem = worst.get(node.id);
       return problem ? { ...node, data: { ...node.data, problem } } : node;
     });
-  }, [materialized, racks, pluginKinds, problems]);
+  }, [materialized, racks, pluginKinds, pluginArt, problems]);
   const [interactiveNodes, setInteractiveNodes] = useState(mappedNodes);
   const interactiveRackIdRef = useRef(rack.id);
   useLayoutEffect(() => {

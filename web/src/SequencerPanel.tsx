@@ -202,6 +202,10 @@ export function SequencerStrip({
       aria-label="Sequencer"
     >
       <div className="sequencer-strip">
+        {/* The controls wrap to as many rows as the width asks for; the
+            fold key stands apart, top right, so unfolding -- which brings
+            more controls and more rows -- never moves it. */}
+        <div className="seq-strip-controls">
         <div className="seq-keys" role="group" aria-label="Transport">
           <button
             className={`seq-key seq-lamp-key${running ? " engaged" : ""}`}
@@ -272,18 +276,20 @@ export function SequencerStrip({
         >
           SYNC
         </button>
+        </div>
         {/* One key opens the sequencers: the pads and the deck unfold
             together, and fold away together. There used to be two -- one for
             the deck, one for the fold -- that did nearly the same thing. The
-            arrow points the way it will move. */}
+            arrow alone, pointing the way it will move; its name is for
+            screen readers and the tooltip. */}
         <button
           className={`seq-key seq-fold-key${collapsed ? "" : " engaged"}`}
           aria-expanded={!collapsed}
           aria-controls="sequencer-body"
+          aria-label={collapsed ? "Unfold the sequencers" : "Fold the sequencers away"}
           title={collapsed ? "Unfold the sequencers" : "Fold the sequencers away"}
           onClick={toggleCollapsed}
         >
-          SEQUENCERS
           <span className="seq-chevron" aria-hidden="true" />
         </button>
       </div>

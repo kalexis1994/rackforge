@@ -4338,11 +4338,19 @@
 }
 
 .sequencer-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 9px 12px;
+}
+
+.seq-strip-controls {
+  min-width: 0;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px 14px;
-  padding: 9px 12px;
 }
 
 .seq-keys {
@@ -4420,10 +4428,8 @@
    Animated as grid rows rather than a max-height guess, so the motion is
    exactly the height the content asks for however many lanes it has. */
 .seq-fold-key {
-  margin-left: auto;
   min-width: 40px;
   justify-content: center;
-  gap: 10px;
   padding-inline: 12px;
 }
 
@@ -4445,10 +4451,6 @@
    sync and the deck key come back with the pads when it unfolds. */
 .sequencer-shell.collapsed .seq-extended {
   display: none;
-}
-
-.sequencer-shell.collapsed .sequencer-strip {
-  padding-block: 6px;
 }
 
 /* The deck key keeps its lamp and no arrow: one arrow on the strip, and it
@@ -9081,9 +9083,6 @@
     flex: 0 0 auto;
   }
 
-  /* Folded on a phone the strip is two rows -- the keys, then where the
-     transport is -- and the SEQUENCERS key ends the second, at its right,
-     rather than spending a row of its own. */
   .seq-fold-key {
     min-height: 28px;
   }

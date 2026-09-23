@@ -138,7 +138,19 @@ export function AudioHealthReadout() {
   );
 }
 
-export function MasterOutputMeter() {
+/**
+ * The master output meter. Given `toggle`, it is also the switch between
+ * the top bar's two faces on a narrow screen -- what is playing, or the
+ * master volume and pan -- which do not fit side by side there. The switch
+ * is a transparent key laid over the meter rather than a key around it:
+ * the health readout below the bars has a key of its own, and a key may
+ * not hold another.
+ */
+export function MasterOutputMeter({
+  toggle,
+}: {
+  toggle?: { expanded: boolean; onToggle: () => void };
+} = {}) {
   const [levels, setLevels] = useState<[number, number]>([METER_FLOOR_DB, METER_FLOOR_DB]);
   const [holds, setHolds] = useState<[number, number]>([METER_FLOOR_DB, METER_FLOOR_DB]);
   const holdUntil = useRef<[number, number]>([0, 0]);
@@ -181,6 +193,16 @@ export function MasterOutputMeter() {
         ))}
       </span>
       <span className="master-output-meter-channels" aria-hidden="true">L R</span>
+      {toggle ? (
+        <button
+          type="button"
+          className="master-output-meter-toggle"
+          aria-expanded={toggle.expanded}
+          aria-controls="topbar-mixer"
+          aria-label={toggle.expanded ? "Show what is playing" : "Show volume and pan"}
+          onClick={toggle.onToggle}
+        />
+      ) : null}
       <AudioHealthReadout />
     </div>
   );

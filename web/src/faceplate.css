@@ -424,6 +424,90 @@
   }
 }
 
+/* ------------------------------------------------ OUT, the bar's switch ---
+   Narrow, the bar cannot hold the Now Playing window and the master volume
+   and pan side by side without each squeezing the other. So it shows one
+   face at a time: what is playing, by default, or -- after a touch on OUT --
+   volume and pan across the bar, until OUT is touched again. The meter keeps
+   metering either way. Wide, everything fits: the switch is not there. */
+
+.master-output-meter {
+  position: relative;
+}
+
+.master-output-meter-toggle {
+  display: none;
+}
+
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .master-output-meter-toggle {
+    display: block;
+    position: absolute;
+    inset: -4px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: var(--fp-radius-key);
+    cursor: pointer;
+  }
+
+  .master-output-meter-toggle:focus-visible {
+    outline: 2px solid var(--acid);
+    outline-offset: 0;
+  }
+
+  /* Open, the meter reads as a key held down: its lamp lit under it. */
+  .topbar.mixer-open .master-output-meter-toggle {
+    box-shadow: inset 0 -2px 0 var(--acid);
+  }
+
+  /* The health readout's own key stays above the switch. */
+  .master-output-meter .audio-health-readout {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Closed: the window, and no faders. */
+  .topbar.has-mixer-toggle:not(.mixer-open) .top-controls .compact-control {
+    display: none;
+  }
+
+  /* Open: no window; volume and pan share the bar, each with its name. */
+  .topbar.mixer-open .now-playing {
+    display: none !important;
+  }
+
+  .topbar.mixer-open .top-controls {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 0;
+  }
+
+  .topbar.mixer-open .top-controls .compact-control,
+  .topbar.mixer-open .top-controls .compact-control.pan-control {
+    flex: 1 1 0;
+    min-width: 0;
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) 34px;
+    animation: rf-mixer-in var(--rf-motion-standard) var(--rf-ease-emphasized) backwards;
+  }
+
+  .topbar.mixer-open .top-controls .compact-control > .compact-control-label {
+    display: block !important;
+  }
+
+  .topbar.has-mixer-toggle:not(.mixer-open) .now-playing {
+    animation: rf-mixer-in var(--rf-motion-standard) var(--rf-ease-emphasized) backwards;
+  }
+}
+
+@keyframes rf-mixer-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
 /* On a phone the window is a third of the bar, too narrow for its label
    and the program both. The program is what a player looks down for, so
    the label goes, as it already does on a phone on its side. */

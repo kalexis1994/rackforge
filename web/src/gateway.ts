@@ -7,7 +7,7 @@ import {
   snapshotReceived,
   store,
 } from "./store";
-import { isVstHost, openSessionChannel, type SessionChannel } from "./host";
+import { IS_BROWSER_HOST, isVstHost, openSessionChannel, type SessionChannel } from "./host";
 import { randomIdToken } from "./ids";
 import { invalidatePluginCatalog } from "./pluginCatalog";
 import { serializeSessionCommand } from "./sessionCommandProtocol";
@@ -726,8 +726,14 @@ function commandPayload(id: number, command: SessionCommand) {
 }
 
 function sendAudioHealthRequest() {
+  // The browser host has no audio driver to report on and answers
+  // audio_health as unavailable. Session errors carry no request id, so that
+  // answer rejected whatever command was waiting beside it: switching
+  // instrument in the browser failed with "does not implement this request"
+  // though the switch itself had worked.
   if (
     !isVstHost()
+    && !IS_BROWSER_HOST
     && socket
     && sessionConnected
     && coreReady

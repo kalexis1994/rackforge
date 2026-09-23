@@ -9,6 +9,7 @@ import {
 } from "react";
 import { materializePluginState, requestPluginPreset, requestPluginPresets } from "../gateway";
 import { AsyncActionLabel, AsyncSpinner } from "./AsyncSpinner";
+import { POPOVER_TAIL_TOP, fitPopover } from "./rackSlotPopoverGeometry";
 import type {
   HostPresetSummary,
   PluginInstance,
@@ -66,6 +67,20 @@ export function RackSlotPopover({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [size, setSize] = useState(POPOVER_INITIAL_SIZE);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const [bounds, setBounds] = useState<{ width: number; height: number } | null>(null);
+
+  // The layer the editor floats in, measured, so the editor can be kept
+  // inside it -- and kept inside it again when the window is resized.
+  useEffect(() => {
+    const layer = sectionRef.current?.offsetParent;
+    if (!(layer instanceof HTMLElement)) return;
+    const measure = () => setBounds({ width: layer.clientWidth, height: layer.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(layer);
+    return () => observer.disconnect();
+  }, []);
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -136,7 +151,7 @@ export function RackSlotPopover({
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      position: displayPosition,
+      position: fitted.position,
     };
   };
   const drag = (event: PointerEvent<HTMLElement>) => {
@@ -205,6 +220,12 @@ export function RackSlotPopover({
     x: viewport.x + (nodePosition.x + POPOVER_OFFSET.x) * viewport.zoom,
     y: viewport.y + (nodePosition.y + POPOVER_OFFSET.y) * viewport.zoom,
   } : position;
+  const fitted = fitPopover(displayPosition, size, bounds);
+  // Moved up to fit, the tail moves down by as much, so it still points at
+  // the node; if the node is past the editor's edge there is nothing to point
+  // along, and the tail is left out.
+  const tailTop = POPOVER_TAIL_TOP + displayPosition.y - fitted.position.y;
+  const tailVisible = tailTop >= POPOVER_TAIL_TOP && tailTop <= fitted.size.height - 48;
   const editorInstance: PluginInstance = {
     ...instance,
     selected_sound_id: slot.state?.selected_sound_id ?? instance.selected_sound_id,
@@ -217,21 +238,24 @@ export function RackSlotPopover({
     <>
       {mode === "floating" ? (
         <svg className="rack-slot-popover-link" aria-hidden="true">
-        <line x1={anchor.x} y1={anchor.y} x2={displayPosition.x} y2={displayPosition.y + 28} />
+        <line x1={anchor.x} y1={anchor.y} x2={fitted.position.x} y2={fitted.position.y + 28} />
           <circle cx={anchor.x} cy={anchor.y} r="3" />
         </svg>
       ) : null}
       <section
+        ref={sectionRef}
         className={`rack-slot-popover ${mode}`}
         style={{
-          left: displayPosition.x,
-          top: displayPosition.y,
-          width: size.width,
-          height: size.height,
+          left: fitted.position.x,
+          top: fitted.position.y,
+          width: fitted.size.width,
+          height: fitted.size.height,
         }}
         aria-label={`Edit ${slot.name}`}
       >
-      <span className="rack-slot-popover-tail" aria-hidden="true" />
+      {tailVisible ? (
+        <span className="rack-slot-popover-tail" aria-hidden="true" style={{ top: tailTop }} />
+      ) : null}
       <header
         className="rack-slot-popover-header"
         onPointerDown={beginDrag}

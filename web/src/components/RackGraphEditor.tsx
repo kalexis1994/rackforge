@@ -6,13 +6,13 @@ import {
   Controls,
   EdgeLabelRenderer,
   Handle,
-  MarkerType,
   MiniMap,
   Position,
   ReactFlow,
   applyNodeChanges,
   getBezierPath,
   useConnection,
+  useInternalNode,
   type Connection,
   type Edge,
   type EdgeProps,
@@ -31,8 +31,10 @@ import type { DraftHistory } from "../hooks/useDraftHistory";
 import { pluginKind, usePluginCatalog } from "../pluginCatalog";
 import { pluginKindPresentation } from "../pluginPresentation";
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -78,6 +80,8 @@ type CanvasNodeData = {
    *  and its icon in place of the generic mark. */
   bannerUrl?: string;
   iconUrl?: string;
+  /** The ports with a cable in them, by handle id ("audio:audio_out"). */
+  connected?: string[];
   /** The worst problem this node has as it is wired; see rackGraphProblems. */
   problem?: "error" | "warning";
   labelKind?: RackGraphLabel["kind"];
@@ -107,7 +111,74 @@ type CanvasBounds = {
   height: number;
 };
 
-const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<CanvasNode>) {
+/** The graph's connection rules, for a port to ask while a cable is dragged. */
+const RackConnectionRules = createContext<
+  ((connection: Connection) => boolean) | null
+>(null);
+
+/** How far a dragged cable's reach extends from a port that would take it,
+ *  in canvas units: inside it, the port grows as the cable nears. */
+const PORT_REACH = 140;
+
+/**
+ * A port: hollow while nothing is plugged into it, filled once something
+ * is. While a cable is being drawn, a port that would take it beats gently
+ * and grows as the cable comes near, like a jack lit to receive a plug; one
+ * that would refuse it dims. The rules are the graph's own.
+ */
+function RackPort({
+  nodeId,
+  id,
+  type,
+  position,
+  className,
+  connected,
+}: {
+  nodeId: string;
+  id: string;
+  type: "source" | "target";
+  position: Position;
+  className: string;
+  connected: boolean;
+}) {
+  const rules = useContext(RackConnectionRules);
+  const internal = useInternalNode(nodeId);
+  // One short answer per port -- idle, refusing, or accepting at a reach
+  // rounded to a tenth -- so a drag re-renders a port only when it changes.
+  const state = useConnection((connection) => {
+    if (!connection.inProgress || !rules) return "idle";
+    const from = connection.fromHandle;
+    if (from.nodeId === nodeId && from.id === id) return "idle";
+    if (from.type === type) return "refusing";
+    const candidate = type === "target"
+      ? { source: from.nodeId, sourceHandle: from.id ?? null, target: nodeId, targetHandle: id }
+      : { source: nodeId, sourceHandle: id, target: from.nodeId, targetHandle: from.id ?? null };
+    if (!rules(candidate)) return "refusing";
+    const bounds = internal?.internals.handleBounds?.[type]?.find((handle) => handle.id === id);
+    if (!internal || !bounds) return "accepting:0";
+    const x = internal.internals.positionAbsolute.x + bounds.x + bounds.width / 2;
+    const y = internal.internals.positionAbsolute.y + bounds.y + bounds.height / 2;
+    // `to` is the cable's end in canvas units (`pointer` is not).
+    const distance = Math.hypot(connection.to.x - x, connection.to.y - y);
+    const reach = Math.max(0, Math.min(1, 1 - distance / PORT_REACH));
+    return `accepting:${Math.round(reach * 10) / 10}`;
+  });
+  const accepting = state.startsWith("accepting");
+  const reach = accepting ? Number(state.split(":")[1]) : 0;
+  return (
+    <Handle
+      id={id}
+      type={type}
+      position={position}
+      className={`${className}${connected ? " is-connected" : ""}${
+        accepting ? " is-accepting" : state === "refusing" ? " is-refusing" : ""}`}
+      style={accepting ? ({ "--reach": reach } as CSSProperties) : undefined}
+    />
+  );
+}
+
+const RackNodeCard = memo(function RackNodeCard({ id: nodeId, data, selected }: NodeProps<CanvasNode>) {
+  const plugged = (handleId: string) => data.connected?.includes(handleId) ?? false;
   const acceptsMidi = data.kind === "plugin" || data.kind === "rack";
   const emitsAudio = acceptsMidi;
   const acceptsAudio = data.kind === "plugin" || data.kind === "rack";
@@ -121,27 +192,33 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
         </span>
       ) : null}
       {acceptsMidi ? (
-        <Handle
+        <RackPort
+          nodeId={nodeId}
           id="midi:midi_in"
           type="target"
           position={Position.Left}
           className="midi-handle rack-midi-input-handle"
+          connected={plugged("midi:midi_in")}
         />
       ) : null}
       {data.kind === "audio_output" ? (
-        <Handle
+        <RackPort
+          nodeId={nodeId}
           id="audio:in"
           type="target"
           position={Position.Left}
           className="audio-handle"
+          connected={plugged("audio:in")}
         />
       ) : null}
       {acceptsAudio ? (
-        <Handle
+        <RackPort
+          nodeId={nodeId}
           id="audio:audio_in"
           type="target"
           position={Position.Left}
           className="audio-handle rack-audio-input-handle"
+          connected={plugged("audio:audio_in")}
         />
       ) : null}
       <span className={`rack-flow-node-icon${data.iconUrl ? " has-art" : ""}`}>
@@ -162,27 +239,33 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
         {data.subtitle ? <small>{data.subtitle}</small> : null}
       </div>
       {data.kind === "midi_input" ? (
-        <Handle
+        <RackPort
+          nodeId={nodeId}
           id="midi:out"
           type="source"
           position={Position.Right}
           className="midi-handle"
+          connected={plugged("midi:out")}
         />
       ) : null}
       {data.kind === "audio_input" ? (
-        <Handle
+        <RackPort
+          nodeId={nodeId}
           id="audio:out"
           type="source"
           position={Position.Right}
           className="audio-handle"
+          connected={plugged("audio:out")}
         />
       ) : null}
       {emitsAudio ? (
-        <Handle
+        <RackPort
+          nodeId={nodeId}
           id="audio:audio_out"
           type="source"
           position={Position.Right}
           className="audio-handle"
+          connected={plugged("audio:audio_out")}
         />
       ) : null}
     </div>
@@ -356,12 +439,17 @@ function toCanvasNodes(
       ? null
       : rack.slots.find((candidate) => candidate.id === slotId)?.plugin_id ?? null;
     const kind = pluginId === null ? undefined : pluginKinds.get(pluginId);
+    const connected = graph.edges.flatMap((edge) => [
+      ...(edge.source.node_id === node.id ? [`${edge.signal}:${edge.source.port_id}`] : []),
+      ...(edge.target.node_id === node.id ? [`${edge.signal}:${edge.target.port_id}`] : []),
+    ]);
     return {
       id: node.id,
       type: "rackNode",
       position: node.position,
       data: {
         title,
+        connected,
         // A plugin node's small line is its version, in the catalog's words.
         subtitle: (pluginId && pluginArt.get(pluginId)?.version) || subtitle,
         kind: node.kind.kind,
@@ -422,7 +510,6 @@ function toCanvasEdges(
     // MIDI is drawn dashed (faceplate.css), but still: running dashes repaint
     // the canvas every frame, which a Raspberry Pi pays for the whole time a
     // Rack is open.
-    markerEnd: { type: MarkerType.ArrowClosed },
     style: {
       // The signal's colour in the code's lit set: MIDI violet, audio amber.
       stroke: edge.signal === "midi" ? "var(--rf-lit-input)" : "var(--rf-lit-sound)",
@@ -1216,6 +1303,7 @@ export default function RackGraphEditor({
         onPointerUp={finishPaneGesture}
         onPointerCancel={finishPaneGesture}
       >
+        <RackConnectionRules.Provider value={isValidConnection}>
         <ReactFlow<CanvasNode, RackCanvasEdge>
           nodes={interactiveNodes}
           edges={edges}
@@ -1341,6 +1429,7 @@ export default function RackGraphEditor({
             ) : null}
           </Controls>
         </ReactFlow>
+        </RackConnectionRules.Provider>
         {history && historyOpen ? (
           <div id="rack-history-list" className="rack-history-list" role="dialog" aria-label="Editing history">
             <header>

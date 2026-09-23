@@ -5552,32 +5552,53 @@
   object-fit: cover;
 }
 
-/* The ports are their signal's colour: MIDI violet, audio amber. */
-.rack-flow-node .midi-handle {
-  background: var(--rf-lit-input);
-}
-
-.rack-flow-node .audio-handle {
-  background: var(--rf-lit-sound);
-}
-
-/* While a cable is dragged, a port that would take it grows and rings white
-   as the cable nears it; one that refuses it rings red. The rules are the
-   graph's own (rackGraph.ts), so what lights is what connects. `scale`, not
-   transform: React Flow places the handle with its transform. */
+/* A port is a jack in its signal's colour -- MIDI violet, audio amber --
+   drawn as a ring while nothing is plugged into it and filled once a cable
+   is. While a cable is being drawn (RackPort), a port that would take it
+   beats gently and grows as the cable comes within reach, --reach running
+   0 to 1; one that would refuse it dims. `scale`, not transform: React Flow
+   places the handle with its transform. */
 .rack-flow-node .react-flow__handle {
+  --port-colour: var(--rf-lit-sound);
+  --reach: 0;
+  width: 11px;
+  height: 11px;
+  background: #17181b;
+  border: 2px solid var(--port-colour);
   transition:
     scale var(--rf-motion-fast) var(--rf-ease-standard),
+    background var(--rf-motion-fast) var(--rf-ease-standard),
+    opacity var(--rf-motion-fast) var(--rf-ease-standard),
     box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
 }
 
-.rack-flow-node .react-flow__handle.connectingto.valid {
-  scale: 1.6;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+.rack-flow-node .midi-handle {
+  --port-colour: var(--rf-lit-input);
 }
 
-.rack-flow-node .react-flow__handle.connectingto:not(.valid) {
-  box-shadow: 0 0 0 2px var(--red);
+.rack-flow-node .react-flow__handle.is-connected {
+  background: var(--port-colour);
+}
+
+.rack-flow-node .react-flow__handle.is-accepting {
+  scale: calc(1.2 + var(--reach) * 0.9);
+  background: color-mix(in srgb, var(--port-colour) calc(35% + var(--reach) * 65%), #17181b);
+  animation: rack-port-beat calc(var(--rf-motion-emphasized) * 3) var(--rf-ease-standard) infinite;
+}
+
+.rack-flow-node .react-flow__handle.is-refusing {
+  opacity: 0.25;
+}
+
+@keyframes rack-port-beat {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--port-colour) 45%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--port-colour) 0%, transparent);
+  }
 }
 
 /* A port is a small dot and a finger is not: the reach around it is wider

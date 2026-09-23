@@ -730,10 +730,7 @@ export default function RackGraphEditor({
      *  plug into, and the new node is wired to it. */
     from?: { signal: RackGraphSignal; node_id: string; port_id: string; name: string };
   }) | null>(null);
-  const [midiLinkEditor, setMidiLinkEditor] = useState<{
-    edgeId: string;
-    anchor: GraphMenuAnchor;
-  } | null>(null);
+  const [midiLinkEditor, setMidiLinkEditor] = useState<{ edgeId: string } | null>(null);
   const overlayOpen = editorSlotId !== undefined || midiLinkEditor !== null;
   const closePluginEditor = useCallback(() => setEditorSlotId(undefined), []);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -841,7 +838,7 @@ export default function RackGraphEditor({
     setMidiLinkEditor(null);
     setPaneMenu(anchor);
   }, [createMenuAnchor]);
-  const openMidiLinkEditor = useCallback((edgeId: string, clientX: number, clientY: number) => {
+  const openMidiLinkEditor = useCallback((edgeId: string) => {
     const edge = materialized.graph!.edges.find((candidate) => candidate.id === edgeId);
     const source = edge
       ? materialized.graph!.nodes.find((node) => node.id === edge.source.node_id)
@@ -856,13 +853,11 @@ export default function RackGraphEditor({
       && source?.kind.kind === "audio_input"
       && target?.kind.kind === "plugin";
     if (!edge || !(midiCable || inputCable)) return;
-    const anchor = createMenuAnchor(clientX, clientY, 486, 650);
-    if (!anchor) return;
     setSelectedId(edgeId);
     setNodeMenu(null);
     setPaneMenu(null);
-    setMidiLinkEditor({ edgeId, anchor });
-  }, [createMenuAnchor, materialized]);
+    setMidiLinkEditor({ edgeId });
+  }, [materialized]);
   const finishPaneGesture = useCallback(() => {
     const gesture = paneGestureRef.current;
     if (!gesture) return;
@@ -898,7 +893,7 @@ export default function RackGraphEditor({
           if (gesture.nodeId) {
             openNodeMenu(gesture.nodeId, x, y);
           } else if (gesture.edgeId) {
-            openMidiLinkEditor(gesture.edgeId, x, y);
+            openMidiLinkEditor(gesture.edgeId);
           } else {
             openPaneMenu(x, y);
           }
@@ -1503,35 +1498,49 @@ export default function RackGraphEditor({
     ? instances.find((instance) => instance.plugin_id === editorSlot.plugin_id)
     : undefined;
   const editorKind = ((editorSlot && pluginKinds.get(editorSlot.plugin_id)) ?? "instrument") as RackPluginEditorKind;
-  // A plugin edited is a modal over the canvas: the graph behind it takes no
-  // pointer, key or focus until it is closed, and the canvas's own popovers
-  // close under it. If the slot goes -- an undo takes it away -- so does
-  // the editor.
+  // A plugin or a cable edited is a modal over the canvas, centred on it: the
+  // graph behind takes no pointer, key or focus until it is closed, and the
+  // canvas's own popovers close under it. If what it edits goes -- an undo
+  // takes it away -- so does the modal.
   useEffect(() => {
     if (editorSlotId !== undefined && !editorSlot) setEditorSlotId(undefined);
   }, [editorSlot, editorSlotId]);
   const editorNodeIdRef = useRef<string | undefined>(undefined);
   editorNodeIdRef.current = editorNode?.id;
+  const cableEdited = midiLinkEditor
+    && materialized.graph!.edges.some((edge) => edge.id === midiLinkEditor.edgeId);
+  useEffect(() => {
+    if (midiLinkEditor && !cableEdited) setMidiLinkEditor(null);
+  }, [cableEdited, midiLinkEditor]);
+  // What the modal is over, and what takes the focus back when it closes:
+  // the node a plugin was opened from, or the key of the cable.
+  const modalKey = editorSlotId !== undefined
+    ? `node:${editorSlotId}`
+    : midiLinkEditor
+      ? `edge:${midiLinkEditor.edgeId}`
+      : undefined;
   useEffect(() => {
     const flow = canvasRef.current?.querySelector<HTMLElement>(".react-flow");
-    if (!flow || editorSlotId === undefined) return;
+    if (!flow || modalKey === undefined) return;
     flow.inert = true;
-    const nodeId = editorNodeIdRef.current;
+    const returnTo = modalKey.startsWith("node:")
+      ? editorNodeIdRef.current
+        && `.react-flow__node[data-id="${CSS.escape(editorNodeIdRef.current)}"]`
+      : `.rack-edge-control[data-edge-id="${CSS.escape(modalKey.slice("edge:".length))}"]`;
     setHistoryOpen(false);
     setShortcutsOpen(false);
     setNodeMenu(null);
     setPaneMenu(null);
     return () => {
       flow.inert = false;
-      // Focus goes back where it was; if that was a menu item, gone with
-      // its menu, it goes to the node the plugin was opened from.
+      // Focus goes back where it was; if that is gone -- a menu item, with
+      // its menu -- it goes to what was edited.
       window.requestAnimationFrame(() => {
-        if (!nodeId || (document.activeElement && document.activeElement !== document.body)) return;
-        flow.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(nodeId)}"]`)
-          ?.focus({ preventScroll: true });
+        if (!returnTo || (document.activeElement && document.activeElement !== document.body)) return;
+        flow.querySelector<HTMLElement>(returnTo)?.focus({ preventScroll: true });
       });
     };
-  }, [editorSlotId]);
+  }, [modalKey]);
   const midiEditorEdge = midiLinkEditor
     ? materialized.graph!.edges.find((edge) => edge.id === midiLinkEditor.edgeId)
     : undefined;
@@ -1961,7 +1970,6 @@ export default function RackGraphEditor({
               targetLabel={midiEditorTargetLabel}
               status={audioInput.status}
               peaks={audioInput.peaks}
-              style={menuStyle(midiLinkEditor.anchor)}
               onClose={() => setMidiLinkEditor(null)}
               onApply={(audio_input_route) => {
                 updateGraph((graph) => ({
@@ -1983,7 +1991,6 @@ export default function RackGraphEditor({
                 ? midiTransformFromSlot(midiEditorTargetSlot)
                 : undefined}
               targetLabel={midiEditorTargetLabel}
-              style={menuStyle(midiLinkEditor.anchor)}
               onClose={() => setMidiLinkEditor(null)}
               onApply={(midi_transform) => {
                 updateGraph((graph) => ({

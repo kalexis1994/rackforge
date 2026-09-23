@@ -7457,7 +7457,8 @@
 .rack-plugin-editor.kind-effect { --editor-colour: var(--rf-color-sound); }
 .rack-plugin-editor.kind-midi-processor { --editor-colour: var(--rf-color-input); }
 
-.rack-plugin-editor-scrim {
+.rack-plugin-editor-scrim,
+.rack-link-editor-scrim {
   position: absolute;
   inset: 0;
   z-index: 43;

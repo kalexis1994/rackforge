@@ -1,4 +1,5 @@
-import { useState, type CSSProperties } from "react";
+import { useId, useState } from "react";
+import { useCanvasModal } from "../hooks/useCanvasModal";
 import type { RackAudioInputRoute, RackGraphEdge } from "../types";
 import type { AudioInputPeakFeed, AudioInputState } from "../hooks/useAudioInputStatus";
 import { AudioInputMeter } from "./AudioInputMeter";
@@ -15,7 +16,6 @@ interface RackAudioInputLinkEditorProps {
   targetLabel?: string;
   status: AudioInputState | null;
   peaks: AudioInputPeakFeed | null;
-  style?: CSSProperties;
   /** The route to keep on the cable, or undefined for none: every captured
    *  input at unity, which is what a cable without one carries. */
   onApply: (route: RackAudioInputRoute | undefined) => void;
@@ -94,10 +94,11 @@ export function RackAudioInputLinkEditor({
   targetLabel = "Plugin",
   status,
   peaks,
-  style,
   onApply,
   onClose,
 }: RackAudioInputLinkEditorProps) {
+  const { sectionRef, closeRef, onKeyDown } = useCanvasModal(onClose);
+  const titleId = useId();
   const [draft, setDraft] = useState<RackAudioInputRoute>(() => ({
     channels: edge.audio_input_route?.channels ?? [],
     gain_db: edge.audio_input_route?.gain_db ?? 0,
@@ -129,18 +130,23 @@ export function RackAudioInputLinkEditor({
     : undefined;
 
   return (
+    <>
+    <div className="rack-link-editor-scrim" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} />
     <section
+      ref={sectionRef}
       className="rack-midi-link-editor rack-audio-link-editor"
-      style={style}
-      aria-label="Audio input connection settings"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onKeyDown={onKeyDown}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <header>
         <div>
           <span>AUDIO CONNECTION</span>
-          <strong>Audio input → {targetLabel}</strong>
+          <strong id={titleId}>Audio input → {targetLabel}</strong>
         </div>
-        <button type="button" className="rack-midi-close" aria-label="Close" onClick={onClose}>×</button>
+        <button ref={closeRef} type="button" className="rack-midi-close" aria-label="Close" title="Close (Esc)" onClick={onClose}>×</button>
       </header>
       <div className="rack-midi-link-scroll">
         <section className="rack-midi-section">
@@ -260,5 +266,6 @@ export function RackAudioInputLinkEditor({
         </button>
       </footer>
     </section>
+    </>
   );
 }

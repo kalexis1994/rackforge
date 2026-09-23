@@ -1,14 +1,8 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { materializePluginState, requestPluginPreset, requestPluginPresets } from "../gateway";
 import { AsyncActionLabel, AsyncSpinner } from "./AsyncSpinner";
+import { useCanvasModal } from "../hooks/useCanvasModal";
 import type {
   HostPresetSummary,
   PluginInstance,
@@ -47,16 +41,6 @@ interface RackPluginEditorProps {
   }) => ReactNode;
 }
 
-const FOCUSABLE = [
-  "button:not([disabled])",
-  "select:not([disabled])",
-  "input:not([disabled])",
-  "textarea:not([disabled])",
-  "iframe",
-  "[href]",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
-
 /**
  * A plugin in a Rack, edited: the plugin's own surface over the whole
  * editor, edged in its kind's colour, with its presets in theirs. It is a
@@ -78,8 +62,7 @@ export function RackPluginEditor({
   const [loadedPresetId, setLoadedPresetId] = useState<string>();
   const [busy, setBusy] = useState<"preset" | "sound" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const sectionRef = useRef<HTMLElement | null>(null);
-  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const { sectionRef, closeRef, onKeyDown } = useCanvasModal(onClose);
   // Answers that arrive after the editor is closed are dropped; the slot a
   // late answer would be applied to is the one it was asked for.
   const mounted = useRef(true);
@@ -111,40 +94,6 @@ export function RackPluginEditor({
       active = false;
     };
   }, [slot.plugin_id, presetsAttempt]);
-
-  // Focus goes to the editor as it opens and back where it was when it
-  // closes; Escape closes it; Tab stays inside it.
-  useEffect(() => {
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus({ preventScroll: true });
-    return () => {
-      if (before?.isConnected) before.focus({ preventScroll: true });
-    };
-  }, []);
-  useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  const keepTabInside = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== "Tab" || !sectionRef.current) return;
-    const stops = [...sectionRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)]
-      .filter((element) => element.getClientRects().length > 0);
-    if (stops.length === 0) return;
-    const first = stops[0];
-    const last = stops[stops.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
 
   const selectSound = useCallback(async (soundId: string) => {
     setBusy("sound");
@@ -204,7 +153,7 @@ export function RackPluginEditor({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        onKeyDown={keepTabInside}
+        onKeyDown={onKeyDown}
       >
         <header className="rack-plugin-editor-header">
           <div className="rack-plugin-editor-title">

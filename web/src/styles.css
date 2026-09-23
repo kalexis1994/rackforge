@@ -8119,11 +8119,17 @@ body {
   pointer-events: auto;
 }
 
+/* A cable's settings are a modal over the canvas, centred on it, as the
+   plugin editor is: the graph behind is inert until it closes. */
 .rack-midi-link-editor {
   position: absolute;
   z-index: 48;
+  inset: 0;
+  margin: auto;
   width: min(486px, calc(100% - 24px));
+  height: fit-content;
   max-height: calc(100% - 24px);
+  animation: rack-plugin-editor-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
@@ -8435,9 +8441,6 @@ body {
     box-shadow: none;
   }
 
-  .rack-midi-link-editor > header {
-    padding-left: 58px;
-  }
 }
 
 @media (max-width: 430px) {

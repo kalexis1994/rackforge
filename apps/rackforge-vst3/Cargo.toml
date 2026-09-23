@@ -26,6 +26,8 @@ rackforge-resource-host = { path = "../../crates/rackforge-resource-host" }
 include_dir = "0.7"
 mime_guess = "2.0"
 raw-window-handle = "0.6"
+# Opens About's project link in the system browser, as the desktop app does.
+webbrowser = "1.0"
 wry = { version = "0.56.0", default-features = false, features = ["os-webview"] }
 # Pinned to the exact version wry 0.56 depends on: naming ICoreWebView2Environment
 # ourselves must not pull a second copy of the COM types.

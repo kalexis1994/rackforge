@@ -2638,53 +2638,96 @@
   accent-color: var(--acid) !important;
 }
 
-/* About's fact rows: the same inset wells the runtime readout uses, so a
-   version reads as something stamped on the chassis rather than body copy. */
-.about-facts {
+/* About's downloads: one key per platform, its mark and its name, big
+   enough to hit at once. Raised and seamed like every key on the panel,
+   sunk while pressed. */
+.about-download-keys {
   margin: 14px 0 0;
+  padding: 0;
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
+  list-style: none;
 }
 
-.about-facts > div {
-  padding: 9px 11px;
+.about-download-key {
+  min-height: 56px;
+  padding: 10px 12px;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
-  background: var(--panel-inset);
+  align-items: center;
+  gap: 12px;
+  color: var(--ink);
+  text-decoration: none;
+  background: linear-gradient(180deg, var(--glass), var(--paper));
   border: var(--fp-seam);
   border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  transition:
+    background var(--rf-motion-instant) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
+}
+
+.about-download-key:hover {
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.about-download-key:active {
+  background: var(--panel-inset);
   box-shadow: var(--fp-well);
 }
 
-.about-facts dt {
-  color: var(--muted);
-  font-family: var(--display-font);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: var(--fp-track);
-  text-transform: uppercase;
+.about-download-key:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
 }
 
-.about-facts dd {
-  margin: 0;
+.about-download-key > svg {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  fill: currentColor;
+}
+
+/* Lucide's plug is a stroke, not a fill. */
+.about-download-key > svg.lucide {
+  fill: none;
+}
+
+.about-download-key > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.about-download-key strong {
+  font: 700 13px/1.2 var(--display-font);
+}
+
+.about-download-key small {
+  color: var(--fp-rail-label);
+  font: 500 11px/1 var(--mono-font);
+}
+
+/* The project's address, and a link that reads as one. */
+.about-project-link {
+  margin-top: 10px;
+  display: inline-block;
   color: var(--ink);
-  font-family: var(--mono-font);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  font: 600 13px/1.4 var(--mono-font);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--ink) 40%, transparent);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
 }
 
-/* A disagreement is worth an edge, not a shout. */
-.about-drift {
-  margin: 12px 0 0;
-  padding: 9px 11px;
-  background: var(--panel-inset);
-  border: var(--fp-seam);
+.about-project-link:hover {
+  text-decoration-color: currentColor;
+}
+
+.about-project-link:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 3px;
   border-radius: var(--fp-radius-key);
-  box-shadow: var(--fp-well), inset 3px 0 0 var(--red);
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .rf-button--ghost {

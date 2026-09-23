@@ -1,28 +1,40 @@
+import { Plug } from "lucide-react";
 import { BrandMark } from "../components/BrandMark";
 import { PageHeading } from "../components/PageHeading";
-import { HostHealth, useHostHealth } from "../hooks/useHostHealth";
-import { IS_BROWSER_HOST, isDesktopHost, isVstHost } from "../host";
+import {
+  ANDROID_PATH,
+  LINUX_PATH,
+  RASPBERRY_PI_PATH,
+  WINDOWS_PATH,
+} from "../components/platformGlyphs";
 
-/** Which RackForge the player is looking at, in their words rather than the
- *  wire's. Only ever what this build can actually know about itself. */
-function hostShellName(health: HostHealth | null): string {
-  if (IS_BROWSER_HOST) return "This browser";
-  if (isVstHost()) return "VST3 plug-in";
-  if (isDesktopHost()) return "Desktop app";
-  if (health?.host === "desktop") return "Desktop app";
-  if (health?.host === "vst3") return "VST3 plug-in";
-  return "Web interface";
-}
+/** The project's home. The desktop app and the VST3 editor open only links
+ *  under this owner in the system browser (desktop_webview.rs, view.rs). */
+const PROJECT_URL = "https://github.com/kalexis1994/rackforge";
+/** Always the newest release: GitHub resolves `latest` itself, so none of
+ *  these links goes stale the way a pinned version would. */
+const LATEST_RELEASE_URL = `${PROJECT_URL}/releases/latest`;
+const latestAsset = (name: string) => `${LATEST_RELEASE_URL}/download/${name}`;
 
-/* About says what this build is, where it is running and what it speaks.
-   Everything on it is read from the host or stamped in at build time — a
-   version panel that guesses is worse than none. */
+/** One key per platform, each the Standard build as the release names it.
+ *  The Minimal builds and the checksums are on the release page. */
+const DOWNLOADS: Array<{
+  platform: string;
+  file: string;
+  asset: string;
+  glyph: string | "plug";
+}> = [
+  { platform: "Windows", file: ".exe", asset: "RackForge-Windows-x86_64.exe", glyph: WINDOWS_PATH },
+  { platform: "VST3 · Windows", file: ".zip", asset: "RackForge-VST3-Windows-x86_64.zip", glyph: "plug" },
+  { platform: "Linux", file: ".tar.gz", asset: "RackForge-Linux-x86_64.tar.gz", glyph: LINUX_PATH },
+  { platform: "Raspberry Pi", file: ".tar.gz", asset: "RackForge-RaspberryPi-arm64.tar.gz", glyph: RASPBERRY_PI_PATH },
+  { platform: "Android", file: ".apk", asset: "RackForge-Android-arm64.apk", glyph: ANDROID_PATH },
+];
+
+/* About says where the project lives and where to get it. Links open in a
+   new window, so the interface stays where it is. */
 
 export function AboutPage() {
-  const health = useHostHealth();
-  const hostRevision = health?.revision;
-  const drift = hostRevision !== undefined && hostRevision !== __UI_REVISION__;
-  const shell = hostShellName(health);
   return (
     <>
       <PageHeading
@@ -31,41 +43,68 @@ export function AboutPage() {
         detail="A portable instrument host built around one shared interface and native real-time runtimes."
       />
       <section className="settings-grid">
+        {/* Where the project lives: its source, releases and issues. It
+            used to name the runtime protocol, which says nothing to a
+            player. */}
         <article className="settings-card about-card">
           <BrandMark />
           <div className="settings-copy">
-            <span className="card-kicker">Runtime protocol</span>
-            <h2>rackforge.host@1</h2>
-            <p>Portable .rfplugin runtime · Rust core · native audio and MIDI.</p>
+            <span className="card-kicker">Project</span>
+            <h2>RackForge on GitHub</h2>
+            <p>Source code, releases and issues.</p>
+            <a
+              className="about-project-link"
+              href={PROJECT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              github.com/kalexis1994/rackforge
+            </a>
           </div>
         </article>
 
-        <article className="settings-card">
+        <article className="settings-card about-downloads">
           <div className="settings-copy">
-            <span className="card-kicker">This build</span>
-            <h2>{shell}</h2>
+            <span className="card-kicker">Downloads</span>
+            <h2>Take RackForge with you</h2>
             <p>
-              The interface and the host binary are stamped separately, so a
-              half-finished deploy shows here instead of as a behaviour you
-              cannot explain.
+              Pick your platform and get the newest release: on your computer,
+              in your DAW, on a Raspberry Pi on stage, or in your pocket.
             </p>
           </div>
-          <dl className="about-facts">
-            <div>
-              <dt>Interface</dt>
-              <dd>{__UI_REVISION__}</dd>
-            </div>
-            <div>
-              <dt>Host</dt>
-              <dd>{hostRevision ?? "—"}</dd>
-            </div>
-          </dl>
-          {drift ? (
-            <p className="about-drift">
-              These disagree. The interface and the host came from different
-              builds; reinstall the one that is behind.
-            </p>
-          ) : null}
+          <ul className="about-download-keys">
+            {DOWNLOADS.map((download) => (
+              <li key={download.asset}>
+                <a
+                  className="about-download-key"
+                  href={latestAsset(download.asset)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={download.asset}
+                >
+                  {download.glyph === "plug" ? (
+                    <Plug aria-hidden="true" />
+                  ) : (
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d={download.glyph} />
+                    </svg>
+                  )}
+                  <span>
+                    <strong>{download.platform}</strong>
+                    <small>{download.file}</small>
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+          <a
+            className="about-project-link"
+            href={LATEST_RELEASE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Every download, Minimal builds and checksums
+          </a>
         </article>
 
         <article className="settings-card">

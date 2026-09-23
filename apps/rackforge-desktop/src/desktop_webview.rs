@@ -1,9 +1,16 @@
 use anyhow::{Context, Result};
 use eframe::CreationContext;
 use wry::{
-    Rect, WebContext, WebView, WebViewBuilder,
+    NewWindowResponse, Rect, WebContext, WebView, WebViewBuilder,
     dpi::{LogicalPosition, LogicalSize},
 };
+
+/// Links the interface may send to the system browser: the project's own
+/// pages, and nothing else. The WebView itself only ever shows the local
+/// interface, so a link out opens beside it rather than in place of it.
+fn opens_in_system_browser(url: &str) -> bool {
+    url.starts_with("https://github.com/kalexis1994/")
+}
 
 /// Where the WebView keeps what it caches between runs.
 ///
@@ -54,6 +61,17 @@ impl DesktopWebView {
             })
             .with_navigation_handler(|url| {
                 url.starts_with("http://127.0.0.1:") || url == "about:blank"
+            })
+            // A link that asks for a new window -- About's link to the
+            // project -- opens in the system browser; no WebView window of
+            // its own is ever made, and nothing else leaves the interface.
+            .with_new_window_req_handler(|url, _features| {
+                if opens_in_system_browser(&url)
+                    && let Err(error) = webbrowser::open(&url)
+                {
+                    eprintln!("EXTERNAL_LINK_FAILED url={url} error={error}");
+                }
+                NewWindowResponse::Deny
             })
             .build_as_child(creation)
             .context("creating the embedded RackForge WebView2 workspace")?;

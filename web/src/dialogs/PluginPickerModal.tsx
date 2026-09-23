@@ -187,7 +187,7 @@ export function PluginPickerModal({
                   <PluginIcon plugin={plugin} name={plugin.plugin_name} className="plugin-picker-icon" />
                   <span className="play-plugin-copy">
                     <strong>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</strong>
-                    <PluginRuntimeStatus status={runtime[plugin.plugin_id]} />
+                    <PluginRuntimeStatus status={runtime[plugin.plugin_id]} problemsOnly />
                   </span>
                   <span className="play-plugin-status">
                     {activating ? (

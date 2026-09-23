@@ -1,32 +1,49 @@
+import { AsyncSpinner } from "./AsyncSpinner";
 import type { PluginRuntimeStatus as RuntimeStatus } from "../pluginCatalog";
 
+const FALLBACK_STATUS: RuntimeStatus = {
+  plugin_id: "",
+  phase: "loading",
+  loaded: false,
+  healthy: null,
+  detail: "Checking runtime…",
+};
+
 /**
- * A plugin's runtime, said out loud only when something is wrong with it.
+ * A plugin's runtime state as a lamp and a line.
  *
- * Every card used to carry a line for every state -- "Loaded and healthy",
- * "Active · Loads on demand", "Inactive", a spinner while checking -- and a
- * list in which every entry says it is fine teaches the eye to skip the one
- * that is not. The cards already show whether a plugin is active and what it
- * is doing (the kicker, the activation key, the PLAYING / SELECT column), so
- * this renders nothing unless the runtime is unhealthy: disconnected, idle,
- * or an instance that has gone missing.
+ * `problemsOnly` keeps it quiet unless the runtime is unhealthy --
+ * disconnected, idle, or its instance gone. The Plugin Manager is where a
+ * plugin's state is read, so it shows every state; the PLAY selector is for
+ * picking an instrument, and a line on every entry saying it is fine only
+ * hides the one that is not.
  */
 export function PluginRuntimeStatus({
   status,
   className = "",
+  problemsOnly = false,
 }: {
   status?: RuntimeStatus | null;
   className?: string;
+  problemsOnly?: boolean;
 }) {
-  if (status?.phase !== "unhealthy") return null;
+  if (problemsOnly && status?.phase !== "unhealthy") return null;
+  const current = status ?? FALLBACK_STATUS;
   return (
     <span
-      className={["plugin-runtime-status", "is-unhealthy", className].filter(Boolean).join(" ")}
-      title={status.detail}
-      role="status"
+      className={["plugin-runtime-status", `is-${current.phase}`, className]
+        .filter(Boolean)
+        .join(" ")}
+      title={current.detail}
+      data-loaded={current.loaded}
+      data-healthy={current.healthy ?? "unknown"}
     >
-      <i aria-hidden="true" />
-      <span>{status.detail}</span>
+      {current.phase === "loading" ? (
+        <AsyncSpinner label={current.detail} />
+      ) : (
+        <i aria-hidden="true" />
+      )}
+      <span>{current.detail}</span>
     </span>
   );
 }

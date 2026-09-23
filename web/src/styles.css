@@ -2908,6 +2908,22 @@ body {
   box-shadow: 0 0 0 3px rgba(113, 129, 138, 0.1);
 }
 
+/* The lamp label takes the palette's green, which is mixed per lighting
+   condition; the pale mint here was a dark-ground colour and washed out to
+   about 1.4:1 on the cream panel. The lamp itself keeps a lit face. */
+.plugin-runtime-status.is-ready {
+  color: var(--green);
+}
+
+.plugin-runtime-status.is-ready > i {
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
+}
+
+.plugin-runtime-status.is-loading {
+  color: var(--acid);
+}
+
 .plugin-runtime-status.is-unhealthy {
   color: var(--red);
 }
@@ -2915,6 +2931,14 @@ body {
 .plugin-runtime-status.is-unhealthy > i {
   background: var(--red);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent);
+}
+
+.plugin-runtime-status.is-available > i {
+  background: #62cbe0;
+}
+
+.plugin-runtime-status .async-spinner {
+  flex: 0 0 auto;
 }
 
 .plugin-manager-card-copy .plugin-runtime-status {

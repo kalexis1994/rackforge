@@ -2850,6 +2850,19 @@
   opacity: 0.58;
 }
 
+/* Artwork appears when it is whole (FadeImage): out of sight while it
+   arrives, then faded in, so a banner never paints in strips and an icon
+   never pops. After the inactive rule above, whose opacity it must win
+   until the image has loaded. The motion token is instant under reduced
+   motion. */
+.rf-fade-image {
+  transition: opacity var(--rf-motion-emphasized) var(--rf-ease-standard);
+}
+
+.rf-fade-image:not(.is-loaded) {
+  opacity: 0;
+}
+
 /* Only a genuinely narrow card — a phone, one column — reaches this. The grid
    above guarantees every other card is wide enough for the row, so there is no
    width at which the gang has to choose badly. The icon gives up room here:

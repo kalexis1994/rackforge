@@ -5,6 +5,7 @@ import { AsyncNotice, AsyncStateBoundary } from "../components/AsyncStateBoundar
 import { EmptyState } from "../components/EmptyState";
 import { PageHeading } from "../components/PageHeading";
 import { PluginIcon } from "../components/PluginIcon";
+import { FadeImage } from "../components/FadeImage";
 import { PluginRuntimeStatus } from "../components/PluginRuntimeStatus";
 import { RfLoader } from "../components/RfLoader";
 import { PluginRemovalDialog } from "../dialogs/PluginRemovalDialog";
@@ -319,10 +320,11 @@ export function PluginsPage({
               key={plugin.plugin_id}
             >
               {/* The plugin's banner behind the card, shaded down under the
-                  copy so the text keeps its contrast. */}
+                  copy so the text keeps its contrast. It fades in whole
+                  once loaded (FadeImage) rather than painting in strips. */}
               {plugin.branding ? (
                 <>
-                  <img className="plugin-manager-card-banner" src={plugin.branding.banner_url} alt="" />
+                  <FadeImage className="plugin-manager-card-banner" src={plugin.branding.banner_url} />
                   <span className="plugin-manager-card-shade" aria-hidden="true" />
                 </>
               ) : null}

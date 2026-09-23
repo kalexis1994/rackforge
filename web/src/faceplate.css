@@ -2947,32 +2947,23 @@
 }
 
 /* The glyph plate is inset into the key, the way a legend plate is. Each
-   key's plate has its own colour, so the three read apart at a glance
-   rather than as one blue repeated: the instrument's blue, as the picker
-   and the rack paint an instrument; amber for the effects, a pedal's
-   lamp; green for presets, the memory. The deep daylight mixes the rail's
-   chips use, so the cream glyph on them stays legible. */
-/* Effects have a colour of their own: the amber of the EFFECTS key's
-   plate, the rail chips' deep mix in daylight. Whatever belongs to the
-   effects -- the key, the drawer's frames -- takes it from here. */
-:root {
-  --fx: var(--nav-controller);
-}
-
+   key's plate is its subject's colour in the colour code (design/
+   tokens.css), so the three read apart at a glance rather than as one
+   blue repeated: plugins blue, sound amber, presets green. */
 .play-header-button {
   --key-plate: var(--acid);
 }
 
 .play-header-button.back {
-  --key-plate: var(--entity-instrument);
+  --key-plate: var(--rf-color-plugin);
 }
 
 .play-header-button.chain {
-  --key-plate: var(--fx);
+  --key-plate: var(--rf-color-sound);
 }
 
 .play-header-button.presets {
-  --key-plate: var(--nav-diagnostics);
+  --key-plate: var(--rf-color-preset);
 }
 
 .play-header-button > span {
@@ -5648,13 +5639,13 @@
    mixed a little toward the panel's own seam so it sits in the plate
    rather than glowing on it, and the faintest wash of it inside. */
 .play-chain-section {
-  border: 1px solid color-mix(in srgb, var(--fx) 62%, var(--line));
+  border: 1px solid color-mix(in srgb, var(--rf-color-sound) 62%, var(--line));
   border-radius: var(--fx-section-radius);
-  background: color-mix(in srgb, var(--fx) 5%, transparent);
+  background: color-mix(in srgb, var(--rf-color-sound) 5%, transparent);
 }
 
 .play-chain-section > legend {
-  color: var(--fx);
+  color: var(--rf-color-sound);
   font: 700 10px/1 var(--display-font);
   letter-spacing: var(--fp-track);
   text-transform: uppercase;
@@ -5728,12 +5719,12 @@
 /* The instrument's node keeps the instrument's blue, the one colour in
    the drawer that is not the effects'. */
 .play-chain-node.instrument {
-  box-shadow: var(--fp-lip), inset 3px 0 0 var(--entity-instrument);
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--rf-color-plugin);
 }
 
 .play-chain-node.effect.open {
   border-color: var(--line);
-  box-shadow: var(--fp-well), inset 3px 0 0 var(--fx);
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--rf-color-sound);
 }
 
 /* An effect's own keys speak its colour: ON, and PANEL while its panel is
@@ -5741,25 +5732,25 @@
    keyboard is edged in it. The instrument keeps its blue edge. */
 .play-chain-tools button:not(:disabled):hover,
 .play-chain-tools button:focus-visible {
-  border-color: var(--fx);
+  border-color: var(--rf-color-sound);
 }
 
 .play-chain-tools button.on {
-  color: var(--acid-ink);
-  background: var(--fx);
-  border-color: var(--fx);
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-sound);
+  border-color: var(--rf-color-sound);
 }
 
 /* Add effect: its + plate is the effects' amber, and so is the dashed
    outline of its node under the pointer and while its list is open. */
 .play-chain-add > span {
-  background: var(--fx);
+  background: var(--rf-color-sound);
 }
 
 .play-chain-node.add:hover,
 .play-chain-node.add:focus-within,
 .play-chain-node.add.active {
-  border-color: var(--fx);
+  border-color: var(--rf-color-sound);
 }
 
 .play-chain-picker button {

@@ -990,6 +990,14 @@
   border-radius: 2px;
 }
 
+/* The peak line stays inside the slot, the ends of a lit segment, rather
+   than a bar laid across it. */
+.master-output-meter-track em {
+  right: 0;
+  left: 0;
+  border-radius: 1px;
+}
+
 .compact-fader-fill {
   border-radius: var(--fp-radius-key) !important;
   background: linear-gradient(90deg, var(--acid), color-mix(in srgb, var(--acid) 55%, var(--green))) !important;

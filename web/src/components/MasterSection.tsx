@@ -188,7 +188,11 @@ export function MasterOutputMeter({
         {levels.map((level, channel) => (
           <i className="master-output-meter-track" key={channel}>
             <b style={{ height: `${meterPercent(level)}%` }} />
-            <em style={{ bottom: `${meterPercent(holds[channel])}%` }} />
+            {/* The peak line only while there is a peak: at the floor it lay
+                across the bottom of the slot and squared it off. */}
+            {meterPercent(holds[channel]) > 0 ? (
+              <em style={{ bottom: `${meterPercent(holds[channel])}%` }} />
+            ) : null}
           </i>
         ))}
       </span>

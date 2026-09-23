@@ -2469,6 +2469,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     // ordinary scheduler, where blocking on the filesystem is harmless.
     let realtime_status = realtime::engage(realtime::DEFAULT_AUDIO_PRIORITY);
     println!("{realtime_status}");
+    // A process property rather than a thread one, and the two do not
+    // substitute: a background process is slowed whatever its threads asked
+    // for. Reported separately for the same reason it is requested separately.
+    println!(
+        "REALTIME_THROTTLING {:?}",
+        realtime::exempt_process_from_throttling()
+    );
     if let Some(remedy) = realtime_status.remedy() {
         eprintln!("REALTIME_REMEDY {remedy}");
     }

@@ -6727,11 +6727,12 @@
   opacity: 0.35;
 }
 
-/* On the node, on the always-dark canvas: thinner, and covered in the
-   canvas's own dark rather than the panel's. */
+/* On the node, on the always-dark canvas: thinner, covered in the canvas's
+   own dark rather than the panel's, and as wide as the node's text column,
+   never past the node's edge and its port. */
 .rack-flow-node-meter {
   --meter-cover: #101417;
-  width: 132px;
+  width: 100%;
   margin-top: 6px;
   gap: 3px;
 }

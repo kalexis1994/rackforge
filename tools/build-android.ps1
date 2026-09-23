@@ -102,9 +102,36 @@ try {
 }
 
 $nativeOutput = Join-Path $androidProject "app/build/generated/rust-jni/arm64-v8a"
+if (Test-Path -LiteralPath $nativeOutput) {
+    Remove-Item -LiteralPath $nativeOutput -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $nativeOutput | Out-Null
+$nativeLibrary = Join-Path $nativeOutput "librackforge_android.so"
 Copy-Item -LiteralPath (Join-Path $repository "target/aarch64-linux-android/release/librackforge_android_native.so") `
-    -Destination (Join-Path $nativeOutput "librackforge_android.so") -Force
+    -Destination $nativeLibrary -Force
+
+# Binaryen (wasm-opt, in the plugin runtime) is C++ and links the NDK's
+# shared C++ runtime, which Android does not provide: it travels in the APK
+# beside the library. Without it the app died on launch, unable to load
+# librackforge_android.so. Every library the runtime needs is then checked:
+# either Android provides it (the NDK carries a stub for it at the minimum
+# API level) or it is packaged here.
+$sysrootLib = Join-Path $ndkRoot "toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/aarch64-linux-android"
+Copy-Item -LiteralPath (Join-Path $sysrootLib "libc++_shared.so") `
+    -Destination (Join-Path $nativeOutput "libc++_shared.so") -Force
+$neededLibraries = & (Join-Path $ndkBin "llvm-readelf.exe") --needed-libs $nativeLibrary |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -match '^lib\S*\.so$' }
+if ($LASTEXITCODE -ne 0 -or -not $neededLibraries) {
+    throw "Could not list the libraries librackforge_android.so needs."
+}
+foreach ($needed in $neededLibraries) {
+    $systemStub = Join-Path $sysrootLib "26/$needed"
+    $packaged = Join-Path $nativeOutput $needed
+    if (-not (Test-Path -LiteralPath $systemStub) -and -not (Test-Path -LiteralPath $packaged)) {
+        throw "librackforge_android.so needs $needed, which neither Android nor the APK provides."
+    }
+}
 
 $webOutput = Join-Path $androidProject "app/build/generated/web-ui/rackforge"
 if (Test-Path -LiteralPath $webOutput) {

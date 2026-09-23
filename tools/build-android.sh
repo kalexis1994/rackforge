@@ -80,10 +80,28 @@ cargo build --locked --release \
   --target aarch64-linux-android
 
 native_output="$android_project/app/build/generated/rust-jni/arm64-v8a"
+rm -rf -- "$native_output"
 install -d "$native_output"
 install -m 0644 \
   "$repository/target/aarch64-linux-android/release/librackforge_android_native.so" \
   "$native_output/librackforge_android.so"
+
+# Binaryen (wasm-opt, in the plugin runtime) is C++ and links the NDK's
+# shared C++ runtime, which Android does not provide: it travels in the APK
+# beside the library. Without it the app died on launch, unable to load
+# librackforge_android.so. Every library the runtime needs is then checked:
+# either Android provides it (the NDK carries a stub for it at the minimum
+# API level) or it is packaged here.
+sysroot_lib="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android"
+install -m 0644 "$sysroot_lib/libc++_shared.so" "$native_output/libc++_shared.so"
+while read -r needed; do
+  [[ -n "$needed" ]] || continue
+  if [[ ! -f "$sysroot_lib/26/$needed" && ! -f "$native_output/$needed" ]]; then
+    printf 'librackforge_android.so needs %s, which neither Android nor the APK provides.\n' "$needed" >&2
+    exit 1
+  fi
+done < <("$toolchain/llvm-readelf" --needed-libs "$native_output/librackforge_android.so" \
+  | sed -n 's/^[[:space:]]*\(lib[^[:space:]]*\.so\)[[:space:]]*$/\1/p')
 
 # Builds predating generated assets copied this ignored artifact into the
 # source tree. Gradle would merge both copies, so remove only the known legacy

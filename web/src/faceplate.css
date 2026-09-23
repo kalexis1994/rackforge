@@ -452,10 +452,6 @@
    share the small top line, the program has the large one -- where the
    phone layout used to drop the mode altogether. */
 @media (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
-  .topbar.has-mixer-toggle {
-    grid-template-rows: 42px;
-  }
-
   .topbar .now-playing {
     grid-template-columns: auto minmax(0, 1fr) !important;
     column-gap: 8px !important;
@@ -492,6 +488,34 @@
     grid-column: 1 / -1 !important;
     grid-row: 2;
   }
+}
+
+/* The same space inside the bar at its ends as above and below what it
+   holds. Wide, that is the bar's own 14 px; it kept up to 64 at the ends.
+   Narrow, the window stands 8 px in from the top and bottom, so the menu
+   key and the meter stand 8 px in from the ends. */
+.topbar {
+  padding-inline: 14px;
+}
+
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .topbar {
+    padding-inline: 8px;
+  }
+}
+
+/* Between the compact layout and a wide screen -- about 760 to 1000 px --
+   the window, pan, volume and the meter did not fit the bar, and the meter
+   ran off its end, out of sight. The faders' rails give way instead, from
+   124 px down to 56, before anything leaves the bar. */
+.top-controls {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.top-controls .compact-control {
+  min-width: 0;
+  grid-template-columns: 48px minmax(56px, 124px) 38px;
 }
 
 /* Upright, the bar keeps 14 px above and below; the window takes 6 of
@@ -629,6 +653,27 @@
       visibility 0s linear var(--rf-motion-exit);
   }
 }
+
+/* On its side the bar's row is 58 px less 8 above and below. After the
+   OUT block and its 44 px upright row, so it is not overruled by it. */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .topbar.has-mixer-toggle {
+    grid-template-rows: 42px;
+  }
+
+  /* The meter is 51 px tall and the row 42: it takes the row's height and
+     its bars give up the difference, so it stands 8 px in from the top and
+     bottom like the window beside it. */
+  .topbar.has-mixer-toggle .master-output-meter {
+    align-self: stretch;
+    min-height: 0;
+  }
+
+  .topbar.has-mixer-toggle .master-output-meter-bars {
+    min-height: 0;
+  }
+}
+
 
 
 

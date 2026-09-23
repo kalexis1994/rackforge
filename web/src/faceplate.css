@@ -5897,7 +5897,17 @@
 
   /* The title breaks onto two lines rather than being cut: RACK / EDITOR.
      "Unsaved changes" becomes a lamp beside it, so the name keeps the room. */
+  .graph-workspace-title {
+    flex: 0 0 auto;
+  }
+
+  /* Broken onto two lines, the title is as wide as its longer word: a
+     wrapped box otherwise keeps the one-line width, leaving a gap before
+     the name. */
   .graph-workspace-title .card-kicker {
+    position: relative;
+    width: min-content;
+    margin-right: 10px;
     white-space: normal;
   }
 
@@ -5907,11 +5917,11 @@
 
   .graph-workspace-header.is-unsaved .graph-workspace-title .card-kicker::after {
     content: "";
-    display: inline-block;
+    position: absolute;
+    right: -10px;
+    bottom: 0.2em;
     width: 6px;
     height: 6px;
-    margin-left: 5px;
-    vertical-align: 0.1em;
     background: var(--amber-ink);
     border-radius: 1px;
   }

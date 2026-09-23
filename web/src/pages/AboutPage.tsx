@@ -16,19 +16,21 @@ const PROJECT_URL = "https://github.com/kalexis1994/rackforge";
 const LATEST_RELEASE_URL = `${PROJECT_URL}/releases/latest`;
 const latestAsset = (name: string) => `${LATEST_RELEASE_URL}/download/${name}`;
 
-/** One key per platform, each the Standard build as the release names it.
- *  The Minimal builds and the checksums are on the release page. */
+/** One key per platform, each the Standard build as the release names it,
+ *  with the processor it is built for. The Minimal builds and the checksums
+ *  are on the release page. */
 const DOWNLOADS: Array<{
   platform: string;
   file: string;
+  arch: string;
   asset: string;
   glyph: string | "plug";
 }> = [
-  { platform: "Windows", file: ".exe", asset: "RackForge-Windows-x86_64.exe", glyph: WINDOWS_PATH },
-  { platform: "VST3 · Windows", file: ".zip", asset: "RackForge-VST3-Windows-x86_64.zip", glyph: "plug" },
-  { platform: "Linux", file: ".tar.gz", asset: "RackForge-Linux-x86_64.tar.gz", glyph: LINUX_PATH },
-  { platform: "Raspberry Pi", file: ".tar.gz", asset: "RackForge-RaspberryPi-arm64.tar.gz", glyph: RASPBERRY_PI_PATH },
-  { platform: "Android", file: ".apk", asset: "RackForge-Android-arm64.apk", glyph: ANDROID_PATH },
+  { platform: "Windows", file: ".exe", arch: "x86-64", asset: "RackForge-Windows-x86_64.exe", glyph: WINDOWS_PATH },
+  { platform: "VST3 · Windows", file: ".zip", arch: "x86-64", asset: "RackForge-VST3-Windows-x86_64.zip", glyph: "plug" },
+  { platform: "Linux", file: ".tar.gz", arch: "x86-64", asset: "RackForge-Linux-x86_64.tar.gz", glyph: LINUX_PATH },
+  { platform: "Raspberry Pi", file: ".tar.gz", arch: "ARM64", asset: "RackForge-RaspberryPi-arm64.tar.gz", glyph: RASPBERRY_PI_PATH },
+  { platform: "Android", file: ".apk", arch: "ARM64", asset: "RackForge-Android-arm64.apk", glyph: ANDROID_PATH },
 ];
 
 /* About says where the project lives and where to get it. Links open in a
@@ -91,7 +93,7 @@ export function AboutPage() {
                   )}
                   <span>
                     <strong>{download.platform}</strong>
-                    <small>{download.file}</small>
+                    <small>{download.file} · {download.arch}</small>
                   </span>
                 </a>
               </li>

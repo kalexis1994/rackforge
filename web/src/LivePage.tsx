@@ -448,7 +448,8 @@ function PerformanceBrowser({
               role="tab"
               aria-selected={mode === item}
             >
-              {item.toUpperCase()}
+              {/* Plural, as Configure's tabs: each is a list to choose from. */}
+              {kindLabels[item].toUpperCase()}
             </button>
           ))}
         </div>

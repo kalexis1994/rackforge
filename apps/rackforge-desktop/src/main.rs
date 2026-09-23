@@ -1302,6 +1302,61 @@ impl DesktopApp {
         )
     }
 
+    /// What this host captures, for the Rack editor. Read from the saved
+    /// preferences and the running stream, and the interface's input count
+    /// from the last inventory scan -- never a new scan, which would ask a
+    /// streaming ASIO driver to enumerate itself. Desktop plays one Slot of
+    /// a Rack, so a cable's own inputs and trim are not honoured here.
+    #[cfg(windows)]
+    fn audio_input_status(&self) -> rackforge_control_api::AudioInputStatus {
+        use rackforge_control_api::{AudioInputAvailability, AudioInputStatus};
+        let Some(preferences) = self
+            .audio_preferences
+            .as_ref()
+            .filter(|preferences| preferences.input_device.is_some())
+        else {
+            return AudioInputStatus::default();
+        };
+        let device_channels = self
+            .audio_inventory_cache
+            .as_ref()
+            .and_then(|(_, inventory)| inventory.input(preferences))
+            .map_or(0, |input| input.channels);
+        let captured = preferences.input_channels.clone();
+        let capturing = self
+            .audio
+            .as_ref()
+            .is_some_and(desktop_audio::DesktopAudio::capturing);
+        AudioInputStatus {
+            availability: if capturing {
+                AudioInputAvailability::Open
+            } else {
+                AudioInputAvailability::Absent
+            },
+            device_name: preferences.input_device.clone(),
+            device_channels,
+            peaks: if capturing {
+                self.audio
+                    .as_ref()
+                    .map_or_else(Vec::new, |audio| audio.take_input_peaks(captured.len()))
+            } else {
+                Vec::new()
+            },
+            captured,
+            gain_db: preferences.input_gain_db,
+            cable_routing: false,
+            reason: (!capturing).then(|| "The input could not be opened.".to_owned()),
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn audio_input_status(&self) -> rackforge_control_api::AudioInputStatus {
+        rackforge_control_api::AudioInputStatus {
+            availability: rackforge_control_api::AudioInputAvailability::Unsupported,
+            ..Default::default()
+        }
+    }
+
     #[cfg(windows)]
     /// The device inventory, without ever re-instantiating the ASIO driver
     /// that is streaming right now: enumerating instantiates every ASIO
@@ -3881,6 +3936,9 @@ impl DesktopApp {
                 };
                 ControlResponse::AudioHealth { health }
             }
+            ControlRequest::AudioInput => ControlResponse::AudioInput {
+                input: self.audio_input_status(),
+            },
             ControlRequest::OutputMeter => {
                 #[cfg(windows)]
                 {

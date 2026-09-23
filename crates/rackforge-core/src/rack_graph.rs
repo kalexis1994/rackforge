@@ -1,6 +1,6 @@
 use rackforge_performance_api::{
-    PerformanceError, PerformanceLibrary, RackDefinition, RackGraphEdge, RackGraphNode,
-    RackGraphNodeId, RackGraphNodeKind, RackGraphSignal, RackId, RackKeyboardParts,
+    PerformanceError, PerformanceLibrary, RackAudioInputRoute, RackDefinition, RackGraphEdge,
+    RackGraphNode, RackGraphNodeId, RackGraphNodeKind, RackGraphSignal, RackId, RackKeyboardParts,
     RackMidiTransform, RackSlot,
 };
 use std::collections::BTreeMap;
@@ -29,8 +29,15 @@ pub struct CompiledRackSlot {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CompiledAudioSource {
-    HardwareInput { bus_id: String },
-    Slot { runtime_slot_id: String },
+    /// The hardware input, as far as this cable carries it: which inputs and
+    /// at what trim. Several cables may read the one input, each its own way.
+    HardwareInput {
+        bus_id: String,
+        route: RackAudioInputRoute,
+    },
+    Slot {
+        runtime_slot_id: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -114,19 +121,10 @@ fn compile_rack(
 
     for node in &graph.nodes {
         match &node.kind {
-            RackGraphNodeKind::AudioInput { .. } => {
-                let fed = graph
-                    .edges
-                    .iter()
-                    .filter(|edge| {
-                        edge.signal == RackGraphSignal::Audio && edge.source.node_id == node.id
-                    })
-                    .count();
-                if fed > 1 {
-                    return unsupported(rack, node, "the audio input can feed only one node");
-                }
-            }
-            RackGraphNodeKind::MidiInput { .. }
+            // The audio input may feed several nodes: each cable says which
+            // of its inputs it carries, as MIDI's cables say which channels.
+            RackGraphNodeKind::AudioInput { .. }
+            | RackGraphNodeKind::MidiInput { .. }
             | RackGraphNodeKind::AudioOutput { .. }
             | RackGraphNodeKind::Plugin { .. } => {}
             RackGraphNodeKind::Rack { rack_id } => {
@@ -220,6 +218,7 @@ fn compile_plugin_nodes(
                     RackGraphNodeKind::AudioInput { bus_id } => {
                         audio_sources.push(CompiledAudioSource::HardwareInput {
                             bus_id: bus_id.clone(),
+                            route: edge.audio_input_route.clone().unwrap_or_default(),
                         });
                     }
                     RackGraphNodeKind::Plugin { .. } => {
@@ -492,6 +491,7 @@ mod tests {
                 port_id: "audio_in".into(),
             },
             midi_transform: None,
+            audio_input_route: None,
         });
         let library = library(vec![rack]);
         let compiled =
@@ -527,6 +527,7 @@ mod tests {
                 port_id: "audio_in".into(),
             },
             midi_transform: None,
+            audio_input_route: None,
         });
         let error =
             compile_instrument_rack(&library(vec![rack]), &RackId::new("rack.main").unwrap())
@@ -564,6 +565,7 @@ mod tests {
                 port_id: "audio_in".into(),
             },
             midi_transform: None,
+            audio_input_route: None,
         });
         let compiled =
             compile_instrument_rack(&library(vec![rack]), &RackId::new("rack.guitar").unwrap())
@@ -571,10 +573,81 @@ mod tests {
         assert_eq!(
             compiled[0].audio_sources,
             vec![CompiledAudioSource::HardwareInput {
-                bus_id: "main".into()
+                bus_id: "main".into(),
+                route: RackAudioInputRoute::default(),
             }]
         );
         assert!(compiled[0].midi_stages.is_empty());
+    }
+
+    #[test]
+    fn one_audio_input_feeds_two_chains_each_from_its_own_inputs() {
+        // A guitar on input 1 and a voice on input 2 through one interface:
+        // one input node, two cables, each carrying its own inputs at its
+        // own trim.
+        let mut rack = rack("rack.duo", "guitar");
+        rack.slots.push(slot("voice"));
+        rack.graph = Some(RackGraph::from_slots(&rack.slots));
+        let graph = rack.graph.as_mut().unwrap();
+        graph
+            .edges
+            .retain(|edge| edge.signal != RackGraphSignal::Midi);
+        graph.nodes.push(RackGraphNode {
+            id: RackGraphNodeId::new("input.audio.00").unwrap(),
+            kind: RackGraphNodeKind::AudioInput {
+                bus_id: "main".into(),
+            },
+            position: RackGraphPosition { x: 0, y: 180 },
+        });
+        let guitar = RackAudioInputRoute {
+            channels: vec![1],
+            gain_db: 6,
+        };
+        let voice = RackAudioInputRoute {
+            channels: vec![2],
+            gain_db: -3,
+        };
+        for (number, route) in [(1, &guitar), (2, &voice)] {
+            graph.edges.push(RackGraphEdge {
+                id: RackGraphEdgeId::new(format!("audio.input.{number:02}")).unwrap(),
+                signal: RackGraphSignal::Audio,
+                source: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("input.audio.00").unwrap(),
+                    port_id: "out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new(format!("plugin.{number:02}")).unwrap(),
+                    port_id: "audio_in".into(),
+                },
+                midi_transform: None,
+                audio_input_route: Some(route.clone()),
+            });
+        }
+        let compiled =
+            compile_instrument_rack(&library(vec![rack]), &RackId::new("rack.duo").unwrap())
+                .unwrap();
+        let sources = |id: &str| {
+            compiled
+                .iter()
+                .find(|one| one.slot.id.as_str() == id)
+                .unwrap()
+                .audio_sources
+                .clone()
+        };
+        assert_eq!(
+            sources("guitar"),
+            vec![CompiledAudioSource::HardwareInput {
+                bus_id: "main".into(),
+                route: guitar,
+            }]
+        );
+        assert_eq!(
+            sources("voice"),
+            vec![CompiledAudioSource::HardwareInput {
+                bus_id: "main".into(),
+                route: voice,
+            }]
+        );
     }
 
     #[test]
@@ -626,6 +699,7 @@ mod tests {
                     port_id: "audio_in".into(),
                 },
                 midi_transform: None,
+                audio_input_route: None,
             },
             RackGraphEdge {
                 id: RackGraphEdgeId::new("audio.out.02").unwrap(),
@@ -639,6 +713,7 @@ mod tests {
                     port_id: "in".into(),
                 },
                 midi_transform: None,
+                audio_input_route: None,
             },
         ]);
 
@@ -663,7 +738,8 @@ mod tests {
         assert_eq!(
             pedalboard.audio_sources,
             vec![CompiledAudioSource::HardwareInput {
-                bus_id: "main".into()
+                bus_id: "main".into(),
+                route: RackAudioInputRoute::default(),
             }]
         );
         assert!(pedalboard.sends_to_main);
@@ -694,6 +770,7 @@ mod tests {
                     port_id: "midi_in".into(),
                 },
                 midi_transform: None,
+                audio_input_route: None,
             },
             RackGraphEdge {
                 id: RackGraphEdgeId::new("layer.audio").unwrap(),
@@ -707,6 +784,7 @@ mod tests {
                     port_id: "in".into(),
                 },
                 midi_transform: None,
+                audio_input_route: None,
             },
         ]);
         let library = library(vec![parent, child]);
@@ -754,6 +832,7 @@ mod tests {
                     port_id: "midi_in".into(),
                 },
                 midi_transform: Some(part_to_rack_transform.clone()),
+                audio_input_route: None,
             },
             RackGraphEdge {
                 id: RackGraphEdgeId::new("layer.audio").unwrap(),
@@ -767,6 +846,7 @@ mod tests {
                     port_id: "in".into(),
                 },
                 midi_transform: None,
+                audio_input_route: None,
             },
         ]);
         let library = library(vec![child]);

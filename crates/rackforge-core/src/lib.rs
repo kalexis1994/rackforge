@@ -3,6 +3,7 @@ pub mod audio;
 #[cfg(target_os = "linux")]
 pub mod audio_hotplug;
 pub mod audio_reliability;
+pub mod capture_route;
 #[cfg(target_os = "linux")]
 pub mod control;
 pub mod default_instrument;

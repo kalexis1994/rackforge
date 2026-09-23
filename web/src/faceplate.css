@@ -6568,6 +6568,187 @@
   box-shadow: var(--fp-lip), var(--fp-drop) !important;
 }
 
+/* ------------------------------------------- the audio input's cables ---
+   A cable from the audio input carries some of the interface's inputs --
+   all of them, one as a mono source, or a pair -- so its key says which,
+   "In 1" in the audio's amber, where a MIDI cable's key is a plain dot. Its
+   editor is the MIDI cable editor's plate with the audio's colour: the
+   section titles and the one lit key amber (see the colour code in
+   design/tokens.css). */
+.rack-edge-control.audio.has-route {
+  width: auto;
+  min-width: 30px;
+  height: 20px;
+  padding: 0 6px;
+}
+
+.rack-edge-control > em {
+  color: var(--rf-color-sound);
+  font: 700 9px/1 var(--mono-font);
+  font-style: normal;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.rack-midi-link-editor.rack-audio-link-editor .rack-midi-section h3 {
+  color: var(--rf-color-sound) !important;
+}
+
+.rack-midi-link-editor.rack-audio-link-editor button.active {
+  color: var(--rf-color-sound) !important;
+}
+
+.rack-midi-link-editor.rack-audio-link-editor > footer .primary,
+.rack-midi-link-editor.rack-audio-link-editor > footer .primary:hover:not(:disabled),
+.rack-midi-link-editor.rack-audio-link-editor > footer .primary:focus-visible {
+  color: var(--rf-color-on-code) !important;
+  background: var(--rf-color-sound) !important;
+  border-color: var(--rf-color-sound) !important;
+}
+
+.rack-audio-input-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rack-audio-input-picker legend {
+  margin-bottom: 6px;
+}
+
+.rack-audio-input-picker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rack-audio-input-picker button {
+  min-width: 42px;
+  min-height: 32px;
+  padding: 0 9px;
+  font-family: var(--mono-font);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rack-audio-input-picker button.rack-audio-swap {
+  font-family: var(--display-font);
+  font-size: 10px;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+/* An input the host does not capture can still be chosen -- the Rack may be
+   for another machine -- but it reads as unavailable here. */
+.rack-audio-input-picker button.is-not-captured:not(.active) {
+  color: var(--fp-rail-label) !important;
+  text-decoration: line-through;
+}
+
+.rack-audio-link-status {
+  margin: 0;
+  color: var(--fp-rail-label);
+  font: 500 12px/1.45 var(--display-font);
+}
+
+.rack-audio-link-status.warning {
+  color: var(--red);
+}
+
+.rack-audio-level {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+}
+
+@media (max-width: 520px) {
+  .rack-audio-level {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* -- the input meter: a track drawn green to red, and over its unreached
+   part a cover that moves; a colour stays where its level is -- */
+.audio-input-meter {
+  --meter-cover: var(--panel-inset);
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.audio-input-meter-bar {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.audio-input-meter .audio-input-meter-bar > small {
+  margin: 0;
+  color: var(--fp-rail-label);
+  font: 700 9px/1 var(--mono-font);
+  text-align: right;
+}
+
+.audio-input-meter-bar > span {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: linear-gradient(90deg,
+    var(--rf-lit-preset) 0 72%,
+    var(--rf-lit-sound) 72% 90%,
+    var(--red) 90%);
+  box-shadow: var(--fp-well);
+}
+
+.audio-input-meter-bar > span > i {
+  position: absolute;
+  inset: 0 0 0 auto;
+  background: var(--meter-cover);
+  transition: width var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.audio-input-meter-bar.is-clipping > small {
+  color: var(--red);
+}
+
+.audio-input-meter-bar.is-clipping > span {
+  outline: 1px solid var(--red);
+}
+
+.audio-input-meter-bar.is-missing > small {
+  text-decoration: line-through;
+}
+
+.audio-input-meter-bar.is-missing > span {
+  opacity: 0.35;
+}
+
+/* On the node, on the always-dark canvas: thinner, and covered in the
+   canvas's own dark rather than the panel's. */
+.rack-flow-node-meter {
+  --meter-cover: #101417;
+  width: 132px;
+  margin-top: 6px;
+  gap: 3px;
+}
+
+.rack-flow-node-meter .audio-input-meter-bar > span {
+  height: 5px;
+  box-shadow: none;
+}
+
+.rack-flow-node-meter .audio-input-meter-bar > small {
+  color: #8a949b;
+}
+
+.rack-flow-node small.is-off {
+  color: var(--rf-lit-sound);
+}
+
 /* ----------------------------------------------------------- the FX drawer ---
    The effects drawer was the last of PLAY on the old material: a navy band,
    cyan-washed nodes, and the suggestions a wrapped strip of chips under a

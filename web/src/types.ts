@@ -394,6 +394,39 @@ export interface RackGraphEdge {
   source: RackGraphEndpoint;
   target: RackGraphEndpoint;
   midi_transform?: RackMidiTransform;
+  /** On a cable from the audio input only: which inputs it carries and at
+   *  what trim. Absent, it carries everything the host captures. */
+  audio_input_route?: RackAudioInputRoute;
+}
+
+/** A cable's share of the hardware audio input. */
+export interface RackAudioInputRoute {
+  /** Physical inputs, one-based. Empty or absent: every captured input. One:
+   *  a mono source, on both sides of a stereo plugin. Two: a stereo pair,
+   *  left then right. */
+  channels?: number[];
+  /** Trim on this cable, in dB, -60 to +24, after the host's input trim. */
+  gain_db?: number;
+}
+
+/** Whether the host is listening to an audio input. */
+export type AudioInputAvailability = "open" | "disabled" | "absent" | "unsupported";
+
+/** What the host captures, for the Rack editor. `peaks` is drained by each
+ *  request. */
+export interface AudioInputStatus {
+  availability: AudioInputAvailability;
+  device_name?: string;
+  /** Inputs the interface has, numbered from 1; 0 when unknown. */
+  device_channels: number;
+  /** Inputs captured, one-based, in capture order. */
+  captured: number[];
+  gain_db: number;
+  /** Whether the host honours each cable's own inputs and trim. */
+  cable_routing: boolean;
+  /** Linear peaks since the previous request, one per captured input. */
+  peaks: number[];
+  reason?: string;
 }
 
 export interface RackMidiTransform {

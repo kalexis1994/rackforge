@@ -555,6 +555,14 @@ impl BrowserHost {
             ControlRequest::OutputMeter => Ok(ControlResponse::OutputMeter {
                 meter: self.audio.take_output_meter(),
             }),
+            // A page cannot reach an audio interface's inputs; the Rack
+            // editor says so instead of routing a silence.
+            ControlRequest::AudioInput => Ok(ControlResponse::AudioInput {
+                input: rackforge_control_api::AudioInputStatus {
+                    availability: rackforge_control_api::AudioInputAvailability::Unsupported,
+                    ..Default::default()
+                },
+            }),
             ControlRequest::ApplyAudioOutput { .. } => Err(Failure::new(
                 ControlErrorCode::Unavailable,
                 "the browser host plays through the page's audio output, which it cannot reconfigure",

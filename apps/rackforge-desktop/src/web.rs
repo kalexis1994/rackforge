@@ -2497,6 +2497,7 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::AudioHealth
         | ControlRequest::OpenAudioDriverPanel
         | ControlRequest::SaveOutputCapture
+        | ControlRequest::AudioInput
         | ControlRequest::OutputMeter) => {
             let (response_sender, response_receiver) = mpsc::channel();
             if state

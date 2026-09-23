@@ -13,7 +13,10 @@ use crate::{
     validate_state_reference,
 };
 use anyhow::{Context, Result, bail};
-use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState, OutputMeter};
+use rackforge_audio_api::{
+    AudioInputAvailability, AudioInputStatus, AudioOutputDocument, AudioOutputProfile,
+    AudioOutputState, InputMeter, OutputMeter,
+};
 use rackforge_control_api::{
     ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
     MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, VirtualMidiMessage, decode_request,
@@ -357,6 +360,8 @@ struct ControlContext {
     audio_sender: SyncSender<AudioControlCommand>,
     audio_state: Arc<Mutex<AudioOutputState>>,
     output_meter: Arc<OutputMeter>,
+    audio_input: AudioInputStatus,
+    input_meter: Arc<InputMeter>,
     audio_state_path: PathBuf,
     performance_repository: Arc<Mutex<PerformanceRepository>>,
     state_store: Arc<Mutex<PluginStateStore>>,
@@ -390,6 +395,9 @@ pub struct ControlServerOptions {
     pub audio_sender: SyncSender<AudioControlCommand>,
     pub audio_state: Arc<Mutex<AudioOutputState>>,
     pub output_meter: Arc<OutputMeter>,
+    /// What the engine captures, said once when it opened the input.
+    pub audio_input: AudioInputStatus,
+    pub input_meter: Arc<InputMeter>,
     pub audio_state_path: PathBuf,
     pub performance_repository: Arc<Mutex<PerformanceRepository>>,
     pub state_store: Arc<Mutex<PluginStateStore>>,
@@ -443,6 +451,8 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         audio_sender: options.audio_sender,
         audio_state: options.audio_state,
         output_meter: options.output_meter,
+        audio_input: options.audio_input,
+        input_meter: options.input_meter,
         audio_state_path: options.audio_state_path,
         performance_repository: options.performance_repository,
         state_store: options.state_store,
@@ -545,6 +555,17 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             Err(_) => internal_error("audio state lock is poisoned", current_revision(context)),
         },
         ControlRequest::OutputMeter => output_meter_response(context),
+        ControlRequest::AudioInput => audio_input_response(context),
+        // The desktop host's own: its callback's health, its driver's panel,
+        // its flight recorder. The appliance has none of them, and says so
+        // rather than failing to build.
+        ControlRequest::AudioHealth
+        | ControlRequest::OpenAudioDriverPanel
+        | ControlRequest::SaveOutputCapture => error_response(
+            ControlErrorCode::Unavailable,
+            "this host does not provide it",
+            current_revision(context),
+        ),
         ControlRequest::PerformanceSnapshot => {
             match (context.store.lock(), context.performance_repository.lock()) {
                 (Ok(store), Ok(repository)) => {
@@ -5281,6 +5302,16 @@ fn internal_error(
     error_response(ControlErrorCode::Internal, message, current_revision)
 }
 
+fn audio_input_response(context: &ControlContext) -> ControlResponse {
+    let mut input = context.audio_input.clone();
+    input.peaks = if input.availability == AudioInputAvailability::Open {
+        context.input_meter.take(input.captured.len())
+    } else {
+        Vec::new()
+    };
+    ControlResponse::AudioInput { input }
+}
+
 fn output_meter_response(context: &ControlContext) -> ControlResponse {
     ControlResponse::OutputMeter {
         meter: context.output_meter.take(),
@@ -5442,6 +5473,17 @@ mod tests {
                     devices: vec![device],
                 })),
                 output_meter: Arc::new(OutputMeter::default()),
+                audio_input: AudioInputStatus {
+                    availability: AudioInputAvailability::Open,
+                    device_name: Some("Scarlett 2i2".into()),
+                    device_channels: 2,
+                    captured: vec![1, 2],
+                    gain_db: 0,
+                    cable_routing: true,
+                    peaks: Vec::new(),
+                    reason: None,
+                },
+                input_meter: Arc::new(InputMeter::default()),
                 audio_state_path: std::env::temp_dir().join("rackforge-control-audio.toml"),
                 performance_repository: Arc::new(Mutex::new(
                     PerformanceRepository::in_memory(PerformanceLibrary {
@@ -5513,6 +5555,22 @@ mod tests {
             }),
             receiver,
         )
+    }
+
+    #[test]
+    fn audio_input_request_says_what_is_captured_and_drains_its_peaks() {
+        let (context, _receiver) = context();
+        context.input_meter.observe_interleaved(&[0.5, -0.25], 2);
+        let ControlResponse::AudioInput { input } = audio_input_response(&context) else {
+            panic!("expected the audio input");
+        };
+        assert_eq!(input.captured, vec![1, 2]);
+        assert!(input.cable_routing);
+        assert_eq!(input.peaks, vec![0.5, 0.25]);
+        let ControlResponse::AudioInput { input } = audio_input_response(&context) else {
+            panic!("expected the audio input");
+        };
+        assert_eq!(input.peaks, vec![0.0, 0.0]);
     }
 
     #[test]

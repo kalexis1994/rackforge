@@ -1,4 +1,9 @@
-import { materializeRackGraph, rackGraphNodeName, songPartAsRack } from "./rackGraph";
+import {
+  audioInputRouteLabel,
+  materializeRackGraph,
+  rackGraphNodeName,
+  songPartAsRack,
+} from "./rackGraph";
 import type { RackDefinition, RackGraphEdge, SongDefinition } from "./types";
 
 /**
@@ -78,6 +83,20 @@ export function describeRackChange(before: RackDefinition, after: RackDefinition
     return other && JSON.stringify(other.midi_transform) !== JSON.stringify(edge.midi_transform);
   });
   if (routingChanged) return "Changed MIDI routing";
+
+  // An audio input cable given other inputs or another trim, named by what
+  // it now carries and where it goes: "Audio input: In 2 to RF-Comp".
+  const rerouted = b.graph!.edges.find((edge) => {
+    const was = a.graph!.edges.find((one) => one.id === edge.id);
+    return was
+      && JSON.stringify(was.audio_input_route ?? null) !== JSON.stringify(edge.audio_input_route ?? null);
+  });
+  if (rerouted) {
+    const route = rerouted.audio_input_route;
+    const gain = route?.gain_db ?? 0;
+    const trim = gain !== 0 ? `, ${gain > 0 ? "+" : ""}${gain} dB` : "";
+    return `Audio input: ${audioInputRouteLabel(route)}${trim} to ${rackGraphNodeName(b, rerouted.target.node_id)}`;
+  }
 
   const moved = b.graph!.nodes.filter((node) => {
     const was = a.graph!.nodes.find((one) => one.id === node.id);

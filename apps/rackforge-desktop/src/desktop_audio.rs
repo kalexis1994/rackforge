@@ -3,7 +3,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, FromSample, Sample, SampleFormat, SizedSample, SupportedBufferSize};
 use keylab_essential_mk3::{controller as keylab_controller, protocol as keylab_protocol};
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
-use rackforge_audio_api::{OutputMeter, OutputMeterSnapshot};
+use rackforge_audio_api::{InputMeter, OutputMeter, OutputMeterSnapshot};
 use rackforge_control_api::PluginParameterValue;
 use rackforge_core::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
@@ -336,6 +336,9 @@ struct CaptureRing {
     read: AtomicUsize,
     overruns: AtomicU64,
     underruns: AtomicU64,
+    /// What arrives on each selected input, after the input trim: the Rack
+    /// editor shows it so a player sees the guitar before hearing it.
+    meter: InputMeter,
 }
 
 // SAFETY: there is exactly one capture producer and one playback consumer.
@@ -351,6 +354,7 @@ impl CaptureRing {
             read: AtomicUsize::new(0),
             overruns: AtomicU64::new(0),
             underruns: AtomicU64::new(0),
+            meter: InputMeter::default(),
         }
     }
 
@@ -1367,6 +1371,18 @@ impl DesktopAudio {
 
     pub fn take_output_meter(&self) -> OutputMeterSnapshot {
         self.output_meter.take()
+    }
+
+    /// Whether the chosen input opened and is being captured.
+    pub fn capturing(&self) -> bool {
+        self.capture_ring.is_some()
+    }
+
+    /// The peaks of the first `channels` captured inputs since the last take.
+    pub fn take_input_peaks(&self, channels: usize) -> Vec<f32> {
+        self.capture_ring
+            .as_ref()
+            .map_or_else(Vec::new, |capture| capture.meter.take(channels))
     }
 
     /// Raw callback count, for the stall watchdog: a healthy stream renders
@@ -3223,14 +3239,17 @@ where
     if device_channels == 0 || input.len() % device_channels != 0 {
         bail!("Windows audio input buffer changed channel layout during capture");
     }
+    let mut peaks = [0.0_f32; MAX_STANDALONE_INPUT_CHANNELS];
     for frame in input.chunks_exact(device_channels) {
         let mut selected = [0.0_f32; MAX_STANDALONE_INPUT_CHANNELS];
         for (target, &channel) in selected_channels.iter().enumerate() {
             let sample = frame.get(channel).copied().unwrap_or(T::EQUILIBRIUM);
             selected[target] = clean_sample(f32::from_sample(sample) * input_gain);
+            peaks[target] = peaks[target].max(selected[target].abs());
         }
         ring.push_frame(&selected[..selected_channels.len()]);
     }
+    ring.meter.observe_peaks(&peaks[..selected_channels.len()]);
     Ok(())
 }
 

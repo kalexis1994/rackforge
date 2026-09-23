@@ -1,4 +1,4 @@
-pub use rackforge_audio_api::OutputMeterSnapshot;
+pub use rackforge_audio_api::{AudioInputAvailability, AudioInputStatus, OutputMeterSnapshot};
 
 /// What the audio callback is costing and what it has lost.
 ///
@@ -636,6 +636,11 @@ pub enum ControlRequest {
     /// Drains the post-master peaks accumulated since the previous request.
     /// This is transient telemetry and never advances the session revision.
     OutputMeter,
+    /// What the host captures -- which interface, which inputs, at what trim,
+    /// whether it could be opened -- and the peaks of those inputs since the
+    /// previous request. For the Rack editor's audio input and its cables;
+    /// transient like `OutputMeter`.
+    AudioInput,
     /// How hard the audio callback is working, and what it has dropped.
     ///
     /// Polled beside `OutputMeter` for the same reason: a fault that appears
@@ -838,6 +843,9 @@ pub enum ControlResponse {
     },
     OutputMeter {
         meter: OutputMeterSnapshot,
+    },
+    AudioInput {
+        input: AudioInputStatus,
     },
     SequencerAccepted,
     SequencerStatus {

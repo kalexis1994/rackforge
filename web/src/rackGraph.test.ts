@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addSlotToRack,
+  audioInputRouteLabel,
   connectRackGraph,
   graphFromSlots,
   rackConnectionProblem,
@@ -10,7 +11,7 @@ import {
   removeSlotFromRack,
   tidyRackGraph,
 } from "./rackGraph";
-import type { RackDefinition, RackSlot } from "./types";
+import type { AudioInputStatus, RackDefinition, RackSlot } from "./types";
 
 function slot(id: string, pluginId: string): RackSlot {
   return {
@@ -471,5 +472,121 @@ describe("editing by hand", () => {
       expect(position.x % RACK_GRID).toBe(0);
       expect(Math.abs(position.y % RACK_GRID)).toBe(0);
     }
+  });
+});
+
+describe("the audio input's cables", () => {
+  const open: AudioInputStatus = {
+    availability: "open",
+    device_name: "Scarlett 4i4",
+    device_channels: 4,
+    captured: [1, 2],
+    gain_db: 0,
+    cable_routing: true,
+    peaks: [],
+  };
+
+  /** A guitar pedal fed by the audio input, and a second effect after it. */
+  function pedalboard() {
+    let rack = addSlotToRack(emptyRack(), slot("guitar", "rf-rig"), undefined, "effect");
+    rack = addSlotToRack(rack, slot("voice", "rf-verb"), undefined, "effect");
+    const input = rack.graph!.nodes.find((one) => one.kind.kind === "audio_input")!;
+    return { rack, input };
+  }
+
+  it("feed several chains from one input, each on its own cable", () => {
+    const { rack, input } = pedalboard();
+    const voice = nodeFor(rack, "voice").id;
+    const graph = connectRackGraph(rack.graph!, {
+      signal: "audio",
+      source: { node_id: input.id, port_id: "out" },
+      target: { node_id: voice, port_id: "audio_in" },
+    });
+    const fromInput = graph.edges.filter((edge) => edge.source.node_id === input.id);
+    expect(fromInput.map((edge) => edge.target.node_id).sort()).toEqual(
+      [nodeFor(rack, "guitar").id, voice].sort(),
+    );
+    expect(rackGraphProblems(graph).filter((problem) => problem.severity === "error")).toEqual([]);
+  });
+
+  it("keep a cable's inputs when a free node is dropped into it", () => {
+    const { rack, input } = pedalboard();
+    const cable = edgesOutOf(rack, input.id)[0];
+    const routed = {
+      ...rack.graph!,
+      nodes: [...rack.graph!.nodes, {
+        id: "plugin.free",
+        kind: { kind: "plugin" as const, slot_id: "free" },
+        position: { x: 0, y: 400 },
+      }],
+      edges: rack.graph!.edges.map((edge) =>
+        edge.id === cable.id ? { ...edge, audio_input_route: { channels: [2], gain_db: 3 } } : edge),
+    };
+    const graph = insertNodeIntoCable(routed, "plugin.free", cable.id);
+    const intoFree = graph.edges.find((edge) => edge.target.node_id === "plugin.free")!;
+    const outOfFree = graph.edges.find((edge) => edge.source.node_id === "plugin.free")!;
+    expect(intoFree.source.node_id).toBe(input.id);
+    expect(intoFree.audio_input_route).toEqual({ channels: [2], gain_db: 3 });
+    expect(outOfFree.audio_input_route).toBeUndefined();
+  });
+
+  it("keep a cable's inputs when the node after it is removed", () => {
+    const { rack, input } = pedalboard();
+    const cable = edgesOutOf(rack, input.id)[0];
+    const routed: RackDefinition = {
+      ...rack,
+      graph: {
+        ...rack.graph!,
+        edges: rack.graph!.edges.map((edge) =>
+          edge.id === cable.id ? { ...edge, audio_input_route: { channels: [1] } } : edge),
+      },
+    };
+    const healed = removeSlotFromRack(routed, "guitar");
+    const [intoVoice] = edgesOutOf(healed, input.id);
+    expect(intoVoice.target.node_id).toBe(nodeFor(healed, "voice").id);
+    expect(intoVoice.audio_input_route).toEqual({ channels: [1] });
+  });
+
+  it("drop the route when a cable no longer starts at the input", () => {
+    const { rack } = pedalboard();
+    const graph = connectRackGraph(rack.graph!, {
+      signal: "audio",
+      source: { node_id: nodeFor(rack, "voice").id, port_id: "audio_out" },
+      target: { node_id: mainOutput(rack).id, port_id: "in" },
+    }, "edge.moved", { audio_input_route: { channels: [1] } });
+    expect(graph.edges.find((edge) => edge.id === "edge.moved")?.audio_input_route).toBeUndefined();
+  });
+
+  it("are named by the inputs they carry", () => {
+    expect(audioInputRouteLabel(undefined)).toBe("All");
+    expect(audioInputRouteLabel({ channels: [2] })).toBe("In 2");
+    expect(audioInputRouteLabel({ channels: [2, 1] })).toBe("In 2–1");
+  });
+
+  it("warn about the host's capture, and never refuse the Rack for it", () => {
+    const { rack, input } = pedalboard();
+    const warnings = (status: AudioInputStatus | null, graph = rack.graph!) =>
+      rackGraphProblems(graph, { audioInput: status })
+        .filter((problem) => problem.nodeId === input.id);
+    expect(warnings(null)).toEqual([]);
+    expect(warnings(open)).toEqual([]);
+    for (const availability of ["disabled", "absent", "unsupported"] as const) {
+      const found = warnings({ ...open, availability });
+      expect(found).toHaveLength(1);
+      expect(found[0].severity).toBe("warning");
+    }
+
+    const cable = edgesOutOf(rack, input.id)[0];
+    const uncaptured = {
+      ...rack.graph!,
+      edges: rack.graph!.edges.map((edge) =>
+        edge.id === cable.id ? { ...edge, audio_input_route: { channels: [3] } } : edge),
+    };
+    const [missing] = warnings(open, uncaptured);
+    expect(missing.severity).toBe("warning");
+    expect(missing.message).toContain("input 3");
+
+    const [oneSlotHost] = warnings({ ...open, cable_routing: false, captured: [1, 2, 3] }, uncaptured);
+    expect(oneSlotHost.message).toContain("appliance");
   });
 });

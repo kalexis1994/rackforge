@@ -7,6 +7,9 @@ pub const AUDIO_DEVICE_SCHEMA_VERSION: u32 = 1;
 pub const AUDIO_OUTPUT_STATE_SCHEMA_VERSION: u32 = 1;
 pub const AUDIO_INPUT_STATE_SCHEMA_VERSION: u32 = 1;
 pub const MAX_ACTIVE_INPUT_CHANNELS: usize = 2;
+/// How many captured inputs `InputMeter` can follow at once. Above what any
+/// capture opens today, so widening the capture never outgrows the meter.
+pub const MAX_METERED_INPUT_CHANNELS: usize = 64;
 pub const COMMON_SAMPLE_RATES: [u32; 8] = [
     32_000, 44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 384_000,
 ];
@@ -85,6 +88,105 @@ impl OutputMeter {
             right_peak: f32::from_bits(self.right_peak_bits.swap(0, Ordering::AcqRel)),
         }
     }
+}
+
+/// Lock-free peaks of the captured inputs, one per input in the order the
+/// host captures them -- what arrives, after the host's input trim and
+/// before any cable's. Same contract as `OutputMeter`: the audio thread
+/// publishes the greatest sample since the last `take`, the control side
+/// drains it, and nothing on the audio thread allocates or waits.
+pub struct InputMeter {
+    peak_bits: [AtomicU32; MAX_METERED_INPUT_CHANNELS],
+}
+
+impl Default for InputMeter {
+    fn default() -> Self {
+        Self {
+            peak_bits: std::array::from_fn(|_| AtomicU32::new(0)),
+        }
+    }
+}
+
+impl InputMeter {
+    /// One block of interleaved capture, `channels` wide.
+    pub fn observe_interleaved(&self, samples: &[f32], channels: usize) {
+        let metered = channels.min(MAX_METERED_INPUT_CHANNELS);
+        if metered == 0 {
+            return;
+        }
+        let mut peaks = [0.0_f32; MAX_METERED_INPUT_CHANNELS];
+        for frame in samples.chunks_exact(channels) {
+            for (peak, sample) in peaks[..metered].iter_mut().zip(frame) {
+                let sample = sample.abs();
+                if sample.is_finite() && sample > *peak {
+                    *peak = sample;
+                }
+            }
+        }
+        self.observe_peaks(&peaks[..metered]);
+    }
+
+    /// Peaks the caller measured itself, one per captured input in order.
+    pub fn observe_peaks(&self, peaks: &[f32]) {
+        for (target, peak) in self.peak_bits.iter().zip(peaks) {
+            publish_peak(target, peak.abs());
+        }
+    }
+
+    /// The peaks of the first `channels` inputs since the last take.
+    pub fn take(&self, channels: usize) -> Vec<f32> {
+        self.peak_bits[..channels.min(MAX_METERED_INPUT_CHANNELS)]
+            .iter()
+            .map(|bits| f32::from_bits(bits.swap(0, Ordering::AcqRel)))
+            .collect()
+    }
+}
+
+/// Whether the host is listening to an audio input.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioInputAvailability {
+    /// An input is chosen and open: `captured` is arriving.
+    Open,
+    /// No input is chosen in the host's audio settings.
+    #[default]
+    Disabled,
+    /// An input is chosen but could not be opened -- unplugged, busy, or it
+    /// refused the format. `reason` says which.
+    Absent,
+    /// This host has no audio capture at all (the browser, a plugin host).
+    Unsupported,
+}
+
+/// What a host captures, for a screen that routes it: the Rack editor's
+/// audio input node and its cables. Transient: `peaks` is drained by every
+/// request, like `OutputMeter`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioInputStatus {
+    pub availability: AudioInputAvailability,
+    /// The interface, by the name its settings show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    /// How many inputs the interface has, numbered from 1; 0 when unknown.
+    #[serde(default)]
+    pub device_channels: u16,
+    /// The inputs the host captures, one-based, in capture order. A cable
+    /// that names another input hears silence.
+    #[serde(default)]
+    pub captured: Vec<u16>,
+    /// The host's own trim on everything it captures, in dB.
+    #[serde(default)]
+    pub gain_db: i8,
+    /// Whether this host honours each cable's own inputs and trim. Only an
+    /// engine that plays a whole Rack does; the others play one Slot.
+    #[serde(default)]
+    pub cable_routing: bool,
+    /// Linear peaks since the previous request, one per `captured` input.
+    #[serde(default)]
+    pub peaks: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 fn publish_peak(target: &AtomicU32, peak: f32) {
@@ -842,6 +944,46 @@ mod tests {
     /// choice has to be about kinds of connection. A player who plugs an
     /// interface into a Raspberry Pi means to play through it, not through
     /// the jack on the board.
+    #[test]
+    fn input_meter_keeps_each_input_apart_and_drains_on_take() {
+        let meter = InputMeter::default();
+        meter.observe_interleaved(&[0.1, -0.5, 0.3, 0.2], 2);
+        meter.observe_interleaved(&[-0.4, 0.1, f32::NAN, 0.0], 2);
+        assert_eq!(meter.take(2), vec![0.4, 0.5]);
+        assert_eq!(meter.take(2), vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn input_meter_ignores_what_it_cannot_hold() {
+        let meter = InputMeter::default();
+        meter.observe_interleaved(&[0.5; 4], 0);
+        let wide = vec![0.25_f32; MAX_METERED_INPUT_CHANNELS + 2];
+        meter.observe_interleaved(&wide, MAX_METERED_INPUT_CHANNELS + 2);
+        let peaks = meter.take(MAX_METERED_INPUT_CHANNELS + 2);
+        assert_eq!(peaks.len(), MAX_METERED_INPUT_CHANNELS);
+        assert!(peaks.iter().all(|peak| *peak == 0.25));
+    }
+
+    #[test]
+    fn audio_input_status_round_trips_with_its_wire_names() {
+        let status = AudioInputStatus {
+            availability: AudioInputAvailability::Open,
+            device_name: Some("Scarlett 2i2".into()),
+            device_channels: 2,
+            captured: vec![1, 2],
+            gain_db: 3,
+            cable_routing: true,
+            peaks: vec![0.5, 0.25],
+            reason: None,
+        };
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["availability"], "open");
+        assert_eq!(
+            serde_json::from_value::<AudioInputStatus>(json).unwrap(),
+            status
+        );
+    }
+
     #[test]
     fn something_plugged_in_outranks_the_board() {
         let built_in = output_of("alsa.card-headphones.pcm-0", AudioTransport::BuiltIn);

@@ -33,6 +33,7 @@ import type {
   MidiSourceStatus,
   AudioHealthMessage,
   AudioHealthSnapshot,
+  AudioInputStatus,
   OutputMeterMessage,
   OutputMeterSnapshot,
   ParameterLink,
@@ -918,6 +919,17 @@ export function openAudioDriverPanel(): Promise<void> {
     { op: "open_audio_driver_panel" },
     "audio_driver_panel_opening",
     () => undefined,
+  );
+}
+
+/** What the host captures, and the peaks of those inputs since the last
+ *  request. A host that predates the question answers with an error, which
+ *  is the caller's to treat as "unknown". */
+export function requestAudioInput(): Promise<AudioInputStatus> {
+  return requestPresetOperation(
+    { op: "audio_input" },
+    "audio_input",
+    (message) => message.input as AudioInputStatus,
   );
 }
 

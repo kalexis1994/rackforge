@@ -1,4 +1,6 @@
 import type {
+  AudioInputStatus,
+  RackAudioInputRoute,
   RackDefinition,
   RackGraph,
   RackGraphEdge,
@@ -306,6 +308,13 @@ function targetPortAllowed(node: RackGraphNode, signal: RackGraphSignal, portId:
 /** The edges a connection displaces: the source's audio cable, which it may
  *  only have one of, and the target's MIDI cable, likewise. */
 function displacedBy(graph: RackGraph, connection: RackConnection) {
+  // The audio input is the one audio source that may feed several places:
+  // each of its cables carries its own inputs (a guitar on 1, a voice on 2),
+  // as each of the MIDI input's carries its own channels.
+  const fromAudioInput = connection.signal === "audio"
+    && graph.nodes.some((node) =>
+      node.id === connection.source.node_id && node.kind.kind === "audio_input");
+  if (fromAudioInput) return [];
   return graph.edges.filter((edge) =>
     edge.signal === connection.signal
     && (connection.signal === "audio"
@@ -392,10 +401,17 @@ export function connectRackGraph(
   graph: RackGraph,
   connection: RackConnection,
   edgeId: string = rackGraphId("edge"),
+  /** What the cable carries with it when it is one moved or re-drawn: a MIDI
+   *  cable its routing, an audio input's cable its inputs and trim. Each is
+   *  kept only where it belongs, so a cable moved off the audio input
+   *  loses a route no other source could have. */
+  settings: Pick<RackGraphEdge, "midi_transform" | "audio_input_route"> = {},
 ): RackGraph {
   if (connectionExists(graph, connection)) return graph;
   if (rackConnectionProblem(graph, connection) !== null) return graph;
   const displaced = new Set(displacedBy(graph, connection).map((edge) => edge.id));
+  const fromAudioInput = graph.nodes.some((node) =>
+    node.id === connection.source.node_id && node.kind.kind === "audio_input");
   return {
     ...graph,
     edges: [
@@ -405,9 +421,24 @@ export function connectRackGraph(
         signal: connection.signal,
         source: { ...connection.source },
         target: { ...connection.target },
+        ...(connection.signal === "midi" && settings.midi_transform
+          ? { midi_transform: settings.midi_transform }
+          : {}),
+        ...(connection.signal === "audio" && fromAudioInput && settings.audio_input_route
+          ? { audio_input_route: settings.audio_input_route }
+          : {}),
       },
     ],
   };
+}
+
+/** The inputs a route carries, as the canvas and its messages name them:
+ *  "In 1", "In 1–2" (a pair, left then right), "In 2–1" (swapped), or "All"
+ *  for a cable without a route. */
+export function audioInputRouteLabel(route: RackAudioInputRoute | undefined): string {
+  const channels = route?.channels ?? [];
+  if (channels.length === 0) return "All";
+  return `In ${channels.join("–")}`;
 }
 
 /**
@@ -430,6 +461,9 @@ export interface RackGraphProblem {
 export interface RackGraphProblemContext {
   /** The Rack's Slots: a disabled one is not played, so not judged. */
   slots?: RackSlot[];
+  /** What the host captures, when it has said. Absent or null, the audio
+   *  input's cables are not judged against it. */
+  audioInput?: AudioInputStatus | null;
   /** What a Slot's plugin is, from the catalog; the graph alone cannot say
    *  whether a node with nothing plugged in is an instrument or an effect. */
   slotRole?: (slot: RackSlot) => RackPluginRole | undefined;
@@ -492,10 +526,16 @@ export function rackGraphProblems(
       continue;
     }
     if (node.kind.kind === "audio_input") {
-      if (audioOut.length > 1) {
-        report(node.id, "error", `Audio is sent to ${audioOut.length} destinations. An audio output connects to one destination.`);
-      } else if (audioOut.length === 0) {
+      if (audioOut.length === 0) {
         report(node.id, "warning", "Not connected. Connect it to an effect, or remove it.");
+      } else {
+        for (const [severity, message] of audioInputWarnings(audioOut, context.audioInput, (id) => {
+          const target = nodes.get(id);
+          const slot = target ? slotOf(target) : undefined;
+          return slot?.name ?? "a plugin";
+        })) {
+          report(node.id, severity, message);
+        }
       }
       continue;
     }
@@ -528,6 +568,46 @@ export function rackGraphProblems(
   }
   return problems.sort((a, b) =>
     a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1);
+}
+
+/**
+ * What the host's capture means for the audio input's cables. Warnings, not
+ * errors: the Rack plays, and the silence is the machine's settings, not the
+ * Rack's -- the same Rack is right on the appliance with the guitar plugged in.
+ */
+function audioInputWarnings(
+  cables: RackGraphEdge[],
+  input: AudioInputStatus | null | undefined,
+  targetName: (nodeId: string) => string,
+): Array<[RackGraphProblemSeverity, string]> {
+  if (!input) return [];
+  switch (input.availability) {
+    case "unsupported":
+      return [["warning", "This host has no audio input. The connected plugins receive silence here."]];
+    case "disabled":
+      return [["warning", "No audio input is selected in Settings. The connected plugins receive silence."]];
+    case "absent":
+      return [["warning", `The audio input${input.device_name ? ` ${input.device_name}` : ""} is not available. The connected plugins receive silence until it is.`]];
+    case "open":
+      break;
+  }
+  const warnings: Array<[RackGraphProblemSeverity, string]> = [];
+  const captured = new Set(input.captured);
+  for (const cable of cables) {
+    const missing = (cable.audio_input_route?.channels ?? [])
+      .filter((channel) => !captured.has(channel));
+    if (missing.length > 0) {
+      const inputs = missing.map((channel) => `input ${channel}`).join(" and ");
+      warnings.push(["warning", `The cable to ${targetName(cable.target.node_id)} takes ${inputs}, which Settings does not capture. That part is silent.`]);
+    }
+  }
+  const routed = cables.some((cable) =>
+    (cable.audio_input_route?.channels?.length ?? 0) > 0
+    || (cable.audio_input_route?.gain_db ?? 0) !== 0);
+  if (!input.cable_routing && (routed || cables.length > 1)) {
+    warnings.push(["warning", "This host plays one plugin of a Rack. Each cable's inputs and trim apply on the RackForge appliance."]);
+  }
+  return warnings;
 }
 
 /** What a node is called where a message names it. */
@@ -692,8 +772,9 @@ export function addSlotToRack(
         };
         graph = { ...graph, nodes: [...graph.nodes, audioInput] };
       }
-      // The input's one cable is left where it is if it is already patched;
-      // the effect is then fed by whatever is drawn to it.
+      // An input already patched is left as it is -- a second chain from
+      // it is a choice of inputs, made by drawing its cable -- and the
+      // effect is fed by whatever is drawn to it.
       if (!graph.edges.some((edge) =>
         edge.signal === "audio" && edge.source.node_id === audioInput!.id)) {
         graph = connectRackGraph(graph, {
@@ -865,7 +946,7 @@ export function removeSlotFromRack(
         signal: "audio",
         source: source.source,
         target: destinations[0].target,
-      }, rackGraphId("edge.audio"));
+      }, rackGraphId("edge.audio"), { audio_input_route: source.audio_input_route });
     }
   }
   return {
@@ -897,7 +978,7 @@ export function insertNodeIntoCable(
     signal: "audio",
     source: edge.source,
     target: { node_id: nodeId, port_id: "audio_in" },
-  }, rackGraphId("edge.audio"));
+  }, rackGraphId("edge.audio"), { audio_input_route: edge.audio_input_route });
   if (fed === without) return graph;
   const feeding = connectRackGraph(fed, {
     signal: "audio",

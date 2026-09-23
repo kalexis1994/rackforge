@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { addSlotToRack, connectRackGraph, graphFromSlots, insertNodeIntoCable, removeSlotFromRack } from "./rackGraph";
 import { describeRackChange } from "./rackChanges";
-import type { RackDefinition, RackSlot } from "./types";
+import type { RackAudioInputRoute, RackDefinition, RackSlot } from "./types";
 
 function slot(id: string, name = id): RackSlot {
   return {
@@ -40,6 +40,22 @@ describe("naming a Rack edit", () => {
   it("names a plugin removed, and the chain closed behind it", () => {
     const removed = removeSlotFromRack(withComp, "comp");
     expect(describeRackChange(withComp, removed)).toBe("Removed RF-Comp · chain reconnected");
+  });
+
+  it("names an audio input cable given its own inputs and trim", () => {
+    const pedal = addSlotToRack(empty, slot("drive", "RF-Drive"), undefined, "effect");
+    const input = pedal.graph!.nodes.find((node) => node.kind.kind === "audio_input")!;
+    const route = (audio_input_route: RackAudioInputRoute) => ({
+      ...pedal,
+      graph: {
+        ...pedal.graph!,
+        edges: pedal.graph!.edges.map((edge) =>
+          edge.source.node_id === input.id ? { ...edge, audio_input_route } : edge),
+      },
+    });
+    expect(describeRackChange(pedal, route({ channels: [2] }))).toBe("Audio input: In 2 to RF-Drive");
+    expect(describeRackChange(pedal, route({ channels: [1, 2], gain_db: -6 })))
+      .toBe("Audio input: In 1–2, -6 dB to RF-Drive");
   });
 
   it("names a cable moved from an output", () => {

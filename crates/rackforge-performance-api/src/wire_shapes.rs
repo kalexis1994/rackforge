@@ -127,6 +127,7 @@ fn performance_wire_document() -> String {
         PatternNoteSpec,
         PerformanceLibrary,
         PerformanceSnapshot,
+        RackAudioInputRoute,
         RackDefinition,
         RackGraph,
         RackGraphEdge,

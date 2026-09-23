@@ -29,8 +29,8 @@ use alsa::pcm::PCM;
 use anyhow::{Context, Result, bail};
 use midir::MidiInput;
 use rackforge_audio_api::{
-    AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioInputProfile, AudioOutputProfile, AudioOutputState,
-    AudioSampleFormat, OutputMeter,
+    AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioInputAvailability, AudioInputProfile, AudioInputStatus,
+    AudioOutputProfile, AudioOutputState, AudioSampleFormat, InputMeter, OutputMeter,
 };
 use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
@@ -140,8 +140,8 @@ fn resolve_render_mode(mode: SurfaceMode, rack_voice_count: usize) -> AudioRende
 /// the per-block gather performs no string comparisons.
 #[derive(Clone, Copy)]
 enum ResolvedRackSource {
-    /// The hardware capture staged for the current block.
-    Capture,
+    /// This cable's share of the hardware capture staged for the block.
+    Capture(crate::capture_route::CaptureRoute),
     /// The finished output of an earlier Slot in the compiled order.
     Slot(usize),
 }
@@ -165,6 +165,10 @@ struct RackSlotVoice<'plugin> {
     capture_ptr: *const f32,
     capture_len: usize,
     capture_channels: usize,
+    /// The physical input (one-based) of each captured channel, in order,
+    /// staged with the capture: a cable names inputs, not positions.
+    capture_inputs_ptr: *const u32,
+    capture_inputs_len: usize,
     sends_to_main: bool,
     input_channels: usize,
     level: f32,
@@ -201,8 +205,10 @@ fn resolve_rack_voice_graph(voices: &mut [RackSlotVoice<'_>]) {
         voice.deps_mask = 0;
         for source in &voice.audio_sources {
             match source {
-                crate::rack_graph::CompiledAudioSource::HardwareInput { .. } => {
-                    voice.resolved_sources.push(ResolvedRackSource::Capture);
+                crate::rack_graph::CompiledAudioSource::HardwareInput { route, .. } => {
+                    voice.resolved_sources.push(ResolvedRackSource::Capture(
+                        crate::capture_route::CaptureRoute::new(route),
+                    ));
                 }
                 crate::rack_graph::CompiledAudioSource::Slot { runtime_slot_id } => {
                     if let Some(upstream) = earlier
@@ -431,17 +437,25 @@ unsafe impl<'plugin> ScheduledSlot for RackSlotVoice<'plugin> {
         voice.input.fill(0.0);
         for source in &voice.resolved_sources {
             match source {
-                ResolvedRackSource::Capture => {
+                ResolvedRackSource::Capture(route) => {
                     if voice.capture_len == 0 || voice.capture_channels == 0 {
                         continue;
                     }
-                    // SAFETY: staged by the audio loop for this block and
-                    // only read during it.
+                    // SAFETY: both staged by the audio loop for this block,
+                    // from buffers it owns for the whole loop, and only read
+                    // during the block.
                     let capture =
                         unsafe { std::slice::from_raw_parts(voice.capture_ptr, voice.capture_len) };
-                    mix_capture_into_plugin(
+                    let inputs = unsafe {
+                        std::slice::from_raw_parts(
+                            voice.capture_inputs_ptr,
+                            voice.capture_inputs_len,
+                        )
+                    };
+                    route.mix_into(
                         capture,
                         voice.capture_channels,
+                        inputs,
                         &mut voice.input,
                         voice.input_channels,
                         frames as usize,
@@ -597,33 +611,6 @@ fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channel
             "PLUGIN_PROCESS_QUARANTINED context=rack-slot:{} action=silence error={error}",
             voice.slot_id
         );
-    }
-}
-
-fn mix_capture_into_plugin(
-    capture: &[f32],
-    capture_channels: usize,
-    plugin: &mut [f32],
-    plugin_channels: usize,
-    frames: usize,
-) {
-    if capture_channels == 0 || plugin_channels == 0 {
-        return;
-    }
-    for frame in 0..frames {
-        for channel in 0..plugin_channels {
-            let sample = if capture_channels == 1 {
-                capture[frame]
-            } else if plugin_channels == 1 {
-                (capture[frame * capture_channels] + capture[frame * capture_channels + 1]) * 0.5
-            } else {
-                capture
-                    .get(frame * capture_channels + channel)
-                    .copied()
-                    .unwrap_or(0.0)
-            };
-            plugin[frame * plugin_channels + channel] += sample;
-        }
     }
 }
 
@@ -1010,6 +997,8 @@ fn create_rack_voices<'plugin>(
             capture_ptr: std::ptr::null(),
             capture_len: 0,
             capture_channels: 0,
+            capture_inputs_ptr: std::ptr::null(),
+            capture_inputs_len: 0,
             sends_to_main: spec.sends_to_main,
             input_channels,
             level: f32::from(spec.level_per_mille) / 1_000.0,
@@ -1231,6 +1220,8 @@ fn rack_voices_from_prepared(
             capture_ptr: std::ptr::null(),
             capture_len: 0,
             capture_channels: 0,
+            capture_inputs_ptr: std::ptr::null(),
+            capture_inputs_len: 0,
             sends_to_main: prepared.sends_to_main,
             input_channels: prepared.input_channels,
             level: f32::from(prepared.level_per_mille) / 1_000.0,
@@ -1853,16 +1844,57 @@ pub fn run(config: LiveConfig) -> Result<()> {
     };
     // The same for capture: a guitar that is not plugged in must not cost the
     // player the instrument that is.
+    let mut input_absent_reason = None;
     let input = match config.audio_input.as_ref() {
         Some(profile) => match open_audio_input_from_inventory(profile, &audio_devices) {
             Ok(input) => Some(input),
             Err(error) => {
                 println!("AUDIO_INPUT_ABSENT reason={:?}", error.to_string());
+                input_absent_reason = Some(error.to_string());
                 None
             }
         },
         None => None,
     };
+    // What the Rack editor is told about the input: fixed for the life of
+    // this loop, since the capture is opened once and never reopened.
+    let audio_input_status = match (&input, config.audio_input.as_ref()) {
+        (Some(opened), _) => AudioInputStatus {
+            availability: AudioInputAvailability::Open,
+            device_name: Some(opened.device.name.clone()),
+            device_channels: opened.device.capture.as_ref().map_or(0, |capture| {
+                capture.channels.maximum.min(u32::from(u16::MAX)) as u16
+            }),
+            captured: opened
+                .profile
+                .channels
+                .iter()
+                .map(|channel| (*channel).min(u32::from(u16::MAX)) as u16)
+                .collect(),
+            gain_db: opened.profile.gain_db,
+            cable_routing: true,
+            peaks: Vec::new(),
+            reason: None,
+        },
+        (None, Some(profile)) => AudioInputStatus {
+            availability: AudioInputAvailability::Absent,
+            captured: profile
+                .channels
+                .iter()
+                .map(|channel| (*channel).min(u32::from(u16::MAX)) as u16)
+                .collect(),
+            gain_db: profile.gain_db,
+            cable_routing: true,
+            reason: input_absent_reason,
+            ..AudioInputStatus::default()
+        },
+        (None, None) => AudioInputStatus {
+            availability: AudioInputAvailability::Disabled,
+            cable_routing: true,
+            ..AudioInputStatus::default()
+        },
+    };
+    let input_meter = Arc::new(InputMeter::default());
     if let Some(output) = &output {
         println!(
             "AUDIO_READY id={} name={:?} backend={} rate={} channels={} format={:?} \
@@ -2012,6 +2044,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
             audio_sender: control_sender,
             audio_state: Arc::clone(&audio_state),
             output_meter: Arc::clone(&output_meter),
+            audio_input: audio_input_status,
+            input_meter: Arc::clone(&input_meter),
             audio_state_path: config.audio_state_path.clone(),
             performance_repository: Arc::new(Mutex::new(performance_repository)),
             state_store,
@@ -2058,6 +2092,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         render_mode: resolve_render_mode(initial_surface_mode, initial_rack_specs.len()),
         audio_state,
         output_meter,
+        input_meter,
         live_parameter_writer: live_parameter_writer.handle(),
         startup,
     })
@@ -2348,6 +2383,7 @@ struct AudioLoopContext<'a> {
     render_mode: AudioRenderMode,
     audio_state: Arc<Mutex<AudioOutputState>>,
     output_meter: Arc<OutputMeter>,
+    input_meter: Arc<InputMeter>,
     live_parameter_writer: LiveParameterWriterHandle,
     startup: crate::startup::StartupTimeline,
 }
@@ -2374,6 +2410,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         mut render_mode,
         audio_state,
         output_meter,
+        input_meter,
         live_parameter_writer,
         startup,
     } = context;
@@ -2407,6 +2444,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 .map(|channel| *channel as usize - 1)
                 .collect::<Vec<_>>()
         })
+        .unwrap_or_default();
+    // The physical input of each captured channel, for the cables that name
+    // inputs; staged beside the capture every block.
+    let capture_inputs = input
+        .as_ref()
+        .map(|capture| capture.profile.channels.clone())
         .unwrap_or_default();
     let mut device_input = vec![0_i32; period_frames * capture_stream_channels];
     let mut captured_input = vec![0.0_f32; period_frames * capture_channels];
@@ -3599,6 +3642,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 capture_gain,
                 &mut captured_input,
             );
+            input_meter.observe_interleaved(&captured_input, capture_channels);
             if let Some(report) = input_xruns.tick() {
                 eprintln!("AUDIO_INPUT_{report}");
             }
@@ -3794,6 +3838,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     voice.capture_ptr = captured_input.as_ptr();
                     voice.capture_len = captured_input.len();
                     voice.capture_channels = capture_channels;
+                    voice.capture_inputs_ptr = capture_inputs.as_ptr();
+                    voice.capture_inputs_len = capture_inputs.len();
                 }
                 let render_started = Instant::now();
                 let scheduled = if rack_renderer.process(

@@ -56,11 +56,19 @@ import {
   rackGraphProblems,
   removeSlotFromRack,
   tidyRackGraph,
+  audioInputRouteLabel,
   type RackConnection,
 } from "../rackGraph";
 import type { RackPluginRole } from "../rackPluginSelection";
 import { RackPluginEditor, type RackPluginEditorKind } from "./RackPluginEditor";
 import { RackMidiLinkEditor } from "./RackMidiLinkEditor";
+import { RackAudioInputLinkEditor } from "./RackAudioInputLinkEditor";
+import { AudioInputMeter } from "./AudioInputMeter";
+import {
+  useAudioInputStatus,
+  type AudioInputPeakFeed,
+  type AudioInputState,
+} from "../hooks/useAudioInputStatus";
 import type {
   PluginInstance,
   PluginStateReference,
@@ -99,6 +107,10 @@ type CanvasNode = Node<CanvasNodeData>;
 type RackCanvasEdgeData = {
   signal: RackGraphSignal;
   editable: boolean;
+  /** A cable from the audio input: it never displaces another from the
+   *  same port, and its key names the inputs it carries. */
+  fromAudioInput?: boolean;
+  routeLabel?: string;
   onOpen: (edgeId: string, clientX: number, clientY: number) => void;
   onSelect: (edgeId: string) => void;
 };
@@ -116,6 +128,52 @@ type CanvasBounds = {
   width: number;
   height: number;
 };
+
+/** What the host captures, for the audio input node to show: its state,
+ *  and the peaks its meter follows. */
+const AudioInputContext = createContext<{
+  status: AudioInputState | null;
+  peaks: AudioInputPeakFeed | null;
+}>({ status: null, peaks: null });
+
+/** The audio input node's second line: where its audio comes from, or why
+ *  none does. */
+function audioInputSubtitle(status: AudioInputState | null, busId: string): string {
+  if (!status) return busId;
+  switch (status.availability) {
+    case "open":
+      return `${status.device_name ?? "Interface"} · ${status.captured.length ? `In ${status.captured.join("–")}` : "nothing captured"}`;
+    case "disabled":
+      return "Off in Settings";
+    case "absent":
+      return `${status.device_name ?? "Input"} · not available`;
+    case "unsupported":
+      return "No audio input here";
+  }
+}
+
+/** The audio input node's inner part: its state and, while it captures, a
+ *  meter per input. Reads the host through context, so only this redraws
+ *  as the levels move. */
+function AudioInputNodeBody({ title, busId }: { title: string; busId: string }) {
+  const { status, peaks } = useContext(AudioInputContext);
+  const open = status?.availability === "open";
+  return (
+    <div>
+      <strong>{title}</strong>
+      <small className={status && !open ? "is-off" : undefined}>
+        {audioInputSubtitle(status, busId)}
+      </small>
+      {open && status.captured.length > 0 ? (
+        <AudioInputMeter
+          feed={peaks}
+          captured={status.captured}
+          className="rack-flow-node-meter"
+        />
+      ) : null}
+    </div>
+  );
+}
 
 /** The graph's connection rules, for a port to ask while a cable is dragged. */
 const RackConnectionRules = createContext<
@@ -240,10 +298,14 @@ const RackNodeCard = memo(function RackNodeCard({ id: nodeId, data, selected }: 
               ? "RACK"
               : "RF"}
       </span>
-      <div>
-        <strong>{data.title}</strong>
-        {data.subtitle ? <small>{data.subtitle}</small> : null}
-      </div>
+      {data.kind === "audio_input" ? (
+        <AudioInputNodeBody title={data.title} busId={data.subtitle ?? "main"} />
+      ) : (
+        <div>
+          <strong>{data.title}</strong>
+          {data.subtitle ? <small>{data.subtitle}</small> : null}
+        </div>
+      )}
       {data.kind === "midi_input" ? (
         <RackPort
           nodeId={nodeId}
@@ -350,6 +412,7 @@ const RackFlowEdge = memo(function RackFlowEdge({
   const replacing = useConnection((connection) =>
     connection.inProgress
     && data?.signal === "audio"
+    && !data.fromAudioInput
     && connection.fromHandle.type === "source"
     && connection.fromNode.id === source
     && connection.fromHandle.id === sourceHandleId);
@@ -366,10 +429,13 @@ const RackFlowEdge = memo(function RackFlowEdge({
         <EdgeLabelRenderer>
           <button
             type="button"
-            className={`rack-edge-control nodrag nopan${selected ? " selected" : ""}`}
+            className={`rack-edge-control nodrag nopan ${data.signal}${data.routeLabel ? " has-route" : ""}${selected ? " selected" : ""}`}
             style={{ transform: `translate(-50%, -50%) translate(${controlX}px, ${controlY}px)` }}
             data-edge-id={id}
-            aria-label="MIDI connection settings"
+            aria-label={data.signal === "audio"
+              ? `Audio input connection settings: ${data.routeLabel ?? "All"}`
+              : "MIDI connection settings"}
+            title={data.signal === "audio" ? "Inputs and trim of this cable" : undefined}
             onClick={(event) => {
               event.stopPropagation();
               data.onSelect(id);
@@ -386,7 +452,7 @@ const RackFlowEdge = memo(function RackFlowEdge({
               data.onOpen(id, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
             }}
           >
-            <span />
+            {data.routeLabel ? <em>{data.routeLabel}</em> : <span />}
           </button>
         </EdgeLabelRenderer>
       ) : null}
@@ -496,9 +562,12 @@ function toCanvasEdges(
   onSelect: RackCanvasEdgeData["onSelect"],
 ): RackCanvasEdge[] {
   const nodeKinds = new Map(nodes.map((node) => [node.id, node.kind.kind]));
-  return edges.map((edge) => ({
+  return edges.map((edge) => {
+    const fromAudioInput = edge.signal === "audio"
+      && nodeKinds.get(edge.source.node_id) === "audio_input";
+    return {
     id: edge.id,
-    type: "rackFlow",
+    type: "rackFlow" as const,
     source: edge.source.node_id,
     target: edge.target.node_id,
     sourceHandle: `${edge.signal}:${edge.source.port_id}`,
@@ -507,9 +576,12 @@ function toCanvasEdges(
     selected: selectedId === edge.id,
     data: {
       signal: edge.signal,
-      editable: edge.signal === "midi"
+      editable: (edge.signal === "midi"
         && nodeKinds.get(edge.source.node_id) === "midi_input"
-        && ["plugin", "rack"].includes(nodeKinds.get(edge.target.node_id) ?? ""),
+        && ["plugin", "rack"].includes(nodeKinds.get(edge.target.node_id) ?? ""))
+        || (fromAudioInput && nodeKinds.get(edge.target.node_id) === "plugin"),
+      fromAudioInput,
+      routeLabel: fromAudioInput ? audioInputRouteLabel(edge.audio_input_route) : undefined,
       onOpen,
       onSelect,
     },
@@ -521,7 +593,8 @@ function toCanvasEdges(
       stroke: edge.signal === "midi" ? "var(--rf-lit-input)" : "var(--rf-lit-sound)",
       strokeWidth: 2,
     },
-  }));
+    };
+  });
 }
 
 /** A React Flow connection as the graph's rules read one, or null when its
@@ -776,13 +849,13 @@ export default function RackGraphEditor({
     const target = edge
       ? materialized.graph!.nodes.find((node) => node.id === edge.target.node_id)
       : undefined;
-    if (
-      !edge
-      || edge.signal !== "midi"
-      || source?.kind.kind !== "midi_input"
-      || !target
-      || !["plugin", "rack"].includes(target.kind.kind)
-    ) return;
+    const midiCable = edge?.signal === "midi"
+      && source?.kind.kind === "midi_input"
+      && !!target && ["plugin", "rack"].includes(target.kind.kind);
+    const inputCable = edge?.signal === "audio"
+      && source?.kind.kind === "audio_input"
+      && target?.kind.kind === "plugin";
+    if (!edge || !(midiCable || inputCable)) return;
     const anchor = createMenuAnchor(clientX, clientY, 486, 650);
     if (!anchor) return;
     setSelectedId(edgeId);
@@ -866,6 +939,16 @@ export default function RackGraphEditor({
     ])),
     [catalogPlugins],
   );
+  const hasAudioInput = materialized.graph!.nodes.some((node) => node.kind.kind === "audio_input");
+  const settingInputCable = midiLinkEditor !== null && materialized.graph!.edges.some((edge) =>
+    edge.id === midiLinkEditor.edgeId && edge.signal === "audio");
+  const audioInput = useAudioInputStatus(
+    settingInputCable ? 100 : hasAudioInput ? 250 : null,
+  );
+  const audioInputContext = useMemo(
+    () => ({ status: audioInput.status, peaks: audioInput.peaks }),
+    [audioInput.peaks, audioInput.status],
+  );
   const problems = useMemo(
     () => rackGraphProblems(materialized.graph!, {
       slots: materialized.slots,
@@ -873,8 +956,9 @@ export default function RackGraphEditor({
         const kind = pluginKinds.get(slot.plugin_id);
         return kind === "instrument" || kind === "effect" ? kind : undefined;
       },
+      audioInput: audioInput.status ? { ...audioInput.status, peaks: [] } : null,
     }),
-    [materialized, pluginKinds],
+    [audioInput.status, materialized, pluginKinds],
   );
   const errorCount = problems.filter((problem) => problem.severity === "error").length;
   const mappedNodes = useMemo(() => {
@@ -1034,18 +1118,15 @@ export default function RackGraphEditor({
         const previous = graph.edges.find((edge) => edge.id === oldEdge.id);
         if (!previous) return graph;
         const without = { ...graph, edges: graph.edges.filter((edge) => edge !== previous) };
-        const next = connectRackGraph(without, candidate);
+        // A cable keeps its settings wherever it is plugged: a MIDI cable
+        // its routing, an audio input's cable its inputs and trim (while it
+        // still starts at the input).
+        const next = connectRackGraph(without, candidate, undefined, {
+          midi_transform: previous.midi_transform,
+          audio_input_route: previous.audio_input_route,
+        });
         if (next === without) return graph;
-        // A MIDI cable keeps its routing settings wherever it is plugged.
-        return previous.midi_transform
-          ? {
-            ...next,
-            edges: next.edges.map((edge, index) =>
-              index === next.edges.length - 1
-                ? { ...edge, midi_transform: previous.midi_transform }
-                : edge),
-          }
-          : next;
+        return next;
       });
     },
     [updateGraph],
@@ -1517,6 +1598,7 @@ export default function RackGraphEditor({
         onPointerUp={finishPaneGesture}
         onPointerCancel={finishPaneGesture}
       >
+        <AudioInputContext.Provider value={audioInputContext}>
         <RackConnectionRules.Provider value={isValidConnection}>
         <ReactFlow<CanvasNode, RackCanvasEdge>
           nodes={interactiveNodes}
@@ -1702,6 +1784,7 @@ export default function RackGraphEditor({
           </Controls>
         </ReactFlow>
         </RackConnectionRules.Provider>
+        </AudioInputContext.Provider>
         {history && historyOpen ? (
           <div id="rack-history-list" className="rack-history-list" role="dialog" aria-label="Editing history">
             <header>
@@ -1871,7 +1954,28 @@ export default function RackGraphEditor({
               renderSurface={renderPluginSurface}
             />
           ) : null}
-          {midiLinkEditor && midiEditorEdge && midiEditorTargetNode ? (
+          {midiLinkEditor && midiEditorEdge && midiEditorTargetNode && midiEditorEdge.signal === "audio" ? (
+            <RackAudioInputLinkEditor
+              key={midiEditorEdge.id}
+              edge={midiEditorEdge}
+              targetLabel={midiEditorTargetLabel}
+              status={audioInput.status}
+              peaks={audioInput.peaks}
+              style={menuStyle(midiLinkEditor.anchor)}
+              onClose={() => setMidiLinkEditor(null)}
+              onApply={(audio_input_route) => {
+                updateGraph((graph) => ({
+                  ...graph,
+                  edges: graph.edges.map((candidate) => {
+                    if (candidate.id !== midiEditorEdge.id) return candidate;
+                    const { audio_input_route: _previous, ...rest } = candidate;
+                    return audio_input_route ? { ...rest, audio_input_route } : rest;
+                  }),
+                }));
+                setMidiLinkEditor(null);
+              }}
+            />
+          ) : midiLinkEditor && midiEditorEdge && midiEditorTargetNode ? (
             <RackMidiLinkEditor
               key={midiEditorEdge.id}
               edge={midiEditorEdge}

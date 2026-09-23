@@ -6221,10 +6221,14 @@
   box-shadow: var(--fp-lip);
 }
 
+/* Two lines and nothing else: what is edited, and whether it is saved --
+   the same on every screen. The state is set so its longer word, UNSAVED
+   CHANGES, runs as wide as RACK EDITOR above it: the two lines make one
+   block, and the name starts where both end. */
 .graph-workspace-title {
+  flex: 0 0 auto;
   display: grid;
   gap: 3px;
-  min-width: 108px;
 }
 
 .graph-workspace-title .card-kicker {
@@ -6233,21 +6237,11 @@
 }
 
 .graph-workspace-state {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
+  color: var(--muted);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
   white-space: nowrap;
-}
-
-.graph-workspace-state strong {
-  color: var(--muted);
-  font: 600 11px/1 var(--display-font);
-}
-
-.graph-workspace-state .graph-workspace-preview::before {
-  content: "·";
-  margin-right: 6px;
-  color: var(--muted);
 }
 
 .graph-workspace-name {
@@ -6256,15 +6250,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.graph-workspace-preview {
-  flex: 0 0 auto;
-  color: var(--fp-rail-label);
-  font: 700 10px/1 var(--display-font);
-  letter-spacing: var(--fp-track);
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .graph-workspace-name input {
@@ -6285,14 +6270,6 @@
   outline-offset: 1px;
 }
 
-
-.graph-workspace-preview.ready {
-  color: var(--green);
-}
-
-.graph-workspace-preview.applying {
-  color: var(--acid);
-}
 
 .graph-workspace-actions {
   margin-left: auto;
@@ -6404,16 +6381,6 @@
     padding: 8px;
   }
 
-  .graph-workspace-title {
-    min-width: 0;
-    flex: 0 1 auto;
-  }
-
-  .graph-workspace-state {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
   .graph-workspace-name {
     min-width: 72px;
   }
@@ -6423,41 +6390,6 @@
    their words for their icons -- the words stay for a screen reader -- and
    the name takes what is left. */
 @media (max-width: 560px) {
-  .graph-workspace-state .graph-workspace-preview {
-    display: none;
-  }
-
-  /* The title breaks onto two lines rather than being cut: RACK / EDITOR.
-     "Unsaved changes" becomes a lamp beside it, so the name keeps the room. */
-  .graph-workspace-title {
-    flex: 0 0 auto;
-  }
-
-  /* Broken onto two lines, the title is as wide as its longer word: a
-     wrapped box otherwise keeps the one-line width, leaving a gap before
-     the name. */
-  .graph-workspace-title .card-kicker {
-    position: relative;
-    width: min-content;
-    margin-right: 10px;
-    white-space: normal;
-  }
-
-  .graph-workspace-state {
-    display: none;
-  }
-
-  .graph-workspace-header.is-unsaved .graph-workspace-title .card-kicker::after {
-    content: "";
-    position: absolute;
-    right: -10px;
-    bottom: 0.2em;
-    width: 6px;
-    height: 6px;
-    background: var(--amber-ink);
-    border-radius: 1px;
-  }
-
   /* Save keeps Exit's size: no words on it, only red -- its icon in the
      attention colour and a lamp in its corner. The strip under the canvas
      says why, and so does the key to a screen reader. */

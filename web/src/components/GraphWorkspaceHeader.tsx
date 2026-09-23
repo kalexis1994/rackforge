@@ -2,9 +2,10 @@ import { LogOut, Menu, Save } from "lucide-react";
 import { AsyncActionLabel } from "./AsyncSpinner";
 import { StableLabel } from "./StableLabel";
 
-// Both lines keep the room of their longest word, so editing the name does
+// The state keeps the room of its longest word, so editing the name does
 // not push the name field when "Saved" turns into "Unsaved changes".
 const SAVE_STATES = ["Saved", "Unsaved changes"] as const;
+// The preview is heard, not read: only a screen reader is told how it stands.
 const PREVIEW_STATES = {
   idle: "Preview idle",
   applying: "Applying preview…",
@@ -13,8 +14,8 @@ const PREVIEW_STATES = {
 
 /**
  * The node editor's own header, across the top of the screen while it is
- * open: what is being edited and whether it is saved, how the preview
- * stands, its name, and Exit and Save. It replaces the thin bar that used to
+ * open: what is being edited and whether it is saved, its name, and Exit
+ * and Save. It replaces the thin bar that used to
  * name the Rack and the details dialog a key over the canvas opened -- the
  * details are always in view now, and nothing floats over the graph.
  *
@@ -51,7 +52,7 @@ export function GraphWorkspaceHeader({
 }) {
   return (
     <header
-      className={`graph-workspace-header${dirty || isNew ? " is-unsaved" : ""} ${className}`.trim()}
+      className={`graph-workspace-header ${className}`.trim()}
       aria-label={title}
     >
       {/* Narrow, where the rail is hidden, the navigation opens from here --
@@ -66,13 +67,11 @@ export function GraphWorkspaceHeader({
       </button>
       <div className="graph-workspace-title">
         <span className="card-kicker">{title}</span>
-        <span className="graph-workspace-state">
-          <strong>
-            <StableLabel value={dirty || isNew ? "Unsaved changes" : "Saved"} options={SAVE_STATES} />
-          </strong>
-          <span className={`graph-workspace-preview ${previewStatus}`} role="status" aria-live="polite">
-            <StableLabel value={PREVIEW_STATES[previewStatus]} options={Object.values(PREVIEW_STATES)} />
-          </span>
+        <strong className="graph-workspace-state">
+          <StableLabel value={dirty || isNew ? "Unsaved changes" : "Saved"} options={SAVE_STATES} />
+        </strong>
+        <span className="visually-hidden" role="status" aria-live="polite">
+          {PREVIEW_STATES[previewStatus]}
         </span>
       </div>
       <label className="graph-workspace-name">

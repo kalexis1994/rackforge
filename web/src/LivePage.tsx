@@ -2614,7 +2614,7 @@ function SongEditor({
   };
   const workspaceHeader = (
     <GraphWorkspaceHeader
-      title="Song Part Editor"
+      title="Part Editor"
       nameLabel="Part name"
       name={selectedPart?.name ?? "Song Part"}
       onName={(name) => {

@@ -3663,8 +3663,10 @@ dependencies = [
  "cpal",
  "midir",
  "rackforge-core",
+ "rackforge-plugin-api",
  "rackforge-plugin-sdk",
  "rackforge-ump",
+ "wasmtime",
 ]
 
 [[package]]

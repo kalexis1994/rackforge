@@ -252,6 +252,15 @@ export function PlayPage({
           surface="play"
           onSurfaceInfoChange={handleSurfaceInfo}
         />
+      ) : !snapshot ? (
+        // No session yet is not "no instrument": the one that is playing
+        // simply has not been reported.
+        <RfLoader
+          className="plugin-play-loader"
+          label="Connecting to RackForge"
+          detail="Waiting for the session…"
+          size="large"
+        />
       ) : pluginCatalog.status === "idle" || pluginCatalog.status === "loading" ? (
         <RfLoader
           className="plugin-play-loader"

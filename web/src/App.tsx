@@ -73,6 +73,8 @@ import {
   
   
   
+  IS_BROWSER_HOST,
+  isRemoteWebClient,
   isVstHost,
   
   
@@ -103,6 +105,7 @@ import {
   type FirstRunFailure,
 } from "./firstRun";
 import { FirstRunScreen } from "./FirstRunScreen";
+import { BootCurtain } from "./components/BootCurtain";
 import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
 import { TouchControllerPage } from "./TouchControllerPage";
 import {
@@ -405,6 +408,13 @@ function RackForgeApp() {
     navigate,
   });
   const vstHost = isVstHost();
+  // The web builds open onto whatever the engine and the catalogue say, as
+  // they arrive; the desktop shows its own startup before its window has an
+  // interface at all, and a plugin host has no start of its own.
+  const [bootCurtainEnabled] = useState(() => IS_BROWSER_HOST || isRemoteWebClient());
+  const bootActiveInstrument = snapshot?.instances.find(
+    (instance) => instance.instance_id === snapshot.active_instance_id,
+  )?.plugin_name;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [installPluginOpen, setInstallPluginOpen] = useState(false);
   const [playOverlay, setPlayOverlay] = useState<"plugins" | "presets" | null>(null);
@@ -771,6 +781,15 @@ function RackForgeApp() {
       ) : null}
       {installPluginOpen ? (
         <InstallPluginDialog onClose={() => setInstallPluginOpen(false)} />
+      ) : null}
+      {bootCurtainEnabled ? (
+        <BootCurtain
+          connection={connection}
+          sessionKnown={Boolean(snapshot)}
+          catalogStatus={pluginCatalog.status}
+          firstRunActive={firstRun.active}
+          activeInstrument={bootActiveInstrument}
+        />
       ) : null}
       {firstRun.active ? (
         <FirstRunScreen

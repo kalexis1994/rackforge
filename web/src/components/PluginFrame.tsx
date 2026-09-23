@@ -10,7 +10,8 @@ import { ResourceExplorerDialog } from "../dialogs/lazyResourceExplorer";
 import { dispatchCommand, dispatchCommandAwait, materializePluginState, requestPluginParameters, requestPluginStateParameters, setPluginParameter, setPluginStateParameter } from "../gateway";
 import { useResolvedLighting } from "../hooks/useResolvedLighting";
 import { bindNativePluginResource, hostJson, isDesktopHost, isNativeHost, selectNativePluginSound } from "../host";
-import { beginPluginOperation, usePluginDescriptor } from "../pluginCatalog";
+import { surfaceSettled, surfaceStarted } from "../bootReadiness";
+import { beginPluginOperation, refreshPluginCatalog, usePluginDescriptor } from "../pluginCatalog";
 import { pluginContextInstance } from "../pluginContext";
 import { synchronizePluginEnvironment } from "../pluginLifecycle";
 import { PluginRemovalOptions, PluginRemovalResult, pluginRemovalSummary } from "../pluginRemoval";
@@ -115,6 +116,13 @@ export interface PendingIsolatedParameterWrite {
   timer: number;
 }
 
+/**
+ * Descriptors that have already had their one forced refresh, by plugin,
+ * version and surface. Once per visit: a plugin that really has no web view
+ * must not refresh the catalogue for ever.
+ */
+const surfaceHealAttempts = new Set<string>();
+
 export function PluginFrame({
   instance,
   surface,
@@ -136,14 +144,34 @@ export function PluginFrame({
 }) {
   const catalogDescriptor = usePluginDescriptor(instance.plugin_id);
   const descriptor = catalogDescriptor.descriptor;
-  const descriptorStatus = catalogDescriptor.status === "error"
-    ? "error"
-    : catalogDescriptor.status === "ready"
-      ? descriptor ? "ready" : "unavailable"
-      : "loading";
   const selectedSurface = descriptor?.surfaces.find(
     (candidate) => candidate.kind === surface,
   );
+  const healKey = `${instance.plugin_id}:${descriptor?.version ?? "unknown"}:${surface}`;
+  // A descriptor that already carries this surface keeps the frame up while
+  // the catalogue refreshes behind it. Treating every refresh as "not known
+  // yet" tore the iframe down and loaded the plugin again from nothing --
+  // on every refresh the service worker asks for as it takes the page, and
+  // after every activation -- which a cold start showed as one loader
+  // after another. Only a surface nobody has seen yet waits for the list.
+  //
+  // One without it gets a single forced refresh before being declared
+  // unavailable: in the browser the catalogue can be read a moment before
+  // the worker that serves installed plugins is ready, and that answer --
+  // "no web view" -- used to stand until someone refreshed by hand.
+  const descriptorStatus = descriptor && selectedSurface
+    ? "ready"
+    : catalogDescriptor.status === "error"
+      ? "error"
+      : catalogDescriptor.status === "ready" && surfaceHealAttempts.has(healKey)
+        ? "unavailable"
+        : "loading";
+  useEffect(() => {
+    if (catalogDescriptor.status !== "ready" || (descriptor && selectedSurface)) return;
+    if (surfaceHealAttempts.has(healKey)) return;
+    surfaceHealAttempts.add(healKey);
+    void refreshPluginCatalog(true).catch(() => undefined);
+  }, [catalogDescriptor.status, descriptor, healKey, selectedSurface]);
   const surfaceIdentity = [
     instance.plugin_id,
     descriptor?.version ?? "loading",
@@ -159,6 +187,19 @@ export function PluginFrame({
   const [hiddenSplashIdentity, setHiddenSplashIdentity] = useState<string | null>(null);
   const splashDone = completedSplashIdentity === surfaceIdentity;
   const splashGone = hiddenSplashIdentity === surfaceIdentity;
+  const readinessKey = `${instance.instance_id}:${surface}`;
+  const surfaceSettledNow =
+    splashDone ||
+    descriptorStatus === "error" ||
+    descriptorStatus === "unavailable" ||
+    (surface === "config" && !instance.config_available);
+  useEffect(() => {
+    surfaceStarted(readinessKey);
+    return () => surfaceSettled(readinessKey);
+  }, [readinessKey]);
+  useEffect(() => {
+    if (surfaceSettledNow) surfaceSettled(readinessKey);
+  }, [readinessKey, surfaceSettledNow]);
   const splashLitRef = useRef<HTMLImageElement | null>(null);
   const frameLoadedRef = useRef(false);
   const [resourceBusy, setResourceBusy] = useState<string | null>(null);

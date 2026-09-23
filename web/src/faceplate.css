@@ -2037,7 +2037,11 @@
   --boot-glow: 0.15;
 }
 
-.pairing-shell {
+/* The boot curtain wears the same ground, so the connecting screen and the
+   curtain that follows it read as one: the mark does not move and the light
+   does not change between them. */
+.pairing-shell,
+.boot-curtain {
   position: relative;
   color: var(--ink) !important;
   background:
@@ -2059,7 +2063,8 @@
 }
 
 /* The dither plate: the shell is not an app shell, so it carries its own. */
-.pairing-shell::after {
+.pairing-shell::after,
+.boot-curtain::after {
   content: "";
   position: fixed;
   inset: 0;
@@ -2071,13 +2076,15 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .pairing-shell::after {
+  :root:not([data-theme="light"]) .pairing-shell::after,
+  :root:not([data-theme="light"]) .boot-curtain::after {
     opacity: 0.07;
     mix-blend-mode: screen;
   }
 }
 
-:root[data-theme="dark"] .pairing-shell::after {
+:root[data-theme="dark"] .pairing-shell::after,
+:root[data-theme="dark"] .boot-curtain::after {
   opacity: 0.07;
   mix-blend-mode: screen;
 }
@@ -5407,6 +5414,49 @@
   opacity: 0.82;
   font-size: 12px !important;
   line-height: 1.55;
+}
+
+/* ------------------------------------------------------ the boot curtain ---
+   The mark, full screen and centred, while RackForge gets ready, on the
+   connecting screen's own ground (see .pairing-shell). It lifts once there
+   is something to play -- the curtain fading while the mark swells a little
+   and goes out of focus, so the instrument appears behind it rather than
+   being cut to. */
+
+.boot-curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding:
+    var(--rackforge-safe-top, 0)
+    var(--rackforge-safe-right, 0)
+    var(--rackforge-safe-bottom, 0)
+    var(--rackforge-safe-left, 0);
+  opacity: 1;
+  /* Twice the emphasized step: a curtain is the largest thing that moves,
+     and still collapses with the rest of the vocabulary under reduced
+     motion. */
+  transition: opacity calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized);
+}
+
+.boot-curtain > .rf-async-loader {
+  transition:
+    transform calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized),
+    filter calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized),
+    opacity var(--rf-motion-emphasized) var(--rf-ease-exit);
+}
+
+.boot-curtain--leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-curtain--leaving > .rf-async-loader {
+  opacity: 0;
+  filter: blur(3px);
+  transform: scale(1.06);
 }
 
 /* ------------------------------------------------- the plugin installer ---

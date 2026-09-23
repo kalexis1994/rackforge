@@ -7276,10 +7276,9 @@
    short gap between plates. Each key says where its group starts and ends
    (group-start, group-end). */
 .rack-graph-canvas .react-flow__controls {
-  overflow: visible !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   box-shadow: none !important;
 }
 

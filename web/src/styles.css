@@ -9648,7 +9648,6 @@ body {
 .rack-flow-label.tone-violet { color: #b99cff; border-color: rgba(185, 156, 255, 0.42); }
 .rack-flow-label.tone-red { color: #ff7995; border-color: rgba(255, 121, 149, 0.42); }
 
-.rack-graph-canvas .react-flow__controls,
 .rack-graph-canvas .react-flow__minimap {
   overflow: hidden;
   border: 1px solid rgba(98, 223, 241, 0.16);

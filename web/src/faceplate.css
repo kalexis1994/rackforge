@@ -5363,6 +5363,42 @@
   color: var(--red) !important;
 }
 
+/* ------------------------------------------------------ the LOAD key ---
+   Loading a target is the one thing a player reaches for on stage, and it
+   was a word with nothing around it. It is a key now, and a big one: raised
+   and seamed like every key on the panel, sunk while pressed, and sunk for
+   good -- its word in the stage's red -- while its target is playing. The
+   word keeps its silkscreen. */
+.live-shell .activate-button {
+  min-width: 120px;
+  min-height: 52px;
+  padding: 10px 18px;
+  display: inline-grid;
+  place-items: center;
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  transition:
+    background var(--rf-motion-instant) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
+}
+
+.live-shell .activate-button:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.live-shell .activate-button:active:not(:disabled),
+.live-shell .activate-button.active {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.live-shell .activate-button:focus-visible {
+  outline: 2px solid var(--entity-color, var(--acid));
+  outline-offset: 2px;
+}
+
 /* -------------------------------------------- config card actions, keys ---
    EDIT and DELETE were the last pill buttons on the library cards. Keys
    now: raised, momentary sink, and DELETE wears the red ink the way the

@@ -5106,6 +5106,175 @@
   box-shadow: var(--fp-lip), var(--fp-drop) !important;
 }
 
+/* ----------------------------------------------------------- the FX drawer ---
+   The effects drawer was the last of PLAY on the old material: a navy band,
+   cyan-washed nodes, and the suggestions a wrapped strip of chips under a
+   heading. It is a plate now, divided into three framed sections -- CHAIN,
+   SUGGESTED and PANEL, the last two only when there is something in them --
+   each with its name silkscreened across the top of its frame, as the RF-5
+   labels its sections.
+
+   The frames take the keys' own slight rounding. `--fx-section-radius` is
+   the one place their corners are set, so a squarer or rounder frame is
+   one value away. */
+
+.play-chain-drawer {
+  --fx-section-radius: var(--fp-radius-key);
+}
+
+.play-chain-panel {
+  color: var(--ink);
+  background: var(--paper);
+  border-top: var(--fp-seam);
+}
+
+.play-chain-section {
+  border: var(--fp-seam);
+  border-radius: var(--fx-section-radius);
+  background: rgba(var(--edge-dark-rgb), 0.04);
+}
+
+.play-chain-section > legend {
+  color: var(--fp-rail-label);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+/* What the section is about, after its name: the instrument that suggests,
+   the effect whose panel it is. Data, so not silkscreen. */
+.play-chain-section > legend > span {
+  margin-left: 4px;
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+/* -- the chain -- */
+
+.play-chain-node {
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip);
+}
+
+.play-chain-node.instrument {
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--acid);
+}
+
+.play-chain-node.effect.open {
+  border-color: var(--line);
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid);
+}
+
+.play-chain-picker button {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.play-chain-picker button:hover,
+.play-chain-picker button:focus-visible {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+  outline: none;
+}
+
+/* -- suggested -- */
+
+.play-chain-suggestion {
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip);
+}
+
+.play-chain-suggestion.missing {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.play-chain-suggestion-copy strong {
+  font: 700 12px/1.2 var(--display-font);
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.play-chain-suggestion-copy em {
+  color: var(--fp-rail-label);
+  font: 500 11px/1.2 var(--mono-font);
+  font-style: normal;
+}
+
+/* Add is a key, the one lit thing in a row that can take it. */
+.play-chain-suggestion-add {
+  color: var(--red-ink);
+  background: var(--red);
+  border: 1px solid color-mix(in srgb, var(--red) 70%, #000);
+  border-radius: var(--fp-radius-key);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.play-chain-suggestion-add:hover {
+  background: color-mix(in srgb, var(--red) 88%, #fff);
+}
+
+.play-chain-suggestion-add:active {
+  box-shadow: var(--fp-well);
+}
+
+/* In chain and Not installed: stamped labels the size of the key, so a row
+   that is done reads as settled rather than as missing its button. Nothing
+   on the faceplate is a pill. */
+.play-chain-tag {
+  color: var(--fp-rail-label);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.play-chain-tag.missing {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.play-chain-suggest-all {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--red);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.play-chain-suggest-all:hover {
+  background: var(--panel-inset);
+}
+
+/* -- the open effect's panel -- */
+
+.play-chain-effect-panel {
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+}
+
 /* ------------------------------------------------ changing instrument ---
    Switching instrument used to be a cut in two places. The header's name
    and icon were retyped in place, and the plugin's splash -- its photograph

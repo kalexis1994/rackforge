@@ -585,11 +585,6 @@ textarea {
   align-content: start;
   gap: var(--rf-space-3);
   padding: var(--rf-space-3) clamp(12px, 2.5vw, 26px) var(--rf-space-2);
-  color: var(--ink);
-  /* The same band the toolbar above is: one chrome around the plugin's own
-     panel, not a second surface with its own colour. */
-  background: rgba(7, 18, 27, 0.94);
-  border-top: 1px solid var(--line);
   overflow: hidden;
 }
 
@@ -635,21 +630,22 @@ textarea {
   min-width: 0;
 }
 
-.play-chain-head {
-  display: flex;
-  align-items: center;
-  gap: var(--rf-space-3);
+/* The drawer is three framed sections -- the chain, what the instrument
+   suggests, and the open effect's panel -- each named on its own frame. A
+   fieldset draws that frame with its legend cutting the top edge, which is
+   what the RF-5's sections do with a drawn outline, without measuring the
+   title. A fieldset is `min-width: min-content` by default, which would lay
+   the chain's scrolling strip out at its whole length; it may shrink. */
+.play-chain-section {
+  min-width: 0;
+  margin: 0;
+  padding: var(--rf-space-3) var(--rf-space-3) var(--rf-space-3);
+  display: grid;
+  gap: var(--rf-space-2);
 }
 
-.play-chain-status {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.03em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.play-chain-section > legend {
+  padding: 0 6px;
 }
 
 .play-chain-nodes {
@@ -671,10 +667,6 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--rf-space-2);
-  background: rgba(111, 219, 239, 0.06);
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-card);
-  box-shadow: var(--rf-elevation-control);
 }
 
 .play-chain-node + .play-chain-node::before {
@@ -718,9 +710,6 @@ textarea {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-card);
-  box-shadow: var(--rf-elevation-card);
   overflow: hidden;
 }
 
@@ -858,15 +847,8 @@ textarea {
   border-color: var(--acid);
 }
 
-/* On a phone the drawer keeps what it is for -- the chain, and the panel of
-   whichever effect is open -- and drops what it cannot show. The sentence
-   about the audio path is the first to go: at this width it is an ellipsis
-   holding a line to itself. */
+/* On a phone the chain's nodes tighten and drop their versions. */
 @media (max-width: 560px) {
-  .play-chain-status {
-    display: none;
-  }
-
   .play-chain-node {
     padding: var(--rf-space-2);
     gap: var(--rf-space-1);
@@ -917,18 +899,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: var(--rf-space-2);
-  color: var(--ink);
-  background: rgba(111, 219, 239, 0.06);
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-control);
-  box-shadow: var(--rf-elevation-control);
   cursor: pointer;
-}
-
-.play-chain-picker button:hover,
-.play-chain-picker button:focus-visible {
-  border-color: var(--acid);
-  outline: none;
 }
 
 .play-chain-picker button .play-chain-icon {
@@ -948,72 +919,63 @@ textarea {
   font-style: normal;
 }
 
-.play-chain-suggested {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+.play-chain-suggestions {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  list-style: none;
 }
 
-.play-chain-suggested > small {
-  color: var(--muted);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
+/* Every row the same height, whatever it ends in: Add, In chain and Not
+   installed all take the same box on the right. */
 .play-chain-suggestion {
-  display: inline-flex;
+  min-height: 40px;
+  padding: 4px 6px 4px 8px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 96px;
   align-items: center;
-  gap: 7px;
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-control);
-  font-size: 11px;
+  gap: var(--rf-space-2);
 }
 
-.play-chain-suggestion.missing {
-  border-style: dashed;
-  color: var(--muted);
+.play-chain-suggestion .play-chain-icon {
+  width: 24px;
+  height: 24px;
 }
 
-.play-chain-suggestion em,
-.play-chain-suggestion i {
-  color: var(--muted);
-  font-size: 10px;
-  font-style: normal;
+.play-chain-suggestion-copy {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--rf-space-2);
+  overflow: hidden;
+  white-space: nowrap;
 }
 
-.play-chain-suggestion button {
-  padding: var(--rf-space-1) var(--rf-space-2);
-  color: var(--acid-ink, #021016);
-  background: var(--acid);
-  border: 0;
-  border-radius: var(--rf-radius-control);
+.play-chain-suggestion-copy strong,
+.play-chain-suggestion-copy em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.play-chain-suggestion-add,
+.play-chain-tag {
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.play-chain-suggestion-add {
   cursor: pointer;
-  font: 800 10px/1 var(--display-font);
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
 }
 
-/* Taking the whole recommendation. It is the instrument speaking rather
-   than the host, so it carries the same weight as one of its own pills and
-   not the accent the individual Add buttons wear -- the emphasis belongs on
-   what is being suggested, not on accepting all of it at once. */
 .play-chain-suggest-all {
-  padding: 3px 10px;
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--acid);
-  border-radius: var(--rf-radius-control);
+  justify-self: end;
+  height: 26px;
+  padding: 0 12px;
   cursor: pointer;
-  font: 800 10px/1 var(--display-font);
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
-}
-
-.play-chain-suggest-all:hover {
-  background: color-mix(in srgb, var(--acid) 14%, transparent);
 }
 
 .play-header-button.presets {

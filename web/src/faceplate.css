@@ -508,14 +508,7 @@
   }
 }
 
-/* On a phone the window is a third of the bar, too narrow for its label
-   and the program both. The program is what a player looks down for, so
-   the label goes, as it already does on a phone on its side. */
-@media (max-width: 430px) {
-  .topbar .now-playing .eyebrow {
-    display: none;
-  }
-}
+
 
 .now-playing .eyebrow {
   grid-column: auto !important;

@@ -4,6 +4,19 @@ import { type SessionSnapshot } from "../../types";
 import { Menu } from "lucide-react";
 import { useState } from "react";
 
+function modeLabel(mode: SessionSnapshot["active_mode"] | undefined): string {
+  switch (mode) {
+    case "live":
+      return "Live Mode";
+    case "play":
+      return "Play Mode";
+    case "idle":
+      return "Idle";
+    default:
+      return "Connecting";
+  }
+}
+
 export function TopBar({
   snapshot,
   menuOpen,
@@ -39,7 +52,9 @@ export function TopBar({
         <Menu aria-hidden="true" />
       </button>
       <div className="now-playing">
-        <span className="eyebrow">Now playing</span>
+        {/* Which mode the host is in, where "Now playing" used to say
+            nothing the program name below did not. */}
+        <span className="eyebrow">{modeLabel(snapshot?.active_mode)}</span>
         <strong>{selected?.name ?? "Waiting for Core"}</strong>
         {active && <span className="muted-inline">{active.plugin_name}</span>}
       </div>

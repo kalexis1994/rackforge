@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardMusic } from "lucide-react";
 import { PerformanceInfoBar } from "../components/PerformanceInfoBar";
 import { PlayChainDrawer } from "../components/PlayChainDrawer";
 import { PluginFrame } from "../components/PluginFrame";
@@ -185,7 +186,9 @@ export function PlayPage({
           }}
           aria-expanded={pluginPickerOpen}
         >
-          <span aria-hidden="true">▦</span>
+          <span className="plugin-button-mark" aria-hidden="true">
+            <KeyboardMusic size={16} strokeWidth={2.25} />
+          </span>
           <strong>Select plugin</strong>
         </button>
         <PerformanceInfoBar

@@ -2847,10 +2847,31 @@
   letter-spacing: var(--fp-track) !important;
 }
 
-/* The glyph plate is inset into the key, the way a legend plate is. */
+/* The glyph plate is inset into the key, the way a legend plate is. Each
+   key's plate has its own colour, so the three read apart at a glance
+   rather than as one blue repeated: the instrument's blue, as the picker
+   and the rack paint an instrument; amber for the effects, a pedal's
+   lamp; green for presets, the memory. The deep daylight mixes the rail's
+   chips use, so the cream glyph on them stays legible. */
+.play-header-button {
+  --key-plate: var(--acid);
+}
+
+.play-header-button.back {
+  --key-plate: var(--entity-instrument);
+}
+
+.play-header-button.chain {
+  --key-plate: var(--nav-controller);
+}
+
+.play-header-button.presets {
+  --key-plate: var(--nav-diagnostics);
+}
+
 .play-header-button > span {
   color: var(--acid-ink) !important;
-  background: var(--acid) !important;
+  background: var(--key-plate) !important;
   border-radius: 1px !important;
   font-family: var(--mono-font) !important;
 }
@@ -2863,7 +2884,7 @@
   }
 
   .play-header-button:hover > span {
-    background: var(--acid) !important;
+    background: var(--key-plate) !important;
   }
 }
 
@@ -2881,7 +2902,7 @@
 
 .play-header-button.active > span,
 .play-header-button:active > span {
-  background: var(--acid) !important;
+  background: var(--key-plate) !important;
 }
 
 .play-header-button:focus-visible {

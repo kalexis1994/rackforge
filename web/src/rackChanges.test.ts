@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSlotToRack, connectRackGraph, graphFromSlots, removeSlotFromRack } from "./rackGraph";
+import { addSlotToRack, connectRackGraph, graphFromSlots, insertNodeIntoCable, removeSlotFromRack } from "./rackGraph";
 import { describeRackChange } from "./rackChanges";
 import type { RackDefinition, RackSlot } from "./types";
 
@@ -56,6 +56,28 @@ describe("naming a Rack edit", () => {
       }),
     };
     expect(describeRackChange(withComp, repatched)).toBe("Re-patched Piano → Audio Output");
+  });
+
+  it("names a node dropped into a cable", () => {
+    const freeEq = addSlotToRack(withComp, slot("eq", "RF-EQ"), undefined, "effect");
+    const eq = freeEq.graph!.nodes.find(
+      (node) => node.kind.kind === "plugin" && node.kind.slot_id === "eq",
+    )!.id;
+    const unplugged = removeSlotFromRack(freeEq, "eq");
+    const loose = {
+      ...unplugged,
+      slots: freeEq.slots,
+      graph: {
+        ...unplugged.graph!,
+        nodes: [...unplugged.graph!.nodes, freeEq.graph!.nodes.find((node) => node.id === eq)!],
+      },
+    };
+    const cable = loose.graph.edges.find((edge) =>
+      edge.signal === "audio" && edge.target.node_id !== eq
+      && loose.graph.nodes.find((node) => node.id === edge.source.node_id)?.kind.kind === "plugin"
+      && (loose.graph.nodes.find((node) => node.id === edge.source.node_id)!.kind as { slot_id: string }).slot_id === "piano")!;
+    const inserted = { ...loose, graph: insertNodeIntoCable(loose.graph, eq, cable.id) };
+    expect(describeRackChange(loose, inserted)).toBe("Inserted RF-EQ between Piano and RF-Comp");
   });
 
   it("names a move and a rename", () => {

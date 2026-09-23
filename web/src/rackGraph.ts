@@ -736,8 +736,11 @@ export function addSlotToRack(
   return { ...current, slots: [...current.slots, slot], graph };
 }
 
-const NODE_SPACING_X = 300;
-const NODE_SPACING_Y = 160;
+/** The canvas's grid, the dots it draws: nodes placed by the editor land
+ *  on it, as nodes moved by hand snap to it. */
+export const RACK_GRID = 22;
+const NODE_SPACING_X = RACK_GRID * 14;
+const NODE_SPACING_Y = RACK_GRID * 8;
 
 /**
  * Where a node added without a place of its own goes, so it lands where it
@@ -825,7 +828,15 @@ function sharedInstrumentDestination(graph: RackGraph, excluding: string): strin
  * off. A cable the rules would refuse -- the bare audio input straight to an
  * output -- is not drawn.
  */
-export function removeSlotFromRack(rack: RackDefinition, slotId: string): RackDefinition {
+export function removeSlotFromRack(
+  rack: RackDefinition,
+  slotId: string,
+  options: {
+    /** Close the gap the node leaves (the default), or leave its cables'
+     *  other ends unplugged -- Shift+Delete, for re-patching by hand. */
+    heal?: boolean;
+  } = {},
+): RackDefinition {
   const current = materializeRackGraph(rack);
   const graph = current.graph!;
   const nodeIds = new Set(
@@ -840,7 +851,7 @@ export function removeSlotFromRack(rack: RackDefinition, slotId: string): RackDe
       (edge) => !nodeIds.has(edge.source.node_id) && !nodeIds.has(edge.target.node_id),
     ),
   };
-  for (const nodeId of nodeIds) {
+  for (const nodeId of options.heal === false ? [] : nodeIds) {
     const sources = graph.edges.filter(
       (edge) => edge.signal === "audio" && edge.target.node_id === nodeId,
     );
@@ -862,4 +873,109 @@ export function removeSlotFromRack(rack: RackDefinition, slotId: string): RackDe
     slots: current.slots.filter((slot) => slot.id !== slotId),
     graph: next,
   };
+}
+
+/**
+ * Puts a node that has no cables into an audio cable: the cable's source now
+ * feeds the node, and the node feeds where the cable went -- a pedal dropped
+ * onto the lead between two others. Refused, the graph is returned as it was.
+ */
+export function insertNodeIntoCable(
+  graph: RackGraph,
+  nodeId: string,
+  edgeId: string,
+): RackGraph {
+  const edge = graph.edges.find((candidate) => candidate.id === edgeId);
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+  if (!edge || edge.signal !== "audio" || !node || node.kind.kind !== "plugin") return graph;
+  if (edge.source.node_id === nodeId || edge.target.node_id === nodeId) return graph;
+  if (graph.edges.some((one) => one.source.node_id === nodeId || one.target.node_id === nodeId)) {
+    return graph;
+  }
+  const without = { ...graph, edges: graph.edges.filter((one) => one.id !== edgeId) };
+  const fed = connectRackGraph(without, {
+    signal: "audio",
+    source: edge.source,
+    target: { node_id: nodeId, port_id: "audio_in" },
+  }, rackGraphId("edge.audio"));
+  if (fed === without) return graph;
+  const feeding = connectRackGraph(fed, {
+    signal: "audio",
+    source: { node_id: nodeId, port_id: "audio_out" },
+    target: edge.target,
+  }, rackGraphId("edge.audio"));
+  return feeding === fed ? graph : feeding;
+}
+
+/**
+ * Where each node goes when the graph is tidied: signal flowing left to
+ * right in columns -- inputs first, each node one column after the furthest
+ * node feeding it, outputs last -- and each column's nodes ordered by where
+ * what feeds them sits, so cables cross as little as they can, centred on
+ * the column. Positions land on the canvas grid. Labels are not moved.
+ */
+export function tidyRackGraph(graph: RackGraph): Map<string, RackGraphPosition> {
+  const incoming = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const list = incoming.get(edge.target.node_id) ?? [];
+    list.push(edge.source.node_id);
+    incoming.set(edge.target.node_id, list);
+  }
+  const depth = new Map<string, number>();
+  const visiting = new Set<string>();
+  const depthOf = (id: string): number => {
+    const known = depth.get(id);
+    if (known !== undefined) return known;
+    if (visiting.has(id)) return 0;
+    visiting.add(id);
+    const sources = incoming.get(id) ?? [];
+    const value = sources.length === 0 ? 0 : Math.max(...sources.map(depthOf)) + 1;
+    visiting.delete(id);
+    depth.set(id, value);
+    return value;
+  };
+  const isOutput = (node: RackGraphNode) =>
+    node.kind.kind === "audio_output" || node.kind.kind === "midi_output";
+  for (const node of graph.nodes) depthOf(node.id);
+  const last = Math.max(
+    1,
+    ...graph.nodes.filter((node) => !isOutput(node)).map((node) => depth.get(node.id)! + 1),
+  );
+  for (const node of graph.nodes) {
+    if (isOutput(node)) depth.set(node.id, last);
+  }
+
+  const columns = new Map<number, RackGraphNode[]>();
+  for (const node of graph.nodes) {
+    const column = depth.get(node.id)!;
+    columns.set(column, [...(columns.get(column) ?? []), node]);
+  }
+  const positions = new Map<string, RackGraphPosition>();
+  for (const column of [...columns.keys()].sort((a, b) => a - b)) {
+    const nodes = columns.get(column)!;
+    // Ordered by where their sources already sit; unfed ones keep the order
+    // they had on the canvas.
+    const rank = (node: RackGraphNode) => {
+      const placed = (incoming.get(node.id) ?? [])
+        .map((id) => positions.get(id)?.y)
+        .filter((y): y is number => y !== undefined);
+      return placed.length > 0
+        ? placed.reduce((sum, y) => sum + y, 0) / placed.length
+        : node.position.y;
+    };
+    nodes.sort((a, b) => rank(a) - rank(b));
+    nodes.forEach((node, index) => {
+      positions.set(node.id, {
+        x: column * NODE_SPACING_X,
+        y: (index - (nodes.length - 1) / 2) * NODE_SPACING_Y,
+      });
+    });
+  }
+  for (const [id, position] of positions) {
+    positions.set(id, {
+      x: Math.round(position.x / RACK_GRID) * RACK_GRID,
+      y: Math.round(position.y / RACK_GRID) * RACK_GRID,
+    });
+  }
+  return positions;
 }

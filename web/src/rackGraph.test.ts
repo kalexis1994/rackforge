@@ -5,7 +5,10 @@ import {
   graphFromSlots,
   rackConnectionProblem,
   rackGraphProblems,
+  RACK_GRID,
+  insertNodeIntoCable,
   removeSlotFromRack,
+  tidyRackGraph,
 } from "./rackGraph";
 import type { RackDefinition, RackSlot } from "./types";
 
@@ -408,5 +411,65 @@ describe("the graph's connection rules", () => {
     expect(rackGraphProblems(silent).map((problem) => problem.nodeId)).toContain(
       nodeFor(rack, "verb").id,
     );
+  });
+});
+
+describe("editing by hand", () => {
+  function chain() {
+    let rack = addSlotToRack(emptyRack(), slot("piano", "org.rackforge.piano"));
+    rack = addSlotToRack(rack, slot("comp", "rf-comp"), undefined, "effect");
+    return rack;
+  }
+
+  it("leaves the gap when asked to", () => {
+    const rack = removeSlotFromRack(chain(), "comp", { heal: false });
+    expect(edgesOutOf(rack, nodeFor(rack, "piano").id)
+      .filter((edge) => edge.signal === "audio")).toEqual([]);
+  });
+
+  it("drops a free node into a cable", () => {
+    let rack = addSlotToRack(chain(), slot("verb", "rf-verb"), undefined, "effect");
+    rack = removeSlotFromRack(rack, "verb");
+    // A free effect node: added, then unplugged.
+    rack = addSlotToRack(rack, slot("eq", "rf-eq"), undefined, "effect");
+    const eq = nodeFor(rack, "eq").id;
+    rack = { ...rack, graph: { ...rack.graph!, edges: rack.graph!.edges.filter(
+      (edge) => edge.source.node_id !== eq && edge.target.node_id !== eq,
+    ) } };
+    rack = { ...rack, graph: connectRackGraph(rack.graph!, {
+      signal: "audio",
+      source: { node_id: nodeFor(rack, "comp").id, port_id: "audio_out" },
+      target: { node_id: mainOutput(rack).id, port_id: "in" },
+    }) };
+    const cable = rack.graph!.edges.find(
+      (edge) => edge.signal === "audio" && edge.source.node_id === nodeFor(rack, "piano").id,
+    )!;
+    const graph = insertNodeIntoCable(rack.graph!, eq, cable.id);
+    expect(chainOf({ ...rack, graph }, nodeFor(rack, "piano").id)).toEqual(["eq", "comp", "output"]);
+  });
+
+  it("will not drop a node that is already patched", () => {
+    const rack = chain();
+    const cable = rack.graph!.edges.find(
+      (edge) => edge.signal === "midi",
+    )!;
+    expect(insertNodeIntoCable(rack.graph!, nodeFor(rack, "comp").id, cable.id)).toBe(rack.graph);
+  });
+
+  it("tidies signal left to right, on the grid", () => {
+    let rack = addSlotToRack(emptyRack(), slot("piano", "org.rackforge.piano"));
+    rack = addSlotToRack(rack, slot("pad", "org.rackforge.pad"));
+    rack = addSlotToRack(rack, slot("comp", "rf-comp"), undefined, "effect");
+    const positions = tidyRackGraph(rack.graph!);
+    const x = (id: string) => positions.get(id)!.x;
+    const midi = rack.graph!.nodes.find((node) => node.kind.kind === "midi_input")!.id;
+    expect(x(midi)).toBeLessThan(x(nodeFor(rack, "piano").id));
+    expect(x(nodeFor(rack, "piano").id)).toBe(x(nodeFor(rack, "pad").id));
+    expect(x(nodeFor(rack, "piano").id)).toBeLessThan(x(nodeFor(rack, "comp").id));
+    expect(x(nodeFor(rack, "comp").id)).toBeLessThan(x(mainOutput(rack).id));
+    for (const position of positions.values()) {
+      expect(position.x % RACK_GRID).toBe(0);
+      expect(Math.abs(position.y % RACK_GRID)).toBe(0);
+    }
   });
 });

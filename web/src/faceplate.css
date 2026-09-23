@@ -5722,6 +5722,39 @@
   font-style: italic;
 }
 
+/* The keys and gestures, listed on request: the key on the left, what it
+   does beside it. */
+.rack-shortcuts dl {
+  margin: 0;
+  padding: 6px 10px 10px;
+  display: grid;
+  gap: 7px;
+  overflow-y: auto;
+}
+
+.rack-shortcuts dl > div {
+  display: grid;
+  gap: 2px;
+}
+
+.rack-shortcuts dt {
+  color: var(--ink);
+  font: 700 11px/1.3 var(--display-font);
+}
+
+.rack-shortcuts dd {
+  margin: 0;
+  color: var(--muted);
+  font: 500 11px/1.35 var(--display-font);
+}
+
+/* A free node held over an audio cable: the cable it would go into widens
+   and brightens, so the drop is aimed. */
+.rack-graph-canvas .react-flow__edge.is-drop-target .rack-flow-edge-path {
+  stroke-width: 5 !important;
+  filter: drop-shadow(0 0 5px var(--rf-lit-sound));
+}
+
 /* Why a cable was refused, for a moment, over the canvas. */
 .rack-graph-refusal {
   position: absolute;
@@ -7238,21 +7271,41 @@
    minimap gets a bezel — a seam around a dark inset, because what it shows
    is the screen itself. */
 
+/* The keys over the canvas come in groups by what they do -- editing, the
+   layout, the view, help -- each group one small plate of butted keys, a
+   short gap between plates. Each key says where its group starts and ends
+   (group-start, group-end). */
 .rack-graph-canvas .react-flow__controls {
-  border: var(--fp-seam) !important;
-  border-radius: var(--fp-radius) !important;
-  background: var(--paper) !important;
-  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 .rack-graph-canvas .react-flow__controls-button {
   color: var(--fp-rail-label) !important;
   background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
-  border-bottom: var(--fp-seam) !important;
+  border: var(--fp-seam) !important;
+  border-left-width: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: var(--fp-lip), var(--fp-drop);
 }
 
-.rack-graph-canvas .react-flow__controls-button:last-child {
-  border-bottom: 0 !important;
+.rack-graph-canvas .react-flow__controls-button.group-start {
+  margin-left: 6px;
+  border-left-width: 1px !important;
+  border-top-left-radius: var(--fp-radius) !important;
+  border-bottom-left-radius: var(--fp-radius) !important;
+}
+
+.rack-graph-canvas .react-flow__controls-button.group-start:first-child {
+  margin-left: 0;
+}
+
+.rack-graph-canvas .react-flow__controls-button.group-end {
+  border-top-right-radius: var(--fp-radius) !important;
+  border-bottom-right-radius: var(--fp-radius) !important;
 }
 
 .rack-graph-canvas .react-flow__controls-button:hover {

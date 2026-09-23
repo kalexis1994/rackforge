@@ -57,6 +57,18 @@ export function describeRackChange(before: RackDefinition, after: RackDefinition
   if (edgesRemoved.length === 1 && edgesAdded.length === 0) {
     return `Disconnected ${describeEdge(a, edgesRemoved[0])}`;
   }
+  if (edgesRemoved.length === 1 && edgesAdded.length === 2) {
+    // A node dropped into a cable: the cable's two ends now meet at it.
+    const [into, out] = edgesAdded[0].target.node_id === edgesAdded[1].source.node_id
+      ? edgesAdded
+      : [edgesAdded[1], edgesAdded[0]];
+    if (into.target.node_id === out.source.node_id
+      && into.source.node_id === edgesRemoved[0].source.node_id
+      && out.target.node_id === edgesRemoved[0].target.node_id) {
+      return `Inserted ${rackGraphNodeName(b, into.target.node_id)} between `
+        + `${rackGraphNodeName(b, into.source.node_id)} and ${rackGraphNodeName(b, out.target.node_id)}`;
+    }
+  }
   if (edgesAdded.length + edgesRemoved.length > 0) {
     return "Changed connections";
   }

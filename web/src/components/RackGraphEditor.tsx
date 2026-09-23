@@ -26,7 +26,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { History, Redo2, Undo2 } from "lucide-react";
+import { CircleHelp, History, Maximize, Minus, Plus, Redo2, Undo2, Workflow } from "lucide-react";
 import type { DraftHistory } from "../hooks/useDraftHistory";
 import { pluginKind, usePluginCatalog } from "../pluginCatalog";
 import { pluginKindPresentation } from "../pluginPresentation";
@@ -45,7 +45,9 @@ import {
   type ReactNode,
 } from "react";
 import {
+  RACK_GRID,
   connectRackGraph,
+  insertNodeIntoCable,
   materializeRackGraph,
   midiTransformFromSlot,
   normalizeRackGraphPosition,
@@ -53,6 +55,7 @@ import {
   rackGraphId,
   rackGraphProblems,
   removeSlotFromRack,
+  tidyRackGraph,
   type RackConnection,
 } from "../rackGraph";
 import type { RackPluginRole } from "../rackPluginSelection";
@@ -658,6 +661,10 @@ export default function RackGraphEditor({
   } | null>(null);
   const overlayOpen = editorSlotId !== undefined || midiLinkEditor !== null;
   const [historyOpen, setHistoryOpen] = useState(false);
+  // The canvas mostly explains itself -- ports light for a cable they take,
+  // a refused cable says why -- so what it cannot show, its keys and
+  // gestures, is a list opened on request rather than a line always read.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Undo and redo from the keyboard, as everywhere: Ctrl/Cmd+Z, and
   // Ctrl/Cmd+Shift+Z or Ctrl+Y. A text field keeps its own undo.
   useEffect(() => {
@@ -1186,7 +1193,7 @@ export default function RackGraphEditor({
     });
   }, [activeChildRackId, updateGraph]);
 
-  const removeSelected = useCallback(() => {
+  const removeSelected = useCallback((heal = true) => {
     if (!selectedId) return;
     if (selectedId.startsWith("label:")) {
       const labelId = selectedId.slice("label:".length);
@@ -1201,7 +1208,7 @@ export default function RackGraphEditor({
     if (!node || node.kind.kind === "midi_input" || node.kind.kind.endsWith("output")) return;
     if (node.kind.kind === "plugin") {
       const slotId = node.kind.slot_id;
-      onChange((current) => removeSlotFromRack(current, slotId));
+      onChange((current) => removeSlotFromRack(current, slotId, { heal }));
     } else {
       updateGraph((graph) => ({
         ...graph,
@@ -1214,6 +1221,143 @@ export default function RackGraphEditor({
     }
     setSelectedId(undefined);
   }, [materialized, onChange, selectedId, setSelectedId, updateGraph]);
+
+  // Delete (or Backspace) removes the selected node and closes the chain
+  // behind it; Shift+Delete removes it and leaves the gap, as Blender's and
+  // Node-RED's editors do. Cables and notes are React Flow's own to delete.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (!selectedId || selectedId.startsWith("label:")) return;
+      if (!materialized.graph!.nodes.some((node) => node.id === selectedId)) return;
+      event.preventDefault();
+      removeSelected(!event.shiftKey);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [materialized, removeSelected, selectedId]);
+
+  // Nodes snap to the canvas's dots as they are moved; held Alt, they move
+  // freely -- the default most node editors settle on, and the one that
+  // keeps cables straight under a finger.
+  const [freeMove, setFreeMove] = useState(false);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => setFreeMove(event.altKey);
+    const release = () => setFreeMove(false);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+      window.removeEventListener("blur", release);
+    };
+  }, []);
+
+  // A node with no cables dragged over an audio cable lights it, and let go
+  // there it is put into it. The cable is found under the pointer and marked
+  // on its own element, so the drag re-renders nothing.
+  const dropCable = useRef<string | null>(null);
+  const markDropCable = useCallback((edgeId: string | null) => {
+    if (dropCable.current === edgeId) return;
+    const layer = canvasRef.current;
+    if (dropCable.current) {
+      layer?.querySelector(`.react-flow__edge[data-id="${CSS.escape(dropCable.current)}"]`)
+        ?.classList.remove("is-drop-target");
+    }
+    dropCable.current = edgeId;
+    if (edgeId) {
+      layer?.querySelector(`.react-flow__edge[data-id="${CSS.escape(edgeId)}"]`)
+        ?.classList.add("is-drop-target");
+    }
+  }, []);
+  const trackDropCable = useCallback((event: MouseEvent | TouchEvent, nodeId: string) => {
+    const graph = materialized.graph!;
+    const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+    const free = node?.kind.kind === "plugin" && !graph.edges.some((edge) =>
+      edge.source.node_id === nodeId || edge.target.node_id === nodeId);
+    if (!free) {
+      markDropCable(null);
+      return;
+    }
+    const point = "touches" in event ? event.touches[0] ?? event.changedTouches[0] : event;
+    if (!point) return;
+    const under = document.elementsFromPoint(point.clientX, point.clientY)
+      .map((element) => element.closest<SVGGElement>(".react-flow__edge"))
+      .find((element): element is SVGGElement => element !== null);
+    const edgeId = under?.dataset.id ?? null;
+    const edge = edgeId ? graph.edges.find((candidate) => candidate.id === edgeId) : undefined;
+    markDropCable(edge?.signal === "audio" ? edge.id : null);
+  }, [markDropCable, materialized]);
+  const finishNodeDrag = useCallback((nodeId: string, position: RackGraphPosition) => {
+    const cable = dropCable.current;
+    markDropCable(null);
+    if (!cable) {
+      persistNodePosition(nodeId, position);
+      return;
+    }
+    // Where it was let go and what it was let go on are one step.
+    const normalized = normalizeRackGraphPosition(position);
+    updateGraph((graph) => insertNodeIntoCable({
+      ...graph,
+      nodes: graph.nodes.map((node) =>
+        node.id === nodeId ? { ...node, position: normalized } : node),
+    }, nodeId, cable));
+  }, [markDropCable, persistNodePosition, updateGraph]);
+
+  // Tidy: every node to its column, signal left to right, gliding there.
+  // The cables follow because the nodes' own positions move, frame by
+  // frame; then the layout is kept as one step.
+  const tidying = useRef<number | null>(null);
+  const tidy = useCallback(() => {
+    const targets = tidyRackGraph(materialized.graph!);
+    const commit = () => updateGraph((graph) => ({
+      ...graph,
+      nodes: graph.nodes.map((node) => {
+        const target = targets.get(node.id);
+        return target ? { ...node, position: target } : node;
+      }),
+    }));
+    const starts = new Map(interactiveNodes.map((node) => [node.id, node.position]));
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) {
+      commit();
+      window.requestAnimationFrame(() => {
+        void flowRef.current?.fitView({ padding: 0.18, maxZoom: 1.15, duration: 0 });
+      });
+      return;
+    }
+    if (tidying.current !== null) window.cancelAnimationFrame(tidying.current);
+    const duration = 360;
+    const began = performance.now();
+    const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+    const frame = (now: number) => {
+      const t = Math.min(1, (now - began) / duration);
+      const k = ease(t);
+      setInteractiveNodes((current) => current.map((node) => {
+        const from = starts.get(node.id);
+        const to = targets.get(node.id);
+        if (!from || !to) return node;
+        return {
+          ...node,
+          position: { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k },
+        };
+      }));
+      if (t < 1) {
+        tidying.current = window.requestAnimationFrame(frame);
+      } else {
+        tidying.current = null;
+        commit();
+        void flowRef.current?.fitView({ padding: 0.18, maxZoom: 1.15, duration: 320 });
+      }
+    };
+    tidying.current = window.requestAnimationFrame(frame);
+  }, [interactiveNodes, materialized, updateGraph]);
+  useEffect(() => () => {
+    if (tidying.current !== null) window.cancelAnimationFrame(tidying.current);
+  }, []);
 
   const selectedLabel = selectedId?.startsWith("label:")
     ? materialized.graph!.labels?.find(
@@ -1311,7 +1455,10 @@ export default function RackGraphEditor({
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodesChange={handleNodesChange}
-          onNodeDragStop={(_event, node) => persistNodePosition(node.id, node.position)}
+          onNodeDrag={(event, node) => trackDropCable(event as unknown as MouseEvent, node.id)}
+          onNodeDragStop={(_event, node) => finishNodeDrag(node.id, node.position)}
+          snapToGrid={!freeMove}
+          snapGrid={[RACK_GRID, RACK_GRID]}
           onInit={(instance) => {
             flowRef.current = instance;
           }}
@@ -1374,7 +1521,7 @@ export default function RackGraphEditor({
           colorMode="dark"
           proOptions={{ hideAttribution: true }}
         >
-          <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} />
+          <Background variant={BackgroundVariant.Dots} gap={RACK_GRID} size={1.2} />
           {/* The minimap computes its view from its own size, so it is told
               the size it is drawn at (faceplate.css); sized only by CSS it
               kept its default 200 x 150 view inside a smaller box and showed
@@ -1391,15 +1538,22 @@ export default function RackGraphEditor({
             maskStrokeColor="rgba(255, 255, 255, 0.5)"
             maskStrokeWidth={1.5}
           />
+          {/* Keys in groups, in the order they are reached for, left to
+              right: editing (undo, redo, the history) | the layout (tidy) |
+              the view (zoom out, zoom in, fit), which changes what is seen
+              and not the Rack | help, in the corner. React Flow's own zoom
+              keys are replaced so the view group can be ordered - + fit. */}
           <Controls
             position="top-right"
             orientation="horizontal"
+            showZoom={false}
+            showFitView={false}
             showInteractive={false}
           >
             {history ? (
               <>
                 <ControlButton
-                  className="rack-history-key"
+                  className="rack-history-key group-start"
                   onClick={history.undo}
                   disabled={!history.canUndo}
                   title="Undo (Ctrl+Z)"
@@ -1417,8 +1571,11 @@ export default function RackGraphEditor({
                   <Redo2 aria-hidden="true" />
                 </ControlButton>
                 <ControlButton
-                  className={`rack-history-key${historyOpen ? " active" : ""}`}
-                  onClick={() => setHistoryOpen((open) => !open)}
+                  className={`rack-history-key group-end${historyOpen ? " active" : ""}`}
+                  onClick={() => {
+                    setShortcutsOpen(false);
+                    setHistoryOpen((open) => !open);
+                  }}
                   title="History"
                   aria-label="Editing history"
                   aria-expanded={historyOpen}
@@ -1428,6 +1585,51 @@ export default function RackGraphEditor({
                 </ControlButton>
               </>
             ) : null}
+            <ControlButton
+              className="rack-history-key group-start group-end"
+              onClick={tidy}
+              title="Tidy up: signal left to right"
+              aria-label="Tidy up the graph"
+            >
+              <Workflow aria-hidden="true" />
+            </ControlButton>
+            <ControlButton
+              className="rack-history-key group-start"
+              onClick={() => void flowRef.current?.zoomOut({ duration: 200 })}
+              title="Zoom out"
+              aria-label="Zoom out"
+            >
+              <Minus aria-hidden="true" />
+            </ControlButton>
+            <ControlButton
+              className="rack-history-key"
+              onClick={() => void flowRef.current?.zoomIn({ duration: 200 })}
+              title="Zoom in"
+              aria-label="Zoom in"
+            >
+              <Plus aria-hidden="true" />
+            </ControlButton>
+            <ControlButton
+              className="rack-history-key group-end"
+              onClick={() => void flowRef.current?.fitView({ padding: 0.18, maxZoom: 1.15, duration: 320 })}
+              title="Fit the whole graph"
+              aria-label="Fit the whole graph"
+            >
+              <Maximize aria-hidden="true" />
+            </ControlButton>
+            <ControlButton
+              className={`rack-history-key group-start group-end${shortcutsOpen ? " active" : ""}`}
+              onClick={() => {
+                setHistoryOpen(false);
+                setShortcutsOpen((open) => !open);
+              }}
+              title="Keys and gestures"
+              aria-label="Keys and gestures"
+              aria-expanded={shortcutsOpen}
+              aria-controls="rack-shortcuts"
+            >
+              <CircleHelp aria-hidden="true" />
+            </ControlButton>
           </Controls>
         </ReactFlow>
         </RackConnectionRules.Provider>
@@ -1453,6 +1655,35 @@ export default function RackGraphEditor({
                 </li>
               ))}
             </ol>
+          </div>
+        ) : null}
+        {shortcutsOpen ? (
+          <div id="rack-shortcuts" className="rack-history-list rack-shortcuts" role="dialog" aria-label="Keys and gestures">
+            <header>
+              <span>Keys and gestures</span>
+              <button type="button" onClick={() => setShortcutsOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </header>
+            <dl>
+              {[
+                ["Drag from a port", "Draw a cable. Ports that take it light up."],
+                ["Drop a cable on empty space", "Add an effect or instrument there, wired."],
+                ["Drag a cable's end", "Move it to another port, or off to unplug it."],
+                ["Drop a free node on a cable", "Put it into that cable."],
+                ["Delete", "Remove the selected node and close the chain."],
+                ["Shift + Delete", "Remove it and leave the gap."],
+                ["Alt while dragging", "Move freely, off the grid."],
+                ["Ctrl + Z · Ctrl + Shift + Z", "Undo · redo."],
+                ["Right-click or hold", "The menu for a node or the canvas."],
+                ["Double-click a MIDI cable's key", "Its channel, range and velocity."],
+              ].map(([keys, what]) => (
+                <div key={keys}>
+                  <dt>{keys}</dt>
+                  <dd>{what}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
         ) : null}
         {refusal ? (
@@ -1556,6 +1787,12 @@ export default function RackGraphEditor({
                 setNodeMenu(null);
                 removeSelected();
               }} disabled={menuNode.kind.kind === "midi_input" || menuNode.kind.kind.endsWith("output")}>Remove node</button>
+              {menuNode.kind.kind === "plugin" ? (
+                <button type="button" role="menuitem" onClick={() => {
+                  setNodeMenu(null);
+                  removeSelected(false);
+                }}>Remove, leave the gap</button>
+              ) : null}
               <button type="button" role="menuitem" onClick={() => setNodeMenu(null)}>Close</button>
             </div>
           ) : null}
@@ -1625,11 +1862,6 @@ export default function RackGraphEditor({
           </ul>
         </div>
       ) : null}
-      <p className="rack-graph-hint">
-        Mouse wheel zooms · drag empty space to pan · drag ports to connect; an audio output
-        feeds one place, so a new cable from it moves the old one · Delete removes a selected
-        connection · double-click or hold a MIDI cable's center control to edit routing.
-      </p>
     </div>
   );
 }

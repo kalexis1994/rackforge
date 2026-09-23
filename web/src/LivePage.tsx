@@ -10,6 +10,7 @@ import {
 } from "react";
 import { ChevronLeft, ChevronRight, LogOut, Save } from "lucide-react";
 import { SequencerStrip } from "./SequencerPanel";
+import { GraphWorkspaceHeader } from "./components/GraphWorkspaceHeader";
 import { sendSequencerCommand } from "./gateway";
 import { pluginKind, usePluginCatalog } from "./pluginCatalog";
 import {
@@ -1742,111 +1743,6 @@ function BasicFields({
   );
 }
 
-function RackWorkspaceDetails({
-  name,
-  enabled,
-  dirty,
-  isNew,
-  pending,
-  instrumentCount,
-  previewStatus,
-  onName,
-  onEnabled,
-  onSave,
-  onExit,
-  onDismiss,
-  mobile = false,
-  saveBlocked = null,
-}: {
-  name: string;
-  enabled: boolean;
-  dirty: boolean;
-  isNew: boolean;
-  pending: boolean;
-  instrumentCount: number;
-  previewStatus: "idle" | "applying" | "ready";
-  onName: (name: string) => void;
-  onEnabled: (enabled: boolean) => void;
-  onSave: () => void;
-  onExit: () => void;
-  onDismiss?: () => void;
-  mobile?: boolean;
-  /** Why the Rack cannot be saved as it is, or null. */
-  saveBlocked?: string | null;
-}) {
-  return (
-    <section
-      className={`rack-workspace-details${mobile ? " mobile" : ""}`}
-      aria-label="Rack details"
-    >
-      <header>
-        <div>
-          <span className="card-kicker">Rack details</span>
-          <strong>{dirty || isNew ? "Unsaved changes" : "Saved"}</strong>
-        </div>
-        {onDismiss ? (
-          <button type="button" className="rack-details-dismiss" onClick={onDismiss} aria-label="Close Rack details">
-            ×
-          </button>
-        ) : null}
-      </header>
-      <div className="rack-details-fields">
-        <label>
-          <span>Name</span>
-          <input
-            value={name}
-            maxLength={64}
-            autoComplete="off"
-            onChange={(event) => onName(event.target.value)}
-          />
-        </label>
-        <label className="rack-details-toggle">
-          <span>
-            <strong>Available in LIVE</strong>
-            <small>{instrumentCount} {instrumentCount === 1 ? "instrument" : "instruments"}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(event) => onEnabled(event.target.checked)}
-          />
-          <i />
-        </label>
-      </div>
-      {saveBlocked ? (
-        <p className="rack-details-blocked" role="alert">{saveBlocked}</p>
-      ) : null}
-      <footer>
-        <span className={`rack-details-preview ${previewStatus}`}>
-          {previewStatus === "applying"
-            ? "Applying preview…"
-            : previewStatus === "ready"
-              ? "Preview active"
-              : "Preview idle"}
-        </span>
-        <div>
-          <button type="button" className="workspace-exit-button" disabled={pending} onClick={onExit}>
-            <LogOut aria-hidden="true" />
-            <span>Exit</span>
-          </button>
-          <button
-            type="button"
-            className="save-button"
-            disabled={(!dirty && !isNew) || pending || !!saveBlocked}
-            title={saveBlocked ?? undefined}
-            onClick={onSave}
-          >
-            <AsyncActionLabel active={pending} activeLabel="Saving…">
-              <Save aria-hidden="true" />
-              <span>Save</span>
-            </AsyncActionLabel>
-          </button>
-        </div>
-      </footer>
-    </section>
-  );
-}
-
 function validationName(name: string) {
   return name.trim().length === 0
     ? "Name is required."
@@ -2045,7 +1941,6 @@ function RackEditor({
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
   const [confirmDialog, askConfirmation] = useConfirmation();
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [pluginPicker, setPluginPicker] = useState<{
     position?: RackGraphPosition;
     role: RackPluginRole;
@@ -2166,7 +2061,6 @@ function RackEditor({
     setPluginPicker(null);
   }, [pluginPicker, plugins]);
   const handleGraphOverlayChange = useCallback((open: boolean) => {
-    if (open) setDetailsOpen(false);
     window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
       detail: { open },
     }));
@@ -2219,17 +2113,9 @@ function RackEditor({
   useEffect(() => {
     if (!immersive) return;
     const saveWorkspace = () => void save();
-    const openDetails = () => setDetailsOpen(true);
     window.addEventListener("rackforge:save-graph-workspace", saveWorkspace);
-    window.addEventListener("rackforge:open-graph-details", openDetails);
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setDetailsOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
     return () => {
       window.removeEventListener("rackforge:save-graph-workspace", saveWorkspace);
-      window.removeEventListener("rackforge:open-graph-details", openDetails);
-      window.removeEventListener("keydown", closeOnEscape);
     };
   }, [immersive, save]);
 
@@ -2276,25 +2162,25 @@ function RackEditor({
     }
   };
   const exitWorkspace = () => {
-    setDetailsOpen(false);
     window.dispatchEvent(new Event("rackforge:close-graph-workspace"));
   };
-  const workspaceDetails = (mobile = false) => (
-    <RackWorkspaceDetails
+  const workspaceHeader = (
+    <GraphWorkspaceHeader
+      title="Rack Editor"
+      nameLabel="Rack name"
       name={draft.name}
+      onName={(name) => setDraft({ ...draft, name })}
       enabled={draft.enabled}
+      onEnabled={(enabled) => setDraft({ ...draft, enabled })}
+      instrumentCount={previewInstrumentCount}
+      previewStatus={visiblePreviewStatus}
       dirty={dirty}
       isNew={isNew}
       pending={pending}
-      instrumentCount={previewInstrumentCount}
-      previewStatus={visiblePreviewStatus}
       saveBlocked={graphBlocking ? `Cannot be saved. ${graphBlocking}` : null}
-      onName={(name) => setDraft({ ...draft, name })}
-      onEnabled={(enabled) => setDraft({ ...draft, enabled })}
       onSave={() => void save()}
       onExit={exitWorkspace}
-      onDismiss={() => setDetailsOpen(false)}
-      mobile={mobile}
+      className="entity-rack"
     />
   );
 
@@ -2303,6 +2189,7 @@ function RackEditor({
       className={`performance-form rack-editor-form entity-rack${immersive ? " immersive" : ""}`}
       onSubmit={(event) => event.preventDefault()}
     >
+      {immersive ? workspaceHeader : null}
       {confirmDialog}
       <EditorHeader
         eyebrow={isNew ? "New Rack" : "Rack configuration"}
@@ -2334,16 +2221,6 @@ function RackEditor({
         onName={(name) => setDraft({ ...draft, name })}
         onEnabled={(enabled) => setDraft({ ...draft, enabled })}
       />
-      {immersive && detailsOpen ? (
-        <div
-          className="rack-details-sheet-backdrop"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget) setDetailsOpen(false);
-          }}
-        >
-          {workspaceDetails(true)}
-        </div>
-      ) : null}
       <EditorSection
         title="Rack graph"
         detail="Route instruments and child Racks. Positions and labels are portable; the viewport stays local to this device."
@@ -2546,92 +2423,6 @@ function SlotEditor({
   );
 }
 
-function SongWorkspaceDetails({
-  partName,
-  dirty,
-  isNew,
-  pending,
-  previewStatus,
-  instrumentCount,
-  onPartName,
-  onSave,
-  onExit,
-  onDismiss,
-  mobile = false,
-}: {
-  partName: string;
-  dirty: boolean;
-  isNew: boolean;
-  pending: boolean;
-  previewStatus: "idle" | "applying" | "ready";
-  instrumentCount: number;
-  onPartName: (name: string) => void;
-  onSave: () => void;
-  onExit: () => void;
-  onDismiss?: () => void;
-  mobile?: boolean;
-}) {
-  return (
-    <section
-      className={`rack-workspace-details song-workspace-details entity-song-part${mobile ? " mobile" : ""}`}
-      aria-label="Song Part details"
-    >
-      <header>
-        <div>
-          <span className="card-kicker">Song Part details</span>
-          <strong>{dirty || isNew ? "Unsaved changes" : "Saved"}</strong>
-        </div>
-        {onDismiss ? (
-          <button type="button" className="rack-details-dismiss" onClick={onDismiss} aria-label="Close Song Part details">
-            ×
-          </button>
-        ) : null}
-      </header>
-      <div className="rack-details-fields song-details-fields">
-        <label>
-          <span>Part name</span>
-          <input
-            value={partName}
-            maxLength={64}
-            autoComplete="off"
-            onChange={(event) => onPartName(event.target.value)}
-          />
-        </label>
-        <div className="song-part-details-summary">
-          <span>Graph preview</span>
-          <strong>{instrumentCount} {instrumentCount === 1 ? "active instrument" : "active instruments"}</strong>
-        </div>
-      </div>
-      <footer>
-        <span className={`rack-details-preview ${previewStatus}`}>
-          {previewStatus === "applying"
-            ? "Applying preview…"
-            : previewStatus === "ready"
-              ? `${instrumentCount} active`
-              : "Preview idle"}
-        </span>
-        <div>
-          <button type="button" className="workspace-exit-button" disabled={pending} onClick={onExit}>
-            <LogOut aria-hidden="true" />
-            <span>Exit</span>
-          </button>
-          <button
-            type="button"
-            className="save-button"
-            disabled={(!dirty && !isNew) || pending}
-            onClick={onSave}
-          >
-            <AsyncActionLabel active={pending} activeLabel="Saving…">
-              <Save aria-hidden="true" />
-              <span>Save</span>
-            </AsyncActionLabel>
-          </button>
-        </div>
-      </footer>
-    </section>
-  );
-}
-
 function SongEditor({
   song,
   performance,
@@ -2667,7 +2458,6 @@ function SongEditor({
   const [error, setError] = useState<string | null>(null);
   const [confirmDialog, askConfirmation] = useConfirmation();
   const [selectedPartId, setSelectedPartId] = useState(song?.parts[0]?.id);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [pluginPicker, setPluginPicker] = useState<{
     position?: RackGraphPosition;
     role: RackPluginRole;
@@ -2719,6 +2509,21 @@ function SongEditor({
       };
     });
   }, [selectedPart, selectedPartIndex, updatePart]);
+  // A Part whose graph has an error keeps the Song from being saved, as a
+  // Rack's does (rackGraphProblems); the first one found is named.
+  const graphBlocking = useMemo(() => {
+    if (!draft) return null;
+    for (const part of draft.parts) {
+      const rack = materializeRackGraph(songPartAsRack(part));
+      const problem = rackGraphBlockingProblem(
+        rack.graph!,
+        { slots: rack.slots, slotRole: (slot) => rackPluginRole(slot.plugin_id, plugins) },
+        (nodeId) => rackGraphNodeName(rack, nodeId),
+      );
+      if (problem) return `In ${part.name}, ${problem}`;
+    }
+    return null;
+  }, [draft, plugins]);
   const save = useCallback(async () => {
     if (!draft) return;
     const nextError = validationName(draft.name) ??
@@ -2730,16 +2535,7 @@ function SongEditor({
           (node) => node.kind.kind === "plugin" || node.kind.kind === "rack",
         );
       }) ? "Every Part needs at least one instrument or Rack node." : null) ??
-      draft.parts.reduce<string | null>((found, part) => {
-        if (found) return found;
-        const rack = materializeRackGraph(songPartAsRack(part));
-        const problem = rackGraphBlockingProblem(
-          rack.graph!,
-          { slots: rack.slots, slotRole: (slot) => rackPluginRole(slot.plugin_id, plugins) },
-          (nodeId) => rackGraphNodeName(rack, nodeId),
-        );
-        return problem ? `The Song cannot be saved. In ${part.name}, ${problem}` : null;
-      }, null);
+      (graphBlocking ? `The Song cannot be saved. ${graphBlocking}` : null);
     setError(nextError);
     if (nextError) return;
     try {
@@ -2754,9 +2550,8 @@ function SongEditor({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Song.");
     }
-  }, [baseRevision, draft, onSaved, plugins]);
+  }, [baseRevision, draft, graphBlocking, onSaved]);
   const handleGraphOverlayChange = useCallback((open: boolean) => {
-    if (open) setDetailsOpen(false);
     window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
       detail: { open },
     }));
@@ -2764,17 +2559,9 @@ function SongEditor({
   useEffect(() => {
     if (!immersive) return;
     const saveWorkspace = () => void save();
-    const openDetails = () => setDetailsOpen(true);
     window.addEventListener("rackforge:save-graph-workspace", saveWorkspace);
-    window.addEventListener("rackforge:open-graph-details", openDetails);
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setDetailsOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
     return () => {
       window.removeEventListener("rackforge:save-graph-workspace", saveWorkspace);
-      window.removeEventListener("rackforge:open-graph-details", openDetails);
-      window.removeEventListener("keydown", closeOnEscape);
     };
   }, [immersive, save]);
   if (!draft) return <EditorEmpty>Select a Song or create a new one.</EditorEmpty>;
@@ -2826,25 +2613,26 @@ function SongEditor({
     }
   };
   const exitWorkspace = () => {
-    setDetailsOpen(false);
     window.dispatchEvent(new Event("rackforge:close-graph-workspace"));
   };
-  const workspaceDetails = (mobile = false) => (
-    <SongWorkspaceDetails
-      partName={selectedPart?.name ?? "Song Part"}
-      dirty={dirty}
-      isNew={isNew}
-      pending={pending}
-      previewStatus={partPreview.status}
-      instrumentCount={partPreview.instrumentCount}
-      onPartName={(name) => {
+  const workspaceHeader = (
+    <GraphWorkspaceHeader
+      title="Song Part Editor"
+      nameLabel="Part name"
+      name={selectedPart?.name ?? "Song Part"}
+      onName={(name) => {
         if (selectedPartIndex < 0) return;
         updatePart(selectedPartIndex, (part) => ({ ...part, name }));
       }}
+      instrumentCount={partPreview.instrumentCount}
+      previewStatus={partPreview.status}
+      dirty={dirty}
+      isNew={isNew}
+      pending={pending}
+      saveBlocked={graphBlocking ? `Cannot be saved. ${graphBlocking}` : null}
       onSave={() => void save()}
       onExit={exitWorkspace}
-      onDismiss={() => setDetailsOpen(false)}
-      mobile={mobile}
+      className="entity-song-part"
     />
   );
   return (
@@ -2852,6 +2640,7 @@ function SongEditor({
       className={`performance-form song-editor-form entity-song${immersive ? " immersive" : ""}`}
       onSubmit={(event) => event.preventDefault()}
     >
+      {immersive ? workspaceHeader : null}
       {confirmDialog}
       <EditorHeader eyebrow={isNew ? "New Song" : "Song configuration"} title={draft.name} dirty={dirty || isNew} pending={pending} onSave={save} onReset={() => { setDraft(original ? clone(original) : newSong(performance)); setBaseRevision(performance.revision); setError(null); }} onDelete={isNew ? undefined : remove} />
       {error && <div className="form-error">{error}</div>}
@@ -2866,16 +2655,6 @@ function SongEditor({
         </div>
       ) : null}
       <BasicFields name={draft.name} enabled={draft.enabled} onName={(name) => setDraft({ ...draft, name })} onEnabled={(enabled) => setDraft({ ...draft, enabled })} />
-      {immersive && detailsOpen ? (
-        <div
-          className="rack-details-sheet-backdrop"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget) setDetailsOpen(false);
-          }}
-        >
-          {workspaceDetails(true)}
-        </div>
-      ) : null}
       <EditorSection
         title="Song Parts"
         detail="Parts are ordered scenes. Every Part owns a graph; all connected instrument and Rack paths can sound together."

@@ -5671,28 +5671,181 @@
   color: var(--acid) !important;
 }
 
-/* The workspace details are a dialog over the editor, which the ground
-   behind dims as every dialog's does; the plate rises into place. */
-.rack-details-sheet-backdrop {
-  background: rgba(var(--edge-dark-rgb), 0.62);
-  animation: rf-backdrop-in var(--rf-motion-fast) var(--rf-ease-standard) both;
+/* ------------------------------------------------ the editor's header ---
+   Across the top of the node editor while it is open, where the thin bar
+   and the details dialog used to be: what is edited and whether it is
+   saved, its name, Available in LIVE, the preview, and Exit and Save --
+   Save the one painted key, off while the graph has an error. It wraps to
+   a second row before anything is cut. */
+.graph-workspace-header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  padding: 10px 14px;
+  color: var(--ink);
+  background: var(--fp-panel);
+  border-bottom: var(--fp-seam);
+  box-shadow: var(--fp-lip);
 }
 
-.rack-workspace-details.mobile {
-  box-shadow: var(--fp-lip), 0 18px 48px rgba(var(--edge-dark-rgb), 0.45) !important;
-  animation: rf-dialog-in var(--rf-motion-standard) var(--rf-ease-emphasized) both;
+.graph-workspace-title {
+  display: grid;
+  gap: 3px;
+  min-width: 108px;
 }
 
-/* Why the Rack cannot be saved: an error plate inside the dialog, above
-   the Save key it has turned off. */
-.rack-details-blocked {
-  margin: 0 12px 10px;
-  padding: 8px 10px;
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 7%, var(--paper));
-  border: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+.graph-workspace-title .card-kicker {
+  color: var(--ink);
+}
+
+.graph-workspace-state {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.graph-workspace-state strong {
+  color: var(--muted);
+  font: 600 11px/1 var(--display-font);
+}
+
+.graph-workspace-state .graph-workspace-preview::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--muted);
+}
+
+.graph-workspace-name {
+  flex: 1 1 160px;
+  max-width: 340px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.graph-workspace-count,
+.graph-workspace-preview {
+  flex: 0 0 auto;
+  color: var(--fp-rail-label);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.graph-workspace-name input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
   border-radius: var(--fp-radius-key);
-  font: 600 12px/1.45 var(--display-font);
+  box-shadow: var(--fp-well);
+  font: 600 13px/1 var(--display-font);
+}
+
+.graph-workspace-name input:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+.graph-workspace-live {
+  min-height: 34px;
+}
+
+/* Narrow, the rail is hidden and the navigation opens from the header's
+   own menu key, first in its row; "Cannot be saved" gives way to room, as
+   Save is off and the strip under the canvas says why. */
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .graph-workspace-header {
+    gap: 8px 12px;
+    padding: 8px;
+  }
+
+  .graph-workspace-blocked {
+    display: none;
+  }
+}
+
+.graph-workspace-preview.ready {
+  color: var(--green);
+}
+
+.graph-workspace-preview.applying {
+  color: var(--acid);
+}
+
+.graph-workspace-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.graph-workspace-blocked {
+  color: var(--red);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.graph-workspace-key,
+.graph-workspace-key .async-action-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.graph-workspace-key {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: var(--fp-radius-key);
+  font: 700 var(--fp-label)/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.graph-workspace-key svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.graph-workspace-key.exit {
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.graph-workspace-key.exit:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.graph-workspace-key.save {
+  min-width: 92px;
+  color: var(--acid-ink);
+  background: var(--acid);
+  border: 1px solid color-mix(in srgb, var(--acid) 70%, var(--line));
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.graph-workspace-key:active:not(:disabled) {
+  box-shadow: var(--fp-well);
+}
+
+.graph-workspace-key:disabled {
+  opacity: 0.42;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 /* The details plate: a plate, not smoked glass. */

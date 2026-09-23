@@ -8876,7 +8876,8 @@ body {
 .graph-workspace-active .topbar,
 .graph-workspace-active .live-toolbar,
 .graph-workspace-active .config-library,
-.graph-workspace-active .sequencer-shell {
+.graph-workspace-active .sequencer-shell,
+.app-shell.graph-workspace-active .live-performance-bar {
   display: none;
 }
 
@@ -8972,9 +8973,6 @@ body {
     grid-column: 1;
   }
 
-  .graph-workspace-active .live-performance-bar {
-    padding-left: 58px;
-  }
 
   .graph-workspace-active .performance-menu-button {
     position: absolute;
@@ -9321,58 +9319,6 @@ body {
   --rack-float-inset: 14px;
 }
 
-/* The workspace details -- name, Available in LIVE, Save and Exit -- are a
-   dialog at every size, opened from the key beside the zoom cluster. On a
-   wide screen they used to float open over the top-left of the canvas,
-   covering the nodes placed there. */
-
-/* Beside the zoom cluster inside the canvas, one inset clear of it. The
-   cluster is three 30px keys and its two borders; if a fourth is ever
-   added, this is the number that moves with it. */
-.rack-graph-canvas .rack-details-floating-button {
-  position: absolute;
-  top: var(--rack-float-inset);
-  right: calc(var(--rack-float-inset) * 2 + 92px);
-  z-index: 5;
-}
-
-.rack-details-floating-button {
-  position: absolute;
-  z-index: 36;
-  width: 42px;
-  height: 42px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  touch-action: manipulation;
-  cursor: pointer;
-}
-
-.rack-details-floating-button svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* Centred over the editor, the editor dimmed behind it. */
-.rack-details-sheet-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 40;
-  padding:
-    max(12px, var(--rackforge-safe-top))
-    max(12px, var(--rackforge-safe-right))
-    max(12px, var(--rackforge-safe-bottom))
-    max(12px, var(--rackforge-safe-left));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.rack-workspace-details.mobile {
-  width: min(420px, 100%);
-  max-height: 100%;
-  overflow: auto;
-}
 
 .graph-workspace-active .rack-editor-form.immersive > .editor-header,
 .graph-workspace-active .rack-editor-form.immersive > .basic-fields,

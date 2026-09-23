@@ -429,6 +429,13 @@ function RackForgeApp() {
     (instance) => instance.instance_id === snapshot.active_instance_id,
   )?.plugin_name;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // A surface that draws its own menu key -- the node editor's header --
+  // asks for the navigation by event rather than by a prop threaded down.
+  useEffect(() => {
+    const open = () => setMobileMenuOpen(true);
+    window.addEventListener("rackforge:open-navigation", open);
+    return () => window.removeEventListener("rackforge:open-navigation", open);
+  }, []);
   const [installPluginOpen, setInstallPluginOpen] = useState(false);
   const [playOverlay, setPlayOverlay] = useState<"plugins" | "presets" | null>(null);
   const [liveSurface, setLiveSurface] = useState<"perform" | "configure">("perform");
@@ -647,11 +654,13 @@ function RackForgeApp() {
             onMenu={() => setMobileMenuOpen((open) => !open)}
           />
         ) : null}
-        {isPerformanceSurface ? (
+        {/* The node editor's header carries the menu key itself; the
+            floating one is for the performance surfaces with no header. */}
+        {isPerformanceSurface && liveWorkspace === null ? (
           <FloatingPerformanceMenuButton
             menuOpen={mobileMenuOpen}
             onOpen={() => setMobileMenuOpen(true)}
-            showGraphDetails={liveWorkspace !== null}
+            showGraphDetails={false}
           />
         ) : null}
         {error && <div className="error-banner">{error}</div>}

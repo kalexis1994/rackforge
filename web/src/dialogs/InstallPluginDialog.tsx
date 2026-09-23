@@ -5,10 +5,16 @@ import { BrandMark } from "../components/BrandMark";
 import { ModalDialog } from "../components/ModalDialog";
 import { RfLoader } from "../components/RfLoader";
 import { ResourceExplorerDialog } from "../dialogs/lazyResourceExplorer";
-import { requestSessionSnapshot } from "../gateway";
+import { dispatchCommandAwait } from "../gateway";
 import { hostHaptic, hostJson, isDesktopHost, isNativeHost, isRemoteWebClient, selectNativeResource } from "../host";
 import { beginPluginOperation, invalidatePluginCatalog } from "../pluginCatalog";
-import { InstalledPluginResult, activateInstalledPlugin } from "../pluginLifecycle";
+import {
+  InstalledPluginResult,
+  activateInstalledPlugin,
+  awaitPluginInstance,
+  synchronizePluginEnvironment,
+} from "../pluginLifecycle";
+import { commitPlayPluginSelection, preflightPlayPluginSelection } from "../playPluginSelection";
 import { MAX_CLIENT_RESOURCE_BYTES, postResourceApi } from "../resourceApi";
 import { type PluginWebDescriptor, type ResourceEntry, type ResourceSelection } from "../types";
 import { FileUp, FolderOpen } from "lucide-react";
@@ -212,17 +218,42 @@ export function InstallPluginDialog({ onClose }: { onClose: () => void }) {
     );
     try {
       await activateInstalledPlugin(installed);
-      const refreshed = await requestSessionSnapshot();
-      const instance = refreshed.instances.find(
-        (candidate) => candidate.plugin_id === installed.plugin_id,
-      );
-      if (destination === "config" && !instance) {
-        throw new Error("RackForge activated the plugin but did not publish its configuration instance.");
+      const { snapshot, instance } = await awaitPluginInstance(installed.plugin_id);
+      if (!instance) {
+        throw new Error(
+          destination === "play"
+            ? "RackForge activated the plugin but did not publish it to PLAY."
+            : "RackForge activated the plugin but did not publish its configuration instance.",
+        );
+      }
+      if (destination === "play") {
+        // Activating a plugin does not make it the one PLAY shows: that is
+        // the session's active instance, and it stays whatever was playing
+        // until something selects the new one. The same transition the
+        // Plugin Manager's "Open in PLAY" makes, so both land in one place.
+        const request = {
+          target: {
+            pluginId: installed.plugin_id,
+            pluginName: installedDescriptor?.plugin_name ?? installed.plugin_id,
+            instanceId: instance.instance_id,
+          },
+          activeInstanceId: snapshot.active_instance_id,
+        };
+        if (preflightPlayPluginSelection(request).status !== "already_active") {
+          await commitPlayPluginSelection(request, {
+            dispatch: dispatchCommandAwait,
+            activate: (pluginId) =>
+              hostJson(`/api/v1/plugins/${encodeURIComponent(pluginId)}/activate`, {
+                method: "POST",
+              }),
+            synchronize: synchronizePluginEnvironment,
+          });
+        }
       }
       navigate(
         destination === "play"
           ? "/play"
-          : `/plugins/${encodeURIComponent(instance!.instance_id)}`,
+          : `/plugins/${encodeURIComponent(instance.instance_id)}`,
       );
       onClose();
     } catch (reason) {

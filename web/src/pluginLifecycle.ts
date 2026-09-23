@@ -1,7 +1,7 @@
 import { requestSessionSnapshot } from "./gateway";
 import { hostJson } from "./host";
 import { beginPluginOperation, invalidatePluginCatalog } from "./pluginCatalog";
-import { type PluginWebDescriptor } from "./types";
+import { type PluginInstance, type PluginWebDescriptor, type SessionSnapshot } from "./types";
 
 export interface InstalledPluginResult {
   plugin_id: string;
@@ -60,6 +60,33 @@ export async function activateInstalledPlugin(
       : new Error("RackForge installed the plugin but activation did not finish in time.");
   } finally {
     finishOperation();
+  }
+}
+
+/**
+ * The session instance an activated plugin runs as, and the snapshot that
+ * shows it.
+ *
+ * Activation and the session snapshot are separate messages, and a host may
+ * publish the new instance a moment after it says the plugin is active. Asking
+ * once and moving on is how "Open in PLAY" came to open whichever instrument
+ * had been playing before: the new one was not in the snapshot yet, so nothing
+ * selected it. This asks again until it appears or `timeoutMs` passes.
+ */
+export async function awaitPluginInstance(
+  pluginId: string,
+  requestSnapshot: () => Promise<SessionSnapshot> = requestSessionSnapshot,
+  timeoutMs = 5_000,
+  intervalMs = 150,
+): Promise<{ snapshot: SessionSnapshot; instance?: PluginInstance }> {
+  const startedAt = performance.now();
+  for (;;) {
+    const snapshot = await requestSnapshot();
+    const instance = snapshot.instances.find((candidate) => candidate.plugin_id === pluginId);
+    if (instance || performance.now() - startedAt >= timeoutMs) {
+      return { snapshot, instance };
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }
 

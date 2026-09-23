@@ -301,7 +301,10 @@ fn where_a_parallel_block_spends_its_time() {
         // ---- C: the same units across the real pool ----------------------
         let telemetry = RenderTelemetry::new(3);
         let mut pool = RenderPool::with_workers(3, telemetry);
-        assert!(pool.worker_count() >= 2, "this machine cannot schedule units");
+        assert!(
+            pool.worker_count() >= 2,
+            "this machine cannot schedule units"
+        );
         let mut voices = vec![Voice::create(plugin, true)];
         voices[0].events = first_block.clone();
         let mut pooled = Vec::with_capacity(BLOCKS);
@@ -337,9 +340,18 @@ fn where_a_parallel_block_spends_its_time() {
             pool.worker_count()
         );
         println!("  --------");
-        println!("  B-A  el transporte cuesta        {:8.1} us", micros(b - a));
-        println!("  C-B  los hilos cuestan           {:8.1} us", micros(c - b));
-        println!("  C-A  la sobrecarga total         {:8.1} us", micros(c - a));
+        println!(
+            "  B-A  el transporte cuesta        {:8.1} us",
+            micros(b - a)
+        );
+        println!(
+            "  C-B  los hilos cuestan           {:8.1} us",
+            micros(c - b)
+        );
+        println!(
+            "  C-A  la sobrecarga total         {:8.1} us",
+            micros(c - a)
+        );
         // `finish` is the mix writes plus `end_block`, and the mix writes are
         // the whole of what the transport costs, so the rest of `finish` is
         // the global stage: the soundboard, the sympathetic bank and the

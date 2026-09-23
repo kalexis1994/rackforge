@@ -1374,12 +1374,17 @@ fn the_packaged_concert_grand_matches_its_sequential_fallback() {
         "plugins/concert-grand/package",
         "rackforge_concert_grand.wasm",
     );
-    let layout = plugin.parallel_layout().expect("the Concert Grand is parallel");
+    let layout = plugin
+        .parallel_layout()
+        .expect("the Concert Grand is parallel");
     assert_eq!(layout.max_units, 4, "one unit per string section");
     // The property this whole file exists to hold: a section hands over
     // twenty floats a frame -- a bridge force, sixteen drive points and two
     // keybed contributions -- into a stereo instrument.
-    assert_eq!(layout.unit_channels, 20, "a section is wider than the piano");
+    assert_eq!(
+        layout.unit_channels, 20,
+        "a section is wider than the piano"
+    );
 
     let telemetry = RenderTelemetry::new(1);
     let mut classic_voices = vec![TestVoice::create(plugin, false)];
@@ -1456,7 +1461,10 @@ fn a_parallel_block_reports_the_fuel_the_whole_block_spent() {
     // The same block, the same work, split across workers.
     let telemetry = RenderTelemetry::new(3);
     let mut pool = RenderPool::with_workers(3, telemetry);
-    assert!(pool.worker_count() >= 2, "this machine cannot schedule units");
+    assert!(
+        pool.worker_count() >= 2,
+        "this machine cannot schedule units"
+    );
     let mut voices = vec![TestVoice::create(plugin, true)];
     voices[0].events = vec![note];
     assert!(pool.process(&mut voices, FRAMES, CHANNELS, 1_000_000_000));

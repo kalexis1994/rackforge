@@ -405,10 +405,7 @@ impl PortableModule {
             let mix_offset = raw.call_0(export::PARALLEL_MIX_PTR, "parallel_mix_ptr")?;
             // Optional, as on the native host: zero means the output channels.
             let unit_channels = raw
-                .call_0(
-                    export::PARALLEL_UNIT_CHANNELS,
-                    "parallel_unit_channels",
-                )
+                .call_0(export::PARALLEL_UNIT_CHANNELS, "parallel_unit_channels")
                 .unwrap_or(0)
                 .max(0);
             // Optional, as on the native host: zero means a unit has

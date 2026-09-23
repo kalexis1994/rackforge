@@ -46,8 +46,13 @@ pub(crate) mod probe {
         "la simulacion del golpe en si",
     ];
     pub static NANOS: [AtomicU64; 7] = [
-        AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
-        AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
     ];
     pub fn add(phase: usize, nanos: u64) {
         NANOS[phase].fetch_add(nanos, Ordering::Relaxed);
@@ -59,11 +64,18 @@ pub(crate) mod probe {
     }
     pub fn report(label: &str) {
         let total: u64 = NANOS.iter().map(|s| s.load(Ordering::Relaxed)).sum();
-        std::println!("
-=== {label} ===   total {:.0} us", total as f64 / 1000.0);
+        std::println!(
+            "
+=== {label} ===   total {:.0} us",
+            total as f64 / 1000.0
+        );
         for (phase, name) in PHASES.iter().enumerate() {
             let nanos = NANOS[phase].load(Ordering::Relaxed);
-            let share = if total > 0 { 100.0 * nanos as f64 / total as f64 } else { 0.0 };
+            let share = if total > 0 {
+                100.0 * nanos as f64 / total as f64
+            } else {
+                0.0
+            };
             std::println!(
                 "  {:>38}  {:>8.0} us  {:>5.1} %  {}",
                 name,
@@ -88,10 +100,10 @@ macro_rules! phase {
 }
 
 use rackforge_plugin_sdk::{
-    BlockContext, ParallelProcessor, PlanWriter, UnitContext, UnitMix, UnitWork,
-    MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_FLAG_RELEASE_MEASURED,
-    MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF, MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2,
-    ParameterEvent, export_parallel_processor,
+    BlockContext, MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT,
+    MIDI2_FLAG_RELEASE_MEASURED, MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF,
+    MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2, ParallelProcessor, ParameterEvent, PlanWriter,
+    UnitContext, UnitMix, UnitWork, export_parallel_processor,
 };
 
 /// A tunable constant of the model: it ships with the value the constant had,
@@ -796,8 +808,6 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "SIM_MIN_MODES",
         &SIM_MIN_MODES,
         "Partials a note needs under SIM_TOP_HZ before its strike is integrated rather than drawn.",
-
-
     ),
     (
         "COMB_FLOOR_LOW",
@@ -1115,7 +1125,6 @@ const STRING_SECTIONS: usize = 4;
 const VOICES_PER_SECTION: usize = MAX_VOICES / STRING_SECTIONS;
 /// `slot >> SECTION_SHIFT` is a slot's index inside its section.
 const SECTION_SHIFT: u32 = STRING_SECTIONS.trailing_zeros();
-
 
 /// How many samples of drive-point history the board may read through.
 const BOARD_FEED_HISTORY: usize = 256;
@@ -3952,7 +3961,6 @@ struct VoiceFrame {
     culled: usize,
 }
 
-
 #[derive(Clone, Copy)]
 
 struct Voice<const PARTIALS: usize = MAX_PARTIALS> {
@@ -4442,7 +4450,6 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
             }
         }
     }
-
 
     /// One frame of this voice, and everything it needs to make one.
     ///
@@ -6373,7 +6380,7 @@ struct StringEngine {
 impl Default for StringEngine {
     fn default() -> Self {
         Self {
-                cal: [
+            cal: [
                 [
                     0.7665, 2.3440, 0.5097, 0.3392, 1.0000, 0.9236, 1.6842, 1.0000, 1.0000,
                 ],
@@ -6405,12 +6412,12 @@ impl Default for StringEngine {
                     1.0345, 0.4249, 4.0000, 4.0000, 1.0000, 1.0000, 1.0000, 1.0000, 2.0000,
                 ],
             ],
-                controls: Controls::default(),
-                fundamental: [0.0; NOTE_COUNT],
-                inharmonicity: [0.0; NOTE_COUNT],
-                restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
-                sample_rate: 48_000.0,
-                strike_budget: 0,
+            controls: Controls::default(),
+            fundamental: [0.0; NOTE_COUNT],
+            inharmonicity: [0.0; NOTE_COUNT],
+            restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
+            sample_rate: 48_000.0,
+            strike_budget: 0,
         }
     }
 }
@@ -7272,12 +7279,16 @@ impl StringUnit {
         // here: 37 mm turns up among technicians as a shortened figure and
         // ~46 mm as the regulated one. The mechanism is certain; the fraction
         // is judgement, like the strike skew and the damper's spread.
-        let (velocity, shift, repetition, at_string) = self.engine.action_blow(velocity, soft, returned);
+        let (velocity, shift, repetition, at_string) =
+            self.engine.action_blow(velocity, soft, returned);
         // The coordinator asked the same question of the same function
         // before it took this slot, so a hammer that stops short cannot
         // arrive here -- and if it ever did, it would be a silent note
         // holding a voice, not a wrong sound.
-        debug_assert!(at_string > 0.0, "un martillo que no llega se quedo con una voz");
+        debug_assert!(
+            at_string > 0.0,
+            "un martillo que no llega se quedo con una voz"
+        );
         let (letoff, _) = self.engine.hammer_speeds_at(repetition, velocity);
 
         // A RE-STRUCK STRING IS THE SAME STRING. If this note is still
@@ -7517,7 +7528,11 @@ impl StringUnit {
             // does not vanish — it sits on a ragged −30…−45 dB shelf out to
             // 8 kHz, the sustained nonlinear forest, growing as the square
             // of velocity. A cliff to silence sounds hollowed out.
-            let floor = 0.0455 * velocity * velocity * self.engine.controls.lab(6) * self.engine.cal(note, 1);
+            let floor = 0.0455
+                * velocity
+                * velocity
+                * self.engine.controls.lab(6)
+                * self.engine.cal(note, 1);
             let felt = expf(-1.2 * felt_r * felt_r).max(floor);
             // The board barely radiates below its first mode: the lowest
             // notes' fundamentals (and even second partials) come out tens of
@@ -7614,8 +7629,9 @@ impl StringUnit {
                 // string-as-spring, tau = pi*sqrt(m / (T*L/(x0*(L-x0)))),
                 // and that is proportional to sqrt(m).
                 let head = 0.0035 + 0.0075 * powf(1.0 - position, 2.5);
-                let mass = (head / strings_struck * self.engine.controls.lab(8) * HAMMER_MASS_SCALE.get())
-                    .max(1e-4);
+                let mass =
+                    (head / strings_struck * self.engine.controls.lab(8) * HAMMER_MASS_SCALE.get())
+                        .max(1e-4);
                 // The action's dynamic span: how much faster the hammer
                 // arrives at full velocity than at none. `dynamics` is the
                 // regulation -- a shallow action compresses the span, a deep
@@ -7747,7 +7763,10 @@ impl StringUnit {
                     * bass_gain
                     * treble_gain
                     * self.engine.controls.lab(7)
-                    * powf(10.0, 2.0 * (self.engine.controls.brightness - HOUSE_BRIGHTNESS))
+                    * powf(
+                        10.0,
+                        2.0 * (self.engine.controls.brightness - HOUSE_BRIGHTNESS),
+                    )
                     * powf(
                         1.0 / FELT_REFERENCE_COMPRESSION_M.get(),
                         exponent - house_exponent,
@@ -7933,8 +7952,7 @@ impl StringUnit {
         }
 
         let floor = peak * 1e-3;
-        let budget_left =
-            self.allowance.saturating_sub(self.partials);
+        let budget_left = self.allowance.saturating_sub(self.partials);
         // Sixteen slots stay reserved for the nonlinear extras (phantoms and
         // the longitudinal clang): the lowest notes fill the whole array with
         // their transverse ladder otherwise, and the growl never fits.
@@ -7953,8 +7971,9 @@ impl StringUnit {
                 energy += amplitude * amplitude;
             }
         }
-        let scale = 0.28 * self.engine.cal(note, 7) * powf(velocity.max(0.01), LEVEL_VELOCITY_POWER.get())
-            / sqrtf(energy.max(1e-9));
+        let scale =
+            0.28 * self.engine.cal(note, 7) * powf(velocity.max(0.01), LEVEL_VELOCITY_POWER.get())
+                / sqrtf(energy.max(1e-9));
 
         // Everything a partial needs, computed before a voice is borrowed:
         // both components draw their decay from the same loss curve, read at
@@ -7975,8 +7994,7 @@ impl StringUnit {
         // -- and it was paying for a power of the strike position, and for
         // nine atomic reads of knobs that cannot change inside it, once for
         // every partial it built.
-        let horizontal_share =
-            HORIZONTAL_SHARE.get() * (0.65 + 1.2 * powf(1.0 - position, 1.5));
+        let horizontal_share = HORIZONTAL_SHARE.get() * (0.65 + 1.2 * powf(1.0 - position, 1.5));
         let horizontal_bridge = HORIZONTAL_BRIDGE.get();
         let unison_jitter_spread = UNISON_JITTER_SPREAD.get();
         let polarisation_cents = POLARISATION_CENTS.get();
@@ -7995,15 +8013,17 @@ impl StringUnit {
             // A4 holds nearly level from 1 s to 2 s while a shared decay
             // curve kept falling. ×1.8 on the slow stage matches the
             // measured plateau.
-            let mut t60 = self.engine.t60_seconds(frequency, f0, string_scale, treble_life);
+            let mut t60 = self
+                .engine
+                .t60_seconds(frequency, f0, string_scale, treble_life);
             if n == 0 {
                 // The fundamental's prompt stage as the reference measured
                 // it at this key -- the bridge's conductance at this point
                 // and pitch, which no smooth law carries. The law's own
                 // controls (the Decay fader, the treble life) stay on top
                 // of it: the table is the mechanism, not the setting.
-                let controls =
-                    (0.5 + 1.5 * self.engine.controls.decay) * self.engine.hf_life(frequency * string_scale);
+                let controls = (0.5 + 1.5 * self.engine.controls.decay)
+                    * self.engine.hf_life(frequency * string_scale);
                 let measured = measured_prompt_t60(note) * controls;
                 t60 *= powf(
                     measured / t60.max(1e-3),
@@ -8127,7 +8147,8 @@ impl StringUnit {
             // What legitimately gathers -- the horizontal polarisation, the
             // aftersound as the unison dephases -- gathers through the
             // two-stage decay and the halo, not through here.
-            let rise_seconds = ((5.0 / frequency) * self.engine.controls.lab(9)).clamp(0.0008, 0.15);
+            let rise_seconds =
+                ((5.0 / frequency) * self.engine.controls.lab(9)).clamp(0.0008, 0.15);
             let rise = expf(-1.0 / (rise_seconds * sample_rate));
             // The horizontal picks up more of the blow in the bass: a wound
             // string's mass sits far off its bending axis and the bridge's
@@ -8837,7 +8858,10 @@ impl StringUnit {
                 );
                 let detuned = (frequency * spread).min(nyquist);
                 let amplitude = amplitudes[n] * scale * 0.063;
-                let t60 = self.engine.t60_seconds(frequency, f0, string_scale, treble_life) * 1.5;
+                let t60 = self
+                    .engine
+                    .t60_seconds(frequency, f0, string_scale, treble_life)
+                    * 1.5;
                 let slow = self.engine.decay_per_sample(t60);
                 let mut built = Partial::default();
                 built.set_lane(0, Component::start(amplitude, detuned, slow, sample_rate));
@@ -8852,8 +8876,7 @@ impl StringUnit {
             // going to use, and it never leaves the section that struck it.
             let index = self.pick_halo();
             let carried = self.halos[index].partial_count;
-            self.partials =
-                self.partials.saturating_sub(carried);
+            self.partials = self.partials.saturating_sub(carried);
             let shadow = &mut self.halos[index];
             *shadow = Voice::default();
             shadow.pole_ceiling = pole_ceiling(sample_rate);
@@ -8904,7 +8927,8 @@ impl StringUnit {
         };
         let damper = self.engine.damper_factor(note, firmness, span);
         let (thud_coefficient, thud_decay) = self.engine.damper_thud();
-        let release_gain = Controls::noise_gain(self.engine.controls.release_noise) * firmness * knock;
+        let release_gain =
+            Controls::noise_gain(self.engine.controls.release_noise) * firmness * knock;
         let rate = self.engine.sample_rate;
         let grip = self.engine.controls.damper_grip();
         let key_off = KEYOFF_KNOCK * release_gain;
@@ -8965,13 +8989,7 @@ impl StringUnit {
         }
     }
 
-    fn pedal_voices(
-        &mut self,
-        pressure: f32,
-        rail_lifted: bool,
-        sostenuto: bool,
-        serial: u32,
-    ) {
+    fn pedal_voices(&mut self, pressure: f32, rail_lifted: bool, sostenuto: bool, serial: u32) {
         let (thud_coefficient, thud_decay) = self.engine.damper_thud();
         let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
         let rate = self.engine.sample_rate;
@@ -9139,12 +9157,7 @@ impl StringUnit {
 
     /// This unit's strings for one frame: its eight voices and its four
     /// halos, and what they put on the bridge.
-    fn render_frame(
-        &mut self,
-        feed: f32,
-        sympathy_rate: f32,
-        sostenuto: bool,
-    ) -> SectionFrame {
+    fn render_frame(&mut self, feed: f32, sympathy_rate: f32, sostenuto: bool) -> SectionFrame {
         let mut made = SectionFrame::default();
         let mut culled = 0usize;
         macro_rules! deposit {
@@ -9269,16 +9282,15 @@ impl StringUnit {
             return index;
         }
         (0..HALOS_PER_SECTION)
-            .min_by(|a, b| {
-                self.halos[*a].energy.total_cmp(&self.halos[*b].energy)
-            })
+            .min_by(|a, b| self.halos[*a].energy.total_cmp(&self.halos[*b].energy))
             .unwrap_or(0)
     }
 
     /// Takes the slot `pick_voice_slot` chose, refunding what it was
     /// carrying. This is where the budget moves, and it has not moved.
     fn claim_voice(&mut self, slot: usize) -> &mut Voice {
-        self.partials = self.partials
+        self.partials = self
+            .partials
             .saturating_sub(unit_voice!(self, slot).partial_count);
         &mut unit_voice!(self, slot)
     }
@@ -9308,17 +9320,14 @@ impl ConcertGrand {
         ((self.lid_radians() - closed) / (open - closed)).clamp(0.0, 1.0)
     }
 
-
-
-
-
     /// Tunes the instrument the way a tuner does: A4 = 440, octave anchors
     /// beatless against the lower note's second (sharp) partial, and the
     /// stretch interpolated in cents between anchors. Railsback's curve is
     /// the output of this procedure, not an input to it.
     fn tune(&mut self) {
         for index in 0..NOTE_COUNT {
-            self.engine.inharmonicity[index] = self.engine.inharmonicity_for(LOW_NOTE + index as u8);
+            self.engine.inharmonicity[index] =
+                self.engine.inharmonicity_for(LOW_NOTE + index as u8);
         }
 
         // Stretch in cents at the octave anchors around A4 (index 48).
@@ -9354,7 +9363,8 @@ impl ConcertGrand {
                 .unwrap_or(below_cents);
             let stretched = below_cents + (above_cents - below_cents) * fraction;
             let semitones = index as f32 - a4 as f32;
-            self.engine.fundamental[index] = 440.0 * powf(2.0, semitones / 12.0 + stretched / 1200.0);
+            self.engine.fundamental[index] =
+                440.0 * powf(2.0, semitones / 12.0 + stretched / 1200.0);
         }
     }
 
@@ -9367,7 +9377,9 @@ impl ConcertGrand {
         // The rim: a sixth-order Butterworth high-pass at the radiation
         // corner, three biquads whose Q are the Butterworth pole pairs.
         // Below the corner it falls at 36 dB an octave, the measured law.
-        let corner = RADIATION_CORNER_HZ.get().clamp(5.0, self.engine.sample_rate * 0.2);
+        let corner = RADIATION_CORNER_HZ
+            .get()
+            .clamp(5.0, self.engine.sample_rate * 0.2);
         let (sin, cos) = sincosf(core::f32::consts::PI * corner / self.engine.sample_rate);
         let k = sin / cos;
         for (section, q) in RIM_Q.iter().enumerate() {
@@ -9535,8 +9547,7 @@ impl ConcertGrand {
                 // only hears its bay must only speak from it, or the board
                 // radiates energy no string ever put into it.
                 let along =
-                    sincosf(core::f32::consts::PI * mode.shape_q as f32 * x + cold.shape_theta)
-                        .1;
+                    sincosf(core::f32::consts::PI * mode.shape_q as f32 * x + cold.shape_theta).1;
                 for j in 0..ACROSS {
                     let y = ((j as f32 + 0.5) / ACROSS as f32 - 0.5) * BOARD_WIDTH_M;
                     let across = sincosf(
@@ -9586,8 +9597,12 @@ impl ConcertGrand {
         // bottom, log-linear from 300 Hz down to BOARD_LOW_LOSS at 50 Hz.
         let low = (log2f(300.0 / placed.max(20.0)) / log2f(6.0)).clamp(0.0, 1.0);
         let loss_here = loss * powf(BOARD_LOW_LOSS.get() / BOARD_LOSS_FACTOR.get(), low);
-        let (mut mode, mut cold) =
-            BoardMode::tune(placed, board_t60(placed, loss_here), pan, self.engine.sample_rate);
+        let (mut mode, mut cold) = BoardMode::tune(
+            placed,
+            board_t60(placed, loss_here),
+            pan,
+            self.engine.sample_rate,
+        );
         // Skudrzyk: a plate's MEAN mobility is flat with frequency,
         // whatever its modal density and damping. A bank of unit-gain
         // peaks is not -- where the modes overlap more the mean rises --
@@ -9645,8 +9660,8 @@ impl ConcertGrand {
                 mode.shape_b = 0.0;
                 mode.shape_c = 0.0;
             } else {
-                mode.shape_q = (roundf(half_waves * cos_alpha) as u16)
-                    .clamp(1, BOARD_DRIVE_POINTS as u16 - 1);
+                mode.shape_q =
+                    (roundf(half_waves * cos_alpha) as u16).clamp(1, BOARD_DRIVE_POINTS as u16 - 1);
                 cold.shape_theta = theta;
                 mode.shape_a = 1.0 - depth;
                 mode.shape_b = depth * core::f32::consts::SQRT_2 * cos_theta;
@@ -9706,12 +9721,9 @@ impl ConcertGrand {
     /// scaling it was given. It is the tests' window onto the law.
     #[cfg(test)]
     fn hammer_speeds(&self, velocity: f32) -> (f32, f32) {
-        self.engine.hammer_speeds_at(self.repetition_scale, velocity)
+        self.engine
+            .hammer_speeds_at(self.repetition_scale, velocity)
     }
-
-
-
-
 
     /// A key down without a strike: its string, damper up, joins the
     /// conversation the way the top octave's do.
@@ -9736,8 +9748,6 @@ impl ConcertGrand {
         self.silent_state[slot] = SILENT_HELD;
         self.silent_in[slot] = 0;
     }
-
-
 
     fn silent_slot_of(&self, note: u8) -> Option<usize> {
         (0..SILENT_SLOTS)
@@ -9898,11 +9908,13 @@ impl ConcertGrand {
     /// Sizes the shimmer's delay lines for the current rate.
     fn tune_halo(&mut self) {
         for (line, delay) in HALO_DELAYS_S.iter().copied().enumerate() {
-            self.halo_len[line] = ((delay * self.engine.sample_rate) as usize).clamp(1, HALO_BUFFER - 1);
+            self.halo_len[line] =
+                ((delay * self.engine.sample_rate) as usize).clamp(1, HALO_BUFFER - 1);
             self.halo_index[line] %= self.halo_len[line];
             self.halo_gain[line] = powf(10.0, -3.0 * delay / HALO_RT60_S.get());
         }
-        self.halo_hp_k = 1.0 - expf(-core::f32::consts::TAU * HALO_HP_HZ.get() / self.engine.sample_rate);
+        self.halo_hp_k =
+            1.0 - expf(-core::f32::consts::TAU * HALO_HP_HZ.get() / self.engine.sample_rate);
     }
 
     /// Sizes the chamber's delay lines and feedback for the current rate.
@@ -10078,7 +10090,8 @@ impl ConcertGrand {
                 let (path, response) = heard(image);
                 let path = path.max(direct_path + 0.1);
                 let delay_s = (path - direct_path) / SOUND_SPEED.get();
-                let samples = ((delay_s * self.engine.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+                let samples =
+                    ((delay_s * self.engine.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
                 let gain = reflect * (direct_path / path) * response * near;
                 *slot = (samples, gain);
             }
@@ -10140,7 +10153,8 @@ impl ConcertGrand {
                     * (1.0 - ((up - 2.0 * half_width) / edge).max(0.0)).clamp(0.0, 1.0)
                     * (1.0 + (up / edge).min(0.0)).clamp(0.0, 1.0);
                 let delay_s = (path - source_path) / SOUND_SPEED.get();
-                let samples = ((delay_s * self.engine.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+                let samples =
+                    ((delay_s * self.engine.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
                 *tap = (
                     samples,
                     0.25 * LID_REFLECT.get()
@@ -10163,44 +10177,6 @@ impl ConcertGrand {
         self.room_dirty = false;
         self.pair_next = 0;
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fn start_voice(&mut self, channel: u8, note: u8, velocity: u8) {
         self.plan_strike(channel, note, velocity as f32 / 127.0);
@@ -10235,9 +10211,10 @@ impl ConcertGrand {
             // there to catch is read here rather than reported back from
             // the sections: it is `active` and the note, which the sections
             // do not change while they catch.
-            let caught = self.summary.iter().any(|voice| {
-                voice.active && voice.note == note && voice.channel == channel
-            });
+            let caught = self
+                .summary
+                .iter()
+                .any(|voice| voice.active && voice.note == note && voice.channel == channel);
             if !caught {
                 self.hold_silent(note);
             }
@@ -10271,10 +10248,7 @@ impl ConcertGrand {
         // re-lifted.
         let merge = self.engine.restrike_merge.then(|| {
             self.summary.iter().position(|voice| {
-                voice.active
-                    && voice.note == note
-                    && voice.channel == channel
-                    && voice.ringing_free
+                voice.active && voice.note == note && voice.channel == channel && voice.ringing_free
             })
         });
         let slot = match merge.flatten() {
@@ -10321,7 +10295,11 @@ impl ConcertGrand {
                 slot: slot as u8,
                 channel,
                 note,
-                flags: if self.pedal { VoiceRecord::FLAG_PEDAL } else { 0 },
+                flags: if self.pedal {
+                    VoiceRecord::FLAG_PEDAL
+                } else {
+                    0
+                },
                 velocity,
                 serial: self.strike_serial,
                 soft: self.soft,
@@ -10368,16 +10346,6 @@ impl ConcertGrand {
         }
         self.voice_work_seq = seq.wrapping_add(1);
     }
-
-
-
-
-
-
-
-
-
-
 
     /// What the instrument is carrying, across all four sections.
     ///
@@ -10662,8 +10630,7 @@ impl ConcertGrand {
                 self.section_delay >= span,
                 "el retraso entre secciones no alcanza el tramo"
             );
-            let read = (self.section_cursor + offset + MAX_SECTION_DELAY
-                - self.section_delay)
+            let read = (self.section_cursor + offset + MAX_SECTION_DELAY - self.section_delay)
                 % MAX_SECTION_DELAY;
             let mut stale = 0.0f32;
             for section in 0..STRING_SECTIONS {
@@ -10686,7 +10653,6 @@ impl ConcertGrand {
                 self.pedal_noise_amp *= pedal_decay;
             }
         }
-
     }
 
     /// Everything downstream of the strings, for one span of frames.
@@ -10720,8 +10686,9 @@ impl ConcertGrand {
         let knob_open_mix = OPEN_MIX.get();
         let knob_room_mix = ROOM_MIX.get();
         let knob_undamped_mix = UNDAMPED_MIX.get();
-        let board_feed_delay =
-            (BOARD_FEED_DELAY.get().clamp(0.0, BOARD_FEED_HISTORY as f32 - 1.0)) as usize;
+        let board_feed_delay = (BOARD_FEED_DELAY
+            .get()
+            .clamp(0.0, BOARD_FEED_HISTORY as f32 - 1.0)) as usize;
         let pedal_c1 =
             1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.0 / self.engine.sample_rate);
         let pedal_c2 =
@@ -10768,25 +10735,23 @@ impl ConcertGrand {
             // strike a block apart, and the ear heard that as the attack
             // losing a pinch. At zero both are handed straight through and
             // nothing is written, so the shipped render is untouched.
-            let (drive_points, excitation, keybed_left, keybed_right) =
-                if board_feed_delay == 0 {
-                    (drive_points, bridge_drive, keybed_left, keybed_right)
-                } else {
-                    let write = self.board_feed_cursor;
-                    let read =
-                        (write + BOARD_FEED_HISTORY - board_feed_delay) % BOARD_FEED_HISTORY;
-                    self.board_feed_history[write] = drive_points;
-                    self.bridge_feed_history[write] = bridge_drive;
-                    self.keybed_feed_history[write] = [keybed_left, keybed_right];
-                    self.board_feed_cursor = (write + 1) % BOARD_FEED_HISTORY;
-                    let keybed = self.keybed_feed_history[read];
-                    (
-                        self.board_feed_history[read],
-                        self.bridge_feed_history[read],
-                        keybed[0],
-                        keybed[1],
-                    )
-                };
+            let (drive_points, excitation, keybed_left, keybed_right) = if board_feed_delay == 0 {
+                (drive_points, bridge_drive, keybed_left, keybed_right)
+            } else {
+                let write = self.board_feed_cursor;
+                let read = (write + BOARD_FEED_HISTORY - board_feed_delay) % BOARD_FEED_HISTORY;
+                self.board_feed_history[write] = drive_points;
+                self.bridge_feed_history[write] = bridge_drive;
+                self.keybed_feed_history[write] = [keybed_left, keybed_right];
+                self.board_feed_cursor = (write + 1) % BOARD_FEED_HISTORY;
+                let keybed = self.keybed_feed_history[read];
+                (
+                    self.board_feed_history[read],
+                    self.bridge_feed_history[read],
+                    keybed[0],
+                    keybed[1],
+                )
+            };
             let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
             let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
             // With nothing sounding every drive point is zero, and the
@@ -11265,18 +11230,11 @@ impl ConcertGrand {
             // and never one this block has already promised away.
             (0..MAX_VOICES)
                 .filter(|slot| self.voice_claimed & (1 << slot) == 0)
-                .min_by(|a, b| {
-                    self.summary[*a]
-                        .energy
-                        .total_cmp(&self.summary[*b].energy)
-                })?
+                .min_by(|a, b| self.summary[*a].energy.total_cmp(&self.summary[*b].energy))?
         };
         self.voice_claimed |= 1 << chosen;
         Some(chosen)
     }
-
-
-
 
     /// Per-sample decay multiplier a falling damper applies: the note dies in
     /// tens of milliseconds instead of seconds.
@@ -11301,23 +11259,11 @@ impl ConcertGrand {
         }
     }
 
-
-
-
-
     /// How much of the random per-landing variation survives once the key's
     /// return is actually measured: the felt still seats where it seats, but
     /// the return speed is no longer something to guess at. A third of the
     /// spread, so +/-15% becomes +/-5%.
     const RELEASE_RESIDUAL: f32 = 0.33;
-
-
-
-
-
-
-
-
 
     fn release(&mut self, channel: u8, note: u8, release: Option<u8>) {
         self.damp_serial = self.damp_serial.wrapping_add(1);
@@ -11378,9 +11324,6 @@ impl ConcertGrand {
         });
     }
 
-
-
-
     /// CC64 as the continuous control it is. The bottom of the travel is
     /// a dead zone (the rail has slack), the top is fully lifted, and the
     /// span between is the half pedal: dampers riding the strings with
@@ -11435,12 +11378,6 @@ impl ConcertGrand {
         });
     }
 
-
-
-
-
-
-
     /// CC66: the sostenuto rod catches exactly the dampers that are up at
     /// the moment it is pressed -- the notes currently held -- and keeps
     /// those clear until it is released, indifferent to CC64.
@@ -11466,8 +11403,6 @@ impl ConcertGrand {
         });
     }
 
-
-
     fn all_notes_off(&mut self) {
         let rate = self.engine.sample_rate;
         let grip = self.engine.controls.damper_grip();
@@ -11484,8 +11419,6 @@ impl ConcertGrand {
         }
         self.pedal = false;
     }
-
-
 
     fn handle_midi(&mut self, event: &MidiEvent) {
         let data = event.data;
@@ -11622,7 +11555,11 @@ impl ConcertGrand {
     fn preamp_gain(&self) -> f32 {
         powf(
             10.0,
-            self.engine.controls.preamp.clamp(0.0, PREAMP_RANGE_DB.get()) / 20.0,
+            self.engine
+                .controls
+                .preamp
+                .clamp(0.0, PREAMP_RANGE_DB.get())
+                / 20.0,
         )
     }
 
@@ -12633,8 +12570,7 @@ impl SectionFrame {
             keybed_right: from[3],
             drive_points: [0.0; BOARD_DRIVE_POINTS],
         };
-        made
-            .drive_points
+        made.drive_points
             .copy_from_slice(&from[4..4 + BOARD_DRIVE_POINTS]);
         made
     }
@@ -12677,7 +12613,6 @@ impl ParallelProcessor for ConcertGrand {
         Self::get_parameter(self, index)
     }
 
-
     fn set_realtime_budget(&mut self, fuel_per_call: u64) -> bool {
         Self::set_realtime_budget(self, fuel_per_call)
     }
@@ -12685,10 +12620,6 @@ impl ParallelProcessor for ConcertGrand {
     fn reset(&mut self) {
         Self::reset(self)
     }
-
-
-
-
 
     fn load_preset(&mut self, id: &str) -> bool {
         Self::load_preset(self, id)
@@ -12733,9 +12664,8 @@ impl ParallelProcessor for ConcertGrand {
         staged.write(self.engine);
         // SAFETY: `staged` is initialised, including its padding, and is read
         // as the bytes of one `StringEngine`.
-        let engine_bytes = unsafe {
-            core::slice::from_raw_parts(staged.as_ptr().cast::<u8>(), SHARED_ENGINE)
-        };
+        let engine_bytes =
+            unsafe { core::slice::from_raw_parts(staged.as_ptr().cast::<u8>(), SHARED_ENGINE) };
         shared[..SHARED_ENGINE].copy_from_slice(engine_bytes);
         shared[SHARED_ENGINE..SHARED_ALLOWANCE].copy_from_slice(&sympathy_rate.to_le_bytes());
         for section in 0..STRING_SECTIONS {
@@ -13693,7 +13623,6 @@ mod tests {
             let mut piano = prepared();
             render(&mut piano, 1, &[note_on(60, velocity)]);
             let voice = piano
-                
                 .voices()
                 .find(|voice| voice.active && voice.note == 60)
                 .unwrap();
@@ -13714,7 +13643,6 @@ mod tests {
         render(&mut piano, 1, &[note_on(60, 20)]);
         render(&mut piano, (FS * 0.02) as usize, &[]);
         let voice = piano
-            
             .voices()
             .find(|voice| voice.active && voice.note == 60)
             .unwrap();
@@ -13739,7 +13667,6 @@ mod tests {
             "the hammer struck below the repetition point"
         );
         let voice = piano
-            
             .voices()
             .find(|voice| voice.active && voice.note == 60)
             .unwrap();
@@ -13926,7 +13853,6 @@ mod tests {
         render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 90)]);
         render(&mut piano, 16, &[note_off(60)]);
         let voice = piano
-            
             .voices()
             .position(|voice| voice.active && voice.note == 60)
             .unwrap();
@@ -13940,7 +13866,6 @@ mod tests {
         let mut at_once = prepared();
         render(&mut at_once, (FS * 0.3) as usize, &[note_on(60, 90)]);
         let slot = at_once
-            
             .voices()
             .position(|voice| voice.active && voice.note == 60)
             .unwrap();
@@ -13949,7 +13874,9 @@ mod tests {
         let grip = at_once.engine.controls.damper_grip();
         let damper = StringEngine::damper_for(60, FS as f32, grip * firmness, 1.0);
         let (coefficient, decay) = at_once.engine.damper_thud();
-        at_once.voice_mut(slot).damp(damper, coefficient, decay, 0.0);
+        at_once
+            .voice_mut(slot)
+            .damp(damper, coefficient, decay, 0.0);
         let late = &piano.voice(voice);
         let now = &at_once.voice(slot);
         // Matched by harmonic number: the cull reorders a voice's partials.
@@ -14441,7 +14368,10 @@ mod tests {
             again.engine.controls.lab[2]
         );
         assert!((again.engine.controls.release_noise + 15.0).abs() < 1e-4);
-        assert_eq!(again.engine.controls.last_damper, Controls::default().last_damper);
+        assert_eq!(
+            again.engine.controls.last_damper,
+            Controls::default().last_damper
+        );
         // With one knob fewer in the old registry the panel still holds and
         // the knobs go to their compiled values.
         let mut fewer = old.clone();
@@ -15575,7 +15505,10 @@ mod tests {
         let frames = (rate * 0.08) as usize;
         let f0_of = |piano: &ConcertGrand| {
             let index = (note - LOW_NOTE) as usize;
-            (piano.engine.fundamental[index], piano.engine.inharmonicity[index])
+            (
+                piano.engine.fundamental[index],
+                piano.engine.inharmonicity[index],
+            )
         };
         let mut ladders: Vec<[f32; 14]> = Vec::new();
         // Third pass: the naked sum PLUS the board bank in parallel, exactly
@@ -16200,7 +16133,6 @@ mod tests {
             render(&mut piano, 64, &opening);
             render(&mut piano, (FS * 2.0) as usize, &[]);
             piano
-                
                 .voices()
                 .filter(|v| v.active && v.note == 60)
                 .map(|v| {
@@ -16236,7 +16168,6 @@ mod tests {
         render(&mut piano, 64, &[note_on(48, 100)]);
         render(&mut piano, (FS * 0.15) as usize, &[]);
         let before: f32 = piano
-            
             .voices()
             .filter(|v| v.active && v.note == 48)
             .map(|v| {
@@ -16251,14 +16182,9 @@ mod tests {
             })
             .sum();
         render(&mut piano, 64, &[note_on(48, 100)]);
-        let voices = piano
-            
-            .voices()
-            .filter(|v| v.active && v.note == 48)
-            .count();
+        let voices = piano.voices().filter(|v| v.active && v.note == 48).count();
         assert_eq!(voices, 1, "a re-strike must not mint a second voice");
         let after: f32 = piano
-            
             .voices()
             .filter(|v| v.active && v.note == 48)
             .map(|v| {
@@ -17157,7 +17083,6 @@ mod tests {";
             // The largest oscillator state anywhere in the bank: if this
             // grows, something has a pole outside the unit circle.
             let state = piano
-                
                 .voices()
                 .filter(|v| v.active)
                 .flat_map(|v| v.partials[..v.partial_count].iter())
@@ -17618,13 +17543,11 @@ mod tests {";
             // What the bank looks like the instant before the strike.
             let active = piano.voices().filter(|v| v.active).count();
             let quietest = piano
-                
                 .voices()
                 .filter(|v| v.active)
                 .map(|v| v.energy)
                 .fold(f32::INFINITY, f32::min);
             let loudest = piano
-                
                 .voices()
                 .filter(|v| v.active)
                 .map(|v| v.energy)
@@ -18262,8 +18185,6 @@ mod bench {
         }
     }
 
-
-
     /// Puts every knob back to the value it was compiled with.
     ///
     /// The knobs are process-wide atomics and eighteen tests write them, so
@@ -18530,8 +18451,16 @@ mod bench {
                 })
                 .collect();
             piano.process(&[], &mut output, &midi, &[], FRAMES, 0, 2);
-            let granted: usize = piano.sections.iter().map(|section| section.allowance).sum::<usize>();
-            let carried: usize = piano.sections.iter().map(|section| section.partials).sum::<usize>();
+            let granted: usize = piano
+                .sections
+                .iter()
+                .map(|section| section.allowance)
+                .sum::<usize>();
+            let carried: usize = piano
+                .sections
+                .iter()
+                .map(|section| section.partials)
+                .sum::<usize>();
             // The four purses hold the budget, or -- when the instrument is
             // already over it -- exactly what is sounding and not a partial
             // more. Over it is reachable: a note may always place twelve
@@ -18852,8 +18781,7 @@ mod bench {
             (core::mem::size_of::<StringUnit>() + core::mem::size_of::<StringEngine>()) / 1024,
             (core::mem::size_of::<ConcertGrand>()
                 + STRING_SECTIONS
-                    * (core::mem::size_of::<StringUnit>()
-                        + core::mem::size_of::<StringEngine>()))
+                    * (core::mem::size_of::<StringUnit>() + core::mem::size_of::<StringEngine>()))
                 / 1024,
             (core::mem::size_of::<ConcertGrand>() * (STRING_SECTIONS + 1)) / 1024,
         );
@@ -18935,7 +18863,13 @@ mod bench {
             }
         }
         let peak = reference.iter().fold(0.0f32, |a, b| a.max(b.abs()));
-        let db = |value: f32| if value > 0.0 { 20.0 * (value / peak).log10() } else { -240.0 };
+        let db = |value: f32| {
+            if value > 0.0 {
+                20.0 * (value / peak).log10()
+            } else {
+                -240.0
+            }
+        };
         match first {
             None => std::println!("identico a la captura"),
             Some(at) => {
@@ -18947,7 +18881,10 @@ mod bench {
                 for event in &pedal_script(300)[block] {
                     std::println!(
                         "  evento en el cuadro {}: {:02x} {} {}",
-                        event.frame, event.data[0], event.data[1], event.data[2]
+                        event.frame,
+                        event.data[0],
+                        event.data[1],
+                        event.data[2]
                     );
                 }
             }
@@ -19096,14 +19033,24 @@ mod bench {
         const FRAMES: usize = 128;
         std::println!(
             "{:>6} {:>7} {:>10} {:>11} {:>10} {:>11} {:>12}",
-            "voces", "activas", "parciales", "componentes", "bloque", "us/voz", "us/componente"
+            "voces",
+            "activas",
+            "parciales",
+            "componentes",
+            "bloque",
+            "us/voz",
+            "us/componente"
         );
         let mut previous: Option<(usize, f64)> = None;
         for wanted in [1usize, 4, 8, 16, 24, 32, 47] {
             let mut piano = Box::new(ConcertGrand::default());
             assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
             let mut output = vec![0.0f32; FRAMES * 2];
-            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
             piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
             // Spread across the compass and across time, as a hand does.
             let mut struck = 0usize;
@@ -19164,8 +19111,14 @@ mod bench {
             std::println!(
                 "{wanted:>6} {active:>7} {partials:>10} {components:>11} {:>8.0}us {:>9} {:>12.2}",
                 cost,
-                marginal.map_or(std::string::String::from("--"), |m| std::format!("{m:.0}us")),
-                if components > 0 { cost / components as f64 } else { 0.0 },
+                marginal.map_or(std::string::String::from("--"), |m| std::format!(
+                    "{m:.0}us"
+                )),
+                if components > 0 {
+                    cost / components as f64
+                } else {
+                    0.0
+                },
             );
             previous = Some((active, cost));
 
@@ -19184,9 +19137,7 @@ mod bench {
                             }
                             let (sn, cn) = (partial.s[lane], partial.c[lane]);
                             let magnitude = (sn * sn + cn * cn).sqrt();
-                            levels.push(
-                                20.0 * log2f((magnitude / peak).max(1e-12)) / log2f(10.0),
-                            );
+                            levels.push(20.0 * log2f((magnitude / peak).max(1e-12)) / log2f(10.0));
                         }
                     }
                 }
@@ -19212,9 +19163,8 @@ mod bench {
                             }
                             let (sn, cn) = (partial.s[lane], partial.c[lane]);
                             let magnitude = (sn * sn + cn * cn).sqrt();
-                            within.push(
-                                20.0 * log2f((magnitude / loudest).max(1e-12)) / log2f(10.0),
-                            );
+                            within
+                                .push(20.0 * log2f((magnitude / loudest).max(1e-12)) / log2f(10.0));
                         }
                     }
                 }
@@ -19324,10 +19274,7 @@ mod bench {
             bytes.extend_from_slice(&sample.to_le_bytes());
         }
         std::fs::write(&path, bytes).expect("writing the oracle");
-        std::println!(
-            "escrito {path}: {} muestras, pico {peak:.4}",
-            samples.len()
-        );
+        std::println!("escrito {path}: {} muestras, pico {peak:.4}", samples.len());
     }
 
     /// Measures the inverted loops against the oracle captured before them.
@@ -19417,7 +19364,11 @@ mod bench {
         assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
         piano.section_delay = 128;
         let mut output = vec![0.0f32; FRAMES * 2];
-        let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
         piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
         let chord: [u8; 8] = [36, 43, 48, 55, 60, 64, 67, 72];
         let mut captured = std::vec::Vec::with_capacity(900 * FRAMES);
@@ -19435,7 +19386,11 @@ mod bench {
                     })
                     .collect()
             } else if block == 400 {
-                std::vec![MidiEvent { frame: 37, data: [0xB0, 64, 0], length: 3 }]
+                std::vec![MidiEvent {
+                    frame: 37,
+                    data: [0xB0, 64, 0],
+                    length: 3
+                }]
             } else {
                 std::vec::Vec::new()
             };
@@ -19475,10 +19430,15 @@ mod bench {
             assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
             let mut output = vec![0.0f32; FRAMES * 2];
             piano.process(
-                &[], &mut output, &[note_on(note, velocity)], &[], FRAMES as u32, 0, 2,
+                &[],
+                &mut output,
+                &[note_on(note, velocity)],
+                &[],
+                FRAMES as u32,
+                0,
+                2,
             );
-            let Some(voice) = piano.voices().find(|voice| voice.active)
-            else {
+            let Some(voice) = piano.voices().find(|voice| voice.active) else {
                 return std::vec::Vec::new();
             };
             voice.partials[..voice.partial_count]
@@ -19505,7 +19465,8 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
                 if got.len() != reference.len() {
                     std::println!(
                         "  {:>8.1} us   escalera distinta ({} parciales)",
-                        dt * 1e6, got.len()
+                        dt * 1e6,
+                        got.len()
                     );
                     continue;
                 }
@@ -19521,7 +19482,11 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
                     sum += db * db;
                     counted += 1;
                 }
-                let rms = if counted > 0 { (sum / counted as f32).sqrt() } else { 0.0 };
+                let rms = if counted > 0 {
+                    (sum / counted as f32).sqrt()
+                } else {
+                    0.0
+                };
                 std::println!("  {:>8.1} us {:>9.2} dB {:>9.2} dB", dt * 1e6, worst, rms);
             }
         }
@@ -19542,7 +19507,10 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
         const FRAMES: usize = 128;
         for (label, notes) in [
             ("una nota (C2)", &[40u8][..]),
-            ("doce notas, un acorde", &[40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84][..]),
+            (
+                "doce notas, un acorde",
+                &[40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84][..],
+            ),
         ] {
             probe::reset();
             let mut blocks = 0.0f64;
@@ -19550,7 +19518,11 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
                 let mut piano = Box::new(ConcertGrand::default());
                 assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
                 let mut output = vec![0.0f32; FRAMES * 2];
-                let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+                let pedal = MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, 127],
+                    length: 3,
+                };
                 piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
                 for _ in 0..200 {
                     piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
@@ -19609,15 +19581,28 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
         );
         // What is actually used, per note, across the compass.
         const FRAMES: usize = 128;
-        std::println!("
-{:>5} {:>10} {:>12} {:>14}", "nota", "parciales", "usado KB", "% del borrador");
+        std::println!(
+            "
+{:>5} {:>10} {:>12} {:>14}",
+            "nota",
+            "parciales",
+            "usado KB",
+            "% del borrador"
+        );
         for note in [24u8, 40, 55, 72, 96] {
             let mut piano = Box::new(ConcertGrand::default());
             assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
             let mut output = vec![0.0f32; FRAMES * 2];
-            piano.process(&[], &mut output, &[note_on(note, 100)], &[], FRAMES as u32, 0, 2);
+            piano.process(
+                &[],
+                &mut output,
+                &[note_on(note, 100)],
+                &[],
+                FRAMES as u32,
+                0,
+                2,
+            );
             let placed: usize = piano
-                
                 .voices()
                 .filter(|voice| voice.active)
                 .map(|voice| voice.partial_count)
@@ -19648,7 +19633,11 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
         const FRAMES: usize = 128;
         std::println!(
             "{:>5} {:>10} {:>11} {:>10} {:>12}",
-            "nota", "parciales", "asentado", "golpe", "us/parcial"
+            "nota",
+            "parciales",
+            "asentado",
+            "golpe",
+            "us/parcial"
         );
         let mut rows: std::vec::Vec<(f64, f64)> = std::vec::Vec::new();
         for note in [24u8, 33, 40, 48, 55, 64, 72, 84, 96] {
@@ -19670,7 +19659,6 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
             piano.process(&[], &mut output, &strike, &[], FRAMES as u32, 0, 2);
             let block = start.elapsed().as_secs_f64() * 1e6;
             let placed: usize = piano
-                
                 .voices()
                 .filter(|voice| voice.active)
                 .map(|voice| voice.partial_count)
@@ -19681,7 +19669,11 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
                 "{note:>5} {placed:>10} {:>9.0}us {:>8.0}us {:>12.2}",
                 floor,
                 over,
-                if placed > 0 { over / placed as f64 } else { 0.0 }
+                if placed > 0 {
+                    over / placed as f64
+                } else {
+                    0.0
+                }
             );
         }
         // A straight line through the points: the slope is what a partial
@@ -19696,7 +19688,8 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
         std::println!();
         std::println!(
             "  ajuste: {:.2} us por parcial + {:.0} us fijos por note-on",
-            slope, intercept
+            slope,
+            intercept
         );
         std::println!(
             "  con una escalera de 46 parciales eso es {:.0} us de escalera contra {:.0} us fijos",
@@ -19729,7 +19722,12 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
         let block_us = FRAMES as f64 / 48.0;
         std::println!(
             "{:>12} {:>9} {:>10} {:>11} {:>10} {:>12}",
-            "fuel", "parciales", "asentado", "golpe", "x deadline", "cola >1.2x"
+            "fuel",
+            "parciales",
+            "asentado",
+            "golpe",
+            "x deadline",
+            "cola >1.2x"
         );
         for fuel in [u64::MAX, 4_000_000, 2_000_000, 1_000_000, 400_000] {
             let mut piano = Box::new(ConcertGrand::default());
@@ -19738,7 +19736,11 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
             if fuel != u64::MAX {
                 piano.set_realtime_budget(fuel);
             }
-            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
             piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
             for _ in 0..600 {
                 piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
@@ -19759,7 +19761,6 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
                 costs.push(start.elapsed().as_secs_f64() * 1e6);
                 if let Some(slot) = ages.iter().position(|age| *age == block) {
                     ladder[slot] = piano
-                        
                         .voices()
                         .filter(|voice| voice.active)
                         .map(|voice| voice.partial_count)
@@ -19785,10 +19786,16 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
             );
             std::println!(
                 "             escalera por edad: {} en el bloque 1 -> {} -> {} -> {} -> {} a 2.4 s",
-                ladder[0], ladder[1], ladder[2], ladder[3], ladder[4]
+                ladder[0],
+                ladder[1],
+                ladder[2],
+                ladder[3],
+                ladder[4]
             );
         }
-        std::println!("  (12 notas en un solo bloque; el deadline de la Pi a 128 cuadros es 2666 us)");
+        std::println!(
+            "  (12 notas en un solo bloque; el deadline de la Pi a 128 cuadros es 2666 us)"
+        );
     }
 
     /// How long a struck chord stays expensive, and how expensive.
@@ -19830,78 +19837,88 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
             std::println!(
                 "
 ===== simulacion del golpe: {} =====",
-                if simulated { "ENCENDIDA (como se envia)" } else { "APAGADA" }
+                if simulated {
+                    "ENCENDIDA (como se envia)"
+                } else {
+                    "APAGADA"
+                }
             );
-        for held in [1usize, 6, 12] {
-            let mut piano = Box::new(ConcertGrand::default());
-            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
-            let mut output = vec![0.0f32; FRAMES * 2];
-            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
-            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
-            // The floor: what this instrument costs with nothing sounding.
-            for _ in 0..400 {
-                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
-            }
-            let mut floor = 0.0f64;
-            for _ in 0..200 {
-                let start = std::time::Instant::now();
-                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
-                floor += start.elapsed().as_secs_f64() * 1e6;
-            }
-            floor /= 200.0;
+            for held in [1usize, 6, 12] {
+                let mut piano = Box::new(ConcertGrand::default());
+                assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+                let mut output = vec![0.0f32; FRAMES * 2];
+                let pedal = MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, 127],
+                    length: 3,
+                };
+                piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+                // The floor: what this instrument costs with nothing sounding.
+                for _ in 0..400 {
+                    piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                }
+                let mut floor = 0.0f64;
+                for _ in 0..200 {
+                    let start = std::time::Instant::now();
+                    piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                    floor += start.elapsed().as_secs_f64() * 1e6;
+                }
+                floor /= 200.0;
 
-            // The whole chord in one block.
-            let chord: std::vec::Vec<MidiEvent> = (0..held)
-                .map(|i| note_on(40 + (i as u8) * 4, 100))
-                .collect();
-            let mut costs = std::vec::Vec::with_capacity(BLOCKS);
-            for block in 0..BLOCKS {
-                let events: &[MidiEvent] = if block == 0 { &chord } else { &[] };
-                let start = std::time::Instant::now();
-                piano.process(&[], &mut output, events, &[], FRAMES as u32, 0, 2);
-                costs.push(start.elapsed().as_secs_f64() * 1e6);
-            }
-            // Settled: the last 200 blocks, well past the partial cull.
-            let settled: f64 = costs[BLOCKS - 200..].iter().sum::<f64>() / 200.0;
-            let peak = costs.iter().cloned().fold(0.0f64, f64::max);
-            let over = costs.iter().filter(|c| **c > settled * 1.2).count();
-            std::println!();
-            std::println!(
-                "--- {held} nota(s) ---  silencio {:.0} us   asentado {:.0} us   primer bloque {:.0} us   pico {:.0} us",
-                floor, settled, costs[0], peak
-            );
-            std::println!(
-                "    el golpe cuesta {:.0} us sobre el asentado; {} bloques sobre 1.2x ({:.0} ms)",
-                costs[0] - settled,
-                over,
-                over as f64 * block_us,
-            );
-            // Fine near the strike, coarse after it.
-            let spans: &[(usize, usize)] = &[
-                (0, 1),
-                (1, 5),
-                (5, 20),
-                (20, 50),
-                (50, 100),
-                (100, 200),
-                (200, 400),
-                (400, 700),
-                (700, 1000),
-            ];
-            std::println!("    {:>12} {:>9} {:>9}", "bloques", "us", "x asentado");
-            for (from, to) in spans {
-                let mean: f64 =
-                    costs[*from..*to].iter().sum::<f64>() / (*to - *from) as f64;
-                let label = std::format!("{from}-{to}");
+                // The whole chord in one block.
+                let chord: std::vec::Vec<MidiEvent> = (0..held)
+                    .map(|i| note_on(40 + (i as u8) * 4, 100))
+                    .collect();
+                let mut costs = std::vec::Vec::with_capacity(BLOCKS);
+                for block in 0..BLOCKS {
+                    let events: &[MidiEvent] = if block == 0 { &chord } else { &[] };
+                    let start = std::time::Instant::now();
+                    piano.process(&[], &mut output, events, &[], FRAMES as u32, 0, 2);
+                    costs.push(start.elapsed().as_secs_f64() * 1e6);
+                }
+                // Settled: the last 200 blocks, well past the partial cull.
+                let settled: f64 = costs[BLOCKS - 200..].iter().sum::<f64>() / 200.0;
+                let peak = costs.iter().cloned().fold(0.0f64, f64::max);
+                let over = costs.iter().filter(|c| **c > settled * 1.2).count();
+                std::println!();
                 std::println!(
-                    "    {:>12} {:>9.0} {:>9.2}   {:>5.0} ms",
-                    label,
-                    mean,
-                    mean / settled,
-                    *from as f64 * block_us,
+                    "--- {held} nota(s) ---  silencio {:.0} us   asentado {:.0} us   primer bloque {:.0} us   pico {:.0} us",
+                    floor,
+                    settled,
+                    costs[0],
+                    peak
                 );
+                std::println!(
+                    "    el golpe cuesta {:.0} us sobre el asentado; {} bloques sobre 1.2x ({:.0} ms)",
+                    costs[0] - settled,
+                    over,
+                    over as f64 * block_us,
+                );
+                // Fine near the strike, coarse after it.
+                let spans: &[(usize, usize)] = &[
+                    (0, 1),
+                    (1, 5),
+                    (5, 20),
+                    (20, 50),
+                    (50, 100),
+                    (100, 200),
+                    (200, 400),
+                    (400, 700),
+                    (700, 1000),
+                ];
+                std::println!("    {:>12} {:>9} {:>9}", "bloques", "us", "x asentado");
+                for (from, to) in spans {
+                    let mean: f64 = costs[*from..*to].iter().sum::<f64>() / (*to - *from) as f64;
+                    let label = std::format!("{from}-{to}");
+                    std::println!(
+                        "    {:>12} {:>9.0} {:>9.2}   {:>5.0} ms",
+                        label,
+                        mean,
+                        mean / settled,
+                        *from as f64 * block_us,
+                    );
+                }
             }
-        }
         }
         SIM_MIN_MODES.set(4.0);
     }
@@ -19975,7 +19992,11 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
         let (low, high) = parameter_bounds(PARAM_BOARD_DENSITY);
         std::println!(
             "{:>18} {:>7} {:>9} {:>11} {:>11}",
-            "Board Density", "tabla", "undamped", "KB ahora", "KB con 88 B"
+            "Board Density",
+            "tabla",
+            "undamped",
+            "KB ahora",
+            "KB con 88 B"
         );
         for step in [0.0f64, 0.5, 1.0] {
             let mut piano = Box::new(ConcertGrand::default());
@@ -20070,9 +20091,7 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
                 let state = mode.y1.abs().max(mode.y2.abs());
                 let mut reach = 0.0f32;
                 for capsule in 0..2 {
-                    reach = reach.max(
-                        mode.out_y[capsule].abs() + mode.out_y1[capsule].abs(),
-                    );
+                    reach = reach.max(mode.out_y[capsule].abs() + mode.out_y1[capsule].abs());
                 }
                 let amp = state * mode.velocity.abs() * reach;
                 let above_knee = cold.omega * 48_000.0 / core::f32::consts::TAU >= knee_hz;
@@ -20098,9 +20117,8 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
                         let state = mode.y1.abs().max(mode.y2.abs());
                         let mut reach = 0.0f32;
                         for capsule in 0..2 {
-                            reach = reach.max(
-                                mode.out_y[capsule].abs() + mode.out_y1[capsule].abs(),
-                            );
+                            reach =
+                                reach.max(mode.out_y[capsule].abs() + mode.out_y1[capsule].abs());
                         }
                         let amp = state * mode.velocity.abs() * reach;
                         20.0 * log2f((amp / peak).max(1e-12)) / log2f(10.0)
@@ -20110,13 +20128,20 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
                 let at = |q: f32| db[((db.len() - 1) as f32 * q) as usize];
                 std::println!(
                     "  bloque {block:>3}: dB bajo el pico -- p5 {:>6.1}  p25 {:>6.1}  p50 {:>6.1}  p75 {:>6.1}  max {:>6.1}",
-                    at(0.05), at(0.25), at(0.50), at(0.75), at(1.0)
+                    at(0.05),
+                    at(0.25),
+                    at(0.50),
+                    at(0.75),
+                    at(1.0)
                 );
             }
         }
         std::println!(
             "{:>7} {:>9} {:>16} {:>18}",
-            "bloque", "pico", "callados/total", "de esos, agudos"
+            "bloque",
+            "pico",
+            "callados/total",
+            "de esos, agudos"
         );
         for (block, peak, quiet, total, quiet_high, high) in &rows {
             std::println!(
@@ -20170,7 +20195,9 @@ nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
             std::println!(
                 "
 densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
-                piano.board_count, knee_split.0, knee_split.1
+                piano.board_count,
+                knee_split.0,
+                knee_split.1
             );
             std::println!("  fila q:  modos que la leen");
             let mut dead = 0;
@@ -20675,7 +20702,11 @@ densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
             assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
             let mut output = vec![0.0f32; FRAMES * 2];
             let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
-            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
             piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
             for block in 0..blocks {
                 let midi: std::vec::Vec<MidiEvent> = if block == 2 {
@@ -20833,7 +20864,11 @@ densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
             assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
             let mut output = vec![0.0f32; FRAMES * 2];
             let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
-            let pedal = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
             piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
             for block in 0..blocks {
                 let midi: std::vec::Vec<MidiEvent> = if block == 2 {

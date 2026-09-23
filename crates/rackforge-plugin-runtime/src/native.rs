@@ -173,9 +173,12 @@ impl PortableEngine {
     /// unmetered one is the safe choice because a plugin that cannot
     /// answer cannot be spending a budget either.
     fn spends_a_budget(module: &Module) -> Result<bool> {
-        let mut store = Store::new(module.engine(), HostState {
-            limits: StoreLimitsBuilder::new().build(),
-        });
+        let mut store = Store::new(
+            module.engine(),
+            HostState {
+                limits: StoreLimitsBuilder::new().build(),
+            },
+        );
         store.set_epoch_deadline(CONTROL_EPOCH_DEADLINE);
         let Ok(instance) = Instance::new(&mut store, module, &[]) else {
             return Ok(false);
@@ -190,7 +193,9 @@ impl PortableEngine {
         let Ok(set_budget) = instance.get_typed_func::<i64, i32>(&mut store, BUDGET_EXPORT) else {
             return Ok(false);
         };
-        Ok(set_budget.call(&mut store, BUDGET_PROBE_FUEL).is_ok_and(|taken| taken == 1))
+        Ok(set_budget
+            .call(&mut store, BUDGET_PROBE_FUEL)
+            .is_ok_and(|taken| taken == 1))
     }
 }
 
@@ -471,27 +476,21 @@ impl PortableModule {
                 // Optional: a component built before it existed does not
                 // export it, and zero means "the output channels", which is
                 // what those components always meant.
-                let unit_channels = typed::<(), i32>(
-                    &instance,
-                    &mut store,
-                    "rackforge_parallel_unit_channels",
-                )
-                .ok()
-                .and_then(|call| call.call(&mut store, ()).ok())
-                .filter(|width| *width > 0)
-                .unwrap_or(0);
+                let unit_channels =
+                    typed::<(), i32>(&instance, &mut store, "rackforge_parallel_unit_channels")
+                        .ok()
+                        .and_then(|call| call.call(&mut store, ()).ok())
+                        .filter(|width| *width > 0)
+                        .unwrap_or(0);
                 // Optional, like the unit width: a component built before
                 // the report existed does not export it, and zero means it
                 // has nothing to say.
-                let report_stride = typed::<(), i32>(
-                    &instance,
-                    &mut store,
-                    "rackforge_parallel_report_stride",
-                )
-                .ok()
-                .and_then(|call| call.call(&mut store, ()).ok())
-                .filter(|bytes| *bytes > 0)
-                .unwrap_or(0);
+                let report_stride =
+                    typed::<(), i32>(&instance, &mut store, "rackforge_parallel_report_stride")
+                        .ok()
+                        .and_then(|call| call.call(&mut store, ()).ok())
+                        .filter(|bytes| *bytes > 0)
+                        .unwrap_or(0);
                 let report_offset = if report_stride > 0 {
                     typed::<(), i32>(&instance, &mut store, "rackforge_parallel_report_ptr")?
                         .call(&mut store, ())?

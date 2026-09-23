@@ -157,8 +157,9 @@ unsafe impl ScheduledSlot for Voice {
 }
 
 fn load(root: &Path) -> &'static LoadedPlugin {
-    let package = PluginPackage::open(root)
-        .unwrap_or_else(|error| panic!("no se pudo abrir el paquete en {}: {error}", root.display()));
+    let package = PluginPackage::open(root).unwrap_or_else(|error| {
+        panic!("no se pudo abrir el paquete en {}: {error}", root.display())
+    });
     // SAFETY: portable wasm-v1 packages execute inside the sandbox.
     let loaded = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), None) }
         .unwrap_or_else(|error| panic!("no se pudo cargar el plugin: {error}"));
@@ -272,7 +273,10 @@ fn measure(
         phases.units.push(at_units.elapsed().as_nanos() as u64);
 
         let at_finish = Instant::now();
-        assert!(voices[0].run_end(FRAMES(), CHANNELS, completed), "end_block fallo");
+        assert!(
+            voices[0].run_end(FRAMES(), CHANNELS, completed),
+            "end_block fallo"
+        );
         phases.finish.push(at_finish.elapsed().as_nanos() as u64);
         phases.whole.push(whole.elapsed().as_nanos() as u64);
         voices[0].events.clear();
@@ -340,7 +344,10 @@ fn sweep(plugin: &'static LoadedPlugin, workers: usize) {
     rows.sort_by(|a, b| b.0.total_cmp(&a.0));
 
     println!();
-    println!("  {} programas, mismo acorde, en el pool de {workers} workers,", rows.len());
+    println!(
+        "  {} programas, mismo acorde, en el pool de {workers} workers,",
+        rows.len()
+    );
     println!("  ordenados por el p99 (deadline {deadline:.0} us):");
     println!();
     println!("      p99      media   del deadline  programa");
@@ -500,7 +507,10 @@ fn main() {
     if begin_is_fixed > 0.8 && begin_loud > mean_micros(&busy.finish) {
         println!();
         println!("  OJO: `begin_block` cuesta {begin_quiet:.1} us SIN NADA SONANDO, el");
-        println!("  {:.0} % de lo que cuesta bajo un acorde. Un costo serial que no crece", begin_is_fixed * 100.0);
+        println!(
+            "  {:.0} % de lo que cuesta bajo un acorde. Un costo serial que no crece",
+            begin_is_fixed * 100.0
+        );
         println!("  con las notas es trabajo de control corriendo a frecuencia de muestreo,");
         println!("  y se paga en todos los bloques para siempre. Vale la pena ver que parte");
         println!("  puede correr una vez por bloque en vez de una vez por frame -- y, si el");

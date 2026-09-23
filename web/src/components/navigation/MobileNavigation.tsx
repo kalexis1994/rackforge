@@ -6,7 +6,7 @@ import { LightingSwitch } from "../../components/LightingSwitch";
 import { RevisionFooter } from "../../components/RevisionFooter";
 import { NavigationLinks } from "../../components/navigation/NavigationLinks";
 import { systemNavItems, vstSystemNavItems, vstWorkspaceNavItems, workspaceNavItems } from "../../components/navigation/navItems";
-import { Activity, Blocks, LogOut, Play, Settings2, X } from "lucide-react";
+import { Activity, Blocks, LogOut, Play, Settings2, SlidersHorizontal, X } from "lucide-react";
 
 export function MobileNavigation({
   vstHost,
@@ -34,7 +34,7 @@ export function MobileNavigation({
   controllerDockOpen: boolean;
   onControllerToggle: () => void;
   onPerformanceAction: (
-    action: "select-plugin" | "presets" | "live-perform" | "live-configure" | "live-exit-setlist" | "live-save-editor" | "live-close-editor",
+    action: "select-plugin" | "effects" | "presets" | "live-perform" | "live-configure" | "live-exit-setlist" | "live-save-editor" | "live-close-editor",
   ) => void;
 }) {
   const panelRef = useRef<HTMLElement | null>(null);
@@ -104,6 +104,16 @@ export function MobileNavigation({
                       <span className="nav-copy">
                         <span>Select plugin</span>
                         <small>Choose the active instrument</small>
+                      </span>
+                    </button>
+                    <button
+                      className="nav-item"
+                      onClick={() => onPerformanceAction("effects")}
+                    >
+                      <span className="nav-mark"><SlidersHorizontal aria-hidden="true" strokeWidth={1.9} /></span>
+                      <span className="nav-copy">
+                        <span>Effects</span>
+                        <small>Show or hide the effects chain</small>
                       </span>
                     </button>
                     <button

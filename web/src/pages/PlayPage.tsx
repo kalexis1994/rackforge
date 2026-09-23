@@ -101,6 +101,12 @@ export function PlayPage({
   // is sent; it stands until the session answers -- with the same chain,
   // or with another (refused, or changed elsewhere), which then wins.
   const [chainOpen, setChainOpen] = useState(false);
+  // The menu's Effects entry, for screens where the bar with FX is hidden.
+  useEffect(() => {
+    const toggle = () => setChainOpen((open) => !open);
+    window.addEventListener("rackforge:toggle-play-effects", toggle);
+    return () => window.removeEventListener("rackforge:toggle-play-effects", toggle);
+  }, []);
   const [pendingChain, setPendingChain] = useState<{
     chain: PlayChain;
     revision: number;

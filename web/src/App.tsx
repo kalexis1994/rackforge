@@ -777,6 +777,11 @@ function RackForgeApp() {
             setMobileMenuOpen(false);
             if (action === "select-plugin") setPlayOverlay("plugins");
             if (action === "presets") setPlayOverlay("presets");
+            // The chain drawer is PLAY's own; where the bar that opens it is
+            // hidden, the menu reaches it through PLAY.
+            if (action === "effects") {
+              window.dispatchEvent(new Event("rackforge:toggle-play-effects"));
+            }
             if (action === "live-perform") setLiveSurface("perform");
             if (action === "live-configure") setLiveSurface("configure");
             if (action === "live-exit-setlist") {

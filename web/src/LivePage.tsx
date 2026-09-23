@@ -11,6 +11,8 @@ import {
 import { ChevronLeft, ChevronRight, LogOut, Save } from "lucide-react";
 import { SequencerStrip } from "./SequencerPanel";
 import { GraphWorkspaceHeader } from "./components/GraphWorkspaceHeader";
+import { useDraftHistory } from "./hooks/useDraftHistory";
+import { describeRackChange, describeSongChange } from "./rackChanges";
 import { sendSequencerCommand } from "./gateway";
 import { pluginKind, usePluginCatalog } from "./pluginCatalog";
 import {
@@ -2071,6 +2073,13 @@ function RackEditor({
       detail: { open },
     }));
   }, []);
+  // Every change to the draft is a step in its history, named, undoable.
+  const rackHistory = useDraftHistory<RackDefinition>(
+    draft ?? null,
+    setDraft,
+    draft?.id ?? null,
+    describeRackChange,
+  );
   // A graph with an error is not saved: the engine would refuse it, or the
   // Rack would not be heard (rackGraphProblems). Warnings do not block.
   const graphBlocking = useMemo(() => {
@@ -2109,13 +2118,17 @@ function RackEditor({
         rack: rackToSave,
       });
       const saved = snapshot.library.racks.find((item) => item.id === draft.id);
-      if (saved) setDraft(clone(materializeRackGraph(saved)));
+      if (saved) {
+        // What the store kept is the same Rack, not a step.
+        rackHistory.skipNext();
+        setDraft(clone(materializeRackGraph(saved)));
+      }
       setBaseRevision(snapshot.revision);
       onSaved(draft.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Rack.");
     }
-  }, [baseRevision, draft, onSaved, validate]);
+  }, [baseRevision, draft, onSaved, rackHistory.skipNext, validate]);
   useEffect(() => {
     if (!immersive) return;
     const saveWorkspace = () => void save();
@@ -2231,6 +2244,7 @@ function RackEditor({
           <RackGraphEditor
             rack={draft}
             racks={performance.library.racks}
+            history={rackHistory}
             onChange={(update) =>
               setDraft((current) => {
                 if (!current) return current;
@@ -2510,6 +2524,12 @@ function SongEditor({
       };
     });
   }, [selectedPart, selectedPartIndex, updatePart]);
+  const songHistory = useDraftHistory<SongDefinition>(
+    draft ?? null,
+    setDraft,
+    draft?.id ?? null,
+    describeSongChange,
+  );
   // A Part whose graph has an error keeps the Song from being saved, as a
   // Rack's does (rackGraphProblems); the first one found is named.
   const graphBlocking = useMemo(() => {
@@ -2545,13 +2565,16 @@ function SongEditor({
         song: draft,
       });
       const saved = snapshot.library.songs.find((item) => item.id === draft.id);
-      if (saved) setDraft(clone(saved));
+      if (saved) {
+        songHistory.skipNext();
+        setDraft(clone(saved));
+      }
       setBaseRevision(snapshot.revision);
       onSaved(draft.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Song.");
     }
-  }, [baseRevision, draft, graphBlocking, onSaved]);
+  }, [baseRevision, draft, graphBlocking, onSaved, songHistory.skipNext]);
   const handleGraphOverlayChange = useCallback((open: boolean) => {
     window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
       detail: { open },
@@ -2745,6 +2768,7 @@ function SongEditor({
               <Suspense fallback={<div className="rack-graph-loading">Loading graph editor…</div>}>
                 <RackGraphEditor
                   rack={selectedPartRack}
+                  history={songHistory}
                   racks={performance.library.racks}
                   onChange={updatePartRack}
                   canAddInstrument={selectedPartRack.slots.length < 32}

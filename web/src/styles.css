@@ -9331,6 +9331,7 @@ body {
 .graph-workspace-active .rack-editor-form.immersive > .editor-section.slot-settings,
 .graph-workspace-active .song-editor-form.immersive > .editor-header,
 .graph-workspace-active .song-editor-form.immersive > .basic-fields,
+.graph-workspace-active .rack-editor-form.immersive > .rack-preview-status,
 .graph-workspace-active .song-editor-form.immersive > .rack-preview-status,
 .graph-workspace-active .song-editor-form.immersive > .form-error {
   display: none;

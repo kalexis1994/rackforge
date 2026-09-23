@@ -2,6 +2,7 @@ import {
   Background,
   BackgroundVariant,
   BaseEdge,
+  ControlButton,
   Controls,
   EdgeLabelRenderer,
   Handle,
@@ -25,6 +26,8 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { History, Redo2, Undo2 } from "lucide-react";
+import type { DraftHistory } from "../hooks/useDraftHistory";
 import { pluginKind, usePluginCatalog } from "../pluginCatalog";
 import { pluginKindPresentation } from "../pluginPresentation";
 import {
@@ -450,6 +453,8 @@ function dependsOn(
 interface RackGraphEditorProps {
   rack: RackDefinition;
   racks: RackDefinition[];
+  /** The editing history of the draft this graph belongs to. */
+  history?: DraftHistory;
   onChange: (
     update: RackDefinition | ((current: RackDefinition) => RackDefinition),
   ) => void;
@@ -469,6 +474,7 @@ interface RackGraphEditorProps {
 export default function RackGraphEditor({
   rack,
   racks,
+  history,
   onChange,
   canAddInstrument,
   onAddInstrument,
@@ -527,6 +533,27 @@ export default function RackGraphEditor({
     anchor: GraphMenuAnchor;
   } | null>(null);
   const overlayOpen = editorSlotId !== undefined || midiLinkEditor !== null;
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // Undo and redo from the keyboard, as everywhere: Ctrl/Cmd+Z, and
+  // Ctrl/Cmd+Shift+Z or Ctrl+Y. A text field keeps its own undo.
+  useEffect(() => {
+    if (!history) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      const key = event.key.toLowerCase();
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        history.undo();
+      } else if ((key === "z" && event.shiftKey) || key === "y") {
+        event.preventDefault();
+        history.redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [history]);
   // A finger needs a wider reach than a pointer to land a cable on a port.
   const coarsePointer = useMemo(
     () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches,
@@ -1193,8 +1220,65 @@ export default function RackGraphEditor({
             position="top-right"
             orientation="horizontal"
             showInteractive={false}
-          />
+          >
+            {history ? (
+              <>
+                <ControlButton
+                  className="rack-history-key"
+                  onClick={history.undo}
+                  disabled={!history.canUndo}
+                  title="Undo (Ctrl+Z)"
+                  aria-label="Undo"
+                >
+                  <Undo2 aria-hidden="true" />
+                </ControlButton>
+                <ControlButton
+                  className="rack-history-key"
+                  onClick={history.redo}
+                  disabled={!history.canRedo}
+                  title="Redo (Ctrl+Shift+Z)"
+                  aria-label="Redo"
+                >
+                  <Redo2 aria-hidden="true" />
+                </ControlButton>
+                <ControlButton
+                  className={`rack-history-key${historyOpen ? " active" : ""}`}
+                  onClick={() => setHistoryOpen((open) => !open)}
+                  title="History"
+                  aria-label="Editing history"
+                  aria-expanded={historyOpen}
+                  aria-controls="rack-history-list"
+                >
+                  <History aria-hidden="true" />
+                </ControlButton>
+              </>
+            ) : null}
+          </Controls>
         </ReactFlow>
+        {history && historyOpen ? (
+          <div id="rack-history-list" className="rack-history-list" role="dialog" aria-label="Editing history">
+            <header>
+              <span>History</span>
+              <button type="button" onClick={() => setHistoryOpen(false)} aria-label="Close history">
+                ×
+              </button>
+            </header>
+            <ol>
+              {history.entries.map((entry, index) => ({ entry, index })).reverse().map(({ entry, index }) => (
+                <li key={index}>
+                  <button
+                    type="button"
+                    className={`${entry.current ? "current" : ""}${index > history.entries.findIndex((one) => one.current) ? " undone" : ""}`}
+                    aria-current={entry.current ? "step" : undefined}
+                    onClick={() => history.jumpTo(index)}
+                  >
+                    {entry.label}
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
         {refusal ? (
           <p key={refusal.id} className="rack-graph-refusal" role="status">
             {refusal.reason}

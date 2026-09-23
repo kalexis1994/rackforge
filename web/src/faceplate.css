@@ -5153,6 +5153,52 @@
 
 /* -- the chain -- */
 
+/* The strip fades out at an end where there are more nodes past it, and
+   only there: a light that says "more this way" instead of a node cut off
+   at the frame. The widths are registered so the fade eases in and out as
+   the strip reaches an end, rather than switching. */
+@property --fx-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fx-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.play-chain-nodes {
+  --fx-fade-start: 0px;
+  --fx-fade-end: 0px;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fx-fade-start),
+    #000 calc(100% - var(--fx-fade-end)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fx-fade-start),
+    #000 calc(100% - var(--fx-fade-end)),
+    transparent 100%
+  );
+  transition:
+    --fx-fade-start var(--rf-motion-standard) var(--rf-ease-standard),
+    --fx-fade-end var(--rf-motion-standard) var(--rf-ease-standard);
+}
+
+.play-chain-nodes[data-fade-start] {
+  --fx-fade-start: 40px;
+}
+
+.play-chain-nodes[data-fade-end] {
+  --fx-fade-end: 40px;
+}
+
 .play-chain-node {
   background: var(--fp-panel);
   border: var(--fp-seam);

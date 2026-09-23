@@ -649,9 +649,12 @@ textarea {
 }
 
 .play-chain-nodes {
-  margin: 0;
+  /* The strip runs to the frame's inner edges, so what scrolls out of it
+     goes under the frame -- faded there, see the faceplate -- instead of
+     stopping square at the section's padding. */
+  margin: 0 calc(-1 * var(--rf-space-3));
   min-width: 0;
-  padding: 2px 0;
+  padding: 2px var(--rf-space-3);
   display: flex;
   align-items: stretch;
   gap: var(--rf-space-3);

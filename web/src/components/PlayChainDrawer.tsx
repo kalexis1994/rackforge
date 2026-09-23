@@ -23,6 +23,7 @@ import {
   type SuggestedChainEntry,
 } from "../playChain";
 import { PluginIcon } from "./PluginIcon";
+import { useScrollEdges } from "../hooks/useScrollEdges";
 
 const HEIGHT_STORAGE_KEY = "rackforge.play.chain-height.v1";
 /** The height the player chose with an effect's panel open: its own memory. */
@@ -145,6 +146,10 @@ export function PlayChainDrawer({
     storedHeight(PANEL_HEIGHT_STORAGE_KEY));
   const [panelHeight, setPanelHeight] = useState(PANEL_MINIMUM);
   const bandRef = useRef<HTMLDivElement | null>(null);
+  // Which ends of the chain's strip have nodes beyond them, so those ends
+  // fade out rather than cutting a node off square.
+  const nodesRef = useRef<HTMLOListElement | null>(null);
+  const nodeEdges = useScrollEdges(nodesRef);
   const [naturalHeight, setNaturalHeight] = useState(MINIMUM_HEIGHT);
   const [maximumHeight, setMaximumHeight] = useState(Number.POSITIVE_INFINITY);
   const [resizing, setResizing] = useState(false);
@@ -290,7 +295,12 @@ export function PlayChainDrawer({
             drawer, and each section below names itself on its own frame. */}
         <fieldset className="play-chain-section chain">
           <legend>Chain</legend>
-        <ol className="play-chain-nodes">
+        <ol
+          ref={nodesRef}
+          className="play-chain-nodes"
+          data-fade-start={nodeEdges.start || undefined}
+          data-fade-end={nodeEdges.end || undefined}
+        >
           <li className="play-chain-node instrument">
             <PluginIcon
               plugin={instrumentDescriptor}

@@ -1602,10 +1602,23 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     match event.phase {
                         InputPhase::Press => {
                             if button_gestures.press(event.input, Instant::now()) {
+                                let previous_button_leds = messages.button_leds.clone();
                                 menu.set_button_pressed(event.input, true);
                                 messages = render_menu_messages(&menu)?;
                                 if let Err(error) = session.send(&messages.footer) {
                                     eprintln!("No se pudo mostrar el botón presionado: {error}");
+                                    break;
+                                }
+                                // The frame on the screen and the light under
+                                // the finger are one gesture. Sending only the
+                                // footer drew the frame and left the LED in
+                                // the ambient, so a pressed button never lit.
+                                if let Err(error) = send_changed_button_leds(
+                                    &mut session,
+                                    &previous_button_leds,
+                                    &messages.button_leds,
+                                ) {
+                                    eprintln!("No se pudo encender el botón presionado: {error}");
                                     break;
                                 }
                             } else {
@@ -1614,10 +1627,22 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                         }
                         InputPhase::Release => {
                             navigation_input = button_gestures.release(event.input, Instant::now());
+                            let previous_button_leds = messages.button_leds.clone();
                             if menu.set_button_pressed(event.input, false) {
                                 messages = render_menu_messages(&menu)?;
                                 if let Err(error) = session.send(&messages.footer) {
                                     eprintln!("No se pudo restaurar el footer: {error}");
+                                    break;
+                                }
+                                // Back to the ambient, by the same path that
+                                // lit it: a button left bright after the
+                                // finger goes is the same bug upside down.
+                                if let Err(error) = send_changed_button_leds(
+                                    &mut session,
+                                    &previous_button_leds,
+                                    &messages.button_leds,
+                                ) {
+                                    eprintln!("No se pudo apagar el botón presionado: {error}");
                                     break;
                                 }
                             }

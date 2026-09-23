@@ -173,19 +173,61 @@ pub fn little_driver(port_name: &str) -> Option<&'static dyn ControllerDriver> {
     Some(driver)
 }
 
+/// The one endpoint that carries notes and the display, told apart from the
+/// device's other ports.
+///
+/// Two naming conventions have to be read, and they mark the extra ports in
+/// opposite places. ALSA appends the endpoint and its address, so the same
+/// keyboard arrives as `KL Essential 61 mk3 MIDI 28:0` beside
+/// `KL Essential 61 mk3 MCU/HUI 28:2`, and the main one is the one ending in
+/// `MIDI`. Windows reports the device's product string bare --
+/// `KL Essential 61 mk3`, read from a running host -- and numbers any extra
+/// ports ahead of it as `MIDIIN2 (...)`.
+///
+/// Requiring the `MIDI` suffix everywhere therefore accepted the right port
+/// on the appliance and rejected every port on Windows, where the driver sat
+/// printing "Esperando el KeyLab Essential mk3..." forever and neither the
+/// display nor the key colours were ever sent. Every test this function had
+/// used an ALSA name, so nothing caught it.
 pub fn is_main_midi_endpoint(name: &str) -> bool {
     let trimmed = name.trim();
-    let endpoint = trimmed
+    let address = trimmed
         .rsplit_once(' ')
-        .filter(|(_, suffix)| is_alsa_address(suffix))
-        .map_or(trimmed, |(prefix, _)| prefix);
+        .filter(|(_, suffix)| is_alsa_address(suffix));
+    let endpoint = address.map_or(trimmed, |(prefix, _)| prefix);
     let folded = endpoint.to_ascii_lowercase();
-    (folded.contains("kl essential") || folded.contains("keylab"))
-        && folded.trim_end().ends_with("midi")
-        && !folded.contains("mcu")
-        && !folded.contains("hui")
-        && !folded.contains("dinthru")
-        && !folded.contains(" alv")
+    if !(folded.contains("kl essential") || folded.contains("keylab")) {
+        return false;
+    }
+    if folded.contains("mcu")
+        || folded.contains("hui")
+        || folded.contains("dinthru")
+        || folded.contains(" alv")
+    {
+        return false;
+    }
+    if address.is_some() {
+        // An ALSA name: the suffix names the endpoint, so it has to say MIDI.
+        return folded.trim_end().ends_with("midi");
+    }
+    // Otherwise the product name is the port and any extras are numbered
+    // ahead of it. A bare `MIDIIN`/`MIDIOUT` with no number is the only port
+    // there is, so only a numbered one is an extra.
+    !is_numbered_secondary_port(&folded)
+}
+
+/// `MIDIIN2 (...)` and `MIDIOUT3 (...)`: how Windows names a multi-port
+/// device's second and later endpoints.
+fn is_numbered_secondary_port(folded: &str) -> bool {
+    for prefix in ["midiin", "midiout"] {
+        if let Some(rest) = folded.strip_prefix(prefix) {
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            if let Ok(index) = digits.parse::<u32>() {
+                return index > 1;
+            }
+        }
+    }
+    false
 }
 
 pub fn is_keylab_endpoint(name: &str) -> bool {
@@ -206,6 +248,38 @@ fn is_alsa_address(value: &str) -> bool {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn the_main_endpoint_is_found_under_both_naming_conventions() {
+        // ALSA, as the appliance sees it. Unchanged behaviour.
+        assert!(is_main_midi_endpoint("KL Essential 61 mk3 MIDI 28:0"));
+        assert!(!is_main_midi_endpoint("KL Essential 61 mk3 MCU/HUI 28:2"));
+        assert!(!is_main_midi_endpoint("KL Essential 61 mk3 DINTHRU 28:1"));
+        assert!(!is_main_midi_endpoint("KL Essential 61 mk3 ALV 28:3"));
+
+        // Windows, copied from a running host's log rather than guessed:
+        // `DESKTOP_MIDI_SOURCE_CONNECTED name="KL Essential 61 mk3"`. The
+        // product string arrives bare, with no endpoint word to end in, and
+        // requiring one rejected it.
+        assert!(is_main_midi_endpoint("KL Essential 61 mk3"));
+        assert!(!is_main_midi_endpoint("MIDIIN2 (KL Essential 61 mk3)"));
+        assert!(!is_main_midi_endpoint("MIDIOUT2 (KL Essential 61 mk3)"));
+
+        // A device that is not a KeyLab stays out under either convention.
+        assert!(!is_main_midi_endpoint("Unknown USB MIDI 31:0"));
+        assert!(!is_main_midi_endpoint("MIDIIN2 (Some Other Keyboard)"));
+    }
+
+    #[test]
+    fn the_windows_port_negotiates_little() {
+        // The desktop gates LITTLE on `little_driver`, and the driver process
+        // waits on `display_driver`, so the fix has to reach through the
+        // lookup rather than stopping at the name test.
+        let driver = little_driver("KL Essential 61 mk3").unwrap();
+        assert_eq!(driver.profile().surfaces[0].layout_id, LITTLE_V1);
+        assert!(display_driver("KL Essential 61 mk3").is_some());
+        assert!(little_driver("MIDIIN2 (KL Essential 61 mk3)").is_none());
+    }
 
     #[test]
     fn unknown_midi_devices_never_receive_a_display_driver() {

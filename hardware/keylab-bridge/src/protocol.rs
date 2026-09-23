@@ -49,6 +49,9 @@ pub fn ambient_repaint_messages() -> Result<Vec<OutboundMessage>, String> {
         .map(|bytes| OutboundMessage::new(bytes, LED_SETTLE_MS))
         .collect())
 }
+/// Addressable RGB controls. The device answers to `0x00`..`0x23` -- see
+/// LED-MAP.md beside the package -- and accepts `0x24`..`0x2B` without
+/// lighting anything, so a full repaint spends eight messages on nothing.
 const RGB_LED_COUNT: u8 = 0x2C;
 pub const PRESET_SETTLE_MS: u16 = 350;
 pub const CONNECT_SETTLE_MS: u16 = 150;
@@ -260,6 +263,12 @@ pub fn all_rgb_led_messages(rgb: [u8; 3]) -> Result<Vec<Vec<u8>>, String> {
         .collect()
 }
 
+/// The four buttons under the screen, at `0x18`..`0x1B`.
+///
+/// Read off the hardware one ID at a time rather than assumed; the whole map
+/// is in hardware/controllers/arturia-keylab-essential-mk3/LED-MAP.md. They
+/// light when addressed on their own, so an ID that reaches nothing is not
+/// why they are dark in normal use.
 pub fn button_led_message(index: usize, rgb: [u8; 3]) -> Result<Vec<u8>, String> {
     if index >= 4 {
         return Err("KeyLab context-button LED index must be between 0 and 3".into());

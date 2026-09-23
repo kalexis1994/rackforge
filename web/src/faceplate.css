@@ -5874,6 +5874,41 @@
   border-radius: var(--fp-radius-key);
 }
 
+/* The Child Rack picker in the canvas menu kept the old glass -- a near-
+   black field ringed in cyan -- inside a paper menu. It is the panel's
+   field now: sunk into the plate, a seam around it, its name silkscreened
+   above like every other field's. */
+.rack-pane-child-picker {
+  border-top: var(--fp-seam);
+}
+
+.rack-pane-child-picker span {
+  color: var(--fp-rail-label);
+  font: 700 9px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.rack-pane-child-picker select {
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 600 12px/1 var(--display-font);
+}
+
+.rack-pane-child-picker select:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+.rack-pane-child-picker select:disabled {
+  color: var(--muted);
+}
+
 .rack-node-menu button:hover:not(:disabled) {
   background: var(--glass);
 }

@@ -450,10 +450,34 @@
   }
 }
 
-/* On its side the bar is 58 px with 8 above and below. */
+/* On its side the bar is 58 px with 8 above and below: too short for three
+   lines. The order stays mode, plugin, program -- the mode and the plugin
+   share the small top line, the program has the large one -- where the
+   phone layout used to drop the mode altogether. */
 @media (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
   .topbar.has-mixer-toggle {
     grid-template-rows: 42px;
+  }
+
+  .topbar .now-playing {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    column-gap: 8px !important;
+  }
+
+  .topbar .now-playing .eyebrow {
+    display: block !important;
+    grid-column: 1 !important;
+    grid-row: 1;
+  }
+
+  .topbar .now-playing .muted-inline {
+    grid-column: 2 !important;
+    grid-row: 1;
+  }
+
+  .topbar .now-playing strong {
+    grid-column: 1 / -1 !important;
+    grid-row: 2;
   }
 }
 

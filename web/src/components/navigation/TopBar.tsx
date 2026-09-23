@@ -55,8 +55,10 @@ export function TopBar({
         {/* Which mode the host is in, where "Now playing" used to say
             nothing the program name below did not. */}
         <span className="eyebrow">{modeLabel(snapshot?.active_mode)}</span>
-        <strong>{selected?.name ?? "Waiting for Core"}</strong>
+        {/* Mode, then plugin, then program: the same order at every size,
+            so it is the markup's order and no layout rearranges it. */}
         {active && <span className="muted-inline">{active.plugin_name}</span>}
+        <strong>{selected?.name ?? "Waiting for Core"}</strong>
       </div>
       <div className="top-controls" id="topbar-mixer">
         {!isVstHost() ? <MasterPan value={snapshot?.master_pan ?? 0} /> : null}

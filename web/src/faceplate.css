@@ -6008,9 +6008,10 @@
   grid-template-rows: 1fr auto;
   justify-items: center;
   align-items: center;
-  gap: 3px;
-  padding-top: 5px;
-  padding-bottom: 4px;
+  gap: 2px;
+  height: 34px;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 
 .graph-workspace-blocked {

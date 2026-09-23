@@ -1,6 +1,7 @@
-import { Plug } from "lucide-react";
+import { Play, Plug } from "lucide-react";
 import { BrandMark } from "../components/BrandMark";
 import { PageHeading } from "../components/PageHeading";
+import { IS_BROWSER_HOST } from "../host";
 import {
   ANDROID_PATH,
   LINUX_PATH,
@@ -35,8 +36,24 @@ const DOWNLOADS: Array<{
   { platform: "Android", file: ".apk", arch: "ARM64", asset: "RackForge-Android-arm64.apk", glyph: ANDROID_PATH },
 ];
 
-/* About says where the project lives and where to get it. Links open in a
-   new window, so the interface stays where it is. */
+/** What comes installed, in a line each: the Concert Grand built here, and
+ *  the official plugins tools/fetch-official-plugins.py pins -- a change
+ *  there is a reviewed edit, and so is this list. Instruments first. */
+const INCLUDED_PLUGINS: Array<{ name: string; kind: "instrument" | "effect"; about: string }> = [
+  { name: "RF - Concert Grand", kind: "instrument", about: "A grand piano modelled from its physics — strings, hammers and soundboard — with no samples." },
+  { name: "RF-Tines", kind: "instrument", about: "An electric piano modelled from hammer, tine and pickup, from bell-like to barking." },
+  { name: "RF-Organ", kind: "instrument", about: "A tonewheel organ with its rotary speaker, modelled rather than sampled." },
+  { name: "RF-7", kind: "instrument", about: "A six-operator FM synthesizer: all 32 algorithms, and the cartridges you already own." },
+  { name: "RF-106", kind: "instrument", about: "A six-voice analog polysynth with its lush stereo chorus and 128 factory programs." },
+  { name: "RF-5", kind: "instrument", about: "A five-voice analog polysynth: two oscillators a voice, hard sync and a four-pole filter." },
+  { name: "RF-Comp", kind: "effect", about: "A stereo compressor with a soft knee, parallel mix and live gain-reduction meters." },
+  { name: "RF-EQ", kind: "effect", about: "An eight-band parametric equaliser with high- and low-pass filters and shelves." },
+  { name: "RF-Limiter", kind: "effect", about: "A true-peak limiter that holds the output under its ceiling, whatever reaches it." },
+];
+
+/* About says what RackForge is, what it comes with, where the project lives
+   and where to get it. Links open in a new window, so the interface stays
+   where it is. */
 
 export function AboutPage() {
   return (
@@ -52,29 +69,69 @@ export function AboutPage() {
             player. */}
         <article className="settings-card about-card">
           <BrandMark />
+          {/* What RackForge is, in a few lines, for whoever meets it here
+              first -- the same promise the README opens with. */}
+          <p className="about-synopsis">
+            RackForge turns a computer, a phone or a Raspberry Pi into an
+            instrument you can play. Connect a MIDI keyboard, pick a sound,
+            layer sounds into Racks and build a show from Songs and Setlists,
+            with no DAW session to set up first. The same instruments and the
+            same interface on every platform.
+          </p>
+          {/* The one lit key on the page: the quickest way to know RackForge
+              is to play it. RackForge Web does not offer itself. */}
+          {IS_BROWSER_HOST ? null : (
+            <a
+              className="about-web-key"
+              href={WEB_DEMO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Play aria-hidden="true" />
+              <span>
+                <strong>Try RackForge Web</strong>
+                <small>Nothing to install</small>
+              </span>
+            </a>
+          )}
           <div className="settings-copy">
             <span className="card-kicker">Project</span>
             <h2>RackForge on GitHub</h2>
-            <p>Source code, releases and issues, and RackForge Web to try it in a browser.</p>
-            <div className="about-project-links">
-              <a
-                className="about-project-link"
-                href={PROJECT_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                github.com/kalexis1994/rackforge
-              </a>
-              <a
-                className="about-project-link"
-                href={WEB_DEMO_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                kalexis1994.github.io/rackforge
-              </a>
-            </div>
+            <p>Source code, releases and issues.</p>
+            <a
+              className="about-project-link"
+              href={PROJECT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              github.com/kalexis1994/rackforge
+            </a>
           </div>
+        </article>
+
+        <article className="settings-card about-plugins">
+          <div className="settings-copy">
+            <span className="card-kicker">Plugins</span>
+            <h2>Ready to play</h2>
+            <p>
+              Installed with RackForge: every one made of code rather than
+              samples, and the same on every platform. Minimal builds leave
+              them out.
+            </p>
+          </div>
+          <ul className="about-plugin-list">
+            {INCLUDED_PLUGINS.map((plugin) => (
+              <li key={plugin.name}>
+                <span className="about-plugin-name">
+                  <strong>{plugin.name}</strong>
+                  <span className={`plugin-kind-tag ${plugin.kind}`}>
+                    {plugin.kind === "instrument" ? "Instrument" : "Effect"}
+                  </span>
+                </span>
+                <p>{plugin.about}</p>
+              </li>
+            ))}
+          </ul>
         </article>
 
         <article className="settings-card about-downloads">

@@ -179,6 +179,75 @@
   width: 164px !important;
 }
 
+/* What RackForge is, centred under the mark, a size above the card copy. */
+.about-synopsis {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+/* Try RackForge Web: the page's one lit key, painted like Save, under what
+   RackForge is -- play it before reading on. */
+.about-web-key {
+  min-height: 56px;
+  padding: 10px 22px 10px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--acid-ink);
+  text-decoration: none;
+  background: var(--acid);
+  border: 1px solid color-mix(in srgb, var(--acid) 70%, var(--line));
+  border-radius: var(--fp-radius-key);
+  box-shadow:
+    var(--fp-lip),
+    var(--fp-drop),
+    0 0 22px color-mix(in srgb, var(--acid) 35%, transparent);
+  transition:
+    filter var(--rf-motion-instant) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
+}
+
+.about-web-key:hover {
+  filter: brightness(1.08);
+}
+
+.about-web-key:active {
+  box-shadow: var(--fp-well);
+}
+
+.about-web-key:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.about-web-key > svg {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  fill: currentColor;
+}
+
+.about-web-key > span {
+  display: grid;
+  gap: 3px;
+}
+
+.about-web-key strong {
+  font: 700 14px/1.1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.about-web-key small {
+  font: 500 11px/1 var(--mono-font);
+  opacity: 0.8;
+}
+
 .pairing-brand .brand-mark {
   width: 118px !important;
 }
@@ -2638,6 +2707,49 @@
   accent-color: var(--acid) !important;
 }
 
+/* About's included plugins: a name, its kind in the colour code, and a line
+   on what it is -- two columns where there is room. */
+.about-plugin-list {
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+  list-style: none;
+}
+
+.about-plugin-list > li {
+  padding: 10px 12px;
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+}
+
+.about-plugin-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.about-plugin-name strong {
+  font: 700 13px/1.2 var(--display-font);
+}
+
+.about-plugin-name .plugin-kind-tag {
+  margin-left: 0;
+}
+
+.about-plugin-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* About's downloads: one key per platform, its mark and its name, big
    enough to hit at once. Raised and seamed like every key on the panel,
    sunk while pressed. */
@@ -2718,18 +2830,6 @@
   text-decoration-color: color-mix(in srgb, var(--ink) 40%, transparent);
   text-underline-offset: 3px;
   overflow-wrap: anywhere;
-}
-
-/* The source and RackForge Web, one under the other. */
-.about-project-links {
-  margin-top: 10px;
-  display: grid;
-  justify-items: start;
-  gap: 6px;
-}
-
-.about-project-links > .about-project-link {
-  margin-top: 0;
 }
 
 .about-project-link:hover {

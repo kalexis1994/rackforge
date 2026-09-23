@@ -1222,8 +1222,6 @@ textarea {
 
 .preset-modal-toolbar p {
   margin: 0;
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .preset-create-button,
@@ -1233,15 +1231,7 @@ textarea {
 .preset-row-actions button,
 .preset-delete-confirm button {
   padding: 9px 12px;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
-  border-radius: 10px;
   cursor: pointer;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .preset-toolbar-actions {
@@ -1262,13 +1252,6 @@ textarea {
   height: 14px;
 }
 
-.preset-create-button,
-.preset-create-form button[type="submit"],
-.preset-rename-form button[type="submit"] {
-  color: #021016;
-  background: var(--acid);
-  border-color: var(--acid);
-}
 
 .preset-create-form {
   margin: 0 clamp(18px, 4vw, 30px) 18px;
@@ -1277,9 +1260,6 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 10px;
-  background: rgba(68, 216, 238, 0.06);
-  border: 1px solid rgba(68, 216, 238, 0.18);
-  border-radius: 15px;
 }
 
 .preset-create-form label {
@@ -1287,29 +1267,16 @@ textarea {
   gap: 6px;
 }
 
-.preset-create-form label > span {
-  color: var(--muted);
-  font-size: 9px;
-  text-transform: uppercase;
-}
 
 .preset-create-form input,
 .preset-rename-form input {
   min-width: 0;
   padding: 10px 12px;
-  color: var(--ink);
-  background: rgba(1, 9, 14, 0.7);
-  border: 1px solid var(--line);
-  border-radius: 9px;
 }
 
 .preset-message {
   margin: 0 clamp(18px, 4vw, 30px) 14px;
   padding: 10px 12px;
-  color: var(--acid);
-  background: rgba(68, 216, 238, 0.07);
-  border-radius: 10px;
-  font-size: 10px;
 }
 
 .preset-list.modal-list {
@@ -1417,9 +1384,6 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
-  background: rgba(4, 16, 24, 0.72);
-  border: 1px solid rgba(91, 223, 242, 0.14);
-  border-radius: 14px;
 }
 
 .preset-load-target {
@@ -1448,16 +1412,9 @@ textarea {
   white-space: nowrap;
 }
 
-.preset-load-target small {
-  color: var(--muted);
-  font-size: 9px;
-}
 
 .preset-load-target i {
-  color: var(--acid);
   font-style: normal;
-  font-size: 9px;
-  font-weight: 800;
 }
 
 .preset-row-actions {
@@ -1465,14 +1422,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 6px;
-  border-left: 1px solid rgba(91, 223, 242, 0.11);
 }
 
-.preset-row-actions .danger,
-.preset-delete-confirm .danger {
-  color: #ff99a5;
-  border-color: rgba(255, 117, 133, 0.32);
-}
 
 .preset-rename-form {
   grid-column: 1 / -1;
@@ -1489,10 +1440,6 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  color: #ffb1ba;
-  background: rgba(83, 16, 27, 0.48);
-  border-top: 1px solid rgba(255, 117, 133, 0.2);
-  font-size: 10px;
 }
 
 .preset-delete-confirm span {
@@ -1561,17 +1508,11 @@ textarea {
 .preset-import-stage-header span {
   display: block;
   margin-bottom: 5px;
-  color: var(--accent);
-  font: 700 9px/1.3 var(--mono);
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
 }
 
 .preset-import-stage-header h3 {
   margin: 0;
   overflow-wrap: anywhere;
-  color: var(--ink);
-  font: 700 clamp(19px, 4vw, 27px)/1.05 var(--display);
 }
 
 .preset-import-actions {
@@ -1592,8 +1533,6 @@ textarea {
   display: grid;
   gap: 1px;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 13px;
 }
 
 .preset-import-summary dl > div {
@@ -1602,43 +1541,22 @@ textarea {
   display: grid;
   grid-template-columns: minmax(110px, 0.4fr) minmax(0, 1fr);
   gap: 12px;
-  background: rgba(255, 255, 255, 0.025);
 }
 
-.preset-import-summary dt {
-  color: var(--muted);
-  font: 700 9px/1.4 var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 
 .preset-import-summary dd {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
-  color: var(--ink);
-  font-size: 11px;
 }
 
 .preset-import-conflict,
 .preset-import-warning {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 10px;
 }
 
-.preset-import-conflict {
-  color: #ffd1a1;
-  background: rgba(255, 166, 72, 0.09);
-  border: 1px solid rgba(255, 177, 92, 0.22);
-}
 
-.preset-import-warning {
-  color: #ffc0cb;
-  background: rgba(255, 90, 119, 0.08);
-  border: 1px solid rgba(255, 117, 144, 0.2);
-}
 
 @media (max-width: 520px) {
   .preset-import-summary dl > div {
@@ -1711,8 +1629,6 @@ textarea {
 
   .preset-row-actions {
     justify-content: flex-end;
-    border-top: 1px solid rgba(91, 223, 242, 0.11);
-    border-left: 0;
   }
 
   .preset-delete-confirm {

@@ -5106,6 +5106,235 @@
   box-shadow: var(--fp-lip), var(--fp-drop) !important;
 }
 
+/* --------------------------------------------------------- the presets ---
+   Only the dialog's shell and its empty state had been ported. The toolbar
+   keys, the New Preset form, every row and the import review were still the
+   old instrument: cyan seams on navy glass, acid fills on anything primary.
+   Now the rows are module plates like the plugin picker's, the keys are
+   stamped keys, New and Save wear the red every primary wears, the form is
+   an inset well with silkscreen labels, and delete confirms on a red-tinted
+   plate like every other error. */
+
+.preset-modal-toolbar {
+  border-bottom: var(--fp-seam);
+}
+
+.preset-modal-toolbar p {
+  color: var(--fp-rail-label);
+  font: 600 11px/1.4 var(--display-font);
+  letter-spacing: 0.02em;
+}
+
+/* -- keys -- */
+
+.preset-create-button,
+.preset-import-button,
+.preset-create-form button,
+.preset-rename-form button,
+.preset-row-actions button,
+.preset-delete-confirm button {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  transition:
+    background-color var(--rf-motion-fast) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.preset-create-button:hover:not(:disabled),
+.preset-import-button:hover:not(:disabled),
+.preset-create-form button:hover:not(:disabled),
+.preset-rename-form button:hover:not(:disabled),
+.preset-row-actions button:hover:not(:disabled),
+.preset-delete-confirm button:hover:not(:disabled),
+.preset-create-button:active:not(:disabled),
+.preset-import-button:active:not(:disabled),
+.preset-create-form button:active:not(:disabled),
+.preset-rename-form button:active:not(:disabled),
+.preset-row-actions button:active:not(:disabled),
+.preset-delete-confirm button:active:not(:disabled) {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+/* New, Save and Rename's confirm are the lit keys: the red every primary
+   wears, where the old theme filled them with acid. */
+.preset-create-button,
+.preset-create-form button[type="submit"],
+.preset-rename-form button[type="submit"] {
+  color: var(--red-ink);
+  background: var(--red);
+  border: 1px solid color-mix(in srgb, var(--red) 70%, #000);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+}
+
+.preset-create-button:hover:not(:disabled),
+.preset-create-form button[type="submit"]:hover:not(:disabled),
+.preset-rename-form button[type="submit"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--red) 88%, #fff);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+}
+
+.preset-create-button:active:not(:disabled),
+.preset-create-form button[type="submit"]:active:not(:disabled),
+.preset-rename-form button[type="submit"]:active:not(:disabled) {
+  background: var(--red);
+  box-shadow: var(--fp-well);
+}
+
+.preset-row-actions .danger,
+.preset-delete-confirm .danger {
+  color: var(--red);
+}
+
+/* -- the New Preset form -- */
+
+.preset-create-form {
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-well);
+}
+
+.preset-create-form label > span {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.preset-create-form input,
+.preset-rename-form input {
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 500 13px/1.2 var(--mono-font);
+}
+
+.preset-create-form input:focus-visible,
+.preset-rename-form input:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+.preset-message {
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-well);
+  font: 600 12px/1.4 var(--display-font);
+}
+
+/* -- rows -- */
+
+.preset-row {
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip);
+}
+
+.preset-load-target:hover:not(:disabled),
+.preset-load-target:focus-visible {
+  background: rgba(var(--ink-rgb), 0.04);
+}
+
+.preset-load-target small {
+  color: var(--fp-rail-label);
+  font: 600 10px/1.3 var(--mono-font);
+}
+
+.preset-load-target i {
+  color: var(--red);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.preset-row-actions {
+  border-left: var(--fp-seam);
+}
+
+.preset-delete-confirm {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--paper));
+  border-top: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+  font: 600 12px/1.4 var(--display-font);
+}
+
+@media (max-width: 720px) {
+  .preset-row-actions {
+    border-top: var(--fp-seam);
+    border-left: 0;
+  }
+}
+
+/* -- importing a preset -- */
+
+.preset-import-stage-header span {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.3 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.preset-import-stage-header h3 {
+  color: var(--ink);
+  font: 700 clamp(19px, 4vw, 27px)/1.05 var(--display-font);
+}
+
+.preset-import-summary dl {
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  background: var(--line);
+}
+
+.preset-import-summary dl > div {
+  background: var(--panel-inset);
+}
+
+.preset-import-summary dt {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.4 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.preset-import-summary dd {
+  color: var(--ink);
+  font: 500 12px/1.4 var(--mono-font);
+}
+
+.preset-import-conflict,
+.preset-import-warning {
+  border-radius: var(--fp-radius);
+  font: 600 12px/1.45 var(--display-font);
+}
+
+.preset-import-conflict {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--amber) 38%, var(--line));
+}
+
+.preset-import-warning {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+}
+
 /* ----------------------------------------------------- the MIDI link ---
    Right-click (or long-press) a control in a plugin and RackForge offers to
    link it to MIDI. The menu and the dialog it opens had never been ported:

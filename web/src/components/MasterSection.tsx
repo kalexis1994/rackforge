@@ -1,7 +1,142 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { dispatchCommand, subscribeOutputMeter } from "../gateway";
+import {
+  dispatchCommand,
+  saveOutputCapture,
+  subscribeAudioHealth,
+  subscribeOutputMeter,
+} from "../gateway";
 import { METER_FLOOR_DB, amplitudeToMeterDb, meterPercent } from "../meter";
-import { type OutputMeterSnapshot } from "../types";
+import { type AudioHealthSnapshot, type OutputMeterSnapshot } from "../types";
+
+/// The audio callback's cost and what it has dropped, beside the meter that
+/// is already being watched.
+///
+/// A dropout that appears at random needs a witness that is always looking,
+/// and this telemetry only ever reached stdout -- which a windowed
+/// application does not have. The load says whether the fault is ours; the
+/// two counters say whose it is if the load is low. They read "0" rather
+/// than disappearing, because a counter that hides when it is zero cannot be
+/// told apart from one that stopped being read.
+export function AudioHealthReadout() {
+  const [health, setHealth] = useState<AudioHealthSnapshot | null>(null);
+  const [capture, setCapture] = useState<{ state: "saving" | "saved" | "failed"; detail: string } | null>(null);
+
+  useEffect(() => subscribeAudioHealth(setHealth), []);
+
+  // The mark returns to its resting state after a few seconds, so the next
+  // click can be saved without wondering whether the last one was.
+  useEffect(() => {
+    if (!capture || capture.state === "saving") return;
+    const timer = window.setTimeout(() => setCapture(null), 6_000);
+    return () => window.clearTimeout(timer);
+  }, [capture]);
+
+  const saveCapture = async () => {
+    setCapture({ state: "saving", detail: "Saving…" });
+    try {
+      const saved = await saveOutputCapture();
+      setCapture({
+        state: "saved",
+        detail: `Saved ${Math.round(saved.seconds)} s and ${saved.midi_messages} MIDI messages to ${saved.path}`,
+      });
+    } catch (error) {
+      setCapture({
+        state: "failed",
+        detail: error instanceof Error ? error.message : "The capture could not be saved.",
+      });
+    }
+  };
+
+  if (!health) {
+    return null;
+  }
+  const load = Math.round(health.load_percent);
+  const peak = Math.round(health.peak_percent);
+  // Everything the host can see that is heard as a click: a callback that
+  // took too long, one the driver called too late, a block that went out as
+  // silence, audio the driver says it lost on its own side, an input that
+  // slipped against the output, and whatever the stream reported as failed.
+  const driverDropouts = health.driver_overloads + health.driver_resyncs
+    + health.driver_skipped_buffers;
+  // Late MIDI is not lost audio, and it is heard the same way from the
+  // keyboard: a note that sounds late, a release that holds a key down.
+  const midiLate = health.midi_late_driver + health.midi_late_queue;
+  const lost = health.overruns + health.late_callbacks + health.silenced_blocks
+    + driverDropouts + health.capture_glitches + health.stream_errors + midiLate;
+  // The colour marks what is happening now. The total on the right only
+  // grows, so colouring by it would leave the readout red for the rest of
+  // the session after a single glitch and say nothing afterwards.
+  const failingNow = health.recent_overruns > 0
+    || health.recent_late_callbacks > 0
+    || health.recent_silenced_blocks > 0
+    || health.recent_driver_dropouts > 0
+    || health.recent_capture_glitches > 0
+    || health.recent_midi_late > 0;
+  const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+  const now: string[] = [];
+  if (health.recent_overruns > 0) {
+    now.push(`${plural(health.recent_overruns, "overrun")} averaging `
+      + `${Math.round(health.overrun_average_percent)}% of budget on `
+      + `${Math.round(health.overrun_average_frames)}-frame blocks`);
+  }
+  if (health.recent_late_callbacks > 0) {
+    now.push(`${plural(health.recent_late_callbacks, "late callback")}, widest gap `
+      + `${Math.round(health.worst_gap_percent)}% of a period`);
+  }
+  if (health.recent_silenced_blocks > 0) {
+    now.push(`${plural(health.recent_silenced_blocks, "block")} sent as silence`);
+  }
+  if (health.recent_driver_dropouts > 0) {
+    now.push(`${plural(health.recent_driver_dropouts, "dropout")} reported by the driver`);
+  }
+  if (health.recent_capture_glitches > 0) {
+    now.push(`${plural(health.recent_capture_glitches, "input slip")}`);
+  }
+  if (health.recent_midi_late > 0) {
+    now.push(`${plural(health.recent_midi_late, "late MIDI message")}, held up to `
+      + `${Math.round(health.worst_midi_driver_delay_ms)} ms before RackForge and `
+      + `${Math.round(health.worst_midi_queue_delay_ms)} ms inside it`);
+  }
+  const title = `Audio callback load ${load}%, peak ${peak}% of a `
+    + `${Math.round(health.block_frames)}-frame block; widest gap between callbacks `
+    + `${Math.round(health.worst_gap_percent)}% of a period. `
+    + `Since the stream opened: ${plural(health.overruns, "overrun")}, `
+    + `${plural(health.late_callbacks, "late callback")}, `
+    + `${plural(health.silenced_blocks, "silenced block")}, `
+    + `${plural(driverDropouts, "driver-reported dropout")} (overload `
+    + `${health.driver_overloads}, resync ${health.driver_resyncs}, skipped buffers `
+    + `${health.driver_skipped_buffers}), `
+    + `${plural(health.capture_glitches, "input slip")}, `
+    + `${plural(midiLate, "late MIDI message")} (held before RackForge `
+    + `${health.midi_late_driver}, inside it ${health.midi_late_queue}), `
+    + `${plural(health.stream_errors, "driver error")}, `
+    + `${plural(health.midi_dropped, "MIDI event")} dropped.`
+    + (now.length > 0 ? ` Now: ${now.join("; ")}.` : " Nothing lost since the last reading.");
+  return (
+    <div
+      className={`audio-health-readout${failingNow ? " audio-health-readout-lost" : ""}`}
+      title={title}
+      aria-label={title}
+    >
+      <span className="audio-health-load">{load}%</span>
+      <span className="audio-health-lost" aria-hidden="true">{lost}</span>
+      {/* A click heard once, with every counter at zero, leaves only the
+          audio as a witness. This keeps it: the last fifteen seconds of
+          what went to the device and the MIDI that played them. */}
+      <button
+        type="button"
+        className={`audio-health-capture${capture ? ` audio-health-capture-${capture.state}` : ""}`}
+        title={capture?.detail
+          ?? "Heard a click? Press within fifteen seconds to save the output and the MIDI that played it."}
+        aria-label={capture?.detail ?? "Save the last fifteen seconds of output"}
+        disabled={capture?.state === "saving"}
+        onClick={() => void saveCapture()}
+      >
+        {capture?.state === "saved" ? "✓" : capture?.state === "failed" ? "!" : "●"}
+      </button>
+    </div>
+  );
+}
 
 export function MasterOutputMeter() {
   const [levels, setLevels] = useState<[number, number]>([METER_FLOOR_DB, METER_FLOOR_DB]);
@@ -46,6 +181,7 @@ export function MasterOutputMeter() {
         ))}
       </span>
       <span className="master-output-meter-channels" aria-hidden="true">L R</span>
+      <AudioHealthReadout />
     </div>
   );
 }

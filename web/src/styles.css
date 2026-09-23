@@ -2224,6 +2224,59 @@ body {
   white-space: pre;
 }
 
+/* The callback's cost and its losses, under the meter that is already being
+   watched. Quiet while nothing is wrong: a readout that draws the eye at
+   rest stops being read when it matters. */
+.audio-health-readout {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+}
+
+.audio-health-readout .audio-health-lost {
+  opacity: 0.6;
+}
+
+/* The flight recorder's save mark: as quiet as the readout until pressed. */
+.audio-health-capture {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.audio-health-capture:hover,
+.audio-health-capture:focus-visible {
+  opacity: 1;
+  color: var(--warning, #d08770);
+}
+
+.audio-health-capture-saved {
+  opacity: 1;
+  color: var(--accent, #3ad8e0);
+}
+
+.audio-health-capture-failed {
+  opacity: 1;
+  color: var(--warning, #d08770);
+}
+
+/* Anything lost at all: the number stops being decoration. */
+.audio-health-readout-lost {
+  opacity: 1;
+  color: var(--warning, #d08770);
+}
+
 .master-output-meter-bars {
   height: 29px;
   display: flex;

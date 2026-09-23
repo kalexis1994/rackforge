@@ -40,7 +40,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -100,13 +100,65 @@ const MASTER_SMOOTHING_FRAMES: u32 = 480;
 const CONTROL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 pub(crate) const VIRTUAL_MIDI_SOURCE_KEY: MidiSourceKey = MidiSourceKey::new(u32::MAX);
 
+/// A message the driver handed over this long after stamping it was held by
+/// something between the keyboard and this process. The driver's stamp has
+/// millisecond resolution, so anything much under this is the stamp's own
+/// grain.
+const MIDI_DRIVER_LATE_US: u64 = 10_000;
+/// Added to two periods to decide that a message waited in our queue for
+/// too long. One period is the normal wait: a message that arrives just
+/// after a block started is taken by the next one.
+const MIDI_QUEUE_LATE_EXTRA_US: u64 = 10_000;
+
+/// A callback whose start came more than one and a half periods after the
+/// previous one's. Scheduling jitter on a healthy stream stays well inside
+/// half a period; a whole missed buffer is a full period late.
+const LATE_CALLBACK_PERMILLE: u64 = 1_500;
+
 #[derive(Default)]
 struct AudioTelemetry {
     callback_count: AtomicU64,
     callback_frames: AtomicU64,
     callback_total_nanos: AtomicU64,
     callback_max_nanos: AtomicU64,
+    /// A second maximum, which the health poll takes and clears. The one
+    /// above is the worst block since the stream opened and never comes
+    /// back down, so it cannot answer "is it happening now".
+    callback_window_max_nanos: AtomicU64,
     callback_overruns: AtomicU64,
+    callback_overrun_nanos: AtomicU64,
+    callback_overrun_frames: AtomicU64,
+    /// Callbacks that arrived more than half a period later than the block
+    /// before them said they would. An overrun is a callback that took too
+    /// long; this is one the driver called too late, which no amount of
+    /// timing the callback itself can see. A driver that misses a buffer
+    /// because another driver held the CPU at interrupt level produces a
+    /// click and a perfectly punctual callback -- after the gap.
+    late_callbacks: AtomicU64,
+    /// The widest gap between two callback starts, as thousandths of the
+    /// block period, since the health poll last took it.
+    callback_window_max_gap_permille: AtomicU64,
+    /// Blocks that went to the device as silence in place of what was
+    /// rendered: a render that failed, or one that produced a sample that
+    /// was not a number, which the output ceiling turns into zero. Either is
+    /// heard as a click and neither was counted anywhere.
+    silenced_blocks: AtomicU64,
+    /// MIDI that reached this host late, in two places. `driver`: the
+    /// driver stamped the message and handed it to our callback more than
+    /// `MIDI_DRIVER_LATE_US` afterwards -- something in the operating
+    /// system held it. `queue`: our callback had it, and no block took it
+    /// for longer than two periods and `MIDI_QUEUE_LATE_EXTRA_US` -- our
+    /// own engine held it. A note heard late, or a key that seems to stick
+    /// because its release was heard late, is one or the other, and which
+    /// one decides where to look. Counts, the worst delay since the health
+    /// poll last took it, and the delay of the latest late message for the
+    /// log.
+    midi_driver_late: AtomicU64,
+    midi_driver_window_worst_us: AtomicU64,
+    midi_driver_last_late_us: AtomicU64,
+    midi_queue_late: AtomicU64,
+    midi_queue_window_worst_us: AtomicU64,
+    midi_queue_last_late_us: AtomicU64,
     midi_dropped_events: AtomicU64,
     midi_panic_count: AtomicU64,
     stream_error_count: AtomicU64,
@@ -115,6 +167,21 @@ struct AudioTelemetry {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AudioRuntimeStatus {
     pub callback_count: u64,
+    /// Running totals, so two readings can be subtracted into a window.
+    /// Everything derived below is a mean over the life of the stream.
+    pub callback_frames: u64,
+    pub callback_total_us: f64,
+    pub callback_overrun_us: f64,
+    pub callback_overrun_frames: u64,
+    pub late_callbacks: u64,
+    pub silenced_blocks: u64,
+    pub midi_driver_late: u64,
+    pub midi_queue_late: u64,
+    /// The ASIO driver's own reports of audio it lost, process-wide: see
+    /// `asio_sys::DriverDropouts`. Zero on WASAPI, which has no equivalent.
+    pub driver_overloads: u64,
+    pub driver_resyncs: u64,
+    pub driver_skipped_buffers: u64,
     pub average_frames: f64,
     pub average_callback_us: f64,
     pub maximum_callback_us: f64,
@@ -137,12 +204,74 @@ impl AudioTelemetry {
         self.callback_total_nanos
             .fetch_add(nanos, Ordering::Relaxed);
         self.callback_max_nanos.fetch_max(nanos, Ordering::Relaxed);
+        self.callback_window_max_nanos
+            .fetch_max(nanos, Ordering::Relaxed);
         let budget = (frames as u64)
             .saturating_mul(1_000_000_000)
             .checked_div(u64::from(sample_rate))
             .unwrap_or(0);
         if budget > 0 && nanos > budget {
             self.callback_overruns.fetch_add(1, Ordering::Relaxed);
+            // Kept apart from the totals above so a diagnosis can compare
+            // the late callbacks against the rest: their size against the
+            // usual block, and their length against their own budget.
+            self.callback_overrun_nanos
+                .fetch_add(nanos, Ordering::Relaxed);
+            self.callback_overrun_frames
+                .fetch_add(frames as u64, Ordering::Relaxed);
+        }
+    }
+
+    /// Records the time between the start of the previous callback and the
+    /// start of this one, against the period of the block this one was
+    /// asked for.
+    ///
+    /// Measured against the CURRENT block because that is the one that
+    /// states how much time passed: with ASIO every block is the same size,
+    /// and a WASAPI stream asks for as many frames as the device consumed
+    /// since the last fill, so a late wake there also asks for more frames
+    /// and the ratio stays near one. It only climbs when time passed that no
+    /// block accounted for -- a buffer the device played without us.
+    fn record_gap(&self, gap: Duration, frames: usize, sample_rate: u32) {
+        let period = (frames as u64)
+            .saturating_mul(1_000_000_000)
+            .checked_div(u64::from(sample_rate))
+            .unwrap_or(0);
+        if period == 0 {
+            return;
+        }
+        let gap = gap.as_nanos().min(u128::from(u64::MAX)) as u64;
+        let permille = gap.saturating_mul(1_000) / period;
+        self.callback_window_max_gap_permille
+            .fetch_max(permille, Ordering::Relaxed);
+        if permille > LATE_CALLBACK_PERMILLE {
+            self.late_callbacks.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn record_silenced_block(&self) {
+        self.silenced_blocks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// How long after the driver's stamp our callback got the message.
+    fn record_midi_driver_delay(&self, delay_us: u64) {
+        self.midi_driver_window_worst_us
+            .fetch_max(delay_us, Ordering::Relaxed);
+        if delay_us > MIDI_DRIVER_LATE_US {
+            self.midi_driver_late.fetch_add(1, Ordering::Relaxed);
+            self.midi_driver_last_late_us
+                .store(delay_us, Ordering::Relaxed);
+        }
+    }
+
+    /// How long a message waited in our queue before a block took it.
+    fn record_midi_queue_delay(&self, delay_us: u64, period_us: u64) {
+        self.midi_queue_window_worst_us
+            .fetch_max(delay_us, Ordering::Relaxed);
+        if delay_us > period_us.saturating_mul(2) + MIDI_QUEUE_LATE_EXTRA_US {
+            self.midi_queue_late.fetch_add(1, Ordering::Relaxed);
+            self.midi_queue_last_late_us
+                .store(delay_us, Ordering::Relaxed);
         }
     }
 
@@ -168,6 +297,15 @@ impl AudioTelemetry {
         };
         AudioRuntimeStatus {
             callback_count,
+            callback_frames,
+            callback_total_us: callback_nanos as f64 / 1_000.0,
+            callback_overrun_us: self.callback_overrun_nanos.load(Ordering::Relaxed) as f64
+                / 1_000.0,
+            callback_overrun_frames: self.callback_overrun_frames.load(Ordering::Relaxed),
+            late_callbacks: self.late_callbacks.load(Ordering::Relaxed),
+            silenced_blocks: self.silenced_blocks.load(Ordering::Relaxed),
+            midi_driver_late: self.midi_driver_late.load(Ordering::Relaxed),
+            midi_queue_late: self.midi_queue_late.load(Ordering::Relaxed),
             average_frames,
             average_callback_us,
             maximum_callback_us: self.callback_max_nanos.load(Ordering::Relaxed) as f64 / 1_000.0,
@@ -177,6 +315,11 @@ impl AudioTelemetry {
             midi_dropped_events: self.midi_dropped_events.load(Ordering::Relaxed),
             midi_panic_count: self.midi_panic_count.load(Ordering::Relaxed),
             stream_error_count: self.stream_error_count.load(Ordering::Relaxed),
+            // Filled in by `DesktopAudio::runtime_status`: the driver and
+            // the capture ring are not this telemetry's to read.
+            driver_overloads: 0,
+            driver_resyncs: 0,
+            driver_skipped_buffers: 0,
             capture_overruns: 0,
             capture_underruns: 0,
         }
@@ -299,6 +442,44 @@ pub struct AudioDriverInfo {
     pub detail: String,
 }
 
+/// The row that says ASIO exists and this build cannot use it.
+///
+/// Decided by whether cpal was compiled with an ASIO host, and by nothing
+/// else. It used to be decided by whether the scan had produced an ASIO row,
+/// which is not the same question: a scan that skips the ASIO driver because
+/// it is the one streaming produces no row either, and then the live driver
+/// was listed twice -- once as this, unavailable, and once as itself when its
+/// cached rows were spliced back in. The settings page keys its driver
+/// options by name, so it showed the unavailable one as selected and would
+/// not let the real one be chosen.
+fn asio_placeholder(asio_in_build: bool) -> Option<AudioDriverInfo> {
+    (!asio_in_build).then(|| AudioDriverInfo {
+        name: "ASIO".into(),
+        available: false,
+        detail: "Not included in this build; an ASIO-enabled build and driver are required".into(),
+    })
+}
+
+/// Puts the live backend's rows back into a scan that skipped it.
+///
+/// Rows of the same driver already in the scan are replaced, not joined:
+/// the driver list is keyed by name everywhere it is shown, so two rows with
+/// one name is never a richer list, only a broken selector.
+pub fn splice_live_backend(
+    fresh: &mut AudioInventory,
+    live: &str,
+    drivers: impl IntoIterator<Item = AudioDriverInfo>,
+    outputs: impl IntoIterator<Item = AudioOutputInfo>,
+    inputs: impl IntoIterator<Item = AudioInputInfo>,
+) {
+    fresh.drivers.retain(|driver| driver.name != live);
+    fresh.outputs.retain(|output| output.driver != live);
+    fresh.inputs.retain(|input| input.driver != live);
+    fresh.drivers.extend(drivers);
+    fresh.outputs.extend(outputs);
+    fresh.inputs.extend(inputs);
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct AudioOutputInfo {
     pub driver: String,
@@ -340,6 +521,7 @@ impl AudioInventory {
     /// the running stream dead. The caller splices the skipped driver's rows
     /// back in from its cache.
     pub fn scan_skipping(skip_driver: Option<&str>) -> Result<Self> {
+        let scan_started = Instant::now();
         let mut drivers = Vec::new();
         let mut outputs = Vec::new();
         let mut inputs = Vec::new();
@@ -426,13 +608,11 @@ impl AudioInventory {
             });
         }
 
-        if !drivers.iter().any(|driver| driver.name == "ASIO") {
-            drivers.push(AudioDriverInfo {
-                name: "ASIO".into(),
-                available: false,
-                detail: "Not included in this build; an ASIO-enabled build and driver are required"
-                    .into(),
-            });
+        let asio_in_build = cpal::available_hosts()
+            .iter()
+            .any(|host| host.name() == "ASIO");
+        if let Some(placeholder) = asio_placeholder(asio_in_build) {
+            drivers.push(placeholder);
         }
         outputs.sort_by(|left, right| {
             left.driver
@@ -446,7 +626,17 @@ impl AudioInventory {
                 .then_with(|| right.is_default.cmp(&left.is_default))
                 .then_with(|| left.name.cmp(&right.name))
         });
+        let audio_ms = scan_started.elapsed().as_millis();
+        let midi_started = Instant::now();
         let midi_inputs = discover_all_midi_inputs()?;
+        // Written every time: a scan opens every endpoint of every backend
+        // it covers, and that is exactly the kind of thing that, run while
+        // someone plays, has to be ruled in or out by a time in the log.
+        println!(
+            "DESKTOP_AUDIO_INVENTORY_SCAN t_ms={} audio_ms={audio_ms} midi_ms={} skipped={skip_driver:?}",
+            log_clock_ms(),
+            midi_started.elapsed().as_millis(),
+        );
         Ok(Self {
             drivers,
             outputs,
@@ -771,6 +961,8 @@ pub struct DesktopAudio {
     errors: Arc<Mutex<Option<String>>>,
     telemetry: Arc<AudioTelemetry>,
     output_meter: Arc<OutputMeter>,
+    /// The last seconds of output and the MIDI that played them.
+    recorder: Arc<OutputRecorder>,
     capture_ring: Option<Arc<CaptureRing>>,
     sample_rate: u32,
     summary: String,
@@ -868,6 +1060,9 @@ impl DesktopAudio {
 
         let telemetry = Arc::new(AudioTelemetry::default());
         let output_meter = Arc::new(OutputMeter::default());
+        // Fifteen seconds at the stream's own rate, allocated here and never
+        // in the callback.
+        let recorder = Arc::new(OutputRecorder::new(config.sample_rate.0));
         let (midi_sender, midi_receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
         // Notes played on a surface deserve the same queue as notes played on
         // a keyboard: 4096 deep, and anything that does not fit in this block
@@ -951,6 +1146,8 @@ impl DesktopAudio {
                 RenderPool::automatic(render_telemetry)
             },
             render_telemetry: RenderTelemetry::new(0),
+            audio_telemetry: Arc::clone(&telemetry),
+            recorder: Arc::clone(&recorder),
             clock_sender,
             clock_scratch: Vec::with_capacity(64),
             clock_frequency: performance_frequency(),
@@ -961,6 +1158,7 @@ impl DesktopAudio {
         };
         processor.render_telemetry = Arc::clone(processor.render_pool.telemetry());
         let engage_callback_thread = std::sync::Once::new();
+        let mut previous_callback_start: Option<Instant> = None;
         let stream = device
             .build_output_stream_raw(
                 &config,
@@ -974,15 +1172,48 @@ impl DesktopAudio {
                             rackforge_core::realtime::DEFAULT_AUDIO_PRIORITY,
                         );
                         println!("DESKTOP_AUDIO_CALLBACK {status}");
+                        // Per-thread promotion is not enough on Windows 11:
+                        // EcoQoS throttles the whole process once none of its
+                        // windows is in front, and a boosted thread inside a
+                        // throttled process still runs on a slower clock. That
+                        // is heard as xruns that start when another window is
+                        // clicked and stop when RackForge is in front again.
+                        let throttling = rackforge_core::realtime::exempt_process_from_throttling();
+                        println!("DESKTOP_AUDIO_THROTTLING {throttling:?}");
+                        println!(
+                            "DESKTOP_AUDIO_SUBNORMALS {:?}",
+                            rackforge_core::realtime::flush_subnormals()
+                        );
                     });
+                    // `engage` already set the flags, once. This thread is
+                    // the driver's, not ours, and nothing stops an ASIO
+                    // driver from restoring its own floating-point control
+                    // word between callbacks; if one did, every plugin tail
+                    // would fall back to microcode speed with no sign of
+                    // why. Checking costs one register read per block.
+                    rackforge_core::realtime::flush_subnormals();
                     let started = Instant::now();
                     let frames = data.len() / callback_channels;
-                    if let Err(error) = render_output(&mut processor, data, sample_format) {
-                        silence_output(data, sample_format);
-                        // `{:#}` keeps the cause chain: without it every audio
-                        // failure reads as the outermost context and the real
-                        // reason never reaches the log.
-                        publish_error(&callback_errors, format!("{error:#}"));
+                    if let Some(previous) = previous_callback_start.replace(started) {
+                        callback_telemetry.record_gap(
+                            started.duration_since(previous),
+                            frames,
+                            callback_sample_rate,
+                        );
+                    }
+                    match render_output(&mut processor, data, sample_format) {
+                        Ok(RenderedBlock::Clean) => {}
+                        Ok(RenderedBlock::SilencedNonFinite) => {
+                            callback_telemetry.record_silenced_block();
+                        }
+                        Err(error) => {
+                            silence_output(data, sample_format);
+                            callback_telemetry.record_silenced_block();
+                            // `{:#}` keeps the cause chain: without it every
+                            // audio failure reads as the outermost context
+                            // and the real reason never reaches the log.
+                            publish_error(&callback_errors, format!("{error:#}"));
+                        }
                     }
                     callback_telemetry.record_callback(
                         frames,
@@ -1037,6 +1268,7 @@ impl DesktopAudio {
             errors,
             telemetry,
             output_meter,
+            recorder,
             capture_ring,
             sample_rate: config.sample_rate.0,
             summary,
@@ -1052,11 +1284,85 @@ impl DesktopAudio {
 
     pub fn runtime_status(&self) -> AudioRuntimeStatus {
         let mut status = self.telemetry.snapshot(self.sample_rate);
+        let dropouts = asio_sys::driver_dropouts();
+        status.driver_overloads = dropouts.overloads;
+        status.driver_resyncs = dropouts.resyncs;
+        status.driver_skipped_buffers = dropouts.skipped_buffers;
         if let Some(capture) = &self.capture_ring {
             status.capture_overruns = capture.overruns.load(Ordering::Relaxed);
             status.capture_underruns = capture.underruns.load(Ordering::Relaxed);
         }
         status
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    /// The longest MIDI delays since this was last called, in microseconds
+    /// -- driver to callback, and callback to block -- and zero for the next
+    /// caller.
+    pub fn take_midi_window_worst_us(&self) -> (u64, u64) {
+        (
+            self.telemetry
+                .midi_driver_window_worst_us
+                .swap(0, Ordering::Relaxed),
+            self.telemetry
+                .midi_queue_window_worst_us
+                .swap(0, Ordering::Relaxed),
+        )
+    }
+
+    /// The widest gap between two callbacks since this was last called, as
+    /// a percentage of the block period, and zero for the next caller.
+    pub fn take_callback_window_gap_percent(&self) -> f64 {
+        self.telemetry
+            .callback_window_max_gap_permille
+            .swap(0, Ordering::Relaxed) as f64
+            / 10.0
+    }
+
+    /// The worst callback since this was last called, in microseconds, and
+    /// zero for the next caller. Taking it is what makes it a window.
+    pub fn take_callback_window_peak_us(&self) -> f64 {
+        self.telemetry
+            .callback_window_max_nanos
+            .swap(0, Ordering::Relaxed) as f64
+            / 1_000.0
+    }
+
+    /// Saves the flight recorder into `directory`, as `<stem>.wav` and
+    /// `<stem>.txt`, and returns the WAV's path with how many seconds and
+    /// messages it holds.
+    ///
+    /// The ring is copied here, which takes a few milliseconds; the files
+    /// are written on a thread of their own, so the caller is not held for
+    /// the disk. The path is known before the file is finished.
+    pub fn save_output_capture(&self, directory: &Path) -> (PathBuf, f64, usize) {
+        let snapshot = self.recorder.snapshot();
+        let seconds = snapshot.samples.len() as f64 / 2.0 / f64::from(snapshot.sample_rate.max(1));
+        let messages = snapshot.events.len();
+        let stem = format!(
+            "click-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs())
+        );
+        let path = directory.join(format!("{stem}.wav"));
+        let directory = directory.to_path_buf();
+        let _ = thread::Builder::new()
+            .name("rackforge-output-capture".into())
+            .spawn(
+                move || match write_recorder_snapshot(&snapshot, &directory, &stem) {
+                    Ok(path) => println!(
+                        "DESKTOP_OUTPUT_CAPTURED t_ms={} path={}",
+                        log_clock_ms(),
+                        path.display()
+                    ),
+                    Err(error) => eprintln!("DESKTOP_OUTPUT_CAPTURE_FAILED error={error:#}"),
+                },
+            );
+        (path, seconds, messages)
     }
 
     pub fn take_output_meter(&self) -> OutputMeterSnapshot {
@@ -1356,6 +1662,7 @@ impl DesktopAudio {
 
     pub fn test_note(&self) -> Result<()> {
         self.send_command(AudioCommand::InjectMidi(MidiPacket {
+            received_at: 0,
             source: VIRTUAL_MIDI_SOURCE_KEY,
             length: 3,
             data: [0x90, 60, 100],
@@ -1368,6 +1675,7 @@ impl DesktopAudio {
             .spawn(move || {
                 thread::sleep(Duration::from_millis(350));
                 let _ = sender.try_send(AudioCommand::InjectMidi(MidiPacket {
+                    received_at: 0,
                     source: VIRTUAL_MIDI_SOURCE_KEY,
                     length: 3,
                     data: [0x80, 60, 0],
@@ -1405,6 +1713,7 @@ impl DesktopAudio {
         for data in messages {
             self.injected_midi
                 .try_send(MidiPacket {
+                    received_at: 0,
                     source,
                     length: 3,
                     data,
@@ -1568,6 +1877,11 @@ pub(crate) struct MidiPacket {
     /// transport that stamps its messages. `None` lands at the block's
     /// first sample, as every message did before.
     pub(crate) timestamp: Option<u64>,
+    /// When this host received it, on the performance counter; 0 for a
+    /// message that did not come from an input port. Measured only, never
+    /// used to place the message: the render reads it to tell how long the
+    /// message waited in the queue before a block took it.
+    pub(crate) received_at: u64,
 }
 
 impl MidiPacket {
@@ -1585,7 +1899,7 @@ impl MidiPacket {
 }
 
 /// The performance counter, in the ticks the MIDI service stamps with.
-fn performance_counter() -> u64 {
+pub(crate) fn performance_counter() -> u64 {
     let mut ticks = 0i64;
     // SAFETY: a valid out-pointer; the call cannot fail on Windows XP and later.
     let _ = unsafe { windows::Win32::System::Performance::QueryPerformanceCounter(&mut ticks) };
@@ -1901,6 +2215,12 @@ struct AudioProcessor {
     sample_rate: u32,
     render_pool: RenderPool,
     render_telemetry: Arc<RenderTelemetry>,
+    /// The callback's own counters, shared with the stream: the render
+    /// records here how long MIDI waited in the queue.
+    audio_telemetry: Arc<AudioTelemetry>,
+    /// The flight recorder: the render stamps MIDI into it, the output
+    /// write fills it.
+    recorder: Arc<OutputRecorder>,
     /// The host sequencer: transport and lanes, advanced once per block so
     /// pattern MIDI joins `events` sample-accurately before instances run.
     sequencer: rackforge_core::SequencerEngine,
@@ -1937,6 +2257,13 @@ impl AudioProcessor {
             let Ok(packet) = self.midi_receiver.try_recv() else {
                 break;
             };
+            if packet.received_at != 0 && block_now > packet.received_at {
+                let waited = u128::from(block_now - packet.received_at) * 1_000_000
+                    / u128::from(self.clock_frequency.max(1));
+                let period = frames as u64 * 1_000_000 / u64::from(self.sample_rate.max(1));
+                self.audio_telemetry
+                    .record_midi_queue_delay(waited.min(u128::from(u64::MAX)) as u64, period);
+            }
             let frame = block_frame(
                 packet.timestamp,
                 block_start,
@@ -1969,6 +2296,11 @@ impl AudioProcessor {
                 );
             }
             let ingress = packet.ingress_at(frame);
+            self.recorder.record_event(
+                self.recorder.frames_written() + u64::from(frame),
+                packet.length,
+                packet.data,
+            );
             let active_voice = self.active_voice;
             let mut consume = false;
             {
@@ -2902,20 +3234,48 @@ where
     Ok(())
 }
 
+/// What reached the device from one rendered block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RenderedBlock {
+    Clean,
+    /// Some sample was not a number. The output ceiling sends each such
+    /// sample as silence, which keeps the speakers safe and is heard as a
+    /// click -- so it is counted, because nothing else would say it happened.
+    SilencedNonFinite,
+}
+
 fn render_output(
     processor: &mut AudioProcessor,
     data: &mut cpal::Data,
     format: SampleFormat,
-) -> Result<()> {
+) -> Result<RenderedBlock> {
     let frames = data.len() / processor.device_channels;
     let device_channels = processor.device_channels;
     let output_gain = processor.output_gain;
     let output_meter = Arc::clone(&processor.output_meter);
+    let recorder = Arc::clone(&processor.recorder);
     let rendered = processor.render(frames)?;
-    for frame in rendered.as_chunks::<PLUGIN_OUTPUT_CHANNELS>().0 {
+    let mut block = RenderedBlock::Clean;
+    for (offset, frame) in rendered
+        .as_chunks::<PLUGIN_OUTPUT_CHANNELS>()
+        .0
+        .iter()
+        .enumerate()
+    {
+        if !(frame[0].is_finite() && frame[1].is_finite()) {
+            block = RenderedBlock::SilencedNonFinite;
+        }
         output_meter.observe_stereo(frame[0] * output_gain, frame[1] * output_gain);
+        // The same arithmetic `write_samples` does, so the recording is the
+        // device's input and not an approximation of it.
+        recorder.record_frame(
+            offset,
+            clean_sample(frame[0] * output_gain),
+            clean_sample(frame[1] * output_gain),
+        );
     }
-    match format {
+    recorder.commit(rendered.len() / PLUGIN_OUTPUT_CHANNELS);
+    let written = match format {
         SampleFormat::I8 => copy_samples::<i8>(data, rendered, device_channels, output_gain),
         SampleFormat::I16 => copy_samples::<i16>(data, rendered, device_channels, output_gain),
         SampleFormat::I24 => {
@@ -2930,7 +3290,9 @@ fn render_output(
         SampleFormat::F32 => copy_samples::<f32>(data, rendered, device_channels, output_gain),
         SampleFormat::F64 => copy_samples::<f64>(data, rendered, device_channels, output_gain),
         _ => bail!("unsupported Windows sample format {format:?}"),
-    }
+    };
+    written?;
+    Ok(block)
 }
 
 fn copy_samples<T>(
@@ -3078,7 +3440,7 @@ pub fn midi_input_names() -> Result<Vec<String>> {
     discover_all_midi_inputs()
 }
 
-fn discover_all_midi_inputs() -> Result<Vec<String>> {
+pub(crate) fn discover_all_midi_inputs() -> Result<Vec<String>> {
     let mut names = discover_midi_inputs()?;
     names.extend(crate::ump_input::discover());
     Ok(names)
@@ -3196,7 +3558,9 @@ impl MidiSupervisor {
                     }
                 }
                 let mut next_reconcile = Instant::now() + MIDI_RECONNECT_INTERVAL;
+                let mut late_log = MidiLateLog::default();
                 loop {
+                    late_log.report(&telemetry);
                     match stop_receiver.recv_timeout(MIDI_SUPERVISOR_TICK) {
                         Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
                         Err(RecvTimeoutError::Timeout) => {}
@@ -3223,7 +3587,8 @@ impl MidiSupervisor {
                         next_reconcile = Instant::now();
                     }
                     if Instant::now() >= next_reconcile {
-                        if let Err(error) = reconcile_midi_inputs(
+                        let scan_started = Instant::now();
+                        let scan = reconcile_midi_inputs(
                             &wanted(),
                             &mut connections,
                             &mut ump,
@@ -3231,7 +3596,18 @@ impl MidiSupervisor {
                             &telemetry,
                             &controller_sender,
                             yield_keylab,
-                        ) {
+                        );
+                        // Every second, all through a performance: if one of
+                        // these ever takes long, the log says when, and a
+                        // late note beside it says why.
+                        let scan_ms = scan_started.elapsed().as_millis();
+                        if scan_ms >= MIDI_SCAN_SLOW_MS {
+                            println!(
+                                "DESKTOP_MIDI_SCAN_SLOW t_ms={} ms={scan_ms}",
+                                log_clock_ms()
+                            );
+                        }
+                        if let Err(error) = scan {
                             eprintln!("DESKTOP_MIDI_SCAN_FAILED error={error:#}");
                         }
                         if !yield_keylab && reconcile_keylab_display(&mut display, &display_mailbox)
@@ -3699,6 +4075,7 @@ fn deliver_midi_message(
     data[..message.len()].copy_from_slice(message);
     if sender
         .try_send(MidiPacket {
+            received_at: performance_counter(),
             source,
             length: message.len() as u8,
             data,
@@ -3710,6 +4087,43 @@ fn deliver_midi_message(
         telemetry
             .midi_dropped_events
             .fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// How late each message reached our callback, from the driver's own stamp.
+///
+/// WinMM stamps every message with the milliseconds since the port started,
+/// on its clock; this host knows when the callback ran, on its own. The
+/// difference is a constant offset plus whatever held the message. The
+/// offset is the smallest difference seen, and what exceeds it is delay.
+///
+/// The two clocks drift apart by some parts per million, which over an hour
+/// would read as a steady climb. So the floor may rise by up to a
+/// millisecond per second since the previous message: that follows any
+/// drift a real oscillator has, and a stall of a tenth of a second still
+/// shows as one.
+#[derive(Default)]
+struct MidiArrivalClock {
+    /// The smallest arrival-minus-stamp seen, allowed to creep up, in µs.
+    floor_us: Option<i64>,
+    /// When the previous message arrived, µs since the port was opened.
+    previous_arrival_us: i64,
+}
+
+impl MidiArrivalClock {
+    /// Microseconds this message was held beyond the fastest delivery.
+    fn delay_us(&mut self, stamp_us: u64, arrival_us: u64) -> u64 {
+        let arrival_us = i64::try_from(arrival_us).unwrap_or(i64::MAX);
+        let stamp_us = i64::try_from(stamp_us).unwrap_or(i64::MAX);
+        let difference = arrival_us.saturating_sub(stamp_us);
+        let creep = (arrival_us - self.previous_arrival_us).max(0) / 1_000;
+        self.previous_arrival_us = arrival_us;
+        let floor = match self.floor_us {
+            Some(floor) => difference.min(floor.saturating_add(creep)),
+            None => difference,
+        };
+        self.floor_us = Some(floor);
+        (difference - floor).max(0) as u64
     }
 }
 
@@ -3729,10 +4143,17 @@ fn connect_midi_input(
         .with_context(|| format!("Windows MIDI input {name:?} disappeared before connection"))?;
     let keylab = keylab_controller::is_keylab_endpoint(name);
     let source = stable_midi_source_key(name);
+    let mut arrival = MidiArrivalClock::default();
+    // Taken just before the port starts, so arrivals and the driver's
+    // stamps count from nearly the same moment; the rest of the offset is
+    // what the clock above removes.
+    let opened = Instant::now();
     midi.connect(
         &port,
         "rackforge-desktop-input",
-        move |_timestamp, message, _| {
+        move |stamp_us, message, _| {
+            let arrival_us = opened.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
+            telemetry.record_midi_driver_delay(arrival.delay_us(stamp_us, arrival_us));
             deliver_midi_message(
                 message,
                 None,
@@ -3747,6 +4168,270 @@ fn connect_midi_input(
         (),
     )
     .map_err(|error| anyhow::anyhow!("connecting Windows MIDI input {name:?}: {error}"))
+}
+
+/// Seconds of output the flight recorder keeps.
+const RECORDER_SECONDS: usize = 15;
+/// MIDI messages it keeps: far more than fifteen seconds of playing.
+const RECORDER_EVENTS: usize = 8_192;
+
+/// The last seconds of exactly what went to the device, and the MIDI that
+/// played them.
+///
+/// A click heard once while playing, with every counter at zero, is either
+/// in the audio this host produced or added after it -- by the driver, the
+/// USB link, the interface. Only the audio itself can say which, so the
+/// callback keeps the latest fifteen seconds of its output, sample for
+/// sample as the device received it, and every MIDI message stamped with
+/// the sample it was played at. When the player hears a click they save
+/// it: a click in the file is ours, and the message beside it is what
+/// caused it; a file that is clean where the click was heard clears the
+/// whole host.
+///
+/// The callback writes with relaxed atomic stores into memory allocated
+/// when the stream opens: no lock, no allocation, a store per sample.
+pub(crate) struct OutputRecorder {
+    sample_rate: u32,
+    /// Interleaved stereo, as `f32` bits.
+    samples: Box<[AtomicU32]>,
+    /// Frames ever written: the ring position is this modulo the capacity.
+    frames_written: AtomicU64,
+    events_frame: Box<[AtomicU64]>,
+    /// Length and up to three bytes, packed.
+    events_data: Box<[AtomicU32]>,
+    events_written: AtomicU64,
+}
+
+/// One saved stretch: its samples and the MIDI inside it, frames counted
+/// from the stretch's first sample.
+pub(crate) struct RecorderSnapshot {
+    pub sample_rate: u32,
+    pub samples: Vec<f32>,
+    pub events: Vec<(u64, u8, [u8; 3])>,
+}
+
+impl OutputRecorder {
+    fn new(sample_rate: u32) -> Self {
+        let frames = sample_rate as usize * RECORDER_SECONDS;
+        Self {
+            sample_rate,
+            samples: (0..frames * 2).map(|_| AtomicU32::new(0)).collect(),
+            frames_written: AtomicU64::new(0),
+            events_frame: (0..RECORDER_EVENTS).map(|_| AtomicU64::new(0)).collect(),
+            events_data: (0..RECORDER_EVENTS).map(|_| AtomicU32::new(0)).collect(),
+            events_written: AtomicU64::new(0),
+        }
+    }
+
+    fn capacity_frames(&self) -> u64 {
+        (self.samples.len() / 2) as u64
+    }
+
+    /// The frame the next block starts at.
+    fn frames_written(&self) -> u64 {
+        self.frames_written.load(Ordering::Relaxed)
+    }
+
+    /// Audio thread: one MIDI message, at the frame it was played at.
+    fn record_event(&self, frame: u64, length: u8, data: [u8; 3]) {
+        let index = self.events_written.load(Ordering::Relaxed);
+        let slot = (index % RECORDER_EVENTS as u64) as usize;
+        self.events_frame[slot].store(frame, Ordering::Relaxed);
+        self.events_data[slot].store(
+            u32::from(length) << 24
+                | u32::from(data[2]) << 16
+                | u32::from(data[1]) << 8
+                | u32::from(data[0]),
+            Ordering::Relaxed,
+        );
+        self.events_written.store(index + 1, Ordering::Release);
+    }
+
+    /// Audio thread: one frame of the block being written, `offset` frames
+    /// into it. The block is published by `commit`.
+    fn record_frame(&self, offset: usize, left: f32, right: f32) {
+        let frame = (self.frames_written() + offset as u64) % self.capacity_frames();
+        let index = frame as usize * 2;
+        self.samples[index].store(left.to_bits(), Ordering::Relaxed);
+        self.samples[index + 1].store(right.to_bits(), Ordering::Relaxed);
+    }
+
+    fn commit(&self, frames: usize) {
+        self.frames_written
+            .fetch_add(frames as u64, Ordering::Release);
+    }
+
+    /// The whole ring as it stands, oldest first.
+    ///
+    /// The callback keeps writing while this copies. Whatever it overwrote
+    /// meanwhile -- at the oldest end, where the ring wraps -- is dropped,
+    /// with a margin, rather than saved half old and half new.
+    pub(crate) fn snapshot(&self) -> RecorderSnapshot {
+        const MARGIN_FRAMES: u64 = 8_192;
+        let capacity = self.capacity_frames();
+        let written = self.frames_written.load(Ordering::Acquire);
+        let available = written.min(capacity);
+        let mut samples = Vec::with_capacity(available as usize * 2);
+        for frame in written - available..written {
+            let index = (frame % capacity) as usize * 2;
+            samples.push(f32::from_bits(self.samples[index].load(Ordering::Relaxed)));
+            samples.push(f32::from_bits(
+                self.samples[index + 1].load(Ordering::Relaxed),
+            ));
+        }
+        let after = self.frames_written.load(Ordering::Acquire);
+        let overwritten = if written - available + capacity < after + MARGIN_FRAMES {
+            (after + MARGIN_FRAMES - (written - available + capacity)).min(available)
+        } else {
+            0
+        };
+        let start = written - available + overwritten;
+        samples.drain(..overwritten as usize * 2);
+
+        let events_written = self.events_written.load(Ordering::Acquire);
+        let kept = events_written.min(RECORDER_EVENTS as u64);
+        let events = (events_written - kept..events_written)
+            .filter_map(|index| {
+                let slot = (index % RECORDER_EVENTS as u64) as usize;
+                let frame = self.events_frame[slot].load(Ordering::Relaxed);
+                let packed = self.events_data[slot].load(Ordering::Relaxed);
+                (frame >= start && frame < written).then(|| {
+                    (
+                        frame - start,
+                        (packed >> 24) as u8,
+                        [packed as u8, (packed >> 8) as u8, (packed >> 16) as u8],
+                    )
+                })
+            })
+            .collect();
+        RecorderSnapshot {
+            sample_rate: self.sample_rate,
+            samples,
+            events,
+        }
+    }
+}
+
+/// Writes a snapshot as `<stem>.wav` -- 32-bit float stereo, exactly the
+/// samples sent -- and `<stem>.txt`, the MIDI inside it with its time.
+pub(crate) fn write_recorder_snapshot(
+    snapshot: &RecorderSnapshot,
+    directory: &Path,
+    stem: &str,
+) -> Result<PathBuf> {
+    std::fs::create_dir_all(directory)
+        .with_context(|| format!("creating {}", directory.display()))?;
+    let wav_path = directory.join(format!("{stem}.wav"));
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: snapshot.sample_rate,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(&wav_path, spec)
+        .with_context(|| format!("creating {}", wav_path.display()))?;
+    for sample in &snapshot.samples {
+        writer.write_sample(*sample)?;
+    }
+    writer.finalize()?;
+
+    let mut listing = format!(
+        "# RackForge output capture: {} s at {} Hz, {} MIDI messages\n\
+         # seconds       frame   bytes      meaning\n",
+        snapshot.samples.len() / 2 / snapshot.sample_rate.max(1) as usize,
+        snapshot.sample_rate,
+        snapshot.events.len(),
+    );
+    for (frame, length, data) in &snapshot.events {
+        let bytes = data[..usize::from(*length).min(3)]
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        listing.push_str(&format!(
+            "{:>9.4}  {frame:>10}   {bytes:<9}  {}\n",
+            *frame as f64 / f64::from(snapshot.sample_rate.max(1)),
+            describe_midi(*length, *data),
+        ));
+    }
+    let txt_path = directory.join(format!("{stem}.txt"));
+    std::fs::write(&txt_path, listing)
+        .with_context(|| format!("writing {}", txt_path.display()))?;
+    Ok(wav_path)
+}
+
+/// A MIDI message in words, for a person reading a capture.
+fn describe_midi(length: u8, data: [u8; 3]) -> String {
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    let note = |number: u8| {
+        format!(
+            "{}{}",
+            NAMES[usize::from(number % 12)],
+            i32::from(number / 12) - 1
+        )
+    };
+    let channel = (data[0] & 0x0f) + 1;
+    match (data[0] & 0xf0, length) {
+        (0x90, 3) if data[2] > 0 => {
+            format!("note on  {} vel {} ch {channel}", note(data[1]), data[2])
+        }
+        (0x90, 3) | (0x80, 3) => format!("note off {} ch {channel}", note(data[1])),
+        (0xa0, 3) => format!("poly pressure {} {} ch {channel}", note(data[1]), data[2]),
+        (0xb0, 3) => format!("control {} = {} ch {channel}", data[1], data[2]),
+        (0xc0, _) => format!("program {} ch {channel}", data[1]),
+        (0xd0, _) => format!("channel pressure {} ch {channel}", data[1]),
+        (0xe0, 3) => format!(
+            "pitch bend {} ch {channel}",
+            (i32::from(data[2]) << 7 | i32::from(data[1])) - 8192
+        ),
+        _ => "system".into(),
+    }
+}
+
+/// A MIDI hotplug scan at least this slow is written to the log.
+const MIDI_SCAN_SLOW_MS: u128 = 5;
+
+/// Milliseconds since this process first asked, for log lines written by
+/// different threads to be put side by side.
+pub(crate) fn log_clock_ms() -> u128 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis()
+}
+
+/// Writes late MIDI to the log from the supervisor's thread. The input
+/// callbacks only count: printing there would put a write to stdout -- a
+/// file or a pipe -- in the path of the next note.
+#[derive(Default)]
+struct MidiLateLog {
+    driver_seen: u64,
+    queue_seen: u64,
+}
+
+impl MidiLateLog {
+    fn report(&mut self, telemetry: &AudioTelemetry) {
+        let driver = telemetry.midi_driver_late.load(Ordering::Relaxed);
+        if driver > self.driver_seen {
+            println!(
+                "DESKTOP_MIDI_LATE t_ms={} stage=driver count={} last_ms={:.1}",
+                log_clock_ms(),
+                driver - self.driver_seen,
+                telemetry.midi_driver_last_late_us.load(Ordering::Relaxed) as f64 / 1_000.0,
+            );
+            self.driver_seen = driver;
+        }
+        let queue = telemetry.midi_queue_late.load(Ordering::Relaxed);
+        if queue > self.queue_seen {
+            println!(
+                "DESKTOP_MIDI_LATE t_ms={} stage=queue count={} last_ms={:.1}",
+                log_clock_ms(),
+                queue - self.queue_seen,
+                telemetry.midi_queue_last_late_us.load(Ordering::Relaxed) as f64 / 1_000.0,
+            );
+            self.queue_seen = queue;
+        }
+    }
 }
 
 struct KeyLabDisplay {
@@ -3922,6 +4607,7 @@ fn release_held_notes(sender: &SyncSender<MidiPacket>, telemetry: &AudioTelemetr
     for packet in packets {
         if sender
             .send(MidiPacket {
+                received_at: 0,
                 source: VIRTUAL_MIDI_SOURCE_KEY,
                 length: packet.length,
                 data: packet.data,
@@ -4002,6 +4688,7 @@ mod tests {
 
     fn packet(status: u8, data: [u8; 3], wide: Option<u32>) -> super::MidiPacket {
         super::MidiPacket {
+            received_at: 0,
             source: rackforge_midi_api::MidiSourceKey::new(7),
             length: 3,
             data: [status, data[1], data[2]],
@@ -4415,6 +5102,234 @@ midi_inputs = []
         assert_eq!(status.maximum_callback_us, 1_500.0);
         assert_eq!(status.callback_budget_us, 1_000.0);
         assert_eq!(status.callback_overruns, 1);
+    }
+
+    fn driver_row(name: &str, available: bool) -> AudioDriverInfo {
+        AudioDriverInfo {
+            name: name.into(),
+            available,
+            detail: String::new(),
+        }
+    }
+
+    fn output_row(driver: &str, name: &str) -> AudioOutputInfo {
+        AudioOutputInfo {
+            driver: driver.into(),
+            name: name.into(),
+            is_default: false,
+            channels: 2,
+            default_sample_rate: 48_000,
+            sample_rates: vec![48_000],
+            buffer_frames: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_asio_placeholder_depends_on_the_build_not_on_what_the_scan_skipped() {
+        assert!(asio_placeholder(true).is_none());
+        let placeholder = asio_placeholder(false).expect("a build without ASIO says so");
+        assert_eq!(placeholder.name, "ASIO");
+        assert!(!placeholder.available);
+    }
+
+    #[test]
+    fn splicing_the_live_backend_leaves_exactly_one_row_per_driver() {
+        // What the settings page showed: a scan that skipped the streaming
+        // ASIO driver still carried an unavailable "ASIO" row, and the
+        // cached real one was appended beside it.
+        let mut fresh = AudioInventory {
+            drivers: vec![driver_row("WASAPI", true), driver_row("ASIO", false)],
+            outputs: vec![
+                output_row("WASAPI", "Speakers"),
+                output_row("ASIO", "stale"),
+            ],
+            inputs: Vec::new(),
+            midi_inputs: Vec::new(),
+        };
+        splice_live_backend(
+            &mut fresh,
+            "ASIO",
+            [driver_row("ASIO", true)],
+            [output_row("ASIO", "Focusrite USB ASIO")],
+            [],
+        );
+        let asio: Vec<_> = fresh.drivers.iter().filter(|d| d.name == "ASIO").collect();
+        assert_eq!(asio.len(), 1, "one row per driver name");
+        assert!(asio[0].available, "the live driver is the one that remains");
+        let asio_outputs: Vec<_> = fresh
+            .outputs
+            .iter()
+            .filter(|o| o.driver == "ASIO")
+            .map(|o| o.name.as_str())
+            .collect();
+        assert_eq!(asio_outputs, ["Focusrite USB ASIO"]);
+        assert!(fresh.drivers.iter().any(|d| d.name == "WASAPI"));
+        assert!(fresh.outputs.iter().any(|o| o.name == "Speakers"));
+    }
+
+    fn record_ramp(recorder: &OutputRecorder, frames: u64) {
+        // One block at a time, the way the callback writes: each frame's
+        // value is its own index, so any sample says where it came from.
+        let mut written = 0;
+        while written < frames {
+            let block = (frames - written).min(256);
+            for offset in 0..block {
+                let value = (written + offset) as f32;
+                recorder.record_frame(offset as usize, value, -value);
+            }
+            recorder.commit(block as usize);
+            written += block;
+        }
+    }
+
+    #[test]
+    fn the_recorder_returns_the_output_oldest_first_with_its_midi_in_place() {
+        let recorder = OutputRecorder::new(1_000);
+        recorder.record_event(10, 3, [0x90, 60, 100]);
+        recorder.record_event(500, 3, [0x80, 60, 0]);
+        record_ramp(&recorder, 1_000);
+        let snapshot = recorder.snapshot();
+        assert_eq!(snapshot.samples.len(), 2_000);
+        assert_eq!(snapshot.samples[0], 0.0);
+        assert_eq!(snapshot.samples[2 * 999], 999.0);
+        assert_eq!(snapshot.samples[2 * 999 + 1], -999.0);
+        assert_eq!(
+            snapshot.events,
+            vec![(10, 3, [0x90, 60, 100]), (500, 3, [0x80, 60, 0])]
+        );
+    }
+
+    #[test]
+    fn a_wrapped_recorder_keeps_the_newest_and_drops_what_the_callback_may_overwrite() {
+        // 15 000 frames of room at 1 kHz. Once full, the oldest end is where
+        // the callback's next block lands, so a margin of it is not trusted.
+        let recorder = OutputRecorder::new(1_000);
+        record_ramp(&recorder, 20_000);
+        recorder.record_event(19_000, 3, [0xb0, 64, 127]);
+        recorder.record_event(1_000, 3, [0x90, 40, 90]);
+        let snapshot = recorder.snapshot();
+        let kept = snapshot.samples.len() as u64 / 2;
+        let first = 20_000 - kept;
+        assert_eq!(snapshot.samples[0], first as f32, "oldest kept frame first");
+        assert_eq!(
+            *snapshot.samples.last().unwrap(),
+            -19_999.0,
+            "newest frame last"
+        );
+        assert!(kept > 5_000 && kept < 15_000, "kept {kept}");
+        assert_eq!(
+            snapshot.events,
+            vec![(19_000 - first, 3, [0xb0, 64, 127])],
+            "an event from before the kept stretch is left out"
+        );
+    }
+
+    #[test]
+    fn a_capture_is_written_as_float_wav_and_a_readable_midi_listing() {
+        let recorder = OutputRecorder::new(1_000);
+        recorder.record_event(250, 3, [0x90, 60, 100]);
+        record_ramp(&recorder, 1_000);
+        let directory =
+            std::env::temp_dir().join(format!("rackforge-capture-test-{}", std::process::id()));
+        let path = write_recorder_snapshot(&recorder.snapshot(), &directory, "click-test").unwrap();
+        let reader = hound::WavReader::open(&path).unwrap();
+        assert_eq!(reader.spec().channels, 2);
+        assert_eq!(reader.spec().sample_rate, 1_000);
+        assert_eq!(reader.spec().sample_format, hound::SampleFormat::Float);
+        assert_eq!(reader.len(), 2_000);
+        let listing = std::fs::read_to_string(directory.join("click-test.txt")).unwrap();
+        assert!(listing.contains("0.2500"), "{listing}");
+        assert!(listing.contains("note on  C4 vel 100 ch 1"), "{listing}");
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn the_first_message_sets_the_offset_and_a_held_one_reads_as_its_delay() {
+        let mut clock = MidiArrivalClock::default();
+        // Arrivals trail the driver's stamps by a constant 3 ms of offset.
+        assert_eq!(clock.delay_us(10_000, 13_000), 0);
+        assert_eq!(clock.delay_us(20_000, 23_000), 0);
+        // Stamped at 30 ms, handed over 180 ms later than the rest. The floor
+        // may have crept up by a millisecond per second since the previous
+        // message -- 190 µs here -- which is the drift allowance, not error.
+        let held = clock.delay_us(30_000, 213_000);
+        assert!((179_000..=180_000).contains(&held), "read {held} µs");
+        // And the next punctual one is punctual again.
+        assert_eq!(clock.delay_us(400_000, 403_000), 0);
+    }
+
+    #[test]
+    fn clock_drift_between_driver_and_host_is_not_read_as_delay() {
+        // 200 parts per million: the host's clock gains 0.2 ms a second on
+        // the driver's. Over an hour of playing, a fixed floor would read
+        // that as 720 ms of delay on every note.
+        let mut clock = MidiArrivalClock::default();
+        let mut worst = 0;
+        for second in 0..3_600_u64 {
+            let stamp = second * 1_000_000;
+            let arrival = stamp + 3_000 + second * 200;
+            worst = worst.max(clock.delay_us(stamp, arrival));
+        }
+        assert!(worst < 1_000, "drift read as {worst} µs of delay");
+    }
+
+    #[test]
+    fn late_midi_is_counted_per_stage_against_its_own_threshold() {
+        let telemetry = AudioTelemetry::default();
+        telemetry.record_midi_driver_delay(2_000);
+        telemetry.record_midi_driver_delay(MIDI_DRIVER_LATE_US + 1);
+        assert_eq!(telemetry.midi_driver_late.load(Ordering::Relaxed), 1);
+
+        // A 2.7 ms period: waiting one period, or two, is normal; waiting
+        // two periods and ten milliseconds more is not.
+        let period_us = 2_667;
+        telemetry.record_midi_queue_delay(period_us, period_us);
+        telemetry.record_midi_queue_delay(2 * period_us, period_us);
+        assert_eq!(telemetry.midi_queue_late.load(Ordering::Relaxed), 0);
+        telemetry.record_midi_queue_delay(2 * period_us + MIDI_QUEUE_LATE_EXTRA_US + 1, period_us);
+        assert_eq!(telemetry.midi_queue_late.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            telemetry.midi_queue_window_worst_us.load(Ordering::Relaxed),
+            2 * period_us + MIDI_QUEUE_LATE_EXTRA_US + 1
+        );
+    }
+
+    #[test]
+    fn a_punctual_stream_has_no_late_callbacks_and_a_full_period_gap_is_one() {
+        // 128 frames at 48 kHz is 2667 µs. Jitter of a quarter period either
+        // way is a healthy stream; a whole period more is a buffer the
+        // device played without us.
+        let telemetry = AudioTelemetry::default();
+        telemetry.record_gap(Duration::from_micros(2_667), 128, 48_000);
+        telemetry.record_gap(Duration::from_micros(3_300), 128, 48_000);
+        telemetry.record_gap(Duration::from_micros(2_000), 128, 48_000);
+        assert_eq!(telemetry.snapshot(48_000).late_callbacks, 0);
+
+        telemetry.record_gap(Duration::from_micros(5_334), 128, 48_000);
+        assert_eq!(telemetry.snapshot(48_000).late_callbacks, 1);
+        let widest = telemetry
+            .callback_window_max_gap_permille
+            .load(Ordering::Relaxed);
+        assert!((1_990..=2_010).contains(&widest), "widest gap {widest}");
+    }
+
+    #[test]
+    fn a_wasapi_stream_that_wakes_late_but_asks_for_more_frames_is_not_late() {
+        // WASAPI asks for whatever the device consumed since the last fill,
+        // so a 10 ms wake arrives asking for 480 frames: the time is
+        // accounted for, nothing was missed.
+        let telemetry = AudioTelemetry::default();
+        telemetry.record_gap(Duration::from_millis(10), 480, 48_000);
+        telemetry.record_gap(Duration::from_millis(3), 144, 48_000);
+        assert_eq!(telemetry.snapshot(48_000).late_callbacks, 0);
+    }
+
+    #[test]
+    fn a_zero_frame_callback_cannot_be_judged_late() {
+        let telemetry = AudioTelemetry::default();
+        telemetry.record_gap(Duration::from_secs(1), 0, 48_000);
+        telemetry.record_gap(Duration::from_secs(1), 128, 0);
+        assert_eq!(telemetry.snapshot(48_000).late_callbacks, 0);
     }
 
     #[test]

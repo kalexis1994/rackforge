@@ -1,4 +1,96 @@
 pub use rackforge_audio_api::OutputMeterSnapshot;
+
+/// What the audio callback is costing and what it has lost.
+///
+/// `load_percent` is the callback's time over the time it had. `overruns`
+/// counts callbacks that took longer than their budget -- the host's own
+/// name for a dropout it caused. `stream_errors` counts the ones the driver
+/// reported instead, which is the distinction that matters when a glitch is
+/// heard and the load is low: the two rising together is a different fault
+/// from either rising alone.
+///
+/// `load_percent` and `peak_percent` cover the interval since the previous
+/// poll, not the life of the stream. A lifetime mean drifts for minutes
+/// after the thing that moved it stopped, which makes it useless for
+/// watching what a machine is doing right now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioHealthSnapshot {
+    pub load_percent: f64,
+    pub peak_percent: f64,
+    pub overruns: u64,
+    pub stream_errors: u64,
+    pub midi_dropped: u64,
+    /// Overruns inside the poll window alone. The cumulative count above can
+    /// only grow, so it says a fault happened but never when; this says
+    /// whether it is happening now, which is what a diagnosis needs.
+    pub recent_overruns: u64,
+    /// How large the overrunning callbacks were, as a percentage of their
+    /// own budget. A callback that is late because the core woke up slowly
+    /// overshoots by a roughly fixed amount; one that is late because the
+    /// render is too big overshoots in proportion. The two read differently
+    /// here.
+    pub overrun_average_percent: f64,
+    /// Block size of the overrunning callbacks, in frames, against
+    /// `block_frames` for every callback in the window. A driver that
+    /// occasionally hands over a short block gives it a short budget too,
+    /// and those callbacks overrun without anything being slow.
+    pub overrun_average_frames: f64,
+    pub block_frames: f64,
+    /// Callbacks the driver made more than half a period late, in total and
+    /// in the poll window. An overrun is a callback that took too long;
+    /// this is a buffer the device played while nothing had been asked to
+    /// fill it, which a low load and zero overruns cannot rule out.
+    pub late_callbacks: u64,
+    pub recent_late_callbacks: u64,
+    /// The widest gap between two callbacks in the poll window, as a
+    /// percentage of the block period. 100 is on time.
+    pub worst_gap_percent: f64,
+    /// Blocks sent to the device as silence in place of what was rendered,
+    /// because the render failed or produced something that was not a
+    /// number. Each one is heard as a click.
+    pub silenced_blocks: u64,
+    pub recent_silenced_blocks: u64,
+    /// Audio the ASIO driver says it lost on its own side, which no timing
+    /// of the callback can see: `kAsioOverload`, `kAsioResyncRequest`, and
+    /// sample positions that skipped a buffer. Totals since the process
+    /// started, and all three together in the poll window.
+    pub driver_overloads: u64,
+    pub driver_resyncs: u64,
+    pub driver_skipped_buffers: u64,
+    pub recent_driver_dropouts: u64,
+    /// Input capture that ran over or under its ring: an input device on a
+    /// clock of its own drifting against the output. Heard as a periodic
+    /// click on whatever is monitored through the input.
+    pub capture_glitches: u64,
+    pub recent_capture_glitches: u64,
+    /// MIDI that reached the engine late, split by who held it. `driver`:
+    /// the input driver stamped it and something in the operating system
+    /// kept it from this host's callback. `queue`: this host had it, and no
+    /// audio block took it for more than two periods. A note heard late, or
+    /// a key that seems to stick because its release was heard late, is one
+    /// or the other; the audio counters above see neither. Totals, the two
+    /// together in the poll window, and each stage's worst delay in it.
+    pub midi_late_driver: u64,
+    pub midi_late_queue: u64,
+    pub recent_midi_late: u64,
+    pub worst_midi_driver_delay_ms: f64,
+    pub worst_midi_queue_delay_ms: f64,
+}
+
+/// The settings window a host can show for the audio driver in use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioDriverPanel {
+    /// The ASIO driver's own window, drawn by the driver: ASIO4ALL's device
+    /// list, a Focusrite's control application. Only the driver that is
+    /// streaming can show it, since ASIO loads one driver at a time.
+    Asio,
+    /// The operating system's sound settings. WASAPI has no window of the
+    /// driver's own; this is where its shared-mode format is set.
+    SystemSound,
+}
+
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 pub use rackforge_midi_api::{
     MidiChannel, MidiSourceDescriptor, ParameterLink, ParameterLinkChannel, ParameterLinkId,
@@ -544,6 +636,25 @@ pub enum ControlRequest {
     /// Drains the post-master peaks accumulated since the previous request.
     /// This is transient telemetry and never advances the session revision.
     OutputMeter,
+    /// How hard the audio callback is working, and what it has dropped.
+    ///
+    /// Polled beside `OutputMeter` for the same reason: a fault that appears
+    /// at random needs a witness that is always looking. The render's own
+    /// budget telemetry only ever reached stdout, and a windowed application
+    /// has no console, so nobody could see it while playing.
+    AudioHealth,
+    /// Shows the settings window of the audio driver in use.
+    ///
+    /// Answered before the window opens: an ASIO driver's window can be
+    /// modal, and a reply held until it closes would time out while the
+    /// user is still choosing a buffer size. What changes in that window
+    /// reaches the host as the driver's reset request, not through here.
+    OpenAudioDriverPanel,
+    /// Saves the host's flight recorder: the last seconds of exactly what
+    /// went to the audio device, and the MIDI that played them. For a click
+    /// heard once with every counter at zero, the only witness left is the
+    /// audio itself, and this keeps it.
+    SaveOutputCapture,
     ApplyAudioOutput {
         profile: AudioOutputProfile,
     },
@@ -711,6 +822,19 @@ pub enum ControlResponse {
     },
     AudioSnapshot {
         snapshot: Box<AudioOutputState>,
+    },
+    AudioHealth {
+        health: AudioHealthSnapshot,
+    },
+    AudioDriverPanelOpening {
+        panel: AudioDriverPanel,
+    },
+    /// Where the capture was saved, on the host, and what it holds. The
+    /// file is written after this answer, in a moment.
+    OutputCaptureSaved {
+        path: String,
+        seconds: f64,
+        midi_messages: u64,
     },
     OutputMeter {
         meter: OutputMeterSnapshot,

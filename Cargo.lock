@@ -3781,11 +3781,13 @@ name = "rackforge-desktop"
 version = "0.1.23"
 dependencies = [
  "anyhow",
+ "asio-sys",
  "axum",
  "base64",
  "cpal",
  "eframe",
  "futures-util",
+ "hound",
  "include_dir",
  "midir",
  "mime_guess",

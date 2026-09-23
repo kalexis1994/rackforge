@@ -513,6 +513,32 @@ struct DesktopApp {
     /// the cached scan.
     #[cfg(windows)]
     audio_inventory_cache: Option<(Instant, desktop_audio::AudioInventory)>,
+    /// The last enumeration that actually reached the live backend's rows.
+    ///
+    /// Kept apart from `audio_inventory_cache` because that one holds spliced
+    /// results: while ASIO streams it is rebuilt from a scan that skips ASIO
+    /// plus whatever the previous cache held, so a cache that ever lacked the
+    /// ASIO rows can never regain them. Starting the app with ASIO already
+    /// streaming produced exactly that -- an ASIO section with nothing
+    /// selectable in it, for the rest of the session. This holds the rows of
+    /// record and is only ever written by a scan that really enumerated them.
+    audio_live_backend_rows: Option<desktop_audio::AudioInventory>,
+    /// The previous health reading, so the next one can be reported as the
+    /// interval between them instead of as a lifetime mean.
+    audio_health_previous: Option<desktop_audio::AudioRuntimeStatus>,
+    /// Set when the interface asks for the ASIO driver's window and taken on
+    /// the next frame, after the request has been answered: the window can
+    /// be modal, and it has to open on this thread, the one that loaded the
+    /// driver.
+    audio_driver_panel_pending: bool,
+    /// The forwarded-MIDI route last published to the web servers, so it is
+    /// written only when it changes.
+    #[cfg(windows)]
+    forwarded_midi_route: web::ForwardedMidiRoute,
+    /// The driver's reset-request count when the running stream was
+    /// published, and when that was. `None` until the first poll after a
+    /// stream is published takes it.
+    audio_reset_baseline: Option<(u64, Instant)>,
     #[cfg(windows)]
     midi_learn: Option<DesktopMidiLearn>,
     #[cfg(windows)]
@@ -643,8 +669,18 @@ impl DesktopApp {
             .context("loading Desktop plugin-state store")?;
         #[cfg(windows)]
         let audio_config_path = options.rackforge_root.join("config/audio.toml");
+        // The one scan that may touch every device freely: nothing is
+        // streaming yet. It is kept, as the cache the settings page reads and
+        // as the rows of record, instead of being thrown away and redone by
+        // the interface a second later with the stream already open --
+        // measured at 636 ms of opening every WASAPI endpoint, the playing
+        // interface's included, just after startup.
         #[cfg(windows)]
-        let (audio_preferences, audio) = match desktop_audio::AudioInventory::scan() {
+        let startup_inventory = desktop_audio::AudioInventory::scan();
+        #[cfg(windows)]
+        let startup_rows = startup_inventory.as_ref().ok().cloned();
+        #[cfg(windows)]
+        let (audio_preferences, audio) = match startup_inventory {
             Ok(inventory) => match inventory.default_preferences() {
                 Ok(defaults) => {
                     let preferences = match desktop_audio::AudioPreferences::load(
@@ -863,7 +899,15 @@ impl DesktopApp {
             #[cfg(windows)]
             audio_last_stall: None,
             #[cfg(windows)]
-            audio_inventory_cache: None,
+            audio_inventory_cache: startup_rows
+                .clone()
+                .map(|inventory| (Instant::now(), inventory)),
+            audio_live_backend_rows: startup_rows,
+            audio_health_previous: None,
+            audio_driver_panel_pending: false,
+            #[cfg(windows)]
+            forwarded_midi_route: web::ForwardedMidiRoute::default(),
+            audio_reset_baseline: None,
             #[cfg(windows)]
             midi_learn: None,
             #[cfg(windows)]
@@ -1025,12 +1069,133 @@ impl DesktopApp {
         let last_strike = audio.last_strike_cell();
         self.audio = Some(audio);
         self.audio_watchdog = None;
+        self.audio_reset_baseline = None;
         self.web_servers.set_injected_midi(Some(injected_midi));
         self.web_servers.set_last_strike(Some(last_strike));
     }
 
     #[cfg(windows)]
+    /// Stops the engine and schedules it to start again, with the patience
+    /// a device that keeps failing has earned: one that stays up half a
+    /// minute gets a quarter of a second, one that fails again sooner gets
+    /// twice the wait of the time before, up to eight seconds.
+    fn schedule_audio_restart(&mut self, status: &str) {
+        self.stop_audio_runtime();
+        let repeated = self
+            .audio_last_stall
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(30));
+        if repeated {
+            self.audio_recovery_attempts = self.audio_recovery_attempts.saturating_add(1);
+        } else {
+            self.audio_recovery_attempts = 0;
+        }
+        self.audio_last_stall = Some(Instant::now());
+        let exponent = self.audio_recovery_attempts.min(5);
+        let delay = Duration::from_millis(250_u64.saturating_mul(1 << exponent));
+        self.audio_recovery_at = Some(Instant::now() + delay);
+        self.status = status.into();
+    }
+
+    #[cfg(windows)]
+    fn asio_streaming(&self) -> bool {
+        self.audio.is_some()
+            && self
+                .audio_preferences
+                .as_ref()
+                .is_some_and(|preferences| preferences.driver == "ASIO")
+    }
+
+    #[cfg(windows)]
+    /// Reopens the stream when the ASIO driver asks to be reset.
+    ///
+    /// A driver asks when something it owns changed under us -- a buffer
+    /// size or sample rate chosen in its own window, its clock source, the
+    /// device itself -- and until the host closes and reopens it the driver
+    /// may keep calling back with the old buffers, or stop. cpal registers
+    /// nothing for the message, so it used to go unheard and the stall
+    /// watchdog found out two seconds later, if the driver stopped at all.
+    ///
+    /// Requests in the first second after a stream is published are taken
+    /// as the driver settling into the configuration this host just gave
+    /// it, not as a change: some drivers ask once as buffers are created,
+    /// and reopening for that would ask again, forever. A driver that keeps
+    /// asking after that goes through the same backoff as a stalled one.
+    fn poll_audio_driver_reset(&mut self) {
+        if !self.asio_streaming() {
+            self.audio_reset_baseline = None;
+            return;
+        }
+        let requests = asio_sys::driver_reset_requests();
+        let (baseline, restart) =
+            driver_reset_decision(self.audio_reset_baseline, requests, Instant::now());
+        self.audio_reset_baseline = Some(baseline);
+        if let Some(asked) = restart {
+            println!("DESKTOP_AUDIO_DRIVER_RESET_REQUESTED requests={asked}");
+            self.schedule_audio_restart(
+                "The audio driver asked to be reset (its settings changed) · reopening audio…",
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    /// The driver settings window the interface may offer, and whether it
+    /// can open now.
+    fn audio_driver_panel(
+        &self,
+    ) -> Option<(
+        rackforge_control_api::AudioDriverPanel,
+        Result<(), &'static str>,
+    )> {
+        use rackforge_control_api::AudioDriverPanel;
+        match self.audio_preferences.as_ref()?.driver.as_str() {
+            "ASIO" => Some((
+                AudioDriverPanel::Asio,
+                if self.audio.is_some() {
+                    Ok(())
+                } else {
+                    Err(
+                        "Start the ASIO stream to open its driver's settings: ASIO loads one driver at a time, and only the one playing can show its window.",
+                    )
+                },
+            )),
+            "WASAPI" => Some((AudioDriverPanel::SystemSound, Ok(()))),
+            _ => None,
+        }
+    }
+
+    #[cfg(windows)]
+    /// Opens the ASIO driver's window if one was asked for.
+    fn poll_audio_driver_panel(&mut self) {
+        if !std::mem::take(&mut self.audio_driver_panel_pending) {
+            return;
+        }
+        // The request was answered a frame ago and the stream may have gone
+        // since; loading a driver just to show its window would stop it.
+        if !self.asio_streaming() {
+            self.status = "The ASIO stream stopped before its driver's settings could open".into();
+            return;
+        }
+        // A modal window holds this thread until it closes, and with it the
+        // stall watchdog's clock. It is re-armed on both sides, so the time
+        // spent choosing a buffer size is not mistaken for a driver that
+        // stopped calling back. A driver that really did stop is still
+        // caught, two seconds after the window closes.
+        self.audio_watchdog = None;
+        let opened = Instant::now();
+        let result = asio_sys::open_control_panel();
+        self.audio_watchdog = None;
+        println!(
+            "DESKTOP_AUDIO_DRIVER_PANEL result={result:?} open_ms={}",
+            opened.elapsed().as_millis()
+        );
+        if let Err(error) = result {
+            self.status = format!("The ASIO driver could not open its settings: {error}");
+        }
+    }
+
+    #[cfg(windows)]
     fn poll_audio_error(&mut self) {
+        self.poll_audio_driver_reset();
         // The stall watchdog. An ASIO driver whose hardware another client
         // grabbed (the Focusrite when a WASAPI session opens the same
         // interface, a control-panel reset, a sample-rate change) stops
@@ -1046,26 +1211,9 @@ impl DesktopApp {
             match self.audio_watchdog {
                 Some((last, since)) if blocks == last => {
                     if since.elapsed() >= Duration::from_secs(2) {
-                        self.stop_audio_runtime();
-                        // A device that keeps dying earns exponential
-                        // patience; one that stays up half a minute earns a
-                        // fresh start.
-                        let repeated = self
-                            .audio_last_stall
-                            .is_some_and(|at| at.elapsed() < Duration::from_secs(30));
-                        if repeated {
-                            self.audio_recovery_attempts =
-                                self.audio_recovery_attempts.saturating_add(1);
-                        } else {
-                            self.audio_recovery_attempts = 0;
-                        }
-                        self.audio_last_stall = Some(Instant::now());
-                        let exponent = self.audio_recovery_attempts.min(5);
-                        let delay = Duration::from_millis(250_u64.saturating_mul(1 << exponent));
-                        self.audio_recovery_at = Some(Instant::now() + delay);
-                        self.status =
-                            "Audio stream stalled (the driver stopped calling back) · reconnecting audio…"
-                                .into();
+                        self.schedule_audio_restart(
+                            "Audio stream stalled (the driver stopped calling back) · reconnecting audio…",
+                        );
                         eprintln!("DESKTOP_AUDIO_STALL_DETECTED blocks={blocks}");
                     }
                 }
@@ -1162,12 +1310,29 @@ impl DesktopApp {
     /// ran). While ASIO is active, other backends are scanned fresh and the
     /// live driver's rows come from the cache; a short TTL keeps repeated
     /// settings reads from hammering the drivers either way.
-    fn scan_inventory(&mut self) -> Result<desktop_audio::AudioInventory> {
+    ///
+    /// While a stream is running, audio hardware is scanned only when the
+    /// player asks for it (`refresh`). A scan opens every endpoint of every
+    /// backend and asks it for its formats -- the audio interface that is
+    /// playing included, through its WASAPI side -- and the settings page
+    /// used to trigger one on arrival and then every ten seconds while it
+    /// stayed open, because its live readings poll this document. Notes
+    /// played meanwhile were heard late and releases held over: switching
+    /// from PLAY to SETTINGS while playing was enough. The MIDI list is
+    /// still refreshed, from the same enumeration the MIDI supervisor
+    /// already runs every second, so a keyboard plugged in shows up.
+    fn scan_inventory(&mut self, refresh: bool) -> Result<desktop_audio::AudioInventory> {
         const INVENTORY_TTL: Duration = Duration::from_secs(10);
-        if let Some((at, cached)) = &self.audio_inventory_cache
-            && at.elapsed() < INVENTORY_TTL
-        {
-            return Ok(cached.clone());
+        if !refresh && let Some((at, cached)) = &self.audio_inventory_cache {
+            if at.elapsed() < INVENTORY_TTL {
+                return Ok(cached.clone());
+            }
+            if self.audio.is_some() {
+                let mut inventory = cached.clone();
+                inventory.midi_inputs = desktop_audio::discover_all_midi_inputs()?;
+                self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
+                return Ok(inventory);
+            }
         }
         let streaming_driver = if self.audio.is_some() {
             self.audio_preferences
@@ -1180,23 +1345,45 @@ impl DesktopApp {
         let inventory = match streaming_driver.as_deref() {
             Some(live) => {
                 let mut fresh = desktop_audio::AudioInventory::scan_skipping(Some(live))?;
-                match &self.audio_inventory_cache {
-                    Some((_, cached)) => {
-                        fresh
-                            .drivers
-                            .extend(cached.drivers.iter().filter(|d| d.name == live).cloned());
-                        fresh
-                            .outputs
-                            .extend(cached.outputs.iter().filter(|o| o.driver == live).cloned());
-                        fresh
-                            .inputs
-                            .extend(cached.inputs.iter().filter(|i| i.driver == live).cloned());
+                match &self.audio_live_backend_rows {
+                    Some(cached) => desktop_audio::splice_live_backend(
+                        &mut fresh,
+                        live,
+                        cached.drivers.iter().filter(|d| d.name == live).cloned(),
+                        cached.outputs.iter().filter(|o| o.driver == live).cloned(),
+                        cached.inputs.iter().filter(|i| i.driver == live).cloned(),
+                    ),
+                    // Nothing recorded yet: the app was started with this
+                    // backend already streaming, so no scan has ever reached
+                    // its devices and none can be run now without stopping
+                    // the stream. Listing the driver alone left the section
+                    // empty and unselectable for the rest of the session.
+                    // The device in use is known from the preferences that
+                    // opened it, so it is published as itself -- one true row
+                    // instead of none -- until a scan that includes this
+                    // backend records the rest.
+                    None => {
+                        let driver = desktop_audio::AudioDriverInfo {
+                            name: live.to_owned(),
+                            available: true,
+                            detail: "In use by the current stream".into(),
+                        };
+                        desktop_audio::splice_live_backend(&mut fresh, live, [driver], [], []);
+                        if let Some(preferences) = self.audio_preferences.as_ref() {
+                            fresh.outputs.push(desktop_audio::AudioOutputInfo {
+                                driver: live.to_owned(),
+                                name: preferences.output_device.clone(),
+                                is_default: false,
+                                // Stereo unless the running stream says
+                                // otherwise; the preferences do not record a
+                                // channel count for the output.
+                                channels: 2,
+                                default_sample_rate: preferences.sample_rate_hz,
+                                sample_rates: vec![preferences.sample_rate_hz],
+                                buffer_frames: preferences.buffer_frames.into_iter().collect(),
+                            });
+                        }
                     }
-                    None => fresh.drivers.push(desktop_audio::AudioDriverInfo {
-                        name: live.to_owned(),
-                        available: true,
-                        detail: "In use by the current stream".into(),
-                    }),
                 }
                 fresh.outputs.sort_by(|left, right| {
                     left.driver
@@ -1212,15 +1399,21 @@ impl DesktopApp {
                 });
                 fresh
             }
-            None => desktop_audio::AudioInventory::scan()?,
+            None => {
+                let full = desktop_audio::AudioInventory::scan()?;
+                // Nothing was skipped, so these rows are the record every
+                // later spliced scan borrows the live backend's rows from.
+                self.audio_live_backend_rows = Some(full.clone());
+                full
+            }
         };
         self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
         Ok(inventory)
     }
 
     #[cfg(windows)]
-    fn audio_settings_json(&mut self) -> Result<serde_json::Value> {
-        let inventory = self.scan_inventory()?;
+    fn audio_settings_json(&mut self, refresh: bool) -> Result<serde_json::Value> {
+        let inventory = self.scan_inventory(refresh)?;
         let preferences = self
             .audio_preferences
             .clone()
@@ -1245,6 +1438,13 @@ impl DesktopApp {
             "preferences": preferences,
             "midi_source_keys": midi_source_keys,
             "runtime_status": self.audio_summary(),
+            "driver_panel": self.audio_driver_panel().map(|(kind, ready)| {
+                serde_json::json!({
+                    "kind": kind,
+                    "available": ready.is_ok(),
+                    "detail": ready.err(),
+                })
+            }),
         }))
     }
 
@@ -2364,10 +2564,20 @@ impl DesktopApp {
                         delete_plugin_data,
                     ));
                 }
-                web::DesktopControlCall::AudioSettings { response } => {
+                web::DesktopControlCall::ForwardedMidi {
+                    client_id,
+                    source_name,
+                    message,
+                } => {
+                    #[cfg(windows)]
+                    self.record_forwarded_midi(client_id, &source_name, message);
+                    #[cfg(not(windows))]
+                    let _ = (client_id, source_name, message);
+                }
+                web::DesktopControlCall::AudioSettings { refresh, response } => {
                     #[cfg(windows)]
                     let _ = response.send(
-                        self.audio_settings_json()
+                        self.audio_settings_json(refresh)
                             .map_err(|error| format!("{error:#}")),
                     );
                     #[cfg(not(windows))]
@@ -2386,7 +2596,7 @@ impl DesktopApp {
                             .and_then(|preferences| {
                                 self.apply_audio_preferences(preferences)
                                     .map_err(|error| format!("{error:#}"))?;
-                                self.audio_settings_json()
+                                self.audio_settings_json(false)
                                     .map_err(|error| format!("{error:#}"))
                             });
                     #[cfg(windows)]
@@ -3386,6 +3596,65 @@ impl DesktopApp {
     }
 
     #[cfg(windows)]
+    #[cfg(windows)]
+    /// Tells the web servers which forwarded MIDI may skip this thread: the
+    /// enabled ports and their routing keys, unless a MIDI learn is
+    /// listening. Cheap enough for every frame, and written only on change.
+    fn publish_forwarded_midi_route(&mut self) {
+        let approved = self
+            .audio_preferences
+            .as_ref()
+            .map(|preferences| {
+                preferences
+                    .midi_inputs
+                    .iter()
+                    .filter_map(|name| {
+                        desktop_audio::midi_source_descriptor(name)
+                            .ok()
+                            .map(|descriptor| {
+                                (
+                                    name.clone(),
+                                    desktop_audio::stable_midi_source_key_from_id(&descriptor.id),
+                                )
+                            })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let route = web::ForwardedMidiRoute {
+            approved,
+            learning: self.midi_learn.is_some(),
+        };
+        if route != self.forwarded_midi_route {
+            self.web_servers.set_forwarded_midi_route(route.clone());
+            self.forwarded_midi_route = route;
+        }
+    }
+
+    #[cfg(windows)]
+    /// The ledger half of a forwarded note that the web server already sent
+    /// to the audio thread: which notes this driver holds, so they can be
+    /// released if it goes away. The same bookkeeping `accept_virtual_midi`
+    /// does, without the injection.
+    fn record_forwarded_midi(
+        &mut self,
+        client_id: ClientId,
+        source_name: &str,
+        message: VirtualMidiMessage,
+    ) {
+        let state = self.virtual_midi.entry(client_id).or_default();
+        if state.midi_source.is_none() {
+            state.midi_source = desktop_audio::midi_source_descriptor(source_name).ok();
+        }
+        let channel = message.channel();
+        state.channels.insert(channel);
+        if let Some(note) = message.note_on() {
+            state.notes.insert((channel, note));
+        } else if let Some(note) = message.note_off() {
+            state.notes.remove(&(channel, note));
+        }
+    }
+
     fn approved_midi_source(&self, source_name: &str) -> Result<MidiSourceDescriptor, String> {
         approved_midi_source(self.audio_preferences.as_ref(), source_name)
     }
@@ -3520,6 +3789,98 @@ impl DesktopApp {
 
     fn handle_performance_control(&mut self, request: ControlRequest) -> ControlResponse {
         match request {
+            ControlRequest::SaveOutputCapture => {
+                #[cfg(windows)]
+                {
+                    match self.audio.as_ref() {
+                        Some(audio) => {
+                            let (path, seconds, messages) = audio
+                                .save_output_capture(&self.options.rackforge_root.join("captures"));
+                            ControlResponse::OutputCaptureSaved {
+                                path: path.display().to_string(),
+                                seconds,
+                                midi_messages: messages as u64,
+                            }
+                        }
+                        None => ControlResponse::Error {
+                            code: ControlErrorCode::Unavailable,
+                            message: "No audio stream is running, so there is nothing recorded."
+                                .into(),
+                            current_revision: None,
+                        },
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: "Desktop audio is unavailable".into(),
+                        current_revision: None,
+                    }
+                }
+            }
+            ControlRequest::OpenAudioDriverPanel => {
+                #[cfg(windows)]
+                {
+                    use rackforge_control_api::AudioDriverPanel;
+                    let unavailable = |message: String| ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message,
+                        current_revision: None,
+                    };
+                    match self.audio_driver_panel() {
+                        Some((panel, Ok(()))) => {
+                            match panel {
+                                AudioDriverPanel::Asio => self.audio_driver_panel_pending = true,
+                                AudioDriverPanel::SystemSound => {
+                                    if let Err(error) = open_system_sound_settings() {
+                                        return unavailable(format!(
+                                            "Could not open the Windows sound settings: {error}"
+                                        ));
+                                    }
+                                }
+                            }
+                            ControlResponse::AudioDriverPanelOpening { panel }
+                        }
+                        Some((_, Err(reason))) => unavailable(reason.into()),
+                        None => unavailable("This audio driver has no settings window.".into()),
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: "Desktop audio is unavailable".into(),
+                        current_revision: None,
+                    }
+                }
+            }
+            ControlRequest::AudioHealth => {
+                // Read straight off the callback's own counters rather than
+                // recomputed here: the callback is the only thing that knows
+                // how long it took and what it dropped.
+                let health = match self.audio.as_ref() {
+                    None => rackforge_control_api::AudioHealthSnapshot::default(),
+                    Some(audio) => {
+                        let status = audio.runtime_status();
+                        let peak_us = audio.take_callback_window_peak_us();
+                        let gap_percent = audio.take_callback_window_gap_percent();
+                        let midi_worst_us = audio.take_midi_window_worst_us();
+                        let mut health = audio_health_window(
+                            self.audio_health_previous.as_ref(),
+                            &status,
+                            peak_us,
+                            gap_percent,
+                            audio.sample_rate(),
+                        );
+                        health.worst_midi_driver_delay_ms = midi_worst_us.0 as f64 / 1_000.0;
+                        health.worst_midi_queue_delay_ms = midi_worst_us.1 as f64 / 1_000.0;
+                        self.audio_health_previous = Some(status);
+                        health
+                    }
+                };
+                ControlResponse::AudioHealth { health }
+            }
             ControlRequest::OutputMeter => {
                 #[cfg(windows)]
                 {
@@ -3541,7 +3902,7 @@ impl DesktopApp {
             ControlRequest::MidiSources => {
                 #[cfg(windows)]
                 {
-                    let inventory = match self.scan_inventory() {
+                    let inventory = match self.scan_inventory(false) {
                         Ok(inventory) => inventory,
                         Err(error) => {
                             return ControlResponse::Error {
@@ -6448,6 +6809,168 @@ impl eframe::App for DesktopApp {
     }
 }
 
+/// Requests in the first second after a stream is published are the driver
+/// settling into the configuration it was just given, not a change.
+const DRIVER_RESET_SETTLING: Duration = Duration::from_secs(1);
+
+/// Whether the driver's reset requests call for reopening the stream.
+///
+/// `baseline` is the count and time the running stream was first seen at,
+/// `None` for a stream nobody has looked at yet. Returns the baseline to keep
+/// and, when the stream must be reopened, how many requests arrived since.
+/// Requests during the settling second move the baseline instead: some
+/// drivers ask once as buffers are created, and reopening for that would
+/// make them ask again, forever.
+fn driver_reset_decision(
+    baseline: Option<(u64, Instant)>,
+    requests: u64,
+    now: Instant,
+) -> ((u64, Instant), Option<u64>) {
+    match baseline {
+        None => ((requests, now), None),
+        Some((seen, since)) if requests > seen => {
+            if now.duration_since(since) < DRIVER_RESET_SETTLING {
+                ((requests, since), None)
+            } else {
+                ((requests, since), Some(requests - seen))
+            }
+        }
+        Some(kept) => (kept, None),
+    }
+}
+
+/// Turn two cumulative readings into the interval between them.
+///
+/// Everything the callback publishes only grows, and a mean over a stream
+/// that has been open for ten minutes moves too slowly to show what the
+/// machine is doing while someone watches it. Subtracting the previous
+/// reading gives the poll interval instead, and the budget is recomputed
+/// from the blocks that actually arrived in it rather than from the
+/// lifetime average block, so a driver that changes block size does not
+/// smear the two together.
+fn audio_health_window(
+    previous: Option<&desktop_audio::AudioRuntimeStatus>,
+    status: &desktop_audio::AudioRuntimeStatus,
+    window_peak_us: f64,
+    window_gap_percent: f64,
+    sample_rate: u32,
+) -> rackforge_control_api::AudioHealthSnapshot {
+    let base = previous.filter(|previous| {
+        // A restarted stream resets the counters; a reading that went
+        // backwards is from a different stream and cannot be subtracted.
+        previous.callback_count <= status.callback_count
+            && previous.callback_overruns <= status.callback_overruns
+            && previous.late_callbacks <= status.late_callbacks
+            && previous.silenced_blocks <= status.silenced_blocks
+    });
+    let capture = |status: &desktop_audio::AudioRuntimeStatus| {
+        status.capture_overruns + status.capture_underruns
+    };
+    let midi_late = |status: &desktop_audio::AudioRuntimeStatus| {
+        status.midi_driver_late + status.midi_queue_late
+    };
+    let (late, silenced, capture_glitches, recent_midi_late) = match base {
+        Some(previous) => (
+            status.late_callbacks - previous.late_callbacks,
+            status.silenced_blocks - previous.silenced_blocks,
+            capture(status).saturating_sub(capture(previous)),
+            midi_late(status).saturating_sub(midi_late(previous)),
+        ),
+        None => (
+            status.late_callbacks,
+            status.silenced_blocks,
+            capture(status),
+            midi_late(status),
+        ),
+    };
+    // The driver's counters belong to the process, not the stream: they do
+    // not reset when the stream does, so they are subtracted from whatever
+    // came before whether or not the stream restarted in between, and
+    // counted from zero only on the very first reading.
+    let driver = |status: &desktop_audio::AudioRuntimeStatus| {
+        status.driver_overloads + status.driver_resyncs + status.driver_skipped_buffers
+    };
+    let driver_dropouts = previous.map_or(driver(status), |previous| {
+        driver(status).saturating_sub(driver(previous))
+    });
+    let (blocks, frames, total_us, overruns, overrun_us, overrun_frames) = match base {
+        Some(previous) => (
+            status.callback_count - previous.callback_count,
+            status.callback_frames - previous.callback_frames,
+            status.callback_total_us - previous.callback_total_us,
+            status.callback_overruns - previous.callback_overruns,
+            status.callback_overrun_us - previous.callback_overrun_us,
+            status.callback_overrun_frames - previous.callback_overrun_frames,
+        ),
+        None => (
+            status.callback_count,
+            status.callback_frames,
+            status.callback_total_us,
+            status.callback_overruns,
+            status.callback_overrun_us,
+            status.callback_overrun_frames,
+        ),
+    };
+    let block_frames = if blocks == 0 {
+        0.0
+    } else {
+        frames as f64 / blocks as f64
+    };
+    let budget_us = if sample_rate == 0 {
+        0.0
+    } else {
+        block_frames / f64::from(sample_rate) * 1_000_000.0
+    };
+    let percent_of_budget = |us: f64| {
+        if budget_us > 0.0 {
+            us / budget_us * 100.0
+        } else {
+            0.0
+        }
+    };
+    rackforge_control_api::AudioHealthSnapshot {
+        load_percent: if blocks == 0 {
+            0.0
+        } else {
+            percent_of_budget(total_us / blocks as f64)
+        },
+        peak_percent: percent_of_budget(window_peak_us),
+        overruns: status.callback_overruns,
+        stream_errors: status.stream_error_count,
+        midi_dropped: status.midi_dropped_events,
+        recent_overruns: overruns,
+        overrun_average_percent: if overruns == 0 {
+            0.0
+        } else {
+            percent_of_budget(overrun_us / overruns as f64)
+        },
+        overrun_average_frames: if overruns == 0 {
+            0.0
+        } else {
+            overrun_frames as f64 / overruns as f64
+        },
+        block_frames,
+        late_callbacks: status.late_callbacks,
+        recent_late_callbacks: late,
+        worst_gap_percent: window_gap_percent,
+        silenced_blocks: status.silenced_blocks,
+        recent_silenced_blocks: silenced,
+        driver_overloads: status.driver_overloads,
+        driver_resyncs: status.driver_resyncs,
+        driver_skipped_buffers: status.driver_skipped_buffers,
+        recent_driver_dropouts: driver_dropouts,
+        capture_glitches: capture(status),
+        recent_capture_glitches: capture_glitches,
+        midi_late_driver: status.midi_driver_late,
+        midi_late_queue: status.midi_queue_late,
+        recent_midi_late,
+        // The worst delays are taken from the stream by the caller, which
+        // owns the window; nothing in two cumulative readings holds them.
+        worst_midi_driver_delay_ms: 0.0,
+        worst_midi_queue_delay_ms: 0.0,
+    }
+}
+
 fn short_input(index: usize) -> Input {
     [
         Input::Button1,
@@ -6670,6 +7193,17 @@ fn read_live_state(dir: &Path, plugin_id: &str) -> Option<Vec<u8>> {
 }
 
 #[cfg(windows)]
+#[cfg(windows)]
+/// Windows' Sound control panel, where a WASAPI device's shared-mode format
+/// is chosen. It is a program of its own, so this returns as soon as it has
+/// started and nothing here waits for it.
+fn open_system_sound_settings() -> std::io::Result<()> {
+    std::process::Command::new("control")
+        .arg("mmsys.cpl")
+        .spawn()
+        .map(drop)
+}
+
 fn start_desktop_audio(
     plugins: &[DesktopPlugin],
     preferences: &desktop_audio::AudioPreferences,
@@ -7449,6 +7983,10 @@ impl eframe::App for RackForgeApp {
                 #[cfg(windows)]
                 app.poll_controller();
                 app.poll_web_control();
+                #[cfg(windows)]
+                app.publish_forwarded_midi_route();
+                #[cfg(windows)]
+                app.poll_audio_driver_panel();
                 context.request_repaint_after(Duration::from_millis(16));
                 let reload_web = app.poll_plugin_install(context);
                 context.send_viewport_cmd(egui::ViewportCommand::Title(app.window_title().into()));
@@ -7652,6 +8190,197 @@ mod tests {
         PROGRAM_SCHEMA_VERSION, PresetDescriptor, ProgramEditorField, ProgramEditorFieldKind,
         ProgramEditorPage, ProgramEditorView,
     };
+
+    fn health_reading(
+        blocks: u64,
+        frames: u64,
+        total_us: f64,
+        overruns: u64,
+        overrun_us: f64,
+        overrun_frames: u64,
+    ) -> desktop_audio::AudioRuntimeStatus {
+        desktop_audio::AudioRuntimeStatus {
+            callback_count: blocks,
+            callback_frames: frames,
+            callback_total_us: total_us,
+            callback_overrun_us: overrun_us,
+            callback_overrun_frames: overrun_frames,
+            callback_overruns: overruns,
+            ..desktop_audio::AudioRuntimeStatus::default()
+        }
+    }
+
+    #[test]
+    fn the_health_window_reports_the_interval_and_not_the_life_of_the_stream() {
+        // Ten minutes of a 2% load, then one poll interval at 40%: the
+        // lifetime mean barely moves, which is why it is not what is
+        // reported. 256 frames at 48 kHz is a 5333 µs budget.
+        let previous = health_reading(200_000, 200_000 * 256, 200_000.0 * 107.0, 0, 0.0, 0);
+        let status = health_reading(
+            200_000 + 400,
+            (200_000 + 400) * 256,
+            200_000.0 * 107.0 + 400.0 * 2_133.0,
+            0,
+            0.0,
+            0,
+        );
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert!(
+            (health.load_percent - 40.0).abs() < 0.5,
+            "reported {}",
+            health.load_percent
+        );
+        assert!((health.block_frames - 256.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn the_health_window_separates_a_late_callback_from_a_short_one() {
+        // Four overruns, all of them full blocks that ran 150% of budget:
+        // nothing about the block size explains them.
+        let previous = health_reading(1_000, 1_000 * 256, 100_000.0, 0, 0.0, 0);
+        let status = health_reading(1_400, 1_400 * 256, 200_000.0, 4, 4.0 * 8_000.0, 4 * 256);
+        let health = audio_health_window(Some(&previous), &status, 8_000.0, 0.0, 48_000);
+        assert_eq!(health.recent_overruns, 4);
+        assert!((health.overrun_average_frames - 256.0).abs() < f64::EPSILON);
+        assert!(
+            (health.overrun_average_percent - 150.0).abs() < 0.5,
+            "reported {}",
+            health.overrun_average_percent
+        );
+        assert!((health.peak_percent - 150.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn a_stream_nobody_has_seen_takes_the_current_count_as_its_baseline() {
+        let now = Instant::now();
+        // Resets from before this stream existed -- the one that made the
+        // host reopen it, say -- are not this stream's to answer.
+        assert_eq!(driver_reset_decision(None, 7, now), ((7, now), None));
+    }
+
+    #[test]
+    fn a_reset_asked_for_while_the_driver_settles_moves_the_baseline_only() {
+        let published = Instant::now();
+        let during = published + Duration::from_millis(400);
+        assert_eq!(
+            driver_reset_decision(Some((7, published)), 8, during),
+            ((8, published), None)
+        );
+    }
+
+    #[test]
+    fn a_reset_asked_for_after_the_driver_settled_reopens_the_stream() {
+        let published = Instant::now();
+        let later = published + Duration::from_secs(5);
+        assert_eq!(
+            driver_reset_decision(Some((7, published)), 9, later),
+            ((9, published), Some(2))
+        );
+        assert_eq!(
+            driver_reset_decision(Some((9, published)), 9, later),
+            ((9, published), None),
+            "no new request, nothing to do"
+        );
+    }
+
+    #[test]
+    fn late_and_silenced_blocks_are_reported_for_the_window_and_in_total() {
+        let mut previous = health_reading(1_000, 1_000 * 128, 100_000.0, 0, 0.0, 0);
+        previous.late_callbacks = 3;
+        previous.silenced_blocks = 1;
+        let mut status = health_reading(1_400, 1_400 * 128, 140_000.0, 0, 0.0, 0);
+        status.late_callbacks = 5;
+        status.silenced_blocks = 1;
+        let health = audio_health_window(Some(&previous), &status, 0.0, 212.5, 48_000);
+        assert_eq!(health.late_callbacks, 5);
+        assert_eq!(health.recent_late_callbacks, 2);
+        assert_eq!(health.silenced_blocks, 1);
+        assert_eq!(health.recent_silenced_blocks, 0);
+        assert!((health.worst_gap_percent - 212.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn driver_dropouts_survive_a_stream_restart_without_being_counted_twice() {
+        // The driver's counters are process-wide. A restarted stream resets
+        // the callback's counters but not these, so reporting them "whole"
+        // on a restart, as the stream's own are, would count every old
+        // dropout a second time.
+        let mut previous = health_reading(500_000, 500_000 * 128, 1.0, 0, 0.0, 0);
+        previous.driver_overloads = 4;
+        previous.driver_resyncs = 1;
+        let mut status = health_reading(100, 100 * 128, 1.0, 0, 0.0, 0);
+        status.driver_overloads = 4;
+        status.driver_resyncs = 2;
+        status.driver_skipped_buffers = 3;
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert_eq!(health.recent_driver_dropouts, 4);
+        assert_eq!(health.driver_overloads, 4);
+        assert_eq!(health.driver_resyncs, 2);
+        assert_eq!(health.driver_skipped_buffers, 3);
+    }
+
+    #[test]
+    fn capture_glitches_are_overruns_and_underruns_together() {
+        let mut previous = health_reading(1_000, 1_000 * 128, 1.0, 0, 0.0, 0);
+        previous.capture_overruns = 2;
+        let mut status = health_reading(1_400, 1_400 * 128, 1.0, 0, 0.0, 0);
+        status.capture_overruns = 3;
+        status.capture_underruns = 5;
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert_eq!(health.capture_glitches, 8);
+        assert_eq!(health.recent_capture_glitches, 6);
+    }
+
+    #[test]
+    fn late_midi_is_reported_by_stage_in_total_and_together_for_the_window() {
+        let mut previous = health_reading(1_000, 1_000 * 128, 1.0, 0, 0.0, 0);
+        previous.midi_driver_late = 1;
+        let mut status = health_reading(1_400, 1_400 * 128, 1.0, 0, 0.0, 0);
+        status.midi_driver_late = 3;
+        status.midi_queue_late = 1;
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert_eq!(health.midi_late_driver, 3);
+        assert_eq!(health.midi_late_queue, 1);
+        assert_eq!(health.recent_midi_late, 3);
+    }
+
+    #[test]
+    fn a_restarted_stream_is_reported_whole_rather_than_subtracted() {
+        // The counters reset with the stream. Subtracting the reading from
+        // before it would underflow, and on a u64 that is a panic in debug
+        // and a colossal number in release.
+        let previous = health_reading(
+            500_000,
+            500_000 * 256,
+            50_000_000.0,
+            12,
+            120_000.0,
+            12 * 256,
+        );
+        let status = health_reading(100, 100 * 256, 100.0 * 1_066.0, 0, 0.0, 0);
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert_eq!(health.recent_overruns, 0);
+        assert!(
+            (health.load_percent - 20.0).abs() < 0.5,
+            "reported {}",
+            health.load_percent
+        );
+    }
+
+    #[test]
+    fn a_stream_with_no_blocks_yet_reports_zero_rather_than_dividing_by_it() {
+        let health = audio_health_window(
+            None,
+            &health_reading(0, 0, 0.0, 0, 0.0, 0),
+            0.0,
+            0.0,
+            48_000,
+        );
+        assert_eq!(
+            health,
+            rackforge_control_api::AudioHealthSnapshot::default()
+        );
+    }
 
     #[test]
     fn chooses_safe_activation_for_plugin_versions() {

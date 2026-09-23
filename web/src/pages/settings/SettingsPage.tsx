@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 import { AsyncActionLabel } from "../../components/AsyncSpinner";
 import { PageHeading } from "../../components/PageHeading";
 import { VelocityCurveReading } from "../../components/VelocityCurveReading";
+import { openAudioDriverPanel } from "../../gateway";
 import { HostRequestError, IS_BROWSER_HOST, hostJson, isNativeHost } from "../../host";
 import { ChangePinCard } from "../../pages/settings/ChangePinCard";
 import { ScreenGlassCard } from "../../pages/settings/ScreenGlassCard";
@@ -31,7 +32,7 @@ export function SettingsPage({
   // request failed, and the two need different words on screen.
   const [audioUnsupported, setAudioUnsupported] = useState(false);
   const [audioDraft, setAudioDraft] = useState<HostAudioPreferences | null>(initial.audioSettings?.preferences ?? null);
-  const [audioOperation, setAudioOperation] = useState<"refresh" | "test" | "save" | null>(null);
+  const [audioOperation, setAudioOperation] = useState<"refresh" | "test" | "save" | "panel" | null>(null);
   const audioBusy = audioOperation !== null;
   const [audioMessage, setAudioMessage] = useState<string | null>(null);
   // The tab lives in the URL so a section stays linkable. `replace` keeps
@@ -50,11 +51,20 @@ export function SettingsPage({
   const setSettingsTab = (tab: SettingsTab) => {
     setSearchParams(tab === "audio" ? {} : { tab }, { replace: true });
   };
+  // "Refresh devices" is the one read that may scan the audio hardware while
+  // a stream plays: the desktop host otherwise answers from what it last
+  // scanned, because opening every endpoint of every backend under a running
+  // stream held notes back while the player played. Only the desktop reads
+  // the flag, and the other hosts match this path exactly, so it goes to the
+  // desktop alone.
+  const hostScansOnRequest = audioSettings?.host === "desktop";
   const loadAudioSettings = useCallback(async () => {
     setAudioOperation("refresh");
     setAudioMessage(null);
     try {
-      const settings = await hostJson<HostAudioSettings>("/api/v1/host/audio");
+      const settings = await hostJson<HostAudioSettings>(
+        hostScansOnRequest ? "/api/v1/host/audio?refresh=true" : "/api/v1/host/audio",
+      );
       setAudioSettings(settings);
       setAudioDraft(settings.preferences);
       onAudioChange(settings);
@@ -68,7 +78,7 @@ export function SettingsPage({
     } finally {
       setAudioOperation(null);
     }
-  }, [onAudioChange]);
+  }, [onAudioChange, hostScansOnRequest]);
 
   // The readings below the form -- health, actual rate, audio load, buffer
   // underruns -- are LIVE, and the snapshot behind them was not: the whole
@@ -316,6 +326,36 @@ export function SettingsPage({
       setAudioMessage("Playing test note.");
     } catch (error) {
       setAudioMessage(error instanceof Error ? error.message : "Audio test failed.");
+    } finally {
+      setAudioOperation(null);
+    }
+  };
+
+  // The window belongs to the driver that is applied, not to the one picked
+  // in an unsaved draft: until a new choice is applied, the button would
+  // open the settings of the driver being left.
+  const driverPanel = audioSettings?.driver_panel ?? null;
+  const driverPanelBlocked = !driverPanel
+    ? null
+    : !driverPanel.available
+      ? driverPanel.detail ?? "Not available right now."
+      : audioDraft && audioSettings && audioDraft.driver !== audioSettings.preferences.driver
+        ? "Apply the driver change first: this opens the settings of the driver in use."
+        : null;
+
+  const openDriverPanel = async () => {
+    if (!driverPanel) return;
+    setAudioOperation("panel");
+    setAudioMessage(null);
+    try {
+      await openAudioDriverPanel();
+      setAudioMessage(
+        driverPanel.kind === "asio"
+          ? "Opening the driver's settings on this computer. A change there reopens the audio stream; refresh the devices afterwards."
+          : "Opening the Windows sound settings.",
+      );
+    } catch (error) {
+      setAudioMessage(error instanceof Error ? error.message : "The driver settings could not open.");
     } finally {
       setAudioOperation(null);
     }
@@ -614,6 +654,18 @@ export function SettingsPage({
                     Test note
                   </AsyncActionLabel>
                 </button>
+                {driverPanel ? (
+                  <button
+                    className="secondary-button"
+                    disabled={audioBusy || driverPanelBlocked !== null}
+                    title={driverPanelBlocked ?? undefined}
+                    onClick={() => void openDriverPanel()}
+                  >
+                    <AsyncActionLabel active={audioOperation === "panel"} activeLabel="Opening…">
+                      {driverPanel.kind === "asio" ? "Driver settings" : "Windows sound settings"}
+                    </AsyncActionLabel>
+                  </button>
+                ) : null}
                 {/* Back to what is applied, for this tab. It is the way out of
                     an audition as much as an undo: the reading the engine is
                     hearing goes back with the draft. */}

@@ -31,6 +31,8 @@ import type {
   PluginStateReference,
   MidiLearnCandidate,
   MidiSourceStatus,
+  AudioHealthMessage,
+  AudioHealthSnapshot,
   OutputMeterMessage,
   OutputMeterSnapshot,
   ParameterLink,
@@ -64,6 +66,19 @@ let sequencerStatusInFlight = false;
 let gatewayGeneration = 0;
 let performanceSnapshotInFlight = false;
 let outputMeterInFlight = false;
+/// When the outstanding poll was sent. A latch that is only cleared by a
+/// matching reply stops the poller for good if that reply never arrives, so
+/// a latch older than this is treated as lost and the poll is reissued. The
+/// requests are idempotent reads, so reissuing one costs nothing.
+let outputMeterSentAt = 0;
+let audioHealthInFlight = false;
+let audioHealthSentAt = 0;
+let sequencerStatusSentAt = 0;
+const POLL_LATCH_STALE_MS = 2000;
+
+function latchIsStale(sentAt: number) {
+  return sentAt !== 0 && Date.now() - sentAt > POLL_LATCH_STALE_MS;
+}
 let intentionallyStopped = false;
 let pendingPerformanceEdit:
   | {
@@ -102,6 +117,7 @@ const pendingSnapshotRefreshes = new Set<{
   timeout: number;
 }>();
 const outputMeterListeners = new Set<(meter: OutputMeterSnapshot) => void>();
+const audioHealthListeners = new Set<(health: AudioHealthSnapshot) => void>();
 const sequencerStatusListeners = new Set<(status: SequencerStatus) => void>();
 const connectionOutage = new DeferredConnectionOutage(
   CONNECTION_NOTICE_DELAY_MS,
@@ -250,7 +266,10 @@ export function connectGateway() {
       );
       if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
       outputMeterTimer = window.setInterval(
-        sendOutputMeterRequest,
+        () => {
+          sendOutputMeterRequest();
+          sendAudioHealthRequest();
+        },
         OUTPUT_METER_REFRESH_MS,
       );
       if (sequencerStatusTimer !== null) window.clearInterval(sequencerStatusTimer);
@@ -291,10 +310,17 @@ export function connectGateway() {
           store.dispatch(hostIdleReceived());
         } else if (message.status === "sequencer_status" && "sequencer" in message) {
           sequencerStatusInFlight = false;
+          sequencerStatusSentAt = 0;
           const status = (message as unknown as { sequencer: SequencerStatus }).sequencer;
           for (const listener of sequencerStatusListeners) listener(status);
+        } else if (message.status === "audio_health" && "health" in message) {
+          audioHealthInFlight = false;
+          audioHealthSentAt = 0;
+          const healthMessage = message as unknown as AudioHealthMessage;
+          for (const listener of audioHealthListeners) listener(healthMessage.health);
         } else if (message.status === "output_meter" && "meter" in message) {
           outputMeterInFlight = false;
+          outputMeterSentAt = 0;
           const meterMessage = message as unknown as OutputMeterMessage;
           for (const listener of outputMeterListeners) listener(meterMessage.meter);
         } else if (message.status === "core_restarting") {
@@ -343,7 +369,20 @@ export function connectGateway() {
           rejectPendingCommands(new Error(errorMessage.message));
           pendingPerformanceEdit?.reject(new Error(errorMessage.message));
           pendingPerformanceEdit = null;
+          // Every poller's in-flight latch has to clear here, not just the
+          // performance snapshot's. The Desktop answers a request it could
+          // not serve with {"status":"error"}, which matches none of the
+          // per-poller branches above, so a latch left set here never clears
+          // and that poller stops for the rest of the session. The output
+          // meter latching was visible as the OUT bar freezing after a
+          // hiccup and never moving again.
           performanceSnapshotInFlight = false;
+          outputMeterInFlight = false;
+          outputMeterSentAt = 0;
+          audioHealthInFlight = false;
+          audioHealthSentAt = 0;
+          sequencerStatusInFlight = false;
+          sequencerStatusSentAt = 0;
           if (pendingPresetRequest?.timeout !== undefined) {
             window.clearTimeout(pendingPresetRequest.timeout);
           }
@@ -686,9 +725,31 @@ function commandPayload(id: number, command: SessionCommand) {
   return serializeSessionCommand(CLIENT_ID, id, command);
 }
 
+function sendAudioHealthRequest() {
+  if (
+    !isVstHost()
+    && socket
+    && sessionConnected
+    && coreReady
+    && (!audioHealthInFlight || latchIsStale(audioHealthSentAt))
+    && audioHealthListeners.size > 0
+  ) {
+    audioHealthInFlight = true;
+    audioHealthSentAt = Date.now();
+    socket.send(JSON.stringify({ op: "audio_health" }));
+  }
+}
+
 function sendOutputMeterRequest() {
-  if (!isVstHost() && socket && sessionConnected && coreReady && !outputMeterInFlight) {
+  if (
+    !isVstHost()
+    && socket
+    && sessionConnected
+    && coreReady
+    && (!outputMeterInFlight || latchIsStale(outputMeterSentAt))
+  ) {
     outputMeterInFlight = true;
+    outputMeterSentAt = Date.now();
     socket.send(JSON.stringify({ op: "output_meter" }));
   }
 }
@@ -699,10 +760,11 @@ function sendSequencerStatusRequest() {
     && socket
     && sessionConnected
     && coreReady
-    && !sequencerStatusInFlight
+    && (!sequencerStatusInFlight || latchIsStale(sequencerStatusSentAt))
     && sequencerStatusListeners.size > 0
   ) {
     sequencerStatusInFlight = true;
+    sequencerStatusSentAt = Date.now();
     socket.send(JSON.stringify({ op: "sequencer_status" }));
   }
 }
@@ -719,6 +781,13 @@ export function subscribeSequencerStatus(listener: (status: SequencerStatus) => 
   sequencerStatusListeners.add(listener);
   return () => {
     sequencerStatusListeners.delete(listener);
+  };
+}
+
+export function subscribeAudioHealth(listener: (health: AudioHealthSnapshot) => void) {
+  audioHealthListeners.add(listener);
+  return () => {
+    audioHealthListeners.delete(listener);
   };
 }
 
@@ -811,6 +880,38 @@ export function importLiveShow(
       );
       return message.preview as import("./types").RfLiveImportPreview;
     },
+  );
+}
+
+export interface OutputCapture {
+  /** Where the host saved it, on the host's own disk. */
+  path: string;
+  seconds: number;
+  midi_messages: number;
+}
+
+/** Saves the host's flight recorder -- the last seconds of what went to the
+    audio device and the MIDI that played them -- for a click heard once. */
+export function saveOutputCapture(): Promise<OutputCapture> {
+  return requestPresetOperation(
+    { op: "save_output_capture" },
+    "output_capture_saved",
+    (message) => ({
+      path: String(message.path ?? ""),
+      seconds: Number(message.seconds ?? 0),
+      midi_messages: Number(message.midi_messages ?? 0),
+    }),
+  );
+}
+
+/** Asks the host to show the audio driver's settings window. Resolves as
+    soon as the host has accepted: the window may be modal, and what is
+    changed in it comes back as the driver reopening, not as this reply. */
+export function openAudioDriverPanel(): Promise<void> {
+  return requestPresetOperation(
+    { op: "open_audio_driver_panel" },
+    "audio_driver_panel_opening",
+    () => undefined,
   );
 }
 

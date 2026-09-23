@@ -70,6 +70,17 @@ export interface HostAudioSettings {
   midi_source_keys?: Record<string, number>;
   runtime?: HostAudioRuntimeStatus;
   runtime_status: string;
+  /** The settings window of the driver in use, when the host can show one.
+      Absent on hosts that have none. */
+  driver_panel?: HostAudioDriverPanel | null;
+}
+
+export interface HostAudioDriverPanel {
+  /** `asio`: the driver's own window. `system_sound`: the OS sound settings. */
+  kind: "asio" | "system_sound";
+  available: boolean;
+  /** Why it cannot open, when it cannot. */
+  detail?: string | null;
 }
 
 export interface SoundSummary {
@@ -130,6 +141,44 @@ export interface OutputMeterSnapshot {
 export interface OutputMeterMessage {
   status: "output_meter";
   meter: OutputMeterSnapshot;
+}
+
+export interface AudioHealthSnapshot {
+  /** Since the previous poll, not since the stream opened. */
+  load_percent: number;
+  peak_percent: number;
+  overruns: number;
+  stream_errors: number;
+  midi_dropped: number;
+  recent_overruns: number;
+  overrun_average_percent: number;
+  overrun_average_frames: number;
+  block_frames: number;
+  late_callbacks: number;
+  recent_late_callbacks: number;
+  /** Widest gap between two callbacks in the window; 100 is on time. */
+  worst_gap_percent: number;
+  silenced_blocks: number;
+  recent_silenced_blocks: number;
+  /** What the ASIO driver itself reports losing; zero on WASAPI. */
+  driver_overloads: number;
+  driver_resyncs: number;
+  driver_skipped_buffers: number;
+  recent_driver_dropouts: number;
+  capture_glitches: number;
+  recent_capture_glitches: number;
+  /** MIDI held by the operating system before it reached the host. */
+  midi_late_driver: number;
+  /** MIDI the host had and no audio block took in time. */
+  midi_late_queue: number;
+  recent_midi_late: number;
+  worst_midi_driver_delay_ms: number;
+  worst_midi_queue_delay_ms: number;
+}
+
+export interface AudioHealthMessage {
+  status: "audio_health";
+  health: AudioHealthSnapshot;
 }
 
 export interface MidiSourceDescriptor {

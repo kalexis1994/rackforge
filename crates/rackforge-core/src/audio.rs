@@ -111,6 +111,38 @@ pub fn discover_audio_devices() -> Result<Vec<AudioDeviceDescriptor>> {
     Ok(devices)
 }
 
+/// The devices that are plugged in, whether or not they can be opened right
+/// now: cards and their PCMs, read from the control interface alone.
+///
+/// `discover_audio_devices` opens every stream to learn what it can do, and a
+/// stream the engine itself holds answers "busy". With only the output open
+/// the device still showed up through its free capture side; once the engine
+/// captured too, both sides were busy, the device dropped out of the
+/// inventory, and the supervisor took its own interface for unplugged --
+/// restarting the engine every two seconds. Presence does not need a stream.
+pub fn present_audio_device_ids() -> Result<BTreeSet<AudioDeviceId>> {
+    let mut present = BTreeSet::new();
+    for card in CardIter::new() {
+        let card = card.context("enumerating ALSA cards")?;
+        let index = card.get_index();
+        let Ok(control) = Ctl::new(&format!("hw:{index}"), true) else {
+            continue;
+        };
+        let card_id = read_trimmed(format!("/proc/asound/card{index}/id"))
+            .unwrap_or_else(|| format!("card-{index}"));
+        let usb = usb_identity(index);
+        for pcm_device in DeviceIter::new(&control) {
+            let has_stream = [Direction::Playback, Direction::Capture]
+                .into_iter()
+                .any(|direction| control.pcm_info(pcm_device as u32, 0, direction).is_ok());
+            if has_stream {
+                present.insert(stable_device_id(index, pcm_device, &card_id, usb.as_ref())?);
+            }
+        }
+    }
+    Ok(present)
+}
+
 pub fn open_audio_output(profile: &AudioOutputProfile) -> Result<OpenedAudioOutput> {
     profile
         .validate()

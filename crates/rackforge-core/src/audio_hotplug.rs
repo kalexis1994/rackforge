@@ -18,7 +18,7 @@
 //! appears -- and no interface displaces another interface, so plugging a
 //! second one in beside a working one does nothing at all.
 
-use crate::audio::discover_audio_devices;
+use crate::audio::{discover_audio_devices, present_audio_device_ids};
 use anyhow::{Context, Result};
 use rackforge_audio_api::{
     AudioDeviceId, AudioOutputProfile, AudioTransport, OutputChange, assess,
@@ -52,6 +52,14 @@ pub fn spawn(
                 match discover_audio_devices() {
                     Ok(devices) => {
                         match assess(&current_id, current_transport, &profile, &devices) {
+                            // Missing from the probed inventory is not gone:
+                            // the engine holds the device, and a device held
+                            // on both sides -- playing and capturing -- cannot
+                            // be probed at all. Only a device the card list no
+                            // longer has was unplugged.
+                            Some(OutputChange::Lost)
+                                if present_audio_device_ids()
+                                    .is_ok_and(|present| present.contains(&current_id)) => {}
                             Some(OutputChange::Lost) => {
                                 println!(
                                     "AUDIO_OUTPUT_LOST id={current_id} \

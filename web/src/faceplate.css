@@ -486,10 +486,10 @@
 
 /* The master faders, at every size: the value above, the rail across the
    whole width, the name below, all centred -- where a name and a value
-   beside the rail left it a third of the room. 42 px from top to bottom,
-   the height of the narrow bar's menu key: 10 px of value, 6 of air, a
-   10 px rail with a low cap to match, 6 of air, 10 px of name. The markup is
-   name, rail, value; the rows place them. */
+   beside the rail left it a third of the room. The cap keeps its full
+   20 px, a size a thumb finds; the air goes around it: 10 px of value,
+   6 of air, the 20 px rail, 6 of air, 10 px of name. The markup is name,
+   rail, value; the rows place them. */
 .top-controls .compact-control {
   min-width: 0;
   grid-template-columns: minmax(96px, 160px);
@@ -508,7 +508,7 @@
 .top-controls .compact-control > .compact-fader {
   grid-row: 2;
   width: 100%;
-  height: 10px;
+  height: 20px;
   min-height: 0;
 }
 
@@ -520,16 +520,7 @@
 }
 
 .top-controls .compact-fader input[type="range"] {
-  height: 10px;
-}
-
-.top-controls .compact-fader input[type="range"]::-webkit-slider-thumb {
-  height: 10px;
-  margin-top: -1.5px;
-}
-
-.top-controls .compact-fader input[type="range"]::-moz-range-thumb {
-  height: 10px;
+  height: 20px;
 }
 
 
@@ -592,6 +583,23 @@
      what it is, and the room goes to the bars. */
   .topbar.has-mixer-toggle .master-output-meter-label {
     display: none !important;
+  }
+
+  /* Nor its L R: in a 42 px key the letters pressed the bars against the
+     key's edges. The bars alone fill the glass, with the same 7 px of it
+     showing on every side. */
+  .topbar.has-mixer-toggle .master-output-meter-channels {
+    display: none;
+  }
+
+  .topbar.has-mixer-toggle .master-output-meter {
+    grid-template-rows: minmax(0, 1fr) !important;
+    gap: 0;
+    padding: 7px;
+  }
+
+  .topbar.has-mixer-toggle .master-output-meter-bars {
+    height: auto;
   }
 
   /* Pressed, or open, the key sits down in the panel, as PLAY's header keys
@@ -657,6 +665,16 @@
     height: 100%;
     display: grid !important;
     grid-template-columns: minmax(0, 1fr);
+    row-gap: 3px;
+  }
+
+  /* The bar is the menu key's 42 px tall, and the cap keeps its 20: the
+     value and the name go down to 8 px so 3 px of air still stands between
+     them and the cap, where there was 1 -- and 9 between them and the rail
+     itself. */
+  .topbar.has-mixer-toggle .top-controls .compact-control > output,
+  .topbar.has-mixer-toggle .top-controls .compact-control > .compact-control-label {
+    font-size: 8px;
   }
 
   .topbar.has-mixer-toggle .top-controls .compact-control > .compact-control-label {

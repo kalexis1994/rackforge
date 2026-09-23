@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronLeft, ChevronRight, LogOut, Save } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SequencerStrip } from "./SequencerPanel";
 import { GraphWorkspaceHeader } from "./components/GraphWorkspaceHeader";
 import { useDraftHistory } from "./hooks/useDraftHistory";

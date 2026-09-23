@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type PerformanceGraphWorkspace } from "../../LivePage";
 import { ConnectionBadge } from "../../components/ConnectionBadge";
 import { ControllerDockToggle } from "../../components/ControllerDockToggle";
 import { LightingSwitch } from "../../components/LightingSwitch";
@@ -13,8 +12,6 @@ export function MobileNavigation({
   connection,
   onClose,
   performanceSurface,
-  liveWorkspaceActive,
-  liveWorkspaceKind,
   liveSetlistSelected,
   onPlayRequest,
   dockableController,
@@ -26,8 +23,6 @@ export function MobileNavigation({
   connection: string;
   onClose: () => void;
   performanceSurface?: "play" | "live";
-  liveWorkspaceActive: boolean;
-  liveWorkspaceKind?: PerformanceGraphWorkspace["kind"];
   liveSetlistSelected: boolean;
   onPlayRequest: () => void;
   dockableController: boolean;
@@ -129,30 +124,6 @@ export function MobileNavigation({
                   </>
                 ) : (
                   <>
-                    {liveWorkspaceActive ? (
-                      <>
-                        <button
-                          className="nav-item"
-                          onClick={() => onPerformanceAction("live-save-editor")}
-                        >
-                          <span className="nav-mark"><Activity aria-hidden="true" strokeWidth={1.9} /></span>
-                          <span className="nav-copy">
-                            <span>Save workspace</span>
-                            <small>Store this portable node graph</small>
-                          </span>
-                        </button>
-                        <button
-                          className="nav-item"
-                          onClick={() => onPerformanceAction("live-close-editor")}
-                        >
-                          <span className="nav-mark"><Blocks aria-hidden="true" strokeWidth={1.9} /></span>
-                          <span className="nav-copy">
-                            <span>{liveWorkspaceKind === "song_part" ? "Back to Song" : "Back to LIVE library"}</span>
-                            <small>{liveWorkspaceKind === "song_part" ? "Close the Song Part graph" : "Close the full-screen Rack workspace"}</small>
-                          </span>
-                        </button>
-                      </>
-                    ) : null}
                     <button
                       className="nav-item"
                       onClick={() => onPerformanceAction("live-perform")}

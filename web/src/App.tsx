@@ -12,25 +12,6 @@ import {
 } from "react";
 import { useSelector } from "react-redux";
 import {
-  Activity,
-  Blocks,
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-} from "lucide-react";
-import {
   
   Navigate,
   Route,
@@ -609,33 +590,8 @@ function RackForgeApp() {
           )}
           onPlayRequest={requestPlayNavigation}
         />
-        {liveWorkspace ? (
-          <nav className="rail-context-actions" aria-label="Graph editor actions">
-            <span className="rail-context-label">
-              {liveWorkspace.kind === "rack" ? "Rack editor" : "Song Part editor"}
-            </span>
-            <button
-              type="button"
-              className="nav-item"
-              onClick={() => window.dispatchEvent(new Event("rackforge:save-graph-workspace"))}
-            >
-              <span className="nav-mark"><Activity aria-hidden="true" strokeWidth={1.9} /></span>
-              <span className="nav-copy">
-                <span>{liveWorkspace.kind === "rack" ? "Save Rack" : "Save Song Part"}</span>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="nav-item"
-              onClick={() => window.dispatchEvent(new Event("rackforge:close-graph-workspace"))}
-            >
-              <span className="nav-mark"><Blocks aria-hidden="true" strokeWidth={1.9} /></span>
-              <span className="nav-copy">
-                <span>{liveWorkspace.kind === "rack" ? "Back to LIVE" : "Back to Song"}</span>
-              </span>
-            </button>
-          </nav>
-        ) : null}
+        {/* The node editor's Save and Exit are in its own header, at every
+            size; the rail keeps only navigation. */}
         {dockableController ? (
           <ControllerDockToggle
             open={showControllerDock}
@@ -771,8 +727,6 @@ function RackForgeApp() {
                 ? "live"
                 : undefined
           }
-          liveWorkspaceActive={liveWorkspace !== null}
-          liveWorkspaceKind={liveWorkspace?.kind}
           dockableController={dockableController}
           controllerDockOpen={showControllerDock}
           onControllerToggle={() => setControllerDockOpen((open) => !open)}

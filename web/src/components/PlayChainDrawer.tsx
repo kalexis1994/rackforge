@@ -440,7 +440,7 @@ export function PlayChainDrawer({
                   className={`play-chain-suggestion${suggestion.descriptor ? "" : " missing"}`}
                 >
                   <PluginIcon
-                    plugin={suggestion.descriptor}
+                    plugin={suggestion.descriptor ?? undefined}
                     name={suggestion.descriptor?.plugin_name ?? suggestion.plugin_id}
                     className="play-chain-icon"
                   />

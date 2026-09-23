@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -10,6 +11,7 @@ import {
 import { ChevronLeft, ChevronRight, LogOut, Save } from "lucide-react";
 import { SequencerStrip } from "./SequencerPanel";
 import { sendSequencerCommand } from "./gateway";
+import { pluginKind, usePluginCatalog } from "./pluginCatalog";
 import {
   dispatchCommand,
   dispatchCommandAwait,
@@ -1851,20 +1853,27 @@ function dispatchEdit(
   return dispatchPerformanceEdit(expectedRevision, edit);
 }
 
+/**
+ * The enabled plugin nodes a Rack runs, child Racks included -- every one
+ * of them, effects too, since each is work the preview has to start. `counts`
+ * narrows it to some of them; see `useInstrumentSlot`.
+ */
 function rackPreviewVoiceCount(
   rack: RackDefinition | undefined,
   racks: RackDefinition[] = [],
   visited = new Set<string>(),
+  counts: (slot: RackSlot) => boolean = () => true,
 ): number {
   if (!rack) return 0;
   if (visited.has(rack.id)) return 0;
   const nextVisited = new Set(visited).add(rack.id);
-  const enabledSlots = new Set(
-    rack.slots.filter((slot) => slot.enabled).map((slot) => slot.id),
+  const enabledSlots = new Map(
+    rack.slots.filter((slot) => slot.enabled).map((slot) => [slot.id, slot]),
   );
   return materializeRackGraph(rack).graph!.nodes.reduce((count, node) => {
     if (node.kind.kind === "plugin") {
-      return count + Number(enabledSlots.has(node.kind.slot_id));
+      const slot = enabledSlots.get(node.kind.slot_id);
+      return count + Number(!!slot && counts(slot));
     }
     if (node.kind.kind !== "rack") return count;
     const childRackId = node.kind.rack_id;
@@ -1872,8 +1881,26 @@ function rackPreviewVoiceCount(
       racks.find((candidate) => candidate.id === childRackId && candidate.enabled),
       racks,
       nextVisited,
+      counts,
     );
   }, 0);
+}
+
+/**
+ * Whether a slot holds an instrument, for the counts that say "instruments":
+ * a Rack with a piano and a compressor has one. A plugin the catalog does not
+ * know is counted, as the slot was before it could be told apart.
+ */
+function useInstrumentSlot(): (slot: RackSlot) => boolean {
+  const { plugins } = usePluginCatalog();
+  return useMemo(() => {
+    const notInstruments = new Set(
+      plugins
+        .filter((plugin) => pluginKind(plugin) !== "instrument")
+        .map((plugin) => plugin.plugin_id),
+    );
+    return (slot: RackSlot) => !notInstruments.has(slot.plugin_id);
+  }, [plugins]);
 }
 
 function useSongPartPreview(
@@ -1896,6 +1923,13 @@ function useSongPartPreview(
   const transportRack = rack ? normalizeRackGraphGeometry(rack) : undefined;
   const payload = transportRack ? JSON.stringify(transportRack) : null;
   const voiceCount = rackPreviewVoiceCount(transportRack, performance.library.racks);
+  const isInstrumentSlot = useInstrumentSlot();
+  const instrumentCount = rackPreviewVoiceCount(
+    transportRack,
+    performance.library.racks,
+    undefined,
+    isInstrumentSlot,
+  );
 
   const restoreOrigin = useCallback(() => {
     if (!previewSupported || !engagedRef.current) return;
@@ -1966,6 +2000,7 @@ function useSongPartPreview(
     error: voiceCount === 0 ? null : error,
     status: voiceCount === 0 ? "idle" as const : status,
     voiceCount,
+    instrumentCount,
   };
 }
 
@@ -2033,6 +2068,13 @@ function RackEditor({
   const previewVoiceCount = rackPreviewVoiceCount(
     transportDraft,
     performance.library.racks,
+  );
+  const isInstrumentSlot = useInstrumentSlot();
+  const previewInstrumentCount = rackPreviewVoiceCount(
+    transportDraft,
+    performance.library.racks,
+    undefined,
+    isInstrumentSlot,
   );
   const visiblePreviewStatus = previewVoiceCount === 0 ? "idle" : previewStatus;
   const visiblePreviewError = previewVoiceCount === 0 ? null : previewError;
@@ -2218,7 +2260,7 @@ function RackEditor({
       dirty={dirty}
       isNew={isNew}
       pending={pending}
-      instrumentCount={previewVoiceCount}
+      instrumentCount={previewInstrumentCount}
       previewStatus={visiblePreviewStatus}
       onName={(name) => setDraft({ ...draft, name })}
       onEnabled={(enabled) => setDraft({ ...draft, enabled })}
@@ -2255,7 +2297,7 @@ function RackEditor({
           {visiblePreviewStatus === "applying" ? (
             <><AsyncSpinner label="Applying Rack preview…" /><span>Applying Rack preview…</span></>
           ) : (
-            <><i /><span>{previewVoiceCount} {previewVoiceCount === 1 ? "instrument" : "instruments"} active in preview</span></>
+            <><i /><span>{previewInstrumentCount} {previewInstrumentCount === 1 ? "instrument" : "instruments"} active in preview</span></>
           )}
         </div>
       ) : null}
@@ -2753,7 +2795,7 @@ function SongEditor({
       isNew={isNew}
       pending={pending}
       previewStatus={partPreview.status}
-      instrumentCount={partPreview.voiceCount}
+      instrumentCount={partPreview.instrumentCount}
       onPartName={(name) => {
         if (selectedPartIndex < 0) return;
         updatePart(selectedPartIndex, (part) => ({ ...part, name }));
@@ -2778,7 +2820,7 @@ function SongEditor({
           {partPreview.status === "applying" ? (
             <><AsyncSpinner label="Applying Song Part preview…" /><span>Applying Song Part preview…</span></>
           ) : (
-            <><i /><span>{partPreview.voiceCount} {partPreview.voiceCount === 1 ? "instrument" : "instruments"} active in this Part</span></>
+            <><i /><span>{partPreview.instrumentCount} {partPreview.instrumentCount === 1 ? "instrument" : "instruments"} active in this Part</span></>
           )}
         </div>
       ) : null}

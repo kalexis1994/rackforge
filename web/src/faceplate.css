@@ -3344,6 +3344,27 @@
   color: var(--muted);
 }
 
+/* The rack editor's picker asks for an instrument or an effect, and says
+   which in its colour from the code (design/tokens.css): the eyebrow, each
+   row's painted edge and its ADD are the instruments' blue or the effects'
+   amber. */
+.rack-instrument-picker-dialog {
+  --pick-colour: var(--rf-color-instrument);
+}
+
+.rack-instrument-picker-dialog.effect {
+  --pick-colour: var(--rf-color-sound);
+}
+
+.rack-instrument-picker-dialog .modal-dialog-heading > .eyebrow,
+.rack-instrument-picker-dialog .play-plugin-status {
+  color: var(--pick-colour) !important;
+}
+
+.rack-instrument-picker-dialog .plugin-picker-card::before {
+  background: var(--pick-colour);
+}
+
 /* ==========================================================================
    The hamburger drawer
    ==========================================================================

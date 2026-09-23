@@ -1001,14 +1001,6 @@ textarea {
   animation: rf-backdrop-in var(--rf-motion-fast) var(--rf-ease-standard) both;
 }
 
-/* The one surface that keeps a strip uncovered: a plugin's own play surface
-   carries a 58px toolbar, and the dialog is a layer over the instrument
-   rather than over the whole app. Everywhere else the ground covers the
-   screen, or it leaves a lit band across the top with nothing behind it. */
-.plugin-surface-active .preset-modal-backdrop {
-  top: 58px;
-}
-
 .preset-modal {
   width: min(820px, 100%);
   max-height: 100%;
@@ -4319,8 +4311,12 @@ body {
     display: inline;
   }
 
+  /* Backwards, not both: kept after it ends, the last frame's translateY(0)
+     is still a transform, and a transformed page is the box every fixed
+     layer inside it is placed in -- a dialog's backdrop then began under
+     the top bar instead of at the top of the screen. */
   .page > * {
-    animation: mobile-page-in 220ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+    animation: mobile-page-in 220ms cubic-bezier(0.2, 0.75, 0.2, 1) backwards;
   }
 
   .now-playing .muted-inline,
@@ -11206,7 +11202,6 @@ body {
   }
 
   .preset-modal-backdrop {
-    inset-block-start: 52px;
     padding: 8px;
   }
 

@@ -35,7 +35,7 @@ export function PluginPickerDialog({
       title={isEffect ? "Choose an effect" : "Choose an instrument"}
       onClose={onClose}
       closeLabel={isEffect ? "Close effect selector" : "Close instrument selector"}
-      className="rack-instrument-picker-dialog"
+      className={`rack-instrument-picker-dialog ${isEffect ? "effect" : "instrument"}`}
       actions={
         <RfButton variant="secondary" onClick={onClose}>
           Cancel

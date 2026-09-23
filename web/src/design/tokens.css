@@ -62,12 +62,14 @@
      --rf-color-instrument  blue    instruments: SELECT PLUGIN, the
                                     instrument's node in the FX chain, the
                                     Instrument tab and tag, instrument
-                                    nodes in the rack editor.
+                                    nodes in the rack editor and its
+                                    Choose an instrument dialog.
      --rf-color-sound       amber   effects and sound, the audio itself:
                                     EFFECTS and the whole FX drawer (frames,
                                     ON, PANEL, Add effect, ADD), the Effect
                                     tab and tag; in the rack editor, effect
-                                    nodes, audio ports, cables, ins and outs.
+                                    nodes, audio ports, cables, ins and
+                                    outs, and the Choose an effect dialog.
      --rf-color-preset      green   presets, the saved memory: PRESETS and
                                     the preset sheet's keys.
      --rf-color-input       violet  what plays into RackForge -- MIDI and

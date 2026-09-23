@@ -55,7 +55,6 @@ import {
   rackPluginRole,
   type RackPluginRole,
 } from "./rackPluginSelection";
-import { PluginPickerDialog } from "./components/PluginPickerDialog";
 import type {
   LiveBrowseMode,
   LiveLocation,
@@ -2259,6 +2258,11 @@ function RackEditor({
               })
             }
             canAddInstrument={draft.slots.length < 32}
+            pluginPicker={pluginPicker ? {
+              role: pluginPicker.role,
+              onSelect: selectPlugin,
+              onClose: () => setPluginPicker(null),
+            } : null}
             onAddInstrument={addPlugin}
             instances={instances}
             renderPluginSurface={renderPluginSurface}
@@ -2310,15 +2314,6 @@ function RackEditor({
           />
         ))}
       </EditorSection>
-      {pluginPicker ? (
-        <PluginPickerDialog
-          instances={instances}
-          plugins={plugins}
-          role={pluginPicker.role}
-          onSelect={selectPlugin}
-          onClose={() => setPluginPicker(null)}
-        />
-      ) : null}
     </form>
   );
 }
@@ -2780,6 +2775,22 @@ function SongEditor({
                   racks={performance.library.racks}
                   onChange={updatePartRack}
                   canAddInstrument={selectedPartRack.slots.length < 32}
+                  pluginPicker={pluginPicker ? {
+                    role: pluginPicker.role,
+                    onSelect: (instance) => {
+                      updatePartRack(
+                        addSlotToRack(
+                          selectedPartRack,
+                          defaultSlot(instance),
+                          pluginPicker.position,
+                          rackPluginRole(instance.plugin_id, plugins),
+                          { insertAfter: pluginPicker.insertAfter },
+                        ),
+                      );
+                      setPluginPicker(null);
+                    },
+                    onClose: () => setPluginPicker(null),
+                  } : null}
                   onAddInstrument={(position, role, insertAfter) =>
                     setPluginPicker({ position, role, insertAfter })}
                   instances={instances}
@@ -2818,26 +2829,6 @@ function SongEditor({
           ) : null}
         </div>
       </EditorSection>
-      {pluginPicker && selectedPartRack ? (
-        <PluginPickerDialog
-          instances={instances}
-          plugins={plugins}
-          role={pluginPicker.role}
-          onSelect={(instance) => {
-            updatePartRack(
-              addSlotToRack(
-                selectedPartRack,
-                defaultSlot(instance),
-                pluginPicker.position,
-                rackPluginRole(instance.plugin_id, plugins),
-                { insertAfter: pluginPicker.insertAfter },
-              ),
-            );
-            setPluginPicker(null);
-          }}
-          onClose={() => setPluginPicker(null)}
-        />
-      ) : null}
     </form>
   );
 }

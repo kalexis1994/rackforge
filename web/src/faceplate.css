@@ -3365,6 +3365,114 @@
   background: var(--pick-colour);
 }
 
+/* ------------------------------------------------ the plugin picker ---
+   Choosing what a new node owns is an edit of the Rack like the others, so
+   it is their modal: centred on the canvas over the same scrim, the graph
+   behind inert, the plate of the cable editors. It asks in its role's
+   colour -- the kicker and each row's edge and ADD (see above). */
+.rack-plugin-picker {
+  position: absolute;
+  z-index: 48;
+  inset: 0;
+  margin: auto;
+  width: min(620px, calc(100% - 24px));
+  height: fit-content;
+  max-height: calc(100% - 24px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip), 0 14px 36px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  animation: rack-plugin-editor-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
+}
+
+.rack-plugin-picker > header {
+  min-height: 56px;
+  padding: 8px 8px 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--fp-panel);
+  border-bottom: var(--fp-seam);
+}
+
+.rack-plugin-picker > header > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.rack-plugin-picker > header span {
+  color: var(--pick-colour);
+  font: 700 10px/1.2 var(--mono-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.rack-plugin-picker > header strong {
+  font: 700 15px/1.2 var(--display-font);
+}
+
+.rack-plugin-picker-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.rack-plugin-picker > footer {
+  padding: 8px;
+  display: flex;
+  justify-content: flex-end;
+  background: var(--fp-panel);
+  border-top: var(--fp-seam);
+}
+
+.rack-plugin-picker-cancel {
+  min-height: 34px;
+  padding: 0 14px;
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  font: 700 11px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.rack-plugin-picker-cancel:hover {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.rack-plugin-picker-cancel:active {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.rack-plugin-picker-cancel:focus-visible {
+  outline: 2px solid var(--pick-colour);
+  outline-offset: 2px;
+}
+
+/* On a phone the picker is the canvas, edge to edge, as the others are. */
+@media (max-width: 700px), (max-height: 600px) {
+  .rack-plugin-picker {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
 /* ==========================================================================
    The hamburger drawer
    ==========================================================================

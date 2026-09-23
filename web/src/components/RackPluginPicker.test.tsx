@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { PluginPickerDialog } from "./PluginPickerDialog";
+import { RackPluginPicker } from "./RackPluginPicker";
 import type { PluginInstance, PluginWebDescriptor } from "../types";
 
 function plugin(
@@ -45,7 +45,7 @@ const instances = [
 
 function markupFor(role: "instrument" | "effect", available = instances) {
   return renderToStaticMarkup(
-    <PluginPickerDialog
+    <RackPluginPicker
       instances={available}
       plugins={catalog}
       role={role}
@@ -55,7 +55,7 @@ function markupFor(role: "instrument" | "effect", available = instances) {
   );
 }
 
-describe("PluginPickerDialog", () => {
+describe("RackPluginPicker", () => {
   it("offers only instruments when asked for an instrument", () => {
     const markup = markupFor("instrument");
 
@@ -72,10 +72,19 @@ describe("PluginPickerDialog", () => {
     expect(markup).not.toContain("Concert Grand");
   });
 
-  it("says where an effect gets its signal from", () => {
-    // The node is wired to the hardware input on the player's behalf, so the
-    // dialog says so rather than leaving them to find the cable in the graph.
-    expect(markupFor("effect")).toContain("wired from the audio input");
+  it("says where an effect goes", () => {
+    // The node is wired into the chain on the player's behalf, so the picker
+    // says so rather than leaving them to find the cable in the graph.
+    expect(markupFor("effect")).toContain("into the chain before the output");
+  });
+
+  it("is a modal of the canvas, in its role's colour", () => {
+    const markup = markupFor("effect");
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain("rack-plugin-picker");
+    expect(markup).toContain("rack-link-editor-scrim");
+    expect(markup).toMatch(/class="[^"]*rack-instrument-picker-dialog effect/);
   });
 
   it("names the role it found nothing for", () => {

@@ -63,6 +63,7 @@ import type { RackPluginRole } from "../rackPluginSelection";
 import { RackPluginEditor, type RackPluginEditorKind } from "./RackPluginEditor";
 import { RackMidiLinkEditor } from "./RackMidiLinkEditor";
 import { RackAudioInputLinkEditor } from "./RackAudioInputLinkEditor";
+import { RackPluginPicker } from "./RackPluginPicker";
 import { AudioInputMeter } from "./AudioInputMeter";
 import {
   useAudioInputStatus,
@@ -653,6 +654,14 @@ interface RackGraphEditorProps {
     update: RackDefinition | ((current: RackDefinition) => RackDefinition),
   ) => void;
   canAddInstrument: boolean;
+  /** The plugin picker, while one is open: shown over the canvas like every
+   *  other edit here. Opened by `onAddInstrument` (or by the page), and
+   *  answered by whoever opened it. */
+  pluginPicker?: {
+    role: RackPluginRole;
+    onSelect: (instance: PluginInstance) => void;
+    onClose: () => void;
+  } | null;
   onAddInstrument: (
     position: RackGraphPosition,
     role: RackPluginRole,
@@ -675,6 +684,7 @@ export default function RackGraphEditor({
   history,
   onChange,
   canAddInstrument,
+  pluginPicker = null,
   onAddInstrument,
   instances,
   renderPluginSurface,
@@ -731,7 +741,7 @@ export default function RackGraphEditor({
     from?: { signal: RackGraphSignal; node_id: string; port_id: string; name: string };
   }) | null>(null);
   const [midiLinkEditor, setMidiLinkEditor] = useState<{ edgeId: string } | null>(null);
-  const overlayOpen = editorSlotId !== undefined || midiLinkEditor !== null;
+  const overlayOpen = editorSlotId !== undefined || midiLinkEditor !== null || pluginPicker !== null;
   const closePluginEditor = useCallback(() => setEditorSlotId(undefined), []);
   const [historyOpen, setHistoryOpen] = useState(false);
   // The canvas mostly explains itself -- ports light for a cable they take,
@@ -1518,7 +1528,9 @@ export default function RackGraphEditor({
     ? `node:${editorSlotId}`
     : midiLinkEditor
       ? `edge:${midiLinkEditor.edgeId}`
-      : undefined;
+      : pluginPicker
+        ? "picker"
+        : undefined;
   useEffect(() => {
     const flow = canvasRef.current?.querySelector<HTMLElement>(".react-flow");
     if (!flow || modalKey === undefined) return;
@@ -1526,7 +1538,9 @@ export default function RackGraphEditor({
     const returnTo = modalKey.startsWith("node:")
       ? editorNodeIdRef.current
         && `.react-flow__node[data-id="${CSS.escape(editorNodeIdRef.current)}"]`
-      : `.rack-edge-control[data-edge-id="${CSS.escape(modalKey.slice("edge:".length))}"]`;
+      : modalKey.startsWith("edge:")
+        ? `.rack-edge-control[data-edge-id="${CSS.escape(modalKey.slice("edge:".length))}"]`
+        : undefined;
     setHistoryOpen(false);
     setShortcutsOpen(false);
     setNodeMenu(null);
@@ -1961,6 +1975,15 @@ export default function RackGraphEditor({
               onChange={updateSlot}
               onClose={closePluginEditor}
               renderSurface={renderPluginSurface}
+            />
+          ) : null}
+          {pluginPicker ? (
+            <RackPluginPicker
+              instances={instances}
+              plugins={catalogPlugins}
+              role={pluginPicker.role}
+              onSelect={pluginPicker.onSelect}
+              onClose={pluginPicker.onClose}
             />
           ) : null}
           {midiLinkEditor && midiEditorEdge && midiEditorTargetNode && midiEditorEdge.signal === "audio" ? (

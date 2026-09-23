@@ -283,8 +283,11 @@ fn run() {
     let component = std::fs::read(root.join("component.wasm")).expect("component.wasm");
     let package = PluginPackage::open(&root).expect("package");
     // SAFETY: a portable wasm-v1 package executes inside the sandbox.
-    let loaded =
-        unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), None) }.expect("load");
+    // A data root of its own, as a host has, so the host's path compiles
+    // what a host would: the component as binaryen leaves it, cached there.
+    let data_root = std::env::temp_dir().join(format!("rackforge-wasm-tax-{}", std::process::id()));
+    let loaded = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), Some(&data_root)) }
+        .expect("load");
     let score = score();
     let deadline = f64::from(FRAMES) / SAMPLE_RATE * 1e6;
 

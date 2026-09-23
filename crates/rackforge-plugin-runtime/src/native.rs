@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use std::fs::File;
 use std::io::{BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use wasmtime::{
     Cache, CacheConfig, Config, Engine, Instance, Memory, Module, OptLevel, Store, StoreLimits,
     StoreLimitsBuilder, TypedFunc,
@@ -58,6 +58,40 @@ const BUDGET_EXPORT: &str = "rackforge_set_realtime_budget";
 /// says no to everything. The number only has to be a number.
 const BUDGET_PROBE_FUEL: i64 = i64::MAX;
 
+/// A component as binaryen's `-O3` leaves it, for packaging tools: what the
+/// host would otherwise do on every machine the plugin is installed on, done
+/// once where it is built. The component must be valid WebAssembly.
+pub fn optimize_component(bytes: &[u8], scratch: &Path) -> Result<Vec<u8>> {
+    let engine = Engine::new(&Config::new())
+        .map_err(|error| anyhow::anyhow!("creating a validating engine: {error}"))?;
+    Module::validate(&engine, bytes)
+        .map_err(|error| anyhow::anyhow!("the component is not valid WebAssembly: {error}"))?;
+    let optimized =
+        crate::optimize::optimize(bytes, scratch).map_err(|error| anyhow::anyhow!(error))?;
+    Module::validate(&engine, &optimized)
+        .map_err(|error| anyhow::anyhow!("the optimised component did not validate: {error}"))?;
+    Ok(optimized)
+}
+
+/// Whether a valid component uses any SIMD instruction.
+///
+/// Asked the way a validator would: the component is valid with SIMD and
+/// either still valid without it -- it uses none -- or not. A component with
+/// no SIMD at all leaves the largest measured lever unpulled: sixteen points
+/// of native speed on the Concert Grand (see `optimize`).
+pub fn component_uses_simd(bytes: &[u8]) -> Result<bool> {
+    let with = Engine::new(&Config::new())
+        .map_err(|error| anyhow::anyhow!("creating a validating engine: {error}"))?;
+    Module::validate(&with, bytes)
+        .map_err(|error| anyhow::anyhow!("the component is not valid WebAssembly: {error}"))?;
+    let mut config = Config::new();
+    config.wasm_relaxed_simd(false);
+    config.wasm_simd(false);
+    let without = Engine::new(&config)
+        .map_err(|error| anyhow::anyhow!("creating a validating engine: {error}"))?;
+    Ok(Module::validate(&without, bytes).is_err())
+}
+
 pub struct PortableEngine {
     /// For plugins that take a budget: fuel, which is the unit the budget is
     /// denominated in and cannot be had any other way.
@@ -66,6 +100,9 @@ pub struct PortableEngine {
     /// runaway call without a counter in every basic block.
     interrupted: Engine,
     limits: RuntimeLimits,
+    /// Where optimised components are kept; `None` compiles every component
+    /// as shipped (see `crate::optimize`).
+    cache_directory: Option<PathBuf>,
 }
 
 impl PortableEngine {
@@ -95,7 +132,10 @@ impl PortableEngine {
             config.wasm_memory64(false);
             if let Some(directory) = cache_directory {
                 let mut cache_config = CacheConfig::new();
-                cache_config.with_directory(directory);
+                // Wasmtime's own directory, beside -- never around -- the
+                // optimised components: its cleaner removes whatever files in
+                // its directory it did not write itself.
+                cache_config.with_directory(directory.join("compiled"));
                 config.cache(Some(Cache::new(cache_config).map_err(|error| {
                     anyhow::anyhow!("creating RackForge portable code cache: {error}")
                 })?));
@@ -124,10 +164,49 @@ impl PortableEngine {
             metered: engine(true)?,
             interrupted,
             limits,
+            cache_directory: cache_directory.map(Path::to_path_buf),
         })
     }
 
+    /// The component this engine compiles for `bytes`: binaryen's optimised
+    /// form when there is a cache to keep it in, the original otherwise.
+    ///
+    /// Only an engine given a cache optimises. Optimising costs seconds, so it
+    /// is worth doing once per plugin version and kept -- not on every load,
+    /// which is what an engine without a cache would do.
+    fn optimized(&self, bytes: &[u8]) -> Option<Vec<u8>> {
+        let cache = self.cache_directory.as_deref()?;
+        if crate::optimize::disabled() {
+            return None;
+        }
+        let path = crate::optimize::cached_path(cache, bytes);
+        if let Ok(optimized) = std::fs::read(&path) {
+            return Some(optimized);
+        }
+        // Binaryen may end the process on a module it cannot read, rather
+        // than return an error, so it is only given modules the engine has
+        // already accepted. A module that fails here fails again, with the
+        // engine's own message, when the original is compiled.
+        Module::validate(&self.interrupted, bytes).ok()?;
+        let optimized =
+            crate::optimize::optimize(bytes, &cache.join("optimized").join("scratch")).ok()?;
+        Module::validate(&self.interrupted, &optimized).ok()?;
+        // A cache that cannot be written only means optimising again next
+        // time; the result is good either way.
+        let _ = crate::optimize::store(&path, &optimized);
+        Some(optimized)
+    }
+
     pub fn compile(&self, bytes: &[u8]) -> Result<PortableModule> {
+        // The optimised component when there is one and it compiles; the
+        // component as shipped in every other case.
+        let optimized = self.optimized(bytes);
+        let bytes = match optimized.as_deref() {
+            Some(optimized) if Module::from_binary(&self.interrupted, optimized).is_ok() => {
+                optimized
+            }
+            _ => bytes,
+        };
         let compile = |engine: &Engine| {
             Module::from_binary(engine, bytes).map_err(|error| {
                 anyhow::anyhow!("compiling RackForge WebAssembly component: {error}")
@@ -2039,6 +2118,91 @@ mod tests {
             }
         }
         panic!("docs/PLUGIN_ABI.md no longer contains a complete wat module");
+    }
+
+    /// A cache directory of its own under the system's temporary directory,
+    /// removed when the test is done with it.
+    struct ScratchCache(std::path::PathBuf);
+
+    impl ScratchCache {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "rackforge-optimize-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            Self(path)
+        }
+    }
+
+    impl Drop for ScratchCache {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn gain_output(engine: &PortableEngine, bytes: &[u8]) -> [f32; 4] {
+        let module = engine.compile(bytes).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        instance.set_parameter(0, 0.5).unwrap();
+        let mut output = [0.0; 4];
+        instance
+            .process_interleaved(&[1.0, -1.0, 0.25, -0.25], &mut output, 2)
+            .unwrap();
+        output
+    }
+
+    #[test]
+    fn a_cached_engine_compiles_the_optimised_component_and_keeps_it() {
+        let bytes = wat::parse_str(GAIN).unwrap();
+        let cache = ScratchCache::new("kept");
+        let engine = PortableEngine::with_cache(RuntimeLimits::default(), &cache.0).unwrap();
+        // The same sound as the component compiled as shipped.
+        assert_eq!(gain_output(&engine, &bytes), [0.5, -0.5, 0.125, -0.125]);
+        let kept = crate::optimize::cached_path(&std::fs::canonicalize(&cache.0).unwrap(), &bytes);
+        let optimized = std::fs::read(&kept).expect("the optimised component is kept");
+        assert!(optimized.starts_with(b"\0asm"));
+        // And the next load finds it rather than optimising again.
+        let modified = std::fs::metadata(&kept).unwrap().modified().unwrap();
+        assert_eq!(gain_output(&engine, &bytes), [0.5, -0.5, 0.125, -0.125]);
+        assert_eq!(
+            std::fs::metadata(&kept).unwrap().modified().unwrap(),
+            modified
+        );
+    }
+
+    #[test]
+    fn an_engine_without_a_cache_compiles_the_component_as_shipped() {
+        let bytes = wat::parse_str(GAIN).unwrap();
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        assert!(engine.optimized(&bytes).is_none());
+    }
+
+    #[test]
+    fn a_component_that_does_not_validate_is_never_given_to_binaryen() {
+        let cache = ScratchCache::new("invalid");
+        let engine = PortableEngine::with_cache(RuntimeLimits::default(), &cache.0).unwrap();
+        // Binaryen may end the process on bytes it cannot read; the engine
+        // must refuse them first and leave the error to the real compile.
+        assert!(engine.optimized(b"\0asm\x01\0\0\0\xff").is_none());
+        assert!(engine.compile(b"\0asm\x01\0\0\0\xff").is_err());
+    }
+
+    #[test]
+    fn tells_a_component_with_simd_from_one_without() {
+        let scalar =
+            wat::parse_str("(module (func (export \"f\") (result f32) f32.const 1))").unwrap();
+        let vector = wat::parse_str(
+            "(module (func (export \"f\") (result f32) \
+               f32.const 1 f32x4.splat f32x4.extract_lane 0))",
+        )
+        .unwrap();
+        assert!(!super::component_uses_simd(&scalar).unwrap());
+        assert!(super::component_uses_simd(&vector).unwrap());
     }
 
     #[test]

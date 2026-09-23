@@ -86,3 +86,15 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Every native RackForge host, and `rackforge-store` when it packs a component,
+optimises plugin components with Binaryen through the `wasm-opt` bindings.
+
+## Binaryen and wasm-opt-rs
+
+- Project: <https://github.com/WebAssembly/binaryen>, compiled into the host by
+  <https://github.com/brson/wasm-opt-rs>
+- Version: `wasm-opt` 0.116.1 (Binaryen version 116)
+- License: Binaryen Apache-2.0; `wasm-opt-rs` MIT OR Apache-2.0
+
+Copyright (c) the Binaryen contributors and the wasm-opt-rs contributors.

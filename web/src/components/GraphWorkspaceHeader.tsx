@@ -40,7 +40,10 @@ export function GraphWorkspaceHeader({
   className?: string;
 }) {
   return (
-    <header className={`graph-workspace-header ${className}`.trim()} aria-label={title}>
+    <header
+      className={`graph-workspace-header${dirty || isNew ? " is-unsaved" : ""} ${className}`.trim()}
+      aria-label={title}
+    >
       {/* Narrow, where the rail is hidden, the navigation opens from here --
           a key in the header rather than one floating over the canvas. */}
       <button

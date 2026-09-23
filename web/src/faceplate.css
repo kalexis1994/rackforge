@@ -5754,64 +5754,6 @@
   outline-offset: 1px;
 }
 
-/* Narrow, the rail is hidden and the navigation opens from the header's
-   own menu key, first in its row; "Cannot be saved" gives way to room, as
-   Save is off and the strip under the canvas says why. */
-@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
-  .graph-workspace-header {
-    flex-wrap: nowrap;
-    gap: 8px;
-    padding: 8px;
-  }
-
-  .graph-workspace-title {
-    min-width: 0;
-    flex: 0 1 auto;
-  }
-
-  .graph-workspace-state {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .graph-workspace-name {
-    min-width: 72px;
-  }
-}
-
-/* On a phone held upright the header stays one row: Exit and Save give up
-   their words for their icons -- the words stay for a screen reader -- and
-   the name takes what is left. */
-@media (max-width: 560px) {
-  .graph-workspace-state .graph-workspace-preview {
-    display: none;
-  }
-
-  /* The title breaks onto two lines rather than being cut: RACK / EDITOR. */
-  .graph-workspace-title .card-kicker {
-    white-space: normal;
-  }
-
-  .graph-workspace-key {
-    min-width: 38px;
-    padding: 0 10px;
-  }
-
-  .graph-workspace-key.save {
-    min-width: 38px;
-  }
-
-  .graph-workspace-save-label > span:not(.async-action-label),
-  .graph-workspace-key.exit > span,
-  .graph-workspace-key .async-action-label > span:last-child {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-}
 
 .graph-workspace-preview.ready {
   color: var(--green);
@@ -5918,6 +5860,114 @@
   background: var(--panel-inset);
   border: var(--fp-seam);
   box-shadow: var(--fp-well);
+}
+
+/* Narrow, the rail is hidden and the navigation opens from the header's
+   own menu key, first in its row; "Cannot be saved" gives way to room, as
+   Save is off and the strip under the canvas says why. */
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .graph-workspace-header {
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .graph-workspace-title {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .graph-workspace-state {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .graph-workspace-name {
+    min-width: 72px;
+  }
+}
+
+/* On a phone held upright the header stays one row: Exit and Save give up
+   their words for their icons -- the words stay for a screen reader -- and
+   the name takes what is left. */
+@media (max-width: 560px) {
+  .graph-workspace-state .graph-workspace-preview {
+    display: none;
+  }
+
+  /* The title breaks onto two lines rather than being cut: RACK / EDITOR.
+     "Unsaved changes" becomes a lamp beside it, so the name keeps the room. */
+  .graph-workspace-title .card-kicker {
+    white-space: normal;
+  }
+
+  .graph-workspace-state {
+    display: none;
+  }
+
+  .graph-workspace-header.is-unsaved .graph-workspace-title .card-kicker::after {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 5px;
+    vertical-align: 0.1em;
+    background: var(--amber-ink);
+    border-radius: 1px;
+  }
+
+  /* Save keeps Exit's size: no words on it, only red -- its icon in the
+     attention colour and a lamp in its corner. The strip under the canvas
+     says why, and so does the key to a screen reader. */
+  .graph-workspace-key.save.blocked {
+    position: relative;
+    display: inline-flex;
+    padding: 0 10px;
+  }
+
+  .graph-workspace-key.save.blocked svg {
+    color: var(--red);
+  }
+
+  .graph-workspace-key.save.blocked::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    background: var(--red);
+    border-radius: 1px;
+    box-shadow: 0 0 5px color-mix(in srgb, var(--red) 60%, transparent);
+  }
+
+  .graph-workspace-blocked {
+    display: none;
+  }
+
+  .graph-workspace-name {
+    min-width: 96px;
+  }
+
+  .graph-workspace-key {
+    min-width: 38px;
+    padding: 0 10px;
+  }
+
+  .graph-workspace-key.save {
+    min-width: 38px;
+  }
+
+  .graph-workspace-save-label > span:not(.async-action-label),
+  .graph-workspace-key.exit > span,
+  .graph-workspace-key .async-action-label > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
 
 /* The details plate: a plate, not smoked glass. */

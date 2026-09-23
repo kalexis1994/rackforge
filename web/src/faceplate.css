@@ -193,6 +193,14 @@
   .brand-lockup {
     align-items: center;
   }
+
+  /* Down to their icons, the section keys are square: the rail sets their
+     width, and the desktop padding, kept for a label that is gone, made
+     them 5 px taller than wide. The icon sits in the middle of the cap. */
+  .rail .nav-item {
+    aspect-ratio: 1;
+    padding: 0;
+  }
 }
 
 /* One word. At 0.3em the tracking pulled it apart into RACK FORGE, so it

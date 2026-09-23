@@ -699,8 +699,10 @@
   /* PLAY on a wide, short screen used to hide the top bar and run a thin
      strip in its place -- mode, program and plugin in a line. The top bar
      now stays, and its window says all of that, so the strip is gone. */
+  /* Plain, not !important: the faceplate loads after styles.css, so the
+     same selector here already has the last word. */
   .performance-surface-active .play-plugin-toolbar {
-    display: none !important;
+    display: none;
   }
 
   /* PLAY keeps its top bar here: its window names the mode, the plugin and

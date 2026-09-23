@@ -5689,6 +5689,20 @@
   --port-colour: var(--rf-lit-input);
 }
 
+/* A port grows about its own centre. React Flow centres it on the node's
+   edge with a transform (translate(-50%, -50%) on the left, (50%, -50%) on
+   the right), and `scale` is applied before that transform, so scaling about
+   the box's own middle pushed the dot away as it grew. The origin that stays
+   put is the box point the transform lands on the edge: its top-left corner
+   on the left, its top-right corner on the right. */
+.rack-flow-node .react-flow__handle-left {
+  transform-origin: 0 0;
+}
+
+.rack-flow-node .react-flow__handle-right {
+  transform-origin: 100% 0;
+}
+
 .rack-flow-node .react-flow__handle.is-connected {
   background: var(--port-colour);
 }

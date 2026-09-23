@@ -504,6 +504,13 @@ pub struct PluginManifest {
     /// adds it once every host it ships to reads it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub suggested_chain: Vec<SuggestedChainEntry>,
+    /// An effect that is played on its own, fed by the hardware audio input:
+    /// a guitar pedalboard, as against a compressor that belongs after
+    /// something. PLAY offers it beside the instruments, so a guitarist plays
+    /// through it without building a Rack. Effects only, with an audio input;
+    /// absent, it is false, so no other plugin needs to say anything.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub play_source: bool,
 }
 
 impl PluginManifest {
@@ -524,7 +531,18 @@ impl PluginManifest {
         if self.name.trim().is_empty() {
             return Err(ManifestError::EmptyField("name"));
         }
-        if !self.suggested_chain.is_empty() && self.kind != PluginKind::Instrument {
+        if self.play_source
+            && (self.kind != PluginKind::Effect
+                || self.resolved_audio_contract().input_channels() == 0)
+        {
+            return Err(ManifestError::PlaySourceRequiresInputEffect);
+        }
+        // What a PLAY source would like after itself: an instrument, or an
+        // effect played on its own (a pedalboard suggesting its EQ).
+        if !self.suggested_chain.is_empty()
+            && self.kind != PluginKind::Instrument
+            && !self.play_source
+        {
             return Err(ManifestError::SuggestedChainRequiresInstrument);
         }
         for (position, entry) in self.suggested_chain.iter().enumerate() {
@@ -940,8 +958,10 @@ pub enum ManifestError {
     UnsupportedRuntimeSchema(u32),
     #[error("invalid plugin id {0:?}")]
     InvalidPluginId(String),
-    #[error("only an instrument may suggest a chain")]
+    #[error("only an instrument, or an effect played on its own, may suggest a chain")]
     SuggestedChainRequiresInstrument,
+    #[error("play_source is for an effect with an audio input")]
+    PlaySourceRequiresInputEffect,
     #[error("suggested chain entry must name another plugin: {0:?}")]
     InvalidSuggestedChainEntry(String),
     #[error("suggested chain names {0:?} twice")]
@@ -1057,7 +1077,51 @@ mod tests {
             component: None,
             binaries: BTreeMap::from([("linux-aarch64".into(), "lib/librackforge_gain.so".into())]),
             suggested_chain: Vec::new(),
+            play_source: false,
         }
+    }
+
+    #[test]
+    fn an_effect_with_an_input_may_be_played_on_its_own() {
+        let mut candidate = manifest();
+        candidate.play_source = true;
+        assert_eq!(candidate.validate(), Ok(()));
+        // And, played on its own, it may suggest what follows it.
+        candidate.suggested_chain = vec![SuggestedChainEntry {
+            plugin: "org.rackforge.limiter".into(),
+            preset: None,
+        }];
+        assert_eq!(candidate.validate(), Ok(()));
+        let text = toml::to_string(&candidate).expect("serialises");
+        assert!(text.contains("play_source = true"), "{text}");
+        assert!(
+            !toml::to_string(&manifest())
+                .expect("serialises")
+                .contains("play_source"),
+            "an absent flag is not written"
+        );
+    }
+
+    #[test]
+    fn only_an_effect_with_an_input_may_be_played_on_its_own() {
+        let mut instrument = manifest();
+        instrument.kind = PluginKind::Instrument;
+        instrument.capabilities = vec![Capability::MidiInput, Capability::AudioOutput];
+        instrument.play_source = true;
+        assert_eq!(
+            instrument.validate(),
+            Err(ManifestError::PlaySourceRequiresInputEffect)
+        );
+        let mut deaf = manifest();
+        deaf.play_source = true;
+        deaf.audio = Some(PluginAudioContract {
+            input_buses: Vec::new(),
+            output_buses: manifest().resolved_audio_contract().output_buses,
+        });
+        assert_eq!(
+            deaf.validate(),
+            Err(ManifestError::PlaySourceRequiresInputEffect)
+        );
     }
 
     #[test]

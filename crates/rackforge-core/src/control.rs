@@ -3295,10 +3295,25 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             instrument_id,
             effects,
         } => {
-            if snapshot.instance(&instrument_id).is_none() {
+            let Some(source_plugin_id) = snapshot
+                .instance(&instrument_id)
+                .map(|instance| instance.plugin_id.clone())
+            else {
                 return error_response(
                     ControlErrorCode::NotFound,
                     format!("unknown instance {instrument_id}"),
+                    Some(snapshot.revision),
+                );
+            };
+            // A source played on its own (a pedalboard) cannot follow itself:
+            // one instance per plugin, and it is already on stage.
+            if effects
+                .iter()
+                .any(|effect| effect.plugin_id == source_plugin_id)
+            {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    format!("{source_plugin_id} cannot follow itself"),
                     Some(snapshot.revision),
                 );
             }

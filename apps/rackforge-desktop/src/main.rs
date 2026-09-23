@@ -2759,11 +2759,18 @@ impl DesktopApp {
                 self.reload_plugins()
                     .map_err(|error| format!("Could not load the installed plugin: {error:#}"))?;
             }
-            let (instance_id, kind) = self
+            let (instance_id, kind, play_source) = self
                 .plugins
                 .iter()
                 .find(|plugin| plugin.plugin_id == plugin_id)
-                .map(|plugin| (plugin.instance_id.clone(), plugin.runtime.manifest().kind))
+                .map(|plugin| {
+                    let manifest = plugin.runtime.manifest();
+                    (
+                        plugin.instance_id.clone(),
+                        manifest.kind,
+                        manifest.play_source,
+                    )
+                })
                 .ok_or_else(|| {
                     format!("Installed plugin {plugin_id:?} is not compatible with Desktop")
                 })?;
@@ -2771,8 +2778,10 @@ impl DesktopApp {
             // place on the stage of its own. Selecting it there put the
             // instrument's chain effects "not on stage" and left the test
             // note with nothing to play through, measured 2026-09-08 when
-            // RF-EQ was activated over the piano.
-            if kind == PluginKind::Effect {
+            // RF-EQ was activated over the piano. An effect played on its
+            // own from the audio input (a pedalboard) is the exception: it
+            // takes the stage as an instrument does.
+            if kind == PluginKind::Effect && !play_source {
                 return Ok(());
             }
             let instance_id = InstanceId::new(instance_id)
@@ -5518,6 +5527,13 @@ impl DesktopApp {
             session.active_instance_id.as_ref() == Some(instrument_id)
         };
         chain.validate()?;
+        // The source's own plugin cannot follow itself: one instance per
+        // plugin, and it is already on stage.
+        let source_plugin_id = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.instance_id == instrument_id.as_str())
+            .map(|plugin| plugin.plugin_id.clone());
         for effect in &chain.effects {
             let plugin = self
                 .plugins
@@ -5526,6 +5542,9 @@ impl DesktopApp {
                 .ok_or_else(|| format!("Unknown plugin: {}", effect.plugin_id))?;
             if plugin.runtime.manifest().kind != PluginKind::Effect {
                 return Err(format!("{} is not an effect plugin", plugin.name));
+            }
+            if source_plugin_id.as_deref() == Some(effect.plugin_id.as_str()) {
+                return Err(format!("{} cannot follow itself", plugin.name));
             }
         }
         #[cfg(windows)]
@@ -7457,11 +7476,21 @@ fn chain_owner_id(instance_id: &InstanceId) -> String {
 }
 
 /// The plugins LITTLE offers, instruments for PLAY and effects for the
-/// chain: one list each, told apart by what the plugin says it is.
+/// chain: one list each, told apart by what the plugin says it is. An effect
+/// played on its own from the audio input is in both: PLAY's sources, and
+/// the effects another source can take.
 fn little_play_plugins(plugins: &[DesktopPlugin], effects: bool) -> Vec<PlayPlugin> {
     plugins
         .iter()
-        .filter(|plugin| (plugin.runtime.manifest().kind == PluginKind::Effect) == effects)
+        .filter(|plugin| {
+            let manifest = plugin.runtime.manifest();
+            let effect = manifest.kind == PluginKind::Effect;
+            if effects {
+                effect
+            } else {
+                !effect || manifest.play_source
+            }
+        })
         .map(|plugin| {
             PlayPlugin::new(&plugin.instance_id, &plugin.plugin_id, &plugin.name)
                 .short_name(plugin.runtime.manifest().little_short_name())

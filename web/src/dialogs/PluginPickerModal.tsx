@@ -1,13 +1,17 @@
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { AsyncActionLabel } from "../components/AsyncSpinner";
 import { AsyncNotice, AsyncStateBoundary } from "../components/AsyncStateBoundary";
 import { ModalDialog } from "../components/ModalDialog";
 import { PluginIcon } from "../components/PluginIcon";
 import { PluginRuntimeStatus } from "../components/PluginRuntimeStatus";
 import { PluginSurfaceState } from "../components/PluginSurfaceState";
-import { dispatchCommandAwait } from "../gateway";
+import { dispatchCommandAwait, requestAudioInput } from "../gateway";
 import { hostJson } from "../host";
-import { commitPlayPluginSelection, preflightPlayPluginSelection } from "../playPluginSelection";
+import {
+  commitPlayPluginSelection,
+  playSourcePlugins,
+  preflightPlayPluginSelection,
+} from "../playPluginSelection";
 import { beginPluginOperation, invalidatePluginCatalog, usePluginCatalog } from "../pluginCatalog";
 import { synchronizePluginEnvironment } from "../pluginLifecycle";
 import { formatPluginVersion } from "../pluginPresentation";
@@ -35,13 +39,27 @@ export function PluginPickerModal({
   const [pendingPlugin, setPendingPlugin] = useState<PluginWebDescriptor | null>(null);
   const [pendingActivation, setPendingActivation] = useState<PluginWebDescriptor | null>(null);
   const activePluginId = active?.plugin_id;
-  // PLAY plays instruments. An effect belongs after one, in the FX drawer,
-  // and a MIDI processor in a Rack; neither can be the instance on stage,
-  // so neither is offered here.
-  const instruments = plugins.filter((plugin) => plugin.kind === "instrument");
+  // Whether this host captures audio at all; asked once. Unknown -- a host
+  // that predates the question -- counts as yes.
+  const [capture, setCapture] = useState(true);
+  useEffect(() => {
+    let current = true;
+    requestAudioInput()
+      .then((input) => {
+        if (current) setCapture(input.availability !== "unsupported");
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, []);
+  // PLAY plays instruments, and effects played on their own from the audio
+  // input (a pedalboard). Any other effect belongs after one, in the FX
+  // drawer, and a MIDI processor in a Rack.
+  const sources = playSourcePlugins(plugins, { capture });
   const orderedPlugins = [
-    ...instruments.filter((plugin) => plugin.plugin_id === activePluginId),
-    ...instruments.filter((plugin) => plugin.plugin_id !== activePluginId),
+    ...sources.filter((plugin) => plugin.plugin_id === activePluginId),
+    ...sources.filter((plugin) => plugin.plugin_id !== activePluginId),
   ];
   // Every banner and icon on the list, decoded before the list is shown, so
   // the cards arrive whole instead of their artwork landing afterwards.
@@ -115,7 +133,7 @@ export function PluginPickerModal({
   return (
     <>
       <ModalDialog
-        eyebrow="PLAY · Instruments"
+        eyebrow="PLAY"
         title="Select plugin"
         onClose={onClose}
         dismissible={activatingId === null && pendingActivation === null}

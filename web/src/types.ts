@@ -747,6 +747,9 @@ export interface PluginWebDescriptor {
   resources: PluginResourceRequirement[];
   /** The effects the instrument suggests after itself in the PLAY chain. */
   suggested_chain?: Array<{ plugin: string; preset?: string | null }>;
+  /** An effect played on its own from the audio input (a pedalboard): PLAY
+   *  offers it beside the instruments. */
+  play_source?: boolean;
   /**
    * The host builds this effect's voice on demand, out of the store, so the
    * chain can take it without the session having loaded it first. Hosts that

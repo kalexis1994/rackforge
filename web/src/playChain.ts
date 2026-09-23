@@ -122,17 +122,20 @@ export function sameChain(a: PlayChain, b: PlayChain): boolean {
  * The effect plugins the chain can take, by name: installed, enabled, and
  * something the host can actually build -- either because it has the plugin
  * loaded already (an instance in the session) or because it says it builds
- * one on demand out of its store.
+ * one on demand out of its store. The source on stage is left out: an
+ * effect played on its own (a pedalboard) cannot follow itself.
  */
 export function effectPlugins(
   plugins: PluginWebDescriptor[],
   instances?: PluginInstance[],
+  sourcePluginId?: string,
 ): PluginWebDescriptor[] {
   return plugins
     .filter(
       (plugin) =>
         plugin.kind === "effect"
         && plugin.active
+        && plugin.plugin_id !== sourcePluginId
         && (plugin.chainable === true
           || instances === undefined
           || instances.some((instance) => instance.plugin_id === plugin.plugin_id)),

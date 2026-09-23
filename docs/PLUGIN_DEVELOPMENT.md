@@ -174,10 +174,27 @@ preset = "Clean"
 ```
 
 The PLAY effects drawer offers each suggested plugin the player has installed
-and names the ones they have not. The field is instruments-only, each entry
-names another plugin once, and `preset` is optional. Because manifests deny
-unknown fields, a host older than the field refuses a package that carries it:
-add it once every host you ship to reads it (RackForge 0.1.18 and later).
+and names the ones they have not. The field is for instruments and PLAY
+sources (below), each entry names another plugin once, and `preset` is
+optional. Because manifests deny unknown fields, a host older than the field
+refuses a package that carries it: add it once every host you ship to reads it
+(RackForge 0.1.18 and later).
+
+An effect that is played on its own, from the audio input -- a guitar
+pedalboard, as against a compressor that belongs after something -- says so:
+
+```toml
+kind = "effect"
+play_source = true
+```
+
+PLAY then offers it beside the instruments, fed by the hardware input, so a
+guitarist plays through it without building a Rack; it may suggest what
+follows it, and it stays an ordinary effect everywhere else (in a Rack, and in
+another source's chain, though never after itself). Only an effect with an
+audio input may declare it. Like every field, it is refused by hosts older
+than it, so add it once every host you ship to reads it (the release after
+0.1.23).
 
 Schema 1 remains loadable so already published plugins do not break. RackForge
 uses its generic plugin identity for those packages; adding any branding field

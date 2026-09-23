@@ -3221,6 +3221,7 @@ fn plugin_catalog_entry(
                 "preset": entry.preset,
             })
         }).collect::<Vec<_>>(),
+        "play_source": manifest.play_source,
         "resources": manifest.resources.iter().map(|resource| {
             serde_json::json!({
                 "id": resource.id,

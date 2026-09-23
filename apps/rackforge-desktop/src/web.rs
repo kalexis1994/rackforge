@@ -467,6 +467,8 @@ struct PublicPluginWeb {
     resources: Vec<rackforge_plugin_api::ResourceRequirement>,
     /// The effects the instrument suggests after itself in PLAY.
     suggested_chain: Vec<rackforge_plugin_api::SuggestedChainEntry>,
+    /// An effect played on its own from the audio input, offered in PLAY.
+    play_source: bool,
 }
 
 #[derive(Clone)]
@@ -2682,6 +2684,7 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                 version: manifest.version.clone(),
                 kind: manifest.kind,
                 suggested_chain: manifest.suggested_chain.clone(),
+                play_source: manifest.play_source,
                 active: if managed {
                     state.plugin_store_root.as_ref().is_some_and(|store| {
                         rackforge_repository::plugin_is_enabled(store, &manifest.id)

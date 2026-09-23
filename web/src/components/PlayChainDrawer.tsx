@@ -256,7 +256,7 @@ export function PlayChainDrawer({
     setChosen(clampHeight(height + direction * (event.shiftKey ? 40 : 10)));
   };
 
-  const available = effectPlugins(plugins, instances);
+  const available = effectPlugins(plugins, instances, instrumentDescriptor?.plugin_id);
   const suggestions = suggestedEffects(suggested, plugins, chain);
   // Offered only when the instrument is recommending more than one thing
   // the player has not already taken: with a single one left, "Add all"

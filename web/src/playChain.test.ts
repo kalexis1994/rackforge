@@ -125,6 +125,17 @@ describe("the PLAY chain", () => {
     );
   });
 
+  it("offers a pedalboard after an instrument, but never after itself", () => {
+    const rig = { ...descriptor("org.rackforge.rig", "effect"), play_source: true };
+    const plugins = [rig, descriptor("org.rackforge.eq", "effect")];
+    // After a piano, keys through a pedalboard.
+    expect(effectPlugins(plugins, undefined, "org.rackforge.piano").map((p) => p.plugin_id))
+      .toEqual(["org.rackforge.eq", "org.rackforge.rig"]);
+    // With the pedalboard itself on stage, only what follows it.
+    expect(effectPlugins(plugins, undefined, "org.rackforge.rig").map((p) => p.plugin_id))
+      .toEqual(["org.rackforge.eq"]);
+  });
+
   it("offers an effect a host builds on demand, loaded or not", () => {
     const onDemand = { ...descriptor("org.rackforge.comp", "effect"), chainable: true };
     const plugins = [onDemand, descriptor("org.rackforge.unloaded", "effect")];

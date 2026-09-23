@@ -5931,6 +5931,28 @@
   border-radius: var(--fp-radius-key);
 }
 
+/* A node's menu is edged in the node's colour from the code, like the
+   node it opened from -- an instrument's blue, an effect's amber, MIDI's
+   violet, a child Rack's grey -- and its kicker names the kind in it. */
+.rack-node-menu.kind-instrument { --menu-colour: var(--rf-color-instrument); }
+.rack-node-menu.kind-effect,
+.rack-node-menu.kind-sound { --menu-colour: var(--rf-color-sound); }
+.rack-node-menu.kind-midi-processor,
+.rack-node-menu.kind-input { --menu-colour: var(--rf-color-input); }
+.rack-node-menu.kind-rack { --menu-colour: var(--rf-color-rack); }
+
+.rack-node-menu[class*="kind-"] {
+  border-color: var(--menu-colour) !important;
+  box-shadow:
+    var(--fp-lip),
+    0 0 0 1px color-mix(in srgb, var(--menu-colour) 45%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.35) !important;
+}
+
+.rack-node-menu[class*="kind-"] > header > span {
+  color: var(--menu-colour);
+}
+
 /* The Child Rack picker in the canvas menu kept the old glass -- a near-
    black field ringed in cyan -- inside a paper menu. It is the panel's
    field now: sunk into the plate, a seam around it, its name silkscreened

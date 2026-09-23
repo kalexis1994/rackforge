@@ -1373,6 +1373,37 @@ export default function RackGraphEditor({
     ? materialized.graph!.nodes.find((node) => node.id === nodeMenu.nodeId)
     : undefined;
   const menuSlotId = menuNode?.kind.kind === "plugin" ? menuNode.kind.slot_id : undefined;
+  // The menu is edged in its node's colour from the code: a plugin by its
+  // kind, the MIDI input violet, the audio ends amber, a child Rack grey.
+  const menuKind = (() => {
+    switch (menuNode?.kind.kind) {
+      case "plugin": {
+        const slot = materialized.slots.find((one) => one.id === menuSlotId);
+        return (slot && pluginKinds.get(slot.plugin_id)) ?? "instrument";
+      }
+      case "midi_input":
+      case "midi_output":
+        return "input";
+      case "audio_input":
+      case "audio_output":
+        return "sound";
+      case "rack":
+        return "rack";
+      default:
+        return undefined;
+    }
+  })();
+  const menuKindLabel = ({
+    effect: "Effect",
+    "midi-processor": "MIDI processor",
+    instrument: "Instrument",
+    rack: "Child Rack",
+  } as Record<string, string>)[menuKind ?? ""] ?? ({
+    midi_input: "MIDI input",
+    midi_output: "MIDI output",
+    audio_input: "Audio input",
+    audio_output: "Audio output",
+  } as Record<string, string>)[menuNode?.kind.kind ?? ""] ?? "Node";
   const menuSlot = menuSlotId
     ? materialized.slots.find((slot) => slot.id === menuSlotId)
     : undefined;
@@ -1765,13 +1796,13 @@ export default function RackGraphEditor({
           ) : null}
           {nodeMenu && menuNode ? (
             <div
-              className="rack-node-menu"
+              className={`rack-node-menu${menuKind ? ` kind-${menuKind}` : ""}`}
               style={menuStyle(nodeMenu.anchor)}
               role="menu"
               aria-label="Node actions"
             >
               <header>
-                <span>{menuNode.kind.kind === "plugin" ? "Plugin" : "Node"}</span>
+                <span>{menuKindLabel}</span>
                 <strong>{menuSlot?.name ?? nodeTitle(menuNode, materialized, racks)[0]}</strong>
               </header>
               {menuSlot ? (

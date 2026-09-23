@@ -477,16 +477,59 @@
 
 /* Between the compact layout and a wide screen -- about 760 to 1000 px --
    the window, pan, volume and the meter did not fit the bar, and the meter
-   ran off its end, out of sight. The faders' rails give way instead, from
-   124 px down to 56, before anything leaves the bar. */
+   ran off its end, out of sight. The controls give way instead, the rails
+   narrowing before anything leaves the bar. */
 .top-controls {
   flex: 0 1 auto;
   min-width: 0;
 }
 
+/* The master faders, at every size: the value above, the rail across the
+   whole width, the name below, all centred -- where a name and a value
+   beside the rail left it a third of the room. 42 px from top to bottom,
+   the height of the narrow bar's menu key: 10 px of value, 6 of air, a
+   10 px rail with a low cap to match, 6 of air, 10 px of name. The markup is
+   name, rail, value; the rows place them. */
 .top-controls .compact-control {
   min-width: 0;
-  grid-template-columns: 48px minmax(56px, 124px) 38px;
+  grid-template-columns: minmax(96px, 160px);
+  grid-template-rows: auto auto auto;
+  align-content: center;
+  justify-items: center;
+  row-gap: 6px;
+}
+
+.top-controls .compact-control > output {
+  grid-row: 1;
+  line-height: 1;
+  text-align: center;
+}
+
+.top-controls .compact-control > .compact-fader {
+  grid-row: 2;
+  width: 100%;
+  height: 10px;
+  min-height: 0;
+}
+
+.top-controls .compact-control > .compact-control-label {
+  grid-row: 3;
+  display: block;
+  line-height: 1;
+  text-align: center;
+}
+
+.top-controls .compact-fader input[type="range"] {
+  height: 10px;
+}
+
+.top-controls .compact-fader input[type="range"]::-webkit-slider-thumb {
+  height: 10px;
+  margin-top: -1.5px;
+}
+
+.top-controls .compact-fader input[type="range"]::-moz-range-thumb {
+  height: 10px;
 }
 
 
@@ -506,20 +549,43 @@
 }
 
 @media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  /* A switch, the meter is dressed as one: the menu key's face and size at
+     the bar's other end, the bars and L R behind its glass. The button over
+     it is clear and follows its corners exactly, so focus rings the key
+     itself, 2 px out like every other key's, and a tap on a phone does not
+     flash the browser's own highlight over it. */
+  .topbar.has-mixer-toggle .master-output-meter {
+    width: 42px;
+    flex-basis: 42px;
+    padding: 5px 0 4px;
+    background: linear-gradient(180deg, var(--glass), var(--paper));
+    border: var(--fp-seam);
+    border-radius: var(--fp-radius-key);
+    box-shadow: var(--fp-lip), var(--fp-drop);
+    transition:
+      background var(--rf-motion-instant) var(--rf-ease-standard),
+      box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
+  }
+
   .master-output-meter-toggle {
     display: block;
     position: absolute;
-    inset: -4px;
+    inset: -1px;
     padding: 0;
     background: transparent;
     border: 0;
     border-radius: var(--fp-radius-key);
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .master-output-meter-toggle:focus {
+    outline: none;
   }
 
   .master-output-meter-toggle:focus-visible {
     outline: 2px solid var(--acid);
-    outline-offset: 0;
+    outline-offset: 2px;
   }
 
   /* Narrow, the meter goes without its OUT stamp: the bars and L R say
@@ -528,9 +594,12 @@
     display: none !important;
   }
 
-  /* Open, the meter reads as a key held down: its lamp lit under it. */
-  .topbar.mixer-open .master-output-meter-toggle {
-    box-shadow: inset 0 -2px 0 var(--acid);
+  /* Pressed, or open, the key sits down in the panel, as PLAY's header keys
+     do when they are on. */
+  .topbar.has-mixer-toggle .master-output-meter:has(.master-output-meter-toggle:active),
+  .topbar.has-mixer-toggle.mixer-open .master-output-meter {
+    background: var(--panel-inset);
+    box-shadow: var(--fp-well);
   }
 
   /* The health readout's own key stays above the switch. */
@@ -581,43 +650,13 @@
     grid-column: 3;
   }
 
-  /* Each fader stands in its own column of the bar: its value above, the
-     rail across the whole width, and its name below, both centred on the
-     rail -- where a name and a value beside the rail left it a third of
-     the room. Three short rows in the key-high row: 10 px of value, a
-     20 px rail, 10 px of name. The markup is name, rail, value; the rows
-     place them. */
+  /* Each fader stacks as it does everywhere (see "The master faders"),
+     across a column of the bar's grid. */
   .topbar.has-mixer-toggle .top-controls .compact-control {
     grid-row: 1;
-    min-width: 0;
     height: 100%;
     display: grid !important;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr) auto;
-    align-content: center;
-    justify-items: center;
-    row-gap: 1px;
-  }
-
-  .topbar.has-mixer-toggle .top-controls .compact-control > .compact-control-label,
-  .topbar.has-mixer-toggle .top-controls .compact-control > output {
-    line-height: 1;
-    text-align: center;
-  }
-
-  .topbar.has-mixer-toggle .top-controls .compact-control > output {
-    grid-row: 1;
-  }
-
-  .topbar.has-mixer-toggle .top-controls .compact-control > .compact-fader {
-    grid-row: 2;
-    width: 100%;
-    height: 20px;
-    min-height: 0;
-  }
-
-  .topbar.has-mixer-toggle .top-controls .compact-control > .compact-control-label {
-    grid-row: 3;
   }
 
   .topbar.has-mixer-toggle .top-controls .compact-control > .compact-control-label {

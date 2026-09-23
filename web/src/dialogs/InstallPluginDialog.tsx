@@ -1,6 +1,7 @@
 import { type CSSProperties, Suspense, useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { AsyncActionLabel, AsyncSpinner } from "../components/AsyncSpinner";
+import { AsyncActionLabel } from "../components/AsyncSpinner";
+import { BrandMark } from "../components/BrandMark";
 import { ModalDialog } from "../components/ModalDialog";
 import { RfLoader } from "../components/RfLoader";
 import { ResourceExplorerDialog } from "../dialogs/lazyResourceExplorer";
@@ -28,6 +29,47 @@ export interface PluginInstallPreview {
     background_color?: string | null;
     accent_color?: string | null;
   } | null;
+}
+
+/**
+ * What a package says about itself, before anything is installed.
+ *
+ * A branded package shows its own banner and accent; one without branding
+ * gets the RackForge mark on the panel, not a monogram typed in a font.
+ */
+export function PluginInstallPreviewCard({ preview }: { preview: PluginInstallPreview }) {
+  const description = preview.description?.trim()
+    || `${preview.kind === "instrument" ? "Instrument" : "Plugin"} by ${preview.vendor}, packaged for RackForge.`;
+  // Only a package's own branding recolours the card; everything else is the
+  // faceplate's, so the card follows the lighting like the rest of the page.
+  const style = preview.branding?.accent_color
+    ? ({ "--preview-accent": preview.branding.accent_color } as CSSProperties)
+    : undefined;
+  const packageSize = preview.archive_bytes >= 1024 * 1024
+    ? `${(preview.archive_bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(preview.archive_bytes / 1024))} KB`;
+  return (
+    <div className="plugin-install-preview" style={style}>
+      <div className={`plugin-install-preview-banner${preview.branding ? " branded" : ""}`}>
+        {preview.branding ? (
+          <img src={preview.branding.banner_data_url} alt={`${preview.plugin_name} banner`} />
+        ) : (
+          <BrandMark />
+        )}
+      </div>
+      <div className="plugin-install-preview-copy">
+        <span className="eyebrow">READY TO INSTALL</span>
+        <h3>{preview.plugin_name} <small>v{preview.version}</small></h3>
+        <p>{description}</p>
+        <div className="plugin-install-preview-meta" aria-label="Package details">
+          <span>{preview.vendor}</span>
+          <span>{preview.kind}</span>
+          <span>{preview.portable ? "Portable" : preview.platform}</span>
+          <span>{packageSize}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function InstallPluginDialog({ onClose }: { onClose: () => void }) {
@@ -273,18 +315,6 @@ export function InstallPluginDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const previewDescription = preview?.description?.trim() || (preview
-    ? `${preview.kind === "instrument" ? "Instrument" : "Plugin"} by ${preview.vendor}, packaged for RackForge.`
-    : "");
-  const previewStyle = preview?.branding ? ({
-    "--preview-accent": preview.branding.accent_color || "#55e7ff",
-    "--preview-background": preview.branding.background_color || "#07131c",
-  } as CSSProperties) : undefined;
-  const packageSize = preview
-    ? preview.archive_bytes >= 1024 * 1024
-      ? `${(preview.archive_bytes / (1024 * 1024)).toFixed(1)} MB`
-      : `${Math.max(1, Math.round(preview.archive_bytes / 1024))} KB`
-    : "";
   const installing = busy && preview !== null && installed === null;
   const canConfigure = installedDescriptor?.surfaces.some(
     (surface) => surface.kind === "config",
@@ -409,33 +439,12 @@ export function InstallPluginDialog({ onClose }: { onClose: () => void }) {
             if (file) void uploadClientFile(file);
           }}
         />
-        {preview ? (
-          <div className="plugin-install-preview" style={previewStyle}>
-            <div className={`plugin-install-preview-banner${preview.branding ? " branded" : ""}`}>
-              {preview.branding ? (
-                <img src={preview.branding.banner_data_url} alt={`${preview.plugin_name} banner`} />
-              ) : (
-                <span aria-hidden="true">RF</span>
-              )}
-            </div>
-            <div className="plugin-install-preview-copy">
-              <span className="eyebrow">READY TO INSTALL</span>
-              <h3>{preview.plugin_name} <small>v{preview.version}</small></h3>
-              <p>{previewDescription}</p>
-              <div className="plugin-install-preview-meta" aria-label="Package details">
-                <span>{preview.vendor}</span>
-                <span>{preview.kind}</span>
-                <span>{preview.portable ? "Portable" : preview.platform}</span>
-                <span>{packageSize}</span>
-              </div>
-            </div>
-          </div>
-        ) : null}
+        {preview ? <PluginInstallPreviewCard preview={preview} /> : null}
+        {/* The faceplate's own loader -- the mark lighting limb by limb --
+            as everywhere else something is being prepared, not a generic
+            ring. */}
         {status ? (
-          <p className="install-plugin-status async-status-line">
-            <AsyncSpinner label={status} />
-            <span>{status}</span>
-          </p>
+          <RfLoader className="install-plugin-loader" label={status} size="compact" />
         ) : null}
         {error ? <p className="install-plugin-error">{error}</p> : null}
         {cancelled ? (

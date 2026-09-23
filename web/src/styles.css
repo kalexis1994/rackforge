@@ -4804,15 +4804,9 @@ body {
 
 .plugin-install-preview {
   --preview-accent: var(--acid);
-  --preview-background: #07131c;
   display: grid;
-  gap: 18px;
   margin: 20px 24px 0;
   overflow: hidden;
-  background: color-mix(in srgb, var(--preview-background) 88%, #102534);
-  border: 1px solid color-mix(in srgb, var(--preview-accent) 38%, transparent);
-  border-radius: 15px;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
 }
 
 .plugin-install-preview-banner {
@@ -4823,18 +4817,6 @@ body {
   display: grid;
   place-items: center;
   overflow: hidden;
-  color: #061018;
-  background:
-    linear-gradient(120deg, color-mix(in srgb, var(--preview-accent) 88%, white), var(--preview-accent));
-  border-bottom: 1px solid color-mix(in srgb, var(--preview-accent) 32%, transparent);
-}
-
-.plugin-install-preview-banner::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, 0.18));
 }
 
 .plugin-install-preview-banner img {
@@ -4844,16 +4826,8 @@ body {
   object-fit: cover;
 }
 
-.plugin-install-preview-banner > span {
-  font-family: var(--display-font);
-  font-size: clamp(2rem, 8vw, 4rem);
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
 .plugin-install-preview-copy {
   min-width: 0;
-  padding: 0 20px;
 }
 
 .plugin-install-preview-copy h3 {
@@ -4872,7 +4846,6 @@ body {
 
 .plugin-install-preview-copy p {
   margin: 0;
-  color: #a9bac5;
   font-size: 0.86rem;
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -4881,22 +4854,13 @@ body {
 .plugin-install-preview-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 14px;
 }
 
 .plugin-install-preview-meta span {
   max-width: 100%;
-  padding: 5px 8px;
   overflow: hidden;
-  color: #c8d6dd;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  font-size: 0.66rem;
   line-height: 1;
   text-overflow: ellipsis;
-  text-transform: capitalize;
   white-space: nowrap;
 }
 
@@ -4957,13 +4921,11 @@ body {
   height: 22px;
 }
 
-.install-plugin-status,
 .install-plugin-error,
 .install-plugin-success,
 .install-plugin-cancelled {
   margin: 16px 24px 0;
   padding: 12px 14px;
-  border-radius: 10px;
   font-size: 0.8rem;
 }
 
@@ -4972,35 +4934,19 @@ body {
   gap: 14px;
 }
 
-.install-plugin-status {
-  color: #a9bdc9;
-  background: rgba(109, 145, 247, 0.12);
-}
-
-.install-plugin-error {
-  color: #ffc6d0;
-  background: rgba(255, 85, 110, 0.12);
-}
-
 .install-plugin-success {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  color: #dfffa4;
-  background: rgba(201, 242, 84, 0.11);
 }
 
 .install-plugin-cancelled {
-  color: #d8e4e9;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.1);
   line-height: 1.5;
 }
 
 .install-plugin-next-step {
   margin: 0;
   padding: 0 24px 4px;
-  color: #9aaab5;
   font-size: 0.78rem;
   line-height: 1.5;
 }
@@ -5055,7 +5001,6 @@ body {
     padding-inline: 18px;
   }
 
-  .install-plugin-status,
   .install-plugin-error,
   .install-plugin-success,
   .install-plugin-cancelled {

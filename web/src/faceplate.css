@@ -5409,6 +5409,122 @@
   line-height: 1.55;
 }
 
+/* ------------------------------------------------- the plugin installer ---
+   The dialog shell had been brought onto the faceplate and everything inside
+   it had not: the package card was still the old navy glass with a blue
+   wash, its labels were pills, and its title was set in panel ink on that
+   dark card -- unreadable in daylight. The card is a panel now: the
+   package's own banner, or the mark on the inset where it has none, over
+   the copy and a row of stamped labels with room under them. (The source
+   cards before it are migrated further down, with the other wide keys.) */
+
+.plugin-install-preview {
+  gap: 0 !important;
+  color: var(--ink);
+  background: var(--paper) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+.plugin-install-preview-banner {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border-bottom: var(--fp-seam) !important;
+  box-shadow: var(--fp-well);
+}
+
+.plugin-install-preview-banner .brand-mark {
+  width: min(30%, 200px) !important;
+}
+
+.plugin-install-preview-copy {
+  padding: 16px 20px 20px !important;
+}
+
+.plugin-install-preview-copy .eyebrow {
+  color: var(--muted);
+}
+
+/* Set like the dialog's own title: a name at this size wants no silkscreen
+   tracking, which is for the small stamped labels. */
+.plugin-install-preview-copy h3 {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.plugin-install-preview-copy h3 small {
+  color: var(--preview-accent);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.plugin-install-preview-copy p {
+  color: rgba(var(--ink-rgb), 0.78) !important;
+}
+
+.plugin-install-preview-meta {
+  gap: 6px !important;
+  margin-top: 14px !important;
+}
+
+/* Stamped labels, like the plugin kind tag: square-cornered, in the
+   display face, not lozenges. */
+.plugin-install-preview-meta span {
+  padding: 5px 8px 4px !important;
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  font-family: var(--display-font);
+  font-size: 0.66rem !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase !important;
+}
+
+/* The faceplate's loader, with room to breathe around it: while a package
+   installs the dialog has no footer, so the loader is its last line. */
+.install-plugin-loader {
+  margin: 22px 24px;
+}
+
+.install-plugin-error,
+.install-plugin-success,
+.install-plugin-cancelled {
+  border-radius: var(--fp-radius-key) !important;
+}
+
+.install-plugin-error {
+  color: var(--red) !important;
+  background: color-mix(in srgb, var(--red) 9%, var(--paper)) !important;
+  border: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+}
+
+.install-plugin-success {
+  color: var(--green) !important;
+  background: color-mix(in srgb, var(--green) 9%, var(--paper)) !important;
+  border: 1px solid color-mix(in srgb, var(--green) 38%, var(--line));
+}
+
+.install-plugin-success strong {
+  font-family: var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.install-plugin-cancelled {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+}
+
+.install-plugin-next-step {
+  color: var(--muted) !important;
+}
+
 /* ------------------------------------------------------ modal dialogs ---
    The dialog shell was the old navy glass and its close glyph floated
    naked. The shell is a plate, the header a panel strip with a seam, and

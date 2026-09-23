@@ -98,6 +98,14 @@ is a complete instrument in freestanding C, about 2 KB compiled.
 
 `#![no_std]`, no allocator, no dependencies.
 
+## Building
+
+Components are built with SIMD: for `wasm32-unknown-unknown` the SDK does not
+compile without `-C target-feature=+simd128`, which every RackForge host
+executes. The flag, the stack size a voice pool needs, and why LTO makes a
+component slower rather than faster are in "Building a fast component" in
+[docs/PLUGIN_DEVELOPMENT.md](https://github.com/kalexis1994/rackforge/blob/main/docs/PLUGIN_DEVELOPMENT.md).
+
 ## Packaging
 
 A `.wasm` is not yet an installable instrument: it needs a manifest, branding

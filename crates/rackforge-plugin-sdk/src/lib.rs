@@ -12,6 +12,27 @@
 //! [`export_processor!`]. The SDK owns the raw WebAssembly ABI and its linear
 //! memory buffers so plugin code does not handle pointers or host platforms.
 
+// A plugin component is built with SIMD, or not at all. Every host that runs
+// one executes it -- wasmtime on desktop, Raspberry Pi and Android, and every
+// browser since 2021 -- so the flag costs nothing, and without it LLVM cannot
+// vectorise anything: on the Concert Grand that is 58 per cent of native
+// speed against 74 (plugins/concert-grand/examples/wasm-tax.rs). A plugin
+// with nothing to vectorise loses nothing by having it. Only the plugin
+// target is held to this; the browser host builds for wasm32-wasip1 and is
+// not a plugin.
+#[cfg(all(
+    target_arch = "wasm32",
+    target_os = "unknown",
+    not(target_feature = "simd128")
+))]
+compile_error!(
+    "RackForge plugins are built with SIMD. Add to the plugin repository's \
+     .cargo/config.toml:\n\n\
+     [target.wasm32-unknown-unknown]\n\
+     rustflags = [\"-C\", \"target-feature=+simd128\"]\n\n\
+     (see docs/PLUGIN_DEVELOPMENT.md, \"Building a fast component\")"
+);
+
 pub const ABI_VERSION_V1_1: u32 = 0x0001_0001;
 pub const ABI_VERSION_V1_2: u32 = 0x0001_0002;
 pub const ABI_VERSION_V1: u32 = 0x0001_0003;

@@ -35,6 +35,54 @@ Plugin API minor revision. Existing plugins declaring an older minor remain
 loadable. New packages declare the first host minor that provides every contract
 they use.
 
+## Building a fast component
+
+A component runs as portable WebAssembly, and portable code is slower than
+the same code built natively. How much slower is partly the host's doing and
+partly the plugin's. On the Concert Grand, played through
+`plugins/concert-grand/examples/wasm-tax.rs` with the audio checked identical
+on every path (x86_64, native = 100):
+
+| Component | Speed |
+| --- | --- |
+| built as below, as RackForge runs it | 71 |
+| the same, before RackForge optimises it | 67 |
+| without `+simd128` | 58 |
+| with `lto = "fat"` and `codegen-units = 1` | 62 |
+
+The host does its part without being asked: every native host passes each
+component through binaryen's `wasm-opt -O3` before compiling it, once per
+plugin version, and `rackforge-store pack-wasm` does the same while packing,
+so the browser gets it too. What is left is the plugin's.
+
+**Build with SIMD.** It is required: the SDK refuses to compile for
+`wasm32-unknown-unknown` without it, and every RackForge host executes it.
+Together with a larger shadow stack -- a processor with a voice pool is
+built by value, and the default 1 MiB runs out -- the plugin repository's
+`.cargo/config.toml` carries:
+
+```toml
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128", "-C", "link-arg=-zstack-size=8388608"]
+```
+
+**Give the compiler work it can vectorise.** The flag only lets LLVM use
+four-wide instructions; it uses them where the code has four independent
+things to do at once. Keep what is independent -- voices, partials, filter
+stages, oscillators -- in arrays of plain numbers and process them in loops
+without branches that depend on the data. The Concert Grand's strings are
+thousands of independent phasor rotations per sample, and that shape is
+worth sixteen points above. An algorithm that is sequential by nature -- a
+Newton iteration per sample, a feedback path one sample long -- will not
+vectorise, and no flag changes that. `rackforge-store pack` and `pack-wasm`
+warn when a component contains no SIMD instruction at all.
+
+**Do not reach for LTO.** It is the usual advice for native code and it
+makes the component slower here: LLVM inlines into very large functions,
+and Cranelift, which compiles the component on the host, handles those
+worse. Keep the default release profile (`opt-level = 3`, no LTO) unless a
+measurement with the bench above says otherwise.
+
 ## Package contract
 
 A development package is a directory with the following contents. For

@@ -59,7 +59,6 @@ export function AboutPage() {
   return (
     <>
       <PageHeading
-        eyebrow="RackForge"
         title="About RackForge"
         detail="A portable instrument host built around one shared interface and native real-time runtimes."
       />

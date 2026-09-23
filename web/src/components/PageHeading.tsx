@@ -3,13 +3,14 @@ export function PageHeading({
   title,
   detail,
 }: {
-  eyebrow: string;
+  /** Left out where the title already says it all. */
+  eyebrow?: string;
   title: string;
   detail: string;
 }) {
   return (
     <div className="page-heading">
-      <span className="eyebrow accent">{eyebrow}</span>
+      {eyebrow ? <span className="eyebrow accent">{eyebrow}</span> : null}
       <h1>{title}</h1>
       <p>{detail}</p>
     </div>

@@ -8870,9 +8870,13 @@ body {
   overflow: hidden;
 }
 
+/* The node editor is the whole screen: the top bar, the LIVE toolbar, the
+   library and the sequencer all step away while it is open. The sequencer
+   used to stay above it, taking a third of the height from the canvas. */
 .graph-workspace-active .topbar,
 .graph-workspace-active .live-toolbar,
-.graph-workspace-active .config-library {
+.graph-workspace-active .config-library,
+.graph-workspace-active .sequencer-shell {
   display: none;
 }
 

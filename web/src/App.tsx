@@ -99,6 +99,7 @@ import {
 import {
   defaultInstrument,
   firstRunView,
+  hostIsStarting,
   markFirstRunCompleted,
   readFirstRunCompleted,
   shouldRunFirstRun,
@@ -282,6 +283,7 @@ function useFirstRun({
   const [activationFailure, setActivationFailure] = useState<FirstRunFailure | null>(null);
   const [timedOut, setTimedOut] = useState(false);
   const started = useRef(false);
+  const hostStarting = hostIsStarting(plugins);
   const active = shouldRunFirstRun({
     completed,
     sessionKnown,
@@ -298,7 +300,7 @@ function useFirstRun({
             kind: "catalogue" as const,
             message: "RackForge could not read its plugin catalogue.",
           }
-        : catalogStatus === "ready" && defaultInstrument(plugins) === null
+        : catalogStatus === "ready" && !hostStarting && defaultInstrument(plugins) === null
           ? {
               kind: "no_instruments" as const,
               message:
@@ -310,7 +312,7 @@ function useFirstRun({
                 message: "RackForge is taking longer than usual to start.",
               }
             : null),
-    [activationFailure, catalogStatus, plugins, timedOut],
+    [activationFailure, catalogStatus, hostStarting, plugins, timedOut],
   );
 
   const finish = useCallback(() => {
@@ -327,7 +329,7 @@ function useFirstRun({
 
   useEffect(() => {
     if (!active || started.current) return;
-    if (catalogStatus !== "ready") return;
+    if (catalogStatus !== "ready" || hostStarting) return;
     const target = defaultInstrument(plugins);
     if (!target) return;
     started.current = true;
@@ -358,7 +360,18 @@ function useFirstRun({
         });
       }
     })();
-  }, [active, catalogStatus, plugins, navigate, finish]);
+  }, [active, catalogStatus, hostStarting, plugins, navigate, finish]);
+
+  // The host says it is starting only in the catalogue, so read it again
+  // until it has finished. Usually the session arrives with the instrument
+  // the host opened first, and this screen is gone before a second read.
+  useEffect(() => {
+    if (!active || !hostStarting) return;
+    const timer = window.setInterval(() => {
+      void refreshPluginCatalog(true).catch(() => undefined);
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [active, hostStarting]);
 
   // And a host that never answers at all still hands the interface over.
   useEffect(() => {

@@ -79,6 +79,23 @@ describe("what the first run shows", () => {
     expect(view.target).toBeNull();
   });
 
+  it("waits while the host is still opening its own instrument", () => {
+    // Android mid-start: RF-106 has installed, the piano has not yet, and the
+    // host refuses activations until it has opened the one it starts with.
+    const view = firstRunView({
+      catalogStatus: "ready",
+      plugins: [{ ...rf106, transitioning: true }],
+      failure: null,
+    });
+    expect(view.target).toBeNull();
+    expect(view.steps.map((step) => step.label)).toEqual([
+      "Starting the audio engine",
+      "Preparing your instruments",
+      "Opening your instrument",
+    ]);
+    expect(view.steps.map((step) => step.state)).toEqual(["working", "waiting", "waiting"]);
+  });
+
   it("names every instrument it found, and opens the default one", () => {
     const view = firstRunView({
       catalogStatus: "ready",

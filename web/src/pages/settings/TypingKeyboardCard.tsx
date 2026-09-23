@@ -18,9 +18,9 @@ export function TypingKeyboardCard() {
         <span className="card-kicker">Computer keys</span>
         <h2>Typing Keyboard</h2>
         <p>
-          Play notes with the computer keyboard, FL Studio layout: the Z row
-          is one octave, the Q row the next, sharps on the row above each.
-          Text fields always take priority.
+          Play notes from the computer keyboard, laid out like a piano: the
+          Z row is one octave, the Q row the next, sharps on the row above
+          each. Text fields always take priority.
         </p>
       </div>
       <ToggleSwitch

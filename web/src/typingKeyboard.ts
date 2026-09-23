@@ -1,5 +1,5 @@
-// The typing keyboard: play notes from the computer keys, FL Studio's
-// layout -- the Z row is one octave (Z = C3), the Q row the next
+// The typing keyboard: play notes from the computer keys, laid out like a
+// piano -- the Z row is one octave (Z = C3), the Q row the next
 // (Q = middle C), sharps on the row above each. Disabled by default and
 // enabled from Settings > Input; text fields always win.
 export const TYPING_KEYBOARD_STORAGE = "rackforge.typing-keyboard.enabled";

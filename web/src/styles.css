@@ -6781,7 +6781,6 @@ body {
   gap: 16px;
 }
 
-.active-performance-card,
 .live-browser,
 .config-library,
 .config-editor,
@@ -6794,55 +6793,12 @@ body {
   backdrop-filter: blur(18px) saturate(125%);
 }
 
-.active-performance-card {
-  min-height: 250px;
-  padding: 28px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  background:
-    radial-gradient(circle at 90% 8%, rgba(var(--acid-rgb), 0.17), transparent 34%),
-    var(--glass);
-}
 
-.active-performance-card h2 {
-  margin: 0 0 6px;
-  font-size: clamp(24px, 3vw, 38px);
-  font-weight: 500;
-  letter-spacing: -0.045em;
-}
 
-.active-performance-card p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-}
 
-.live-state {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-}
 
-.live-state i {
-  width: 7px;
-  height: 7px;
-  background: #6b7680;
-  border-radius: 50%;
-}
 
-.live-state.online {
-  color: var(--acid);
-}
 
-.live-state.online i {
-  background: var(--acid);
-  box-shadow: 0 0 0 4px rgba(var(--acid-rgb), 0.1);
-}
 
 .live-browser {
   min-width: 0;
@@ -9376,9 +9332,6 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .active-performance-card {
-    min-height: 190px;
-  }
 
   .config-library {
     position: static;
@@ -10634,10 +10587,6 @@ body {
     gap: 12px;
   }
 
-  .active-performance-card {
-    min-height: 180px;
-    padding: 18px;
-  }
 
   .live-mode-tabs {
     padding: 9px;
@@ -10910,9 +10859,6 @@ body {
     overflow: hidden;
   }
 
-  .live-surface-active .live-perform-surface .active-performance-card {
-    display: none;
-  }
 
   .live-surface-active .live-perform-surface .live-browser {
     min-height: 0;
@@ -11184,9 +11130,6 @@ body {
     overflow: hidden;
   }
 
-  .live-surface-active .live-perform-surface .active-performance-card {
-    display: none;
-  }
 
   .live-surface-active .live-perform-surface .live-browser {
     min-height: 0;
@@ -11238,10 +11181,6 @@ body {
 @media (orientation: landscape) and (max-height: 600px) and (max-width: 640px) {
   .live-surface-active .live-perform-surface .live-content {
     grid-template-columns: minmax(145px, 0.52fr) minmax(0, 1.48fr);
-  }
-
-  .live-surface-active .live-perform-surface .active-performance-card {
-    padding-inline: 12px;
   }
 }
 

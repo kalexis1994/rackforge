@@ -410,7 +410,6 @@ function PerformanceBrowser({
     }
   }, [performance.live.active, performance.live.mode]);
   const mode = performance.live.mode;
-  const active = describeLocation(performance, performance.live.active);
   const activate = (location: LiveLocation) => {
     if (session?.active_mode !== "live") {
       dispatchCommand({ type: "set_active_mode", mode: "live" });
@@ -423,21 +422,9 @@ function PerformanceBrowser({
 
   return (
     <div className="live-content">
-      <article className="active-performance-card">
-        <span className="card-kicker">On stage</span>
-        <div>
-          <h2>{active.title}</h2>
-          <p>{active.detail}</p>
-        </div>
-        <span className={`live-state${session?.active_mode === "live" ? " online" : ""}`}>
-          <i /> {session?.active_mode === "live"
-            ? "LIVE ACTIVE"
-            : session?.active_mode === "play"
-              ? "PLAY MODE"
-              : "AUDIO STOPPED"}
-        </span>
-      </article>
-
+      {/* What is on stage is the header's window to say -- the mode, where
+          in the library, what is playing -- so the browser is only the
+          choice. An ON STAGE card here said it a second time. */}
       <div className="live-browser">
         <div className="live-mode-tabs" role="tablist" aria-label="LIVE target type">
           {(["rack", "song", "setlist"] as LiveBrowseMode[]).map((item) => (

@@ -2952,6 +2952,13 @@
    and the rack paint an instrument; amber for the effects, a pedal's
    lamp; green for presets, the memory. The deep daylight mixes the rail's
    chips use, so the cream glyph on them stays legible. */
+/* Effects have a colour of their own: the amber of the EFFECTS key's
+   plate, the rail chips' deep mix in daylight. Whatever belongs to the
+   effects -- the key, the drawer's frames -- takes it from here. */
+:root {
+  --fx: var(--nav-controller);
+}
+
 .play-header-button {
   --key-plate: var(--acid);
 }
@@ -2961,7 +2968,7 @@
 }
 
 .play-header-button.chain {
-  --key-plate: var(--nav-controller);
+  --key-plate: var(--fx);
 }
 
 .play-header-button.presets {
@@ -5637,14 +5644,17 @@
   border-top: var(--fp-seam);
 }
 
+/* The frames and their names are the effects' amber: a line drawn in it,
+   mixed a little toward the panel's own seam so it sits in the plate
+   rather than glowing on it, and the faintest wash of it inside. */
 .play-chain-section {
-  border: var(--fp-seam);
+  border: 1px solid color-mix(in srgb, var(--fx) 62%, var(--line));
   border-radius: var(--fx-section-radius);
-  background: rgba(var(--edge-dark-rgb), 0.04);
+  background: color-mix(in srgb, var(--fx) 5%, transparent);
 }
 
 .play-chain-section > legend {
-  color: var(--fp-rail-label);
+  color: var(--fx);
   font: 700 10px/1 var(--display-font);
   letter-spacing: var(--fp-track);
   text-transform: uppercase;

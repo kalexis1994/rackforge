@@ -131,11 +131,13 @@ function useSequencerStatus(): SequencerStatus | null {
 
 const COLLAPSED_KEY = "rackforge.sequencer.collapsed";
 
+/** Folded unless this browser unfolded it: LIVE is for playing, and a
+ *  sequencer nobody is using should cost one line, not a panel. */
 function readCollapsed(): boolean {
   try {
-    return window.localStorage.getItem(COLLAPSED_KEY) === "1";
+    return window.localStorage.getItem(COLLAPSED_KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -149,11 +151,19 @@ export function SequencerStrip({
   session?: SessionSnapshot | null;
 }) {
   const status = useSequencerStatus();
-  const [open, setOpen] = useState(false);
-  // Folded away or unfolded, remembered per browser: the machine takes the
-  // top third of a phone, and a player who is not using it now should not
-  // have to fold it again next time.
+  // Folded away or unfolded, remembered per browser, folded to begin with:
+  // the machine takes the top third of a phone, and a player who is not
+  // using it now should not have to fold it again next time. Folded, the
+  // strip is one line -- play, panic, fill, where the transport is and at
+  // what tempo, and the key that unfolds the rest.
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  // The deck is built the first time the sequencers unfold and then kept,
+  // so folding them away slides the whole body shut rather than dropping
+  // the deck out of it first.
+  const [deckMounted, setDeckMounted] = useState(!collapsed);
+  useEffect(() => {
+    if (!collapsed) setDeckMounted(true);
+  }, [collapsed]);
   const taps = useRef<number[]>([]);
 
   const toggleCollapsed = useCallback(() => {
@@ -192,7 +202,6 @@ export function SequencerStrip({
       aria-label="Sequencer"
     >
       <div className="sequencer-strip">
-        <span className="seq-legend">SEQ</span>
         <div className="seq-keys" role="group" aria-label="Transport">
           <button
             className={`seq-key seq-lamp-key${running ? " engaged" : ""}`}
@@ -204,7 +213,7 @@ export function SequencerStrip({
             PLAY
           </button>
           <button
-            className="seq-key"
+            className="seq-key seq-extended"
             onClick={() => sendSequencerCommand({ kind: "transport_stop" })}
           >
             STOP
@@ -217,6 +226,18 @@ export function SequencerStrip({
             PANIC
           </button>
         </div>
+        {/* Fill is played, not set up: it stays on the first line, folded
+            or not, beside the transport. */}
+        <button
+          className={`seq-key seq-lamp-key seq-fill-key${status?.fill ? " engaged" : ""}`}
+          aria-pressed={status?.fill ?? false}
+          title="Hold: steps with a fill condition fire while this is down"
+          onPointerDown={() => sendSequencerCommand({ kind: "set_fill", on: true })}
+          onPointerUp={() => sendSequencerCommand({ kind: "set_fill", on: false })}
+          onPointerLeave={() => status?.fill && sendSequencerCommand({ kind: "set_fill", on: false })}
+        >
+          FILL
+        </button>
         <div className="seq-lcd" role="status" aria-label="Transport position">
           <span className={`seq-beat-lamp${running && (status?.beat_phase ?? 1) < 0.22 ? " lit" : ""}`} />
           <span className="seq-lcd-position">
@@ -227,22 +248,22 @@ export function SequencerStrip({
           </span>
         </div>
         <div className="seq-tempo" role="group" aria-label="Tempo">
-          <button className="seq-key seq-key-narrow" onClick={() => nudgeTempo(-1)} disabled={!status}>
+          <button className="seq-key seq-key-narrow seq-extended" onClick={() => nudgeTempo(-1)} disabled={!status}>
             −
           </button>
           <span className="seq-lcd seq-lcd-tempo">
             {status ? status.tempo_bpm.toFixed(1) : "---.-"}
             <small>BPM</small>
           </span>
-          <button className="seq-key seq-key-narrow" onClick={() => nudgeTempo(1)} disabled={!status}>
+          <button className="seq-key seq-key-narrow seq-extended" onClick={() => nudgeTempo(1)} disabled={!status}>
             +
           </button>
-          <button className="seq-key" onClick={tap}>
+          <button className="seq-key seq-extended" onClick={tap}>
             TAP
           </button>
         </div>
         <button
-          className={`seq-key seq-lamp-key${status?.clock_out ? " engaged" : ""}`}
+          className={`seq-key seq-lamp-key seq-extended${status?.clock_out ? " engaged" : ""}`}
           aria-pressed={status?.clock_out ?? false}
           title="MIDI clock out: conduct external hardware at 24 PPQN"
           onClick={() =>
@@ -251,52 +272,25 @@ export function SequencerStrip({
         >
           SYNC
         </button>
+        {/* One key opens the sequencers: the pads and the deck unfold
+            together, and fold away together. There used to be two -- one for
+            the deck, one for the fold -- that did nearly the same thing. The
+            arrow points the way it will move. */}
         <button
-          className={`seq-key seq-lamp-key${status?.fill ? " engaged" : ""}`}
-          aria-pressed={status?.fill ?? false}
-          title="Hold: steps with a fill condition fire while this is down"
-          onPointerDown={() => sendSequencerCommand({ kind: "set_fill", on: true })}
-          onPointerUp={() => sendSequencerCommand({ kind: "set_fill", on: false })}
-          onPointerLeave={() => status?.fill && sendSequencerCommand({ kind: "set_fill", on: false })}
-        >
-          FILL
-        </button>
-        <button
-          className={`seq-key seq-lamp-key seq-open-key${open ? " engaged" : ""}`}
-          aria-expanded={open}
-          onClick={() => {
-            // Opening the deck out of a folded panel unfolds it, because
-            // otherwise the key would light with nothing to show. Closing it
-            // does not: switching the sequencers off while the panel is put
-            // away should put nothing back on the screen.
-            const opening = !open;
-            setOpen(opening);
-            if (opening && collapsed) {
-              toggleCollapsed();
-            }
-          }}
-        >
-          SEQUENCERS
-        </button>
-        {/* The fold: the arrow points the way it will move -- down to unfold
-            the pads and any open deck, up to put them away. */}
-        <button
-          className="seq-key seq-fold-key"
+          className={`seq-key seq-fold-key${collapsed ? "" : " engaged"}`}
           aria-expanded={!collapsed}
           aria-controls="sequencer-body"
-          title={collapsed ? "Unfold the sequencer" : "Fold the sequencer away"}
+          title={collapsed ? "Unfold the sequencers" : "Fold the sequencers away"}
           onClick={toggleCollapsed}
         >
+          SEQUENCERS
           <span className="seq-chevron" aria-hidden="true" />
-          <span className="visually-hidden">
-            {collapsed ? "Unfold the sequencer" : "Fold the sequencer away"}
-          </span>
         </button>
       </div>
       <div className="sequencer-body" id="sequencer-body" data-collapsed={collapsed}>
         <div className="sequencer-body-inner">
           {surface === "perform" ? <LanePadDeck status={status} /> : null}
-          {open ? (
+          {deckMounted ? (
             <SequencerDeck
               performance={performance}
               status={status}

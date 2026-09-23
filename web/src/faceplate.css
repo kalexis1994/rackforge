@@ -4369,14 +4369,6 @@
   padding: 9px 12px;
 }
 
-.seq-legend {
-  color: var(--fp-rail-label);
-  font-family: var(--display-font);
-  font-weight: 800;
-  font-size: var(--fp-label);
-  letter-spacing: var(--fp-track);
-}
-
 .seq-keys {
   display: flex;
   align-items: center;
@@ -4412,8 +4404,7 @@
   border-radius: 0 var(--fp-radius-key) var(--fp-radius-key) 0;
 }
 
-.seq-keys > .seq-key:only-child,
-.seq-open-key {
+.seq-keys > .seq-key:only-child {
   border-radius: var(--fp-radius-key);
   border-left-width: 1px;
 }
@@ -4456,7 +4447,8 @@
   margin-left: auto;
   min-width: 40px;
   justify-content: center;
-  padding-inline: 10px;
+  gap: 10px;
+  padding-inline: 12px;
 }
 
 .seq-chevron {
@@ -4470,6 +4462,17 @@
 
 .sequencer-shell.collapsed .seq-chevron {
   transform: translateY(-2px) rotate(45deg);
+}
+
+/* Folded, the strip is one line: play, panic and fill, where the transport
+   is and at what tempo, and the fold to open the rest. Stop, the tempo keys,
+   sync and the deck key come back with the pads when it unfolds. */
+.sequencer-shell.collapsed .seq-extended {
+  display: none;
+}
+
+.sequencer-shell.collapsed .sequencer-strip {
+  padding-block: 6px;
 }
 
 /* The deck key keeps its lamp and no arrow: one arrow on the strip, and it
@@ -4737,10 +4740,6 @@
   gap: 6px;
 }
 
-.seq-open-key {
-  margin-left: auto;
-}
-
 /* ------------------------------------------------------- the workshop --- */
 
 .sequencer-workshop {
@@ -4961,10 +4960,6 @@
 
   .seq-library ul {
     max-height: 140px;
-  }
-
-  .seq-open-key {
-    margin-left: 0;
   }
 }
 
@@ -9085,7 +9080,7 @@
   /* Only the first row sits under the key, so only the first item steps
      aside. Padding the whole strip pushed every wrapped row inward and cost
      a line of height for nothing. */
-  .live-surface-active .sequencer-strip > .seq-legend:first-child {
+  .live-surface-active .sequencer-strip > :first-child {
     margin-left: 46px;
   }
 
@@ -9126,13 +9121,10 @@
     flex: 0 0 auto;
   }
 
-  /* The strip wraps to three rows on a phone, and the fold key landed alone
-     at the end of a fourth — a stray button, and a row spent on it. Spanning
-     the row instead, it reads as what it is: the drawer's handle, and the
-     widest target on the panel. */
+  /* Folded on a phone the strip is two rows -- the keys, then where the
+     transport is -- and the SEQUENCERS key ends the second, at its right,
+     rather than spending a row of its own. */
   .seq-fold-key {
-    flex: 1 1 100%;
     min-height: 28px;
-    margin-left: 0;
   }
 }

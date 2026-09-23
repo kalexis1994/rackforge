@@ -4505,26 +4505,13 @@
     0 0 7px color-mix(in srgb, var(--acid) 72%, transparent);
 }
 
-/* The SHOW FILE plate: the library's luggage. An engraved outline like
-   the PERFORMANCE zone, sized as a footer under the library grid. */
+/* The SHOW FILE plate: the library's luggage, a labelled frame like the
+   PERFORMANCE zone (see "labelled frames"), sized as a footer under the
+   library grid. */
 .show-transfer {
   position: relative;
   margin: 18px 0 4px;
   padding: 18px 14px 14px;
-  border: 1px solid var(--fp-seam);
-  border-radius: var(--fp-radius);
-  background: var(--fp-panel);
-}
-
-.show-transfer-legend {
-  position: absolute;
-  top: -8px;
-  left: 12px;
-  padding: 0 6px;
-  background: var(--fp-panel);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: var(--fp-rail-label);
 }
 
 .show-transfer-note {
@@ -6915,20 +6902,49 @@
   border-top: var(--fp-seam);
 }
 
-/* The frames and their names are the effects' amber: a line drawn in it,
-   mixed a little toward the panel's own seam so it sits in the plate
-   rather than glowing on it, and the faintest wash of it inside. */
-.play-chain-section {
-  border: 1px solid color-mix(in srgb, var(--rf-color-sound) 62%, var(--line));
-  border-radius: var(--fx-section-radius);
-  background: color-mix(in srgb, var(--rf-color-sound) 5%, transparent);
+/* ------------------------------------------------- labelled frames ---
+   Every named, framed section is one kind of frame, the effects drawer's:
+   a hairline in its colour from the code, mixed a little toward the seam so
+   it sits in the plate rather than glowing on it; the keys' slight rounding;
+   the faintest wash of the colour inside; and its name silkscreened across
+   the top of the line. PERFORMANCE and SHOW FILE were engraved outlines of
+   their own -- a heavier seam, a rounder corner, a 9px label -- and read as
+   another instrument's panel. A frame says its colour in --frame-colour:
+   the drawer's are the effects' amber; the neutral ones the rack's grey. */
+.play-chain-section,
+.live-zone,
+.show-transfer {
+  --frame-colour: var(--rf-color-rack);
+  border: 1px solid color-mix(in srgb, var(--frame-colour) 62%, var(--line));
+  border-radius: var(--fp-radius-key);
+  background: color-mix(in srgb, var(--frame-colour) 5%, transparent);
 }
 
-.play-chain-section > legend {
-  color: var(--rf-color-sound);
+.play-chain-section {
+  --frame-colour: var(--rf-color-sound);
+  border-radius: var(--fx-section-radius);
+}
+
+.play-chain-section > legend,
+.live-zone-legend,
+.show-transfer-legend {
+  color: var(--frame-colour);
   font: 700 10px/1 var(--display-font);
   letter-spacing: var(--fp-track);
   text-transform: uppercase;
+}
+
+/* A fieldset's legend breaks its line by itself; these frames are plain
+   boxes, so their name is set on the line and covers it with the ground
+   the frame stands on. */
+.live-zone-legend,
+.show-transfer-legend {
+  position: absolute;
+  z-index: 1;
+  top: -5px;
+  left: 10px;
+  padding: 0 6px;
+  background: var(--chassis);
 }
 
 /* What the section is about, after its name: the instrument that suggests,
@@ -8820,24 +8836,7 @@
 .live-zone {
   position: relative;
   padding: 16px 12px 12px;
-  border: var(--fp-seam);
-  border-radius: var(--fp-radius);
   margin-bottom: 12px;
-}
-
-.live-zone-legend {
-  position: absolute;
-  top: -7px;
-  left: 12px;
-  padding: 0 7px;
-  color: var(--fp-rail-label);
-  background: var(--chassis);
-  font-family: var(--display-font);
-  font-weight: 800;
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  line-height: 13px;
-  z-index: 1;
 }
 
 /* The sequencer is docked: the page sheds its padding and the plate fuses

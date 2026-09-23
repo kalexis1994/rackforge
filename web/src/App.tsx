@@ -131,7 +131,6 @@ import { navItems,  vstNavItems,   } from "./components/navigation/navItems";
 import { NavigationLinks } from "./components/navigation/NavigationLinks";
 import { MobileNavigation } from "./components/navigation/MobileNavigation";
 import { TopBar } from "./components/navigation/TopBar";
-import { FloatingPerformanceMenuButton } from "./components/navigation/FloatingPerformanceMenuButton";
 import {    synchronizePluginEnvironment } from "./pluginLifecycle";
 import { PlayModeTransitionDialog } from "./dialogs/PlayModeTransitionDialog";
 import { InstallPluginDialog } from "./dialogs/InstallPluginDialog";
@@ -608,15 +607,6 @@ function RackForgeApp() {
             snapshot={snapshot}
             menuOpen={mobileMenuOpen}
             onMenu={() => setMobileMenuOpen((open) => !open)}
-          />
-        ) : null}
-        {/* The node editor's header carries the menu key itself; the
-            floating one is for the performance surfaces with no header. */}
-        {isPerformanceSurface && liveWorkspace === null ? (
-          <FloatingPerformanceMenuButton
-            menuOpen={mobileMenuOpen}
-            onOpen={() => setMobileMenuOpen(true)}
-            showGraphDetails={false}
           />
         ) : null}
         {error && <div className="error-banner">{error}</div>}

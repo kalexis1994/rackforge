@@ -16,7 +16,7 @@ import {
 const PRESSABLE_SELECTOR =
   "button:not(:disabled), a[href], [role='button']:not([aria-disabled='true'])";
 const FEEDBACK_EXCLUSIONS =
-  ".touch-instrument, .performance-menu-button, .rack-details-floating-button, " +
+  ".touch-instrument, .rack-details-floating-button, " +
   "[data-rf-press-feedback='none'], [data-rf-press-feedback='local']";
 const TOUCH_FEEDBACK_DELAY_MS = 32;
 

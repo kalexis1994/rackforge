@@ -2043,10 +2043,6 @@ body {
   display: none;
 }
 
-.performance-menu-button {
-  display: none;
-}
-
 .topbar {
   min-height: 78px;
   padding: 14px clamp(24px, 4vw, 64px);
@@ -8658,24 +8654,6 @@ body {
   }
 
 
-  .graph-workspace-active .performance-menu-button {
-    position: absolute;
-    z-index: 36;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: var(--acid);
-    background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(var(--acid-rgb), 0.34);
-    border-radius: 13px;
-    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
-    backdrop-filter: blur(14px) saturate(120%);
-    touch-action: none;
-    user-select: none;
-    cursor: grab;
-  }
 }
 
 .graph-workspace-active .performance-config.graph-workspace,
@@ -10838,9 +10816,9 @@ body {
   }
 }
 
-/* On a phone LIVE Perform is a dedicated stage surface. The ordinary app
-   header and the Perform/Configure switch move into the hamburger menu, while
-   the same compact information bar used by PLAY remains visible. */
+/* On a phone LIVE Perform is a dedicated stage surface. It keeps the same
+   header as every other page -- its window, the master and the menu key in
+   it -- and the Perform/Configure switch moves into the hamburger menu. */
 @media (max-width: 760px) {
   .app-shell.live-surface-active {
     overflow: hidden;
@@ -10852,35 +10830,6 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-  }
-
-  .live-surface-active .topbar {
-    display: none;
-  }
-
-  .live-surface-active .performance-menu-button {
-    position: absolute;
-    z-index: 36;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: var(--acid);
-    background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(var(--acid-rgb), 0.34);
-    border-radius: 13px;
-    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
-    backdrop-filter: blur(14px) saturate(120%);
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    cursor: grab;
-  }
-
-  .live-surface-active .performance-menu-button svg {
-    width: 22px;
-    height: 22px;
   }
 
   .live-surface-active .page.live-host-page {
@@ -10903,22 +10852,6 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-  }
-
-  .live-surface-active .live-performance-bar {
-    width: 100%;
-    min-height: 22px;
-    height: 22px;
-    padding: 0 6px 0 58px;
-    display: grid;
-    grid-template-columns: minmax(64px, 0.72fr) minmax(90px, 1.35fr) minmax(88px, 1fr);
-    align-items: center;
-    flex: 0 0 22px;
-    color: var(--ink);
-    background: rgba(5, 16, 24, 0.96);
-    border-bottom: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.04);
-    z-index: 4;
   }
 
   .live-surface-active .performance-info-slot {
@@ -11083,46 +11016,6 @@ body {
     display: none;
   }
 
-  .performance-menu-button {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    z-index: 36;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: var(--acid);
-    background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(var(--acid-rgb), 0.34);
-    border-radius: 13px;
-    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
-    backdrop-filter: blur(14px) saturate(120%);
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    cursor: grab;
-    will-change: left, top, transform;
-    transform-origin: 50% 50%;
-    transition:
-      transform 180ms cubic-bezier(0.2, 0.82, 0.2, 1),
-      color 150ms ease,
-      background-color 150ms ease,
-      border-color 150ms ease,
-      box-shadow 180ms ease;
-  }
-
-  .performance-menu-button svg {
-    width: 22px;
-    height: 22px;
-  }
-
-  .performance-menu-button.dragging,
-  .performance-menu-button.dragging:active {
-    cursor: grabbing;
-  }
-
   .performance-surface-active .page.plugin-host-page,
   .performance-surface-active .page.live-host-page {
     width: 100%;
@@ -11249,22 +11142,6 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-  }
-
-  .live-surface-active .live-performance-bar {
-    width: 100%;
-    min-height: 22px;
-    height: 22px;
-    padding: 0 6px 0 58px;
-    display: grid;
-    grid-template-columns: minmax(70px, 0.75fr) minmax(120px, 1.5fr) minmax(120px, 1fr);
-    align-items: center;
-    flex: 0 0 22px;
-    color: var(--ink);
-    background: rgba(5, 16, 24, 0.96);
-    border-bottom: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.04);
-    z-index: 4;
   }
 
   .live-surface-active .live-toolbar > div:first-child {

@@ -133,8 +133,28 @@ $defaultPlugin = ""
 if ($Edition -eq "Standard") {
     $defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
     if (-not $defaultPlugin) {
-        $candidate = Join-Path $repository "dist/bundled-plugins/RF-Concert-Grand.rfplugin"
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $defaultPlugin = $candidate }
+        # The Standard edition opens on the Concert Grand. It is built from
+        # this repository rather than fetched, so a local build makes it when
+        # it is missing -- skipping it silently shipped an APK without the
+        # piano, which then opened on whichever plugin sorted first.
+        $defaultPlugin = Join-Path $repository "dist/bundled-plugins/RF-Concert-Grand.rfplugin"
+        if (-not (Test-Path -LiteralPath $defaultPlugin -PathType Leaf)) {
+            Push-Location $repository
+            try {
+                & rustup target add wasm32-unknown-unknown
+                if ($LASTEXITCODE -ne 0) { throw "Could not install the WebAssembly Rust target." }
+                & cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+                if ($LASTEXITCODE -ne 0) { throw "Concert Grand WebAssembly build failed." }
+                New-Item -ItemType Directory -Force (Split-Path -Parent $defaultPlugin) | Out-Null
+                & cargo run --release -p rackforge-store -- pack-wasm `
+                    plugins/concert-grand/package `
+                    target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
+                    $defaultPlugin
+                if ($LASTEXITCODE -ne 0) { throw "Concert Grand package build failed." }
+            } finally {
+                Pop-Location
+            }
+        }
     }
     if ($defaultPlugin) {
         if (-not (Test-Path -LiteralPath $defaultPlugin -PathType Leaf)) {

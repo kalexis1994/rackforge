@@ -96,8 +96,23 @@ rm -rf -- "$bundled_output"
 install -d "$bundled_output/bundled-plugins"
 default_plugin="${RACKFORGE_BUNDLED_PLUGIN:-}"
 if [[ "$edition" == standard ]]; then
-  if [[ -z "$default_plugin" && -f "$repository/dist/bundled-plugins/RF-Concert-Grand.rfplugin" ]]; then
+  if [[ -z "$default_plugin" ]]; then
+    # The Standard edition opens on the Concert Grand. It is built from this
+    # repository rather than fetched, so a local build makes it when it is
+    # missing -- skipping it silently shipped an APK without the piano.
     default_plugin="$repository/dist/bundled-plugins/RF-Concert-Grand.rfplugin"
+    if [[ ! -f "$default_plugin" ]]; then
+      (
+        cd "$repository"
+        rustup target add wasm32-unknown-unknown
+        cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+        install -d "$(dirname "$default_plugin")"
+        cargo run --release -p rackforge-store -- pack-wasm \
+          plugins/concert-grand/package \
+          target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm \
+          "$default_plugin"
+      )
+    fi
   fi
   if [[ -n "$default_plugin" ]]; then
     [[ -f "$default_plugin" ]] || {

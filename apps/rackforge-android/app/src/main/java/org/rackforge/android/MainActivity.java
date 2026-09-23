@@ -2054,9 +2054,9 @@ public final class MainActivity extends Activity {
                 case "select_sound" -> {
                     String target = command.optString("instance_id", "");
                     if (target.contains(CHAIN_INSTANCE_MARK)) {
-                        selectChainProgram(target, command.optString("sound_id"));
+                        selectChainProgram(envelope, target, command.optString("sound_id"));
                     } else {
-                        selectControllerSound(command.optString("sound_id"));
+                        selectControllerSound(command.optString("sound_id"), envelope);
                     }
                 }
                 case "set_play_chain" -> applySharedPlayChain(envelope, command);
@@ -2173,16 +2173,24 @@ public final class MainActivity extends Activity {
     /**
      * One effect of the chain takes its program. The chain remembers which:
      * the same effect twice is two settings.
+     *
+     * The command is confirmed once the program is in, like every other
+     * shared command. It used not to be: the program loaded and the session
+     * moved on, but the panel that asked waited out its timeout and told the
+     * plugin the change had failed.
      */
-    private void selectChainProgram(String instanceId, String soundId) {
-        if (soundId == null || soundId.isBlank()) return;
+    private void selectChainProgram(JSONObject envelope, String instanceId, String soundId) {
+        if (soundId == null || soundId.isBlank()) {
+            emitSharedSessionError(new IllegalArgumentException("No program was named."));
+            return;
+        }
         pluginParameterExecutor.execute(() -> {
             try {
                 if (!selectChainSound(instanceId, soundId)) {
                     throw new IllegalStateException("The effect rejected program " + soundId);
                 }
                 rememberChainProgram(instanceId, soundId);
-                runOnUiThread(this::emitSessionSnapshot);
+                runOnUiThread(() -> runConfirmedSharedCommand(envelope, () -> { }));
             } catch (Throwable error) {
                 Log.e("RackForge", "Could not select the effect program " + soundId, error);
                 emitSharedSessionError(error);
@@ -5499,13 +5507,31 @@ public final class MainActivity extends Activity {
     }
 
     private void selectControllerSound(String soundId) {
-        if (soundId == null || soundId.isBlank()) return;
+        selectControllerSound(soundId, null);
+    }
+
+    /**
+     * Selects the instrument's program. `envelope` is the shared command that
+     * asked, when one did: it is confirmed once the program is in, or answered
+     * with the error, so the surface that sent it is not left waiting.
+     */
+    private void selectControllerSound(String soundId, JSONObject envelope) {
+        if (soundId == null || soundId.isBlank()) {
+            if (envelope != null) {
+                emitSharedSessionError(new IllegalArgumentException("No program was named."));
+            }
+            return;
+        }
         new Thread(() -> {
             try {
                 applyPluginSound(soundId);
-                runOnUiThread(this::publishSelectedPluginSound);
+                runOnUiThread(() -> {
+                    publishSelectedPluginSound();
+                    if (envelope != null) runConfirmedSharedCommand(envelope, () -> { });
+                });
             } catch (Throwable error) {
                 Log.w("RackForge", "Could not select sound " + soundId, error);
+                if (envelope != null) emitSharedSessionError(error);
             }
         }, "rackforge-keylab-sound").start();
     }

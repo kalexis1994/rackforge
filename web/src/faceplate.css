@@ -4651,21 +4651,17 @@
     0 0 7px color-mix(in srgb, var(--red) 78%, transparent);
 }
 
-/* The LCD: mono data set into the panel, the strip's only glass. */
-/* An LCD sitting inside a key group belongs to that group: it takes the
-   keys' height so the row reads as one machined block instead of a
-   readout floating between two switches. */
-.seq-keys > .seq-lcd {
-  min-height: 34px;
-  padding-top: 9px;
-  padding-bottom: 10px;
-}
-
+/* The LCD: mono data set into the panel, the strip's only glass. It takes
+   the keys' height wherever it stands -- in a key group or on its own, as
+   the transport position and the tempo do -- so a row of keys and readouts
+   reads as one machined block, not readouts floating shorter between the
+   switches. */
 .seq-lcd {
   display: inline-flex;
   align-items: baseline;
   gap: 9px;
-  padding: 7px 11px;
+  min-height: 34px;
+  padding: 9px 11px 10px;
   background: var(--panel-inset);
   border: var(--fp-seam);
   border-radius: var(--fp-radius-key);
@@ -9120,9 +9116,5 @@
   .seq-pad-state {
     min-height: 0;
     flex: 0 0 auto;
-  }
-
-  .seq-fold-key {
-    min-height: 28px;
   }
 }

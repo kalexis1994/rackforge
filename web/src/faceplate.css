@@ -6187,6 +6187,21 @@
   color: var(--acid) !important;
 }
 
+/* A word that changes in place (StableLabel): every word it can show shares
+   one cell, the spare ones invisible, so the cell keeps the longest one's
+   width and nothing beside it moves. */
+.stable-label {
+  display: inline-grid;
+}
+
+.stable-label > * {
+  grid-area: 1 / 1;
+}
+
+.stable-label > [aria-hidden="true"] {
+  visibility: hidden;
+}
+
 /* ------------------------------------------------ the editor's header ---
    Across the top of the node editor while it is open, where the thin bar
    and the details dialog used to be: what is edited and whether it is

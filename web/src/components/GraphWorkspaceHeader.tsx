@@ -1,5 +1,15 @@
 import { LogOut, Menu, Save } from "lucide-react";
 import { AsyncActionLabel } from "./AsyncSpinner";
+import { StableLabel } from "./StableLabel";
+
+// Both lines keep the room of their longest word, so editing the name does
+// not push the name field when "Saved" turns into "Unsaved changes".
+const SAVE_STATES = ["Saved", "Unsaved changes"] as const;
+const PREVIEW_STATES = {
+  idle: "Preview idle",
+  applying: "Applying preview…",
+  ready: "Preview active",
+} as const;
 
 /**
  * The node editor's own header, across the top of the screen while it is
@@ -57,13 +67,11 @@ export function GraphWorkspaceHeader({
       <div className="graph-workspace-title">
         <span className="card-kicker">{title}</span>
         <span className="graph-workspace-state">
-          <strong>{dirty || isNew ? "Unsaved changes" : "Saved"}</strong>
+          <strong>
+            <StableLabel value={dirty || isNew ? "Unsaved changes" : "Saved"} options={SAVE_STATES} />
+          </strong>
           <span className={`graph-workspace-preview ${previewStatus}`} role="status" aria-live="polite">
-            {previewStatus === "applying"
-              ? "Applying preview…"
-              : previewStatus === "ready"
-                ? "Preview active"
-                : "Preview idle"}
+            <StableLabel value={PREVIEW_STATES[previewStatus]} options={Object.values(PREVIEW_STATES)} />
           </span>
         </span>
       </div>

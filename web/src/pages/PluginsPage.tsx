@@ -252,6 +252,14 @@ export function PluginsPage({
               className={`plugin-card installed-plugin-card plugin-manager-card${plugin.active ? "" : " inactive"}`}
               key={plugin.plugin_id}
             >
+              {/* The plugin's banner behind the card, shaded down under the
+                  copy so the text keeps its contrast. */}
+              {plugin.branding ? (
+                <>
+                  <img className="plugin-manager-card-banner" src={plugin.branding.banner_url} alt="" />
+                  <span className="plugin-manager-card-shade" aria-hidden="true" />
+                </>
+              ) : null}
               <div className={`plugin-tile tile-${index % 4}${plugin.branding ? " branded" : ""}`}>
                 <PluginIcon plugin={plugin} name={plugin.plugin_name} />
                 {!plugin.branding && <i />}

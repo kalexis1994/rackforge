@@ -2770,6 +2770,51 @@
   container-type: inline-size;
 }
 
+/* A branded card carries its plugin's banner as its ground, the way the
+   PLAY picker's rows do: the artwork across the whole card, and over it a
+   shade of the panel's own paper, dense where the copy reads and thinning
+   toward the right, so the text holds its contrast in either theme and the
+   banner still shows. The keys at the foot are solid and need none. */
+.plugin-manager-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.plugin-manager-card-banner,
+.plugin-manager-card-shade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.plugin-manager-card-banner {
+  object-fit: cover;
+}
+
+.plugin-manager-card-shade {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--paper) 94%, transparent) 0%,
+    color-mix(in srgb, var(--paper) 86%, transparent) 50%,
+    color-mix(in srgb, var(--paper) 52%, transparent) 100%
+  );
+}
+
+.plugin-manager-card > :not(.plugin-manager-card-banner, .plugin-manager-card-shade) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Inactive, the banner goes grey with the rest of the card. */
+.plugin-manager-card.inactive .plugin-manager-card-banner {
+  filter: grayscale(1);
+  opacity: 0.58;
+}
+
 /* Only a genuinely narrow card — a phone, one column — reaches this. The grid
    above guarantees every other card is wide enough for the row, so there is no
    width at which the gang has to choose badly. The icon gives up room here:

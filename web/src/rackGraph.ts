@@ -432,6 +432,22 @@ export function connectRackGraph(
   };
 }
 
+/** A list of inputs as a person reads it, runs folded: "1", "1–2",
+ *  "1–18", "1, 3 and 5–8". For what a host captures, where there can be
+ *  many; a cable's own pair keeps its order (see audioInputRouteLabel). */
+export function formatInputList(channels: number[]): string {
+  const sorted = [...new Set(channels)].sort((a, b) => a - b);
+  const runs: string[] = [];
+  for (let index = 0; index < sorted.length;) {
+    let end = index;
+    while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end += 1;
+    runs.push(end > index ? `${sorted[index]}–${sorted[end]}` : `${sorted[index]}`);
+    index = end + 1;
+  }
+  if (runs.length <= 1) return runs[0] ?? "";
+  return `${runs.slice(0, -1).join(", ")} and ${runs[runs.length - 1]}`;
+}
+
 /** The inputs a route carries, as the canvas and its messages name them:
  *  "In 1", "In 1–2" (a pair, left then right), "In 2–1" (swapped), or "All"
  *  for a cable without a route. */
@@ -585,7 +601,7 @@ function audioInputWarnings(
     case "unsupported":
       return [["warning", "This host has no audio input. The connected plugins receive silence here."]];
     case "disabled":
-      return [["warning", "No audio input is selected in Settings. The connected plugins receive silence."]];
+      return [["warning", "This host has no audio input selected. The connected plugins receive silence."]];
     case "absent":
       return [["warning", `The audio input${input.device_name ? ` ${input.device_name}` : ""} is not available. The connected plugins receive silence until it is.`]];
     case "open":
@@ -597,8 +613,8 @@ function audioInputWarnings(
     const missing = (cable.audio_input_route?.channels ?? [])
       .filter((channel) => !captured.has(channel));
     if (missing.length > 0) {
-      const inputs = missing.map((channel) => `input ${channel}`).join(" and ");
-      warnings.push(["warning", `The cable to ${targetName(cable.target.node_id)} takes ${inputs}, which Settings does not capture. That part is silent.`]);
+      const inputs = `input${missing.length > 1 ? "s" : ""} ${formatInputList(missing)}`;
+      warnings.push(["warning", `The cable to ${targetName(cable.target.node_id)} takes ${inputs}, which this host does not capture. That part is silent.`]);
     }
   }
   const routed = cables.some((cable) =>
@@ -762,13 +778,16 @@ export function addSlotToRack(
         (node) => node.kind.kind === "audio_input" && node.kind.bus_id === "main",
       );
       if (!audioInput) {
+        // Left of the effect it feeds -- or, where a node already stands
+        // there (the MIDI input, in a Rack just begun), in the first free
+        // place below it, never on top of another node.
         audioInput = {
           id: rackGraphId("input.audio"),
           kind: { kind: "audio_input", bus_id: "main" },
-          position: normalizeRackGraphPosition({
+          position: freeRackGraphSpot(graph, normalizeRackGraphPosition({
             x: nodePosition.x - 360,
             y: nodePosition.y,
-          }),
+          })),
         };
         graph = { ...graph, nodes: [...graph.nodes, audioInput] };
       }
@@ -822,6 +841,19 @@ export function addSlotToRack(
 export const RACK_GRID = 22;
 const NODE_SPACING_X = RACK_GRID * 14;
 const NODE_SPACING_Y = RACK_GRID * 8;
+
+/** `wanted`, or the first place straight below it that no node is too near
+ *  to share: nodes the editor places never land on one another. */
+function freeRackGraphSpot(graph: RackGraph, wanted: RackGraphPosition): RackGraphPosition {
+  const taken = (at: RackGraphPosition) => graph.nodes.some((node) =>
+    Math.abs(node.position.x - at.x) < NODE_SPACING_X * 0.8
+    && Math.abs(node.position.y - at.y) < NODE_SPACING_Y * 0.8);
+  let spot = wanted;
+  for (let step = 0; step < 64 && taken(spot); step += 1) {
+    spot = { x: wanted.x, y: spot.y + NODE_SPACING_Y };
+  }
+  return normalizeRackGraphPosition(spot);
+}
 
 /**
  * Where a node added without a place of its own goes, so it lands where it

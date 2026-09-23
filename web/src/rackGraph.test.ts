@@ -3,6 +3,7 @@ import {
   addSlotToRack,
   audioInputRouteLabel,
   connectRackGraph,
+  formatInputList,
   graphFromSlots,
   rackConnectionProblem,
   rackGraphProblems,
@@ -119,6 +120,15 @@ describe("adding a Slot to a Rack", () => {
     expect(
       rack.graph!.nodes.filter((one) => one.kind.kind === "audio_input"),
     ).toHaveLength(1);
+  });
+
+  it("puts the audio input it creates where no node stands", () => {
+    const rack = addSlotToRack(emptyRack(), slot("pedalboard", "rf-rig"), undefined, "effect");
+    const at = (kind: string) => rack.graph!.nodes.find((one) => one.kind.kind === kind)!.position;
+    const midi = at("midi_input");
+    const audio = at("audio_input");
+    expect(audio.x === midi.x && audio.y === midi.y).toBe(false);
+    expect(Math.abs(audio.y - midi.y)).toBeGreaterThanOrEqual(RACK_GRID * 8);
   });
 
   it("chains a second effect after the first on a pedalboard", () => {
@@ -555,6 +565,14 @@ describe("the audio input's cables", () => {
       target: { node_id: mainOutput(rack).id, port_id: "in" },
     }, "edge.moved", { audio_input_route: { channels: [1] } });
     expect(graph.edges.find((edge) => edge.id === "edge.moved")?.audio_input_route).toBeUndefined();
+  });
+
+  it("name many captured inputs by their runs", () => {
+    expect(formatInputList([1])).toBe("1");
+    expect(formatInputList([2, 1])).toBe("1–2");
+    expect(formatInputList(Array.from({ length: 18 }, (_, index) => index + 1))).toBe("1–18");
+    expect(formatInputList([1, 3, 5, 6, 7, 8])).toBe("1, 3 and 5–8");
+    expect(formatInputList([])).toBe("");
   });
 
   it("are named by the inputs they carry", () => {

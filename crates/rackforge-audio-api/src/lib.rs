@@ -6,7 +6,13 @@ use thiserror::Error;
 pub const AUDIO_DEVICE_SCHEMA_VERSION: u32 = 1;
 pub const AUDIO_OUTPUT_STATE_SCHEMA_VERSION: u32 = 1;
 pub const AUDIO_INPUT_STATE_SCHEMA_VERSION: u32 = 1;
+/// How many input channels a plugin may declare: a mono or a stereo input.
+/// Not how many the host captures -- see `MAX_CAPTURE_CHANNELS`.
 pub const MAX_ACTIVE_INPUT_CHANNELS: usize = 2;
+/// How many of an interface's inputs the host may capture at once. Each
+/// cable from a Rack's audio input then takes one or two of them, so this is
+/// the interface's side, not a plugin's.
+pub const MAX_CAPTURE_CHANNELS: usize = 32;
 /// How many captured inputs `InputMeter` can follow at once. Above what any
 /// capture opens today, so widening the capture never outgrows the meter.
 pub const MAX_METERED_INPUT_CHANNELS: usize = 64;
@@ -560,6 +566,13 @@ pub struct AudioOutputProfile {
 /// ordered: `[2]` exposes input 2 as plugin channel 1, while `[2, 1]` swaps a
 /// stereo pair. The host owns this mapping; plugins receive only normalized
 /// interleaved samples.
+///
+/// `channels` left empty -- or left out -- captures every input the
+/// interface has (up to `MAX_CAPTURE_CHANNELS`), resolved against the device
+/// when it is opened: then each Rack cable chooses its own inputs, and a Rack
+/// made on another machine finds its guitar on input 3 wherever there is an
+/// input 3. It is also what a USB interface opens most readily, since many
+/// offer their whole channel count and nothing less.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AudioInputProfile {
@@ -568,6 +581,7 @@ pub struct AudioInputProfile {
     pub fallback: AudioFallbackPolicy,
     pub sample_format: AudioSampleFormat,
     pub sample_rate_hz: u32,
+    #[serde(default)]
     pub channels: Vec<u32>,
     pub period_frames: u32,
     pub buffer_frames: u32,
@@ -761,10 +775,7 @@ impl AudioInputProfile {
         if self.sample_rate_hz < 8_000 || self.sample_rate_hz > 768_000 {
             return Err(AudioError::InvalidSampleRate(self.sample_rate_hz));
         }
-        if self.channels.is_empty()
-            || self.channels.len() > MAX_ACTIVE_INPUT_CHANNELS
-            || self.channels.contains(&0)
-        {
+        if self.channels.len() > MAX_CAPTURE_CHANNELS || self.channels.contains(&0) {
             return Err(AudioError::InvalidInputChannels(self.channels.clone()));
         }
         let mut ordered = self.channels.clone();
@@ -803,8 +814,15 @@ impl AudioInputProfile {
         if !capabilities.sample_rates_hz.contains(&self.sample_rate_hz) {
             return Err(AudioError::UnsupportedSampleRate(self.sample_rate_hz));
         }
-        let stream_channels = self.channels.iter().copied().max().unwrap_or(0);
-        if !capabilities.channels.contains(stream_channels) {
+        let stream_channels = if self.captures_every_input() {
+            capabilities
+                .channels
+                .maximum
+                .min(MAX_CAPTURE_CHANNELS as u32)
+        } else {
+            self.channels.iter().copied().max().unwrap_or(0)
+        };
+        if stream_channels == 0 || !capabilities.channels.contains(stream_channels) {
             return Err(AudioError::UnsupportedChannels(stream_channels));
         }
         if !capabilities.period_frames.contains(self.period_frames) {
@@ -818,6 +836,32 @@ impl AudioInputProfile {
 
     pub fn stream_channels(&self) -> u32 {
         self.channels.iter().copied().max().unwrap_or(0)
+    }
+
+    /// Whether this profile captures whatever inputs the interface has,
+    /// rather than a list of them.
+    pub fn captures_every_input(&self) -> bool {
+        self.channels.is_empty()
+    }
+
+    /// The profile as a device will be opened with it: every input the
+    /// device offers, one to its channel count (capped at
+    /// `MAX_CAPTURE_CHANNELS`), when the profile names none; the profile as
+    /// it is otherwise. The engine opens only a resolved profile, so what it
+    /// captures is always an explicit list.
+    pub fn resolved_for(&self, device: &AudioDeviceDescriptor) -> Self {
+        if !self.captures_every_input() {
+            return self.clone();
+        }
+        let count = device
+            .capture
+            .as_ref()
+            .map_or(0, |capture| capture.channels.maximum)
+            .min(MAX_CAPTURE_CHANNELS as u32);
+        Self {
+            channels: (1..=count).collect(),
+            ..self.clone()
+        }
     }
 
     pub fn nominal_buffer_latency_ms(&self) -> f64 {
@@ -1365,6 +1409,65 @@ mod tests {
             toml::from_str::<AudioInputDocument>(&text).unwrap(),
             document
         );
+    }
+
+    #[test]
+    fn an_input_profile_without_channels_captures_every_input_the_device_has() {
+        let mut profile = input_profile();
+        profile.channels = Vec::new();
+        assert!(profile.captures_every_input());
+        profile.validate().unwrap();
+        profile.validate_against(&device()).unwrap();
+        let resolved = profile.resolved_for(&device());
+        assert_eq!(resolved.channels, vec![1, 2]);
+        assert_eq!(resolved.stream_channels(), 2);
+        // A named list is left as it is.
+        let named = input_profile();
+        assert_eq!(named.resolved_for(&device()), named);
+    }
+
+    #[test]
+    fn capturing_every_input_is_capped_and_needs_a_capture_side() {
+        let mut profile = input_profile();
+        profile.channels = Vec::new();
+        let mut wide = device();
+        wide.capture.as_mut().unwrap().channels = AudioValueRange::new(1, 64).unwrap();
+        assert_eq!(
+            profile.resolved_for(&wide).channels.len(),
+            MAX_CAPTURE_CHANNELS
+        );
+        let mut playback_only = device();
+        playback_only.capture = None;
+        assert!(profile.resolved_for(&playback_only).channels.is_empty());
+        assert!(profile.validate_against(&playback_only).is_err());
+    }
+
+    #[test]
+    fn an_input_profile_may_name_many_inputs_but_not_more_than_the_host_captures() {
+        let mut profile = input_profile();
+        profile.channels = (1..=MAX_CAPTURE_CHANNELS as u32).collect();
+        profile.validate().unwrap();
+        profile.channels.push(MAX_CAPTURE_CHANNELS as u32 + 1);
+        assert!(matches!(
+            profile.validate(),
+            Err(AudioError::InvalidInputChannels(_))
+        ));
+    }
+
+    #[test]
+    fn an_input_profile_left_without_channels_reads_back_as_every_input() {
+        let text = r#"
+            sample_format = "s32_le"
+            sample_rate_hz = 48000
+            period_frames = 128
+            buffer_frames = 384
+
+            [device]
+            mode = "automatic"
+        "#;
+        let profile: AudioInputProfile = toml::from_str(text).unwrap();
+        assert!(profile.captures_every_input());
+        profile.validate().unwrap();
     }
 
     #[test]

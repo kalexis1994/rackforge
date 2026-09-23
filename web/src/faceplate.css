@@ -6819,6 +6819,45 @@
   transition: width var(--rf-motion-fast) var(--rf-ease-standard);
 }
 
+/* Many inputs -- an eighteen-channel interface -- stand side by side as a
+   bank of upright bars, filling from the bottom, the number under each. */
+.audio-input-meter.is-bank {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 2px;
+}
+
+.audio-input-meter.is-bank .audio-input-meter-bar {
+  height: 52px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  gap: 3px;
+}
+
+.audio-input-meter.is-bank .audio-input-meter-bar > span {
+  order: 1;
+  width: 100%;
+  max-width: 9px;
+  height: 100%;
+  background: linear-gradient(0deg,
+    var(--rf-lit-preset) 0 72%,
+    var(--rf-lit-sound) 72% 90%,
+    var(--red) 90%);
+}
+
+.audio-input-meter.is-bank .audio-input-meter-bar > span > i {
+  inset: 0 0 auto 0;
+  transition: height var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.audio-input-meter.is-bank .audio-input-meter-bar > small {
+  order: 2;
+  font-size: 7px;
+  text-align: center;
+}
+
 .audio-input-meter-bar.is-clipping > small {
   color: var(--red);
 }
@@ -6852,6 +6891,17 @@
 
 .rack-flow-node-meter .audio-input-meter-bar > small {
   color: #8a949b;
+}
+
+/* On the node a bank is a strip: short, and without its numbers, which the
+   cable editor shows. */
+.rack-flow-node-meter.is-bank .audio-input-meter-bar {
+  height: 18px;
+  gap: 0;
+}
+
+.rack-flow-node-meter.is-bank .audio-input-meter-bar > small {
+  display: none;
 }
 
 .rack-flow-node small.is-off {

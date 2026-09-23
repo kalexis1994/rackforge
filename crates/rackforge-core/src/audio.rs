@@ -221,6 +221,10 @@ pub fn open_audio_input_from_inventory(
     profile
         .validate_against(&device)
         .with_context(|| format!("validating input profile against {}", device.id))?;
+    // "Every input" becomes the device's own list here, once: from this
+    // point what is captured is always named, input by input.
+    let resolved = profile.resolved_for(&device);
+    let profile = &resolved;
 
     let pcm = PCM::new(&device.backend_address, Direction::Capture, false)
         .with_context(|| format!("opening ALSA capture {}", device.backend_address))?;

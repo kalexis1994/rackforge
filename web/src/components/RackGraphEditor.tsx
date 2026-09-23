@@ -57,6 +57,7 @@ import {
   removeSlotFromRack,
   tidyRackGraph,
   audioInputRouteLabel,
+  formatInputList,
   type RackConnection,
 } from "../rackGraph";
 import type { RackPluginRole } from "../rackPluginSelection";
@@ -143,7 +144,7 @@ function audioInputSubtitle(status: AudioInputState | null, busId: string): stri
   if (!status) return busId;
   switch (status.availability) {
     case "open":
-      return `${status.device_name ?? "Interface"} · ${status.captured.length ? `In ${status.captured.join("–")}` : "nothing captured"}`;
+      return `${status.device_name ?? "Interface"} · ${status.captured.length ? `In ${formatInputList(status.captured)}` : "nothing captured"}`;
     case "disabled":
       return "Off in Settings";
     case "absent":

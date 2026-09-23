@@ -4,6 +4,7 @@ import type { RackAudioInputRoute, RackGraphEdge } from "../types";
 import type { AudioInputPeakFeed, AudioInputState } from "../hooks/useAudioInputStatus";
 import { AudioInputMeter } from "./AudioInputMeter";
 import { ScrubNumberField } from "./ScrubNumberField";
+import { formatInputList } from "../rackGraph";
 
 /** The trim a cable may apply, in dB -- the host's own input trim's range. */
 export const AUDIO_INPUT_ROUTE_GAIN_MIN_DB = -60;
@@ -67,7 +68,7 @@ function statusLine(status: AudioInputState | null): { tone: "note" | "warning";
     case "unsupported":
       return { tone: "warning", text: "This host has no audio input. The cable carries silence here." };
     case "disabled":
-      return { tone: "warning", text: "No audio input is selected. Choose one in Settings, Audio." };
+      return { tone: "warning", text: "This host has no audio input selected. Choose one in its audio settings." };
     case "absent":
       return {
         tone: "warning",
@@ -76,11 +77,13 @@ function statusLine(status: AudioInputState | null): { tone: "note" | "warning";
     case "open":
       break;
   }
-  const captured = status.captured.length > 0 ? `captures input ${status.captured.join(" and ")}` : "captures nothing";
+  const captured = status.captured.length > 0
+    ? `captures input${status.captured.length > 1 ? "s" : ""} ${formatInputList(status.captured)}`
+    : "captures nothing";
   const trim = status.gain_db !== 0 ? ` at ${status.gain_db > 0 ? "+" : ""}${status.gain_db} dB` : "";
   return {
     tone: "note",
-    text: `${status.device_name ?? "The interface"} ${captured}${trim}. Settings, Audio chooses what is captured.`,
+    text: `${status.device_name ?? "The interface"} ${captured}${trim}.`,
   };
 }
 
@@ -126,7 +129,7 @@ export function RackAudioInputLinkEditor({
     knowsCapture && inputsOfKey.some((input) => !captured.has(input)) ? "is-not-captured" : "",
   ].filter(Boolean).join(" ");
   const keyTitle = (inputsOfKey: number[]) => knowsCapture && inputsOfKey.some((input) => !captured.has(input))
-    ? "Not captured: choose it in Settings, Audio"
+    ? "Not captured by this host"
     : undefined;
 
   return (
@@ -223,8 +226,9 @@ export function RackAudioInputLinkEditor({
           ) : null}
           {missing.length > 0 ? (
             <p className="rack-audio-link-status warning" role="alert">
-              Input {missing.join(" and ")} is not captured, so {missing.length > 1 ? "they are" : "it is"} silent.
-              Choose {missing.length > 1 ? "them" : "it"} in Settings, Audio.
+              Input{missing.length > 1 ? "s" : ""} {formatInputList(missing)} {missing.length > 1 ? "are" : "is"} not
+              captured by this host, so {missing.length > 1 ? "they are" : "it is"} silent. Capture{" "}
+              {missing.length > 1 ? "them" : "it"} in the host's audio settings, or choose another.
             </p>
           ) : null}
         </section>

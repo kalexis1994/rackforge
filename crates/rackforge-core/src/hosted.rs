@@ -1043,6 +1043,10 @@ impl PluginInstance<'_> {
         }
     }
 
+    /// Deposits one unit's audio into its mix slot on the coordinator. Units
+    /// are distributed only on hosts with worker threads; the browser engine
+    /// renders every instrument whole.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn parallel_write_mix_slot(&mut self, unit: u32, samples: &[f32]) -> Result<()> {
         match &mut self.backend {
             PluginInstanceBackend::Native(_) => {

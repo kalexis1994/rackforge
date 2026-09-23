@@ -1265,6 +1265,13 @@ impl PortableInstance {
         Ok(false)
     }
 
+    /// Always false: the browser engine does not meter guest execution, so
+    /// there is no fuel figure to report and the governor is told so rather
+    /// than handed a zero it would read as a free block.
+    pub const fn is_metered(&self) -> bool {
+        false
+    }
+
     /// Always `0`: the browser engine does not meter guest execution, so no
     /// fuel figure would be truthful.
     pub const fn last_realtime_fuel_consumed(&self) -> u64 {

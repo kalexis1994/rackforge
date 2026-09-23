@@ -107,6 +107,12 @@ export function sameChain(a: PlayChain, b: PlayChain): boolean {
         effect.id === other.id
         && effect.plugin_id === other.plugin_id
         && effect.enabled === other.enabled
+        // The program is part of how the chain sounds. Leaving it out let a
+        // chain edited here keep standing after the session had moved an
+        // effect to another program: its panel was handed the old one back,
+        // and the plugin's program selector returned to the old name while
+        // its knobs showed the new one.
+        && (effect.program_id ?? null) === (other.program_id ?? null)
       );
     })
   );

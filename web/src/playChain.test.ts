@@ -93,6 +93,20 @@ describe("the PLAY chain", () => {
     expect(sameChain(chain, withoutEffect(chain, "fx-2"))).toBe(false);
   });
 
+  it("counts an effect's program as part of how the chain sounds", () => {
+    const chain = withEffect(withEffect(emptyChain("p"), "a"), "b");
+    const onProgram = (program_id: string | null | undefined) => ({
+      ...chain,
+      effects: chain.effects.map((effect, index) =>
+        index === 0 ? { ...effect, program_id } : effect,
+      ),
+    });
+    expect(sameChain(onProgram("glue"), onProgram("glue"))).toBe(true);
+    expect(sameChain(onProgram("glue"), onProgram("punch"))).toBe(false);
+    // No program and a program the session reports as null are the same.
+    expect(sameChain(onProgram(undefined), onProgram(null))).toBe(true);
+  });
+
   it("offers only the installed, enabled effects the host has loaded, by name", () => {
     const plugins = [
       descriptor("org.rackforge.zeta", "effect"),

@@ -114,8 +114,19 @@ fn compile_rack(
 
     for node in &graph.nodes {
         match &node.kind {
+            RackGraphNodeKind::AudioInput { .. } => {
+                let fed = graph
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        edge.signal == RackGraphSignal::Audio && edge.source.node_id == node.id
+                    })
+                    .count();
+                if fed > 1 {
+                    return unsupported(rack, node, "the audio input can feed only one node");
+                }
+            }
             RackGraphNodeKind::MidiInput { .. }
-            | RackGraphNodeKind::AudioInput { .. }
             | RackGraphNodeKind::AudioOutput { .. }
             | RackGraphNodeKind::Plugin { .. } => {}
             RackGraphNodeKind::Rack { rack_id } => {
@@ -231,6 +242,12 @@ fn compile_plugin_nodes(
                     edge.signal == RackGraphSignal::Audio && edge.source.node_id == node.id
                 })
                 .collect::<Vec<_>>();
+            // A sound goes one way: fed to two places it is heard twice, or
+            // processed twice and summed. The web editor re-patches instead of
+            // adding a second cable; a graph written elsewhere is refused here.
+            if outgoing.len() > 1 {
+                return unsupported(rack, node, "plugin audio can feed only one node");
+            }
             if outgoing.is_empty()
                 || outgoing.iter().any(|edge| {
                     !matches!(
@@ -488,6 +505,37 @@ mod tests {
             }]
         );
         assert!(compiled[1].sends_to_main);
+    }
+
+    #[test]
+    fn refuses_plugin_audio_sent_to_two_places() {
+        // The instrument feeding the effect and the output at once would be
+        // heard twice: dry, and again through the effect.
+        let mut rack = rack("rack.main", "piano");
+        rack.slots.push(slot("effect"));
+        rack.graph = Some(RackGraph::from_slots(&rack.slots));
+        let graph = rack.graph.as_mut().unwrap();
+        graph.edges.push(RackGraphEdge {
+            id: RackGraphEdgeId::new("audio.chain").unwrap(),
+            signal: RackGraphSignal::Audio,
+            source: RackGraphEndpoint {
+                node_id: RackGraphNodeId::new("plugin.01").unwrap(),
+                port_id: "audio_out".into(),
+            },
+            target: RackGraphEndpoint {
+                node_id: RackGraphNodeId::new("plugin.02").unwrap(),
+                port_id: "audio_in".into(),
+            },
+            midi_transform: None,
+        });
+        let error =
+            compile_instrument_rack(&library(vec![rack]), &RackId::new("rack.main").unwrap())
+                .unwrap_err();
+        assert!(matches!(
+            error,
+            RackGraphCompileError::UnsupportedNode { reason, .. }
+                if reason == "plugin audio can feed only one node"
+        ));
     }
 
     #[test]

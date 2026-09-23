@@ -5394,6 +5394,33 @@
   --node-color: var(--rf-lit-rack);
 }
 
+/* A node the engine would refuse as it is wired carries the attention red on
+   its edge, and the strip under the canvas says what is wrong with it. */
+.rack-flow-node.has-problem {
+  border-color: var(--red) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 3px 0 0 var(--red),
+    0 6px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+.rack-graph-problems {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 12px;
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--paper));
+  border-top: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+  font: 600 12px/1.4 var(--display-font);
+}
+
+.rack-graph-problems strong {
+  color: var(--ink);
+}
+
 /* The ports are their signal's colour: MIDI violet, audio amber. */
 .rack-flow-node .midi-handle {
   background: var(--rf-lit-input);
@@ -5401,6 +5428,107 @@
 
 .rack-flow-node .audio-handle {
   background: var(--rf-lit-sound);
+}
+
+/* While a cable is dragged, a port that would take it grows and rings white
+   as the cable nears it; one that refuses it rings red. The rules are the
+   graph's own (rackGraph.ts), so what lights is what connects. `scale`, not
+   transform: React Flow places the handle with its transform. */
+.rack-flow-node .react-flow__handle {
+  transition:
+    scale var(--rf-motion-fast) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.rack-flow-node .react-flow__handle.connectingto.valid {
+  scale: 1.6;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+
+.rack-flow-node .react-flow__handle.connectingto:not(.valid) {
+  box-shadow: 0 0 0 2px var(--red);
+}
+
+/* A port is a small dot and a finger is not: the reach around it is wider
+   than what is drawn, so a cable lands without aiming for the pixel. */
+.rack-flow-node .react-flow__handle::after {
+  content: "";
+  position: absolute;
+  inset: -12px;
+}
+
+/* MIDI cables are dashed and audio cables solid, still: the running dashes
+   React Flow animates repainted the canvas every frame. */
+.rack-graph-canvas .rack-flow-edge-path.midi {
+  stroke-dasharray: 5 4;
+}
+
+/* The cable a new one is about to replace fades back and breaks up while the
+   new one is drawn, so re-patching an output is never a surprise. */
+.rack-graph-canvas .rack-flow-edge-path {
+  transition: opacity var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.rack-graph-canvas .rack-flow-edge-path.is-replaced {
+  opacity: 0.3;
+  stroke-dasharray: 2 5;
+}
+
+/* Why a cable was refused, for a moment, over the canvas. */
+.rack-graph-refusal {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 6;
+  max-width: min(420px, calc(100% - 28px));
+  margin: 0;
+  padding: 8px 12px;
+  translate: -50% 0;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--fp-seam);
+  border-left: 3px solid var(--red);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), 0 8px 22px rgba(0, 0, 0, 0.4);
+  font: 600 12px/1.4 var(--display-font);
+  pointer-events: none;
+  animation: rack-refusal-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
+}
+
+@keyframes rack-refusal-in {
+  from {
+    opacity: 0;
+    translate: -50% 6px;
+  }
+}
+
+/* A module arrives in place: it fades up from a little smaller, and a new
+   cable fades in along with it, at the emphasized step -- no slide, so a
+   node never appears to come from somewhere it was not. A node the editor
+   moves for you (the output stepping aside for an inserted effect) does not
+   glide: its cables are drawn from where it is going, not where it is
+   on the way, so a gliding node would leave them hanging for the length of
+   the glide. Nodes move at once and stay plugged in. */
+.rack-flow-node,
+.rack-flow-label {
+  animation: rack-node-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
+}
+
+.rack-graph-canvas .react-flow__edge {
+  animation: rack-cable-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
+}
+
+@keyframes rack-node-in {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+}
+
+@keyframes rack-cable-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .rack-flow-node.selected {

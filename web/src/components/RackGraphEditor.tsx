@@ -11,14 +11,17 @@ import {
   ReactFlow,
   applyNodeChanges,
   getBezierPath,
+  useConnection,
   type Connection,
   type Edge,
   type EdgeProps,
   type EdgeTypes,
+  type FinalConnectionState,
   type Node,
   type NodeChange,
   type NodeProps,
   type NodeTypes,
+  type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -37,11 +40,15 @@ import {
   type ReactNode,
 } from "react";
 import {
+  connectRackGraph,
   materializeRackGraph,
   midiTransformFromSlot,
   normalizeRackGraphPosition,
+  rackConnectionProblem,
   rackGraphId,
+  rackGraphProblems,
   removeSlotFromRack,
+  type RackConnection,
 } from "../rackGraph";
 import type { RackPluginRole } from "../rackPluginSelection";
 import { RackSlotPopover } from "./RackSlotPopover";
@@ -65,6 +72,8 @@ type CanvasNodeData = {
   /** What a plugin node's plugin is -- "instrument", "effect" or
    *  "midi-processor" -- so it takes its kind's colour. */
   pluginKind?: string;
+  /** The engine would refuse this node as it is wired; see rackGraphProblems. */
+  problem?: boolean;
   labelKind?: RackGraphLabel["kind"];
   tone?: RackGraphLabelTone;
 };
@@ -97,7 +106,7 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
   const emitsAudio = acceptsMidi;
   const acceptsAudio = data.kind === "plugin" || data.kind === "rack";
   return (
-    <div className={`rack-flow-node ${data.kind}${data.pluginKind ? ` ${data.pluginKind}` : ""} ${selected ? "selected" : ""}`}>
+    <div className={`rack-flow-node ${data.kind}${data.pluginKind ? ` ${data.pluginKind}` : ""}${data.problem ? " has-problem" : ""} ${selected ? "selected" : ""}`}>
       {acceptsMidi ? (
         <Handle
           id="midi:midi_in"
@@ -206,6 +215,8 @@ function graphMiniMapNodeColor(node: CanvasNode) {
 
 const RackFlowEdge = memo(function RackFlowEdge({
   id,
+  source,
+  sourceHandleId,
   sourceX,
   sourceY,
   targetX,
@@ -225,6 +236,16 @@ const RackFlowEdge = memo(function RackFlowEdge({
     sourcePosition,
     targetPosition,
   });
+  // An audio output feeds one place, so a cable drawn from one already
+  // patched takes this one's place: while it is drawn, this one shows it is
+  // about to go. The selector answers yes or no, so a drag re-renders an
+  // edge only when that answer changes, not on every pointer move.
+  const replacing = useConnection((connection) =>
+    connection.inProgress
+    && data?.signal === "audio"
+    && connection.fromHandle.type === "source"
+    && connection.fromNode.id === source
+    && connection.fromHandle.id === sourceHandleId);
   return (
     <>
       <BaseEdge
@@ -232,7 +253,7 @@ const RackFlowEdge = memo(function RackFlowEdge({
         path={path}
         markerEnd={markerEnd}
         style={style}
-        className={`rack-flow-edge-path ${data?.signal ?? "audio"}`}
+        className={`rack-flow-edge-path ${data?.signal ?? "audio"}${replacing ? " is-replaced" : ""}`}
       />
       {data?.editable ? (
         <EdgeLabelRenderer>
@@ -368,7 +389,9 @@ function toCanvasEdges(
       onOpen,
       onSelect,
     },
-    animated: edge.signal === "midi",
+    // MIDI is drawn dashed (faceplate.css), but still: running dashes repaint
+    // the canvas every frame, which a Raspberry Pi pays for the whole time a
+    // Rack is open.
     markerEnd: { type: MarkerType.ArrowClosed },
     style: {
       // The signal's colour in the code's lit set: MIDI violet, audio amber.
@@ -376,6 +399,25 @@ function toCanvasEdges(
       strokeWidth: 2,
     },
   }));
+}
+
+/** A React Flow connection as the graph's rules read one, or null when its
+ *  handles do not name a signal and a port. */
+function toRackConnection(connection: {
+  source: string | null;
+  target: string | null;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}): RackConnection | null {
+  const source = decodeHandle(connection.sourceHandle);
+  const target = decodeHandle(connection.targetHandle);
+  if (!connection.source || !connection.target || !source || !target) return null;
+  if (source.signal !== target.signal) return null;
+  return {
+    signal: source.signal,
+    source: { node_id: connection.source, port_id: source.portId },
+    target: { node_id: connection.target, port_id: target.portId },
+  };
 }
 
 function decodeHandle(handle: string | null | undefined) {
@@ -486,6 +528,33 @@ export default function RackGraphEditor({
     anchor: GraphMenuAnchor;
   } | null>(null);
   const overlayOpen = editorSlotId !== undefined || midiLinkEditor !== null;
+  // A finger needs a wider reach than a pointer to land a cable on a port.
+  const coarsePointer = useMemo(
+    () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches,
+    [],
+  );
+  // A node added to the Rack is brought into view with the rest, at the
+  // emphasized step, so an effect inserted past the edge of the canvas -- or
+  // the output stepping right for it -- is not left off screen. Only when the
+  // Rack gains a node: opening it fits on its own, and moving or removing
+  // leaves the view where the player put it.
+  const flowRef = useRef<ReactFlowInstance<CanvasNode, RackCanvasEdge> | null>(null);
+  const graphNodeCount = materialized.graph!.nodes.length;
+  const seenNodeCountRef = useRef(graphNodeCount);
+  useEffect(() => {
+    const grew = graphNodeCount > seenNodeCountRef.current;
+    seenNodeCountRef.current = graphNodeCount;
+    if (!grew || !flowRef.current) return;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frame = window.requestAnimationFrame(() => {
+      void flowRef.current?.fitView({
+        padding: 0.18,
+        maxZoom: 1.15,
+        duration: still ? 0 : 320,
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [graphNodeCount]);
   useEffect(() => {
     onOverlayChange?.(overlayOpen);
   }, [onOverlayChange, overlayOpen]);
@@ -624,10 +693,15 @@ export default function RackGraphEditor({
     ])),
     [catalogPlugins],
   );
-  const mappedNodes = useMemo(
-    () => toCanvasNodes(materialized, racks, pluginKinds),
-    [materialized, racks, pluginKinds],
+  const problems = useMemo(
+    () => rackGraphProblems(materialized.graph!),
+    [materialized],
   );
+  const mappedNodes = useMemo(() => {
+    const flagged = new Set(problems.map((problem) => problem.nodeId));
+    return toCanvasNodes(materialized, racks, pluginKinds).map((node) =>
+      flagged.has(node.id) ? { ...node, data: { ...node.data, problem: true } } : node);
+  }, [materialized, racks, pluginKinds, problems]);
   const [interactiveNodes, setInteractiveNodes] = useState(mappedNodes);
   const interactiveRackIdRef = useRef(rack.id);
   useLayoutEffect(() => {
@@ -739,37 +813,84 @@ export default function RackGraphEditor({
     [updateGraph],
   );
 
+  // The graph's rules (rackGraph.ts) decide both: a port that would refuse
+  // the cable does not light while it is dragged, and a dropped cable that
+  // re-patches an audio output replaces the one it had.
+  const isValidConnection = useCallback(
+    (connection: Connection | Edge) => {
+      const candidate = toRackConnection(connection);
+      return candidate !== null
+        && rackConnectionProblem(materialized.graph!, candidate) === null;
+    },
+    [materialized],
+  );
   const connect = useCallback(
     (connection: Connection) => {
-      const source = decodeHandle(connection.sourceHandle);
-      const target = decodeHandle(connection.targetHandle);
-      if (!connection.source || !connection.target || !source || !target) return;
-      if (source.signal !== target.signal) return;
+      const candidate = toRackConnection(connection);
+      if (!candidate) return;
+      updateGraph((graph) => connectRackGraph(graph, candidate));
+    },
+    [updateGraph],
+  );
+  // A cable's end can be picked up and moved to another port, as a plug is,
+  // or dropped on empty space to unplug it. Dropped on a port that refuses it,
+  // it stays where it was, and says why (explainRefusal).
+  const reconnected = useRef(false);
+  const reconnect = useCallback(
+    (oldEdge: RackCanvasEdge, connection: Connection) => {
+      const candidate = toRackConnection(connection);
+      if (!candidate) return;
+      reconnected.current = true;
       updateGraph((graph) => {
-        const duplicate = graph.edges.some(
-          (edge) =>
-            edge.signal === source.signal &&
-            edge.source.node_id === connection.source &&
-            edge.source.port_id === source.portId &&
-            edge.target.node_id === connection.target &&
-            edge.target.port_id === target.portId,
-        );
-        if (duplicate) return graph;
-        return {
-          ...graph,
-          edges: [
-            ...graph.edges,
-            {
-              id: rackGraphId("edge"),
-              signal: source.signal,
-              source: { node_id: connection.source, port_id: source.portId },
-              target: { node_id: connection.target, port_id: target.portId },
-            },
-          ],
-        };
+        const previous = graph.edges.find((edge) => edge.id === oldEdge.id);
+        if (!previous) return graph;
+        const without = { ...graph, edges: graph.edges.filter((edge) => edge !== previous) };
+        const next = connectRackGraph(without, candidate);
+        if (next === without) return graph;
+        // A MIDI cable keeps its routing settings wherever it is plugged.
+        return previous.midi_transform
+          ? {
+            ...next,
+            edges: next.edges.map((edge, index) =>
+              index === next.edges.length - 1
+                ? { ...edge, midi_transform: previous.midi_transform }
+                : edge),
+          }
+          : next;
       });
     },
     [updateGraph],
+  );
+  const beginReconnect = useCallback(() => {
+    reconnected.current = false;
+  }, []);
+  // A cable let go over a port that refused it says why, briefly, instead of
+  // simply not appearing.
+  const [refusal, setRefusal] = useState<{ id: number; reason: string } | null>(null);
+  useEffect(() => {
+    if (!refusal) return;
+    const timer = window.setTimeout(() => setRefusal(null), 3_200);
+    return () => window.clearTimeout(timer);
+  }, [refusal]);
+  const explainRefusal = useCallback(
+    (_event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+      if (state.isValid !== false || !state.fromHandle || !state.toHandle) return;
+      const [from, to] = state.fromHandle.type === "source"
+        ? [state.fromHandle, state.toHandle]
+        : [state.toHandle, state.fromHandle];
+      if (from.type === to.type) return;
+      const candidate = toRackConnection({
+        source: from.nodeId,
+        target: to.nodeId,
+        sourceHandle: from.id,
+        targetHandle: to.id,
+      });
+      const reason = candidate
+        ? rackConnectionProblem(materialized.graph!, candidate)
+        : "MIDI and audio ports do not connect to each other.";
+      if (reason) setRefusal({ id: Date.now(), reason });
+    },
+    [materialized],
   );
 
   const removeEdges = useCallback(
@@ -987,7 +1108,24 @@ export default function RackGraphEditor({
           edgeTypes={edgeTypes}
           onNodesChange={handleNodesChange}
           onNodeDragStop={(_event, node) => persistNodePosition(node.id, node.position)}
+          onInit={(instance) => {
+            flowRef.current = instance;
+          }}
           onConnect={connect}
+          onConnectEnd={explainRefusal}
+          onReconnect={reconnect}
+          onReconnectStart={beginReconnect}
+          onReconnectEnd={(event, edge, _handleType, state) => {
+            if (reconnected.current) return;
+            if (state.toHandle) {
+              explainRefusal(event, state);
+              return;
+            }
+            removeEdges([edge]);
+          }}
+          connectionRadius={coarsePointer ? 36 : 20}
+          reconnectRadius={coarsePointer ? 24 : 10}
+          isValidConnection={isValidConnection}
           onEdgesDelete={removeEdges}
           onViewportChange={setViewport}
           onNodeClick={(_event, node) => setSelectedId(node.id)}
@@ -1062,6 +1200,11 @@ export default function RackGraphEditor({
             </button>
           )}
         </ReactFlow>
+        {refusal ? (
+          <p key={refusal.id} className="rack-graph-refusal" role="status">
+            {refusal.reason}
+          </p>
+        ) : null}
         <div className="rack-graph-menu-layer">
           {paneMenu ? (
             <div
@@ -1180,9 +1323,23 @@ export default function RackGraphEditor({
           ) : null}
         </div>
       </div>
+      {problems.length > 0 ? (
+        <ul className="rack-graph-problems" role="status" aria-live="polite">
+          {problems.map((problem, index) => (
+            <li key={`${problem.nodeId}:${index}`}>
+              <strong>
+                {mappedNodes.find((node) => node.id === problem.nodeId)?.data.title ?? problem.nodeId}
+              </strong>
+              {" — "}
+              {problem.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <p className="rack-graph-hint">
-        Mouse wheel zooms · drag empty space to pan · drag ports to connect · Delete removes a
-        selected connection · double-click or hold a MIDI cable's center control to edit routing.
+        Mouse wheel zooms · drag empty space to pan · drag ports to connect; an audio output
+        feeds one place, so a new cable from it moves the old one · Delete removes a selected
+        connection · double-click or hold a MIDI cable's center control to edit routing.
       </p>
     </div>
   );

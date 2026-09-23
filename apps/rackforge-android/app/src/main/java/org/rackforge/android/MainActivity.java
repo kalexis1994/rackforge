@@ -1993,6 +1993,24 @@ public final class MainActivity extends Activity {
                         .toString());
                 return;
             }
+            // Android captures no audio. It says so, as the browser and the
+            // desktop do: left unanswered, the request held the UI's request
+            // queue for its whole 30-second timeout, and a plugin opened
+            // meanwhile waited that long for its parameters.
+            if ("audio_input".equals(operation)) {
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "audio_input")
+                        .put("input", new JSONObject()
+                                .put("availability", "unsupported")
+                                .put("device_channels", 0)
+                                .put("captured", new JSONArray())
+                                .put("gain_db", 0)
+                                .put("cable_routing", false)
+                                .put("peaks", new JSONArray())
+                                .put("reason", "RackForge for Android does not capture audio"))
+                        .toString());
+                return;
+            }
             if ("begin_midi_learn".equals(operation)) {
                 validateMidiLearnTarget(
                         request.getString("instance_id"),
@@ -2038,7 +2056,13 @@ public final class MainActivity extends Activity {
                         .toString());
                 return;
             }
-            if (!"dispatch".equals(operation)) return;
+            if (!"dispatch".equals(operation)) {
+                // Unanswered on purpose for now (LIVE, the sequencer, audio
+                // health), but never silently: a request the UI waits on and
+                // this host drops shows here first.
+                Log.w("RackForge", "Shared UI session operation not handled on Android: " + operation);
+                return;
+            }
             JSONObject envelope = request.getJSONObject("envelope");
             JSONObject command = envelope.getJSONObject("command");
             String type = command.optString("type");

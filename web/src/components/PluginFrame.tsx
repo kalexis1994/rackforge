@@ -180,6 +180,13 @@ export function PluginFrame({
   ].join(":");
   const [loadedFrameIdentity, setLoadedFrameIdentity] = useState<string | null>(null);
   const frameLoaded = loadedFrameIdentity === surfaceIdentity;
+  // Loaded is not ready: the page is up, but a plugin interface shows
+  // "Connecting" until the host has handed it its parameters. The splash
+  // holds until then, so what it reveals is a plugin that answers; the
+  // sound, which the host starts on its own, does not wait for it.
+  const [dataReadyIdentity, setDataReadyIdentity] = useState<string | null>(null);
+  const surfaceReady = frameLoaded && dataReadyIdentity === surfaceIdentity;
+  const parametersRequestedRef = useRef<string | null>(null);
   const [frameDocumentGeneration, setFrameDocumentGeneration] = useState(0);
   // The splash's own lifecycle: the icon fill reaches the top, THEN the
   // whole overlay fades, THEN it unmounts. Removing it on iframe load was
@@ -202,7 +209,7 @@ export function PluginFrame({
     if (surfaceSettledNow) surfaceSettled(readinessKey);
   }, [readinessKey, surfaceSettledNow]);
   const splashLitRef = useRef<HTMLImageElement | null>(null);
-  const frameLoadedRef = useRef(false);
+  const surfaceReadyRef = useRef(false);
   const [resourceBusy, setResourceBusy] = useState<string | null>(null);
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -271,8 +278,26 @@ export function PluginFrame({
   }, [onIsolatedStateChange]);
 
   useEffect(() => {
-    frameLoadedRef.current = frameLoaded;
-  }, [frameLoaded]);
+    surfaceReadyRef.current = surfaceReady;
+  }, [surfaceReady]);
+
+  // A plugin that asks for nothing right after it loads is ready when it
+  // says so; one that asks is ready when answered. Neither keeps the splash
+  // past ten seconds: a host that never answers is then the plugin's own
+  // "Connecting" to show, not a splash that never ends.
+  useEffect(() => {
+    if (!frameLoaded || dataReadyIdentity === surfaceIdentity) return;
+    const quiet = window.setTimeout(() => {
+      if (parametersRequestedRef.current !== surfaceIdentity) {
+        setDataReadyIdentity(surfaceIdentity);
+      }
+    }, 600);
+    const cap = window.setTimeout(() => setDataReadyIdentity(surfaceIdentity), 10_000);
+    return () => {
+      window.clearTimeout(quiet);
+      window.clearTimeout(cap);
+    };
+  }, [dataReadyIdentity, frameLoaded, surfaceIdentity]);
 
   const publishIsolatedState = useCallback((state: PluginStateReference) => {
     isolatedStateRef.current = state;
@@ -565,7 +590,7 @@ export function PluginFrame({
   // The icon reveal: a dim copy of the plugin icon sits under a full-color
   // copy clipped from the top, and the clip retreats bottom-to-top. The
   // iframe gives no real progress, so the fill eases toward ~90% on its
-  // own clock and completes the moment the frame reports loaded. The DOM
+  // own clock and completes the moment the surface is ready. The DOM
   // node is driven directly from the animation frame -- rendering React
   // sixty times a second for a clip-path would be its own jank.
   useEffect(() => {
@@ -577,12 +602,12 @@ export function PluginFrame({
       const lit = splashLitRef.current;
       if (lit) {
         const seconds = (now - start) / 1000;
-        const target = frameLoadedRef.current
+        const target = surfaceReadyRef.current
           ? 1
           : 0.9 * (1 - Math.exp(-seconds / 0.9));
         progress += (Math.max(target, progress) - progress) * 0.12;
         lit.style.clipPath = `inset(${((1 - progress) * 100).toFixed(2)}% 0 0 0)`;
-        if (frameLoadedRef.current && progress > 0.995) {
+        if (surfaceReadyRef.current && progress > 0.995) {
           lit.style.clipPath = "inset(0 0 0 0)";
           setCompletedSplashIdentity(surfaceIdentity);
           return;
@@ -596,16 +621,16 @@ export function PluginFrame({
 
   // Insurance for the reveal: animation frames stop in a hidden window
   // (minimized, background tab), and the splash must never outlive the
-  // interface it was covering. Once the frame is loaded, a plain timer
+  // interface it was covering. Once the surface is ready, a plain timer
   // completes the splash even if no frame ever fires.
   useEffect(() => {
-    if (!frameLoaded || splashDone) return;
+    if (!surfaceReady || splashDone) return;
     const timer = window.setTimeout(
       () => setCompletedSplashIdentity(surfaceIdentity),
       1800,
     );
     return () => window.clearTimeout(timer);
-  }, [frameLoaded, splashDone, surfaceIdentity]);
+  }, [surfaceReady, splashDone, surfaceIdentity]);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -655,6 +680,8 @@ export function PluginFrame({
         event.data.method === "plugin.parameters" &&
         (surface === "play" || surface === "config")
       ) {
+        parametersRequestedRef.current = surfaceIdentity;
+        const answered = () => setDataReadyIdentity(surfaceIdentity);
         if (isolated) {
           ensureIsolatedState()
             .then(requestPluginStateParameters)
@@ -666,7 +693,8 @@ export function PluginFrame({
                   ? error.message
                   : "Could not read Rack Slot parameters.",
               ),
-            );
+            )
+            .finally(answered);
         } else requestPluginParameters(instance.instance_id)
           .then((result) => respond(true, undefined, result))
           .catch((error: unknown) =>
@@ -674,7 +702,8 @@ export function PluginFrame({
               false,
               error instanceof Error ? error.message : "Could not read plugin parameters.",
             ),
-          );
+          )
+          .finally(answered);
       } else if (
         event.data.method === "plugin.set_parameter" &&
         (surface === "play" || surface === "config") &&

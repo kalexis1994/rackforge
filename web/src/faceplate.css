@@ -7264,10 +7264,11 @@
 
 /* ------------------------------------------------ the plugin editor ---
    A plugin in a Rack, edited, takes the whole canvas: the graph behind is
-   inert while it is open, so it is a modal and not a window to move. It is
-   edged in its kind's colour from the code (design/tokens.css) -- an
-   instrument's blue, an effect's amber, a MIDI processor's violet -- and
-   its kicker names the kind in it; its presets are the presets' green.
+   inert while it is open, so it is a modal and not a window to move. Its
+   edge is the panel's plain seam; the kind is told once, in the header --
+   the kicker names it and the icon is ringed in its colour from the code
+   (design/tokens.css): an instrument's blue, an effect's amber, a MIDI
+   processor's violet. Its presets are the presets' green.
    The plugin's surface inside stays dark: that is the plugin's own screen. */
 
 .rack-plugin-editor { --editor-colour: var(--rf-color-instrument); }
@@ -7294,12 +7295,9 @@
   overflow: hidden;
   color: var(--ink);
   background: var(--paper);
-  border: 2px solid var(--editor-colour);
+  border: var(--fp-seam);
   border-radius: var(--fp-radius);
-  box-shadow:
-    var(--fp-lip),
-    0 0 0 1px color-mix(in srgb, var(--editor-colour) 35%, transparent),
-    0 18px 48px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--fp-lip), 0 18px 48px rgba(0, 0, 0, 0.45);
   pointer-events: auto;
   animation: rack-plugin-editor-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
 }
@@ -7599,8 +7597,8 @@
   text-transform: uppercase;
 }
 
-/* On a phone the editor is the canvas, edge to edge, still ringed in its
-   colour; the presets take a row of their own under the name. */
+/* On a phone the editor is the canvas, edge to edge; the presets take a
+   row of their own under the name. */
 @media (max-width: 700px), (max-height: 600px) {
   .rack-plugin-editor {
     inset: 0;

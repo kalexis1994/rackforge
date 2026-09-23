@@ -344,31 +344,31 @@ export function rackConnectionProblem(
   connection: RackConnection,
 ): string | null {
   const { signal, source, target } = connection;
-  if (source.node_id === target.node_id) return "A node cannot feed itself.";
+  if (source.node_id === target.node_id) return "A node cannot connect to itself.";
   const from = graph.nodes.find((node) => node.id === source.node_id);
   const to = graph.nodes.find((node) => node.id === target.node_id);
-  if (!from || !to) return "Both ends need a node.";
+  if (!from || !to) return "Both ends of a connection need a node.";
   if (!sourcePortAllowed(from, signal, source.port_id)) {
     return signal === "midi"
-      ? "MIDI comes from the MIDI input."
-      : "That port does not send audio.";
+      ? "MIDI connections start at the MIDI input."
+      : "This port does not send audio.";
   }
   if (!targetPortAllowed(to, signal, target.port_id)) {
     return to.kind.kind === "rack" && signal === "audio"
-      ? "A child Rack takes no audio in."
-      : "That port does not take this signal.";
+      ? "A child Rack does not accept audio."
+      : "This port does not accept this signal.";
   }
   if (from.kind.kind === "rack" && !isMainOutput(to)) {
-    return "A child Rack goes straight to the main output.";
+    return "A child Rack connects directly to the main output.";
   }
   if (from.kind.kind === "audio_input" && to.kind.kind === "audio_output") {
-    return "The audio input needs a plugin between it and an output.";
+    return "The audio input must pass through a plugin before an output.";
   }
   const remaining = graph.edges.filter(
     (edge) => !displacedBy(graph, connection).includes(edge),
   );
   if (reaches(remaining, target.node_id, source.node_id)) {
-    return "That cable would make a loop.";
+    return "This connection would form a loop.";
   }
   return null;
 }
@@ -410,19 +410,54 @@ export function connectRackGraph(
   };
 }
 
+/**
+ * How bad a problem is.
+ *
+ *   error    The engine refuses the graph, or the Rack cannot be heard at
+ *            all. A Rack with one is not saved: it would not play.
+ *   warning  The engine plays the graph, but part of it will do nothing --
+ *            an instrument no MIDI reaches, an effect nothing feeds. That
+ *            may be work in progress, so it is said, not enforced.
+ */
+export type RackGraphProblemSeverity = "error" | "warning";
+
 export interface RackGraphProblem {
   nodeId: string;
+  severity: RackGraphProblemSeverity;
   message: string;
 }
 
+export interface RackGraphProblemContext {
+  /** The Rack's Slots: a disabled one is not played, so not judged. */
+  slots?: RackSlot[];
+  /** What a Slot's plugin is, from the catalog; the graph alone cannot say
+   *  whether a node with nothing plugged in is an instrument or an effect. */
+  slotRole?: (slot: RackSlot) => RackPluginRole | undefined;
+}
+
 /**
- * What in a graph the engine will refuse, node by node: Racks saved before
- * the editor held to the rules, or written elsewhere, can break them, and the
- * editor says so where the node is rather than leaving it to a preview error.
+ * What is wrong with a graph, node by node, worst first: Racks saved before
+ * the editor held to the rules, written elsewhere, or still being built. The
+ * editor marks the node and names the problem under the canvas, rather than
+ * leaving it to a preview error, and refuses to save while any is an error.
  */
-export function rackGraphProblems(graph: RackGraph): RackGraphProblem[] {
+export function rackGraphProblems(
+  graph: RackGraph,
+  context: RackGraphProblemContext = {},
+): RackGraphProblem[] {
   const problems: RackGraphProblem[] = [];
+  const seen = new Set<string>();
+  const report = (nodeId: string, severity: RackGraphProblemSeverity, message: string) => {
+    const key = `${nodeId} ${message}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    problems.push({ nodeId, severity, message });
+  };
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const slots = new Map((context.slots ?? []).map((slot) => [slot.id, slot]));
+  const slotOf = (node: RackGraphNode) =>
+    node.kind.kind === "plugin" ? slots.get(node.kind.slot_id) : undefined;
+
   for (const edge of graph.edges) {
     const source = nodes.get(edge.source.node_id);
     const target = nodes.get(edge.target.node_id);
@@ -433,41 +468,99 @@ export function rackGraphProblems(graph: RackGraph): RackGraphProblem[] {
       source: edge.source,
       target: edge.target,
     });
-    if (problem && problem !== "That cable would make a loop.") {
-      problems.push({ nodeId: source.id, message: problem });
+    if (problem === "This connection would form a loop.") {
+      report(source.id, "error", "Connections form a loop. A signal cannot return to a node it has passed.");
+    } else if (problem) {
+      report(source.id, "error", problem);
     }
   }
+
   for (const node of graph.nodes) {
-    if (node.kind.kind !== "plugin" && node.kind.kind !== "rack" && node.kind.kind !== "audio_input") {
-      continue;
-    }
+    const audioIn = graph.edges.filter(
+      (edge) => edge.signal === "audio" && edge.target.node_id === node.id,
+    );
     const audioOut = graph.edges.filter(
       (edge) => edge.signal === "audio" && edge.source.node_id === node.id,
     );
-    if (audioOut.length > 1) {
-      problems.push({
-        nodeId: node.id,
-        message: `Its audio goes to ${audioOut.length} places; it may go to one.`,
-      });
-    }
-    if (node.kind.kind === "audio_input") continue;
-    if (audioOut.length === 0) {
-      problems.push({
-        nodeId: node.id,
-        message: "It is not heard: connect its audio to an effect or an output.",
-      });
-    }
     const midiIn = graph.edges.filter(
       (edge) => edge.signal === "midi" && edge.target.node_id === node.id,
     );
-    if (midiIn.length > 1) {
-      problems.push({ nodeId: node.id, message: "It takes more than one MIDI cable." });
+    if (isMainOutput(node)) {
+      if (audioIn.length === 0) {
+        report(node.id, "error", "Required: connect an instrument or effect to the main output.");
+      }
+      continue;
     }
-    if (node.kind.kind === "rack" && midiIn.length === 0) {
-      problems.push({ nodeId: node.id, message: "It needs a MIDI cable from the MIDI input." });
+    if (node.kind.kind === "audio_input") {
+      if (audioOut.length > 1) {
+        report(node.id, "error", `Audio is sent to ${audioOut.length} destinations. An audio output connects to one destination.`);
+      } else if (audioOut.length === 0) {
+        report(node.id, "warning", "Not connected. Connect it to an effect, or remove it.");
+      }
+      continue;
+    }
+    if (node.kind.kind !== "plugin" && node.kind.kind !== "rack") continue;
+    const slot = slotOf(node);
+    // A disabled Slot is not played, so its wiring cannot stop the Rack.
+    if (slot && !slot.enabled) continue;
+    if (audioOut.length > 1) {
+      report(node.id, "error", `Audio is sent to ${audioOut.length} destinations. An audio output connects to one destination.`);
+    }
+    if (audioOut.length === 0) {
+      report(node.id, "error", "Required: connect its audio output to an effect or to the output.");
+    }
+    if (midiIn.length > 1) {
+      report(node.id, "error", "More than one MIDI connection. A node accepts one.");
+    }
+    if (node.kind.kind === "rack") {
+      if (midiIn.length === 0) {
+        report(node.id, "error", "Required: connect the MIDI input to this child Rack.");
+      }
+      continue;
+    }
+    const role = slot ? context.slotRole?.(slot) : undefined;
+    if (role === "instrument" && midiIn.length === 0) {
+      report(node.id, "warning", "No MIDI connection. This instrument will not receive notes.");
+    }
+    if (role === "effect" && audioIn.length === 0) {
+      report(node.id, "warning", "No audio input. This effect has no signal to process.");
     }
   }
-  return problems;
+  return problems.sort((a, b) =>
+    a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1);
+}
+
+/** What a node is called where a message names it. */
+export function rackGraphNodeName(rack: RackDefinition, nodeId: string): string {
+  const node = rack.graph?.nodes.find((candidate) => candidate.id === nodeId);
+  switch (node?.kind.kind) {
+    case "plugin": {
+      const slotId = node.kind.slot_id;
+      return rack.slots.find((slot) => slot.id === slotId)?.name ?? "A plugin";
+    }
+    case "rack":
+      return "A child Rack";
+    case "midi_input":
+      return "MIDI Input";
+    case "audio_input":
+      return "Audio Input";
+    case "audio_output":
+      return "Audio Output";
+    case "midi_output":
+      return "MIDI Output";
+    default:
+      return "A node";
+  }
+}
+
+/** The first error in a graph, as a sentence naming its node, or null. */
+export function rackGraphBlockingProblem(
+  graph: RackGraph,
+  context: RackGraphProblemContext = {},
+  nodeName: (nodeId: string) => string = (nodeId) => nodeId,
+): string | null {
+  const error = rackGraphProblems(graph, context).find((problem) => problem.severity === "error");
+  return error ? `${nodeName(error.nodeId)} — ${error.message}` : null;
 }
 
 /**

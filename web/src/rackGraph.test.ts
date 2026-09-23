@@ -349,6 +349,15 @@ describe("the graph's connection rules", () => {
     expect(graph).toBe(rack.graph);
   });
 
+  it("names the main output when nothing reaches it", () => {
+    const empty = emptyRack();
+    expect(rackGraphProblems(empty.graph!).map((problem) => problem.nodeId)).toEqual([
+      mainOutput(empty).id,
+    ]);
+    const playing = addSlotToRack(empty, slot("piano", "org.rackforge.piano"));
+    expect(rackGraphProblems(playing.graph!)).toEqual([]);
+  });
+
   it("names a node whose audio goes two ways, or nowhere", () => {
     const rack = pianoRack();
     const piano = nodeFor(rack, "piano").id;

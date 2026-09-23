@@ -37,6 +37,8 @@ import {
 } from "./host";
 import {
   addSlotToRack,
+  rackGraphBlockingProblem,
+  rackGraphNodeName,
   graphFromRackReference,
   graphFromSlots,
   materializeRackGraph,
@@ -1754,6 +1756,7 @@ function RackWorkspaceDetails({
   onExit,
   onDismiss,
   mobile = false,
+  saveBlocked = null,
 }: {
   name: string;
   enabled: boolean;
@@ -1768,6 +1771,8 @@ function RackWorkspaceDetails({
   onExit: () => void;
   onDismiss?: () => void;
   mobile?: boolean;
+  /** Why the Rack cannot be saved as it is, or null. */
+  saveBlocked?: string | null;
 }) {
   return (
     <section
@@ -1808,6 +1813,9 @@ function RackWorkspaceDetails({
           <i />
         </label>
       </div>
+      {saveBlocked ? (
+        <p className="rack-details-blocked" role="alert">{saveBlocked}</p>
+      ) : null}
       <footer>
         <span className={`rack-details-preview ${previewStatus}`}>
           {previewStatus === "applying"
@@ -1824,7 +1832,8 @@ function RackWorkspaceDetails({
           <button
             type="button"
             className="save-button"
-            disabled={(!dirty && !isNew) || pending}
+            disabled={(!dirty && !isNew) || pending || !!saveBlocked}
+            title={saveBlocked ?? undefined}
             onClick={onSave}
           >
             <AsyncActionLabel active={pending} activeLabel="Saving…">
@@ -2162,6 +2171,17 @@ function RackEditor({
       detail: { open },
     }));
   }, []);
+  // A graph with an error is not saved: the engine would refuse it, or the
+  // Rack would not be heard (rackGraphProblems). Warnings do not block.
+  const graphBlocking = useMemo(() => {
+    if (!draft) return null;
+    const current = materializeRackGraph(draft);
+    return rackGraphBlockingProblem(
+      current.graph!,
+      { slots: current.slots, slotRole: (slot) => rackPluginRole(slot.plugin_id, plugins) },
+      (nodeId) => rackGraphNodeName(current, nodeId),
+    );
+  }, [draft, plugins]);
   const validate = useCallback(() => {
     if (!draft) return "Select a Rack or create a new one.";
     const nameError = validationName(draft.name);
@@ -2174,8 +2194,9 @@ function RackEditor({
       if (!instances.some((instance) => instance.plugin_id === slot.plugin_id))
         return `${slot.name} needs an available plugin.`;
     }
+    if (graphBlocking) return `The Rack cannot be saved. ${graphBlocking}`;
     return null;
-  }, [draft, instances]);
+  }, [draft, graphBlocking, instances]);
   const save = useCallback(async () => {
     if (!draft) return;
     const nextError = validate();
@@ -2201,9 +2222,14 @@ function RackEditor({
     const openDetails = () => setDetailsOpen(true);
     window.addEventListener("rackforge:save-graph-workspace", saveWorkspace);
     window.addEventListener("rackforge:open-graph-details", openDetails);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDetailsOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
     return () => {
       window.removeEventListener("rackforge:save-graph-workspace", saveWorkspace);
       window.removeEventListener("rackforge:open-graph-details", openDetails);
+      window.removeEventListener("keydown", closeOnEscape);
     };
   }, [immersive, save]);
 
@@ -2262,11 +2288,12 @@ function RackEditor({
       pending={pending}
       instrumentCount={previewInstrumentCount}
       previewStatus={visiblePreviewStatus}
+      saveBlocked={graphBlocking ? `Cannot be saved. ${graphBlocking}` : null}
       onName={(name) => setDraft({ ...draft, name })}
       onEnabled={(enabled) => setDraft({ ...draft, enabled })}
       onSave={() => void save()}
       onExit={exitWorkspace}
-      onDismiss={mobile ? () => setDetailsOpen(false) : undefined}
+      onDismiss={() => setDetailsOpen(false)}
       mobile={mobile}
     />
   );
@@ -2307,7 +2334,6 @@ function RackEditor({
         onName={(name) => setDraft({ ...draft, name })}
         onEnabled={(enabled) => setDraft({ ...draft, enabled })}
       />
-      {immersive ? <aside className="rack-workspace-details-panel">{workspaceDetails()}</aside> : null}
       {immersive && detailsOpen ? (
         <div
           className="rack-details-sheet-backdrop"
@@ -2703,7 +2729,17 @@ function SongEditor({
         return !graph.graph?.nodes.some(
           (node) => node.kind.kind === "plugin" || node.kind.kind === "rack",
         );
-      }) ? "Every Part needs at least one instrument or Rack node." : null);
+      }) ? "Every Part needs at least one instrument or Rack node." : null) ??
+      draft.parts.reduce<string | null>((found, part) => {
+        if (found) return found;
+        const rack = materializeRackGraph(songPartAsRack(part));
+        const problem = rackGraphBlockingProblem(
+          rack.graph!,
+          { slots: rack.slots, slotRole: (slot) => rackPluginRole(slot.plugin_id, plugins) },
+          (nodeId) => rackGraphNodeName(rack, nodeId),
+        );
+        return problem ? `The Song cannot be saved. In ${part.name}, ${problem}` : null;
+      }, null);
     setError(nextError);
     if (nextError) return;
     try {
@@ -2718,7 +2754,7 @@ function SongEditor({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Song.");
     }
-  }, [baseRevision, draft, onSaved]);
+  }, [baseRevision, draft, onSaved, plugins]);
   const handleGraphOverlayChange = useCallback((open: boolean) => {
     if (open) setDetailsOpen(false);
     window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
@@ -2731,9 +2767,14 @@ function SongEditor({
     const openDetails = () => setDetailsOpen(true);
     window.addEventListener("rackforge:save-graph-workspace", saveWorkspace);
     window.addEventListener("rackforge:open-graph-details", openDetails);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDetailsOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
     return () => {
       window.removeEventListener("rackforge:save-graph-workspace", saveWorkspace);
       window.removeEventListener("rackforge:open-graph-details", openDetails);
+      window.removeEventListener("keydown", closeOnEscape);
     };
   }, [immersive, save]);
   if (!draft) return <EditorEmpty>Select a Song or create a new one.</EditorEmpty>;
@@ -2802,7 +2843,7 @@ function SongEditor({
       }}
       onSave={() => void save()}
       onExit={exitWorkspace}
-      onDismiss={mobile ? () => setDetailsOpen(false) : undefined}
+      onDismiss={() => setDetailsOpen(false)}
       mobile={mobile}
     />
   );
@@ -2825,7 +2866,6 @@ function SongEditor({
         </div>
       ) : null}
       <BasicFields name={draft.name} enabled={draft.enabled} onName={(name) => setDraft({ ...draft, name })} onEnabled={(enabled) => setDraft({ ...draft, enabled })} />
-      {immersive ? <aside className="song-workspace-details-panel">{workspaceDetails()}</aside> : null}
       {immersive && detailsOpen ? (
         <div
           className="rack-details-sheet-backdrop"

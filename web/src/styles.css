@@ -9309,10 +9309,6 @@ body {
 .rack-details-preview.ready { color: #79eaa7; }
 .rack-details-preview.applying { color: var(--acid); }
 
-.rack-details-sheet-backdrop {
-  display: none;
-}
-
 /* How far the editor's floating chrome sits off the canvas wall: the menu
    key, the details key beneath it, and the zoom column opposite. They used to
    disagree -- 8px on the left, 10px on the right -- and both read as stuck to
@@ -9321,85 +9317,57 @@ body {
   --rack-float-inset: 14px;
 }
 
-.rack-details-floating-button {
-  display: none;
+/* The workspace details -- name, Available in LIVE, Save and Exit -- are a
+   dialog at every size, opened from the key beside the zoom cluster. On a
+   wide screen they used to float open over the top-left of the canvas,
+   covering the nodes placed there. */
+
+/* Beside the zoom cluster inside the canvas, one inset clear of it. The
+   cluster is three 30px keys and its two borders; if a fourth is ever
+   added, this is the number that moves with it. */
+.rack-graph-canvas .rack-details-floating-button {
+  position: absolute;
+  top: var(--rack-float-inset);
+  right: calc(var(--rack-float-inset) * 2 + 92px);
+  z-index: 5;
 }
 
-@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
-  .rack-workspace-details-panel,
-  .song-workspace-details-panel {
-    display: none;
-  }
+.rack-details-floating-button {
+  position: absolute;
+  z-index: 36;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  touch-action: manipulation;
+  cursor: pointer;
+}
 
-  /* Beside the zoom cluster inside the canvas, one inset clear of it. The
-     cluster is three 30px keys and its two borders; if a fourth is ever
-     added, this is the number that moves with it. */
-  .rack-graph-canvas .rack-details-floating-button {
-    position: absolute;
-    top: var(--rack-float-inset);
-    right: calc(var(--rack-float-inset) * 2 + 92px);
-    z-index: 5;
-  }
+.rack-details-floating-button svg {
+  width: 20px;
+  height: 20px;
+}
 
-  .rack-details-floating-button {
-    position: absolute;
-    z-index: 36;
-    width: 42px;
-    height: 42px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: var(--acid);
-    background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(var(--acid-rgb), 0.34);
-    border-radius: 12px;
-    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
-    backdrop-filter: blur(14px) saturate(120%);
-    touch-action: manipulation;
-    cursor: pointer;
-    transition: color 130ms ease, background 130ms ease, border-color 130ms ease, transform 100ms ease;
-  }
+/* Centred over the editor, the editor dimmed behind it. */
+.rack-details-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  padding:
+    max(12px, var(--rackforge-safe-top))
+    max(12px, var(--rackforge-safe-right))
+    max(12px, var(--rackforge-safe-bottom))
+    max(12px, var(--rackforge-safe-left));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
-  .rack-details-floating-button svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  .rack-details-floating-button:active {
-    color: #031017;
-    background: var(--acid);
-    border-color: var(--acid);
-    transform: scale(0.94);
-  }
-
-  .rack-details-floating-button:focus-visible {
-    outline: 2px solid var(--acid);
-    outline-offset: 2px;
-  }
-
-  .rack-details-sheet-backdrop {
-    position: absolute;
-    inset: 0;
-    z-index: 40;
-    padding:
-      10px
-      max(10px, var(--rackforge-safe-right))
-      max(10px, var(--rackforge-safe-bottom))
-      max(10px, var(--rackforge-safe-left));
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    background: rgba(1, 7, 11, 0.58);
-    backdrop-filter: blur(6px);
-  }
-
-  .rack-workspace-details.mobile {
-    width: min(480px, 100%);
-    max-height: 100%;
-    overflow: auto;
-    border-radius: 16px;
-    animation: mobile-sheet-in 260ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
-  }
+.rack-workspace-details.mobile {
+  width: min(420px, 100%);
+  max-height: 100%;
+  overflow: auto;
 }
 
 .graph-workspace-active .rack-editor-form.immersive > .editor-header,

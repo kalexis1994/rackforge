@@ -72,8 +72,8 @@ type CanvasNodeData = {
   /** What a plugin node's plugin is -- "instrument", "effect" or
    *  "midi-processor" -- so it takes its kind's colour. */
   pluginKind?: string;
-  /** The engine would refuse this node as it is wired; see rackGraphProblems. */
-  problem?: boolean;
+  /** The worst problem this node has as it is wired; see rackGraphProblems. */
+  problem?: "error" | "warning";
   labelKind?: RackGraphLabel["kind"];
   tone?: RackGraphLabelTone;
 };
@@ -106,7 +106,7 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
   const emitsAudio = acceptsMidi;
   const acceptsAudio = data.kind === "plugin" || data.kind === "rack";
   return (
-    <div className={`rack-flow-node ${data.kind}${data.pluginKind ? ` ${data.pluginKind}` : ""}${data.problem ? " has-problem" : ""} ${selected ? "selected" : ""}`}>
+    <div className={`rack-flow-node ${data.kind}${data.pluginKind ? ` ${data.pluginKind}` : ""}${data.problem ? ` has-${data.problem}` : ""} ${selected ? "selected" : ""}`}>
       {acceptsMidi ? (
         <Handle
           id="midi:midi_in"
@@ -694,13 +694,26 @@ export default function RackGraphEditor({
     [catalogPlugins],
   );
   const problems = useMemo(
-    () => rackGraphProblems(materialized.graph!),
-    [materialized],
+    () => rackGraphProblems(materialized.graph!, {
+      slots: materialized.slots,
+      slotRole: (slot) => {
+        const kind = pluginKinds.get(slot.plugin_id);
+        return kind === "instrument" || kind === "effect" ? kind : undefined;
+      },
+    }),
+    [materialized, pluginKinds],
   );
+  const errorCount = problems.filter((problem) => problem.severity === "error").length;
   const mappedNodes = useMemo(() => {
-    const flagged = new Set(problems.map((problem) => problem.nodeId));
-    return toCanvasNodes(materialized, racks, pluginKinds).map((node) =>
-      flagged.has(node.id) ? { ...node, data: { ...node.data, problem: true } } : node);
+    // Problems come worst first, so the first one found for a node is its mark.
+    const worst = new Map<string, "error" | "warning">();
+    for (const problem of problems) {
+      if (!worst.has(problem.nodeId)) worst.set(problem.nodeId, problem.severity);
+    }
+    return toCanvasNodes(materialized, racks, pluginKinds).map((node) => {
+      const problem = worst.get(node.id);
+      return problem ? { ...node, data: { ...node.data, problem } } : node;
+    });
   }, [materialized, racks, pluginKinds, problems]);
   const [interactiveNodes, setInteractiveNodes] = useState(mappedNodes);
   const interactiveRackIdRef = useRef(rack.id);
@@ -1324,17 +1337,33 @@ export default function RackGraphEditor({
         </div>
       </div>
       {problems.length > 0 ? (
-        <ul className="rack-graph-problems" role="status" aria-live="polite">
-          {problems.map((problem, index) => (
-            <li key={`${problem.nodeId}:${index}`}>
-              <strong>
-                {mappedNodes.find((node) => node.id === problem.nodeId)?.data.title ?? problem.nodeId}
-              </strong>
-              {" — "}
-              {problem.message}
-            </li>
-          ))}
-        </ul>
+        <div
+          className={`rack-graph-problems${errorCount > 0 ? " has-errors" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          <p className="rack-graph-problems-summary">
+            {errorCount > 0
+              ? `${errorCount} ${errorCount === 1 ? "error" : "errors"} — this Rack cannot be saved until ${errorCount === 1 ? "it is" : "they are"} resolved.`
+              : `${problems.length} ${problems.length === 1 ? "warning" : "warnings"} — this Rack can be saved.`}
+          </p>
+          <ul>
+            {problems.map((problem, index) => (
+              <li key={`${problem.nodeId}:${index}`} className={problem.severity}>
+                <span className="rack-graph-problem-severity">
+                  {problem.severity === "error" ? "Error" : "Warning"}
+                </span>
+                <span>
+                  <strong>
+                    {mappedNodes.find((node) => node.id === problem.nodeId)?.data.title ?? problem.nodeId}
+                  </strong>
+                  {" — "}
+                  {problem.message}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       <p className="rack-graph-hint">
         Mouse wheel zooms · drag empty space to pan · drag ports to connect; an audio output

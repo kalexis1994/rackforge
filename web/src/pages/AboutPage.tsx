@@ -60,7 +60,7 @@ export function AboutPage() {
     <>
       <PageHeading
         eyebrow="RackForge"
-        title="About"
+        title="About RackForge"
         detail="A portable instrument host built around one shared interface and native real-time runtimes."
       />
       <section className="settings-grid">

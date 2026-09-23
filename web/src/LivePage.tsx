@@ -602,29 +602,11 @@ function RackTargets({
   // saved one plays. `enabled` stays in the data, unused, for later.
   const racks = performance.library.racks;
   if (racks.length === 0) return <LiveEmpty label="No Racks" />;
-  const selectedRackId = performance.live.rack?.kind === "rack"
-    ? performance.live.rack.rack_id
-    : undefined;
-  const selectedIndex = racks.findIndex((rack) => rack.id === selectedRackId);
-  const selectedRack = selectedIndex >= 0 ? racks[selectedIndex] : undefined;
+  // The list is the whole choice: every Rack, the one playing lit, a key to
+  // load each. A previous/next stepper above it repeated the list one Rack
+  // at a time; Songs and Setlists keep theirs, where it steps through parts.
   return (
     <div className="live-target-workspace">
-      {selectedRack ? (
-        <StageNavigator
-          kind="rack"
-          title={selectedRack.name}
-          detail={`${selectedRack.slots.filter((slot) => slot.enabled).length} active slots`}
-          position={`${selectedIndex + 1} / ${racks.length}`}
-          previousLabel="Load previous Rack"
-          nextLabel="Load next Rack"
-          onPrevious={selectedIndex > 0
-            ? () => activate({ kind: "rack", rack_id: racks[selectedIndex - 1].id })
-            : undefined}
-          onNext={selectedIndex < racks.length - 1
-            ? () => activate({ kind: "rack", rack_id: racks[selectedIndex + 1].id })
-            : undefined}
-        />
-      ) : null}
       <div className="target-grid">
         {racks.map((rack, index) => {
           const location: LiveLocation = { kind: "rack", rack_id: rack.id };

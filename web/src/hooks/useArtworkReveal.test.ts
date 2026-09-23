@@ -31,8 +31,23 @@ describe("revealState", () => {
     expect(revealState(0, null, 150, timing)).toEqual({
       revealed: false,
       loader: "shown",
-      nextChangeAt: null,
+      nextChangeAt: 2_000,
     });
+  });
+
+  it("reveals at the deadline even if the artwork never arrives", () => {
+    // Nothing reported the artwork ready; the arithmetic alone ends the wait.
+    expect(revealState(0, null, 1_999, timing).revealed).toBe(false);
+    expect(revealState(0, null, 2_000, timing)).toEqual({
+      revealed: true,
+      loader: "leaving",
+      nextChangeAt: 2_300,
+    });
+    expect(revealState(0, null, 2_300, timing).loader).toBe("gone");
+  });
+
+  it("does not let late artwork move a reveal that already happened", () => {
+    expect(revealState(0, 5_000, 2_100, timing)).toEqual(revealState(0, null, 2_100, timing));
   });
 
   it("keeps a loader that appeared for its minimum, so it never blinks", () => {

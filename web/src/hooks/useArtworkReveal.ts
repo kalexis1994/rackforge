@@ -18,8 +18,8 @@ export interface RevealTiming {
   loaderDelayMs: number;
   loaderMinimumMs: number;
   loaderFadeMs: number;
-  /** Given up waiting: whatever has not decoded by now shows as it loads.
-   *  Kept short -- a list held back reads as a hang, not as care. */
+  /** The list is revealed by now whatever the artwork is doing. Kept short
+   *  -- a list held back reads as a hang, not as care. */
   timeoutMs: number;
 }
 
@@ -43,6 +43,10 @@ export interface RevealState {
 /**
  * What is on screen at `now`, for a wait that started at `startedAt` and
  * finished at `readyAt` (null while still waiting).
+ *
+ * The deadline is part of the arithmetic, not a timer beside it: an
+ * unfinished wait counts as finished at `startedAt + timeoutMs`. Nothing an
+ * image or an effect does can hold the list back past it.
  */
 export function revealState(
   startedAt: number,
@@ -50,16 +54,20 @@ export function revealState(
   now: number,
   timing: RevealTiming = ARTWORK_REVEAL_TIMING,
 ): RevealState {
+  const deadline = startedAt + timing.timeoutMs;
+  const finishedAt = readyAt === null
+    ? now >= deadline ? deadline : null
+    : Math.min(readyAt, deadline);
   const loaderAt = startedAt + timing.loaderDelayMs;
-  if (readyAt !== null && readyAt <= loaderAt) {
+  if (finishedAt !== null && finishedAt <= loaderAt) {
     // Fast enough that a loader would only have flashed.
-    return now >= readyAt
+    return now >= finishedAt
       ? { revealed: true, loader: "hidden", nextChangeAt: null }
-      : { revealed: false, loader: "hidden", nextChangeAt: readyAt };
+      : { revealed: false, loader: "hidden", nextChangeAt: finishedAt };
   }
   if (now < loaderAt) return { revealed: false, loader: "hidden", nextChangeAt: loaderAt };
-  if (readyAt === null) return { revealed: false, loader: "shown", nextChangeAt: null };
-  const revealAt = Math.max(readyAt, loaderAt + timing.loaderMinimumMs);
+  if (finishedAt === null) return { revealed: false, loader: "shown", nextChangeAt: deadline };
+  const revealAt = Math.max(finishedAt, loaderAt + timing.loaderMinimumMs);
   if (now < revealAt) return { revealed: false, loader: "shown", nextChangeAt: revealAt };
   const goneAt = revealAt + timing.loaderFadeMs;
   if (now < goneAt) return { revealed: true, loader: "leaving", nextChangeAt: goneAt };
@@ -88,63 +96,41 @@ function decodeImage(url: string): Promise<void> {
 }
 
 /**
- * The reveal state for a list whose artwork is `urls`. Everything is keyed
- * on the set of images, so a new array with the same images -- in any
- * order -- is the same wait.
+ * The reveal state for a list whose artwork is `urls`.
+ *
+ * One wait per mount, on one clock. The list can change while it is open --
+ * the catalogue refreshes, the active instrument moves to the top -- and an
+ * earlier version started a new wait each time: the clock restarted, and a
+ * list already on screen hid again behind the loader. Now a change only adds
+ * artwork to decode; the deadline still counts from the open, and once the
+ * list is revealed it stays revealed, new artwork loading in place.
  */
 export function useArtworkReveal(urls: readonly string[], timing = ARTWORK_REVEAL_TIMING) {
   // The set, not the order: the list reorders when the active instrument
   // changes, and that is not new artwork to wait for.
   const key = [...new Set(urls)].sort().join("\n");
-  const [wait, setWait] = useState(() => ({
-    key,
-    startedAt: performance.now(),
-    readyAt: urls.every((url) => waitedFor.has(url)) ? performance.now() : null as number | null,
-  }));
-  const [now, setNow] = useState(() => performance.now());
-
-  // A different set of images is a new wait.
-  const current = wait.key === key ? wait : null;
+  const [startedAt] = useState(() => performance.now());
+  const [readyAt, setReadyAt] = useState<number | null>(() =>
+    urls.every((url) => waitedFor.has(url)) ? startedAt : null,
+  );
+  const [now, setNow] = useState(startedAt);
 
   useEffect(() => {
+    if (readyAt !== null) return;
     let alive = true;
-    const startedAt = performance.now();
     const list = key ? key.split("\n") : [];
-    if (wait.key !== key) {
-      const readyAt = list.every((url) => waitedFor.has(url)) ? startedAt : null;
-      // Deferred to a task: the wait is recorded as a new one, not set in
-      // the middle of this render's commit.
-      queueMicrotask(() => {
-        if (alive) setWait({ key, startedAt, readyAt });
-      });
-    }
-    if (list.every((url) => waitedFor.has(url))) {
-      return () => {
-        alive = false;
-      };
-    }
-    const settle = () => {
-      if (!alive) return;
-      for (const url of list) waitedFor.add(url);
-      const readyAt = performance.now();
-      setWait((previous) =>
-        previous.key === key && previous.readyAt === null ? { ...previous, readyAt } : previous,
-      );
-    };
-    const timer = window.setTimeout(settle, timing.timeoutMs);
-    void Promise.all(list.map(decodeImage)).then(settle);
+    void Promise.all(list.map(decodeImage)).then(() => {
+      if (alive) setReadyAt((current) => current ?? performance.now());
+    });
     return () => {
       alive = false;
-      window.clearTimeout(timer);
     };
-  }, [key, timing.timeoutMs, wait.key]);
+  }, [key, readyAt]);
 
-  const state = current
-    ? revealState(current.startedAt, current.readyAt, now, timing)
-    : { revealed: false, loader: "hidden" as const, nextChangeAt: null };
+  const state = revealState(startedAt, readyAt, now, timing);
 
-  // Wake at the next change: the loader's arrival, the reveal, the end of
-  // the loader's fade. Nothing polls.
+  // Wake at the next change: the loader's arrival, the deadline, the reveal,
+  // the end of the loader's fade. Nothing polls.
   useEffect(() => {
     if (state.nextChangeAt === null) return;
     const timer = window.setTimeout(
@@ -156,10 +142,10 @@ export function useArtworkReveal(urls: readonly string[], timing = ARTWORK_REVEA
 
   // A wait that just finished changes what `now` means: read the clock again.
   useEffect(() => {
-    if (current?.readyAt == null) return;
+    if (readyAt === null) return;
     const timer = window.setTimeout(() => setNow(performance.now()), 0);
     return () => window.clearTimeout(timer);
-  }, [current?.readyAt]);
+  }, [readyAt]);
 
   return state;
 }

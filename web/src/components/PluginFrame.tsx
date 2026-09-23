@@ -21,6 +21,7 @@ import { postResourceApi } from "../resourceApi";
 import { type RootState } from "../store";
 import { type PluginInstance, type PluginResourceRequirement, type PluginStateReference, type PluginWebSurfaceKind, type ResourceGrant, type ResourceSelection } from "../types";
 import { Trash2 } from "lucide-react";
+import { BrandSplashArtwork } from "./BrandSplashArtwork";
 
 export function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
   const navigate = useNavigate();
@@ -1294,16 +1295,12 @@ export function PluginFrame({
           >
             {descriptor?.branding ? (
               <>
-                <img className="splash-bg" src={descriptor.branding.splash_url} alt="" />
-                <div className="splash-icon" aria-hidden="true">
-                  <img className="splash-icon-dim" src={descriptor.branding.icon_url} alt="" />
-                  <img
-                    ref={splashLitRef}
-                    className="splash-icon-lit"
-                    src={descriptor.branding.icon_url}
-                    alt=""
-                  />
-                </div>
+                <BrandSplashArtwork
+                  key={surfaceIdentity}
+                  splashUrl={descriptor.branding.splash_url}
+                  iconUrl={descriptor.branding.icon_url}
+                  litRef={splashLitRef}
+                />
               </>
             ) : (
               <RfLoader label={instance.plugin_name} detail="Loading plugin interface…" size="medium" />

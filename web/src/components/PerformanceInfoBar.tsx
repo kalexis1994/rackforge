@@ -10,6 +10,9 @@ interface PerformanceInfoBarProps {
   center: PerformanceInfoItem;
   right: PerformanceInfoItem;
   rightAccessory?: ReactNode;
+  /** Identifies what the right slot names. When it changes the copy is a
+   *  new thing arriving, and enters as one instead of being retyped. */
+  rightKey?: string;
   className?: string;
 }
 
@@ -18,6 +21,7 @@ export function PerformanceInfoBar({
   center,
   right,
   rightAccessory,
+  rightKey,
   className = "",
 }: PerformanceInfoBarProps) {
   return (
@@ -32,7 +36,7 @@ export function PerformanceInfoBar({
       </div>
       <div className="performance-info-slot performance-info-right">
         {rightAccessory}
-        <div className="performance-info-copy">
+        <div className="performance-info-copy" key={rightKey && `copy:${rightKey}`}>
           <span>{right.label}</span>
           <strong>{right.value}</strong>
         </div>

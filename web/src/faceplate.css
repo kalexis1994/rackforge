@@ -5106,6 +5106,69 @@
   box-shadow: var(--fp-lip), var(--fp-drop) !important;
 }
 
+/* ------------------------------------------------ changing instrument ---
+   Switching instrument used to be a cut in two places. The header's name
+   and icon were retyped in place, and the plugin's splash -- its photograph
+   and the mark that fills from the bottom -- snapped over the old surface,
+   each image landing whenever it finished. Now the new name and icon fade up
+   out of a slight blur, the splash plate fades in over what was there, and
+   its photograph and mark each wait for their image and then arrive: the
+   photograph settling out of a slight zoom, the mark rising just after. */
+
+.play-plugin-identity .play-plugin-icon,
+.play-plugin-identity .performance-info-right .performance-info-copy {
+  animation: rf-identity-in calc(var(--rf-motion-emphasized) * 1.5) var(--rf-ease-emphasized) backwards;
+}
+
+.play-plugin-identity .performance-info-right .performance-info-copy {
+  animation-delay: var(--rf-motion-instant);
+}
+
+@keyframes rf-identity-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(4px);
+  }
+}
+
+/* backwards, not both: a held first frame would fight the fade out. */
+.plugin-brand-splash {
+  animation: rf-splash-plate-in var(--rf-motion-standard) var(--rf-ease-standard) backwards;
+}
+
+@keyframes rf-splash-plate-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.plugin-brand-splash .splash-bg {
+  opacity: 0;
+  transform: scale(1.05);
+  transition:
+    opacity calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized),
+    transform calc(var(--rf-motion-emphasized) * 4) var(--rf-ease-emphasized);
+}
+
+.plugin-brand-splash .splash-bg.is-loaded {
+  opacity: 1;
+  transform: none;
+}
+
+.plugin-brand-splash .splash-icon {
+  opacity: 0;
+  transform: translateY(12px) scale(0.94);
+  transition:
+    opacity calc(var(--rf-motion-emphasized) * 1.5) var(--rf-ease-emphasized) var(--rf-motion-fast),
+    transform calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized) var(--rf-motion-fast);
+}
+
+.plugin-brand-splash .splash-icon.is-loaded {
+  opacity: 1;
+  transform: none;
+}
+
 /* --------------------------------------------------------- the presets ---
    Only the dialog's shell and its empty state had been ported. The toolbar
    keys, the New Preset form, every row and the import review were still the

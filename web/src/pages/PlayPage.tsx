@@ -195,9 +195,13 @@ export function PlayPage({
               ? `${active.plugin_name}${formatPluginVersion(activeVersion)}`
               : "Select an instrument",
           }}
+          // A new instrument's name and icon arrive together, fading in, rather
+          // than the text being swapped under the eye.
+          rightKey={active?.plugin_id}
           rightAccessory={
             active ? (
               <PluginIcon
+                key={`icon:${active.plugin_id}`}
                 plugin={activeDescriptor}
                 name={active.plugin_name}
                 className="play-plugin-icon"

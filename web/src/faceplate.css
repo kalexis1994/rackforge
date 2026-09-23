@@ -5459,6 +5459,70 @@
   transform: scale(1.06);
 }
 
+/* ------------------------------------------------ the picker's entrance ---
+   The PLAY picker used to open with every card already there and its
+   banners landing one by one after. Now the list waits, invisible but
+   holding its size, until its artwork has decoded (useArtworkReveal); a
+   wait long enough to notice shows the mark in its place. Then the cards
+   come up together, each a beat after the one above -- rising a few pixels
+   and coming into focus -- while the mark fades out behind them. Every
+   duration and delay is built from the vocabulary, so under reduced motion
+   the whole thing collapses to the list simply being there. */
+
+.plugin-picker-stage {
+  position: relative;
+}
+
+.plugin-picker-stage:not(.is-revealed) .plugin-picker-card {
+  opacity: 0;
+}
+
+.plugin-picker-stage.is-revealed .plugin-picker-card {
+  animation: rf-picker-card-in calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized) both;
+  /* A beat per card, capped: a long list must not keep the last one waiting. */
+  animation-delay: calc(min(var(--reveal-index, 0), 8) * var(--rf-motion-instant) * 0.6);
+}
+
+@keyframes rf-picker-card-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+.plugin-picker-loader {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  /* backwards, not both: a held final frame would override the fade out. */
+  animation: rf-picker-loader-in var(--rf-motion-standard) var(--rf-ease-standard) backwards;
+  transition:
+    opacity var(--rf-motion-emphasized) var(--rf-ease-exit),
+    filter var(--rf-motion-emphasized) var(--rf-ease-emphasized),
+    transform var(--rf-motion-emphasized) var(--rf-ease-emphasized);
+}
+
+.plugin-picker-loader.is-leaving {
+  opacity: 0;
+  filter: blur(3px);
+  transform: scale(1.04);
+}
+
+@keyframes rf-picker-loader-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
 /* ------------------------------------------------- the plugin installer ---
    The dialog shell had been brought onto the faceplate and everything inside
    it had not: the package card was still the old navy glass with a blue

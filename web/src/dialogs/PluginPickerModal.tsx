@@ -13,6 +13,8 @@ import { synchronizePluginEnvironment } from "../pluginLifecycle";
 import { formatPluginVersion } from "../pluginPresentation";
 import { type PluginInstance, type PluginWebDescriptor, type SessionSnapshot } from "../types";
 import { RfButton } from "../ui/RfButton";
+import { RfLoader } from "../components/RfLoader";
+import { useArtworkReveal } from "../hooks/useArtworkReveal";
 
 export function PluginPickerModal({
   active,
@@ -41,6 +43,12 @@ export function PluginPickerModal({
     ...instruments.filter((plugin) => plugin.plugin_id === activePluginId),
     ...instruments.filter((plugin) => plugin.plugin_id !== activePluginId),
   ];
+  // Every banner and icon on the list, decoded before the list is shown, so
+  // the cards arrive whole instead of their artwork landing afterwards.
+  const artwork = orderedPlugins.flatMap((plugin) =>
+    plugin.branding ? [plugin.branding.banner_url, plugin.branding.icon_url] : [],
+  );
+  const reveal = useArtworkReveal(artwork);
   const activate = async (
     plugin: PluginWebDescriptor,
     { discardDraft = false }: { discardDraft?: boolean } = {},
@@ -161,6 +169,10 @@ export function PluginPickerModal({
           errorDetail={catalogError ?? "RackForge could not load the plugin catalog."}
           onRetry={() => void invalidatePluginCatalog()}
         >
+          <div
+            className={`plugin-picker-stage${reveal.revealed ? " is-revealed" : ""}`}
+            aria-busy={!reveal.revealed}
+          >
           <div className="play-plugin-selector modal-list" role="list" aria-label="Playable plugins">
             {orderedPlugins.map((plugin, index) => {
               const selected = plugin.plugin_id === activePluginId;
@@ -172,10 +184,15 @@ export function PluginPickerModal({
                   key={plugin.plugin_id}
                   onClick={() => requestActivation(plugin)}
                   aria-disabled={!plugin.active}
-                  style={plugin.branding ? {
-                    "--plugin-accent": plugin.branding.accent_color,
-                    "--plugin-background": plugin.branding.background_color,
-                  } as CSSProperties : undefined}
+                  style={{
+                    // The card's place in the entrance: each arrives a beat
+                    // after the one above it.
+                    "--reveal-index": index,
+                    ...(plugin.branding ? {
+                      "--plugin-accent": plugin.branding.accent_color,
+                      "--plugin-background": plugin.branding.background_color,
+                    } : {}),
+                  } as CSSProperties}
                 >
                   {plugin.branding && (
                     <>
@@ -205,6 +222,15 @@ export function PluginPickerModal({
                 detail="Install an .rfplugin package from the Plugins section."
               />
             ) : null}
+          </div>
+          {reveal.loader === "shown" || reveal.loader === "leaving" ? (
+            <div
+              className={`plugin-picker-loader${reveal.loader === "leaving" ? " is-leaving" : ""}`}
+              aria-hidden={reveal.loader === "leaving" ? true : undefined}
+            >
+              <RfLoader label="Instruments" detail="Preparing the list…" size="medium" />
+            </div>
+          ) : null}
           </div>
         </AsyncStateBoundary>
       </ModalDialog>

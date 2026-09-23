@@ -414,6 +414,47 @@
     margin: 1px 0 0;
     font-size: 15px !important;
   }
+
+  /* Three lines, top to bottom: the mode, the plugin, and the program
+     under it, large. Narrow, the plugin used to be dropped, and with a
+     program named like its instrument -- the Concert Grand's own "Concert
+     Grand" -- the one name left read as the plugin's, as if the program
+     were missing. The glass is thinner to make the room: 4 px above and
+     below. */
+  .topbar .now-playing {
+    grid-template-columns: minmax(0, 1fr) !important;
+    row-gap: 1px !important;
+    padding: 4px 12px !important;
+  }
+
+  .topbar .now-playing .eyebrow {
+    grid-column: 1 !important;
+    grid-row: 1;
+  }
+
+  .topbar .now-playing .muted-inline {
+    grid-column: 1 !important;
+    grid-row: 2;
+    display: block !important;
+    font-size: 0.6rem !important;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar .now-playing strong {
+    grid-column: 1 !important;
+    grid-row: 3;
+    margin: 0;
+  }
+}
+
+/* On its side the bar is 58 px with 8 above and below. */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .topbar.has-mixer-toggle {
+    grid-template-rows: 42px;
+  }
 }
 
 /* Upright, the bar keeps 14 px above and below; the window takes 6 of
@@ -467,46 +508,91 @@
     z-index: 1;
   }
 
-  /* Closed: the window, and no faders. */
-  .topbar.has-mixer-toggle:not(.mixer-open) .top-controls .compact-control {
-    display: none;
+  /* The two faces share one place, between the menu and OUT, and cross
+     over there rather than one vanishing before the other appears. The
+     controls' wrapper steps out of the layout so pan, volume and the meter
+     sit in the bar's own grid: the window spans the middle, pan and volume
+     split it, and the meter keeps its own column at the end. */
+  /* One row the height of the bar's content box -- 72 px less 14 above and
+     below -- whatever is in it: the meter is taller than that and would
+     otherwise size the row, and the window stretched to fill it would
+     reach the bar's edge again. The meter sits centred across it, as it
+     did before the bar was a grid. */
+  .topbar.has-mixer-toggle {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-rows: 44px;
+    align-items: center;
   }
 
-  /* Open: no window; volume and pan share the bar, each with its name. */
-  .topbar.mixer-open .now-playing {
-    display: none !important;
+  .topbar.has-mixer-toggle .top-controls {
+    display: contents;
   }
 
-  .topbar.mixer-open .top-controls {
-    flex: 1 1 auto;
-    min-width: 0;
-    margin-left: 0;
+  .topbar.has-mixer-toggle .mobile-menu-button {
+    grid-column: 1;
+    grid-row: 1;
   }
 
-  .topbar.mixer-open .top-controls .compact-control,
-  .topbar.mixer-open .top-controls .compact-control.pan-control {
-    flex: 1 1 0;
+  .topbar.has-mixer-toggle .now-playing {
+    grid-column: 2 / 4;
+    grid-row: 1;
+  }
+
+  .topbar.has-mixer-toggle .top-controls .compact-control.pan-control {
+    grid-column: 2;
+  }
+
+  .topbar.has-mixer-toggle .top-controls .compact-control:not(.pan-control) {
+    grid-column: 3;
+  }
+
+  .topbar.has-mixer-toggle .top-controls .compact-control {
+    grid-row: 1;
     min-width: 0;
     display: grid !important;
     grid-template-columns: auto minmax(0, 1fr) 34px;
-    animation: rf-mixer-in var(--rf-motion-standard) var(--rf-ease-emphasized) backwards;
   }
 
-  .topbar.mixer-open .top-controls .compact-control > .compact-control-label {
+  .topbar.has-mixer-toggle .top-controls .compact-control > .compact-control-label {
     display: block !important;
   }
 
-  .topbar.has-mixer-toggle:not(.mixer-open) .now-playing {
-    animation: rf-mixer-in var(--rf-motion-standard) var(--rf-ease-emphasized) backwards;
+  .topbar.has-mixer-toggle .master-output-meter {
+    grid-column: 4;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  /* A face going away fades, sinks a little and softens, at the exit
+     step; the one arriving waits an instant, then rises into focus at the
+     emphasized step. Hidden, a face is also out of reach and out of the
+     accessibility tree: visibility follows the fade, switching only once
+     the fade has finished going out, and at once coming in. */
+  .topbar.has-mixer-toggle .now-playing,
+  .topbar.has-mixer-toggle .top-controls .compact-control {
+    transition:
+      opacity var(--rf-motion-emphasized) var(--rf-ease-emphasized) var(--rf-motion-instant),
+      transform var(--rf-motion-emphasized) var(--rf-ease-emphasized) var(--rf-motion-instant),
+      filter var(--rf-motion-emphasized) var(--rf-ease-emphasized) var(--rf-motion-instant),
+      visibility 0s linear 0s;
+  }
+
+  .topbar.has-mixer-toggle.mixer-open .now-playing,
+  .topbar.has-mixer-toggle:not(.mixer-open) .top-controls .compact-control {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    filter: blur(2px);
+    transform: translateY(4px) scale(0.98);
+    transition:
+      opacity var(--rf-motion-exit) var(--rf-ease-exit),
+      transform var(--rf-motion-exit) var(--rf-ease-exit),
+      filter var(--rf-motion-exit) var(--rf-ease-exit),
+      visibility 0s linear var(--rf-motion-exit);
   }
 }
 
-@keyframes rf-mixer-in {
-  from {
-    opacity: 0;
-    transform: translateY(3px);
-  }
-}
 
 
 

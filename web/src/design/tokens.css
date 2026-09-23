@@ -53,40 +53,53 @@
 }
 
 /* ============================================================ COLOUR CODE ===
-   Four colours say what a thing is about, wherever it appears. A new
-   control, frame, cable or chip that belongs to one of these takes its
-   colour from here -- never from the hue that happens to look right -- so
-   the code stays one code across PLAY, LIVE, the rack editor and the
+   Five colours say what a thing is about, wherever it appears. A new
+   control, frame, tag, cable or chip that belongs to one of these takes
+   its colour from here -- never from the hue that happens to look right --
+   so the code stays one code across PLAY, LIVE, the rack editor and the
    Plugin Manager.
 
-     --rf-color-plugin   blue    plugins and instruments: SELECT PLUGIN,
-                                 the instrument's node in the FX chain.
-     --rf-color-sound    amber   effects and sound, the audio itself:
-                                 EFFECTS, the FX drawer's frames, ON,
-                                 PANEL and Add effect; the audio cables of
-                                 the rack editor are this amber too.
-     --rf-color-preset   green   presets, the saved memory: PRESETS.
-     --rf-color-input    red     input and control: RF Controller,
-                                 anything that plays into RackForge.
-
-   MIDI as a signal keeps the cyan it has always had in the rack editor:
-   its cables and ports there are cyan, beside the audio's amber
-   (RackGraphEditor.tsx), and a new MIDI cable or port follows them.
+     --rf-color-instrument  blue   instruments: SELECT PLUGIN (it picks
+                                   the instrument), the instrument's node
+                                   in the FX chain, the Instrument tag.
+     --rf-color-sound       amber  effects and sound, the audio itself:
+                                   EFFECTS, the FX drawer's frames, ON,
+                                   PANEL and Add effect, the Effect tag;
+                                   the rack editor's audio cables.
+     --rf-color-preset      green  presets, the saved memory: PRESETS.
+     --rf-color-midi        cyan   MIDI as a signal: the rack editor's
+                                   MIDI cables and ports (RackGraphEditor
+                                   .tsx), the MIDI Processor tag.
+     --rf-color-input       red    input and control: RF Controller, the
+                                   Controller tag, what plays into
+                                   RackForge.
 
    Each is the theme's legible mix: deep in daylight, so a cream glyph on a
    plate of it clears 4.5:1, and bright on the dark panel, under a dark
-   glyph. A glyph on a plate takes --rf-color-on-code (the red plate has
-   its own, --red-ink). The hues themselves are set per theme in
-   styles.css; these names only choose among them.
+   glyph. A glyph on a plate takes --rf-color-on-code; on the red plate,
+   --red-ink. The other hues are set per theme in styles.css and these
+   names only choose among them; MIDI's cyan had no theme token, so it is
+   set here, in both themes.
 
    Outside the code: the rail's chips keep their own tints (--nav-*),
    which mark the page you are on rather than a kind of thing. */
 :root {
-  --rf-color-plugin: var(--entity-instrument);
+  --rf-color-instrument: var(--entity-instrument);
   --rf-color-sound: var(--amber-ink);
   --rf-color-preset: var(--green);
+  --rf-color-midi: #1d6b78;
   --rf-color-input: var(--red);
   --rf-color-on-code: var(--acid-ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --rf-color-midi: #62dff1;
+  }
+}
+
+:root[data-theme="dark"] {
+  --rf-color-midi: #62dff1;
 }
 
 @media (prefers-reduced-motion: reduce) {

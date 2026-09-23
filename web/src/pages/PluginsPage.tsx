@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router";
+import { NavLink, useLocation, useNavigate, useSearchParams } from "react-router";
 import { AsyncActionLabel } from "../components/AsyncSpinner";
 import { AsyncNotice, AsyncStateBoundary } from "../components/AsyncStateBoundary";
 import { EmptyState } from "../components/EmptyState";
@@ -12,7 +12,7 @@ import { dispatchCommandAwait } from "../gateway";
 import { hostJson } from "../host";
 import { ControllerSummary } from "../pages/ControllerPage";
 import { commitPlayPluginSelection, preflightPlayPluginSelection } from "../playPluginSelection";
-import { beginPluginOperation, canOpenInPlay, groupPluginsByKind, invalidatePluginCatalog, usePluginCatalog } from "../pluginCatalog";
+import { PLUGIN_KIND_ORDER, beginPluginOperation, canOpenInPlay, groupPluginsByKind, invalidatePluginCatalog, usePluginCatalog } from "../pluginCatalog";
 import { setInstalledPluginActive, synchronizePluginEnvironment } from "../pluginLifecycle";
 import { formatPluginVersion, pluginKindPresentation } from "../pluginPresentation";
 import { PluginRemovalOptions, PluginRemovalResult, pluginRemovalSummary } from "../pluginRemoval";
@@ -38,6 +38,7 @@ export function PluginsPage({
     showControllers ? "loading" : "ready",
   );
   const [controllerRefreshRevision, setControllerRefreshRevision] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     if (!showControllers) return;
     let cancelled = false;
@@ -169,6 +170,35 @@ export function PluginsPage({
     }
   };
 
+  // One tab per kind of plugin, and Controllers. A kind with nothing
+  // installed has no tab, except Instruments: it is where the page opens,
+  // and where the loader and the empty state are shown.
+  const groups = groupPluginsByKind(installed);
+  const kindTabs = [
+    ...PLUGIN_KIND_ORDER
+      .map((kind) => ({
+        id: kind as string,
+        presentation: pluginKindPresentation(kind),
+        count: groups.find((group) => group.kind === kind)?.plugins.length ?? 0,
+      }))
+      .filter((tab) => tab.count > 0 || tab.id === "instrument"),
+    ...(showControllers
+      ? [{
+        id: "controller",
+        presentation: { label: "Controller", plural: "Controllers", className: "controller" },
+        count: controllers.length,
+      }]
+      : []),
+  ];
+  const requestedKind = searchParams.get("kind");
+  const selectedKind = kindTabs.some((tab) => tab.id === requestedKind)
+    ? requestedKind!
+    : kindTabs[0].id;
+  const selectKind = (kind: string) => {
+    setSearchParams(kind === kindTabs[0].id ? {} : { kind }, { replace: true });
+  };
+  const selectedGroups = groups.filter((group) => group.kind === selectedKind);
+
   return (
     <>
       <div className="plugin-manager-heading">
@@ -176,7 +206,7 @@ export function PluginsPage({
           eyebrow="Plugin library"
           title="Plugin Manager"
           detail={showControllers
-            ? "Install, configure and remove RackForge plugins: instruments and controllers. Musical controls remain in Play."
+            ? "Install, configure and remove RackForge plugins: instruments, effects and controllers. Musical controls remain in Play."
             : "Choose and manage the instruments available to this RackForge VST3 instance."}
         />
         <RfButton variant="primary" className="plugin-install-button" onClick={onInstall}>
@@ -184,10 +214,24 @@ export function PluginsPage({
           Install plugin
         </RfButton>
       </div>
-      <div className="plugin-section-heading">
-        <span className="card-kicker">Audio plugins</span>
-        <small>Installation and runtime activation are managed separately</small>
-      </div>
+      <nav className="settings-tabs plugin-kind-tabs" role="tablist" aria-label="Plugin kinds">
+        {kindTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            id={`plugin-kind-tab-${tab.id}`}
+            aria-selected={selectedKind === tab.id}
+            aria-controls="plugin-kind-panel"
+            className={`${tab.presentation.className}${selectedKind === tab.id ? " active" : ""}`}
+            onClick={() => selectKind(tab.id)}
+          >
+            <i className="plugin-kind-lamp" aria-hidden="true" />
+            {tab.presentation.plural}
+            <small>{tab.count}</small>
+          </button>
+        ))}
+      </nav>
       <div className="rf-floating-notice-stack">
         {removalMessage ? (
           <AsyncNotice
@@ -223,6 +267,13 @@ export function PluginsPage({
           </AsyncNotice>
         ) : null}
       </div>
+      <div
+        id="plugin-kind-panel"
+        className="plugin-kind-panel"
+        role="tabpanel"
+        aria-labelledby={`plugin-kind-tab-${selectedKind}`}
+      >
+      {selectedKind !== "controller" ? (
       <AsyncStateBoundary
         className="plugin-manager-boundary"
         status={pluginCatalog.status}
@@ -234,13 +285,8 @@ export function PluginsPage({
         onRetry={() => void invalidatePluginCatalog()}
         loaderSize="large"
       >
-        {groupPluginsByKind(installed).map((group) => (
+        {selectedGroups.map((group) => (
           <section className="plugin-kind-group" key={group.kind}>
-            <div className="plugin-section-heading">
-              <span className="card-kicker">
-                {pluginKindPresentation(group.kind).plural}
-              </span>
-            </div>
             <div className="plugin-grid expanded plugin-manager-grid">
         {group.plugins.map((plugin, index) => {
           const instance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
@@ -323,7 +369,8 @@ export function PluginsPage({
         <EmptyState title="No plugins installed" />
       ) : null}
         </AsyncStateBoundary>
-      {controllersStatus === "loading" ? (
+      ) : null}
+      {selectedKind === "controller" && controllersStatus === "loading" ? (
         <RfLoader
           className="plugin-controller-loader"
           label="Loading controllers"
@@ -331,12 +378,14 @@ export function PluginsPage({
           size="compact"
         />
       ) : null}
-      {controllers.length > 0 && (
-        <>
-          <div className="plugin-section-heading">
-            <span className="card-kicker">Controllers</span>
-            <small>Hardware surfaces installed as packages</small>
-          </div>
+      {selectedKind === "controller" && controllersStatus === "ready" && controllers.length === 0 ? (
+        <EmptyState title="No controllers installed" />
+      ) : null}
+      {selectedKind === "controller" && controllersStatus === "error" ? (
+        <EmptyState title="Controllers unavailable" />
+      ) : null}
+      {selectedKind === "controller" && controllers.length > 0 && (
+        <section className="plugin-kind-group">
           <div className="plugin-grid expanded">
             {controllers.map((controller) => (
               <NavLink
@@ -364,8 +413,9 @@ export function PluginsPage({
               </NavLink>
             ))}
           </div>
-        </>
+        </section>
       )}
+      </div>
       {pendingRemoval ? (
         <PluginRemovalDialog
           pluginName={pendingRemoval.plugin_name}

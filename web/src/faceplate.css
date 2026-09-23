@@ -2749,11 +2749,15 @@
    know how many columns `auto-fit` produced, so per-key borders would put a
    seam on the outside of a wrapped row. Gaps are right whichever way it lands.
 
-   Horizontally the gang spans the card and the four keys share the width
-   evenly, so the bank reads as one strip mounted across the panel. */
+   Horizontally the gang spans the card and its keys share the width
+   evenly, so the bank reads as one strip mounted across the panel. How many
+   keys there are is the card's business -- an effect has no Go to PLAY --
+   so the gang makes a column per key rather than four columns and a hole. */
 .plugin-manager-card-actions {
   gap: 1px !important;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  grid-template-columns: none !important;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   background: var(--line);
   border: var(--fp-seam);
   border-radius: var(--fp-radius-key);
@@ -2830,6 +2834,7 @@
     width: 92px;
     max-width: none;
     grid-template-columns: minmax(0, 1fr) !important;
+    grid-auto-flow: row;
     align-self: stretch;
   }
 
@@ -2949,13 +2954,13 @@
 /* The glyph plate is inset into the key, the way a legend plate is. Each
    key's plate is its subject's colour in the colour code (design/
    tokens.css), so the three read apart at a glance rather than as one
-   blue repeated: plugins blue, sound amber, presets green. */
+   blue repeated: instruments blue, sound amber, presets green. */
 .play-header-button {
   --key-plate: var(--acid);
 }
 
 .play-header-button.back {
-  --key-plate: var(--rf-color-plugin);
+  --key-plate: var(--rf-color-instrument);
 }
 
 .play-header-button.chain {
@@ -3170,6 +3175,72 @@
   font-family: var(--display-font);
   font-weight: 700;
   letter-spacing: var(--fp-track);
+}
+
+/* A tag is its kind's colour in the colour code (design/tokens.css):
+   instruments blue, effects amber, MIDI processors cyan, controllers red
+   -- where they were cyan, violet, green and peach, a palette of their own
+   that meant nothing anywhere else. */
+.plugin-kind-tag.instrument {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-instrument);
+}
+
+.plugin-kind-tag.effect {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-sound);
+}
+
+.plugin-kind-tag.midi-processor {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-midi);
+}
+
+.plugin-kind-tag.controller {
+  color: var(--red-ink);
+  background: var(--rf-color-input);
+}
+
+/* The Plugin Manager keeps one kind of plugin per tab -- the Settings
+   strip of keys -- and each tab is its kind's colour in the code: a lamp of
+   it beside the name, and the engaged key's lit edge in it rather than the
+   house accent. The count is data, so it is set in the mono face. */
+.plugin-kind-tabs button {
+  --kind-colour: var(--rf-color-instrument);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plugin-kind-tabs button.effect {
+  --kind-colour: var(--rf-color-sound);
+}
+
+.plugin-kind-tabs button.midi-processor {
+  --kind-colour: var(--rf-color-midi);
+}
+
+.plugin-kind-tabs button.controller {
+  --kind-colour: var(--rf-color-input);
+}
+
+.plugin-kind-lamp {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  background: var(--kind-colour);
+  border-radius: 1px;
+  box-shadow: inset 0 0 0 1px rgba(var(--edge-dark-rgb), 0.18);
+}
+
+.plugin-kind-tabs button > small {
+  color: var(--muted);
+  font: 600 10px/1 var(--mono-font);
+  letter-spacing: 0;
+}
+
+.plugin-kind-tabs button.active {
+  box-shadow: var(--fp-well), inset 0 -3px 0 var(--kind-colour) !important;
 }
 
 /* --------------------------------------------------- the create key ----- */
@@ -5719,7 +5790,7 @@
 /* The instrument's node keeps the instrument's blue, the one colour in
    the drawer that is not the effects'. */
 .play-chain-node.instrument {
-  box-shadow: var(--fp-lip), inset 3px 0 0 var(--rf-color-plugin);
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--rf-color-instrument);
 }
 
 .play-chain-node.effect.open {

@@ -44,6 +44,7 @@ exclude = [
     "platforms/raspberry-pi/engines/nuked-sc55/tools/scva-inspect",
     "platforms/raspberry-pi/engines/nuked-sc55/tools/scva-render",
     "platforms/raspberry-pi/engines/scva-arm64",
+    "vendor/asio-sys",
 ]
 
 [workspace.package]
@@ -71,3 +72,9 @@ url = "2.5"
 zeroize = "1.8"
 zip = { version = "8.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 wasmtime = { version = "47.0.3", default-features = false, features = ["anyhow", "cache", "cranelift", "runtime", "std"] }
+
+# cpal's ASIO layer, forked so the driver's own reports of lost audio reach the
+# host instead of being dropped: upstream 0.2.6 ignores `kAsioOverload` and
+# leaves `kAsioResyncRequest` as a TODO. See vendor/asio-sys/FORK.md.
+[patch.crates-io]
+asio-sys = { path = "vendor/asio-sys" }

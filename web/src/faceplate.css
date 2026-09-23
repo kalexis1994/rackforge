@@ -6880,11 +6880,12 @@
   color: var(--rf-lit-sound);
 }
 
-/* ------------------------------------------- the PLAY plugin picker ---
-   Choosing PLAY's instrument is a matter of the plugin area, so its picker
-   covers that area -- the plugin's header and its surface -- and nothing
-   else: the global header, with the master and the menu key, and the
-   sidebar stay in reach. Its ground is the area's, not the window's. */
+/* --------------------------------------- PLAY's plugin-area dialogs ---
+   Choosing PLAY's instrument, or one of its presets, is a matter of the
+   plugin area, so those dialogs cover that area -- the plugin's header and
+   its surface -- and nothing else: the global header, with the master and
+   the menu key, and the sidebar stay in reach. Their ground is the area's,
+   not the window's. */
 .plugin-surface-shell > .modal-dialog-backdrop.plugin-area-backdrop {
   position: absolute;
   inset: 0;

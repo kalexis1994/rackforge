@@ -171,6 +171,7 @@ export function PresetModal({
       onClose={onClose}
       dismissible={!busy}
       closeLabel="Close presets"
+      backdropClassName="plugin-area-backdrop"
     >
       {importCandidate ? (
         <section className="preset-import-stage" aria-label="Portable preset preview">

@@ -121,6 +121,7 @@ export function PluginPickerModal({
         dismissible={activatingId === null && pendingActivation === null}
         closeLabel="Close plugin selector"
         className="plugin-picker-modal"
+        backdropClassName="plugin-area-backdrop"
       >
         {pendingPlugin && programDraft && (
           <section className="plugin-switch-confirm" role="alert">

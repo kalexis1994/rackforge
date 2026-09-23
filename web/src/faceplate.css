@@ -6880,6 +6880,16 @@
   color: var(--rf-lit-sound);
 }
 
+/* ------------------------------------------- the PLAY plugin picker ---
+   Choosing PLAY's instrument is a matter of the plugin area, so its picker
+   covers that area -- the plugin's header and its surface -- and nothing
+   else: the global header, with the master and the menu key, and the
+   sidebar stay in reach. Its ground is the area's, not the window's. */
+.plugin-surface-shell > .modal-dialog-backdrop.plugin-area-backdrop {
+  position: absolute;
+  inset: 0;
+}
+
 /* ----------------------------------------------------------- the FX drawer ---
    The effects drawer was the last of PLAY on the old material: a navy band,
    cyan-washed nodes, and the suggestions a wrapped strip of chips under a

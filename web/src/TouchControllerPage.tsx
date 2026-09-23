@@ -13,6 +13,7 @@ import { Grid3X3, LogOut, Menu, Minus, Piano, Plus, ShieldAlert, X } from "lucid
 import { releaseVirtualMidi, sendVirtualMidi } from "./gateway";
 import { hostHaptic } from "./host";
 import type { SessionSnapshot } from "./types";
+import { padGridLayout } from "./touchControllerLayout";
 
 type ControllerMode = "keyboard" | "pads";
 type KeyboardWidth = "auto" | number;
@@ -49,7 +50,6 @@ const FULL_KEYBOARD_START_NOTE = 21;
 const FULL_KEYBOARD_WHITE_KEYS = 52;
 const FULL_KEYBOARD_MIN_WHITE_KEY_PX = 22;
 const WINDOWED_KEY_MIN_PX = 42;
-const PAD_ASPECT_RATIO = 1;
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -134,23 +134,34 @@ function noteName(note: number) {
   return `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1}`;
 }
 
-function useControllerSize(ref: RefObject<HTMLElement | null>) {
+/**
+ * The controller's measured size. `paused` holds it still for the length of
+ * a dock resize: the dock's height is the controller's height when docked,
+ * so every frame of the drag would otherwise re-render the whole controller
+ * for a size the gesture is already drawing. It is read again as the drag
+ * ends.
+ */
+function useControllerSize(ref: RefObject<HTMLElement | null>, paused = false) {
   const [size, setSize] = useState(() => ({
     width: window.innerWidth,
     height: window.innerHeight,
   }));
   useEffect(() => {
     const element = ref.current;
-    if (!element) return;
+    if (!element || paused) return;
     const update = () => {
       const bounds = element.getBoundingClientRect();
-      setSize({ width: bounds.width, height: bounds.height });
+      setSize((current) =>
+        current.width === bounds.width && current.height === bounds.height
+          ? current
+          : { width: bounds.width, height: bounds.height },
+      );
     };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref]);
+  }, [ref, paused]);
   return size;
 }
 
@@ -241,6 +252,9 @@ export function TouchControllerPage({
     pointerId: number;
     startY: number;
     height: number;
+    /** The height the drag has reached, drawn but not yet committed. */
+    latest: number | null;
+    frame: number | null;
   } | null>(null);
   const keyboardViewportGestureRef = useRef<{
     pointerId: number;
@@ -249,7 +263,7 @@ export function TouchControllerPage({
     trackWidth: number;
     viewport: KeyboardViewport;
   } | null>(null);
-  const controllerSize = useControllerSize(controllerRef);
+  const controllerSize = useControllerSize(controllerRef, resizingDock);
   const controllerWidth = controllerSize.width;
   const fullKeyboard = keyboardWidth === "auto"
     && controllerWidth >= FULL_KEYBOARD_WHITE_KEYS * FULL_KEYBOARD_MIN_WHITE_KEY_PX;
@@ -325,32 +339,20 @@ export function TouchControllerPage({
     Math.max(minimumDockHeight, dockHeights[mode] ?? automaticDockHeight),
   );
   const regularControllerLayout = controllerWidth >= 761 && sizingHeight > 600;
-  const padGap = regularControllerLayout ? 9 : 7;
-  const padAreaWidth = Math.max(
-    1,
-    Math.min(920, controllerSize.width - (regularControllerLayout ? 28 : 14)),
-  );
-  const dockChromeHeight = docked ? regularControllerLayout ? 48 : 42 : 0;
-  const padSizingHeight = docked ? dockHeight - dockChromeHeight : controllerSize.height;
-  const padAreaHeight = Math.max(
-    1,
-    padSizingHeight - (regularControllerLayout ? 28 : 14),
-  );
-  const padCellHeight = Math.max(1, Math.min(
-    (padAreaHeight - padGap * (padMatrix.rows - 1)) / padMatrix.rows,
-    (padAreaWidth - padGap * (padMatrix.columns - 1)) /
-      padMatrix.columns / PAD_ASPECT_RATIO,
-  ));
-  const padCellWidth = padCellHeight * PAD_ASPECT_RATIO;
-  const padGridWidth = padCellWidth * padMatrix.columns + padGap * (padMatrix.columns - 1);
-  const padGridHeight = padCellHeight * padMatrix.rows + padGap * (padMatrix.rows - 1);
-  const padDensityClass = padCellHeight < 54
-    ? " micro"
-    : padCellHeight < 92
-      ? " compact"
-      : padCellHeight < 132
-        ? " condensed"
-        : "";
+  const padInputs = {
+    docked,
+    regular: regularControllerLayout,
+    controllerWidth: controllerSize.width,
+    controllerHeight: controllerSize.height,
+    rows: padMatrix.rows,
+    columns: padMatrix.columns,
+  };
+  const {
+    gap: padGap,
+    gridWidth: padGridWidth,
+    gridHeight: padGridHeight,
+    densityClass: padDensityClass,
+  } = padGridLayout({ ...padInputs, dockHeight });
 
   const activeInstance = session.instances.find(
     (instance) => instance.instance_id === session.active_instance_id,
@@ -611,9 +613,33 @@ export function TouchControllerPage({
       pointerId: event.pointerId,
       startY: event.clientY,
       height: dockHeight,
+      latest: null,
+      frame: null,
     };
     setResizingDock(true);
     hostHaptic("confirm");
+  };
+
+  // A drag draws the dock straight onto the page, once a frame, and tells
+  // React only when it ends. Committing every pointer move re-rendered the
+  // whole controller -- every key or pad -- twice a move, and wrote the
+  // height to storage each time; the FX drawer is light because what it
+  // holds is cheap to re-render, and this is not. The CSS variables written
+  // here are the ones render writes, so the commit at the end lands on the
+  // same values and nothing jumps.
+  const drawDock = () => {
+    const gesture = dockResizeRef.current;
+    const controller = controllerRef.current;
+    if (!gesture || !controller) return;
+    gesture.frame = null;
+    if (gesture.latest === null) return;
+    controller.style.setProperty("--controller-dock-height", `${gesture.latest}px`);
+    const grid = controller.querySelector<HTMLElement>(".touch-pad-grid");
+    if (grid) {
+      const pads = padGridLayout({ ...padInputs, dockHeight: gesture.latest });
+      grid.style.setProperty("--pad-grid-width", `${pads.gridWidth}px`);
+      grid.style.setProperty("--pad-grid-height", `${pads.gridHeight}px`);
+    }
   };
 
   const resizeDock = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -621,18 +647,26 @@ export function TouchControllerPage({
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    setCurrentDockHeight(Math.min(
+    gesture.latest = Math.min(
       maximumDockHeight,
       Math.max(minimumDockHeight, gesture.height + gesture.startY - event.clientY),
-    ));
+    );
+    gesture.frame ??= window.requestAnimationFrame(drawDock);
+  };
+
+  const commitDockResize = () => {
+    const gesture = dockResizeRef.current;
+    dockResizeRef.current = null;
+    if (gesture?.frame != null) window.cancelAnimationFrame(gesture.frame);
+    if (gesture?.latest != null) setCurrentDockHeight(gesture.latest);
+    setResizingDock(false);
   };
 
   const finishDockResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (dockResizeRef.current?.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    dockResizeRef.current = null;
-    setResizingDock(false);
+    commitDockResize();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -704,10 +738,7 @@ export function TouchControllerPage({
         onPointerMove={resizeDock}
         onPointerUp={finishDockResize}
         onPointerCancel={finishDockResize}
-        onLostPointerCapture={() => {
-          dockResizeRef.current = null;
-          setResizingDock(false);
-        }}
+        onLostPointerCapture={commitDockResize}
         onDoubleClick={(event) => {
           event.preventDefault();
           event.stopPropagation();

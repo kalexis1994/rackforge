@@ -490,6 +490,19 @@
 .top-controls {
   flex: 0 1 auto;
   min-width: 0;
+  align-self: stretch;
+}
+
+/* The meter stands the full height of the bar's content, top to bottom
+   like the window at the other end, where it was a 51 px stub centred in
+   68: its bars take whatever the label and L R leave them. The faders
+   stay centred beside it. */
+.top-controls .master-output-meter {
+  align-self: stretch;
+}
+
+.top-controls .master-output-meter-bars {
+  height: auto;
 }
 
 /* The master faders, at every size: the value above, the rail across the
@@ -606,8 +619,11 @@
     padding: 7px;
   }
 
+  /* The plinth under the bars went with the L R it divided them from. */
   .topbar.has-mixer-toggle .master-output-meter-bars {
     height: auto;
+    padding-bottom: 0;
+    border-bottom: 0;
   }
 
   /* Pressed, or open, the key sits down in the panel, as PLAY's header keys
@@ -959,11 +975,19 @@
 /* --------------------------------------------------- wells and meters --- */
 
 .compact-fader-rail,
+/* Each channel is a slot rounded at both ends. At the keys' 2 px, less
+   the 1 px seam, the level lit inside it kept a 1 px corner: the top of an
+   empty slot read round and its lit bottom square. 3 px on a 6 px slot
+   rounds both ends fully, and the level follows the slot's inside. */
 .master-output-meter-track {
-  border-radius: var(--fp-radius-key) !important;
+  border-radius: 3px !important;
   background: var(--panel-inset) !important;
   box-shadow: var(--fp-well) !important;
   border: var(--fp-seam) !important;
+}
+
+.master-output-meter-track b {
+  border-radius: 2px;
 }
 
 .compact-fader-fill {

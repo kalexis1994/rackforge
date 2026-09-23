@@ -6,10 +6,12 @@ use wry::{
 };
 
 /// Links the interface may send to the system browser: the project's own
-/// pages, and nothing else. The WebView itself only ever shows the local
-/// interface, so a link out opens beside it rather than in place of it.
+/// pages and RackForge Web, and nothing else. The WebView itself only ever
+/// shows the local interface, so a link out opens beside it rather than in
+/// place of it.
 fn opens_in_system_browser(url: &str) -> bool {
     url.starts_with("https://github.com/kalexis1994/")
+        || url.starts_with("https://kalexis1994.github.io/rackforge/")
 }
 
 /// Where the WebView keeps what it caches between runs.

@@ -194,10 +194,11 @@ impl IPlugViewTrait for RackForgeView {
                 })
                 // Inside a DAW a WebView2 window of its own would float free of
                 // the plug-in. A link that asks for a new window -- About's
-                // link to the project -- opens in the system browser instead,
-                // and nothing else opens at all.
+                // links to the project and to RackForge Web -- opens in the
+                // system browser instead, and nothing else opens at all.
                 .with_new_window_req_handler(|url, _features| {
-                    if url.starts_with("https://github.com/kalexis1994/")
+                    if (url.starts_with("https://github.com/kalexis1994/")
+                        || url.starts_with("https://kalexis1994.github.io/rackforge/"))
                         && let Err(error) = webbrowser::open(&url)
                     {
                         diagnostic::write(format!(

@@ -2720,6 +2720,18 @@
   overflow-wrap: anywhere;
 }
 
+/* The source and RackForge Web, one under the other. */
+.about-project-links {
+  margin-top: 10px;
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.about-project-links > .about-project-link {
+  margin-top: 0;
+}
+
 .about-project-link:hover {
   text-decoration-color: currentColor;
 }

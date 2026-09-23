@@ -8,9 +8,11 @@ import {
   WINDOWS_PATH,
 } from "../components/platformGlyphs";
 
-/** The project's home. The desktop app and the VST3 editor open only links
- *  under this owner in the system browser (desktop_webview.rs, view.rs). */
+/** The project's home, and RackForge Web, the whole interface running in a
+ *  browser. The desktop app and the VST3 editor open only these two in the
+ *  system browser (desktop_webview.rs, view.rs). */
 const PROJECT_URL = "https://github.com/kalexis1994/rackforge";
+const WEB_DEMO_URL = "https://kalexis1994.github.io/rackforge/";
 /** Always the newest release: GitHub resolves `latest` itself, so none of
  *  these links goes stale the way a pinned version would. */
 const LATEST_RELEASE_URL = `${PROJECT_URL}/releases/latest`;
@@ -53,15 +55,25 @@ export function AboutPage() {
           <div className="settings-copy">
             <span className="card-kicker">Project</span>
             <h2>RackForge on GitHub</h2>
-            <p>Source code, releases and issues.</p>
-            <a
-              className="about-project-link"
-              href={PROJECT_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              github.com/kalexis1994/rackforge
-            </a>
+            <p>Source code, releases and issues, and RackForge Web to try it in a browser.</p>
+            <div className="about-project-links">
+              <a
+                className="about-project-link"
+                href={PROJECT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                github.com/kalexis1994/rackforge
+              </a>
+              <a
+                className="about-project-link"
+                href={WEB_DEMO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                kalexis1994.github.io/rackforge
+              </a>
+            </div>
           </div>
         </article>
 

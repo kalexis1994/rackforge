@@ -5755,6 +5755,63 @@
   filter: drop-shadow(0 0 5px var(--rf-lit-sound));
 }
 
+/* ------------------------------------------ what the pointer is on ---
+   Everything on the canvas answers the pointer: a node brightens and
+   lifts a hair, a port grows a ring, a cable thickens and glows in its
+   signal's colour. A node whose menu is open is ringed and haloed in its
+   kind's colour, so the menu reads as that node's; a selected node wears
+   a finer ring. Outline and filter, not box-shadow: the node's shadow
+   already says whether it has a problem. */
+.rack-flow-node {
+  transition:
+    filter var(--rf-motion-fast) var(--rf-ease-standard),
+    translate var(--rf-motion-fast) var(--rf-ease-standard),
+    outline-color var(--rf-motion-fast) var(--rf-ease-standard);
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+}
+
+.rack-flow-node:hover {
+  filter: brightness(1.14);
+  translate: 0 -1px;
+}
+
+.rack-flow-node.selected {
+  outline: 1px solid color-mix(in srgb, var(--node-color) 70%, transparent);
+}
+
+.rack-flow-node.menu-open {
+  outline: 2px solid var(--node-color);
+  filter: brightness(1.12) drop-shadow(0 0 10px color-mix(in srgb, var(--node-color) 55%, transparent));
+}
+
+.rack-flow-node .react-flow__handle:hover {
+  scale: 1.35;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--port-colour) 35%, transparent);
+}
+
+.rack-graph-canvas .rack-flow-edge-path {
+  transition:
+    opacity var(--rf-motion-fast) var(--rf-ease-standard),
+    stroke-width var(--rf-motion-fast) var(--rf-ease-standard),
+    filter var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.rack-graph-canvas .react-flow__edge:hover .rack-flow-edge-path,
+.rack-graph-canvas .react-flow__edge.selected .rack-flow-edge-path {
+  stroke-width: 3.5 !important;
+}
+
+.rack-graph-canvas .react-flow__edge:hover .rack-flow-edge-path.audio,
+.rack-graph-canvas .react-flow__edge.selected .rack-flow-edge-path.audio {
+  filter: drop-shadow(0 0 4px var(--rf-lit-sound));
+}
+
+.rack-graph-canvas .react-flow__edge:hover .rack-flow-edge-path.midi,
+.rack-graph-canvas .react-flow__edge.selected .rack-flow-edge-path.midi {
+  filter: drop-shadow(0 0 4px var(--rf-lit-input));
+}
+
 /* Why a cable was refused, for a moment, over the canvas. */
 .rack-graph-refusal {
   position: absolute;

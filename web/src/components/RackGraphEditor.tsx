@@ -88,6 +88,8 @@ type CanvasNodeData = {
   connected?: string[];
   /** The worst problem this node has as it is wired; see rackGraphProblems. */
   problem?: "error" | "warning";
+  /** Its menu is open: the node lights so the menu reads as its own. */
+  menuOpen?: boolean;
   labelKind?: RackGraphLabel["kind"];
   tone?: RackGraphLabelTone;
 };
@@ -187,7 +189,7 @@ const RackNodeCard = memo(function RackNodeCard({ id: nodeId, data, selected }: 
   const emitsAudio = acceptsMidi;
   const acceptsAudio = data.kind === "plugin" || data.kind === "rack";
   return (
-    <div className={`rack-flow-node ${data.kind}${data.pluginKind ? ` ${data.pluginKind}` : ""}${data.bannerUrl ? " branded" : ""}${data.problem ? ` has-${data.problem}` : ""} ${selected ? "selected" : ""}`}>
+    <div className={`rack-flow-node ${data.kind}${data.pluginKind ? ` ${data.pluginKind}` : ""}${data.bannerUrl ? " branded" : ""}${data.problem ? ` has-${data.problem}` : ""}${data.menuOpen ? " menu-open" : ""} ${selected ? "selected" : ""}`}>
       {data.bannerUrl ? (
         // Clipped on its own: the node itself cannot hide its overflow, the
         // ports sit half outside its edge.
@@ -881,9 +883,12 @@ export default function RackGraphEditor({
     }
     return toCanvasNodes(materialized, racks, pluginKinds, pluginArt).map((node) => {
       const problem = worst.get(node.id);
-      return problem ? { ...node, data: { ...node.data, problem } } : node;
+      const menuOpen = nodeMenu?.nodeId === node.id;
+      return problem || menuOpen
+        ? { ...node, data: { ...node.data, ...(problem ? { problem } : {}), ...(menuOpen ? { menuOpen } : {}) } }
+        : node;
     });
-  }, [materialized, racks, pluginKinds, pluginArt, problems]);
+  }, [materialized, racks, pluginKinds, pluginArt, problems, nodeMenu]);
   const [interactiveNodes, setInteractiveNodes] = useState(mappedNodes);
   const interactiveRackIdRef = useRef(rack.id);
   useLayoutEffect(() => {

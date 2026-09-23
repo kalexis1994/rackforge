@@ -18,7 +18,8 @@ export interface RevealTiming {
   loaderDelayMs: number;
   loaderMinimumMs: number;
   loaderFadeMs: number;
-  /** Given up waiting: whatever has not decoded by now shows as it loads. */
+  /** Given up waiting: whatever has not decoded by now shows as it loads.
+   *  Kept short -- a list held back reads as a hang, not as care. */
   timeoutMs: number;
 }
 
@@ -27,7 +28,7 @@ export const ARTWORK_REVEAL_TIMING: RevealTiming = {
   loaderMinimumMs: 450,
   // --rf-motion-emphasized, the loader's fade in CSS.
   loaderFadeMs: 320,
-  timeoutMs: 2_500,
+  timeoutMs: 1_500,
 };
 
 export type RevealLoader = "hidden" | "shown" | "leaving" | "gone";
@@ -65,33 +66,40 @@ export function revealState(
   return { revealed: true, loader: "gone", nextChangeAt: null };
 }
 
-/** Artwork already decoded in this visit: reopening shows it at once. */
-const decoded = new Set<string>();
+/**
+ * Artwork already waited for in this visit -- decoded, broken, or given up
+ * on. Reopening never waits for the same image twice: a slow or broken one
+ * would otherwise hold the list back on every open.
+ */
+const waitedFor = new Set<string>();
 
 function decodeImage(url: string): Promise<void> {
-  if (decoded.has(url)) return Promise.resolve();
+  if (waitedFor.has(url)) return Promise.resolve();
   const image = new Image();
   image.src = url;
   return image
     .decode()
-    .then(() => {
-      decoded.add(url);
-    })
     .catch(() => {
       // A broken banner must not hold the list back; it shows as broken.
+    })
+    .finally(() => {
+      waitedFor.add(url);
     });
 }
 
 /**
  * The reveal state for a list whose artwork is `urls`. Everything is keyed
- * on the joined list, so a new array with the same images is the same wait.
+ * on the set of images, so a new array with the same images -- in any
+ * order -- is the same wait.
  */
 export function useArtworkReveal(urls: readonly string[], timing = ARTWORK_REVEAL_TIMING) {
-  const key = urls.join("\n");
+  // The set, not the order: the list reorders when the active instrument
+  // changes, and that is not new artwork to wait for.
+  const key = [...new Set(urls)].sort().join("\n");
   const [wait, setWait] = useState(() => ({
     key,
     startedAt: performance.now(),
-    readyAt: urls.every((url) => decoded.has(url)) ? performance.now() : null as number | null,
+    readyAt: urls.every((url) => waitedFor.has(url)) ? performance.now() : null as number | null,
   }));
   const [now, setNow] = useState(() => performance.now());
 
@@ -103,20 +111,21 @@ export function useArtworkReveal(urls: readonly string[], timing = ARTWORK_REVEA
     const startedAt = performance.now();
     const list = key ? key.split("\n") : [];
     if (wait.key !== key) {
-      const readyAt = list.every((url) => decoded.has(url)) ? startedAt : null;
+      const readyAt = list.every((url) => waitedFor.has(url)) ? startedAt : null;
       // Deferred to a task: the wait is recorded as a new one, not set in
       // the middle of this render's commit.
       queueMicrotask(() => {
         if (alive) setWait({ key, startedAt, readyAt });
       });
     }
-    if (list.every((url) => decoded.has(url))) {
+    if (list.every((url) => waitedFor.has(url))) {
       return () => {
         alive = false;
       };
     }
     const settle = () => {
       if (!alive) return;
+      for (const url of list) waitedFor.add(url);
       const readyAt = performance.now();
       setWait((previous) =>
         previous.key === key && previous.readyAt === null ? { ...previous, readyAt } : previous,

@@ -207,17 +207,20 @@ pub fn open_audio_input(profile: &AudioInputProfile) -> Result<OpenedAudioInput>
         .validate()
         .context("validating audio input profile")?;
     let devices = discover_audio_devices()?;
-    open_audio_input_from_inventory(profile, &devices)
+    open_audio_input_from_inventory(profile, &devices, None)
 }
 
+/// Opens the capture a profile names. `alongside` is the device the output
+/// is playing through, which an "automatic" input prefers.
 pub fn open_audio_input_from_inventory(
     profile: &AudioInputProfile,
     devices: &[AudioDeviceDescriptor],
+    alongside: Option<&AudioDeviceId>,
 ) -> Result<OpenedAudioInput> {
     profile
         .validate()
         .context("validating audio input profile")?;
-    let device = resolve_input_device(profile, devices)?.clone();
+    let device = resolve_input_device(profile, devices, alongside)?.clone();
     profile
         .validate_against(&device)
         .with_context(|| format!("validating input profile against {}", device.id))?;
@@ -360,7 +363,31 @@ fn resolve_output_device<'a>(
 fn resolve_input_device<'a>(
     profile: &AudioInputProfile,
     devices: &'a [AudioDeviceDescriptor],
+    alongside: Option<&AudioDeviceId>,
 ) -> Result<&'a AudioDeviceDescriptor> {
+    if profile.device == AudioDeviceSelector::Automatic {
+        return match rackforge_audio_api::automatic_input_device(profile, devices, alongside) {
+            Some(device) => {
+                eprintln!(
+                    "AUDIO_INPUT_AUTOMATIC selected={} beside_output={}",
+                    device.id,
+                    alongside.is_some_and(|id| id == &device.id)
+                );
+                Ok(device)
+            }
+            None => {
+                let available = devices
+                    .iter()
+                    .filter(|device| device.capture.is_some())
+                    .map(|device| device.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                bail!(
+                    "no connected input can capture this audio profile; capture devices seen: {available}"
+                )
+            }
+        };
+    }
     let matching = devices
         .iter()
         .filter(|device| device.capture.is_some() && profile.device.matches(device))

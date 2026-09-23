@@ -350,6 +350,29 @@ pub fn preferred_automatic_output<'a>(
         .copied()
 }
 
+/// The capture device an input profile left on "automatic" opens: the
+/// interface the output is already playing through, when it can capture
+/// this profile -- one device, one clock, which is what input and output
+/// sharing a rate and period assumes -- and otherwise the connected device
+/// that can, by the same preference the output uses (USB first).
+///
+/// Automatic used to match nothing on the capture side at all, so the
+/// shipped example's `[audio.input.device] mode = "automatic"` never opened
+/// an input on any machine.
+pub fn automatic_input_device<'a>(
+    profile: &AudioInputProfile,
+    devices: &'a [AudioDeviceDescriptor],
+    alongside: Option<&AudioDeviceId>,
+) -> Option<&'a AudioDeviceDescriptor> {
+    let compatible = devices
+        .iter()
+        .filter(|device| device.capture.is_some() && profile.validate_against(device).is_ok())
+        .collect::<Vec<_>>();
+    alongside
+        .and_then(|id| compatible.iter().find(|device| &device.id == id).copied())
+        .or_else(|| preferred_automatic_output(&compatible))
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioSampleFormat {
@@ -1409,6 +1432,41 @@ mod tests {
             toml::from_str::<AudioInputDocument>(&text).unwrap(),
             document
         );
+    }
+
+    #[test]
+    fn automatic_input_follows_the_output_interface_and_otherwise_prefers_usb() {
+        let mut profile = input_profile();
+        profile.device = AudioDeviceSelector::Automatic;
+        let usb = device();
+        let mut board = device();
+        board.id = AudioDeviceId::new("alsa.board.pcm-0").unwrap();
+        board.transport = AudioTransport::BuiltIn;
+        board.usb = None;
+        let devices = vec![board.clone(), usb.clone()];
+
+        // Beside the output's interface when it can capture.
+        assert_eq!(
+            automatic_input_device(&profile, &devices, Some(&board.id)).map(|device| &device.id),
+            Some(&board.id)
+        );
+        // Otherwise the preferred kind of connection.
+        assert_eq!(
+            automatic_input_device(&profile, &devices, None).map(|device| &device.id),
+            Some(&usb.id)
+        );
+        // An output that cannot capture is passed over.
+        let mut playback_only = board.clone();
+        playback_only.capture = None;
+        let devices = vec![playback_only.clone(), usb.clone()];
+        assert_eq!(
+            automatic_input_device(&profile, &devices, Some(&playback_only.id))
+                .map(|device| &device.id),
+            Some(&usb.id)
+        );
+        // Nothing that can capture this profile: nothing.
+        profile.sample_rate_hz = 22_050;
+        assert!(automatic_input_device(&profile, &devices, None).is_none());
     }
 
     #[test]

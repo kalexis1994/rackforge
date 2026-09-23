@@ -1846,7 +1846,11 @@ pub fn run(config: LiveConfig) -> Result<()> {
     // player the instrument that is.
     let mut input_absent_reason = None;
     let input = match config.audio_input.as_ref() {
-        Some(profile) => match open_audio_input_from_inventory(profile, &audio_devices) {
+        Some(profile) => match open_audio_input_from_inventory(
+            profile,
+            &audio_devices,
+            output.as_ref().map(|output| &output.device.id),
+        ) {
             Ok(input) => Some(input),
             Err(error) => {
                 println!("AUDIO_INPUT_ABSENT reason={:?}", error.to_string());

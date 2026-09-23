@@ -5698,6 +5698,7 @@
 
 .graph-workspace-title .card-kicker {
   color: var(--ink);
+  white-space: nowrap;
 }
 
 .graph-workspace-state {
@@ -5726,7 +5727,6 @@
   gap: 8px;
 }
 
-.graph-workspace-count,
 .graph-workspace-preview {
   flex: 0 0 auto;
   color: var(--fp-rail-label);
@@ -5754,21 +5754,62 @@
   outline-offset: 1px;
 }
 
-.graph-workspace-live {
-  min-height: 34px;
-}
-
 /* Narrow, the rail is hidden and the navigation opens from the header's
    own menu key, first in its row; "Cannot be saved" gives way to room, as
    Save is off and the strip under the canvas says why. */
 @media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
   .graph-workspace-header {
-    gap: 8px 12px;
+    flex-wrap: nowrap;
+    gap: 8px;
     padding: 8px;
   }
 
-  .graph-workspace-blocked {
+  .graph-workspace-title {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .graph-workspace-state {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .graph-workspace-name {
+    min-width: 72px;
+  }
+}
+
+/* On a phone held upright the header stays one row: Exit and Save give up
+   their words for their icons -- the words stay for a screen reader -- and
+   the name takes what is left. */
+@media (max-width: 560px) {
+  .graph-workspace-state .graph-workspace-preview {
     display: none;
+  }
+
+  /* The title breaks onto two lines rather than being cut: RACK / EDITOR. */
+  .graph-workspace-title .card-kicker {
+    white-space: normal;
+  }
+
+  .graph-workspace-key {
+    min-width: 38px;
+    padding: 0 10px;
+  }
+
+  .graph-workspace-key.save {
+    min-width: 38px;
+  }
+
+  .graph-workspace-save-label > span:not(.async-action-label),
+  .graph-workspace-key.exit > span,
+  .graph-workspace-key .async-action-label > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 
@@ -5787,9 +5828,30 @@
   gap: 8px;
 }
 
+/* Save carries why it is off at its foot: the key grows a line, its label
+   stays centred above. */
+.graph-workspace-save-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.graph-workspace-key.save.blocked {
+  display: inline-grid;
+  grid-template-rows: 1fr auto;
+  justify-items: center;
+  align-items: center;
+  gap: 3px;
+  padding-top: 5px;
+  padding-bottom: 4px;
+}
+
 .graph-workspace-blocked {
+  align-self: end;
   color: var(--red);
-  font: 700 10px/1 var(--display-font);
+  text-align: center;
+  font: 700 8px/1 var(--display-font);
   letter-spacing: var(--fp-track);
   text-transform: uppercase;
   white-space: nowrap;
@@ -5846,6 +5908,16 @@
   opacity: 0.42;
   box-shadow: none;
   cursor: not-allowed;
+}
+
+/* Off because the graph has an error: an unlit key sunk in the panel, not a
+   faded one, so the red reason on it reads at full strength. */
+.graph-workspace-key.save.blocked:disabled {
+  opacity: 1;
+  color: var(--muted);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  box-shadow: var(--fp-well);
 }
 
 /* The details plate: a plate, not smoked glass. */

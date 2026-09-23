@@ -494,7 +494,7 @@ function playableSongParts(performance: PerformanceSnapshot, song: SongDefinitio
   return song.parts.filter((part) => {
     if (part.content) return true;
     return performance.library.racks.some(
-      (rack) => rack.id === part.rack_id && rack.enabled,
+      (rack) => rack.id === part.rack_id,
     );
   });
 }
@@ -596,8 +596,10 @@ function RackTargets({
   performance: PerformanceSnapshot;
   activate: (location: LiveLocation) => void;
 }) {
-  const racks = performance.library.racks.filter((rack) => rack.enabled);
-  if (racks.length === 0) return <LiveEmpty label="No enabled Racks" />;
+  // Every saved Rack is offered: a Rack with an error cannot be saved, so a
+  // saved one plays. `enabled` stays in the data, unused, for later.
+  const racks = performance.library.racks;
+  if (racks.length === 0) return <LiveEmpty label="No Racks" />;
   const selectedRackId = performance.live.rack?.kind === "rack"
     ? performance.live.rack.rack_id
     : undefined;
@@ -1716,9 +1718,11 @@ function BasicFields({
   onEnabled,
 }: {
   name: string;
-  enabled: boolean;
+  /** Available in LIVE, for Songs and Setlists. A Rack has no such switch:
+   *  a saved Rack is a working one, and every one is offered. */
+  enabled?: boolean;
   onName: (name: string) => void;
-  onEnabled: (enabled: boolean) => void;
+  onEnabled?: (enabled: boolean) => void;
 }) {
   return (
     <div className="form-grid basic-fields">
@@ -1730,15 +1734,17 @@ function BasicFields({
           onChange={(event) => onName(event.target.value)}
         />
       </label>
-      <label className="toggle-field">
-        <span>Available in LIVE</span>
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(event) => onEnabled(event.target.checked)}
-        />
-        <i />
-      </label>
+      {onEnabled ? (
+        <label className="toggle-field">
+          <span>Available in LIVE</span>
+          <input
+            type="checkbox"
+            checked={enabled ?? false}
+            onChange={(event) => onEnabled(event.target.checked)}
+          />
+          <i />
+        </label>
+      ) : null}
     </div>
   );
 }
@@ -1783,7 +1789,7 @@ function rackPreviewVoiceCount(
     if (node.kind.kind !== "rack") return count;
     const childRackId = node.kind.rack_id;
     return count + rackPreviewVoiceCount(
-      racks.find((candidate) => candidate.id === childRackId && candidate.enabled),
+      racks.find((candidate) => candidate.id === childRackId),
       racks,
       nextVisited,
       counts,
@@ -2170,9 +2176,6 @@ function RackEditor({
       nameLabel="Rack name"
       name={draft.name}
       onName={(name) => setDraft({ ...draft, name })}
-      enabled={draft.enabled}
-      onEnabled={(enabled) => setDraft({ ...draft, enabled })}
-      instrumentCount={previewInstrumentCount}
       previewStatus={visiblePreviewStatus}
       dirty={dirty}
       isNew={isNew}
@@ -2217,9 +2220,7 @@ function RackEditor({
       ) : null}
       <BasicFields
         name={draft.name}
-        enabled={draft.enabled}
         onName={(name) => setDraft({ ...draft, name })}
-        onEnabled={(enabled) => setDraft({ ...draft, enabled })}
       />
       <EditorSection
         title="Rack graph"
@@ -2624,7 +2625,6 @@ function SongEditor({
         if (selectedPartIndex < 0) return;
         updatePart(selectedPartIndex, (part) => ({ ...part, name }));
       }}
-      instrumentCount={partPreview.instrumentCount}
       previewStatus={partPreview.status}
       dirty={dirty}
       isNew={isNew}

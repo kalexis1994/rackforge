@@ -3,8 +3,8 @@ import { AsyncActionLabel } from "./AsyncSpinner";
 
 /**
  * The node editor's own header, across the top of the screen while it is
- * open: what is being edited, its name and whether LIVE offers it, how the
- * preview stands, and Exit and Save. It replaces the thin bar that used to
+ * open: what is being edited and whether it is saved, how the preview
+ * stands, its name, and Exit and Save. It replaces the thin bar that used to
  * name the Rack and the details dialog a key over the canvas opened -- the
  * details are always in view now, and nothing floats over the graph.
  *
@@ -16,9 +16,6 @@ export function GraphWorkspaceHeader({
   nameLabel,
   name,
   onName,
-  enabled,
-  onEnabled,
-  instrumentCount,
   previewStatus,
   dirty,
   isNew,
@@ -32,10 +29,6 @@ export function GraphWorkspaceHeader({
   nameLabel: string;
   name: string;
   onName: (name: string) => void;
-  /** Available in LIVE, for an editor whose subject LIVE lists. */
-  enabled?: boolean;
-  onEnabled?: (enabled: boolean) => void;
-  instrumentCount: number;
   previewStatus: "idle" | "applying" | "ready";
   dirty: boolean;
   isNew: boolean;
@@ -46,7 +39,6 @@ export function GraphWorkspaceHeader({
   onExit: () => void;
   className?: string;
 }) {
-  const instruments = `${instrumentCount} ${instrumentCount === 1 ? "instrument" : "instruments"}`;
   return (
     <header className={`graph-workspace-header ${className}`.trim()} aria-label={title}>
       {/* Narrow, where the rail is hidden, the navigation opens from here --
@@ -81,28 +73,7 @@ export function GraphWorkspaceHeader({
           onChange={(event) => onName(event.target.value)}
         />
       </label>
-      {onEnabled ? (
-        <label className="rack-details-toggle graph-workspace-live">
-          <span>
-            <strong>Available in LIVE</strong>
-            <small>{instruments}</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={enabled ?? false}
-            onChange={(event) => onEnabled(event.target.checked)}
-          />
-          <i />
-        </label>
-      ) : (
-        <span className="graph-workspace-count">{instruments}</span>
-      )}
       <div className="graph-workspace-actions">
-        {saveBlocked ? (
-          <span className="graph-workspace-blocked" title={saveBlocked}>
-            Cannot be saved
-          </span>
-        ) : null}
         <button
           type="button"
           className="graph-workspace-key exit"
@@ -112,18 +83,25 @@ export function GraphWorkspaceHeader({
           <LogOut aria-hidden="true" />
           <span>Exit</span>
         </button>
+        {/* Why Save is off is written on the key it turns off, at its foot,
+            taking no width of its own. */}
         <button
           type="button"
-          className="graph-workspace-key save"
+          className={`graph-workspace-key save${saveBlocked ? " blocked" : ""}`}
           disabled={(!dirty && !isNew) || pending || !!saveBlocked}
           title={saveBlocked ?? undefined}
           aria-describedby={saveBlocked ? "graph-workspace-blocked-reason" : undefined}
           onClick={onSave}
         >
-          <AsyncActionLabel active={pending} activeLabel="Saving…">
-            <Save aria-hidden="true" />
-            <span>Save</span>
-          </AsyncActionLabel>
+          <span className="graph-workspace-save-label">
+            <AsyncActionLabel active={pending} activeLabel="Saving…">
+              <Save aria-hidden="true" />
+              <span>Save</span>
+            </AsyncActionLabel>
+          </span>
+          {saveBlocked ? (
+            <small className="graph-workspace-blocked">Cannot be saved</small>
+          ) : null}
         </button>
         {saveBlocked ? (
           <span id="graph-workspace-blocked-reason" className="visually-hidden">

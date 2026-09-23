@@ -3346,15 +3346,10 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 );
             }
             let (library, rack) = match context.performance_repository.lock() {
+                // Every Rack plays: its `enabled` flag is kept in the data but
+                // no longer gates anything.
                 Ok(repository) => match repository.library().resolve_playable(&location) {
-                    Ok(rack) if rack.enabled => (repository.library().clone(), rack),
-                    Ok(_) => {
-                        return error_response(
-                            ControlErrorCode::Rejected,
-                            "the selected Rack is disabled",
-                            Some(snapshot.revision),
-                        );
-                    }
+                    Ok(rack) => (repository.library().clone(), rack),
                     Err(error) => {
                         return error_response(
                             ControlErrorCode::NotFound,

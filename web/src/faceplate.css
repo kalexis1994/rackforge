@@ -473,6 +473,21 @@
     grid-row: 1;
   }
 
+  /* Between the mode and the plugin, one lit pixel of the display itself:
+     a 3 px dot in the window's dim phosphor with its bloom, the same
+     8 px of air on either side. It sits inside the plugin's line so a
+     long name still ends in an ellipsis. */
+  .topbar .now-playing .muted-inline::before {
+    content: "";
+    display: inline-block;
+    width: 3px;
+    height: 3px;
+    margin-right: 8px;
+    vertical-align: 0.2em;
+    background: var(--lcd-phos-dim);
+    box-shadow: 0 0 4px var(--lcd-bloom);
+  }
+
   .topbar .now-playing strong {
     grid-column: 1 / -1 !important;
     grid-row: 2;
@@ -2658,8 +2673,10 @@
    silkscreened on it rather than lit.
    ========================================================================== */
 
+/* The same space around the keys on every side: the bar kept 8 px above
+   and below them and up to 26 at the ends. */
 .play-plugin-toolbar {
-  padding: 8px clamp(12px, 2.5vw, 26px) !important;
+  padding: 8px !important;
   color: var(--ink) !important;
   background:
     repeating-linear-gradient(

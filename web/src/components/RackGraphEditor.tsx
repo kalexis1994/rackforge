@@ -1697,16 +1697,10 @@ export default function RackGraphEditor({
               className="rack-node-menu rack-pane-menu"
               style={menuStyle(paneMenu)}
               role="menu"
-              aria-label="Add to Rack"
+              aria-label={paneMenu.from
+                ? `Connect ${paneMenu.from.signal === "audio" ? "after" : "from"} ${paneMenu.from.name}`
+                : `Add to ${materialized.name}`}
             >
-              <header>
-                <span>{paneMenu.from ? "Connect to" : "Add to Rack"}</span>
-                <strong>
-                  {paneMenu.from
-                    ? `${paneMenu.from.signal === "audio" ? "After" : "From"} ${paneMenu.from.name}`
-                    : materialized.name}
-                </strong>
-              </header>
               {!paneMenu.from || paneMenu.from.signal === "midi" ? (
                 <button type="button" role="menuitem" disabled={!canAddInstrument} onClick={() => {
                   onAddInstrument(paneMenu.position, "instrument");

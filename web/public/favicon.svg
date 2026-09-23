@@ -10,13 +10,12 @@
 
   <!-- Browser tab. No maskable safe zone here, so the mark runs wider than on
        the launcher plate: this renders at 16-32px and every unit of ink counts.
-       The plate follows the system light, same as the faceplate. -->
+       The plate is flat daylight, the same as the launcher icons on desktop
+       and Android: the tab shows the one RackForge icon, whatever the
+       system light. -->
 
   <style>
     svg { --plate: #ebe4d8; --bowl: #c1273d; --leg: #1d3560; --arm: #d25a2b; }
-    @media (prefers-color-scheme: dark) {
-      svg { --plate: #212327; --bowl: #e0455c; --leg: #4a79c8; --arm: #f0813f; }
-    }
   </style>
 
   <rect width="1000" height="1000" rx="120" fill="var(--plate)"/>

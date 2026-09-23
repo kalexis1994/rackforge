@@ -67,7 +67,9 @@ piece of the monogram; three arbitrary colours read as a rainbow.
   crop it to any shape, with the mark held to 600 units wide so it stays inside
   the 66/108 adaptive-icon safe circle. This is the master for every raster.
 - `favicon.svg`: rounded plate with the mark set wider, because a browser tab
-  has no safe zone and renders at 16–32 px. Its own raster master.
+  has no safe zone and renders at 16–32 px. Its own raster master. Flat
+  daylight like the launcher plate, so the tab carries the same icon as the
+  desktop and Android launchers whatever the system light.
 - `rackforge-mark-foreground.svg`: transparent square. The boot loader stacks
   two copies and reveals one from the bottom, and adaptive-icon foregrounds
   expect the plate to come from elsewhere.
@@ -75,7 +77,8 @@ piece of the monogram; three arbitrary colours read as a rainbow.
 - `rackforge-mark-256.png`: runtime window icon used by the desktop host.
 
 The vector files follow the system light through `prefers-color-scheme`; the
-launcher plate is flat daylight ink, since it is only ever rasterised.
+launcher plate and the favicon are flat daylight ink, since they are the
+app's icon rather than artwork inside it.
 
 Keep at least 12% clear space around the mark. Below roughly 32 px the node
 knockouts close up — that is expected, and it is why the launcher plate is

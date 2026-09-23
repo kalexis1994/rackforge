@@ -66,8 +66,12 @@
                                  PANEL and Add effect; the audio cables of
                                  the rack editor are this amber too.
      --rf-color-preset   green   presets, the saved memory: PRESETS.
-     --rf-color-input    red     input and control: MIDI, RF Controller,
+     --rf-color-input    red     input and control: RF Controller,
                                  anything that plays into RackForge.
+
+   MIDI as a signal keeps the cyan it has always had in the rack editor:
+   its cables and ports there are cyan, beside the audio's amber
+   (RackGraphEditor.tsx), and a new MIDI cable or port follows them.
 
    Each is the theme's legible mix: deep in daylight, so a cream glyph on a
    plate of it clears 4.5:1, and bright on the dark panel, under a dark
@@ -75,9 +79,8 @@
    its own, --red-ink). The hues themselves are set per theme in
    styles.css; these names only choose among them.
 
-   Not yet on the code: the rack editor's MIDI cables and ports are still
-   cyan (RackGraphEditor.tsx), and the rail's chips keep their own tints
-   (--nav-*), which mark the page you are on rather than a kind of thing. */
+   Outside the code: the rail's chips keep their own tints (--nav-*),
+   which mark the page you are on rather than a kind of thing. */
 :root {
   --rf-color-plugin: var(--entity-instrument);
   --rf-color-sound: var(--amber-ink);

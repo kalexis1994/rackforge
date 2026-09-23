@@ -205,6 +205,9 @@ const graphNodeColors: Record<CanvasNodeData["kind"], string> = {
   label: "#70838e",
 };
 
+const MINIMAP_WIDTH = 160;
+const MINIMAP_HEIGHT = 100;
+
 const graphPluginColors: Record<string, string> = {
   effect: "var(--rf-lit-sound)",
   "midi-processor": "var(--rf-lit-input)",
@@ -1210,11 +1213,21 @@ export default function RackGraphEditor({
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} />
+          {/* The minimap computes its view from its own size, so it is told
+              the size it is drawn at (faceplate.css); sized only by CSS it
+              kept its default 200 x 150 view inside a smaller box and showed
+              the corner of it. The window onto the canvas is outlined. */}
           <MiniMap
             pannable
             zoomable
+            style={{ width: MINIMAP_WIDTH, height: MINIMAP_HEIGHT }}
             nodeColor={graphMiniMapNodeColor}
-            nodeStrokeWidth={3}
+            nodeBorderRadius={8}
+            nodeStrokeWidth={0}
+            bgColor="#1c1e22"
+            maskColor="rgba(6, 7, 8, 0.66)"
+            maskStrokeColor="rgba(255, 255, 255, 0.5)"
+            maskStrokeWidth={1.5}
           />
           <Controls
             position="top-right"

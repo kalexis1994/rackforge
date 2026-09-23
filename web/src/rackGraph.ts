@@ -448,7 +448,7 @@ export function rackGraphProblems(
   const problems: RackGraphProblem[] = [];
   const seen = new Set<string>();
   const report = (nodeId: string, severity: RackGraphProblemSeverity, message: string) => {
-    const key = `${nodeId} ${message}`;
+    const key = `${nodeId}\u0000${message}`;
     if (seen.has(key)) return;
     seen.add(key);
     problems.push({ nodeId, severity, message });

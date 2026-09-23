@@ -9378,8 +9378,8 @@ body {
 }
 
 .graph-workspace-active .rack-graph-canvas .react-flow__minimap {
-  width: 116px;
-  height: 76px;
+  width: 160px;
+  height: 100px;
 }
 
 .graph-workspace-active .rack-graph-hint {
@@ -9679,7 +9679,6 @@ body {
   fill: currentColor;
 }
 
-.rack-graph-canvas .react-flow__minimap-mask { fill: rgba(2, 8, 12, 0.72); }
 
 @media (max-width: 700px), (max-height: 600px) {
   .rack-graph-canvas .react-flow__minimap {

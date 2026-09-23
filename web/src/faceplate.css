@@ -7199,12 +7199,8 @@
 .rack-graph-canvas .react-flow__minimap {
   border: var(--fp-seam) !important;
   border-radius: var(--fp-radius) !important;
-  background: #101113 !important;
+  background: #1c1e22 !important;
   box-shadow: var(--fp-well), 0 2px 6px rgba(0, 0, 0, 0.35) !important;
-}
-
-.rack-graph-canvas .react-flow__minimap-mask {
-  fill: rgba(8, 9, 10, 0.72) !important;
 }
 
 /* The strip's label and value sit on one baseline, like every other block. */

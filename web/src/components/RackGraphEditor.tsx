@@ -59,7 +59,7 @@ import {
   type RackConnection,
 } from "../rackGraph";
 import type { RackPluginRole } from "../rackPluginSelection";
-import { RackSlotPopover } from "./RackSlotPopover";
+import { RackPluginEditor, type RackPluginEditorKind } from "./RackPluginEditor";
 import { RackMidiLinkEditor } from "./RackMidiLinkEditor";
 import type {
   PluginInstance,
@@ -662,6 +662,7 @@ export default function RackGraphEditor({
     anchor: GraphMenuAnchor;
   } | null>(null);
   const overlayOpen = editorSlotId !== undefined || midiLinkEditor !== null;
+  const closePluginEditor = useCallback(() => setEditorSlotId(undefined), []);
   const [historyOpen, setHistoryOpen] = useState(false);
   // The canvas mostly explains itself -- ports light for a cable they take,
   // a refused cable says why -- so what it cannot show, its keys and
@@ -672,6 +673,7 @@ export default function RackGraphEditor({
   useEffect(() => {
     if (!history) return;
     const onKey = (event: KeyboardEvent) => {
+      if (overlayOpen) return;
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
@@ -686,7 +688,7 @@ export default function RackGraphEditor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [history]);
+  }, [history, overlayOpen]);
   // A finger needs a wider reach than a pointer to land a cable on a port.
   const coarsePointer = useMemo(
     () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches,
@@ -1233,6 +1235,7 @@ export default function RackGraphEditor({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Delete" && event.key !== "Backspace") return;
+      if (overlayOpen) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
       if (!selectedId || selectedId.startsWith("label:")) return;
@@ -1242,7 +1245,7 @@ export default function RackGraphEditor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [materialized, removeSelected, selectedId]);
+  }, [materialized, overlayOpen, removeSelected, selectedId]);
 
   // Nodes snap to the canvas's dots as they are moved; held Alt, they move
   // freely -- the default most node editors settle on, and the one that
@@ -1418,6 +1421,36 @@ export default function RackGraphEditor({
   const editorInstance = editorSlot
     ? instances.find((instance) => instance.plugin_id === editorSlot.plugin_id)
     : undefined;
+  const editorKind = ((editorSlot && pluginKinds.get(editorSlot.plugin_id)) ?? "instrument") as RackPluginEditorKind;
+  // A plugin edited is a modal over the canvas: the graph behind it takes no
+  // pointer, key or focus until it is closed, and the canvas's own popovers
+  // close under it. If the slot goes -- an undo takes it away -- so does
+  // the editor.
+  useEffect(() => {
+    if (editorSlotId !== undefined && !editorSlot) setEditorSlotId(undefined);
+  }, [editorSlot, editorSlotId]);
+  const editorNodeIdRef = useRef<string | undefined>(undefined);
+  editorNodeIdRef.current = editorNode?.id;
+  useEffect(() => {
+    const flow = canvasRef.current?.querySelector<HTMLElement>(".react-flow");
+    if (!flow || editorSlotId === undefined) return;
+    flow.inert = true;
+    const nodeId = editorNodeIdRef.current;
+    setHistoryOpen(false);
+    setShortcutsOpen(false);
+    setNodeMenu(null);
+    setPaneMenu(null);
+    return () => {
+      flow.inert = false;
+      // Focus goes back where it was; if that was a menu item, gone with
+      // its menu, it goes to the node the plugin was opened from.
+      window.requestAnimationFrame(() => {
+        if (!nodeId || (document.activeElement && document.activeElement !== document.body)) return;
+        flow.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(nodeId)}"]`)
+          ?.focus({ preventScroll: true });
+      });
+    };
+  }, [editorSlotId]);
   const midiEditorEdge = midiLinkEditor
     ? materialized.graph!.edges.find((edge) => edge.id === midiLinkEditor.edgeId)
     : undefined;
@@ -1826,15 +1859,15 @@ export default function RackGraphEditor({
               <button type="button" role="menuitem" onClick={() => setNodeMenu(null)}>Close</button>
             </div>
           ) : null}
-          {editorSlot && editorNode && editorInstance ? (
-            <RackSlotPopover
+          {editorSlot && editorNode ? (
+            <RackPluginEditor
               key={`${editorSlot.id}:${editorSlot.plugin_id}`}
               slot={editorSlot}
               instance={editorInstance}
-              nodePosition={editorNode.position}
-              viewport={viewport}
+              kind={editorKind}
+              art={pluginArt.get(editorSlot.plugin_id)}
               onChange={updateSlot}
-              onClose={() => setEditorSlotId(undefined)}
+              onClose={closePluginEditor}
               renderSurface={renderPluginSurface}
             />
           ) : null}

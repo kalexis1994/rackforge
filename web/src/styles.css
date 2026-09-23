@@ -652,29 +652,6 @@ textarea {
   white-space: nowrap;
 }
 
-.play-chain-close {
-  width: var(--rf-target-compact);
-  height: var(--rf-target-compact);
-  display: grid;
-  place-items: center;
-  color: var(--ink);
-  background: rgba(111, 219, 239, 0.06);
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-control);
-  box-shadow: var(--rf-elevation-control);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-}
-
-.play-chain-close:hover,
-.play-chain-close:focus-visible {
-  color: #021016;
-  background: var(--acid);
-  border-color: var(--acid);
-  outline: none;
-}
-
 .play-chain-nodes {
   margin: 0;
   min-width: 0;

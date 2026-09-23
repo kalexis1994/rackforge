@@ -240,7 +240,6 @@ export function PlayPage({
         instrumentDescriptor={activeDescriptor}
         suggested={activeDescriptor?.suggested_chain}
         onChange={handleChainChange}
-        onClose={() => setChainOpen(false)}
         openEffectId={openEffectId}
         onOpenEffect={setOpenEffectId}
         effectPanel={effectPanel}

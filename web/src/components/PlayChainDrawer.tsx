@@ -108,7 +108,6 @@ export function PlayChainDrawer({
   instrumentDescriptor,
   suggested,
   onChange,
-  onClose,
   openEffectId = null,
   onOpenEffect,
   effectPanel,
@@ -123,7 +122,6 @@ export function PlayChainDrawer({
   instrumentDescriptor?: PluginWebDescriptor;
   suggested?: SuggestedChainEntry[];
   onChange: (chain: PlayChain) => void;
-  onClose: () => void;
   /** The effect whose panel is open in the drawer, if one is. */
   openEffectId?: string | null;
   onOpenEffect?: (effectId: string | null) => void;
@@ -289,15 +287,9 @@ export function PlayChainDrawer({
           <span className="play-chain-status">
             Audio path: instrument → every effect that is on, in order → output.
           </span>
-          <button
-            type="button"
-            className="play-chain-close"
-            onClick={onClose}
-            aria-label="Close effects"
-            tabIndex={tab}
-          >
-            ×
-          </button>
+          {/* No close key of its own: FX in the toolbar opens and closes the
+              drawer, and a second control for the same thing was only
+              something else to aim at. */}
         </div>
         <ol className="play-chain-nodes">
           <li className="play-chain-node instrument">

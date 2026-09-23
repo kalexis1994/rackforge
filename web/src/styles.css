@@ -1319,6 +1319,34 @@ textarea {
   gap: 9px;
 }
 
+/* The header stays put and only the list scrolls. The dialog shell scrolls
+   as a whole everywhere else, which here carried the title and the close key
+   away with the first flick through the instruments. So the picker is a
+   column: header and any notice keep their height, and the stage holding the
+   list takes what is left and scrolls inside it. */
+.plugin-picker-modal {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.plugin-picker-modal > * {
+  flex: none;
+}
+
+.plugin-picker-modal > .plugin-picker-boundary {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.plugin-picker-modal .plugin-picker-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 /* The list begins right under the header's seam: there is no intro line
    above it, so the list carries its own top margin. */
 .plugin-picker-modal .play-plugin-selector {

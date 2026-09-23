@@ -27,6 +27,12 @@ struct Palette {
     drop: Color32,
     glow: Color32,
     glow_peak: f32,
+    /// The mark's three inks: the bowl of the R, the leg, and the whole F.
+    /// The same values the interface carries as `--mark-bowl`, `--mark-leg`
+    /// and `--mark-arm`, a set per light, from assets/brand/README.md.
+    mark_bowl: Color32,
+    mark_leg: Color32,
+    mark_arm: Color32,
 }
 
 impl Palette {
@@ -42,6 +48,9 @@ impl Palette {
         drop: Color32::from_black_alpha(40),
         glow: Color32::from_rgb(0xff, 0xfd, 0xf7),
         glow_peak: 0.5,
+        mark_bowl: Color32::from_rgb(0xc1, 0x27, 0x3d),
+        mark_leg: Color32::from_rgb(0x1d, 0x35, 0x60),
+        mark_arm: Color32::from_rgb(0xd2, 0x5a, 0x2b),
     };
 
     const STAGE: Self = Self {
@@ -56,6 +65,9 @@ impl Palette {
         drop: Color32::from_black_alpha(120),
         glow: Color32::from_rgb(0x7c, 0xa5, 0xe0),
         glow_peak: 0.15,
+        mark_bowl: Color32::from_rgb(0xe0, 0x45, 0x5c),
+        mark_leg: Color32::from_rgb(0x4a, 0x79, 0xc8),
+        mark_arm: Color32::from_rgb(0xf0, 0x81, 0x3f),
     };
 
     fn for_context(context: &egui::Context) -> Self {
@@ -63,6 +75,159 @@ impl Palette {
             Self::STAGE
         } else {
             Self::DAYLIGHT
+        }
+    }
+}
+
+/// The mark's artwork box, `rackforge-mark.svg`'s viewBox.
+const MARK_SIZE: egui::Vec2 = egui::vec2(704.0, 308.0);
+/// Its strokes, in the same units.
+const MARK_STROKE: f32 = 34.0;
+
+/// One piece of the mark, in artwork units, in the order it is painted.
+#[derive(Debug, PartialEq)]
+enum MarkPiece {
+    Stroke(Vec<egui::Pos2>, MarkInk),
+    Disc(egui::Pos2, f32, MarkInk),
+    Arrow([egui::Pos2; 3]),
+    /// A knockout: the ground showing through everything beneath.
+    Hole(egui::Pos2, f32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MarkInk {
+    Bowl,
+    Leg,
+    Arm,
+}
+
+/// The mark as `assets/brand/rackforge-mark.svg` draws it, flattened into
+/// points in the artwork's own units.
+///
+/// The SVG is the source; this is a transcription of its paths, including
+/// their `translate(-58 -51)`, so a change there has to be made here too.
+/// The paint order is the drawing (the brand README says why): the leg
+/// goes under the bowl of the R so the bar truncates it, and the node at
+/// the crossbar is laid over the seam where three strokes meet. The two
+/// nodes are knockouts, so they are painted last in the ground's colour.
+fn mark_pieces() -> Vec<MarkPiece> {
+    let at = |x: f32, y: f32| egui::pos2(x - 58.0, y - 51.0);
+    // A quadratic Bezier from the path's current point, flattened finely
+    // enough that its facets stay under a pixel at any size this is drawn.
+    let curve = |points: &mut Vec<egui::Pos2>, control: egui::Pos2, end: egui::Pos2| {
+        let start = *points.last().expect("a curve continues a path");
+        for step in 1..=12 {
+            let t = step as f32 / 12.0;
+            let u = 1.0 - t;
+            points.push(egui::pos2(
+                u * u * start.x + 2.0 * u * t * control.x + t * t * end.x,
+                u * u * start.y + 2.0 * u * t * control.y + t * t * end.y,
+            ));
+        }
+    };
+
+    // M305 200L430 342H505Q550 342 550 297V200
+    let mut leg = vec![at(305.0, 200.0), at(430.0, 342.0), at(505.0, 342.0)];
+    curve(&mut leg, at(550.0, 342.0), at(550.0, 297.0));
+    leg.push(at(550.0, 200.0));
+
+    // M550 200V111Q550 68 595 68H720
+    let mut arm = vec![at(550.0, 200.0), at(550.0, 111.0)];
+    curve(&mut arm, at(550.0, 68.0), at(595.0, 68.0));
+    arm.push(at(720.0, 68.0));
+
+    // M550 200H731
+    let crossbar = vec![at(550.0, 200.0), at(731.0, 200.0)];
+
+    // M80 200H360Q410 200 410 150V110Q410 68 365 68H155V145
+    let mut bowl = vec![at(80.0, 200.0), at(360.0, 200.0)];
+    curve(&mut bowl, at(410.0, 200.0), at(410.0, 150.0));
+    bowl.push(at(410.0, 110.0));
+    curve(&mut bowl, at(410.0, 68.0), at(365.0, 68.0));
+    bowl.push(at(155.0, 68.0));
+    bowl.push(at(155.0, 145.0));
+
+    vec![
+        MarkPiece::Stroke(leg, MarkInk::Leg),
+        MarkPiece::Stroke(arm, MarkInk::Arm),
+        MarkPiece::Stroke(crossbar, MarkInk::Arm),
+        MarkPiece::Stroke(bowl, MarkInk::Bowl),
+        MarkPiece::Disc(at(80.0, 200.0), 22.0, MarkInk::Bowl),
+        MarkPiece::Disc(at(550.0, 200.0), 24.0, MarkInk::Arm),
+        MarkPiece::Arrow([at(720.0, 174.0), at(762.0, 200.0), at(720.0, 226.0)]),
+        MarkPiece::Hole(at(80.0, 200.0), 10.0),
+        MarkPiece::Hole(at(550.0, 200.0), 12.0),
+    ]
+}
+
+/// A polyline cut wherever it turns by more than 30 degrees, and the points
+/// it was cut at. A flattened curve turns a few degrees per step and stays
+/// one run; a drawn corner is where it is cut.
+fn split_at_corners(points: &[egui::Pos2]) -> (Vec<Vec<egui::Pos2>>, Vec<egui::Pos2>) {
+    const SHARP: f32 = 0.866; // cos 30 degrees
+    let mut runs = Vec::new();
+    let mut corners = Vec::new();
+    let mut run = points.first().map(|first| vec![*first]).unwrap_or_default();
+    for window in points.windows(3) {
+        let (before, at, after) = (window[0], window[1], window[2]);
+        run.push(at);
+        let incoming = (at - before).normalized();
+        let outgoing = (after - at).normalized();
+        if incoming.dot(outgoing) < SHARP {
+            runs.push(std::mem::replace(&mut run, vec![at]));
+            corners.push(at);
+        }
+    }
+    if let Some(last) = points.last().filter(|_| points.len() > 1) {
+        run.push(*last);
+    }
+    runs.push(run);
+    (runs, corners)
+}
+
+/// Paints the mark into `rect`, as large as fits and centred, on a surface
+/// of colour `ground`, which is what shows through its two nodes.
+fn paint_mark(painter: &egui::Painter, rect: egui::Rect, palette: Palette, ground: Color32) {
+    let scale = (rect.width() / MARK_SIZE.x).min(rect.height() / MARK_SIZE.y);
+    let origin = rect.center() - MARK_SIZE * scale / 2.0;
+    let place = |point: egui::Pos2| origin + point.to_vec2() * scale;
+    let ink = |ink: MarkInk| match ink {
+        MarkInk::Bowl => palette.mark_bowl,
+        MarkInk::Leg => palette.mark_leg,
+        MarkInk::Arm => palette.mark_arm,
+    };
+    for piece in mark_pieces() {
+        match piece {
+            MarkPiece::Stroke(points, colour) => {
+                // The artwork joins its strokes round; egui mitres them. So
+                // each stroke is cut at its sharp corners, and a disc half a
+                // stroke wide is laid on each cut: two butt ends and a disc
+                // are exactly a round join.
+                let stroke = Stroke::new(MARK_STROKE * scale, ink(colour));
+                let (runs, corners) = split_at_corners(&points);
+                for run in runs {
+                    painter.add(egui::Shape::line(
+                        run.into_iter().map(place).collect(),
+                        stroke,
+                    ));
+                }
+                for corner in corners {
+                    painter.circle_filled(place(corner), MARK_STROKE * scale / 2.0, stroke.color);
+                }
+            }
+            MarkPiece::Disc(centre, radius, colour) => {
+                painter.circle_filled(place(centre), radius * scale, ink(colour));
+            }
+            MarkPiece::Arrow(corners) => {
+                painter.add(egui::Shape::convex_polygon(
+                    corners.into_iter().map(place).collect(),
+                    palette.mark_arm,
+                    Stroke::NONE,
+                ));
+            }
+            MarkPiece::Hole(centre, radius) => {
+                painter.circle_filled(place(centre), radius * scale, ground);
+            }
         }
     }
 }
@@ -424,17 +589,22 @@ impl DesktopShutdown {
                         ui.set_width(modal_width);
 
                         ui.horizontal(|ui| {
-                            // A moulded plate carrying the monogram, not a lit
+                            // A moulded plate carrying the mark, not a lit
                             // chip: nothing on a closing machine is powered.
+                            // The mark is drawn, not an image: the raster the
+                            // window icon uses carries a daylight plate, which
+                            // would sit as a pale square on the stage panel.
                             egui::Frame::new()
                                 .fill(palette.panel_inset)
                                 .stroke(Stroke::new(1.0_f32, palette.line))
                                 .corner_radius(KEY_RADIUS)
-                                .inner_margin(egui::Margin::symmetric(9, 7))
+                                .inner_margin(egui::Margin::symmetric(10, 8))
                                 .show(ui, |ui| {
-                                    ui.label(
-                                        RichText::new("RF").strong().size(15.0).color(palette.ink),
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(64.0, 28.0),
+                                        egui::Sense::hover(),
                                     );
+                                    paint_mark(ui.painter(), rect, palette, palette.panel_inset);
                                 });
                             ui.add_space(10.0);
                             ui.vertical(|ui| {
@@ -579,6 +749,52 @@ impl DesktopShutdown {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mark_stays_inside_its_artwork_box() {
+        // The SVG's viewBox is trimmed to the ink: a transcription error in
+        // a coordinate or in the translate shows up as a point outside it.
+        let inside = |point: egui::Pos2| {
+            (0.0..=MARK_SIZE.x).contains(&point.x) && (0.0..=MARK_SIZE.y).contains(&point.y)
+        };
+        for piece in mark_pieces() {
+            match piece {
+                MarkPiece::Stroke(points, _) => assert!(points.iter().copied().all(inside)),
+                MarkPiece::Disc(centre, _, _) | MarkPiece::Hole(centre, _) => {
+                    assert!(inside(centre))
+                }
+                MarkPiece::Arrow(corners) => assert!(corners.iter().copied().all(inside)),
+            }
+        }
+    }
+
+    #[test]
+    fn the_mark_is_painted_leg_first_and_knocked_out_last() {
+        let pieces = mark_pieces();
+        assert!(matches!(pieces[0], MarkPiece::Stroke(_, MarkInk::Leg)));
+        assert!(matches!(pieces[3], MarkPiece::Stroke(_, MarkInk::Bowl)));
+        assert!(
+            pieces[pieces.len() - 2..]
+                .iter()
+                .all(|piece| matches!(piece, MarkPiece::Hole(..)))
+        );
+    }
+
+    #[test]
+    fn strokes_are_cut_only_at_drawn_corners_not_along_curves() {
+        let pieces = mark_pieces();
+        let corners_of = |index: usize| match &pieces[index] {
+            MarkPiece::Stroke(points, _) => split_at_corners(points).1,
+            _ => panic!("not a stroke"),
+        };
+        // The leg's knee, where the diagonal meets the foot.
+        assert_eq!(corners_of(0), vec![egui::pos2(430.0 - 58.0, 342.0 - 51.0)]);
+        // The F's arm and the crossbar bend only through curves.
+        assert!(corners_of(1).is_empty());
+        assert!(corners_of(2).is_empty());
+        // The bowl's top-left corner, where it turns down towards the jack.
+        assert_eq!(corners_of(3), vec![egui::pos2(155.0 - 58.0, 68.0 - 51.0)]);
+    }
 
     #[test]
     fn glow_discs_composite_onto_the_gaussian() {

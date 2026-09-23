@@ -701,19 +701,73 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * Where each installed plugin's package lives, for serving its Web assets.
+     *
+     * Every banner, icon, script and sample a plugin page asks for is resolved
+     * here. Reading the catalogue opens every installed package -- manifest,
+     * and each branding image read and validated -- so doing it per request
+     * made opening the plugin list or a plugin's page wait on dozens of full
+     * store scans. The map is kept until an install or uninstall changes which
+     * directory a plugin lives in; a root that has since disappeared is read
+     * again rather than trusted.
+     */
+    private final Object pluginRootsLock = new Object();
+    private Map<String, File> pluginRoots;
+
     private File installedPluginRoot(String pluginId) throws Exception {
+        synchronized (pluginRootsLock) {
+            boolean fresh = false;
+            if (pluginRoots == null) {
+                pluginRoots = readPluginRoots();
+                fresh = true;
+            }
+            File root = pluginRoots.get(pluginId);
+            if (!fresh && (root == null || !root.isDirectory())) {
+                pluginRoots = readPluginRoots();
+                root = pluginRoots.get(pluginId);
+            }
+            return root;
+        }
+    }
+
+    private Map<String, File> readPluginRoots() throws Exception {
         JSONArray installed = new JSONObject(
                 installedPlugins(pluginStoreRoot().getAbsolutePath()))
                 .getJSONArray("plugins");
+        Map<String, File> roots = new java.util.HashMap<>();
         for (int index = 0; index < installed.length(); index++) {
             JSONObject plugin = installed.getJSONObject(index);
-            if (pluginId.equals(plugin.optString("plugin_id"))
-                    && usableOnAndroid(plugin)) {
-                String packageRoot = plugin.optString("package_root", "");
-                return packageRoot.isBlank() ? null : new File(packageRoot);
+            String packageRoot = plugin.optString("package_root", "");
+            if (usableOnAndroid(plugin) && !packageRoot.isBlank()) {
+                roots.put(plugin.optString("plugin_id"), new File(packageRoot));
             }
         }
-        return null;
+        return roots;
+    }
+
+    private void forgetPluginRoots() {
+        synchronized (pluginRootsLock) {
+            pluginRoots = null;
+        }
+    }
+
+    /** Installs a package; the plugin may now live in a different directory. */
+    private String installPluginPackage(String archivePath, String storeRoot) {
+        try {
+            return installPluginFile(archivePath, storeRoot);
+        } finally {
+            forgetPluginRoots();
+        }
+    }
+
+    private String uninstallPluginPackage(String pluginId, String storeRoot, String dataRoot,
+            boolean deletePresets, boolean deletePluginData) {
+        try {
+            return uninstallPlugin(pluginId, storeRoot, dataRoot, deletePresets, deletePluginData);
+        } finally {
+            forgetPluginRoots();
+        }
     }
 
     private static WebResourceResponse pluginAsset(File packageRoot, String relative) {
@@ -1341,7 +1395,7 @@ public final class MainActivity extends Activity {
                 stopNativeAudio();
                 stopService(new Intent(this, AudioEngineService.class));
             }
-            String payload = uninstallPlugin(
+            String payload = uninstallPluginPackage(
                     pluginId,
                     pluginStoreRoot().getAbsolutePath(),
                     pluginDataRoot().getAbsolutePath(),
@@ -3526,7 +3580,7 @@ public final class MainActivity extends Activity {
             File temporary = null;
             try {
                 temporary = copyPluginToPrivateCache(uri);
-                String descriptorText = installPluginFile(
+                String descriptorText = installPluginPackage(
                         temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath());
                 JSONObject descriptor = new JSONObject(descriptorText);
                 String installedName = descriptor.getString("plugin_name");
@@ -3567,7 +3621,7 @@ public final class MainActivity extends Activity {
                 throw new IllegalArgumentException(
                         "The plugin exceeds the 512 MB package limit.");
             }
-            String descriptorText = installPluginFile(
+            String descriptorText = installPluginPackage(
                     selection.file.getAbsolutePath(), pluginStoreRoot().getAbsolutePath());
             JSONObject descriptor = new JSONObject(descriptorText);
             keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
@@ -3774,7 +3828,7 @@ public final class MainActivity extends Activity {
                 while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
             }
             try {
-                JSONObject descriptor = new JSONObject(installPluginFile(
+                JSONObject descriptor = new JSONObject(installPluginPackage(
                         temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
                 String pluginId = descriptor.getString("plugin_id");
                 boolean known = knownPlugins.contains(pluginId);
@@ -3808,7 +3862,7 @@ public final class MainActivity extends Activity {
         for (java.io.File entry : entries) {
             try {
                 if (entry.isFile() && entry.getName().endsWith(".rfplugin")) {
-                    JSONObject descriptor = new JSONObject(installPluginFile(
+                    JSONObject descriptor = new JSONObject(installPluginPackage(
                             entry.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
                     Log.i("RackForge", "Inbox plugin installed: "
                             + descriptor.optString("plugin_name") + " "

@@ -20,6 +20,12 @@ import { type PluginWebDescriptor, type SessionSnapshot } from "../types";
 import { RfButton } from "../ui/RfButton";
 import { Download,  Sliders } from "lucide-react";
 
+// The host answers for its controllers only once it runs, and in the
+// browser the engine is still starting when the page first asks. A failure
+// is asked again for a few seconds before it is shown as one.
+const CONTROLLER_LOAD_ATTEMPTS = 8;
+const CONTROLLER_RETRY_MS = 1_000;
+
 export function PluginsPage({
   snapshot,
   onInstall,
@@ -42,18 +48,30 @@ export function PluginsPage({
   useEffect(() => {
     if (!showControllers) return;
     let cancelled = false;
-    hostJson<{ controllers: ControllerSummary[] }>("/api/v1/controllers")
-      .then((response) => {
-        if (!cancelled) {
-          setControllers(response.controllers ?? []);
-          setControllersStatus("ready");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setControllersStatus("error");
-      });
+    let attempt = 0;
+    let retry: number | undefined;
+    const load = () => {
+      hostJson<{ controllers: ControllerSummary[] }>("/api/v1/controllers")
+        .then((response) => {
+          if (!cancelled) {
+            setControllers(response.controllers ?? []);
+            setControllersStatus("ready");
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          attempt += 1;
+          if (attempt < CONTROLLER_LOAD_ATTEMPTS) {
+            retry = window.setTimeout(load, CONTROLLER_RETRY_MS);
+          } else {
+            setControllersStatus("error");
+          }
+        });
+    };
+    load();
     return () => {
       cancelled = true;
+      window.clearTimeout(retry);
     };
   }, [controllerRefreshRevision, showControllers]);
   const [pendingRemoval, setPendingRemoval] = useState<PluginWebDescriptor | null>(null);
@@ -179,14 +197,16 @@ export function PluginsPage({
       .map((kind) => ({
         id: kind as string,
         presentation: pluginKindPresentation(kind),
-        count: groups.find((group) => group.kind === kind)?.plugins.length ?? 0,
+        count: pluginCatalog.status === "ready"
+          ? groups.find((group) => group.kind === kind)?.plugins.length ?? 0
+          : null,
       }))
-      .filter((tab) => tab.count > 0 || tab.id === "instrument"),
+      .filter((tab) => (tab.count ?? 0) > 0 || tab.id === "instrument"),
     ...(showControllers
       ? [{
         id: "controller",
         presentation: { label: "Controller", plural: "Controllers", className: "controller" },
-        count: controllers.length,
+        count: controllersStatus === "ready" ? controllers.length : null,
       }]
       : []),
   ];
@@ -228,7 +248,7 @@ export function PluginsPage({
           >
             <i className="plugin-kind-lamp" aria-hidden="true" />
             {tab.presentation.plural}
-            <small>{tab.count}</small>
+            {tab.count !== null ? <small>{tab.count}</small> : null}
           </button>
         ))}
       </nav>

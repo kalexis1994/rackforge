@@ -605,6 +605,7 @@ function RackForgeApp() {
         {!isControllerSurface ? (
           <TopBar
             snapshot={snapshot}
+            performance={performance}
             menuOpen={mobileMenuOpen}
             onMenu={() => setMobileMenuOpen((open) => !open)}
           />

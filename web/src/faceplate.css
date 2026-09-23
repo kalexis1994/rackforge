@@ -5725,13 +5725,29 @@
   box-shadow: var(--fp-lip);
 }
 
+/* The instrument's node keeps the instrument's blue, the one colour in
+   the drawer that is not the effects'. */
 .play-chain-node.instrument {
-  box-shadow: var(--fp-lip), inset 3px 0 0 var(--acid);
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--entity-instrument);
 }
 
 .play-chain-node.effect.open {
   border-color: var(--line);
-  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid);
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--fx);
+}
+
+/* An effect's own keys speak its colour: ON, and PANEL while its panel is
+   open, are lit in the effects' amber, and a key under the pointer or the
+   keyboard is edged in it. The instrument keeps its blue edge. */
+.play-chain-tools button:not(:disabled):hover,
+.play-chain-tools button:focus-visible {
+  border-color: var(--fx);
+}
+
+.play-chain-tools button.on {
+  color: var(--acid-ink);
+  background: var(--fx);
+  border-color: var(--fx);
 }
 
 .play-chain-picker button {

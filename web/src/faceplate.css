@@ -5750,6 +5750,18 @@
   border-color: var(--fx);
 }
 
+/* Add effect: its + plate is the effects' amber, and so is the dashed
+   outline of its node under the pointer and while its list is open. */
+.play-chain-add > span {
+  background: var(--fx);
+}
+
+.play-chain-node.add:hover,
+.play-chain-node.add:focus-within,
+.play-chain-node.add.active {
+  border-color: var(--fx);
+}
+
 .play-chain-picker button {
   color: var(--ink);
   background: linear-gradient(180deg, var(--glass), var(--paper));

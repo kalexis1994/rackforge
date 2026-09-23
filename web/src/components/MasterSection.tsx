@@ -196,7 +196,10 @@ export function MasterOutputMeter({
           </i>
         ))}
       </span>
-      <span className="master-output-meter-channels" aria-hidden="true">L R</span>
+      <span className="master-output-meter-channels" aria-hidden="true">
+        <span>L</span>
+        <span>R</span>
+      </span>
       {toggle ? (
         <button
           type="button"

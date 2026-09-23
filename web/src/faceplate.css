@@ -1007,6 +1007,28 @@
   gap: 2px;
 }
 
+/* Each channel's letter stands under its own slot: a column the slot's
+   width, the slots' gap between them, where "L R" set as one word put the
+   L a pixel and more to the side of its slot. */
+.master-output-meter-channels {
+  display: flex;
+  gap: 2px;
+  word-spacing: 0;
+}
+
+.master-output-meter-channels > span {
+  width: 6px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+/* Tracked type ends in a letter's worth of space after its last letter,
+   which centring counts as part of the word: OUT stood a pixel left of the
+   slots under it. The same space before the first letter evens it out. */
+.master-output-meter-label {
+  padding-left: var(--fp-track);
+}
+
 /* --------------------------------------------------------------- data --- */
 
 .connection-badge,

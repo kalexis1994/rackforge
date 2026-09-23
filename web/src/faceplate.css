@@ -5106,6 +5106,137 @@
   box-shadow: var(--fp-lip), var(--fp-drop) !important;
 }
 
+/* ----------------------------------------------------- the MIDI link ---
+   Right-click (or long-press) a control in a plugin and RackForge offers to
+   link it to MIDI. The menu and the dialog it opens had never been ported:
+   smoked navy glass with cyan seams over a cream panel. The menu is now a
+   small plate of keys, the dialog's fields are the same inset wells as the
+   audio settings, and Learn is a key that lights amber while it listens. */
+
+.parameter-link-context-menu {
+  color: var(--ink);
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip), 0 12px 32px rgba(var(--edge-dark-rgb), 0.34);
+}
+
+.parameter-link-context-menu button {
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--fp-radius-key);
+  font: 700 11px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  transition:
+    background-color var(--rf-motion-fast) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+/* Hovering a row presses it into the panel, as the keys elsewhere do. */
+.parameter-link-context-menu button:hover:not(:disabled),
+.parameter-link-context-menu button:focus-visible {
+  background: var(--panel-inset);
+  border-color: var(--line);
+  box-shadow: var(--fp-well);
+  outline: none;
+}
+
+/* Removing a link is the one destructive row: the red as ink, set apart. */
+.parameter-link-context-menu button.danger {
+  margin-top: 2px;
+  color: var(--red);
+  border-top-color: var(--line);
+  border-radius: 0 0 var(--fp-radius-key) var(--fp-radius-key);
+}
+
+.parameter-link-context-menu button:disabled {
+  opacity: 0.55;
+}
+
+.parameter-link-context-error {
+  color: var(--red);
+  font: 600 11px/1.35 var(--display-font);
+}
+
+/* -- the dialog -- */
+
+.parameter-link-form label {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.parameter-link-form select,
+.parameter-link-form input[type="number"] {
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 500 13px/1 var(--mono-font);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.parameter-link-form select:focus-visible,
+.parameter-link-form input[type="number"]:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+.parameter-link-options input[type="checkbox"] {
+  accent-color: var(--red);
+}
+
+.midi-learn-button {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  font: 700 12px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.midi-learn-button:hover:not(:disabled),
+.midi-learn-button:focus-visible {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+/* Listening: held down, its edge lit amber like a lamp behind the key. */
+.midi-learn-button.learning {
+  background: var(--panel-inset);
+  border-color: var(--amber);
+  box-shadow:
+    var(--fp-well),
+    inset 0 0 0 1px var(--amber),
+    inset 0 0 14px -4px var(--amber);
+}
+
+.parameter-link-error {
+  padding: 10px 12px;
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+  border-radius: var(--fp-radius);
+  font: 600 12px/1.5 var(--display-font);
+}
+
+.parameter-link-pending {
+  color: var(--amber);
+  font: 600 12px/1.5 var(--display-font);
+}
+
+.parameter-link-help {
+  color: var(--fp-rail-label);
+  font-size: 12px;
+}
+
 /* ------------------------------------------------- the error plate ---
    Form errors predate the faceplate: a pink balloon that once swallowed a
    whole debug dump. A message plate now — seam, square cut, the red as

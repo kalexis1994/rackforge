@@ -150,6 +150,10 @@ export function ParameterLinkHost({
       const targetBounds = element.getBoundingClientRect();
       highlight.setAttribute("aria-hidden", "true");
       highlight.className = "rackforge-parameter-highlight";
+      // Drawn inside the plugin's document, where RackForge's stylesheets do
+      // not reach: the theme's accent is read here and written in.
+      const accent = getComputedStyle(window.document.documentElement)
+        .getPropertyValue("--red").trim() || "#c1273d";
       highlight.style.cssText = [
         "position:fixed",
         `left:${targetBounds.left - 3}px`,
@@ -157,10 +161,10 @@ export function ParameterLinkHost({
         `width:${targetBounds.width + 6}px`,
         `height:${targetBounds.height + 6}px`,
         "box-sizing:border-box",
-        "border:2px solid #5cdcf2",
+        `border:2px solid ${accent}`,
         "border-radius:5px",
-        "background:rgba(92,220,242,0.08)",
-        "box-shadow:0 0 0 2px rgba(4,16,22,0.72),0 0 14px rgba(92,220,242,0.78)",
+        `background:color-mix(in srgb, ${accent} 8%, transparent)`,
+        `box-shadow:0 0 0 2px rgba(0,0,0,0.45),0 0 14px color-mix(in srgb, ${accent} 70%, transparent)`,
         "pointer-events:none",
         "z-index:2147483647",
       ].join(";");

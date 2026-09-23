@@ -3371,44 +3371,26 @@ body {
 .parameter-link-context-menu {
   position: fixed;
   z-index: 1200;
-  min-width: 190px;
+  min-width: 200px;
+  display: grid;
+  gap: 4px;
   padding: 6px;
-  border: 1px solid rgba(92, 220, 242, 0.34);
-  border-radius: 10px;
-  background: rgba(5, 22, 30, 0.98);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.46);
 }
 
 .parameter-link-context-menu button {
   display: block;
   width: 100%;
   padding: 10px 12px;
-  border: 0;
-  border-radius: 7px;
-  color: var(--text-main);
-  background: transparent;
   text-align: left;
-}
-
-.parameter-link-context-menu button:hover,
-.parameter-link-context-menu button:focus-visible {
-  background: rgba(92, 220, 242, 0.13);
-}
-
-.parameter-link-context-menu button.danger {
-  color: #ff9eae;
 }
 
 .parameter-link-context-menu button:disabled {
   cursor: wait;
-  opacity: 0.62;
 }
 
 .parameter-link-context-error {
-  width: 190px;
+  width: 200px;
   margin: 4px 8px 7px;
-  color: #ff9eae;
-  font-size: 0.72rem;
   line-height: 1.25;
 }
 
@@ -3425,20 +3407,13 @@ body {
 .parameter-link-form label {
   display: grid;
   gap: 7px;
-  color: var(--text-muted);
-  font-size: 0.76rem;
-  letter-spacing: 0.045em;
 }
 
 .parameter-link-form select,
 .parameter-link-form input[type="number"] {
   min-height: 42px;
   width: 100%;
-  border: 1px solid rgba(92, 220, 242, 0.23);
-  border-radius: 8px;
   padding: 0 11px;
-  color: var(--text-main);
-  background: #071c25;
 }
 
 .parameter-link-grid {
@@ -3463,15 +3438,6 @@ body {
 
 .midi-learn-button {
   min-height: 46px;
-  border: 1px solid rgba(92, 220, 242, 0.45);
-  border-radius: 9px;
-  color: var(--text-main);
-  background: linear-gradient(135deg, rgba(19, 78, 94, 0.72), rgba(7, 35, 45, 0.84));
-}
-
-.midi-learn-button.learning {
-  border-color: #5cdcf2;
-  box-shadow: 0 0 0 3px rgba(92, 220, 242, 0.12);
 }
 
 .parameter-link-error,
@@ -3480,10 +3446,6 @@ body {
   margin: 0;
   line-height: 1.45;
 }
-
-.parameter-link-error { color: #ff9eae; }
-.parameter-link-pending { color: #f1c879; }
-.parameter-link-help { color: var(--text-muted); font-size: 0.78rem; }
 
 @media (max-width: 620px) {
   .parameter-link-form {

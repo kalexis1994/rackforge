@@ -619,6 +619,12 @@ export function addSlotToRack(
   slot: RackSlot,
   position?: RackGraphPosition,
   role: RackPluginRole = "instrument",
+  options: {
+    /** An audio output the new effect goes right after -- a cable dropped
+     *  on empty space from that port: the effect takes the port's place in
+     *  the chain, fed by it and feeding where it fed. */
+    insertAfter?: { node_id: string; port_id: string };
+  } = {},
 ): RackDefinition {
   const current = materializeRackGraph(rack);
   const provisional = normalizeRackGraphPosition(
@@ -645,7 +651,20 @@ export function addSlotToRack(
     ],
   };
 
-  if (role === "effect") {
+  const after = role === "effect" ? options.insertAfter : undefined;
+  const afterTarget = after
+    ? graph.edges.find((edge) =>
+      edge.signal === "audio"
+      && edge.source.node_id === after.node_id
+      && edge.source.port_id === after.port_id)?.target
+    : undefined;
+  if (after) {
+    graph = connectRackGraph(graph, {
+      signal: "audio",
+      source: after,
+      target: { node_id: nodeId, port_id: "audio_in" },
+    }, rackGraphId("edge.audio"));
+  } else if (role === "effect") {
     const feeders = graph.edges.filter((edge) =>
       edge.signal === "audio"
       && edge.target.node_id === audioOutput.id
@@ -700,13 +719,15 @@ export function addSlotToRack(
     };
   }
 
-  const destination = role === "effect"
-    ? audioOutput.id
-    : sharedInstrumentDestination(graph, nodeId) ?? audioOutput.id;
+  const destination = afterTarget
+    ? afterTarget.node_id
+    : role === "effect"
+      ? audioOutput.id
+      : sharedInstrumentDestination(graph, nodeId) ?? audioOutput.id;
   graph = connectRackGraph(graph, {
     signal: "audio",
     source: { node_id: nodeId, port_id: "audio_out" },
-    target: {
+    target: afterTarget ?? {
       node_id: destination,
       port_id: nodeKind(graph, destination) === "plugin" ? "audio_in" : "in",
     },

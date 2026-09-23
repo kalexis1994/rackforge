@@ -185,6 +185,30 @@ describe("adding a Slot to a Rack", () => {
     expect(chainOf(rack, nodeFor(rack, "organ").id)).toEqual(["output"]);
   });
 
+  it("inserts an effect right after the port a cable was dropped from", () => {
+    let rack = addSlotToRack(emptyRack(), slot("piano", "org.rackforge.piano"));
+    rack = addSlotToRack(rack, slot("verb", "rf-verb"), undefined, "effect");
+    rack = addSlotToRack(rack, slot("comp", "rf-comp"), { x: 400, y: 300 }, "effect", {
+      insertAfter: { node_id: nodeFor(rack, "piano").id, port_id: "audio_out" },
+    });
+
+    expect(chainOf(rack, nodeFor(rack, "piano").id)).toEqual(["comp", "verb", "output"]);
+    expect(nodeFor(rack, "comp").position).toEqual({ x: 400, y: 300 });
+    expect(rackGraphProblems(rack.graph!)).toEqual([]);
+  });
+
+  it("sends an effect dropped after an unpatched output to the main output", () => {
+    let rack = addSlotToRack(emptyRack(), slot("piano", "org.rackforge.piano"));
+    const piano = nodeFor(rack, "piano").id;
+    rack = { ...rack, graph: { ...rack.graph!, edges: rack.graph!.edges.filter(
+      (edge) => !(edge.signal === "audio" && edge.source.node_id === piano),
+    ) } };
+    rack = addSlotToRack(rack, slot("comp", "rf-comp"), undefined, "effect", {
+      insertAfter: { node_id: piano, port_id: "audio_out" },
+    });
+    expect(chainOf(rack, piano)).toEqual(["comp", "output"]);
+  });
+
   it("gives every audio output one destination, whatever is added", () => {
     let rack = emptyRack();
     for (const [id, role] of [

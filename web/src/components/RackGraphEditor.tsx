@@ -487,7 +487,11 @@ interface RackGraphEditorProps {
     update: RackDefinition | ((current: RackDefinition) => RackDefinition),
   ) => void;
   canAddInstrument: boolean;
-  onAddInstrument: (position: RackGraphPosition, role: RackPluginRole) => void;
+  onAddInstrument: (
+    position: RackGraphPosition,
+    role: RackPluginRole,
+    insertAfter?: { node_id: string; port_id: string },
+  ) => void;
   instances: PluginInstance[];
   renderPluginSurface: (options: {
     instance: PluginInstance;
@@ -555,7 +559,11 @@ export default function RackGraphEditor({
     nodeId: string;
     anchor: GraphMenuAnchor;
   } | null>(null);
-  const [paneMenu, setPaneMenu] = useState<GraphMenuAnchor | null>(null);
+  const [paneMenu, setPaneMenu] = useState<(GraphMenuAnchor & {
+    /** A cable let go on empty space: the menu offers only what it can
+     *  plug into, and the new node is wired to it. */
+    from?: { signal: RackGraphSignal; node_id: string; port_id: string; name: string };
+  }) | null>(null);
   const [midiLinkEditor, setMidiLinkEditor] = useState<{
     edgeId: string;
     anchor: GraphMenuAnchor;
@@ -952,7 +960,35 @@ export default function RackGraphEditor({
     return () => window.clearTimeout(timer);
   }, [refusal]);
   const explainRefusal = useCallback(
-    (_event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+    (event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+      // Let go on empty space, from an output: offer what could go there,
+      // already wired to it.
+      if (!state.toHandle && state.fromHandle?.type === "source" && state.fromHandle.id) {
+        const handle = decodeHandle(state.fromHandle.id);
+        const from = materialized.graph!.nodes.find((node) => node.id === state.fromHandle!.nodeId);
+        const point = "changedTouches" in event ? event.changedTouches[0] : event;
+        const canInsertEffect = handle?.signal === "audio"
+          && (from?.kind.kind === "plugin" || from?.kind.kind === "audio_input");
+        const canAddInstrument = handle?.signal === "midi" && from?.kind.kind === "midi_input";
+        if (handle && from && point && (canInsertEffect || canAddInstrument)) {
+          const anchor = createMenuAnchor(point.clientX, point.clientY, 218, 150);
+          if (anchor) {
+            setSelectedId(undefined);
+            setNodeMenu(null);
+            setMidiLinkEditor(null);
+            setPaneMenu({
+              ...anchor,
+              from: {
+                signal: handle.signal,
+                node_id: from.id,
+                port_id: handle.portId,
+                name: mappedNodes.find((node) => node.id === from.id)?.data.title ?? "",
+              },
+            });
+          }
+        }
+        return;
+      }
       if (state.isValid !== false || !state.fromHandle || !state.toHandle) return;
       const [from, to] = state.fromHandle.type === "source"
         ? [state.fromHandle, state.toHandle]
@@ -969,7 +1005,7 @@ export default function RackGraphEditor({
         : "MIDI and audio ports do not connect to each other.";
       if (reason) setRefusal({ id: Date.now(), reason });
     },
-    [materialized],
+    [createMenuAnchor, mappedNodes, materialized],
   );
 
   const removeEdges = useCallback(
@@ -1343,17 +1379,34 @@ export default function RackGraphEditor({
               aria-label="Add to Rack"
             >
               <header>
-                <span>Add to Rack</span>
-                <strong>{materialized.name}</strong>
+                <span>{paneMenu.from ? "Connect to" : "Add to Rack"}</span>
+                <strong>
+                  {paneMenu.from
+                    ? `${paneMenu.from.signal === "audio" ? "After" : "From"} ${paneMenu.from.name}`
+                    : materialized.name}
+                </strong>
               </header>
-              <button type="button" role="menuitem" disabled={!canAddInstrument} onClick={() => {
-                onAddInstrument(paneMenu.position, "instrument");
-                setPaneMenu(null);
-              }}>Instrument</button>
-              <button type="button" role="menuitem" disabled={!canAddInstrument} onClick={() => {
-                onAddInstrument(paneMenu.position, "effect");
-                setPaneMenu(null);
-              }}>Effect</button>
+              {!paneMenu.from || paneMenu.from.signal === "midi" ? (
+                <button type="button" role="menuitem" disabled={!canAddInstrument} onClick={() => {
+                  onAddInstrument(paneMenu.position, "instrument");
+                  setPaneMenu(null);
+                }}>Instrument</button>
+              ) : null}
+              {!paneMenu.from || paneMenu.from.signal === "audio" ? (
+                <button type="button" role="menuitem" disabled={!canAddInstrument} onClick={() => {
+                  onAddInstrument(
+                    paneMenu.position,
+                    "effect",
+                    paneMenu.from
+                      ? { node_id: paneMenu.from.node_id, port_id: paneMenu.from.port_id }
+                      : undefined,
+                  );
+                  setPaneMenu(null);
+                }}>Effect</button>
+              ) : null}
+              {paneMenu.from ? (
+                <button type="button" role="menuitem" onClick={() => setPaneMenu(null)}>Cancel</button>
+              ) : <>
               <button type="button" role="menuitem" disabled={materialized.graph!.nodes.some(
                 (node) => node.kind.kind === "audio_input" && node.kind.bus_id === "main",
               )} onClick={() => {
@@ -1387,6 +1440,7 @@ export default function RackGraphEditor({
                 setPaneMenu(null);
               }}>Add Child Rack</button>
               <button type="button" role="menuitem" onClick={() => setPaneMenu(null)}>Close</button>
+              </>}
             </div>
           ) : null}
           {nodeMenu && menuNode ? (

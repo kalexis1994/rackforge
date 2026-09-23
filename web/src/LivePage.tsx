@@ -1952,6 +1952,7 @@ function RackEditor({
   const [pluginPicker, setPluginPicker] = useState<{
     position?: RackGraphPosition;
     role: RackPluginRole;
+    insertAfter?: { node_id: string; port_id: string };
   } | null>(null);
   // Rack preview is a host capability, not a UI default: the appliance and
   // the in-page browser host implement PreviewRack, the desktop still rejects
@@ -2055,8 +2056,12 @@ function RackEditor({
     }, 120);
     return () => window.clearTimeout(timer);
   }, [previewPayload, previewSupported, previewVoiceCount]);
-  const addPlugin = useCallback((position?: RackGraphPosition, role: RackPluginRole = "instrument") => {
-    setPluginPicker({ position, role });
+  const addPlugin = useCallback((
+    position?: RackGraphPosition,
+    role: RackPluginRole = "instrument",
+    insertAfter?: { node_id: string; port_id: string },
+  ) => {
+    setPluginPicker({ position, role, insertAfter });
   }, []);
   const selectPlugin = useCallback((instance: PluginInstance) => {
     // The menu says what the node is for, but the catalog says what the plugin
@@ -2064,7 +2069,9 @@ function RackEditor({
     // works.
     const role = rackPluginRole(instance.plugin_id, plugins);
     setDraft((current) => current
-      ? addSlotToRack(current, defaultSlot(instance), pluginPicker?.position, role)
+      ? addSlotToRack(current, defaultSlot(instance), pluginPicker?.position, role, {
+        insertAfter: pluginPicker?.insertAfter,
+      })
       : current);
     setPluginPicker(null);
   }, [pluginPicker, plugins]);
@@ -2476,6 +2483,7 @@ function SongEditor({
   const [pluginPicker, setPluginPicker] = useState<{
     position?: RackGraphPosition;
     role: RackPluginRole;
+    insertAfter?: { node_id: string; port_id: string };
   } | null>(null);
   const immersive = immersivePartId !== null;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
@@ -2772,7 +2780,8 @@ function SongEditor({
                   racks={performance.library.racks}
                   onChange={updatePartRack}
                   canAddInstrument={selectedPartRack.slots.length < 32}
-                  onAddInstrument={(position, role) => setPluginPicker({ position, role })}
+                  onAddInstrument={(position, role, insertAfter) =>
+                    setPluginPicker({ position, role, insertAfter })}
                   instances={instances}
                   renderPluginSurface={renderPluginSurface}
                   onOverlayChange={handleGraphOverlayChange}
@@ -2821,6 +2830,7 @@ function SongEditor({
                 defaultSlot(instance),
                 pluginPicker.position,
                 rackPluginRole(instance.plugin_id, plugins),
+                { insertAfter: pluginPicker.insertAfter },
               ),
             );
             setPluginPicker(null);

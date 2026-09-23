@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import {
   dispatchPerformanceEdit,
   dispatchPerformanceEditLatest,
@@ -290,7 +291,7 @@ export function SequencerStrip({
           title={collapsed ? "Unfold the sequencers" : "Fold the sequencers away"}
           onClick={toggleCollapsed}
         >
-          <span className="seq-chevron" aria-hidden="true" />
+          <ChevronDown className="seq-chevron" aria-hidden="true" />
         </button>
       </div>
       <div className="sequencer-body" id="sequencer-body" data-collapsed={collapsed}>

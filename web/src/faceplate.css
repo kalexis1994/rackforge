@@ -4433,17 +4433,21 @@
   padding-inline: 12px;
 }
 
+/* The arrow turns about its own centre. It was two borders of an 8px box,
+   whose drawn corner sat off the box's middle, nudged up 2px to look
+   centred -- so turning it about the box swung it up and down. The icon's
+   stroke is centred in its box, and the box is what turns. */
 .seq-chevron {
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: translateY(-2px) rotate(-135deg);
+  width: 16px;
+  height: 16px;
+  flex: none;
+  transform-origin: 50% 50%;
+  transform: rotate(180deg);
   transition: transform var(--rf-motion-fast) var(--rf-ease-standard);
 }
 
 .sequencer-shell.collapsed .seq-chevron {
-  transform: translateY(-2px) rotate(45deg);
+  transform: rotate(0deg);
 }
 
 /* Folded, the strip is one line: play, panic and fill, where the transport

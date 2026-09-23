@@ -107,16 +107,18 @@ describe("global plugin runtime state", () => {
     expect(state).toMatchObject({ phase: "loading", loaded: false, healthy: null });
   });
 
-  it("reports a missing previously loaded instance as unhealthy", () => {
-    const state = derivePluginRuntimeStates(
-      [plugin()],
-      "online",
-      session([]),
-      new Map(),
-      new Set(["org.rackforge.synth"]),
-    )["org.rackforge.synth"];
+  it("does not call an instrument broken because the host unloaded it", () => {
+    // Loaded, then left for another instrument in PLAY: the host drops its
+    // instance, and it is back to loading on demand.
+    const loaded = derivePluginRuntimeStates([plugin()], "online", session([instance()]));
+    const left = derivePluginRuntimeStates([plugin()], "online", session([]));
 
-    expect(state).toMatchObject({ phase: "unhealthy", loaded: false, healthy: false });
+    expect(loaded["org.rackforge.synth"]).toMatchObject({ phase: "ready" });
+    expect(left["org.rackforge.synth"]).toMatchObject({
+      phase: "available",
+      loaded: false,
+      healthy: null,
+    });
   });
 
   it("reports active plugins as unhealthy when the runtime disconnects", () => {

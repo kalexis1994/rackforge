@@ -55,7 +55,6 @@ let runtimeConnection: ConnectionStatus = "connecting";
 let runtimeSnapshot: SessionSnapshot | null = null;
 let operationToken = 0;
 const operations = new Map<string, PluginOperation>();
-const previouslyLoaded = new Set<string>();
 const listeners = new Set<() => void>();
 let browserAssetRefreshInstalled = false;
 let browserAssetReadyRefreshDone = false;
@@ -96,7 +95,6 @@ export function derivePluginRuntimeStates(
   connection: ConnectionStatus,
   session: SessionSnapshot | null,
   activeOperations: ReadonlyMap<string, PluginOperation> = new Map(),
-  loadedBefore: ReadonlySet<string> = new Set(),
 ): Record<string, PluginRuntimeStatus> {
   const runtime: Record<string, PluginRuntimeStatus> = {};
   const instancesByPlugin = new Map(
@@ -169,39 +167,19 @@ export function derivePluginRuntimeStates(
       };
       continue;
     }
-    const disappeared = loadedBefore.has(plugin.plugin_id);
+    // No instance while the host is online is the host's choice, not a
+    // failure: switching instruments in PLAY unloads the one being left, and
+    // the session carries no fault for an instance. Calling that "missing"
+    // flagged every instrument the player had just come from as broken.
     runtime[plugin.plugin_id] = {
       plugin_id: plugin.plugin_id,
-      phase: disappeared ? "unhealthy" : "available",
+      phase: "available",
       loaded: false,
-      healthy: disappeared ? false : null,
-      detail: disappeared ? "Runtime instance is missing" : "Active · Loads on demand",
+      healthy: null,
+      detail: "Active · Loads on demand",
     };
   }
   return runtime;
-}
-
-function updatePreviouslyLoaded(
-  plugins: PluginWebDescriptor[],
-  status: PluginCatalogSnapshot["status"],
-) {
-  const present = new Set(plugins.map((plugin) => plugin.plugin_id));
-  const active = new Set(
-    plugins.filter((plugin) => plugin.active).map((plugin) => plugin.plugin_id),
-  );
-  if (status === "ready") {
-    for (const pluginId of previouslyLoaded) {
-      if (!present.has(pluginId)) previouslyLoaded.delete(pluginId);
-    }
-    for (const plugin of plugins) {
-      if (!plugin.active) previouslyLoaded.delete(plugin.plugin_id);
-    }
-  }
-  for (const instance of runtimeSnapshot?.instances ?? []) {
-    if (active.has(instance.plugin_id)) {
-      previouslyLoaded.add(instance.plugin_id);
-    }
-  }
 }
 
 function currentRuntime(plugins: PluginWebDescriptor[]) {
@@ -210,7 +188,6 @@ function currentRuntime(plugins: PluginWebDescriptor[]) {
     runtimeConnection,
     runtimeSnapshot,
     operations,
-    previouslyLoaded,
   );
 }
 
@@ -234,7 +211,6 @@ function runtimeEqual(
 }
 
 function publish(next: Omit<PluginCatalogSnapshot, "runtime"> | PluginCatalogSnapshot) {
-  updatePreviouslyLoaded(next.plugins, next.status);
   snapshot = {
     ...next,
     runtime: currentRuntime(next.plugins),
@@ -296,7 +272,6 @@ export function synchronizePluginRuntime(
 ) {
   runtimeSnapshot = session;
   runtimeConnection = connection;
-  updatePreviouslyLoaded(snapshot.plugins, snapshot.status);
   const runtime = currentRuntime(snapshot.plugins);
   if (runtimeEqual(snapshot.runtime, runtime)) return;
   snapshot = { ...snapshot, runtime };

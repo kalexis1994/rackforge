@@ -3637,9 +3637,13 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerCatalog
                         })
                     })
                     .collect();
+                // The controls themselves, for the Controllers editor.
+                let editor = manifest.editor_inputs();
                 serde_json::json!({
                     "id": controller.record.id,
                     "name": manifest.name,
+                    "vendor": manifest.vendor,
+                    "schema_version": manifest.schema_version,
                     "version": controller.record.version,
                     "enabled": controller.record.enabled,
                     "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
@@ -3650,6 +3654,9 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerCatalog
                     },
                     "devices": manifest.devices.len(),
                     "settings": settings,
+                    "inputs": editor.inputs,
+                    "roles": editor.roles,
+                    "actions": editor.actions,
                 })
             })
             .collect();

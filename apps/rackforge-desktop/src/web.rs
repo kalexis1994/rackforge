@@ -2143,15 +2143,22 @@ async fn controller_catalog(State(state): State<WebState>) -> Response {
                     })
                 })
                 .collect();
+            // The controls themselves, for the Controllers editor.
+            let editor = manifest.editor_inputs();
             json!({
                 "id": controller.record.id,
                 "name": manifest.name,
+                "vendor": manifest.vendor,
+                "schema_version": manifest.schema_version,
                 "version": controller.record.version,
                 "enabled": controller.record.enabled,
                 "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
                 "runtime": format!("{:?}", manifest.runtime.kind),
                 "devices": manifest.devices.len(),
                 "settings": settings,
+                "inputs": editor.inputs,
+                "roles": editor.roles,
+                "actions": editor.actions,
             })
         })
         .collect();

@@ -1275,15 +1275,23 @@ async fn controller_catalog(
                     })
                 })
                 .collect();
+            // The controls themselves, for the Controllers editor: what the
+            // package declares, or the messages a schema 1 package binds.
+            let editor = manifest.editor_inputs();
             serde_json::json!({
                 "id": controller.record.id,
                 "name": manifest.name,
+                "vendor": manifest.vendor,
+                "schema_version": manifest.schema_version,
                 "version": controller.record.version,
                 "enabled": controller.record.enabled,
                 "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
                 "runtime": format!("{:?}", manifest.runtime.kind),
                 "devices": manifest.devices.len(),
                 "settings": settings,
+                "inputs": editor.inputs,
+                "roles": editor.roles,
+                "actions": editor.actions,
             })
         })
         .collect();

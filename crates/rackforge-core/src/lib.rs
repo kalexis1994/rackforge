@@ -28,6 +28,7 @@ pub mod loader;
 #[path = "loader_unavailable.rs"]
 pub mod loader;
 pub mod midi2;
+pub mod midi_activity;
 pub mod midi_hotplug;
 pub mod midi_trace;
 pub mod package;

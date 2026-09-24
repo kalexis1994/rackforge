@@ -1,5 +1,6 @@
 use crate::PluginStorage;
 use crate::controller_map_store::{ControllerMapStore, export_rfmap};
+use crate::midi_activity::MidiActivityLog;
 use crate::performance::PerformanceRepository;
 use crate::rack_graph::{
     CompiledAudioSource, CompiledRackSlot, compile_instrument_definition, compile_instrument_rack,
@@ -379,6 +380,10 @@ struct ControlContext {
     connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
     midi_observer: Mutex<Receiver<IngressMidiEvent>>,
     midi_learn: Mutex<Option<MidiLearnState>>,
+    /// What came in lately, for the Controllers editor. Fed with Learn from
+    /// the same drain of the observer, so the two never take messages from
+    /// each other. Locked after `midi_observer` and `midi_learn`.
+    midi_activity: Mutex<MidiActivityLog>,
     dynamic_resources: Mutex<BTreeMap<InstanceId, BTreeMap<String, PathBuf>>>,
     virtual_midi: Mutex<BTreeMap<ClientId, VirtualMidiClientState>>,
     plugin_sample_rate: f64,
@@ -480,6 +485,7 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         connected_midi_sources: options.connected_midi_sources,
         midi_observer: Mutex::new(options.midi_observer),
         midi_learn: Mutex::new(None),
+        midi_activity: Mutex::new(MidiActivityLog::default()),
         dynamic_resources: Mutex::new(BTreeMap::new()),
         virtual_midi: Mutex::new(BTreeMap::new()),
         plugin_sample_rate: options.plugin_sample_rate,
@@ -711,6 +717,7 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
                 None,
             )
         }
+        ControlRequest::MidiActivity { after } => midi_activity(context, after),
         ControlRequest::ControllerMaps => controller_maps(context),
         ControlRequest::SaveControllerMap { map } => save_controller_map(context, *map),
         ControlRequest::ExportControllerMap { controller_id } => {
@@ -2665,9 +2672,9 @@ fn begin_midi_learn(
         );
     }
     drop(repository);
-    if let Ok(observer) = context.midi_observer.lock() {
-        while observer.try_recv().is_ok() {}
-    }
+    // What came before Learn began is activity, not a candidate: drain it
+    // before the session exists.
+    drain_midi_observer(context);
     let learn_id = context
         .next_midi_learn_id
         .fetch_add(1, Ordering::Relaxed)
@@ -2709,19 +2716,58 @@ fn midi_learn_candidate(
     })
 }
 
+/// MIDI a controller driver forwards under its own source never passes the
+/// observer channel; it is observed here, as the channel's messages are.
 fn observe_forwarded_midi_learn(context: &ControlContext, ingress: IngressMidiEvent) {
-    let Some(candidate) = midi_learn_candidate(&context.midi_sources, ingress) else {
+    let mut learn = context.midi_learn.lock().ok();
+    record_observed_midi(context, ingress, learn.as_deref_mut());
+}
+
+/// Takes everything the engine observed: each message goes to the activity
+/// log, and the first learnable one becomes an open Learn session's
+/// candidate. The one reader of the observer channel, so Learn and the
+/// Controllers editor never take messages from each other.
+fn drain_midi_observer(context: &ControlContext) {
+    let Ok(observer) = context.midi_observer.lock() else {
         return;
     };
-    if let Ok(mut learn) = context.midi_learn.lock()
-        && let Some(active) = learn.as_mut()
+    let mut learn = context.midi_learn.lock().ok();
+    while let Ok(ingress) = observer.try_recv() {
+        record_observed_midi(context, ingress, learn.as_deref_mut());
+    }
+}
+
+fn record_observed_midi(
+    context: &ControlContext,
+    ingress: IngressMidiEvent,
+    learn: Option<&mut Option<MidiLearnState>>,
+) {
+    if let Some(source) = context.midi_sources.descriptor(ingress.source)
+        && let Ok(mut activity) = context.midi_activity.lock()
+    {
+        let length = usize::from(ingress.packet.length).clamp(1, 3);
+        activity.record(source, &ingress.packet.data[..length]);
+    }
+    if let Some(Some(active)) = learn
         && active.candidate.is_none()
     {
-        active.candidate = Some(candidate);
+        active.candidate = midi_learn_candidate(&context.midi_sources, ingress);
+    }
+}
+
+fn midi_activity(context: &ControlContext, after: u64) -> ControlResponse {
+    drain_midi_observer(context);
+    match context.midi_activity.lock() {
+        Ok(activity) => {
+            let (cursor, events) = activity.since(after);
+            ControlResponse::MidiActivity { cursor, events }
+        }
+        Err(_) => internal_error("MIDI activity lock is poisoned", None),
     }
 }
 
 fn midi_learn_status(context: &ControlContext, learn_id: u64) -> ControlResponse {
+    drain_midi_observer(context);
     let mut learn = match context.midi_learn.lock() {
         Ok(learn) => learn,
         Err(_) => {
@@ -2744,16 +2790,6 @@ fn midi_learn_status(context: &ControlContext, learn_id: u64) -> ControlResponse
             format!("MIDI Learn session {learn_id} does not exist"),
             current_revision(context),
         );
-    }
-    if active.candidate.is_none()
-        && let Ok(observer) = context.midi_observer.lock()
-    {
-        while let Ok(ingress) = observer.try_recv() {
-            if let Some(candidate) = midi_learn_candidate(&context.midi_sources, ingress) {
-                active.candidate = Some(candidate);
-                break;
-            }
-        }
     }
     ControlResponse::MidiLearnStatus {
         learn_id,
@@ -5740,6 +5776,7 @@ mod tests {
                 connected_midi_sources: Arc::new(Mutex::new(BTreeSet::from([0, 1]))),
                 midi_observer: Mutex::new(midi_receiver),
                 midi_learn: Mutex::new(None),
+                midi_activity: Mutex::new(MidiActivityLog::default()),
                 dynamic_resources: Mutex::new(BTreeMap::new()),
                 virtual_midi: Mutex::new(BTreeMap::new()),
                 plugin_sample_rate: 48_000.0,

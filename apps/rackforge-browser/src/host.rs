@@ -574,6 +574,10 @@ impl BrowserHost {
                 controllers: Vec::new(),
                 maps: Vec::new(),
             }),
+            ControlRequest::MidiActivity { .. } => Ok(ControlResponse::MidiActivity {
+                cursor: 0,
+                events: Vec::new(),
+            }),
             ControlRequest::VirtualMidi {
                 client_id, message, ..
             } => self.virtual_midi(client_id, message),
@@ -2574,15 +2578,21 @@ impl BrowserHost {
         let manifest: ControllerPackageManifest =
             toml::from_str(keylab_essential_mk3::controller::PACKAGE_MANIFEST)
                 .expect("the bundled Arturia controller manifest is validated at build time");
+        let editor = manifest.editor_inputs();
         serde_json::json!({
             "controllers": [{
                 "id": manifest.id,
                 "name": manifest.name,
+                "vendor": manifest.vendor,
+                "schema_version": manifest.schema_version,
                 "version": manifest.version,
                 "enabled": true,
                 "trust": "official",
                 "runtime": "Browser",
                 "devices": manifest.devices.len(),
+                "inputs": editor.inputs,
+                "roles": editor.roles,
+                "actions": editor.actions,
                 "settings": manifest.settings.into_iter().map(|setting| serde_json::json!({
                     "id": setting.id,
                     "name": setting.name,

@@ -750,6 +750,103 @@ impl ControllerPackageManifest {
     pub fn is_declarative(&self) -> bool {
         self.runtime.kind == DriverRuntimeKind::DeclarativeV1
     }
+
+    /// The controls an editor shows for this controller, and the meanings the
+    /// package gives them. A schema 2 package declares both. A schema 1
+    /// package names no control, so each message it binds becomes an unnamed
+    /// input -- "CC 74" -- carrying the role or action it had.
+    pub fn editor_inputs(&self) -> EditorInputs {
+        if self.schema_version == CONTROLLER_PACKAGE_SCHEMA_VERSION_2 {
+            return EditorInputs {
+                inputs: self.inputs.clone(),
+                roles: self.roles.clone(),
+                actions: self.actions.clone(),
+            };
+        }
+        let mut editor = EditorInputs::default();
+        let mut seen = BTreeSet::new();
+        let mut input_for = |editor: &mut EditorInputs,
+                             channel: u8,
+                             controller: u8,
+                             kind: InputKind,
+                             button: Option<ButtonReport>|
+         -> String {
+            let id = format!("cc-{}-{controller}", channel + 1);
+            if seen.insert((channel, controller)) {
+                editor.inputs.push(ControllerInput {
+                    id: id.clone(),
+                    name: format!("CC {controller}"),
+                    kind,
+                    group: None,
+                    midi: InputMidi {
+                        channel,
+                        cc: Some(controller),
+                        ..InputMidi::default()
+                    },
+                    button,
+                    encoder: None,
+                });
+            }
+            id
+        };
+        if let Some(profile) = &self.semantic_profile {
+            for control in &profile.controls {
+                let kind = match control.mode {
+                    rackforge_controller_api::SemanticControlMode::Relative => InputKind::Encoder,
+                    rackforge_controller_api::SemanticControlMode::Absolute => InputKind::Knob,
+                };
+                let input = input_for(
+                    &mut editor,
+                    control.midi_cc.channel,
+                    control.midi_cc.controller,
+                    kind,
+                    None,
+                );
+                editor.roles.push(InputRole {
+                    input,
+                    role: control.role.clone(),
+                    invert: control.invert,
+                    mode: control.mode,
+                });
+            }
+        }
+        for action in &self.host_actions {
+            let input = input_for(
+                &mut editor,
+                action.midi_cc.channel,
+                action.midi_cc.controller,
+                InputKind::Button,
+                Some(ButtonReport {
+                    press: action.midi_cc.press_value,
+                    release: action.midi_cc.release_value,
+                    press_only: false,
+                    latching: false,
+                }),
+            );
+            editor.actions.push(InputAction {
+                input,
+                target: action.target,
+            });
+        }
+        for control in &self.host_controls {
+            input_for(
+                &mut editor,
+                control.midi_cc.channel,
+                control.midi_cc.controller,
+                InputKind::Fader,
+                None,
+            );
+        }
+        editor
+    }
+}
+
+/// A controller's controls and the package's meanings for them, for editing.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EditorInputs {
+    pub inputs: Vec<ControllerInput>,
+    pub roles: Vec<InputRole>,
+    pub actions: Vec<InputAction>,
 }
 
 /// Produces an immutable version of a controller manifest for a host-bundled
@@ -1817,6 +1914,34 @@ target = "keyboard_parts"
         let mut future: ControllerPackageManifest = toml::from_str(SCHEMA_2).unwrap();
         future.schema_version = 3;
         assert!(future.validate().is_err());
+    }
+
+    #[test]
+    fn a_schema_1_package_shows_the_messages_it_binds_as_inputs() {
+        let mut schema_1 = declarative_manifest("org.rackforge.generic-midi", "generic midi");
+        schema_1.host_actions.push(HostActionBinding {
+            target: rackforge_controller_api::HostActionTarget::KeyboardParts,
+            midi_cc: rackforge_controller_api::MidiButtonBinding {
+                channel: 0,
+                controller: 119,
+                press_value: 127,
+                release_value: 0,
+            },
+        });
+        let editor = schema_1.editor_inputs();
+        // The master fader it reserves, and the part key.
+        assert_eq!(editor.inputs.len(), 2);
+        assert!(editor.inputs.iter().any(|input| input.id == "cc-1-7"));
+        assert_eq!(editor.actions[0].input, "cc-1-119");
+        let part = editor
+            .inputs
+            .iter()
+            .find(|input| input.id == "cc-1-119")
+            .unwrap();
+        assert_eq!(part.kind, InputKind::Button);
+
+        let schema_2: ControllerPackageManifest = toml::from_str(SCHEMA_2).unwrap();
+        assert_eq!(schema_2.editor_inputs().inputs, schema_2.inputs);
     }
 
     #[test]

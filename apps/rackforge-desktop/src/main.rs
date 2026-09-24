@@ -508,6 +508,8 @@ struct DesktopApp {
     /// The player's controller maps, by controller id, and where they live.
     controller_maps: BTreeMap<String, ControllerMap>,
     controller_map_store: ControllerMapStore,
+    /// What came in lately, for the Controllers editor.
+    midi_activity: rackforge_core::midi_activity::MidiActivityLog,
     virtual_midi: BTreeMap<ClientId, VirtualMidiClientState>,
     next_program_draft_id: u64,
     next_audition_lease_id: u64,
@@ -915,6 +917,7 @@ impl DesktopApp {
             controller_semantic_profiles,
             controller_maps,
             controller_map_store,
+            midi_activity: Default::default(),
             virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
@@ -2359,6 +2362,10 @@ impl DesktopApp {
         data: [u8; 3],
         observed_at: Instant,
     ) {
+        // Every message is activity for the Controllers editor, Learn or no
+        // Learn.
+        self.midi_activity
+            .record(&descriptor, &data[..usize::from(length).min(3)]);
         if self
             .midi_learn
             .as_ref()
@@ -4073,6 +4080,10 @@ impl DesktopApp {
                         meter: Default::default(),
                     }
                 }
+            }
+            ControlRequest::MidiActivity { after } => {
+                let (cursor, events) = self.midi_activity.since(after);
+                ControlResponse::MidiActivity { cursor, events }
             }
             ControlRequest::ControllerMaps => self.controller_maps_response(),
             ControlRequest::SaveControllerMap { map } => self.save_controller_map(*map),

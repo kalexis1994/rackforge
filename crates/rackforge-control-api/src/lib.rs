@@ -606,6 +606,14 @@ pub enum ControlRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         curve: Option<VelocityCurve>,
     },
+    /// The channel messages the host has received since `after`, from every
+    /// enabled input: what lights a control in the Controllers editor, and
+    /// what it learns a new controller's controls from. Answers the cursor
+    /// to ask from next time.
+    MidiActivity {
+        #[serde(default)]
+        after: u64,
+    },
     /// The controllers the host knows and the player's map for each: what
     /// every mapped input does in every plugin.
     ControllerMaps,
@@ -826,6 +834,10 @@ pub enum ControlResponse {
         /// The reading for a keybed with none of its own.
         shared_curve: VelocityCurve,
     },
+    MidiActivity {
+        cursor: u64,
+        events: Vec<MidiActivityEvent>,
+    },
     ControllerMaps {
         controllers: Vec<RegisteredController>,
         maps: Vec<ControllerMap>,
@@ -946,6 +958,20 @@ pub struct MidiInputSetting {
 pub struct MidiSourceStatus {
     pub source: MidiSourceDescriptor,
     pub connected: bool,
+}
+
+/// One channel message a host received: which input it came from, and its
+/// bytes. Numbered in the order received, so a client asks only for what is
+/// newer than what it has seen.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiActivityEvent {
+    pub sequence: u64,
+    pub source: MidiSourceDescriptor,
+    pub status: u8,
+    pub data1: u8,
+    #[serde(default)]
+    pub data2: u8,
 }
 
 /// A controller package the host has attached to a MIDI input: the key its

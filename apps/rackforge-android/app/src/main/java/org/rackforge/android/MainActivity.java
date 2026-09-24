@@ -2067,6 +2067,14 @@ public final class MainActivity extends Activity {
                         .toString());
                 return;
             }
+            if ("midi_activity".equals(operation)) {
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "midi_activity")
+                        .put("cursor", 0)
+                        .put("events", new JSONArray())
+                        .toString());
+                return;
+            }
             if ("save_controller_map".equals(operation)
                     || "export_controller_map".equals(operation)
                     || "import_controller_map".equals(operation)) {

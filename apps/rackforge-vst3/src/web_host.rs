@@ -521,6 +521,11 @@ fn handle_session_command(
             "controllers": [],
             "maps": [],
         })]),
+        "midi_activity" => Ok(vec![json!({
+            "status": "midi_activity",
+            "cursor": 0,
+            "events": [],
+        })]),
         // The DAW owns the inputs; the plug-in captures none of its own.
         "audio_input" => Ok(vec![json!({
             "status": "audio_input",

@@ -9,6 +9,7 @@ use rackforge_core::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
     process_slots_sequential, spawn_telemetry_publisher,
 };
+use rackforge_core::rack_voice::{RackCapture, RackEngine};
 use rackforge_core::{
     CompiledParameterLink, LiveParameterStateStore, LiveParameterTarget, LiveParameterWriter,
     LiveParameterWriterHandle, LoadedPlugin, PluginInstance,
@@ -51,6 +52,8 @@ const PLUGIN_OUTPUT_CHANNELS: usize = 2;
 const MAX_STANDALONE_INPUT_CHANNELS: usize = 2;
 const CAPTURE_RING_FRAMES: usize = 16_384;
 const MAX_AUDIO_FRAMES: usize = 4_096;
+/// The largest block the audio thread renders: what a Rack is built for.
+pub const MAX_RACK_BLOCK_FRAMES: u32 = MAX_AUDIO_FRAMES as u32;
 const MIDI_QUEUE_CAPACITY: usize = 4_096;
 const COMMAND_QUEUE_CAPACITY: usize = 64;
 const CONTROLLER_QUEUE_CAPACITY: usize = 256;
@@ -1166,6 +1169,10 @@ impl DesktopAudio {
             sequencer: rackforge_core::SequencerEngine::new(f64::from(config.sample_rate.0))
                 .or_else(|| rackforge_core::SequencerEngine::new(48_000.0))
                 .expect("48 kHz is inside the transport bounds"),
+            rack: None,
+            rack_capture: vec![0.0; MAX_AUDIO_FRAMES * capture_channels],
+            // The physical inputs, one-based, in capture order.
+            rack_capture_inputs: (1..=capture_channels as u32).collect(),
         };
         processor.render_telemetry = Arc::clone(processor.render_pool.telemetry());
         let engage_callback_thread = std::sync::Once::new();
@@ -1596,6 +1603,20 @@ impl DesktopAudio {
         self.send_command(AudioCommand::ReplaceVoice(voice))
     }
 
+    /// Puts a LIVE Rack on stage in place of the active voice, or takes it
+    /// off with `None`. The Rack it replaces is dropped here, never on the
+    /// audio thread.
+    pub fn set_rack(&self, rack: Option<RackEngine<'static>>) -> Result<()> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::SetRack {
+            rack: rack.map(|rack| Box::new(DesktopRack(rack))),
+            reply,
+        })?;
+        let retired = receive_control_response(receiver, "change the LIVE Rack")?;
+        drop(retired);
+        Ok(())
+    }
+
     pub fn set_master_level(&self, level: MasterLevel) -> Result<()> {
         self.send_command(AudioCommand::SetMasterLevel(level))
     }
@@ -1781,6 +1802,12 @@ impl DesktopAudio {
 
 enum AudioCommand {
     SelectPlugin(String),
+    /// Puts a Rack on stage, or takes it off with `None`; the Rack it
+    /// replaces comes back, to be dropped off the audio thread.
+    SetRack {
+        rack: Option<Box<DesktopRack>>,
+        reply: SyncSender<std::result::Result<Option<Box<DesktopRack>>, String>>,
+    },
     SaveActiveState {
         reply: SyncSender<std::result::Result<Vec<u8>, String>>,
     },
@@ -2268,7 +2295,26 @@ struct AudioProcessor {
     /// The counter at the start of the previous render: the messages this
     /// render dequeues happened after it.
     previous_block_clock: u64,
+    /// The LIVE Rack, while one is on stage. It plays in place of the active
+    /// voice and its chain, which stay built for PLAY.
+    rack: Option<Box<DesktopRack>>,
+    /// The block's hardware input, for Slots cabled to it.
+    rack_capture: Vec<f32>,
+    rack_capture_inputs: Vec<u32>,
 }
+
+/// A LIVE Rack on the Desktop's audio thread.
+pub struct DesktopRack(pub RackEngine<'static>);
+
+// SAFETY: the Rack's instances are made on the application thread and then
+// owned by the audio thread alone, as every PLAY voice already is; the render
+// pool enters a Slot only under its epoch protocol, and a Rack leaves the
+// audio thread only whole, to be dropped where it was made.
+unsafe impl Send for DesktopRack {}
+
+/// Where the sequencer's own events come from, for a Rack's Slots: no port,
+/// so no parameter link or source filter takes them for its own.
+const SEQUENCER_SOURCE: MidiSourceKey = MidiSourceKey::new(u32::MAX);
 
 impl AudioProcessor {
     /// This keybed's reading, or the one every other device gets.
@@ -2288,7 +2334,16 @@ impl AudioProcessor {
         self.apply_commands()?;
         let block_now = performance_counter();
         let block_start = std::mem::replace(&mut self.previous_block_clock, block_now);
-        while self.events.len() < MAX_MIDI_EVENTS_PER_BLOCK {
+        // With a Rack on stage the events go to its Slots, not `events`, so
+        // the block's share of the queue is counted apart; the rest waits
+        // for the next block either way.
+        let mut rack_taken = 0;
+        while (if self.rack.is_some() {
+            rack_taken
+        } else {
+            self.events.len()
+        }) < MAX_MIDI_EVENTS_PER_BLOCK
+        {
             let Ok(packet) = self.midi_receiver.try_recv() else {
                 break;
             };
@@ -2338,6 +2393,17 @@ impl AudioProcessor {
             );
             let active_voice = self.active_voice;
             let mut consume = false;
+            if let Some(rack) = self.rack.as_mut() {
+                // The Rack's Slots take it through their own stages, and the
+                // links to their parameters; conducting still comes first.
+                rack_taken += 1;
+                let conducted = self.conducting
+                    && feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
+                if !conducted {
+                    rack.0.route(ingress, None);
+                }
+                continue;
+            }
             {
                 let Self {
                     parameter_links,
@@ -2394,6 +2460,22 @@ impl AudioProcessor {
                 &mut clock,
             );
             for event in &self.sequencer_scratch {
+                if let Some(rack) = self.rack.as_mut() {
+                    // The Part's patterns play the Rack as the keyboard does.
+                    rack.0.route(
+                        IngressMidiEvent {
+                            source: SEQUENCER_SOURCE,
+                            packet: RoutedMidiPacket {
+                                frame: event.frame,
+                                length: event.length,
+                                data: event.data,
+                                wide: None,
+                            },
+                        },
+                        None,
+                    );
+                    continue;
+                }
                 if self.events.len() < self.events.capacity() {
                     self.events
                         .push(rackforge_core::midi2::Midi2Event::from_packet(
@@ -2424,6 +2506,10 @@ impl AudioProcessor {
         self.output[..samples].fill(0.0);
         if self.stopped {
             self.discard_capture(frames);
+            return Ok(&self.output[..samples]);
+        }
+        if self.rack.is_some() {
+            self.render_rack(frames)?;
             return Ok(&self.output[..samples]);
         }
         let input_channels = self.voices[self.active_voice].input_channels;
@@ -2523,6 +2609,64 @@ impl AudioProcessor {
         Ok(output)
     }
 
+    /// One block of the LIVE Rack, into `output` with the master applied.
+    /// A Rack that cannot render is silenced and the stream carries on: an
+    /// error here would stop the audio for every other surface too.
+    fn render_rack(&mut self, frames: usize) -> Result<()> {
+        let samples = frames * PLUGIN_OUTPUT_CHANNELS;
+        // The block's capture, whether or not a Slot reads it: the ring is
+        // drained every block, as the PLAY voice drains it.
+        let captured = match &self.capture {
+            Some(capture) if self.capture_channels > 0 => {
+                for sample in &mut self.rack_capture[..frames * self.capture_channels] {
+                    *sample = capture.pop();
+                }
+                true
+            }
+            _ => false,
+        };
+        let deadline_ns = frames as u64 * 1_000_000_000 / u64::from(self.sample_rate.max(1));
+        let Self {
+            rack,
+            render_pool,
+            render_telemetry,
+            rack_capture,
+            rack_capture_inputs,
+            capture_channels,
+            output,
+            ..
+        } = self;
+        let rack = rack
+            .as_mut()
+            .expect("render_rack is called with a Rack on stage");
+        let capture = captured.then_some(RackCapture {
+            samples: &rack_capture[..frames * *capture_channels],
+            channels: *capture_channels,
+            inputs: rack_capture_inputs,
+        });
+        if let Err(error) = rack.0.render(
+            render_pool,
+            render_telemetry,
+            frames as u32,
+            deadline_ns,
+            capture,
+            &mut output[..samples],
+        ) {
+            output[..samples].fill(0.0);
+            eprintln!("LIVE_RACK_RENDER_FAILED action=silence error={error:#}");
+        }
+        for frame in self.output[..samples]
+            .as_chunks_mut::<PLUGIN_OUTPUT_CHANNELS>()
+            .0
+        {
+            let gain = self.master_gain.next();
+            let (left, right) = self.master_balance.next();
+            frame[0] *= gain * left;
+            frame[1] *= gain * right;
+        }
+        Ok(())
+    }
+
     fn discard_capture(&self, frames: usize) {
         let Some(capture) = &self.capture else { return };
         for _ in 0..frames.saturating_mul(self.capture_channels) {
@@ -2562,6 +2706,12 @@ impl AudioProcessor {
         self.flush_retired_voices();
         while let Ok(command) = self.command_receiver.try_recv() {
             match command {
+                AudioCommand::SetRack { rack, reply } => {
+                    let retired = std::mem::replace(&mut self.rack, rack);
+                    // Handed back to be dropped off this thread. Only when the
+                    // caller has already given up waiting does it drop here.
+                    let _ = reply.try_send(Ok(retired));
+                }
                 AudioCommand::SelectPlugin(instance_id) => {
                     let index = self
                         .voices

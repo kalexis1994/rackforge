@@ -870,6 +870,29 @@ pub(crate) fn map_wide_velocity(
     output_low + ((offset * output_span + input_span / 2) / input_span) as u32
 }
 
+/// The hardware input captured for one block, for the Slots whose cables
+/// read it: interleaved samples, and which physical input (one-based) each
+/// captured channel is.
+#[derive(Clone, Copy)]
+pub struct RackCapture<'block> {
+    pub samples: &'block [f32],
+    pub channels: usize,
+    pub inputs: &'block [u32],
+}
+
+/// A block's events in frame order, as a plugin takes them. Live input and
+/// the sequencer arrive interleaved; a stable insertion sort keeps a note's
+/// off before the next on at the same frame, and allocates nothing.
+fn sort_events_by_frame(events: &mut [Midi2Event]) {
+    for index in 1..events.len() {
+        let mut position = index;
+        while position > 0 && events[position - 1].frame > events[position].frame {
+            events.swap(position - 1, position);
+            position -= 1;
+        }
+    }
+}
+
 /// A whole Rack for a host that renders in blocks of its own choosing:
 /// every Slot built and activated, MIDI routed to each through its stages,
 /// the Slots rendered on the shared pool in their graph order, and their
@@ -985,13 +1008,16 @@ impl<'plugin> RackEngine<'plugin> {
 
     /// Renders one block and writes the Rack's mix into `output`, an
     /// interleaved stereo buffer of `frames` frames. The block's MIDI and
-    /// parameter events are spent.
+    /// parameter events are spent. `capture` is the hardware input for this
+    /// block, when the host has one; a Slot cabled to the input hears
+    /// silence without it.
     pub fn render(
         &mut self,
         pool: &mut RenderPool,
         telemetry: &Arc<RenderTelemetry>,
         frames: u32,
         deadline_ns: u64,
+        capture: Option<RackCapture<'_>>,
         output: &mut [f32],
     ) -> Result<()> {
         let block = frames as usize;
@@ -1004,6 +1030,12 @@ impl<'plugin> RackEngine<'plugin> {
         if output.len() != block * self.channels {
             bail!("the Rack's output buffer does not hold {frames} stereo frames");
         }
+        if let Some(capture) = capture
+            && (capture.samples.len() < block * capture.channels
+                || capture.inputs.len() != capture.channels)
+        {
+            bail!("the Rack's capture does not hold {frames} frames of its inputs");
+        }
         let slot_count = self.voices.len();
         for voice in &mut self.voices {
             // Sized to this block within what was reserved at build, so a
@@ -1011,6 +1043,24 @@ impl<'plugin> RackEngine<'plugin> {
             voice.input.resize(block * voice.input_channels, 0.0);
             voice.output.resize(block * self.channels, 0.0);
             voice.budget.governor.configure(deadline_ns, slot_count);
+            sort_events_by_frame(&mut voice.events);
+            // The capture is staged for the block and read only during it.
+            match capture {
+                Some(capture) => {
+                    voice.capture_ptr = capture.samples.as_ptr();
+                    voice.capture_len = block * capture.channels;
+                    voice.capture_channels = capture.channels;
+                    voice.capture_inputs_ptr = capture.inputs.as_ptr();
+                    voice.capture_inputs_len = capture.inputs.len();
+                }
+                None => {
+                    voice.capture_ptr = std::ptr::null();
+                    voice.capture_len = 0;
+                    voice.capture_channels = 0;
+                    voice.capture_inputs_ptr = std::ptr::null();
+                    voice.capture_inputs_len = 0;
+                }
+            }
         }
         let started = Instant::now();
         if !pool.process(&mut self.voices, frames, self.channels as u32, deadline_ns) {
@@ -1025,6 +1075,10 @@ impl<'plugin> RackEngine<'plugin> {
             }
             voice.events.clear();
             voice.parameter_events.clear();
+            voice.capture_ptr = std::ptr::null();
+            voice.capture_len = 0;
+            voice.capture_inputs_ptr = std::ptr::null();
+            voice.capture_inputs_len = 0;
         }
         Ok(())
     }
@@ -1153,6 +1207,22 @@ mod tests {
             )),
             None
         );
+    }
+
+    #[test]
+    fn a_blocks_events_are_put_in_frame_order_keeping_ties_in_arrival_order() {
+        let at = |frame: u32, status: u8| {
+            let mut event = Midi2Event::from_packet(&event(&[status, 60, 100]).packet);
+            event.frame = frame;
+            event
+        };
+        let mut events = vec![at(32, 0x90), at(0, 0x80), at(32, 0x80), at(0, 0x90)];
+        sort_events_by_frame(&mut events);
+        let order: Vec<_> = events
+            .iter()
+            .map(|event| (event.frame, event.to_midi1().data[0]))
+            .collect();
+        assert_eq!(order, vec![(0, 0x80), (0, 0x90), (32, 0x90), (32, 0x80)]);
     }
 
     #[test]

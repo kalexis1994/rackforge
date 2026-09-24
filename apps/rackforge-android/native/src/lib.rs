@@ -2264,11 +2264,14 @@ impl AndroidEngine {
                 MIDI_DROPPED_EVENTS.fetch_add(dropped, Ordering::Relaxed);
             }
             let deadline_ns = u64::from(frames) * 1_000_000_000 / SAMPLE_RATE as u64;
+            // Android opens no audio input, so a Slot cabled to the input
+            // hears silence.
             return rack.engine.render(
                 &mut self.render_pool,
                 &self.render_telemetry,
                 frames,
                 deadline_ns,
+                None,
                 output,
             );
         }

@@ -115,11 +115,11 @@ export function isRemoteWebClient() {
 /**
  * Whether the host plays a Rack being edited (PreviewRack). A capability, not
  * a UI default: an editor must not greet every added instrument with an error
- * banner for asking. The appliance, Android and the in-page host do; the
- * desktop does not yet.
+ * banner for asking. Every host with LIVE does -- the appliance, Android, the
+ * desktop and the in-page host; the VST3 editor has no LIVE.
  */
 export function hostPreviewsRacks() {
-  return isRemoteWebClient() || IS_BROWSER_HOST || isNativeHost();
+  return !isVstHost();
 }
 
 function installNativeListener() {

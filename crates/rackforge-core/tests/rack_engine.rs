@@ -230,6 +230,7 @@ impl Harness {
                 &self.telemetry,
                 frames,
                 1_000_000,
+                None,
                 &mut output,
             )
             .unwrap();
@@ -298,6 +299,7 @@ fn a_slot_plays_at_its_level_and_pan() {
             &rack.telemetry,
             FRAMES,
             1_000_000,
+            None,
             &mut output,
         )
         .unwrap();
@@ -318,6 +320,7 @@ fn a_host_block_shorter_than_the_rack_was_built_for_renders_in_place() {
                 &rack.telemetry,
                 FRAMES * 2,
                 1_000_000,
+                None,
                 &mut too_long
             )
             .is_err()

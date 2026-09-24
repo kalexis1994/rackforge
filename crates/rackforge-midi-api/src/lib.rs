@@ -1,3 +1,4 @@
+pub mod controller_map;
 pub mod velocity_curve;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -61,6 +62,166 @@ pub struct ParameterLink {
     pub transform: ParameterLinkTransform,
     #[serde(default)]
     pub pass_through: ParameterLinkPassThrough,
+    /// What the control does to the parameter. Left out -- as every link
+    /// written before modes existed -- the control drives the parameter
+    /// across its whole range.
+    #[serde(default, skip_serializing_if = "ParameterLinkMode::is_direct")]
+    pub mode: ParameterLinkMode,
+}
+
+/// A plugin parameter value named by a link's mode, in the parameter's own
+/// units: a choice's value, a boolean's 0 or 1, a float within its range.
+/// Always finite, and compared bit for bit, so a link stays comparable.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(try_from = "f64", into = "f64")]
+pub struct LinkValue(f64);
+
+impl LinkValue {
+    pub fn new(value: f64) -> Result<Self, MidiRoutingError> {
+        if value.is_finite() {
+            Ok(Self(value))
+        } else {
+            Err(MidiRoutingError::InvalidParameterLinkMode(
+                "a mode value must be finite",
+            ))
+        }
+    }
+
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for LinkValue {
+    type Error = MidiRoutingError;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<LinkValue> for f64 {
+    fn from(value: LinkValue) -> Self {
+        value.0
+    }
+}
+
+impl PartialEq for LinkValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for LinkValue {}
+
+/// The most values a Zones or Cycle mode may name.
+pub const MAX_LINK_MODE_VALUES: usize = 128;
+
+/// What a control does to the parameter it is linked to.
+///
+/// Continuous controls -- knobs, faders, pedals, wheels -- use `Direct`,
+/// `Range` or `Zones`. Buttons and pads use the rest: they act on a press,
+/// and `Hold` on the release too.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ParameterLinkMode {
+    /// The control's travel spans the parameter's whole range.
+    #[default]
+    Direct,
+    /// The control's travel spans `min` to `max`.
+    Range { min: LinkValue, max: LinkValue },
+    /// The control's travel is divided evenly among these values.
+    Zones { values: Vec<LinkValue> },
+    /// A press sets this value.
+    Set { value: LinkValue },
+    /// A press alternates between two values.
+    Toggle { first: LinkValue, second: LinkValue },
+    /// A press moves to the next of these values, back to the first after
+    /// the last.
+    Cycle { values: Vec<LinkValue> },
+    /// One value while the control is held, another once it is released.
+    Hold {
+        pressed: LinkValue,
+        released: LinkValue,
+    },
+    /// A press moves the parameter one step up or down.
+    Step {
+        direction: StepDirection,
+        /// Past the end, start again from the other end.
+        #[serde(default)]
+        wrap: bool,
+    },
+    /// A press fires a trigger parameter.
+    Trigger,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepDirection {
+    Up,
+    Down,
+}
+
+impl ParameterLinkMode {
+    pub fn is_direct(&self) -> bool {
+        matches!(self, Self::Direct)
+    }
+
+    /// Whether the mode acts on presses rather than following a position.
+    pub fn is_button(&self) -> bool {
+        matches!(
+            self,
+            Self::Set { .. }
+                | Self::Toggle { .. }
+                | Self::Cycle { .. }
+                | Self::Hold { .. }
+                | Self::Step { .. }
+                | Self::Trigger
+        )
+    }
+
+    /// The values the mode may write, for checking against the parameter.
+    pub fn values(&self) -> Vec<f64> {
+        match self {
+            Self::Direct | Self::Step { .. } | Self::Trigger => Vec::new(),
+            Self::Range { min, max } => vec![min.get(), max.get()],
+            Self::Zones { values } | Self::Cycle { values } => {
+                values.iter().map(|value| value.get()).collect()
+            }
+            Self::Set { value } => vec![value.get()],
+            Self::Toggle { first, second } => vec![first.get(), second.get()],
+            Self::Hold { pressed, released } => vec![pressed.get(), released.get()],
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), MidiRoutingError> {
+        match self {
+            Self::Zones { values } | Self::Cycle { values } => {
+                if values.len() < 2 {
+                    return Err(MidiRoutingError::InvalidParameterLinkMode(
+                        "zones and cycles need at least two values",
+                    ));
+                }
+                if values.len() > MAX_LINK_MODE_VALUES {
+                    return Err(MidiRoutingError::InvalidParameterLinkMode(
+                        "zones and cycles name at most 128 values",
+                    ));
+                }
+            }
+            Self::Range { min, max } if min == max => {
+                return Err(MidiRoutingError::InvalidParameterLinkMode(
+                    "a range needs two different ends",
+                ));
+            }
+            Self::Toggle { first, second } if first == second => {
+                return Err(MidiRoutingError::InvalidParameterLinkMode(
+                    "a toggle alternates two different values",
+                ));
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -130,7 +291,7 @@ impl ParameterLink {
         if number.is_some_and(|number| number > 127) {
             return Err(MidiRoutingError::InvalidParameterLinkNumber);
         }
-        Ok(())
+        self.mode.validate()
     }
 
     pub fn matches_channel(&self, channel: MidiChannel) -> bool {
@@ -883,6 +1044,10 @@ pub enum MidiRoutingError {
     InvalidParameterLinkInstance,
     #[error("parameter link message number must be in 0..=127")]
     InvalidParameterLinkNumber,
+    #[error("invalid parameter link mode: {0}")]
+    InvalidParameterLinkMode(&'static str),
+    #[error("invalid controller map: {0}")]
+    InvalidControllerMap(String),
 }
 
 fn validate_identifier(value: &str) -> Result<(), MidiRoutingError> {

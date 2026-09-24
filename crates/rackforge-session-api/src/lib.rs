@@ -1304,6 +1304,7 @@ mod tests {
             message: ParameterLinkMessage::ControlChange { controller: 74 },
             transform: ParameterLinkTransform::default(),
             pass_through: ParameterLinkPassThrough::PassThrough,
+            mode: Default::default(),
         }
     }
 

@@ -297,7 +297,11 @@ export function TouchControllerPage({
   const sizingHeight = docked ? window.innerHeight : controllerSize.height;
   const portraitViewport = useMediaQuery(PORTRAIT_DOCK_QUERY);
   const portraitDock = docked && portraitViewport;
-  const portraitKeyboardNavigator = portraitDock && mode === "keyboard" && !fullKeyboard;
+  // The range strip over the keys: in the portrait dock, and on the phone
+  // on its side, where the controller has the whole screen -- the only place
+  // it is not docked. There the keys used to fill the screen with no way to
+  // see or move the range but the menu's octave buttons.
+  const portraitKeyboardNavigator = (portraitDock || !docked) && mode === "keyboard" && !fullKeyboard;
   const minimumKeyboardViewportWidth = Math.min(
     FULL_KEYBOARD_WHITE_KEYS,
     visibleWhiteKeys,
@@ -759,6 +763,33 @@ export function TouchControllerPage({
       </button>
       {portraitKeyboardNavigator ? (
         <div className="touch-keyboard-navigator" aria-label="Visible keyboard range">
+          {/* On the phone on its side this strip is the only bar there is:
+              Sustain and Panic sit in it, by the menu key, rather than a
+              menu away. The portrait dock has them in its own bar below. */}
+          {!docked ? (
+            <div className="touch-keyboard-navigator-actions">
+              <button
+                type="button"
+                className={sustain ? "active" : ""}
+                onClick={toggleSustain}
+                disabled={!playable}
+                aria-pressed={sustain}
+                aria-label="Sustain"
+                title="Sustain"
+              >
+                SUS
+              </button>
+              <button
+                type="button"
+                className="touch-panic"
+                onClick={panic}
+                aria-label="Panic"
+                title="Panic"
+              >
+                P
+              </button>
+            </div>
+          ) : null}
           <span className="touch-keyboard-navigator-label">A0</span>
           <div className="touch-keyboard-navigator-track">
             <div className="touch-keyboard-navigator-whites" aria-hidden="true" />
@@ -838,8 +869,19 @@ export function TouchControllerPage({
             ? fullKeyboard ? "88 KEYS · A0—C8" : `${visibleWhiteKeys} WHITE KEYS · FROM C${octave}`
             : `${padMatrix.columns} × ${padMatrix.rows} PADS · FROM C${octave}`}
         </span>
-        <button className={sustain ? "active" : ""} onClick={toggleSustain} disabled={!playable}>Sustain</button>
-        <button onClick={panic}>Panic</button>
+        {/* Short, as on the strip over the keys: the bar keeps its room for
+            the keys that name what they do. */}
+        <button
+          className={sustain ? "active" : ""}
+          onClick={toggleSustain}
+          disabled={!playable}
+          aria-pressed={sustain}
+          aria-label="Sustain"
+          title="Sustain"
+        >
+          SUS
+        </button>
+        <button className="touch-panic" onClick={panic} aria-label="Panic" title="Panic">P</button>
         <button onClick={() => setMenuOpen(true)}><Menu aria-hidden="true" /> Settings</button>
       </div>
 

@@ -5230,7 +5230,9 @@ body {
   border-color: var(--line);
 }
 
-.touch-performance-actions .touch-panic {
+.touch-performance-actions .touch-panic,
+.touch-controller-dockbar > button.touch-panic,
+.touch-keyboard-navigator-actions button.touch-panic {
   color: #ffacb8;
   border-color: rgba(255, 120, 144, 0.28);
 }
@@ -6368,7 +6370,15 @@ body {
   .touch-controller.docked.keyboard-navigator-active .touch-controller-dock {
     grid-template-rows: 16px 34px 42px minmax(0, 1fr);
   }
+}
 
+/* The range strip is the portrait dock's and the phone-on-its-side
+   controller's alike: the compact dock's media list, and the immersive one. */
+@media (max-width: 760px) and (orientation: portrait),
+  (orientation: landscape) and (max-height: 600px) and (max-aspect-ratio: 7/4),
+  (orientation: landscape) and (max-height: 600px) and (min-width: 1201px),
+  (pointer: fine) and (orientation: landscape) and (max-height: 600px),
+  (any-pointer: coarse) and (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) and (min-aspect-ratio: 7/4) {
   .touch-keyboard-navigator {
     min-width: 0;
     height: 34px;
@@ -6492,7 +6502,12 @@ body {
     outline: 2px solid #d9fbff;
     outline-offset: -2px;
   }
+}
 
+@media (max-width: 760px) and (orientation: portrait),
+  (orientation: landscape) and (max-height: 600px) and (max-aspect-ratio: 7/4),
+  (orientation: landscape) and (max-height: 600px) and (min-width: 1201px),
+  (pointer: fine) and (orientation: landscape) and (max-height: 600px) {
   .touch-controller.docked .touch-controller-dock.resizing {
     user-select: none;
   }
@@ -6704,6 +6719,70 @@ body {
 
   .controller-surface-active .piano-key span {
     font-size: 8px;
+  }
+
+  /* A mini header over the keys, as the portrait dock has: the range strip,
+     with the menu key sitting in it rather than floating over the keys. */
+  .controller-surface-active .touch-controller.keyboard-navigator-active {
+    display: grid;
+    grid-template-rows: 44px minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .controller-surface-active .touch-controller.keyboard-navigator-active .touch-keyboard-navigator {
+    height: 44px;
+    padding: 6px 12px 6px calc(58px + var(--rackforge-safe-left));
+  }
+
+  .controller-surface-active .touch-controller.keyboard-navigator-active .touch-keyboard-navigator {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .controller-surface-active .touch-controller.keyboard-navigator-active .touch-keyboard-navigator-track {
+    height: 28px;
+  }
+
+  .touch-keyboard-navigator-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .touch-keyboard-navigator-actions button {
+    min-height: 32px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .touch-keyboard-navigator-actions button.active {
+    color: #031017;
+    background: var(--acid);
+    border-color: var(--acid);
+  }
+
+  .touch-keyboard-navigator-actions svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .controller-surface-active .touch-controller.keyboard-navigator-active .touch-controller-menu-button {
+    top: 4px;
+    left: calc(8px + var(--rackforge-safe-left));
+    width: 40px;
+    height: 36px;
+    border-radius: 9px;
   }
 }
 

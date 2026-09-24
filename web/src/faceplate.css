@@ -1989,7 +1989,8 @@
 }
 
 .touch-controller-dockbar > button,
-.touch-controller-dockbar .touch-mode-switch button {
+.touch-controller-dockbar .touch-mode-switch button,
+.touch-keyboard-navigator-actions button {
   color: var(--ink) !important;
   background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
   border: var(--fp-seam) !important;
@@ -2005,7 +2006,8 @@
 /* Engaged means pushed in: the lip goes, the well arrives, and the position
    is painted on its edge — the same gesture as the rail keys. */
 .touch-controller-dockbar > button.active,
-.touch-controller-dockbar .touch-mode-switch button.active {
+.touch-controller-dockbar .touch-mode-switch button.active,
+.touch-keyboard-navigator-actions button.active {
   color: var(--ink) !important;
   background: var(--panel-inset) !important;
   border-color: var(--line) !important;
@@ -2351,7 +2353,9 @@
 
 /* Panic is the one red block on this surface: it stops every note, and it is
    the only control here you press because something has gone wrong. */
-.touch-performance-actions .touch-panic {
+.touch-performance-actions .touch-panic,
+.touch-controller-dockbar > button.touch-panic,
+.touch-keyboard-navigator-actions button.touch-panic {
   color: var(--red-ink) !important;
   background: var(--red) !important;
   border-color: var(--red) !important;
@@ -2469,6 +2473,7 @@
 .nav-item:active,
 .touch-controller-dockbar > button:not(:disabled):active,
 .touch-controller-dockbar .touch-mode-switch button:active,
+.touch-keyboard-navigator-actions button:not(:disabled):active,
 .touch-controller-menu > header > button:active,
 .touch-performance-actions button:not(:disabled):active,
 .touch-octave-control button:not(:disabled):active,
@@ -2483,13 +2488,16 @@
 
 /* Panic keeps its block while pressed — the colour is the point of it — so it
    sinks by losing its lit lip and gaining the recess instead. */
-.touch-performance-actions .touch-panic:not(:disabled):active {
+.touch-performance-actions .touch-panic:not(:disabled):active,
+.touch-controller-dockbar > button.touch-panic:not(:disabled):active,
+.touch-keyboard-navigator-actions button.touch-panic:not(:disabled):active {
   background: var(--red) !important;
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.4) !important;
 }
 
 /* Disabled is flat: nothing to press, so no depth in either direction. */
 .touch-controller-dockbar > button:disabled,
+.touch-keyboard-navigator-actions button:disabled,
 .touch-performance-actions button:disabled,
 .touch-octave-control button:disabled {
   opacity: 0.42 !important;

@@ -563,6 +563,17 @@ function RackForgeApp() {
     void completePlayNavigation(instance);
   }, [completePlayNavigation, liveWorkspace, location.pathname, snapshot]);
 
+  /* Leaving the phone-on-its-side controller closes it wherever it was
+     opened: a dock opened upright is what brought it here, and while that
+     stayed open the presentation rule sent the player straight back -- Exit
+     did nothing. It returns to the page it came from, not to PLAY: from LIVE
+     that asked to leave the stage. */
+  const exitControllerSurface = useCallback(() => {
+    setMobileMenuOpen(false);
+    setControllerDockOpen(false);
+    navigate(lastContentRoute.current, { replace: true });
+  }, [navigate]);
+
   const pendingPreferredPlayInstanceId =
     preferredPlayInstanceId &&
     snapshot?.active_mode === "play" &&
@@ -660,7 +671,7 @@ function RackForgeApp() {
                   snapshot={snapshot}
                   connection={connection}
                   onOpenNavigation={() => setMobileMenuOpen(true)}
-                  onExit={requestPlayNavigation}
+                  onExit={exitControllerSurface}
                 />
               }
             />

@@ -6,9 +6,9 @@ use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use keylab_essential_mk3::protocol as keylab_protocol;
 use rackforge_audio_api::OutputMeter;
 use rackforge_control_api::{
-    ControlErrorCode, ControlRequest, ControlResponse, ControllerMap,
-    PluginParameterControlCommand, PresetImportConflictPolicy, RegisteredController, RfPresetFile,
-    parse_plugin_parameter_control_command,
+    ControlErrorCode, ControlRequest, ControlResponse, ControllerMap, ParameterTouchPickup,
+    ParameterTouchReport, PluginParameterControlCommand, PresetImportConflictPolicy,
+    RegisteredController, RfPresetFile, parse_plugin_parameter_control_command,
 };
 use rackforge_core::controller_map_store::{ControllerMapStore, export_rfmap};
 use rackforge_core::midi_activity::MidiActivityLog;
@@ -33,8 +33,8 @@ use rackforge_core::{
 };
 use rackforge_dsp::output_ceiling;
 use rackforge_midi_api::{
-    IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
-    MidiSourceRegistry, ParameterLink, ParameterLinkPassThrough,
+    ControlTakeover, IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId,
+    MidiSourceKey, MidiSourceRegistry, ParameterLink, ParameterLinkPassThrough,
 };
 use rackforge_performance_api::{
     LivePerformanceState, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot,
@@ -218,6 +218,8 @@ struct AndroidControllerMaps {
     store: Option<ControllerMapStore>,
     data_root: Option<PathBuf>,
     maps: BTreeMap<String, ControllerMap>,
+    /// How knobs and faders take a parameter over, as stored.
+    takeover: ControlTakeover,
 }
 
 #[derive(Default)]
@@ -1635,7 +1637,17 @@ impl AndroidEngine {
         for (parameter_index, value) in
             store.restored_values(&self.plugin_id, self.runtime.0.parameters())
         {
-            set_plugin_parameter(self.runtime.0, &mut self.instance.0, parameter_index, value)?;
+            // A value the plugin refuses costs that one parameter, never the
+            // sound.
+            if let Err(error) =
+                set_plugin_parameter(self.runtime.0, &mut self.instance.0, parameter_index, value)
+            {
+                eprintln!(
+                    "LIVE_PARAMETER_NOT_RESTORED plugin={} parameter={parameter_index} value={value} error={error:#}",
+                    self.plugin_id
+                );
+                continue;
+            }
             if let Some(parallel) = self.parallel.as_mut() {
                 parallel
                     .0
@@ -2281,9 +2293,12 @@ impl AndroidEngine {
                     if link.link.instance_id != ANDROID_INSTANCE_ID {
                         continue;
                     }
-                    // The appliance cannot yet say where a parameter stands
-                    // from here, so a control takes over at once, as before.
-                    if let Some(output) = link.apply(ingress_event, |_| None) {
+                    // Where the parameter stands: a knob picks it up there,
+                    // and lets go when a pad or the screen moves it.
+                    let instance = &mut self.instance.0;
+                    if let Some(output) =
+                        link.apply(ingress_event, |index| instance.get_parameter(index).ok())
+                    {
                         if self.parameter_events.len() < MAX_PENDING_MIDI_EVENTS {
                             self.parameter_events.push(output.event);
                             self.live_parameter_writer_handle.try_record(
@@ -2423,49 +2438,78 @@ impl AndroidEngine {
         // Links to a Rack's Slots move them while the Rack is loaded; the
         // rest wait, as they always did.
         if let Some(rack) = self.rack.as_mut() {
-            let rack_links = compile_rack_parameter_links(&rack.engine, &links, &sources);
+            let rack_links =
+                compile_rack_parameter_links(&rack.engine, &links, &sources, maps.takeover);
             rack.engine.set_parameter_links(rack_links);
+        }
+        // Every link takes a parameter over the way the player chose.
+        for link in &mut compiled {
+            link.set_takeover(maps.takeover);
         }
         self.persisted_parameter_links = links;
         self.parameter_links = compiled;
         Ok(())
     }
 
-    /// LITTLE's header for a touch on PLAY's instrument, one of its effects
-    /// or a Slot of the Rack on stage.
-    fn parameter_touch_header(
+    /// What a touch did, named, when it names PLAY's instrument, one of its
+    /// effects or a Slot of the Rack on stage: LITTLE's header and the web's
+    /// window are both made from it.
+    fn parameter_touch_report(
         &self,
         touch: &rackforge_core::parameter_touch::ParameterTouch,
-    ) -> Option<String> {
+    ) -> Option<ParameterTouchReport> {
         use rackforge_core::parameter_touch::{TouchPickup, touch_names};
-        let runtime = if touch_names(touch, ANDROID_INSTANCE_ID) {
-            Some(self.runtime.0)
+        let (instance_id, runtime) = if touch_names(touch, ANDROID_INSTANCE_ID) {
+            Some((ANDROID_INSTANCE_ID.to_owned(), self.runtime.0))
         } else if let Some(effect) = self
             .chain
             .iter()
             .find(|effect| touch_names(touch, &effect.instance_id))
         {
-            Some(effect.runtime.0)
+            Some((effect.instance_id.clone(), effect.runtime.0))
         } else {
             self.rack
                 .as_ref()
-                .and_then(|rack| rack.engine.touched_plugin(touch))
+                .and_then(|rack| rack.engine.touched_slot(touch))
+                .map(|(slot_id, plugin)| (slot_id.to_owned(), plugin))
         }?;
         let schema = runtime.parameters();
         let parameter = schema
             .parameters
             .iter()
-            .find(|parameter| parameter.index == touch.parameter_index)?;
-        let arrow = match touch.pickup {
-            TouchPickup::Engaged => None,
-            TouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
-            TouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
+            .find(|parameter| parameter.index == touch.parameter_index)?
+            .clone();
+        Some(ParameterTouchReport {
+            instance_id,
+            parameter,
+            value: touch.value,
+            display_decimals: schema.display_decimals,
+            pickup: match touch.pickup {
+                TouchPickup::Engaged => ParameterTouchPickup::Engaged,
+                TouchPickup::MoveUp => ParameterTouchPickup::MoveUp,
+                TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
+            },
+            control: (touch.pickup != TouchPickup::Engaged).then_some(touch.control),
+        })
+    }
+
+    /// LITTLE's header for a touch: the parameter's own name and value.
+    fn parameter_touch_header(
+        &self,
+        touch: &rackforge_core::parameter_touch::ParameterTouch,
+    ) -> Option<String> {
+        let report = self.parameter_touch_report(touch)?;
+        let arrow = match report.pickup {
+            ParameterTouchPickup::Engaged => None,
+            ParameterTouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
+            ParameterTouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
         };
         Some(rackforge_surface_runtime::parameter_touch_header(
-            parameter,
-            touch.value,
-            schema.display_decimals,
+            &report.parameter,
+            report.value,
+            report.display_decimals,
             arrow,
+            report.control,
         ))
     }
 
@@ -2475,8 +2519,16 @@ impl AndroidEngine {
         let sources = midi_sources()
             .lock()
             .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?;
-        let links =
-            compile_rack_parameter_links(&rack.engine, &self.persisted_parameter_links, &sources);
+        let takeover = controller_maps()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?
+            .takeover;
+        let links = compile_rack_parameter_links(
+            &rack.engine,
+            &self.persisted_parameter_links,
+            &sources,
+            takeover,
+        );
         rack.engine.set_parameter_links(links);
         Ok(self.rack.replace(rack))
     }
@@ -2492,20 +2544,24 @@ fn compile_rack_parameter_links(
     rack: &RackEngine<'static>,
     links: &[ParameterLink],
     sources: &MidiSourceRegistry,
+    takeover: ControlTakeover,
 ) -> Vec<CompiledParameterLink> {
     links
         .iter()
         .filter_map(|link| {
             let plugin = rack.link_target_plugin(&link.instance_id)?;
             let source_key = sources.resolve_optional(&link.source.source_id)?;
-            CompiledParameterLink::new(link.clone(), source_key, plugin.parameters())
-                .map_err(|error| {
-                    eprintln!(
-                        "PARAMETER_LINK_PENDING link={} instance={} reason={error:#}",
-                        link.id, link.instance_id
-                    );
-                })
-                .ok()
+            let mut compiled =
+                CompiledParameterLink::new(link.clone(), source_key, plugin.parameters())
+                    .map_err(|error| {
+                        eprintln!(
+                            "PARAMETER_LINK_PENDING link={} instance={} reason={error:#}",
+                            link.id, link.instance_id
+                        );
+                    })
+                    .ok()?;
+            compiled.set_takeover(takeover);
+            Some(compiled)
         })
         .collect()
 }
@@ -2922,9 +2978,28 @@ fn ensure_controller_maps(data_root: &Path) -> Result<bool> {
     maps.maps = store
         .load_all()
         .map_err(|error| anyhow::anyhow!("loading controller maps: {error:#}"))?;
+    maps.takeover = store.takeover();
     maps.store = Some(store);
     maps.data_root = Some(data_root.to_path_buf());
     Ok(true)
+}
+
+/// Stores how knobs and faders take a parameter over and applies it at once.
+fn set_android_controller_takeover(takeover: ControlTakeover) -> Result<()> {
+    {
+        let mut maps = controller_maps()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+        maps.store
+            .as_ref()
+            .context("controller maps are not loaded")?
+            .set_takeover(takeover)
+            .map_err(|error| {
+                anyhow::anyhow!("Could not store the controller takeover: {error:#}")
+            })?;
+        maps.takeover = takeover;
+    }
+    recompile_engine_parameter_links()
 }
 
 fn recompile_engine_parameter_links() -> Result<()> {
@@ -5188,6 +5263,32 @@ fn controller_session_command(data_root: &Path, request_json: &str) -> Result<Co
             let map = save_android_controller_map(*map)?;
             ControlResponse::ControllerMapSaved { map: Box::new(map) }
         }
+        ControlRequest::SetControllerTakeover { takeover } => {
+            set_android_controller_takeover(takeover)?;
+            ControlResponse::ControllerTakeoverSet { takeover }
+        }
+        // What a control last moved, for the window at the top of the page:
+        // `after` zero only learns where the touches stand.
+        ControlRequest::ParameterTouch { after } => {
+            use rackforge_core::parameter_touch::PARAMETER_TOUCHES;
+            let mut sequence = after;
+            let touch = if after == 0 {
+                sequence = PARAMETER_TOUCHES.current_sequence();
+                None
+            } else {
+                PARAMETER_TOUCHES.latest(&mut sequence).and_then(|touch| {
+                    engine()
+                        .lock()
+                        .ok()?
+                        .as_ref()?
+                        .parameter_touch_report(&touch)
+                })
+            };
+            ControlResponse::ParameterTouched {
+                sequence,
+                touch: touch.map(Box::new),
+            }
+        }
         ControlRequest::ImportControllerMap { file } => {
             file.validate()?;
             let map = save_android_controller_map(file.map)?;
@@ -5263,6 +5364,7 @@ fn android_controller_maps_response() -> Result<ControlResponse> {
     Ok(ControlResponse::ControllerMaps {
         controllers: registered.into_values().collect(),
         maps: maps.maps.values().cloned().collect(),
+        takeover: maps.takeover,
     })
 }
 

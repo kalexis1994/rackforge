@@ -4,10 +4,17 @@ import { AsyncActionLabel } from "../../components/AsyncSpinner";
 import { PageHeading } from "../../components/PageHeading";
 import { VelocityCurveReading } from "../../components/VelocityCurveReading";
 import { openAudioDriverPanel } from "../../gateway";
-import { HostRequestError, IS_BROWSER_HOST, hostJson, isNativeHost } from "../../host";
+import {
+  HostRequestError,
+  IS_BROWSER_HOST,
+  hostJson,
+  hostKeepsControllerMaps,
+  isNativeHost,
+} from "../../host";
 import { ChangePinCard } from "../../pages/settings/ChangePinCard";
 import { ScreenGlassCard } from "../../pages/settings/ScreenGlassCard";
 import { TypingKeyboardCard } from "../../pages/settings/TypingKeyboardCard";
+import { ControllerTakeoverCard } from "../../pages/settings/ControllerTakeoverCard";
 import { HostSettingsBootstrap } from "../../pages/settings/hostSettings";
 import { SettingsTab, isSettingsTab, settingsTabsFor } from "../../pages/settings/tabs";
 import { type HostAudioPreferences, type HostAudioSettings, type WebPublicConfig } from "../../types";
@@ -411,6 +418,7 @@ export function SettingsPage({
         ))}
       </nav>
       <section className="settings-grid">
+        {settingsTab === "input" && hostKeepsControllerMaps() ? <ControllerTakeoverCard /> : null}
         {settingsTab === "input" ? <TypingKeyboardCard /> : null}
         {settingsTab === "screen" ? <ScreenGlassCard /> : null}
         {/* Audio and MIDI are two sections of one card because the host keeps

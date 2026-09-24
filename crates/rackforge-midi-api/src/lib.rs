@@ -114,6 +114,24 @@ impl PartialEq for LinkValue {
 
 impl Eq for LinkValue {}
 
+/// How a knob or fader takes over a parameter that stands somewhere else --
+/// set from the screen, by a pad, by a sound. A player's choice for the
+/// whole installation, as synthesizers offer it: Korg's Jump, Catch and
+/// Scale, Sequential's Jump, Pass Thru and Relative.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlTakeover {
+    /// Nothing moves until the control reaches the parameter; the screen
+    /// shows which way to go.
+    #[default]
+    Pickup,
+    /// The parameter jumps to the control the moment it moves.
+    Jump,
+    /// The parameter moves the way the control does, in proportion to the
+    /// room each has left, so the two meet at the end of the travel.
+    Scale,
+}
+
 /// The most values a Zones or Cycle mode may name.
 pub const MAX_LINK_MODE_VALUES: usize = 128;
 

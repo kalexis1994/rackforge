@@ -2548,7 +2548,18 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::OpenAudioDriverPanel
         | ControlRequest::SaveOutputCapture
         | ControlRequest::AudioInput
-        | ControlRequest::OutputMeter) => {
+        | ControlRequest::OutputMeter
+        // The Controllers page: without these it answered "not connected"
+        // on the desktop.
+        | ControlRequest::MidiActivity { .. }
+        | ControlRequest::ControllerMaps
+        | ControlRequest::SaveControllerMap { .. }
+        | ControlRequest::SetControllerTakeover { .. }
+        | ControlRequest::SaveUserController { .. }
+        | ControlRequest::ExportControllerMap { .. }
+        | ControlRequest::ImportControllerMap { .. }
+        // What a control last moved, for the window at the top of the page.
+        | ControlRequest::ParameterTouch { .. }) => {
             let (response_sender, response_receiver) = mpsc::channel();
             if state
                 .control

@@ -33,6 +33,10 @@ pub struct ParameterTouch {
     pub parameter_index: u32,
     pub value: f64,
     pub pickup: TouchPickup,
+    /// The value the control stands at, in the parameter's units: `value`
+    /// once engaged, and while it is on its way, where it has got to -- so
+    /// a screen can show the fader closing in rather than a frozen number.
+    pub control: f64,
 }
 
 /// The process's touches: every link records into it.
@@ -44,6 +48,7 @@ pub struct ParameterTouchCell {
     instance: AtomicU64,
     index_and_pickup: AtomicU64,
     value: AtomicU64,
+    control: AtomicU64,
 }
 
 impl Default for ParameterTouchCell {
@@ -59,6 +64,7 @@ impl ParameterTouchCell {
             instance: AtomicU64::new(0),
             index_and_pickup: AtomicU64::new(0),
             value: AtomicU64::new(0),
+            control: AtomicU64::new(0),
         }
     }
 
@@ -77,6 +83,8 @@ impl ParameterTouchCell {
             Ordering::Relaxed,
         );
         self.value.store(touch.value.to_bits(), Ordering::Relaxed);
+        self.control
+            .store(touch.control.to_bits(), Ordering::Relaxed);
         self.sequence.fetch_add(1, Ordering::Release);
     }
 
@@ -95,6 +103,7 @@ impl ParameterTouchCell {
             let instance_key = self.instance.load(Ordering::Relaxed);
             let packed = self.index_and_pickup.load(Ordering::Relaxed);
             let value = f64::from_bits(self.value.load(Ordering::Relaxed));
+            let control = f64::from_bits(self.control.load(Ordering::Relaxed));
             fence(Ordering::Acquire);
             if self.sequence.load(Ordering::Relaxed) != before {
                 continue;
@@ -110,6 +119,7 @@ impl ParameterTouchCell {
                 parameter_index: packed as u32,
                 value,
                 pickup,
+                control,
             });
         }
         None
@@ -157,18 +167,21 @@ mod tests {
             parameter_index: 23,
             value: 1462.5,
             pickup: TouchPickup::Engaged,
+            control: 1462.5,
         });
         cell.record(ParameterTouch {
             instance_key: key,
             parameter_index: 23,
             value: 45.0,
             pickup: TouchPickup::MoveDown,
+            control: 900.0,
         });
         let touch = cell.latest(&mut seen).unwrap();
         assert_eq!(touch.instance_key, key);
         assert_eq!(touch.parameter_index, 23);
         assert_eq!(touch.value, 45.0);
         assert_eq!(touch.pickup, TouchPickup::MoveDown);
+        assert_eq!(touch.control, 900.0);
         assert_eq!(cell.latest(&mut seen), None);
         assert!(touch_names(&touch, "slot.piano"));
         assert!(touch_names(&touch, "rack.main/slot.piano"));

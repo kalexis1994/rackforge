@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use rackforge_midi_api::controller_map::ControllerMap;
 use rackforge_midi_api::{
-    IngressMidiEvent, MidiChannel, MidiMessageKind, MidiSourceId, MidiSourceKey,
+    ControlTakeover, IngressMidiEvent, MidiChannel, MidiMessageKind, MidiSourceId, MidiSourceKey,
     PARAMETER_LINK_SCHEMA_VERSION, ParameterLink, ParameterLinkChannel, ParameterLinkId,
     ParameterLinkMessage, ParameterLinkMode, ParameterLinkPassThrough, ParameterLinkSource,
     ParameterLinkTransform, StepDirection,
@@ -27,6 +27,11 @@ const PICKUP_WINDOW: f64 = 0.03;
 /// value nobody chose where it stays. So a link starts detached, and takes
 /// the parameter over only once the control has come to where the parameter
 /// is, or has crossed it.
+///
+/// It lets go again whenever something else moves the parameter -- a pad, a
+/// second control on the same parameter, the screen, a sound loaded -- which
+/// it learns by asking the host where the parameter stands on every move, not
+/// by being told: a host cannot forget to tell it.
 #[derive(Clone, Copy, Debug, Default)]
 struct Pickup {
     engaged: bool,
@@ -35,6 +40,8 @@ struct Pickup {
     parameter: Option<f64>,
     /// The control's last position, so a crossing can be seen.
     input: Option<f64>,
+    /// The parameter's value while detached, when the host said it.
+    target: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -46,8 +53,29 @@ pub struct CompiledParameterLink {
     /// The parameter's value as this link last wrote or saw it: what a
     /// toggle, cycle or step starts from when the host cannot say.
     last_value: Option<f64>,
+    /// The value the host last reported that this link accounts for: what
+    /// it wrote, once the plugin took it, or the value it took over from.
+    /// Writes reach the plugin at the next block, so until then the host
+    /// still reports this one, and that is not someone else's move.
+    settled: Option<f64>,
+    /// How an absolute control takes the parameter over: the player's
+    /// setting, applied by the host after compiling.
+    takeover: ControlTakeover,
     /// The key the screen knows the link's instance by.
     instance_key: u64,
+    /// What this link last told the screen: the shared cell is written by
+    /// every test thread at once.
+    #[cfg(test)]
+    last_touch: Option<ParameterTouch>,
+}
+
+/// What a scaling control did with one move.
+enum Scaled {
+    /// It met the parameter: from here on it drives it directly.
+    Met,
+    /// It moved the parameter part of the way -- or, on a parameter with few
+    /// steps, not yet a whole one.
+    Moved(Option<ParameterLinkOutput>),
 }
 
 /// How many presses a Step takes to cross a float parameter's range: its own
@@ -85,18 +113,63 @@ impl CompiledParameterLink {
             parameter,
             pickup: Pickup::default(),
             last_value: None,
+            settled: None,
+            takeover: ControlTakeover::default(),
             instance_key,
+            #[cfg(test)]
+            last_touch: None,
         })
     }
 
-    /// Tells the screen what this link just did to its parameter.
-    fn touch(&self, value: f64, pickup: TouchPickup) {
-        PARAMETER_TOUCHES.record(ParameterTouch {
+    /// Sets how the link's control takes its parameter over.
+    pub fn set_takeover(&mut self, takeover: ControlTakeover) {
+        self.takeover = takeover;
+    }
+
+    /// Tells the screen what this link just did to its parameter, and where
+    /// the control stands.
+    fn touch(&mut self, value: f64, pickup: TouchPickup, control: f64) {
+        let touch = ParameterTouch {
             instance_key: self.instance_key,
             parameter_index: self.parameter.index,
             value,
             pickup,
-        });
+            control,
+        };
+        #[cfg(test)]
+        {
+            self.last_touch = Some(touch);
+        }
+        PARAMETER_TOUCHES.record(touch);
+    }
+
+    /// Lets go of the parameter, which now stands at `value`: the control
+    /// has to come back to it before it takes over again.
+    fn detach(&mut self, value: f64) {
+        self.pickup = Pickup {
+            engaged: false,
+            parameter: Some(self.position_of(value)),
+            input: None,
+            target: Some(value),
+        };
+        self.last_value = Some(value);
+        self.settled = Some(value);
+    }
+
+    /// Whether the host reports a value this link cannot account for: not
+    /// what it wrote, and not what stood before its writes reached the
+    /// plugin.
+    fn moved_elsewhere(&mut self, reported: f64) -> bool {
+        if self
+            .last_value
+            .is_some_and(|written| same_value(reported, written))
+        {
+            self.settled = Some(reported);
+            return false;
+        }
+        !self
+            .settled
+            .is_some_and(|before| same_value(reported, before))
     }
 
     /// The parameter value at a position along the control's travel: the
@@ -122,10 +195,7 @@ impl CompiledParameterLink {
         if self.link.instance_id != instance_id || self.parameter.index != parameter_index {
             return;
         }
-        self.pickup.parameter = Some(self.position_of(value));
-        self.pickup.engaged = false;
-        self.pickup.input = None;
-        self.last_value = Some(value);
+        self.detach(value);
     }
 
     /// Where a parameter value sits along the control's travel, 0..=1: over
@@ -142,7 +212,7 @@ impl CompiledParameterLink {
 
     fn output(&mut self, frame: u32, value: f64) -> ParameterLinkOutput {
         self.last_value = Some(value);
-        self.touch(value, TouchPickup::Engaged);
+        self.touch(value, TouchPickup::Engaged, value);
         ParameterLinkOutput {
             event: ParameterEventV1 {
                 frame,
@@ -220,16 +290,78 @@ impl CompiledParameterLink {
         Some(self.output(frame, value))
     }
 
+    /// Pickup: whether the control has reached the parameter. Until it has,
+    /// nothing moves, and the screen is told where the parameter is, where
+    /// the control has got to, and which way to go.
+    fn catch(&mut self, normalized: f64, value: f64, position: f64, target: f64) -> bool {
+        let crossed = self
+            .pickup
+            .input
+            .is_some_and(|previous| (previous - position) * (normalized - position) <= 0.0);
+        // A control that would set the value the parameter already has is
+        // there: a drawbar at 0 is caught by the whole stretch of the fader
+        // that means 0, not only its last few steps.
+        if same_value(value, target) || (normalized - position).abs() <= PICKUP_WINDOW || crossed {
+            return true;
+        }
+        self.pickup.input = Some(normalized);
+        self.touch(
+            target,
+            if normalized < position {
+                TouchPickup::MoveUp
+            } else {
+                TouchPickup::MoveDown
+            },
+            value,
+        );
+        false
+    }
+
+    /// Scale: the parameter moves the way the control moves, by the share of
+    /// the room each has left -- a fader halfway to the top takes the
+    /// parameter halfway to the top from wherever it is -- so the two meet
+    /// at the end of the travel, and from there move together. Nothing
+    /// jumps, and nothing waits.
+    fn scale(&mut self, frame: u32, normalized: f64, value: f64, position: f64) -> Scaled {
+        // The first move after letting go has nothing to measure from.
+        let previous = self.pickup.input.replace(normalized).unwrap_or(normalized);
+        let moved = normalized - previous;
+        let scaled = if moved > 0.0 && previous < 1.0 {
+            position + moved * (1.0 - position) / (1.0 - previous)
+        } else if moved < 0.0 && previous > 0.0 {
+            position + moved * position / previous
+        } else {
+            position
+        }
+        .clamp(0.0, 1.0);
+        let scaled_value = self.value_at(scaled);
+        if (scaled - normalized).abs() <= PICKUP_WINDOW || same_value(scaled_value, value) {
+            return Scaled::Met;
+        }
+        // The position is kept as it is, fractions and all: a drawbar moves
+        // one step for several of the fader's, and rounding each time would
+        // hold it still.
+        self.pickup.parameter = Some(scaled);
+        let before = self.pickup.target.replace(scaled_value);
+        if before.is_some_and(|before| same_value(before, scaled_value)) {
+            // Still named on the screen, so the control is seen to answer.
+            self.touch(scaled_value, TouchPickup::Engaged, scaled_value);
+            return Scaled::Moved(None);
+        }
+        Scaled::Moved(Some(self.output(frame, scaled_value)))
+    }
+
     fn current_value(&self, current: impl FnOnce(u32) -> Option<f64>) -> f64 {
         current(self.parameter.index)
             .or(self.last_value)
             .unwrap_or_else(|| default_value(&self.parameter.kind))
     }
 
-    /// Map one incoming message onto the parameter. `current` is asked for
-    /// the parameter's value the first time an absolute control is touched
-    /// and the link does not yet know where the parameter is; a host that
-    /// cannot say answers `None`, and the control takes over at once.
+    /// Map one incoming message onto the parameter. `current` is asked where
+    /// the parameter stands on every move of an absolute control and every
+    /// press of a button; a host that cannot say answers `None`, and the link
+    /// goes by what it last wrote or was told through
+    /// [`Self::observe_parameter`].
     pub fn apply(
         &mut self,
         ingress: IngressMidiEvent,
@@ -259,52 +391,55 @@ impl CompiledParameterLink {
             let value = values[zone].get();
             return Some(self.output(frame, value));
         }
+        let value = self.value_at(normalized);
         // Only a control that holds a position needs picking up. A bend
         // wheel springs back, pressure and notes are momentary: they are
         // gestures, and a gesture is taken as it comes.
         if matches!(
             self.link.message,
             ParameterLinkMessage::ControlChange { .. }
-        ) && !self.pickup.engaged
-        {
-            let known = match self.pickup.parameter {
-                Some(position) => Some(position),
-                None => current(self.parameter.index).map(|value| self.position_of(value)),
-            };
-            match known {
-                None => self.pickup.engaged = true,
-                Some(position) => {
-                    let crossed = self.pickup.input.is_some_and(|previous| {
-                        (previous - position) * (normalized - position) <= 0.0
-                    });
-                    if (normalized - position).abs() <= PICKUP_WINDOW || crossed {
+        ) {
+            let reported = current(self.parameter.index);
+            // The parameter as someone other than this link left it -- a
+            // first touch, or a pad, the screen or a sound since: let go,
+            // and take it over again as the player's setting says.
+            if let Some(at) = reported
+                && (self.pickup.parameter.is_none() || self.moved_elsewhere(at))
+            {
+                self.detach(at);
+            }
+            if !self.pickup.engaged {
+                match self.pickup.parameter {
+                    None => self.pickup.engaged = true,
+                    Some(position) => {
+                        let target = self
+                            .pickup
+                            .target
+                            .unwrap_or_else(|| self.value_at(position));
+                        let caught = match self.takeover {
+                            ControlTakeover::Jump => true,
+                            ControlTakeover::Pickup => {
+                                self.catch(normalized, value, position, target)
+                            }
+                            ControlTakeover::Scale => {
+                                match self.scale(frame, normalized, value, position) {
+                                    Scaled::Met => true,
+                                    Scaled::Moved(output) => return output,
+                                }
+                            }
+                        };
+                        if !caught {
+                            return None;
+                        }
                         self.pickup.engaged = true;
-                    } else {
-                        self.pickup.parameter = Some(position);
-                        self.pickup.input = Some(normalized);
-                        // Said, not swallowed: the screen shows where the
-                        // parameter is and which way to move to reach it.
-                        self.touch(
-                            self.value_at(position),
-                            if normalized < position {
-                                TouchPickup::MoveUp
-                            } else {
-                                TouchPickup::MoveDown
-                            },
-                        );
-                        return None;
+                        self.settled = reported.or(Some(target));
                     }
                 }
             }
         }
         self.pickup.input = Some(normalized);
         self.pickup.parameter = Some(normalized);
-        let value = match &self.link.mode {
-            ParameterLinkMode::Range { min, max } => {
-                range_value(&self.parameter.kind, min.get(), max.get(), normalized)
-            }
-            _ => map_parameter_value(&self.parameter.kind, normalized),
-        };
+        self.pickup.target = None;
         Some(self.output(frame, value))
     }
 }
@@ -1034,9 +1169,116 @@ mod tests {
         compiled.observe_parameter("elsewhere", 17, 0.0);
         assert!(
             compiled
-                .apply(ingress(&[0xb1, 102, 91]), parameter_at(0.0))
+                .apply(ingress(&[0xb1, 102, 91]), parameter_at(output.event.value))
                 .is_some()
         );
+    }
+
+    fn drawbar() -> ParameterSchema {
+        schema(ParameterKind::Integer {
+            minimum: 0,
+            maximum: 8,
+            default: 0,
+            step: 1,
+            unit: None,
+        })
+    }
+
+    fn fader(schema: &ParameterSchema) -> CompiledParameterLink {
+        CompiledParameterLink::new(
+            link(ParameterLinkMessage::ControlChange { controller: 108 }),
+            MidiSourceKey::new(7),
+            schema,
+        )
+        .unwrap()
+    }
+
+    fn slide(link: &mut CompiledParameterLink, position: u8, at: f64) -> Option<f64> {
+        link.apply(ingress(&[0xb1, 108, position]), move |_| Some(at))
+            .map(|output| output.event.value)
+    }
+
+    #[test]
+    fn a_fader_catches_a_drawbar_wherever_it_would_set_the_same_value() {
+        let schema = drawbar();
+        let mut fader = fader(&schema);
+        // The drawbar is out at 0: the fader's whole bottom sixteenth means
+        // 0, and catches it there, not only in its last four steps.
+        assert_eq!(slide(&mut fader, 40, 0.0), None);
+        assert_eq!(slide(&mut fader, 7, 0.0), Some(0.0));
+        assert_eq!(slide(&mut fader, 20, 0.0), Some(1.0));
+    }
+
+    #[test]
+    fn a_control_lets_go_when_something_else_moves_its_parameter() {
+        let schema = drawbar();
+        let mut fader = fader(&schema);
+        assert_eq!(slide(&mut fader, 0, 0.0), Some(0.0));
+        assert_eq!(slide(&mut fader, 64, 0.0), Some(4.0));
+        // A second move in the same block: the plugin has not taken the
+        // first yet and still reports 0. That is the fader's own write on
+        // its way, not someone else's.
+        assert_eq!(slide(&mut fader, 80, 0.0), Some(5.0));
+        assert_eq!(slide(&mut fader, 81, 5.0), Some(5.0));
+        // A pad, a sound or the screen puts the drawbar at 8. The fader,
+        // still at 5, lets go instead of dragging it back down...
+        assert_eq!(slide(&mut fader, 82, 8.0), None);
+        assert_eq!(slide(&mut fader, 100, 8.0), None);
+        // ...and takes it again once it gets there.
+        assert_eq!(slide(&mut fader, 127, 8.0), Some(8.0));
+    }
+
+    #[test]
+    fn a_jumping_control_takes_the_parameter_at_once() {
+        let schema = drawbar();
+        let mut fader = fader(&schema);
+        fader.set_takeover(ControlTakeover::Jump);
+        assert_eq!(slide(&mut fader, 32, 6.0), Some(2.0));
+        assert_eq!(slide(&mut fader, 64, 2.0), Some(4.0));
+    }
+
+    #[test]
+    fn a_scaling_control_moves_the_parameter_its_way_until_they_meet() {
+        let schema = drawbar();
+        let mut fader = fader(&schema);
+        fader.set_takeover(ControlTakeover::Scale);
+        // The drawbar at 6, the fader low: the first move has nothing to
+        // measure from, and moves nothing.
+        assert_eq!(slide(&mut fader, 16, 6.0), None);
+        // Up half of the fader's room: the drawbar goes up by its share of
+        // its own, 6 to 7 -- not down to 4, where the fader stands.
+        assert_eq!(slide(&mut fader, 64, 6.0), Some(7.0));
+        // At the top the two meet, and from there move together.
+        assert_eq!(slide(&mut fader, 127, 7.0), Some(8.0));
+        assert_eq!(slide(&mut fader, 64, 8.0), Some(4.0));
+    }
+
+    #[test]
+    fn a_scaling_control_brings_the_parameter_down_with_it() {
+        let schema = drawbar();
+        let mut fader = fader(&schema);
+        fader.set_takeover(ControlTakeover::Scale);
+        // At 110 the fader would set 7: not yet the drawbar's 6.
+        assert_eq!(slide(&mut fader, 110, 6.0), None);
+        // Halfway down the fader's room, halfway down the drawbar's.
+        assert_eq!(slide(&mut fader, 50, 6.0), Some(3.0));
+        assert_eq!(slide(&mut fader, 0, 3.0), Some(0.0));
+        assert_eq!(slide(&mut fader, 32, 0.0), Some(2.0));
+    }
+
+    #[test]
+    fn a_control_on_its_way_says_where_it_has_got_to() {
+        let schema = drawbar();
+        let mut fader = fader(&schema);
+        assert_eq!(slide(&mut fader, 32, 6.0), None);
+        let touch = fader.last_touch.unwrap();
+        assert_eq!(touch.value, 6.0, "where the drawbar is");
+        assert_eq!(touch.control, 2.0, "where the fader has got to");
+        assert_eq!(touch.pickup, TouchPickup::MoveUp);
+        assert_eq!(slide(&mut fader, 96, 6.0), Some(6.0));
+        let touch = fader.last_touch.unwrap();
+        assert_eq!((touch.value, touch.control), (6.0, 6.0));
+        assert_eq!(touch.pickup, TouchPickup::Engaged);
     }
 
     #[test]

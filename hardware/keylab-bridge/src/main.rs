@@ -734,6 +734,8 @@ struct PhysicalInputEvent {
 struct ActiveTransientHeader {
     message: Vec<u8>,
     expires_at: Instant,
+    /// When the header is sent once more, after the changes stop.
+    resend_at: Option<Instant>,
 }
 
 #[derive(Debug, Default)]
@@ -741,13 +743,34 @@ struct TransientHeader {
     active: Option<ActiveTransientHeader>,
 }
 
+/// How long after the last change the header is sent again. A fader swept
+/// fast sends the display a header every few tens of milliseconds, and the
+/// display can drop one: if it drops the last, the value before it stays up,
+/// wrong, until the header times out. Sending the final one again once the
+/// changes stop puts the right value there.
+const TRANSIENT_HEADER_SETTLE: Duration = Duration::from_millis(150);
+
 impl TransientHeader {
+    /// A new value replaces whatever was showing at once, and the header
+    /// stays up for its time counted from this change: it lingers only when
+    /// nothing follows it.
     fn show(&mut self, text: &str, now: Instant) -> Result<&[u8], String> {
         self.active = Some(ActiveTransientHeader {
             message: header(text)?,
             expires_at: now + HOST_CONTROL_HEADER_TIMEOUT,
+            resend_at: Some(now + TRANSIENT_HEADER_SETTLE),
         });
         Ok(&self.active.as_ref().expect("header was just set").message)
+    }
+
+    /// The header to send again now that the changes have settled, once.
+    fn settled_message(&mut self, now: Instant) -> Option<&[u8]> {
+        let active = self.active.as_mut()?;
+        if now >= active.expires_at || !active.resend_at.is_some_and(|at| now >= at) {
+            return None;
+        }
+        active.resend_at = None;
+        Some(active.message.as_slice())
     }
 
     fn visible_message(&self, now: Instant) -> Option<&[u8]> {
@@ -1100,6 +1123,14 @@ impl KeyLabSession {
 
     fn send(&mut self, message: &[u8]) -> Result<(), Box<dyn Error>> {
         self.connection.send(message)?;
+        Ok(())
+    }
+
+    /// Sends a header and remembers it as the one on the display, so the
+    /// menu's own repaints compare against what is really there.
+    fn send_header(&mut self, message: &[u8]) -> Result<(), Box<dyn Error>> {
+        self.send(message)?;
+        self.last_header = Some(message.to_vec());
         Ok(())
     }
 
@@ -1585,7 +1616,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             if let Some(feedback) = latest_feedback {
                 match transient_header.show(&feedback, Instant::now()) {
                     Ok(message) => {
-                        if let Err(error) = session.send(message) {
+                        if let Err(error) = session.send_header(message) {
                             eprintln!("No se pudo mostrar el control maestro: {error}");
                             break 'surface;
                         }
@@ -1783,8 +1814,14 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     }
                 }
             }
+            if let Some(settled) = transient_header.settled_message(now)
+                && let Err(error) = session.send_header(settled)
+            {
+                eprintln!("No se pudo reenviar el header: {error}");
+                break;
+            }
             if transient_header.expire(now)
-                && let Err(error) = session.send(&messages.header)
+                && let Err(error) = session.send_header(&messages.header)
             {
                 eprintln!("No se pudo restaurar el header del menú: {error}");
                 break;
@@ -1926,14 +1963,15 @@ fn parameter_touch_start() -> u64 {
 /// has a new touch: the parameter's own name and value, or where it stands
 /// and which way to move while the control has not picked it up.
 fn parameter_touch_header(sequence: &mut u64) -> Option<String> {
-    if *sequence == 0 {
-        *sequence = parameter_touch_start();
-        return None;
-    }
+    // Asked from at least 1: zero only learns where the touches stand, and
+    // an engine not touched since it started stands at zero -- asking from
+    // there again and again missed the first touch after every start.
     let Ok(ControlResponse::ParameterTouched {
         sequence: next,
         touch,
-    }) = control_request(&ControlRequest::ParameterTouch { after: *sequence })
+    }) = control_request(&ControlRequest::ParameterTouch {
+        after: (*sequence).max(1),
+    })
     else {
         return None;
     };
@@ -1949,6 +1987,7 @@ fn parameter_touch_header(sequence: &mut u64) -> Option<String> {
         touch.value,
         touch.display_decimals,
         arrow,
+        touch.control,
     ))
 }
 
@@ -3324,8 +3363,13 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
             }
             // Any control change the engine takes may move a parameter
             // through a link -- the controller's defaults, the player's map,
-            // a learnt link -- and the header names what it moved.
-            if !consumed_by_surface && message.first().is_some_and(|status| status & 0xf0 == 0xb0) {
+            // a learnt link -- and so may a pad, which sends a note: the
+            // header names what it moved. A key's note is left out, so
+            // playing does not keep the engine answering.
+            if !consumed_by_surface
+                && (message.first().is_some_and(|status| status & 0xf0 == 0xb0)
+                    || controller::is_package_control_message(message))
+            {
                 let _ = control_moved_sender.send(());
             }
             if let Some(message) = forwardable_performance_message(message, consumed_by_surface)
@@ -4139,6 +4183,31 @@ mod tests {
         assert_eq!(
             transient.visible_message(refreshed_at + HOST_CONTROL_HEADER_TIMEOUT),
             None
+        );
+    }
+
+    #[test]
+    fn the_last_header_of_a_sweep_is_sent_again_once_it_settles() {
+        let start = Instant::now();
+        let mut transient = TransientHeader::default();
+        transient.show("4' B             5", start).unwrap();
+        // The sweep goes on: every change pushes the resend back.
+        let last_change = start + Duration::from_millis(100);
+        transient.show("4' B             6", last_change).unwrap();
+        assert_eq!(
+            transient.settled_message(start + TRANSIENT_HEADER_SETTLE),
+            None,
+            "not while it is still moving"
+        );
+        let settled = header("4' B             6").unwrap();
+        assert_eq!(
+            transient.settled_message(last_change + TRANSIENT_HEADER_SETTLE),
+            Some(settled.as_slice())
+        );
+        assert_eq!(
+            transient.settled_message(last_change + TRANSIENT_HEADER_SETTLE * 2),
+            None,
+            "once"
         );
     }
 

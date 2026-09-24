@@ -574,6 +574,7 @@ impl BrowserHost {
             ControlRequest::ControllerMaps => Ok(ControlResponse::ControllerMaps {
                 controllers: Vec::new(),
                 maps: Vec::new(),
+                takeover: Default::default(),
             }),
             ControlRequest::MidiActivity { .. } => Ok(ControlResponse::MidiActivity {
                 cursor: 0,

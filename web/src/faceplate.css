@@ -901,6 +901,55 @@
   white-space: nowrap;
 }
 
+/* A control moving a parameter takes the window's whole first line, as
+   LITTLE's header does: the mode goes, and on the narrow bar the plugin that
+   shares that line goes with it. The line keeps its place and its size, lit
+   rather than dim, the name at the left and the value at the right. */
+.topbar .now-playing.touching .eyebrow {
+  display: none !important;
+}
+
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .topbar .now-playing.touching .muted-inline {
+    display: none !important;
+  }
+
+  .topbar .now-playing .now-playing-touch {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+}
+
+.now-playing .now-playing-touch {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  color: var(--lcd-phos) !important;
+  font-family: var(--mono-font);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  line-height: 1 !important;
+  margin: 0 !important;
+  text-shadow: 0 0 4px var(--lcd-bloom);
+  white-space: nowrap;
+}
+
+/* The name in capitals, as LITTLE shows it; the value keeps its units' own
+   case -- m³, not M³. */
+.now-playing .now-playing-touch-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.now-playing .now-playing-touch-value {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ------------------------------------------------------------- panels --- */
 
 .hero-card,

@@ -3134,13 +3134,16 @@ fn prepare_audio_voice(
     let restored_parameters: Vec<(u32, f64)> =
         live_parameter_store.restored_values(&spec.plugin.manifest().id, spec.plugin.parameters());
     for (parameter_index, value) in restored_parameters.iter().copied() {
-        rackforge_core::set_plugin_parameter(spec.plugin, &mut instance, parameter_index, value)
-            .with_context(|| {
-                format!(
-                    "restoring live parameter {parameter_index} for {}",
-                    spec.instance_id
-                )
-            })?;
+        // A value the plugin refuses costs that one parameter, never the
+        // instrument.
+        if let Err(error) =
+            rackforge_core::set_plugin_parameter(spec.plugin, &mut instance, parameter_index, value)
+        {
+            eprintln!(
+                "LIVE_PARAMETER_NOT_RESTORED instance={} parameter={parameter_index} value={value} error={error:#}",
+                spec.instance_id
+            );
+        }
     }
     instance
         .activate(

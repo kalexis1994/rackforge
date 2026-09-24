@@ -94,7 +94,7 @@ pub enum AudioDriverPanel {
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 pub use rackforge_controller_package::UserControllerRequest;
 pub use rackforge_midi_api::{
-    LinkValue, MidiChannel, MidiSourceDescriptor, MidiSourceId, ParameterLink,
+    ControlTakeover, LinkValue, MidiChannel, MidiSourceDescriptor, MidiSourceId, ParameterLink,
     ParameterLinkChannel, ParameterLinkId, ParameterLinkMessage, ParameterLinkMode,
     ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform, StepDirection,
     controller_map::{
@@ -136,6 +136,10 @@ pub struct ParameterTouchReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_decimals: Option<u8>,
     pub pickup: ParameterTouchPickup,
+    /// While the control is on its way to the parameter, the value it
+    /// stands at: what it would set if it took over now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<f64>,
 }
 
 /// The sequencer wire shapes, recorded for the surfaces that build them.
@@ -655,6 +659,11 @@ pub enum ControlRequest {
     SaveControllerMap {
         map: Box<ControllerMap>,
     },
+    /// How every knob and fader takes over a parameter standing elsewhere:
+    /// the player's choice for the whole installation.
+    SetControllerTakeover {
+        takeover: ControlTakeover,
+    },
     /// Makes -- or saves again -- a controller package for a keyboard
     /// RackForge had none for, from the controls the player moved and named.
     SaveUserController {
@@ -886,9 +895,15 @@ pub enum ControlResponse {
     ControllerMaps {
         controllers: Vec<RegisteredController>,
         maps: Vec<ControllerMap>,
+        /// Left out by a host that predates the setting: pickup.
+        #[serde(default)]
+        takeover: ControlTakeover,
     },
     ControllerMapSaved {
         map: Box<ControllerMap>,
+    },
+    ControllerTakeoverSet {
+        takeover: ControlTakeover,
     },
     UserControllerSaved {
         controller_id: String,

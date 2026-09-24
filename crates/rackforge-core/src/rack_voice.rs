@@ -968,10 +968,18 @@ impl<'plugin> RackEngine<'plugin> {
         &self,
         touch: &crate::parameter_touch::ParameterTouch,
     ) -> Option<&'plugin LoadedPlugin> {
+        self.touched_slot(touch).map(|(_, plugin)| plugin)
+    }
+
+    /// As [`Self::touched_plugin`], with the Slot's id.
+    pub fn touched_slot(
+        &self,
+        touch: &crate::parameter_touch::ParameterTouch,
+    ) -> Option<(&str, &'plugin LoadedPlugin)> {
         self.voices
             .iter()
             .find(|voice| crate::parameter_touch::touch_names(touch, &voice.slot_id))
-            .map(|voice| voice.plugin)
+            .map(|voice| (voice.slot_id.as_str(), voice.plugin))
     }
 
     /// The links to this Rack's Slots, compiled by the host against

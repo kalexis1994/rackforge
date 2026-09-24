@@ -62,7 +62,10 @@ hound = "3.5"
 png = "0.18"
 semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# float_roundtrip: a number reads back as the value that was written. Without
+# it serde_json may land one bit off, and a range's end -- a noise level at
+# -24.082401275634766 dB -- read one bit past what the plugin accepts.
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
 sha2 = "0.10"
 thiserror = "2.0"
 toml = "0.9"

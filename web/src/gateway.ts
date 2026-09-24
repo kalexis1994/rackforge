@@ -7,7 +7,14 @@ import {
   snapshotReceived,
   store,
 } from "./store";
-import { isDesktopHost, isVstHost, openSessionChannel, type SessionChannel } from "./host";
+import {
+  IS_BROWSER_HOST,
+  isDesktopHost,
+  isVstHost,
+  openSessionChannel,
+  type SessionChannel,
+} from "./host";
+import { type ParameterTouchReport } from "./parameterTouch";
 import { randomIdToken } from "./ids";
 import { invalidatePluginCatalog } from "./pluginCatalog";
 import { serializeSessionCommand } from "./sessionCommandProtocol";
@@ -142,6 +149,12 @@ const midiActivityListeners = new Set<(events: MidiActivityEvent[]) => void>();
 let midiActivityCursor: number | null = null;
 let midiActivityInFlight = false;
 let midiActivitySentAt = 0;
+/** Where the engine's parameter touches stand; null until the first answer,
+ * which only learns it, so an old touch is never shown. */
+let parameterTouchCursor: number | null = null;
+let parameterTouchInFlight = false;
+let parameterTouchSentAt = 0;
+const parameterTouchListeners = new Set<(touch: ParameterTouchReport) => void>();
 const audioHealthListeners = new Set<(health: AudioHealthSnapshot) => void>();
 const sequencerStatusListeners = new Set<(status: SequencerStatus) => void>();
 const connectionOutage = new DeferredConnectionOutage(
@@ -310,11 +323,14 @@ export function connectGateway() {
       if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
       midiActivityInFlight = false;
       midiActivityCursor = null;
+      parameterTouchInFlight = false;
+      parameterTouchCursor = null;
       outputMeterTimer = window.setInterval(
         () => {
           sendOutputMeterRequest();
           sendAudioHealthRequest();
           sendMidiActivityRequest();
+          sendParameterTouchRequest();
         },
         OUTPUT_METER_REFRESH_MS,
       );
@@ -377,6 +393,15 @@ export function connectGateway() {
           const events = (message.events ?? []) as MidiActivityEvent[];
           if (!baseline && events.length > 0) {
             for (const listener of midiActivityListeners) listener(events);
+          }
+        } else if (message.status === "parameter_touched" && "sequence" in message) {
+          parameterTouchInFlight = false;
+          parameterTouchSentAt = 0;
+          const baseline = parameterTouchCursor === null;
+          parameterTouchCursor = Number(message.sequence) || 0;
+          const touch = message.touch as ParameterTouchReport | undefined;
+          if (!baseline && touch) {
+            for (const listener of parameterTouchListeners) listener(touch);
           }
         } else if (message.status === "core_restarting") {
           coreReady = false;
@@ -441,6 +466,8 @@ export function connectGateway() {
           sequencerStatusSentAt = 0;
           midiActivityInFlight = false;
           midiActivitySentAt = 0;
+          parameterTouchInFlight = false;
+          parameterTouchSentAt = 0;
           if (pendingPresetRequest?.timeout !== undefined) {
             window.clearTimeout(pendingPresetRequest.timeout);
           }
@@ -878,6 +905,42 @@ export function subscribeMidiActivity(listener: (events: MidiActivityEvent[]) =>
   };
 }
 
+function sendParameterTouchRequest() {
+  if (
+    !isVstHost()
+    && !IS_BROWSER_HOST
+    && socket
+    && sessionConnected
+    && coreReady
+    && parameterTouchListeners.size > 0
+    && (!parameterTouchInFlight || latchIsStale(parameterTouchSentAt))
+  ) {
+    parameterTouchInFlight = true;
+    parameterTouchSentAt = Date.now();
+    // Zero only learns where the touches stand. Once that is known it is
+    // asked from at least 1: an engine that has not been touched yet stands
+    // at 0, and asking from 0 again would only learn again, and miss the
+    // first touch.
+    socket.send(JSON.stringify({
+      op: "parameter_touch",
+      after: parameterTouchCursor === null ? 0 : Math.max(parameterTouchCursor, 1),
+    }));
+  }
+}
+
+/**
+ * What a control -- a knob, a fader, a pad -- does to a plugin parameter
+ * from now on: the parameter and its value, as LITTLE's header names them.
+ * The browser demo and the VST host have no controller links to report.
+ */
+export function subscribeParameterTouches(listener: (touch: ParameterTouchReport) => void) {
+  if (parameterTouchListeners.size === 0) parameterTouchCursor = null;
+  parameterTouchListeners.add(listener);
+  return () => {
+    parameterTouchListeners.delete(listener);
+  };
+}
+
 function sendSequencerStatusRequest() {
   if (
     !isVstHost()
@@ -1087,6 +1150,7 @@ export function cancelMidiLearn(learnId: number): Promise<void> {
 export function requestControllerMaps(): Promise<{
   controllers: RegisteredController[];
   maps: ControllerMap[];
+  takeover: ControlTakeover;
 }> {
   return requestPresetOperation(
     { op: "controller_maps" },
@@ -1094,7 +1158,25 @@ export function requestControllerMaps(): Promise<{
     (message) => ({
       controllers: (message.controllers ?? []) as RegisteredController[],
       maps: (message.maps ?? []) as ControllerMap[],
+      takeover: controlTakeover(message.takeover),
     }),
+  );
+}
+
+/** How a knob or fader takes over a parameter standing elsewhere:
+ * nothing moves until it gets there, it jumps, or it scales its way there. */
+export type ControlTakeover = "pickup" | "jump" | "scale";
+
+function controlTakeover(value: unknown): ControlTakeover {
+  return value === "jump" || value === "scale" ? value : "pickup";
+}
+
+/** Sets how every knob and fader takes a parameter over; the host applies it at once. */
+export function setControllerTakeover(takeover: ControlTakeover): Promise<ControlTakeover> {
+  return requestPresetOperation(
+    { op: "set_controller_takeover", takeover },
+    "controller_takeover_set",
+    (message) => controlTakeover(message.takeover),
   );
 }
 

@@ -7760,13 +7760,15 @@ pub enum PickupArrow {
 
 /// LITTLE's header for a parameter a control just moved: its own name and
 /// its value in its own units, in the header's 18 columns -- "ROOM SIZE
-/// 1462 m3". A control still on its way to the parameter shows where the
-/// parameter stands and which way to move: "ROOM SIZE  ^45 m3".
+/// 1462 m3". A control still on its way to the parameter shows the value it
+/// stands at, which way to move, and where the parameter is: "4' B  2 ^6",
+/// so the number moves with the fader instead of sitting still.
 pub fn parameter_touch_header(
     parameter: &ParameterDescriptor,
     value: f64,
     display_decimals: Option<u8>,
     pickup: Option<PickupArrow>,
+    control: Option<f64>,
 ) -> String {
     let mut shown = clean_surface_text(
         &little_parameter_display(parameter, value, display_decimals),
@@ -7780,6 +7782,19 @@ pub fn parameter_touch_header(
                 PickupArrow::Down => 'v',
             },
         );
+        if let Some(control) = control {
+            let mut at = clean_surface_text(
+                &little_parameter_display(parameter, control, display_decimals),
+                "",
+            );
+            // One unit is enough: "120 ^311 m3", not "120 m3 ^311 m3".
+            if let Some((number, unit)) = at.rsplit_once(' ')
+                && shown.ends_with(&format!(" {unit}"))
+            {
+                at = number.to_owned();
+            }
+            shown = format!("{at} {shown}");
+        }
     }
     let shown: String = shown.chars().take(DISPLAY_COLUMNS).collect();
     let room = DISPLAY_COLUMNS.saturating_sub(shown.chars().count() + 1);
@@ -8733,18 +8748,57 @@ mod tests {
             flags: Default::default(),
             suggested_control: Default::default(),
         };
-        let header = super::parameter_touch_header(&room, 1462.3, None, None);
+        let header = super::parameter_touch_header(&room, 1462.3, None, None, None);
         assert_eq!(header, "ROOM SIZE  1462 m3");
         assert_eq!(header.chars().count(), super::DISPLAY_COLUMNS);
         let waiting =
-            super::parameter_touch_header(&room, 45.0, None, Some(super::PickupArrow::Down));
+            super::parameter_touch_header(&room, 45.0, None, Some(super::PickupArrow::Down), None);
         assert_eq!(waiting, "ROOM SIZE   v45 m3");
+        // With where the knob has got to, one unit for both.
+        let closing_in = super::parameter_touch_header(
+            &room,
+            45.0,
+            None,
+            Some(super::PickupArrow::Down),
+            Some(120.0),
+        );
+        assert_eq!(closing_in, "ROOM SI 120 v45 m3", "the name gives way");
+        assert_eq!(closing_in.chars().count(), super::DISPLAY_COLUMNS);
         let long = ParameterDescriptor {
             name: "Sympathetic Resonance Amount".into(),
             ..room
         };
-        let header = super::parameter_touch_header(&long, 45000.0, None, None);
+        let header = super::parameter_touch_header(&long, 45000.0, None, None, None);
         assert_eq!(header, "SYMPATHET 45000 m3");
+    }
+
+    #[test]
+    fn a_fader_closing_in_on_a_drawbar_shows_both_numbers() {
+        let drawbar = ParameterDescriptor {
+            index: 5,
+            id: "drawbar-4".into(),
+            name: "4' B".into(),
+            page: "organ".into(),
+            group: None,
+            order: 0,
+            kind: ParameterKind::Integer {
+                minimum: 0,
+                maximum: 8,
+                default: 0,
+                step: 1,
+                unit: None,
+            },
+            flags: Default::default(),
+            suggested_control: Default::default(),
+        };
+        let header = super::parameter_touch_header(
+            &drawbar,
+            6.0,
+            None,
+            Some(super::PickupArrow::Up),
+            Some(2.0),
+        );
+        assert_eq!(header, "4' B          2 ^6");
     }
 
     /// A step can be far finer than a whole number is "close to zero".

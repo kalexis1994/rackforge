@@ -1028,14 +1028,24 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
                 plugin_id, preset.id, preset.name
             );
         }
-        let restored_parameters: Vec<(u32, f64)> =
+        let mut restored_parameters: Vec<(u32, f64)> =
             live_parameter_store.restored_values(plugin_id, plugin.parameters());
-        for (parameter_index, value) in restored_parameters.iter().copied() {
-            crate::set_plugin_parameter(plugin, &mut instance, parameter_index, value)
-                .with_context(|| {
-                    format!("restoring live parameter {parameter_index} for plugin {plugin_id}")
-                })?;
-        }
+        // A value the plugin refuses -- a newer version narrowed its range,
+        // or it never took the value that was saved -- costs that one
+        // parameter, which keeps the preset's value. It must not keep the
+        // engine from starting: that took the whole appliance down in a
+        // restart loop over one noise level.
+        restored_parameters.retain(|&(parameter_index, value)| {
+            match crate::set_plugin_parameter(plugin, &mut instance, parameter_index, value) {
+                Ok(_) => true,
+                Err(error) => {
+                    eprintln!(
+                        "LIVE_PARAMETER_NOT_RESTORED plugin={plugin_id} parameter={parameter_index} value={value} error={error:#}"
+                    );
+                    false
+                }
+            }
+        });
         let live_parameter_target = live_parameter_targets.len();
         live_parameter_targets.push(LiveParameterTarget {
             plugin_id: plugin_id.clone(),
@@ -1114,12 +1124,16 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
                     .mirror(|instance| instance.load_preset(&preset.id))
                     .with_context(|| format!("mirroring program for plugin {plugin_id}"))?;
             }
+            // Only what the instance itself took, so the units and the
+            // instance they mirror agree.
             for (parameter_index, value) in restored_parameters.iter().copied() {
-                units
-                    .mirror(|instance| instance.set_parameter(parameter_index, value))
-                    .with_context(|| {
-                        format!("mirroring live parameter {parameter_index} for {plugin_id}")
-                    })?;
+                if let Err(error) =
+                    units.mirror(|instance| instance.set_parameter(parameter_index, value))
+                {
+                    eprintln!(
+                        "LIVE_PARAMETER_NOT_MIRRORED plugin={plugin_id} parameter={parameter_index} value={value} error={error:#}"
+                    );
+                }
             }
         }
         standalone_voices.push(StandaloneVoice {
@@ -1230,12 +1244,20 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         .lock()
         .map_err(|_| anyhow::anyhow!("MIDI connection state lock poisoned"))?
         .insert(virtual_midi_source.get());
-    let initial_parameter_links = compile_parameter_links_for_runtime(
+    let mut initial_parameter_links = compile_parameter_links_for_runtime(
         &persisted_parameter_links,
         &midi_sources,
         &standalone_voices,
         &rack_voices,
     )?;
+    // The links the engine starts with take over as the player chose, as
+    // every table the control server compiles later does.
+    let takeover =
+        crate::controller_map_store::ControllerMapStore::new(config.data_root.as_deref())
+            .takeover();
+    for link in &mut initial_parameter_links {
+        link.set_takeover(takeover);
+    }
     println!("MIDI_READY ports={midi_port_names:?}");
     if midi_port_names.is_empty() {
         println!(
@@ -1796,9 +1818,10 @@ fn compile_parameter_links_for_runtime(
         .collect()
 }
 
-/// `current` answers where a parameter of the instance stands now, for a
-/// link whose control has not yet been picked up; it is asked at most once
-/// per link, on the first touch, and never on the block's ordinary path.
+/// `current` answers where a parameter of the instance stands now. A link
+/// asks on every move of an absolute control and every press of a button:
+/// to pick the parameter up where it is, and to let go when a pad, the
+/// screen or a sound moved it since.
 fn apply_parameter_links(
     links: &mut [CompiledParameterLink],
     event: IngressMidiEvent,

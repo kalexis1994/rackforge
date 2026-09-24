@@ -13,7 +13,9 @@
 //! was never touched.
 
 use anyhow::{Context, Result, bail};
+use rackforge_midi_api::ControlTakeover;
 use rackforge_midi_api::controller_map::{ControllerMap, RfMapFile};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,7 +54,21 @@ pub fn factory_maps() -> Vec<ControllerMap> {
 #[derive(Clone, Debug)]
 pub struct ControllerMapStore {
     directory: Option<PathBuf>,
+    /// The player's settings for every controller at once.
+    settings: Option<PathBuf>,
 }
+
+/// What the player chose for every controller at once.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ControllerSettings {
+    schema_version: u32,
+    #[serde(default)]
+    takeover: ControlTakeover,
+}
+
+const CONTROLLER_SETTINGS_FILE: &str = "controller-settings.json";
+const CONTROLLER_SETTINGS_SCHEMA_VERSION: u32 = 1;
 
 impl ControllerMapStore {
     /// Without a data root the store keeps nothing on disk: every map is
@@ -60,7 +76,53 @@ impl ControllerMapStore {
     pub fn new(data_root: Option<&Path>) -> Self {
         Self {
             directory: data_root.map(|root| root.join(CONTROLLER_MAP_DIRECTORY)),
+            settings: data_root.map(|root| root.join(CONTROLLER_SETTINGS_FILE)),
         }
+    }
+
+    /// How knobs and faders take a parameter over. A file that cannot be
+    /// read is reported and taken as the default, pickup: a setting must
+    /// never keep the controllers from working.
+    pub fn takeover(&self) -> ControlTakeover {
+        let Some(path) = &self.settings else {
+            return ControlTakeover::default();
+        };
+        match fs::read(path) {
+            Ok(bytes) => serde_json::from_slice::<ControllerSettings>(&bytes)
+                .map(|settings| settings.takeover)
+                .unwrap_or_else(|error| {
+                    eprintln!("CONTROLLER_SETTINGS_SKIPPED path={path:?} error={error}");
+                    ControlTakeover::default()
+                }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                ControlTakeover::default()
+            }
+            Err(error) => {
+                eprintln!("CONTROLLER_SETTINGS_SKIPPED path={path:?} error={error}");
+                ControlTakeover::default()
+            }
+        }
+    }
+
+    pub fn set_takeover(&self, takeover: ControlTakeover) -> Result<()> {
+        let Some(path) = &self.settings else {
+            return Ok(());
+        };
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+        }
+        let settings = ControllerSettings {
+            schema_version: CONTROLLER_SETTINGS_SCHEMA_VERSION,
+            takeover,
+        };
+        let temporary = path.with_extension(format!("json.new-{}", std::process::id()));
+        fs::write(&temporary, serde_json::to_vec_pretty(&settings)?)
+            .with_context(|| format!("writing {}", temporary.display()))?;
+        fs::rename(&temporary, path).with_context(|| {
+            let _ = fs::remove_file(&temporary);
+            format!("replacing {}", path.display())
+        })?;
+        Ok(())
     }
 
     /// Every stored map, by controller id. A file that does not read as a
@@ -384,6 +446,36 @@ mod tests {
         }
     }
 
+    /// A range's end, written out by a plugin in single precision, has to
+    /// read back as that very number: one bit past it, the plugin refuses the
+    /// value, and a restored session holding it once kept the engine from
+    /// starting.
+    #[test]
+    fn a_number_reads_back_as_the_value_written() {
+        let noise_floor = f64::from(-24.082_401_f32);
+        let written = serde_json::to_string(&noise_floor).unwrap();
+        assert_eq!(written, "-24.082401275634766");
+        let read: f64 = serde_json::from_str(&written).unwrap();
+        assert_eq!(read.to_bits(), noise_floor.to_bits());
+        let grand = factory_maps()
+            .into_iter()
+            .flat_map(|map| map.plugins)
+            .find(|plugin| plugin.plugin_id == "org.rackforge.concert-grand")
+            .unwrap();
+        let floors = grand
+            .mappings
+            .iter()
+            .flat_map(|mapping| mapping.mode.values())
+            .filter(|value| *value < -24.0)
+            .collect::<Vec<_>>();
+        assert!(!floors.is_empty());
+        assert!(
+            floors
+                .iter()
+                .all(|value| value.to_bits() == noise_floor.to_bits())
+        );
+    }
+
     #[test]
     fn a_factory_map_is_offered_once_and_updated_while_untouched() {
         let root = root("factory");
@@ -425,6 +517,23 @@ mod tests {
         store.save(&own).unwrap();
         assert!(!store.seed(&leslie_map()).unwrap());
         assert_eq!(store.load_all().unwrap()["user.oxygen-49"], own);
+    }
+
+    #[test]
+    fn the_takeover_setting_is_kept_and_defaults_to_pickup() {
+        let root = root("takeover");
+        let store = ControllerMapStore::new(Some(&root.0));
+        assert_eq!(store.takeover(), ControlTakeover::Pickup);
+        store.set_takeover(ControlTakeover::Scale).unwrap();
+        let reopened = ControllerMapStore::new(Some(&root.0));
+        assert_eq!(reopened.takeover(), ControlTakeover::Scale);
+        // A damaged file costs the setting, never the controllers.
+        fs::write(root.0.join(CONTROLLER_SETTINGS_FILE), b"{").unwrap();
+        assert_eq!(reopened.takeover(), ControlTakeover::Pickup);
+        // The settings file is not taken for a map.
+        store.set_takeover(ControlTakeover::Jump).unwrap();
+        store.save(&leslie_map()).unwrap();
+        assert_eq!(store.load_all().unwrap().len(), 1);
     }
 
     #[test]

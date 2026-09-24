@@ -25,7 +25,7 @@ use rackforge_control_api::{
     MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, RegisteredController,
     VirtualMidiMessage, decode_request, encode_line,
 };
-use rackforge_midi_api::MidiSourceDescriptor;
+use rackforge_midi_api::{ControlTakeover, MidiSourceDescriptor};
 use rackforge_midi_api::{
     IngressMidiEvent, MidiMessageKind, MidiPacket, MidiSourceRegistry, ParameterLink,
     ParameterLinkMessage,
@@ -356,6 +356,8 @@ struct ControlContext {
     controller_map_store: ControllerMapStore,
     /// The player's maps, by controller id, as stored.
     controller_maps: Mutex<BTreeMap<String, ControllerMap>>,
+    /// How knobs and faders take a parameter over, as stored.
+    controller_takeover: Mutex<ControlTakeover>,
     controllers_root: Option<PathBuf>,
     midi_sources: MidiSourceRegistry,
     connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
@@ -457,6 +459,7 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         eprintln!("CONTROLLER_MAPS_UNAVAILABLE error={error:#}");
         BTreeMap::new()
     });
+    let controller_takeover = options.controller_maps.takeover();
     let context = Arc::new(ControlContext {
         store: options.store,
         audio_sender: options.audio_sender,
@@ -472,6 +475,7 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         semantic_profiles: Mutex::new(BTreeMap::new()),
         controller_map_store: options.controller_maps,
         controller_maps: Mutex::new(controller_maps),
+        controller_takeover: Mutex::new(controller_takeover),
         controllers_root: options.controllers_root,
         midi_sources: options.midi_sources,
         connected_midi_sources: options.connected_midi_sources,
@@ -713,6 +717,9 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         ControlRequest::ParameterTouch { after } => parameter_touch(context, after),
         ControlRequest::ControllerMaps => controller_maps(context),
         ControlRequest::SaveControllerMap { map } => save_controller_map(context, *map),
+        ControlRequest::SetControllerTakeover { takeover } => {
+            set_controller_takeover(context, takeover)
+        }
         ControlRequest::SaveUserController { controller } => {
             match &context.controllers_root {
                 None => error_response(
@@ -2925,7 +2932,35 @@ fn controller_maps(context: &ControlContext) -> ControlResponse {
         Ok(maps) => maps.values().cloned().collect(),
         Err(_) => return internal_error("controller map lock is poisoned", None),
     };
-    ControlResponse::ControllerMaps { controllers, maps }
+    let takeover = match context.controller_takeover.lock() {
+        Ok(takeover) => *takeover,
+        Err(_) => return internal_error("controller takeover lock is poisoned", None),
+    };
+    ControlResponse::ControllerMaps {
+        controllers,
+        maps,
+        takeover,
+    }
+}
+
+/// Stores how knobs and faders take a parameter over, and compiles the link
+/// table again so every control follows it at once.
+fn set_controller_takeover(context: &ControlContext, takeover: ControlTakeover) -> ControlResponse {
+    let _dispatch = match context.dispatch_lock.lock() {
+        Ok(guard) => guard,
+        Err(_) => return internal_error("control dispatch lock is poisoned", None),
+    };
+    if let Err(error) = context.controller_map_store.set_takeover(takeover) {
+        return internal_error(format!("storing the controller takeover: {error:#}"), None);
+    }
+    match context.controller_takeover.lock() {
+        Ok(mut current) => *current = takeover,
+        Err(_) => return internal_error("controller takeover lock is poisoned", None),
+    }
+    if let Err(failure) = replace_runtime_parameter_links(context) {
+        return failure.into_response();
+    }
+    ControlResponse::ControllerTakeoverSet { takeover }
 }
 
 /// Stores a controller's whole map and puts it to work at once: the link
@@ -3029,7 +3064,11 @@ fn parameter_touch(context: &ControlContext, after: u64) -> ControlResponse {
         };
     };
     let named = (|| {
-        let instances = context.store.lock().ok()?.state().instances.clone();
+        let (instances, active_rack) = {
+            let store = context.store.lock().ok()?;
+            let state = store.state();
+            (state.instances.clone(), state.live.active_rack_id.clone())
+        };
         let (instance_id, plugin_id) = match instances
             .iter()
             .find(|instance| touch_names(&touch, instance.instance_id.as_str()))
@@ -3039,11 +3078,19 @@ fn parameter_touch(context: &ControlContext, after: u64) -> ControlResponse {
                 instance.plugin_id.clone(),
             ),
             None => {
+                // Slot ids are only unique within a Rack: the one playing
+                // is asked first, so two Racks' `slot-0` never name each
+                // other's parameter.
                 let repository = context.performance_repository.lock().ok()?;
-                let slot = repository
-                    .library()
-                    .racks
+                let racks = &repository.library().racks;
+                let slot = racks
                     .iter()
+                    .filter(|rack| Some(&rack.id) == active_rack.as_ref())
+                    .chain(
+                        racks
+                            .iter()
+                            .filter(|rack| Some(&rack.id) != active_rack.as_ref()),
+                    )
                     .flat_map(|rack| rack.slots.iter())
                     .find(|slot| touch_names(&touch, slot.id.as_str()))?;
                 (slot.id.as_str().to_owned(), slot.plugin_id.clone())
@@ -3065,8 +3112,22 @@ fn parameter_touch(context: &ControlContext, after: u64) -> ControlResponse {
                 TouchPickup::MoveUp => ParameterTouchPickup::MoveUp,
                 TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
             },
+            control: (touch.pickup != TouchPickup::Engaged).then_some(touch.control),
         })
     })();
+    if named.is_none() {
+        // A touch nobody can name leaves the screen showing what it showed
+        // before: said once per parameter, so the log names the culprit
+        // without filling up while a fader moves.
+        static LAST_UNNAMED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let key = touch.instance_key ^ u64::from(touch.parameter_index).rotate_left(32);
+        if LAST_UNNAMED.swap(key, std::sync::atomic::Ordering::Relaxed) != key {
+            eprintln!(
+                "PARAMETER_TOUCH_UNNAMED instance_key={:016x} parameter={}",
+                touch.instance_key, touch.parameter_index
+            );
+        }
+    }
     ControlResponse::ParameterTouched {
         sequence,
         touch: named.map(Box::new),
@@ -3256,6 +3317,16 @@ fn compile_parameter_links(
                 );
             }
         }
+    }
+    // Every link, learnt, mapped or default, takes a parameter over the way
+    // the player chose.
+    let takeover = context
+        .controller_takeover
+        .lock()
+        .map(|takeover| *takeover)
+        .unwrap_or_default();
+    for link in &mut compiled {
+        link.set_takeover(takeover);
     }
     Ok(compiled)
 }
@@ -6018,6 +6089,7 @@ mod tests {
                 semantic_profiles: Mutex::new(BTreeMap::new()),
                 controller_map_store: ControllerMapStore::new(None),
                 controller_maps: Mutex::new(BTreeMap::new()),
+                controller_takeover: Mutex::new(ControlTakeover::default()),
                 controllers_root: None,
                 midi_sources,
                 connected_midi_sources: Arc::new(Mutex::new(BTreeSet::from([0, 1]))),

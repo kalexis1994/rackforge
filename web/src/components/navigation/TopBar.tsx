@@ -1,9 +1,34 @@
 import { MasterLevel, MasterOutputMeter, MasterPan } from "../../components/MasterSection";
+import { subscribeParameterTouches } from "../../gateway";
 import { isVstHost } from "../../host";
+import { parameterTouchLine } from "../../parameterTouch";
 import { type PerformanceSnapshot, type SessionSnapshot } from "../../types";
 import { describeLiveDisplay } from "../../liveDisplay";
 import { Menu } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+/** How long a touched parameter stays on the window after the last change:
+ * LITTLE's header holds it as long. */
+const PARAMETER_TOUCH_HOLD_MS = 1_500;
+
+/** The parameter a control is moving, while it moves and for a moment after:
+ * each change replaces the last at once, and the hold counts from the last. */
+function useParameterTouchLine() {
+  const [line, setLine] = useState<{ name: string; value: string } | null>(null);
+  useEffect(() => {
+    let clear: number | undefined;
+    const unsubscribe = subscribeParameterTouches((touch) => {
+      setLine(parameterTouchLine(touch));
+      window.clearTimeout(clear);
+      clear = window.setTimeout(() => setLine(null), PARAMETER_TOUCH_HOLD_MS);
+    });
+    return () => {
+      unsubscribe();
+      window.clearTimeout(clear);
+    };
+  }, []);
+  return line;
+}
 
 function modeLabel(mode: SessionSnapshot["active_mode"] | undefined): string {
   switch (mode) {
@@ -43,6 +68,7 @@ export function TopBar({
   // switch does nothing (see the faceplate).
   const hasMixerToggle = !isVstHost();
   const [mixerOpen, setMixerOpen] = useState(false);
+  const touched = useParameterTouchLine();
   return (
     <header
       className={`topbar${hasMixerToggle ? " has-mixer-toggle" : ""}${
@@ -57,7 +83,16 @@ export function TopBar({
       >
         <Menu aria-hidden="true" />
       </button>
-      <div className="now-playing">
+      <div className={`now-playing${touched ? " touching" : ""}`}>
+        {/* A control moving a parameter takes the whole first line -- the
+            mode, and on a narrow screen the plugin beside it -- as LITTLE's
+            header does, and gives it back once the control rests. */}
+        {touched ? (
+          <span className="now-playing-touch" role="status">
+            <span className="now-playing-touch-name">{touched.name}</span>
+            <span className="now-playing-touch-value">{touched.value}</span>
+          </span>
+        ) : null}
         {/* Which mode the host is in, where "Now playing" used to say
             nothing the program name below did not. */}
         <span className="eyebrow">{modeLabel(snapshot?.active_mode)}</span>

@@ -158,6 +158,9 @@ public final class MainActivity extends Activity {
     /** Long enough for the render thread to apply the link, short enough to
      *  follow a fader as it moves. */
     private static final long PARAMETER_TOUCH_HEADER_DELAY_MS = 40;
+    /** Asks for a header after one move: about a third of a second, as the
+     *  appliance's driver does. */
+    private static final int PARAMETER_TOUCH_HEADER_ATTEMPTS = 8;
     private volatile boolean audioRecoveryInProgress;
     private ThermalMonitor thermalMonitor;
     private int thermalStatus = PowerManager.THERMAL_STATUS_NONE;
@@ -2136,6 +2139,8 @@ public final class MainActivity extends Activity {
             if ("controller_maps".equals(operation)
                     || "midi_activity".equals(operation)
                     || "save_controller_map".equals(operation)
+                    || "set_controller_takeover".equals(operation)
+                    || "parameter_touch".equals(operation)
                     || "export_controller_map".equals(operation)
                     || "import_controller_map".equals(operation)
                     || "save_user_controller".equals(operation)) {
@@ -5719,7 +5724,12 @@ public final class MainActivity extends Activity {
             if (!consumed && forwardMidi && audioRunning) {
                 sendMidiMessageFromSource(
                         sourceKey, messageStatus, data1, data2, expectedDataBytes + 1);
-                if ((messageStatus & 0xF0) == 0xB0) scheduleParameterTouchHeader(generation);
+                // A pad is a note, a wheel a bend: any of them may be
+                // mapped. A key that moves nothing leaves no touch to show.
+                int kind = messageStatus & 0xF0;
+                if (kind == 0xB0 || kind == 0x90 || kind == 0x80 || kind == 0xE0) {
+                    scheduleParameterTouchHeader(generation);
+                }
             }
             messageStatus = runningStatus;
             dataCount = 0;
@@ -5741,15 +5751,30 @@ public final class MainActivity extends Activity {
      * After a control change reaches the engine, LITTLE's header names the
      * parameter its link moved -- the player's map, a learnt link or the
      * controller's defaults -- with its value. Asked once the render thread
-     * has had a block to apply the link; moves in between share one ask.
+     * has had a block to apply the link, and again a few times while nothing
+     * has shown up, so a block that ran late does not lose the header; moves
+     * in between share the asks.
      */
     private void scheduleParameterTouchHeader(int generation) {
         if (!parameterTouchScheduled.compareAndSet(false, true)) return;
+        askParameterTouchHeader(generation, PARAMETER_TOUCH_HEADER_ATTEMPTS);
+    }
+
+    private void askParameterTouchHeader(int generation, int attemptsLeft) {
         mainHandler.postDelayed(() -> {
-            parameterTouchScheduled.set(false);
-            if (generation != midiGeneration) return;
+            if (generation != midiGeneration) {
+                parameterTouchScheduled.set(false);
+                return;
+            }
             String response = keyLabParameterTouch();
-            if (response != null) handleKeyLabResponse(response, generation);
+            if (response != null) {
+                parameterTouchScheduled.set(false);
+                handleKeyLabResponse(response, generation);
+            } else if (attemptsLeft > 1) {
+                askParameterTouchHeader(generation, attemptsLeft - 1);
+            } else {
+                parameterTouchScheduled.set(false);
+            }
         }, PARAMETER_TOUCH_HEADER_DELAY_MS);
     }
 

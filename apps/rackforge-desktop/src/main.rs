@@ -22,9 +22,9 @@ use eframe::egui::{
     StrokeKind, Vec2,
 };
 use rackforge_control_api::{
-    ClientId, ControlErrorCode, ControlRequest, ControlResponse, ControllerMap, MidiInputSetting,
-    MidiLearnCandidate, MidiSourceStatus, ParameterLinkMessage, RegisteredController,
-    VirtualMidiMessage,
+    ClientId, ControlErrorCode, ControlRequest, ControlResponse, ControlTakeover, ControllerMap,
+    MidiInputSetting, MidiLearnCandidate, MidiSourceStatus, ParameterLinkMessage,
+    ParameterTouchPickup, ParameterTouchReport, RegisteredController, VirtualMidiMessage,
 };
 #[cfg(windows)]
 use rackforge_controller_api::{
@@ -178,6 +178,7 @@ fn compile_desktop_parameter_links(
     performance: &PerformanceRepository,
     semantic_profiles: &BTreeMap<String, RegisteredSemanticProfile>,
     controller_maps: &BTreeMap<String, ControllerMap>,
+    takeover: ControlTakeover,
 ) -> Result<Vec<CompiledParameterLink>> {
     let mut compiled = links
         .iter()
@@ -272,6 +273,9 @@ fn compile_desktop_parameter_links(
                 })?,
             );
         }
+    }
+    for link in &mut compiled {
+        link.set_takeover(takeover);
     }
     Ok(compiled)
 }
@@ -511,6 +515,8 @@ struct DesktopApp {
     /// The player's controller maps, by controller id, and where they live.
     controller_maps: BTreeMap<String, ControllerMap>,
     controller_map_store: ControllerMapStore,
+    /// How knobs and faders take a parameter over, as stored.
+    controller_takeover: ControlTakeover,
     /// What came in lately, for the Controllers editor.
     midi_activity: rackforge_core::midi_activity::MidiActivityLog,
     /// What each connected input's device answered to the Identity Request.
@@ -866,6 +872,7 @@ impl DesktopApp {
             warnings.push(format!("Controller maps were not loaded: {error:#}"));
             BTreeMap::new()
         });
+        let controller_takeover = controller_map_store.takeover();
         #[cfg(windows)]
         if let Some(audio) = &audio {
             sync_desktop_audio(audio, &session, &menu)?;
@@ -875,6 +882,7 @@ impl DesktopApp {
                 &performance_repository,
                 &controller_semantic_profiles,
                 &controller_maps,
+                controller_takeover,
             )?)?;
             let active = session
                 .read()
@@ -964,6 +972,7 @@ impl DesktopApp {
             controller_semantic_profiles,
             controller_maps,
             controller_map_store,
+            controller_takeover,
             midi_activity: Default::default(),
             midi_identities: BTreeMap::new(),
             pending_controller_connects: BTreeMap::new(),
@@ -2679,45 +2688,93 @@ impl DesktopApp {
         }
     }
 
-    /// LITTLE's header for a touch: the parameter's own name and value, when
-    /// the touch names a PLAY instance or a Slot of a saved Rack.
-    #[cfg(windows)]
-    fn parameter_touch_header(
+    /// What a touch did, named: the parameter and its value, when the touch
+    /// names a PLAY instance or a Slot of a saved Rack. LITTLE's header and
+    /// the web's window are both made from it.
+    fn parameter_touch_report(
         &self,
         touch: &rackforge_core::parameter_touch::ParameterTouch,
-    ) -> Option<String> {
+    ) -> Option<ParameterTouchReport> {
         use rackforge_core::parameter_touch::{TouchPickup, touch_names};
-        let plugin = self
+        let (instance_id, plugin) = self
             .plugins
             .iter()
             .find(|plugin| touch_names(touch, &plugin.instance_id))
+            .map(|plugin| (plugin.instance_id.clone(), plugin))
             .or_else(|| {
-                let slot = self
-                    .performance_repository
-                    .library()
-                    .racks
+                // Slot ids are only unique within a Rack: the one playing is
+                // asked first.
+                let active_rack = self.session.read().ok()?.live.active_rack_id.clone();
+                let racks = &self.performance_repository.library().racks;
+                let slot = racks
                     .iter()
+                    .filter(|rack| Some(&rack.id) == active_rack.as_ref())
+                    .chain(
+                        racks
+                            .iter()
+                            .filter(|rack| Some(&rack.id) != active_rack.as_ref()),
+                    )
                     .flat_map(|rack| rack.slots.iter())
                     .find(|slot| touch_names(touch, slot.id.as_str()))?;
-                self.plugins
+                let plugin = self
+                    .plugins
                     .iter()
-                    .find(|plugin| plugin.plugin_id == slot.plugin_id)
+                    .find(|plugin| plugin.plugin_id == slot.plugin_id)?;
+                Some((slot.id.as_str().to_owned(), plugin))
             })?;
         let schema = plugin.runtime.parameters();
         let parameter = schema
             .parameters
             .iter()
-            .find(|parameter| parameter.index == touch.parameter_index)?;
-        let arrow = match touch.pickup {
-            TouchPickup::Engaged => None,
-            TouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
-            TouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
+            .find(|parameter| parameter.index == touch.parameter_index)?
+            .clone();
+        Some(ParameterTouchReport {
+            instance_id,
+            parameter,
+            value: touch.value,
+            display_decimals: schema.display_decimals,
+            pickup: match touch.pickup {
+                TouchPickup::Engaged => ParameterTouchPickup::Engaged,
+                TouchPickup::MoveUp => ParameterTouchPickup::MoveUp,
+                TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
+            },
+            control: (touch.pickup != TouchPickup::Engaged).then_some(touch.control),
+        })
+    }
+
+    /// The web's window asks what a control last did, as the Pi's engine
+    /// answers it.
+    fn parameter_touch_response(&self, after: u64) -> ControlResponse {
+        let mut sequence = after;
+        let touch = rackforge_core::parameter_touch::PARAMETER_TOUCHES
+            .latest(&mut sequence)
+            .filter(|_| after != 0)
+            .and_then(|touch| self.parameter_touch_report(&touch))
+            .map(Box::new);
+        if after == 0 {
+            sequence = rackforge_core::parameter_touch::PARAMETER_TOUCHES.current_sequence();
+        }
+        ControlResponse::ParameterTouched { sequence, touch }
+    }
+
+    /// LITTLE's header for a touch: the parameter's own name and value.
+    #[cfg(windows)]
+    fn parameter_touch_header(
+        &self,
+        touch: &rackforge_core::parameter_touch::ParameterTouch,
+    ) -> Option<String> {
+        let report = self.parameter_touch_report(touch)?;
+        let arrow = match report.pickup {
+            ParameterTouchPickup::Engaged => None,
+            ParameterTouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
+            ParameterTouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
         };
         Some(rackforge_surface_runtime::parameter_touch_header(
-            parameter,
-            touch.value,
-            schema.display_decimals,
+            &report.parameter,
+            report.value,
+            report.display_decimals,
             arrow,
+            report.control,
         ))
     }
 
@@ -3446,7 +3503,37 @@ impl DesktopApp {
         ControlResponse::ControllerMaps {
             controllers,
             maps: self.controller_maps.values().cloned().collect(),
+            takeover: self.controller_takeover,
         }
+    }
+
+    /// Stores how knobs and faders take a parameter over, and compiles the
+    /// links again so every control follows it at once.
+    fn set_controller_takeover(&mut self, takeover: ControlTakeover) -> ControlResponse {
+        if let Err(error) = self.controller_map_store.set_takeover(takeover) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Internal,
+                message: format!("Could not store the controller takeover: {error:#}"),
+                current_revision: None,
+            };
+        }
+        self.controller_takeover = takeover;
+        let links = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .parameter_links
+            .clone();
+        if let Err(message) = self.replace_parameter_links(links) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message,
+                current_revision: None,
+            };
+        }
+        // A Rack on stage has links of its own: they follow too.
+        self.reload_live_rack("controller_takeover");
+        ControlResponse::ControllerTakeoverSet { takeover }
     }
 
     /// Attaches the declarative controller packages to the enabled inputs
@@ -3643,6 +3730,7 @@ impl DesktopApp {
                 &self.performance_repository,
                 &self.controller_semantic_profiles,
                 &self.controller_maps,
+                self.controller_takeover,
             )
             .map_err(|error| format!("Could not compile MIDI parameter links: {error:#}"))?;
             self.audio
@@ -4378,6 +4466,10 @@ impl DesktopApp {
             }
             ControlRequest::ControllerMaps => self.controller_maps_response(),
             ControlRequest::SaveControllerMap { map } => self.save_controller_map(*map),
+            ControlRequest::SetControllerTakeover { takeover } => {
+                self.set_controller_takeover(takeover)
+            }
+            ControlRequest::ParameterTouch { after } => self.parameter_touch_response(after),
             ControlRequest::SaveUserController { controller } => {
                 let store = rackforge_controller_package::PackageStore::new(
                     self.options.rackforge_root.join("controllers"),
@@ -5869,14 +5961,17 @@ impl DesktopApp {
                     (descriptor.id == link.source.source_id)
                         .then(|| desktop_audio::stable_midi_source_key_from_id(&descriptor.id))
                 })?;
-                CompiledParameterLink::new(link.clone(), source_key, plugin.parameters())
-                    .map_err(|error| {
-                        eprintln!(
-                            "PARAMETER_LINK_PENDING link={} instance={} reason={error:#}",
-                            link.id, link.instance_id
-                        );
-                    })
-                    .ok()
+                let mut compiled =
+                    CompiledParameterLink::new(link.clone(), source_key, plugin.parameters())
+                        .map_err(|error| {
+                            eprintln!(
+                                "PARAMETER_LINK_PENDING link={} instance={} reason={error:#}",
+                                link.id, link.instance_id
+                            );
+                        })
+                        .ok()?;
+                compiled.set_takeover(self.controller_takeover);
+                Some(compiled)
             })
             .collect()
     }

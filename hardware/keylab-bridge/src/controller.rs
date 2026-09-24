@@ -69,6 +69,33 @@ fn package_manifest() -> &'static ControllerPackageManifest {
     })
 }
 
+/// Whether a message comes from one of the package's own controls -- a
+/// pad's note, a wheel -- rather than a key: what a player's map may bind,
+/// and so what may have moved a parameter. A key's note is not one of them.
+pub fn is_package_control_message(message: &[u8]) -> bool {
+    use rackforge_controller_package::InputMessage;
+    let (Some(&status), Some(&data1)) = (message.first(), message.get(1)) else {
+        return false;
+    };
+    let channel = status & 0x0f;
+    let heard = match status & 0xf0 {
+        0x80 | 0x90 => InputMessage::Note {
+            channel,
+            note: data1,
+        },
+        0xb0 => InputMessage::ControlChange {
+            channel,
+            controller: data1,
+        },
+        0xe0 => InputMessage::PitchBend { channel },
+        _ => return false,
+    };
+    package_manifest()
+        .inputs
+        .iter()
+        .any(|input| input.midi.message() == Ok(heard))
+}
+
 pub fn device_matchers() -> &'static [DeviceMatcher] {
     &package_manifest().devices
 }
@@ -207,6 +234,19 @@ fn is_alsa_address(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pad_is_a_control_and_a_key_is_not() {
+        // Pad 1, bank 1: note 40 on channel 11, struck and let go.
+        assert!(is_package_control_message(&[0x9a, 40, 90]));
+        assert!(is_package_control_message(&[0x8a, 40, 0]));
+        // Pad 1, bank 2, and the mod wheel.
+        assert!(is_package_control_message(&[0x9a, 48, 30]));
+        assert!(is_package_control_message(&[0xb0, 1, 64]));
+        // Middle C on the keys, and note 40 on the keys' channel.
+        assert!(!is_package_control_message(&[0x90, 60, 100]));
+        assert!(!is_package_control_message(&[0x90, 40, 100]));
+    }
     use rackforge_control_profile::roles;
     use rackforge_controller_api::{
         HostActionBinding, HostActionTarget, MidiButtonBinding, SemanticControlMode,

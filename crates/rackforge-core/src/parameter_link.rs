@@ -154,17 +154,17 @@ impl CompiledParameterLink {
     }
 
     /// A button acts on its press, and for Hold and Trigger on its release
-    /// too. A press is a control change at 64 or above, or a note with a
-    /// velocity; a button that never reports its release simply presses
-    /// again. Toggle, Cycle and Step start from where the parameter is --
-    /// set from the screen or not -- so a press always does what it says.
+    /// too. A press is a control change at 64 or above, or a note at any
+    /// velocity -- a pad struck softly is still pressed; a button that never
+    /// reports its release simply presses again. Toggle, Cycle and Step
+    /// start from where the parameter is -- set from the screen or not -- so
+    /// a press always does what it says.
     fn apply_button(
         &mut self,
         frame: u32,
-        normalized: f64,
+        pressed: bool,
         current: impl FnOnce(u32) -> Option<f64>,
     ) -> Option<ParameterLinkOutput> {
-        let pressed = normalized >= 0.5;
         let value = match &self.link.mode {
             ParameterLinkMode::Set { value } => pressed.then(|| value.get())?,
             ParameterLinkMode::Hold {
@@ -239,15 +239,19 @@ impl CompiledParameterLink {
         {
             return None;
         }
-        let normalized = normalized_input(self.link.message, ingress.packet)?;
+        let heard = normalized_input(self.link.message, ingress.packet)?;
         let normalized = if self.link.transform.invert {
-            1.0 - normalized
+            1.0 - heard
         } else {
-            normalized
+            heard
         };
         let frame = ingress.packet.frame;
         if self.link.mode.is_button() {
-            return self.apply_button(frame, normalized, current);
+            let pressed = match self.link.message {
+                ParameterLinkMessage::Note { .. } => (heard > 0.0) != self.link.transform.invert,
+                _ => normalized >= 0.5,
+            };
+            return self.apply_button(frame, pressed, current);
         }
         // A zone is a choice made on purpose, not a position to pick up.
         if let ParameterLinkMode::Zones { values } = &self.link.mode {
@@ -382,9 +386,10 @@ fn mode_name(mode: &ParameterLinkMode) -> &'static str {
 }
 
 /// Parameter values are compared as the plugin reports them: a choice's
-/// value exactly, a float to within a hair of rounding.
+/// value exactly, a float to within a hair of rounding -- a plugin that
+/// keeps its parameters in single precision answers 311.3 as 311.29999.
 fn same_value(left: f64, right: f64) -> bool {
-    (left - right).abs() <= 1e-9 * left.abs().max(right.abs()).max(1.0)
+    (left - right).abs() <= 1e-6 * left.abs().max(right.abs()).max(1.0)
 }
 
 /// A position along a Range, in the parameter's own units and steps. The
@@ -1366,6 +1371,44 @@ mod tests {
         );
         assert_eq!(press(&mut hold, 1.0), Some(2.0));
         assert_eq!(release(&mut hold, 2.0), Some(1.0));
+    }
+
+    #[test]
+    fn a_cycle_recognises_a_value_the_plugin_rounded_to_single_precision() {
+        let schema = schema(ParameterKind::Float {
+            minimum: 45.0,
+            maximum: 45_000.0,
+            default: 311.3,
+            step: 1.0,
+            unit: None,
+            taper: ParameterTaper::Logarithmic,
+        });
+        let mut rooms = button(
+            ParameterLinkMode::Cycle {
+                values: vec![value(100.0), value(311.3), value(3000.0)],
+            },
+            &schema,
+        );
+        assert_eq!(press(&mut rooms, f64::from(311.3_f32)), Some(3000.0));
+    }
+
+    #[test]
+    fn a_pad_struck_softly_is_still_pressed() {
+        let schema = leslie();
+        let mut link = link(ParameterLinkMessage::Note { note: 40 });
+        link.mode = ParameterLinkMode::Hold {
+            pressed: value(2.0),
+            released: value(1.0),
+        };
+        let mut pad = CompiledParameterLink::new(link, MidiSourceKey::new(7), &schema).unwrap();
+        let mut hit = |bytes: &[u8]| {
+            pad.apply(ingress(bytes), |_| Some(1.0))
+                .map(|output| output.event.value)
+        };
+        assert_eq!(hit(&[0x91, 40, 12]), Some(2.0), "velocity 12 presses");
+        assert_eq!(hit(&[0x81, 40, 64]), Some(1.0), "note-off releases");
+        assert_eq!(hit(&[0x91, 40, 90]), Some(2.0));
+        assert_eq!(hit(&[0x91, 40, 0]), Some(1.0), "velocity 0 releases");
     }
 
     #[test]

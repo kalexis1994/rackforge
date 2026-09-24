@@ -995,7 +995,11 @@ impl<'plugin> RackEngine<'plugin> {
             for link in self.parameter_links.iter_mut().filter(|link| {
                 crate::rack_graph::voice_matches_link_target(&voice.slot_id, &link.link.instance_id)
             }) {
-                let Some(mapped) = link.apply(event, |_| None) else {
+                // Asked where the parameter stands: a Slot's saved state or
+                // the screen may have moved it, and a toggle starts there.
+                let instance = &mut voice.instance;
+                let Some(mapped) = link.apply(event, |index| instance.get_parameter(index).ok())
+                else {
                     continue;
                 };
                 consume |= mapped.pass_through == ParameterLinkPassThrough::Consume;

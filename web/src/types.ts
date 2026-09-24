@@ -91,12 +91,20 @@ export interface SoundSummary {
   editable: boolean;
 }
 
+export interface BankSummary {
+  id: string;
+  name: string;
+  order: number;
+}
+
 export interface PluginInstance {
   instance_id: string;
   plugin_id: string;
   plugin_name: string;
   ui_layouts: string[];
   config_available: boolean;
+  /** The banks the sounds are filed under, where the plugin has them. */
+  banks?: BankSummary[];
   sounds: SoundSummary[];
   selected_sound_id?: string;
 }

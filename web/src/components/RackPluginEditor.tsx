@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
-import { materializePluginState, requestPluginPreset, requestPluginPresets } from "../gateway";
+import {
+  materializePluginState,
+  requestPluginCatalog,
+  requestPluginPreset,
+  requestPluginPresets,
+} from "../gateway";
 import { AsyncActionLabel, AsyncSpinner } from "./AsyncSpinner";
+import { isRackSlotStub } from "../rackPluginSelection";
 import { useCanvasModal } from "../hooks/useCanvasModal";
 import type {
   HostPresetSummary,
@@ -62,6 +68,19 @@ export function RackPluginEditor({
   const [loadedPresetId, setLoadedPresetId] = useState<string>();
   const [busy, setBusy] = useState<"preset" | "sound" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The programs of a plugin the host is not running. A host that runs one
+  // plugin at a time (Android) carries only that one's programs in the
+  // session; a Slot holding another asks for its catalog, and the surface is
+  // drawn once it has it, so the plugin boots with its programs listed.
+  const needsCatalog = Boolean(
+    instance && isRackSlotStub(instance) && instance.sounds.length === 0,
+  );
+  const [catalog, setCatalog] = useState<
+    | { pluginId: string; sounds: PluginInstance["sounds"]; banks: PluginInstance["banks"] }
+    | { pluginId: string; failed: string }
+    | null
+  >(null);
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   const { sectionRef, closeRef, onKeyDown } = useCanvasModal(onClose);
   // Answers that arrive after the editor is closed are dropped; the slot a
   // late answer would be applied to is the one it was asked for.
@@ -94,6 +113,27 @@ export function RackPluginEditor({
       active = false;
     };
   }, [slot.plugin_id, presetsAttempt]);
+
+  useEffect(() => {
+    if (!needsCatalog) return;
+    let active = true;
+    const pluginId = slot.plugin_id;
+    requestPluginCatalog(pluginId)
+      .then(({ sounds, banks }) => {
+        if (active) setCatalog({ pluginId, sounds, banks });
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setCatalog({
+            pluginId,
+            failed: reason instanceof Error ? reason.message : "The programs could not be listed.",
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [needsCatalog, slot.plugin_id, catalogAttempt]);
 
   const selectSound = useCallback(async (soundId: string) => {
     setBusy("sound");
@@ -136,8 +176,14 @@ export function RackPluginEditor({
     }
   }, [busy, onChange, presetId, slot.plugin_id]);
 
+  const slotCatalog = needsCatalog && catalog?.pluginId === slot.plugin_id ? catalog : null;
+  const catalogFailed = slotCatalog && "failed" in slotCatalog ? slotCatalog.failed : null;
+  const catalogPending = needsCatalog && slotCatalog === null;
   const editorInstance: PluginInstance | undefined = instance ? {
     ...instance,
+    ...(slotCatalog && "sounds" in slotCatalog
+      ? { sounds: slotCatalog.sounds, banks: slotCatalog.banks }
+      : {}),
     selected_sound_id: slot.state?.selected_sound_id ?? instance.selected_sound_id,
   } : undefined;
   const kindLabel = KIND_LABEL[kind];
@@ -232,8 +278,24 @@ export function RackPluginEditor({
             </button>
           </div>
         ) : null}
-        <div className="rack-plugin-editor-surface" aria-busy={busy !== null}>
-          {editorInstance ? renderSurface({
+        {catalogFailed ? (
+          <div className="rack-plugin-editor-error" role="alert">
+            <span>The programs could not be listed: {catalogFailed}</span>
+            <button type="button" onClick={() => {
+              setCatalog(null);
+              setCatalogAttempt((attempt) => attempt + 1);
+            }}>
+              Retry
+            </button>
+          </div>
+        ) : null}
+        <div className="rack-plugin-editor-surface" aria-busy={busy !== null || catalogPending}>
+          {catalogPending ? (
+            <div className="rack-plugin-editor-busy" role="status" aria-live="polite">
+              <AsyncSpinner label="Reading the programs…" size="medium" />
+              <span>Reading the programs…</span>
+            </div>
+          ) : editorInstance ? renderSurface({
             instance: editorInstance,
             state: slot.state,
             onStateChange: updateState,

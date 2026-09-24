@@ -25,6 +25,7 @@ import type {
   PerformanceEdit,
   PerformanceSnapshot,
   PerformanceSnapshotMessage,
+  PluginInstance,
   PluginParameterSnapshot,
   PluginStateParameterResult,
   PluginStateParameterSnapshot,
@@ -488,6 +489,24 @@ export function materializePluginState(
     },
     "plugin_state_materialized",
     (message) => message.state as PluginStateReference,
+  );
+}
+
+/**
+ * The banks and programs of a plugin that is not running, for a Rack Slot
+ * that holds it. A host that runs one plugin at a time (Android) answers
+ * this; the others carry every plugin's programs in the session already.
+ */
+export function requestPluginCatalog(
+  pluginId: string,
+): Promise<Required<Pick<PluginInstance, "banks" | "sounds">>> {
+  return requestPresetOperation(
+    { op: "plugin_catalog", plugin_id: pluginId },
+    "plugin_catalog",
+    (message) => ({
+      banks: (message.banks ?? []) as NonNullable<PluginInstance["banks"]>,
+      sounds: (message.sounds ?? []) as PluginInstance["sounds"],
+    }),
   );
 }
 

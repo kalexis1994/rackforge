@@ -1745,7 +1745,7 @@ impl AndroidEngine {
     ) -> Result<serde_json::Value> {
         if matches!(
             method,
-            "materialize" | "plugin_state_parameters" | "set_plugin_state_parameter"
+            "materialize" | "catalog" | "plugin_state_parameters" | "set_plugin_state_parameter"
         ) {
             return isolated_plugin_state_command(&self.isolated_state_context(), method, params);
         }
@@ -2392,6 +2392,9 @@ fn isolated_plugin_state_command(
     if method == "materialize" {
         return materialize_isolated_plugin_state(context, params);
     }
+    if method == "catalog" {
+        return isolated_plugin_catalog(context, params);
+    }
     let state: PluginStateReference = serde_json::from_value(
         params
             .get("state")
@@ -2451,6 +2454,75 @@ fn isolated_plugin_state_command(
     }
 }
 
+/// The programs of a plugin a Rack Slot holds, for the Rack editor: Android
+/// runs one plugin at a time, so the session carries the programs of that one
+/// alone, and a Slot holding any other would otherwise show none.
+fn isolated_plugin_catalog(
+    context: &AndroidIsolatedStateContext,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let plugin_id = params
+        .get("plugin_id")
+        .and_then(serde_json::Value::as_str)
+        .context("plugin catalog command is missing plugin_id")?;
+    // Reading programs is as safe for an effect as for an instrument.
+    let (runtime, resource_overrides) = rack_slot_runtime(context, params, plugin_id, false)?;
+    let catalog = runtime
+        .0
+        .create_instance_with_resource_overrides(&resource_overrides)?
+        .preset_catalog()?;
+    Ok(serde_json::json!({
+        "plugin_id": plugin_id,
+        "banks": catalog.banks.iter().map(|bank| serde_json::json!({
+            "id": bank.id,
+            "name": bank.name,
+            "order": bank.order,
+        })).collect::<Vec<_>>(),
+        "sounds": catalog.presets.iter().map(|preset| serde_json::json!({
+            "id": preset.id,
+            "name": preset.name,
+            "bank": preset.bank,
+            "detail": preset.description.clone().or_else(|| preset.category.clone()),
+            "editable": preset.editable,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// The runtime a Rack Slot's plugin runs in: the active plugin's own, or the
+/// installed package's, loaded once and kept.
+fn rack_slot_runtime(
+    context: &AndroidIsolatedStateContext,
+    params: &serde_json::Value,
+    plugin_id: &str,
+    instrument_only: bool,
+) -> Result<(SendableLoadedPlugin, BTreeMap<String, PathBuf>)> {
+    let active_manifest = context.runtime.0.manifest();
+    if active_manifest.id == plugin_id {
+        return Ok((context.runtime, context.resource_overrides.clone()));
+    }
+    let package_root = PathBuf::from(
+        params
+            .get("package_root")
+            .and_then(serde_json::Value::as_str)
+            .context("Rack Slot plugin command is missing package_root")?,
+    );
+    let package = PluginPackage::open(&package_root)
+        .with_context(|| format!("opening Rack Slot plugin {}", package_root.display()))?;
+    if package.manifest().id != plugin_id {
+        bail!("Rack Slot plugin package identity does not match the requested plugin");
+    }
+    if package.manifest().portable_component().is_none() {
+        bail!("Rack Slot plugin must provide a portable wasm-v1 runtime");
+    }
+    if instrument_only && package.manifest().kind != PluginKind::Instrument {
+        bail!("Rack Slot plugin must provide a portable wasm-v1 instrument runtime");
+    }
+    Ok((
+        cached_isolated_plugin_runtime(&package, &context.data_root)?,
+        BTreeMap::new(),
+    ))
+}
+
 fn materialize_isolated_plugin_state(
     context: &AndroidIsolatedStateContext,
     params: &serde_json::Value,
@@ -2459,31 +2531,7 @@ fn materialize_isolated_plugin_state(
         .get("plugin_id")
         .and_then(serde_json::Value::as_str)
         .context("materialize plugin state command is missing plugin_id")?;
-    let active_manifest = context.runtime.0.manifest();
-    let (runtime, resource_overrides) = if active_manifest.id == plugin_id {
-        (context.runtime, context.resource_overrides.clone())
-    } else {
-        let package_root = PathBuf::from(
-            params
-                .get("package_root")
-                .and_then(serde_json::Value::as_str)
-                .context("materialize plugin state command is missing package_root")?,
-        );
-        let package = PluginPackage::open(&package_root)
-            .with_context(|| format!("opening Rack Slot plugin {}", package_root.display()))?;
-        if package.manifest().id != plugin_id {
-            bail!("Rack Slot plugin package identity does not match the requested plugin");
-        }
-        if package.manifest().kind != PluginKind::Instrument
-            || package.manifest().portable_component().is_none()
-        {
-            bail!("Rack Slot plugin must provide a portable wasm-v1 instrument runtime");
-        }
-        (
-            cached_isolated_plugin_runtime(&package, &context.data_root)?,
-            BTreeMap::new(),
-        )
-    };
+    let (runtime, resource_overrides) = rack_slot_runtime(context, params, plugin_id, true)?;
 
     let requested_sound_id = params
         .get("sound_id")
@@ -5096,7 +5144,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginStateComman
             .context("parsing plugin state command parameters")?;
         if matches!(
             method.as_str(),
-            "materialize" | "plugin_state_parameters" | "set_plugin_state_parameter"
+            "materialize" | "catalog" | "plugin_state_parameters" | "set_plugin_state_parameter"
         ) {
             // State inspection creates a separate portable instance. Copy its immutable
             // context while holding ENGINE, then release the audio lock before Wasm

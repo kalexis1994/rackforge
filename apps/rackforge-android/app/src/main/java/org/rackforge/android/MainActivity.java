@@ -2000,6 +2000,10 @@ public final class MainActivity extends Activity {
                 handleMaterializePluginStateSessionRequest(request);
                 return;
             }
+            if ("plugin_catalog".equals(operation)) {
+                handlePluginCatalogSessionRequest(request);
+                return;
+            }
             if ("plugin_parameters".equals(operation)
                     || "set_plugin_parameter".equals(operation)
                     || "plugin_state_parameters".equals(operation)
@@ -2548,6 +2552,34 @@ public final class MainActivity extends Activity {
                         .toString());
             } catch (Throwable error) {
                 Log.e("RackForge", "Materializing Rack Slot plugin state failed", error);
+                emitSharedSessionError(error);
+            }
+        });
+    }
+
+    /**
+     * The programs of a plugin a Rack Slot holds. The session carries the
+     * programs of the one plugin running; a Slot holding another asks here.
+     */
+    private void handlePluginCatalogSessionRequest(JSONObject request) {
+        pluginParameterExecutor.execute(() -> {
+            try {
+                String pluginId = request.getString("plugin_id");
+                JSONObject plugin = installedPluginRecord(pluginId);
+                if (plugin == null) {
+                    throw new IllegalArgumentException(
+                            "Rack Slot plugin is not installed: " + pluginId);
+                }
+                JSONObject params = new JSONObject()
+                        .put("plugin_id", pluginId)
+                        .put("package_root", plugin.getString("package_root"));
+                JSONObject catalog = new JSONObject(
+                        pluginStateCommand("catalog", params.toString()));
+                emitNativeSessionEvent("message", catalog
+                        .put("status", "plugin_catalog")
+                        .toString());
+            } catch (Throwable error) {
+                Log.e("RackForge", "Reading a Rack Slot plugin's programs failed", error);
                 emitSharedSessionError(error);
             }
         });

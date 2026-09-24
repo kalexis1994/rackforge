@@ -208,16 +208,29 @@ them is possible later and is not needed first.
 ## The player's mappings
 
 Mappings are not part of a package. A package is immutable and RackForge
-updates it; a mapping belongs to the player. They live in the data root,
-keyed by controller and plugin:
+updates it; a mapping belongs to the player. One map per controller holds its
+mappings for every plugin, in the data root:
 
 ```text
-<data-root>/controller-mappings/<controller-id>/<plugin-id>.json
+<data-root>/controller-maps/<controller-id>.json
 ```
 
-Each entry names an input, a plugin parameter by its stable `id` (never by
-index: indices may change between plugin versions) and a mode. A mapping whose
-parameter a new plugin version no longer has stays, marked pending.
+The same map travels as an `.rfmap` file (`format = "org.rackforge.map"`),
+exported and imported whole, like `.rfpreset` and `.rflive`. The types are
+`ControllerMap` and `RfMapFile` in `rackforge-midi-api`; the store is
+`rackforge-core::controller_map_store`.
+
+Each mapping names an input -- its id and name, and a copy of the message it
+sends, so the map still works where the package is missing -- a plugin
+parameter by its stable `id` (never by index: indices may change between
+plugin versions) and a mode. Within a plugin an input carries one mapping,
+and two mappings never listen to the same message. A mapping whose parameter
+a new plugin version no longer has stays, reported pending, and costs the
+others nothing.
+
+The mode is part of the link itself (`ParameterLink::mode`), so a link learnt
+in a session can use one as well, and the Pi and the desktop run it through
+the same compiled link.
 
 The mode says what the input does to the parameter:
 
@@ -274,7 +287,8 @@ while the section is open, in addition to Learn's one-shot capture.
 2. The KeyLab package moves to schema 2; its driver reports the lowered
    profile. *(Done.)*
 3. The player's mappings and modes in Core, applied in PLAY; MIDI Learn writes
-   to them.
+   to them. *(Done on the Pi and the desktop, except Learn; Android, the
+   browser and the VST3 editor answer an empty list.)*
 4. The Controllers section, with the live input feed; packages made from it.
 5. Published profiles for common controllers, from their vendors' charts.
 6. Feedback (layer 4) and SysEx identity matching.

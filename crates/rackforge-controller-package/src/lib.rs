@@ -13,11 +13,13 @@ use thiserror::Error;
 
 pub mod inputs;
 pub mod supervise;
+pub mod user;
 
 pub use inputs::{
     ButtonReport, ControllerInput, EncoderEncoding, InputAction, InputKind, InputMessage,
     InputMidi, InputRole, SysexIdentity,
 };
+pub use user::{USER_CONTROLLER_PREFIX, UserControllerRequest};
 
 /// The schema that describes mappings only, each repeating its MIDI message.
 pub const CONTROLLER_PACKAGE_SCHEMA_VERSION: u32 = 1;
@@ -383,7 +385,7 @@ impl ControllerSetting {
 }
 
 /// Schema 2 leaves the runtime out of a package that is data only.
-fn declarative_runtime() -> DriverRuntime {
+pub(crate) fn declarative_runtime() -> DriverRuntime {
     DriverRuntime {
         kind: DriverRuntimeKind::DeclarativeV1,
         entrypoints: BTreeMap::new(),
@@ -391,7 +393,7 @@ fn declarative_runtime() -> DriverRuntime {
 }
 
 /// Schema 2 leaves the permissions out of a package that only listens.
-fn input_only_permissions() -> ControllerPermissions {
+pub(crate) fn input_only_permissions() -> ControllerPermissions {
     ControllerPermissions {
         midi_input: true,
         ..ControllerPermissions::default()

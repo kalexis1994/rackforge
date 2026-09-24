@@ -92,6 +92,7 @@ pub enum AudioDriverPanel {
 }
 
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
+pub use rackforge_controller_package::UserControllerRequest;
 pub use rackforge_midi_api::{
     LinkValue, MidiChannel, MidiSourceDescriptor, MidiSourceId, ParameterLink,
     ParameterLinkChannel, ParameterLinkId, ParameterLinkMessage, ParameterLinkMode,
@@ -621,6 +622,11 @@ pub enum ControlRequest {
     SaveControllerMap {
         map: Box<ControllerMap>,
     },
+    /// Makes -- or saves again -- a controller package for a keyboard
+    /// RackForge had none for, from the controls the player moved and named.
+    SaveUserController {
+        controller: Box<UserControllerRequest>,
+    },
     /// Wraps one controller's map as a portable `.rfmap` document.
     ExportControllerMap {
         controller_id: String,
@@ -844,6 +850,10 @@ pub enum ControlResponse {
     },
     ControllerMapSaved {
         map: Box<ControllerMap>,
+    },
+    UserControllerSaved {
+        controller_id: String,
+        version: String,
     },
     ControllerMapExported {
         file_name: String,

@@ -3308,6 +3308,28 @@ impl DesktopApp {
         }
     }
 
+    /// Attaches the declarative controller packages to the enabled inputs
+    /// again -- after a package was made here -- and recompiles the links.
+    /// Registrations a driver made are kept.
+    #[cfg(windows)]
+    fn reload_declarative_controllers(&mut self) -> Result<(), String> {
+        let approved = self
+            .audio_preferences
+            .as_ref()
+            .map(|preferences| preferences.midi_inputs.clone())
+            .unwrap_or_default();
+        let profiles = declarative_semantic_profiles(&self.options.rackforge_root, &approved)
+            .map_err(|error| format!("{error:#}"))?;
+        self.controller_semantic_profiles.extend(profiles);
+        let links = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .parameter_links
+            .clone();
+        self.replace_parameter_links(links)
+    }
+
     /// Stores a controller's whole map and applies it at once, as a learnt
     /// link is.
     fn save_controller_map(&mut self, map: ControllerMap) -> ControlResponse {
@@ -4087,6 +4109,30 @@ impl DesktopApp {
             }
             ControlRequest::ControllerMaps => self.controller_maps_response(),
             ControlRequest::SaveControllerMap { map } => self.save_controller_map(*map),
+            ControlRequest::SaveUserController { controller } => {
+                let store = rackforge_controller_package::PackageStore::new(
+                    self.options.rackforge_root.join("controllers"),
+                );
+                match store.save_user_controller(&controller) {
+                    Ok(installed) => {
+                        // The desktop attaches declarative controllers when
+                        // it starts; a new one is attached now instead.
+                        #[cfg(windows)]
+                        if let Err(message) = self.reload_declarative_controllers() {
+                            eprintln!("USER_CONTROLLER_NOT_ATTACHED error={message}");
+                        }
+                        ControlResponse::UserControllerSaved {
+                            controller_id: installed.record.id,
+                            version: installed.record.version,
+                        }
+                    }
+                    Err(error) => ControlResponse::Error {
+                        code: ControlErrorCode::InvalidRequest,
+                        message: format!("Could not save the controller: {error}"),
+                        current_revision: None,
+                    },
+                }
+            }
             ControlRequest::ExportControllerMap { controller_id } => {
                 let Some(map) = self.controller_maps.get(&controller_id) else {
                     return ControlResponse::Error {

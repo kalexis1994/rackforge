@@ -512,6 +512,97 @@ export interface ControllerDevice {
   actions: ControllerAction[];
   /** Inputs known only from the map: the package that named them is gone. */
   orphaned: boolean;
+  /** An enabled input no package recognises: its controls are learnt here. */
+  unknown?: boolean;
+}
+
+/**
+ * A controller's name from the name of the input it was heard on: ALSA's
+ * "Oxygen 49:Oxygen 49 MIDI 1 24:0" is "Oxygen 49", the port numbers and
+ * the repeated client name left out.
+ */
+export function suggestedControllerName(sourceName: string): string {
+  let name = sourceName.trim().replace(/\s+\d+:\d+$/, "");
+  const colon = name.indexOf(":");
+  if (colon > 0) {
+    const client = name.slice(0, colon).trim();
+    const port = name.slice(colon + 1).trim();
+    name = port.toLowerCase().startsWith(client.toLowerCase()) ? client : port || client;
+  }
+  name = name.replace(/\s+MIDI(\s*\d+)?$/i, "").trim();
+  return name || sourceName.trim() || "Controller";
+}
+
+/** Package ids a player made, which this editor may save again. */
+export function isUserController(id: string): boolean {
+  return id.startsWith("user.");
+}
+
+/**
+ * The enabled MIDI inputs no controller package claims, as devices whose
+ * controls are the ones learnt from them so far.
+ */
+export function unknownSourceDevices(
+  sources: ReadonlyArray<{ source: { id: string; name: string }; connected: boolean }>,
+  claimedSourceIds: ReadonlySet<string>,
+  learnt: ReadonlyMap<string, ControllerInput[]>,
+): ControllerDevice[] {
+  return sources
+    .filter((entry) => !claimedSourceIds.has(entry.source.id))
+    .map((entry) => ({
+      id: `midi:${entry.source.id}`,
+      name: suggestedControllerName(entry.source.name),
+      source: { id: entry.source.id, name: entry.source.name },
+      connected: entry.connected,
+      inputs: learnt.get(entry.source.id) ?? [],
+      roles: [],
+      actions: [],
+      orphaned: false,
+      unknown: true,
+    }));
+}
+
+/**
+ * The list with an input heard for the first time added at the end; one
+ * already there, by id or by message, leaves the list as it is.
+ */
+export function withLearntInput(inputs: readonly ControllerInput[], input: ControllerInput): ControllerInput[] {
+  const heard = mappedInputFor(input);
+  const known = inputs.some((candidate) => {
+    if (candidate.id === input.id) return true;
+    const other = mappedInputFor(candidate);
+    return heard !== null && other !== null && sameMessage(other, heard);
+  });
+  return known ? [...inputs] : [...inputs, input];
+}
+
+/** Why a set of controls cannot be saved as a controller, or null. */
+export function userControllerProblem(name: string, inputs: readonly ControllerInput[]): string | null {
+  if (!name.trim()) return "Give the controller a name.";
+  if (name.trim().length > 64) return "Keep the name under 64 characters.";
+  if (inputs.length === 0) return "Move at least one control so there is something to save.";
+  const names = inputs.map((input) => input.name.trim());
+  if (names.some((entry) => !entry || entry.length > 48)) return "Every control needs a name under 48 characters.";
+  const pads = inputs.filter((input) => input.kind === "pad" && typeof input.midi.note !== "number");
+  if (pads.length > 0) return `${pads[0].name} sends no note, so it cannot be a pad.`;
+  const continuous = inputs.filter(
+    (input) =>
+      (input.kind === "knob" || input.kind === "fader" || input.kind === "encoder" || input.kind === "pedal")
+      && typeof input.midi.cc !== "number",
+  );
+  if (continuous.length > 0) return `${continuous[0].name} sends no control change, so it cannot be a ${continuous[0].kind}.`;
+  const wheels = inputs.filter(
+    (input) => input.kind === "wheel" && !input.midi.pitch_bend && typeof input.midi.cc !== "number",
+  );
+  if (wheels.length > 0) return `${wheels[0].name} cannot be a wheel.`;
+  return null;
+}
+
+/** The kinds a control can be declared as, given the message it sends. */
+export function kindsForInput(input: Pick<ControllerInput, "midi">): InputKind[] {
+  if (typeof input.midi.note === "number") return ["pad", "button"];
+  if (input.midi.pitch_bend) return ["wheel"];
+  return ["knob", "fader", "encoder", "button", "pedal", "wheel"];
 }
 
 /** An input rebuilt from a mapping's copy of it, for a map whose package is gone. */

@@ -1051,6 +1051,21 @@ export function saveControllerMap(map: ControllerMap): Promise<ControllerMap> {
   );
 }
 
+/** Makes, or saves again, a controller package from the controls a player named. */
+export function saveUserController(controller: {
+  controller_id?: string;
+  name: string;
+  vendor?: string;
+  endpoint_name: string;
+  inputs: unknown[];
+}): Promise<{ controller_id: string; version: string }> {
+  return requestPresetOperation(
+    { op: "save_user_controller", controller },
+    "user_controller_saved",
+    (message) => ({ controller_id: String(message.controller_id), version: String(message.version) }),
+  );
+}
+
 export function exportControllerMap(
   controllerId: string,
 ): Promise<{ file_name: string; file: RfMapFile }> {

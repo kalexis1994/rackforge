@@ -9,6 +9,8 @@ import {
   inputForActivity,
   inputFromActivity,
   inputMessageLabel,
+  isUserController,
+  kindsForInput,
   mappedInputFor,
   mappingsForInput,
   modeProblem,
@@ -17,7 +19,11 @@ import {
   parameterSections,
   roleLabel,
   standardMeaning,
+  suggestedControllerName,
   suggestedMode,
+  unknownSourceDevices,
+  userControllerProblem,
+  withLearntInput,
   withMapping,
   withoutMapping,
 } from "./controllerMapping";
@@ -225,6 +231,50 @@ describe("which controllers the editor shows", () => {
     const gone = devices[2];
     expect(gone).toMatchObject({ name: "Old keyboard", orphaned: true });
     expect(gone.inputs).toEqual([{ id: "pad-1", name: "Pad 1", kind: "pad", midi: { channel: 9, note: 36 } }]);
+  });
+});
+
+describe("a controller RackForge does not know", () => {
+  it("is an enabled input no package claims", () => {
+    const devices = unknownSourceDevices(
+      [
+        { source: { id: "alsa.keylab", name: "KeyLab" }, connected: true },
+        { source: { id: "alsa.oxygen", name: "Oxygen 49" }, connected: true },
+      ],
+      new Set(["alsa.keylab"]),
+      new Map([["alsa.oxygen", [knob]]]),
+    );
+    expect(devices).toHaveLength(1);
+    expect(devices[0]).toMatchObject({ id: "midi:alsa.oxygen", name: "Oxygen 49", unknown: true, inputs: [knob] });
+  });
+
+  it("takes its name from the input it was heard on", () => {
+    expect(suggestedControllerName("Oxygen 49:Oxygen 49 MIDI 1 24:0")).toBe("Oxygen 49");
+    expect(suggestedControllerName("Launchkey Mini")).toBe("Launchkey Mini");
+    expect(suggestedControllerName("MPK mini 3 MIDI 1")).toBe("MPK mini 3");
+    expect(suggestedControllerName("Client:Other port 20:1")).toBe("Other port");
+    expect(suggestedControllerName("  ")).toBe("Controller");
+  });
+
+  it("learns each control once, by id or by message", () => {
+    let inputs = withLearntInput([], knob);
+    inputs = withLearntInput(inputs, knob);
+    inputs = withLearntInput(inputs, { ...knob, id: "cc-1-74", name: "CC 74" });
+    inputs = withLearntInput(inputs, button);
+    expect(inputs.map((input) => input.id)).toEqual(["knob-1", "button-1"]);
+  });
+
+  it("is saved only when every control is named and fits what it sends", () => {
+    expect(userControllerProblem("", [knob])).toMatch(/name/);
+    expect(userControllerProblem("Oxygen", [])).toMatch(/at least one/);
+    expect(userControllerProblem("Oxygen", [{ ...knob, name: " " }])).toMatch(/Every control/);
+    expect(userControllerProblem("Oxygen", [{ ...knob, kind: "pad" }])).toMatch(/sends no note/);
+    expect(userControllerProblem("Oxygen", [{ ...pad, kind: "knob" }])).toMatch(/no control change/);
+    expect(userControllerProblem("Oxygen", [knob, pad, wheel])).toBeNull();
+    expect(kindsForInput(pad)).toEqual(["pad", "button"]);
+    expect(kindsForInput(wheel)).toEqual(["wheel"]);
+    expect(isUserController("user.oxygen")).toBe(true);
+    expect(isUserController("org.rackforge.keylab")).toBe(false);
   });
 });
 

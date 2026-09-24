@@ -2077,7 +2077,8 @@ public final class MainActivity extends Activity {
             }
             if ("save_controller_map".equals(operation)
                     || "export_controller_map".equals(operation)
-                    || "import_controller_map".equals(operation)) {
+                    || "import_controller_map".equals(operation)
+                    || "save_user_controller".equals(operation)) {
                 throw new UnsupportedOperationException(
                         "Controller maps are not available on Android yet");
             }

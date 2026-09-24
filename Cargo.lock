@@ -3788,6 +3788,7 @@ name = "rackforge-control-api"
 version = "0.1.23"
 dependencies = [
  "rackforge-audio-api",
+ "rackforge-controller-package",
  "rackforge-midi-api",
  "rackforge-performance-api",
  "rackforge-plugin-api",
@@ -3870,6 +3871,7 @@ dependencies = [
  "rackforge-audio-api",
  "rackforge-control-api",
  "rackforge-controller-api",
+ "rackforge-controller-package",
  "rackforge-midi-api",
  "rackforge-performance-api",
  "rackforge-plugin-api",

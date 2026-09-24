@@ -2075,6 +2075,18 @@ pub fn run(config: LiveConfig) -> Result<()> {
             controller_maps: crate::controller_map_store::ControllerMapStore::new(
                 config.data_root.as_deref(),
             ),
+            // The same root the controller host installs and watches.
+            controllers_root: Some(
+                env::var_os("RACKFORGE_ROOT")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        env::var_os("HOME")
+                            .map(PathBuf::from)
+                            .unwrap_or_else(|| PathBuf::from("."))
+                            .join("rackforge")
+                    })
+                    .join("controllers"),
+            ),
         },
     )?;
     println!("CONTROL_READY socket={}", control_path.display());

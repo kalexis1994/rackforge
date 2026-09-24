@@ -376,6 +376,7 @@ struct ControlContext {
     controller_map_store: ControllerMapStore,
     /// The player's maps, by controller id, as stored.
     controller_maps: Mutex<BTreeMap<String, ControllerMap>>,
+    controllers_root: Option<PathBuf>,
     midi_sources: MidiSourceRegistry,
     connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
     midi_observer: Mutex<Receiver<IngressMidiEvent>>,
@@ -425,6 +426,9 @@ pub struct ControlServerOptions {
     pub checkpoint: Option<SessionCheckpointStore>,
     /// Where the player's controller maps are kept.
     pub controller_maps: ControllerMapStore,
+    /// The controller package store, where a controller the player makes
+    /// is installed. The controller host attaches it from there.
+    pub controllers_root: Option<PathBuf>,
 }
 
 pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<ControlServer> {
@@ -481,6 +485,7 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         semantic_profiles: Mutex::new(BTreeMap::new()),
         controller_map_store: options.controller_maps,
         controller_maps: Mutex::new(controller_maps),
+        controllers_root: options.controllers_root,
         midi_sources: options.midi_sources,
         connected_midi_sources: options.connected_midi_sources,
         midi_observer: Mutex::new(options.midi_observer),
@@ -720,6 +725,30 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         ControlRequest::MidiActivity { after } => midi_activity(context, after),
         ControlRequest::ControllerMaps => controller_maps(context),
         ControlRequest::SaveControllerMap { map } => save_controller_map(context, *map),
+        ControlRequest::SaveUserController { controller } => {
+            match &context.controllers_root {
+                None => error_response(
+                    ControlErrorCode::Unavailable,
+                    "this engine has no controller package store",
+                    None,
+                ),
+                Some(root) => match rackforge_controller_package::PackageStore::new(root)
+                    .save_user_controller(&controller)
+                {
+                    // The controller host looks for new packages every two
+                    // seconds and attaches this one to its input.
+                    Ok(installed) => ControlResponse::UserControllerSaved {
+                        controller_id: installed.record.id,
+                        version: installed.record.version,
+                    },
+                    Err(error) => error_response(
+                        ControlErrorCode::InvalidRequest,
+                        format!("Could not save the controller: {error}"),
+                        None,
+                    ),
+                },
+            }
+        }
         ControlRequest::ExportControllerMap { controller_id } => {
             export_controller_map(context, &controller_id)
         }
@@ -5772,6 +5801,7 @@ mod tests {
                 semantic_profiles: Mutex::new(BTreeMap::new()),
                 controller_map_store: ControllerMapStore::new(None),
                 controller_maps: Mutex::new(BTreeMap::new()),
+                controllers_root: None,
                 midi_sources,
                 connected_midi_sources: Arc::new(Mutex::new(BTreeSet::from([0, 1]))),
                 midi_observer: Mutex::new(midi_receiver),

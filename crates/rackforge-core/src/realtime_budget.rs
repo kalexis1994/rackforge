@@ -927,7 +927,11 @@ mod tests {
             "and nothing was published to settle on"
         );
         // The budget the plugin holds is the one it started with.
-        assert_eq!(governor.last_counts().1, 0, "the confirming window was clean");
+        assert_eq!(
+            governor.last_counts().1,
+            0,
+            "the confirming window was clean"
+        );
         let _ = first;
     }
 

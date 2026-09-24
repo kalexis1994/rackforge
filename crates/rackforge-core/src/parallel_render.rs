@@ -1617,7 +1617,9 @@ unsafe fn run_unit_cell(context: *mut (), _unit: u32, _frames: u32, _channels: u
     if cell.report.is_empty() {
         return true;
     }
-    cell.instance.parallel_read_report(unit, &mut cell.report).is_ok()
+    cell.instance
+        .parallel_read_report(unit, &mut cell.report)
+        .is_ok()
 }
 
 /// Host-owned worker instances and buffers for one `parallel_render_v1`
@@ -1697,11 +1699,7 @@ impl<'plugin> ParallelUnits<'plugin> {
             layout.shared_capacity,
             unit_channels,
             (layout.shared_capacity * (layout.max_units + 1)
-                + maximum_frames as usize
-                    * unit_channels
-                    * size_of::<f32>()
-                    * layout.max_units
-                    * 2
+                + maximum_frames as usize * unit_channels * size_of::<f32>() * layout.max_units * 2
                 + layout.report_stride * layout.max_units) as f64
                 / 1024.0
         );

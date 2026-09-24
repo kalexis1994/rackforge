@@ -370,9 +370,33 @@ fn unsupported<T>(
     })
 }
 
+/// Whether a parameter link's target names this voice. A link made in a
+/// Rack editor names the Slot (`piano`); the engine names the voice by its
+/// Rack path (`rack.main/piano`), so the path's last step is the Slot. The
+/// exact name still matches, as a PLAY instance's does.
+pub fn voice_matches_link_target(voice_id: &str, target: &str) -> bool {
+    voice_id == target
+        || voice_id
+            .rsplit_once('/')
+            .is_some_and(|(_, slot)| slot == target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_to_a_slot_reaches_its_voice_in_any_rack_path() {
+        assert!(voice_matches_link_target("rack.main/piano", "piano"));
+        assert!(voice_matches_link_target("part.a/rack.keys/piano", "piano"));
+        assert!(voice_matches_link_target(
+            "rack.main/piano",
+            "rack.main/piano"
+        ));
+        assert!(voice_matches_link_target("live.main", "live.main"));
+        assert!(!voice_matches_link_target("rack.main/piano-2", "piano"));
+        assert!(!voice_matches_link_target("rack.piano/strings", "piano"));
+    }
     use rackforge_performance_api::{
         MidiOutputRoute, PERFORMANCE_SCHEMA_VERSION, RackGraph, RackGraphEdgeId, RackGraphEndpoint,
         RackGraphPosition, RackSlotId,

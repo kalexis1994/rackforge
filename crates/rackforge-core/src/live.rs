@@ -16,7 +16,7 @@ use crate::parallel_render::{
     process_slots_sequential, spawn_telemetry_publisher,
 };
 use crate::performance::PerformanceRepository;
-use crate::rack_graph::compile_instrument_definition;
+use crate::rack_graph::{compile_instrument_definition, voice_matches_link_target};
 use crate::realtime::{self, XrunMonitor};
 use crate::realtime_budget::{self, BudgetGovernor, BudgetReason};
 use crate::session::SessionStore;
@@ -2385,17 +2385,21 @@ fn compile_parameter_links_for_runtime(
                 .or_else(|| {
                     rack_voices
                         .iter()
-                        .find(|voice| voice.slot_id == link.instance_id)
+                        .find(|voice| voice_matches_link_target(&voice.slot_id, &link.instance_id))
                         .map(|voice| voice.plugin.parameters())
                 });
-            Some(match schema {
-                Some(schema) => CompiledParameterLink::new(link.clone(), source_key, schema),
-                None => Err(anyhow::anyhow!(
-                    "parameter link {} targets unknown instance {}",
-                    link.id,
-                    link.instance_id
-                )),
-            })
+            // A link to a Slot of a Rack that is not loaded waits, as a link
+            // from an unplugged controller does: the control socket compiles
+            // it again against the library. Refusing it here stopped the
+            // engine at boot over one MIDI link.
+            let Some(schema) = schema else {
+                println!(
+                    "PARAMETER_LINK_PENDING link={} instance={} reason=not-loaded",
+                    link.id, link.instance_id
+                );
+                return None;
+            };
+            Some(CompiledParameterLink::new(link.clone(), source_key, schema))
         })
         .collect()
 }
@@ -2413,7 +2417,7 @@ fn apply_parameter_links(
     let mut consume = false;
     for link in links
         .iter_mut()
-        .filter(|link| link.link.instance_id == instance_id)
+        .filter(|link| voice_matches_link_target(instance_id, &link.link.instance_id))
     {
         let Some(mapped) = link.apply(event, &mut *current) else {
             continue;

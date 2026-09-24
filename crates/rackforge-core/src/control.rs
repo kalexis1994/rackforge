@@ -3013,6 +3013,27 @@ fn replace_runtime_parameter_links(context: &ControlContext) -> Result<(), Contr
     receive_audio(reply_receiver, "apply controller maps")
 }
 
+/// The plugin a link's target runs: a PLAY instance, or a Rack Slot.
+fn link_target_plugin<'a>(
+    snapshot: &'a rackforge_session_api::SessionState,
+    library: &'a rackforge_performance_api::PerformanceLibrary,
+    link: &ParameterLink,
+) -> Option<&'a str> {
+    snapshot
+        .instances
+        .iter()
+        .find(|instance| instance.instance_id.as_str() == link.instance_id)
+        .map(|instance| instance.plugin_id.as_str())
+        .or_else(|| {
+            library
+                .racks
+                .iter()
+                .flat_map(|rack| rack.slots.iter())
+                .find(|slot| slot.id.as_str() == link.instance_id)
+                .map(|slot| slot.plugin_id.as_str())
+        })
+}
+
 fn compile_parameter_links(
     context: &ControlContext,
     snapshot: &rackforge_session_api::SessionState,
@@ -3027,30 +3048,16 @@ fn compile_parameter_links(
     })?;
     let mut compiled = Vec::with_capacity(links.len());
     for link in links {
-        let plugin_id = snapshot
-            .instances
-            .iter()
-            .find(|instance| instance.instance_id.as_str() == link.instance_id)
-            .map(|instance| instance.plugin_id.as_str())
-            .or_else(|| {
-                repository
-                    .library()
-                    .racks
-                    .iter()
-                    .flat_map(|rack| rack.slots.iter())
-                    .find(|slot| slot.id.as_str() == link.instance_id)
-                    .map(|slot| slot.plugin_id.as_str())
-            })
-            .ok_or_else(|| {
-                control_failure(
-                    ControlErrorCode::NotFound,
-                    format!(
-                        "parameter link {} targets unknown instance {}",
-                        link.id, link.instance_id
-                    ),
-                    Some(snapshot.revision),
-                )
-            })?;
+        // A link whose Slot went with its Rack is kept and left out: one
+        // stale link used to fail every later link edit, and every
+        // controller map applied after it.
+        let Some(plugin_id) = link_target_plugin(snapshot, repository.library(), link) else {
+            println!(
+                "PARAMETER_LINK_PENDING link={} instance={} reason=unknown-target",
+                link.id, link.instance_id
+            );
+            continue;
+        };
         let plugin = context.portable_plugins.get(plugin_id).ok_or_else(|| {
             control_failure(
                 ControlErrorCode::Unavailable,
@@ -3212,6 +3219,28 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 return error_response(
                     ControlErrorCode::InvalidRequest,
                     error.to_string(),
+                    Some(snapshot.revision),
+                );
+            }
+            // The new link, unlike a stale one, has to name something.
+            let known = match context.performance_repository.lock() {
+                Ok(repository) => {
+                    link_target_plugin(&snapshot, repository.library(), &link).is_some()
+                }
+                Err(_) => {
+                    return internal_error(
+                        "performance repository lock is poisoned",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            if !known {
+                return error_response(
+                    ControlErrorCode::NotFound,
+                    format!(
+                        "parameter link {} targets unknown instance {}",
+                        link.id, link.instance_id
+                    ),
                     Some(snapshot.revision),
                 );
             }

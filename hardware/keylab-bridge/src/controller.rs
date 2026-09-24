@@ -326,8 +326,29 @@ mod tests {
     fn the_package_names_every_control_it_maps() {
         let manifest = package_manifest();
         assert_eq!(manifest.schema_version, 2);
-        assert_eq!(manifest.inputs.len(), 19);
+        // Nine knobs, nine faders, sixteen pads, nine buttons, two wheels:
+        // what the hardware sends that the driver does not own.
+        assert_eq!(manifest.inputs.len(), 45);
         assert!(manifest.inputs.iter().any(|input| input.id == "part"));
+        let pads = manifest
+            .inputs
+            .iter()
+            .filter(|input| input.id.starts_with("pad-"))
+            .collect::<Vec<_>>();
+        assert_eq!(pads.len(), 16);
+        // MIDI channel 11, zero-based.
+        assert!(pads.iter().all(|pad| pad.midi.channel == 10));
+        // The OLED buttons, the main encoder and the transport the driver
+        // keeps are never offered for a map.
+        for owned in [20, 21, 22, 23, 24, 44, 45, 46, 47, 116, 117] {
+            assert!(
+                manifest
+                    .inputs
+                    .iter()
+                    .all(|input| input.midi.cc != Some(owned)),
+                "CC {owned} belongs to the driver"
+            );
+        }
     }
 
     #[test]

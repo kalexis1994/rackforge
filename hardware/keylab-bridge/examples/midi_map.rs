@@ -1,14 +1,14 @@
-//! Reads what every KeyLab control sends, one control at a time, and writes
-//! the map down: the companion of `led_sweep`, for input instead of light.
+//! Says what every KeyLab control sends as it is touched: the companion of
+//! `led_sweep`, for input instead of light.
 //!
 //! The manuals say what a control *can* be set to send, not what this
 //! unit's program sends; so, as with the LEDs, the device is asked. Each
-//! control is named in turn, the first message it sends and everything
-//! within half a second after it (the release, a pad's pressure) are shown,
-//! and `MIDI-MAP.md` gathers them all at the end.
+//! control touched gets one line -- port, note or CC, channel, and the
+//! values it went through -- for the player to write the map from.
 //!
 //! `cargo run -p rackforge-controller-arturia-keylab-essential-mk3 --example midi_map`
-//! `... --example midi_map -- --monitor` just prints every message.
+//! `... -- --guiado` names each control in turn and writes `MIDI-MAP.md`;
+//! `... -- --todas` listens on every port, not only the KeyLab's.
 use midir::{Ignore, MidiInput, MidiInputConnection};
 use rackforge_controller_arturia_keylab_essential_mk3::controller;
 use std::fmt::Write as _;
@@ -212,12 +212,131 @@ fn spawn_stdin(sender: mpsc::Sender<Event>) {
     });
 }
 
+/// One line per thing touched: a pad's press, pressure and release, or a
+/// fader's whole travel, stay on the line they started, so the screen reads
+/// as a list of controls rather than a flood of messages.
 fn monitor(receiver: &Receiver<Event>) {
-    println!("\nModo monitor: toca cualquier control. Ctrl+C para salir.\n");
+    println!(
+        "\nToca cualquier control: cada uno aparece en su propia linea.\n\
+         Cerra la ventana (o Ctrl+C) para salir.\n"
+    );
+    let mut current: Option<Stream> = None;
+    let mut width = 0;
     for event in receiver.iter() {
-        if let Event::Midi(heard) = event {
-            println!("{:<42} {}", heard.port, describe(&heard.bytes));
+        let Event::Midi(heard) = event else { continue };
+        let key = stream_key(&heard);
+        let same = current.as_ref().is_some_and(|stream| stream.key == key);
+        if !same {
+            if current.is_some() {
+                println!();
+            }
+            current = Some(Stream::start(key, &heard));
+            width = 0;
         }
+        let stream = current.as_mut().expect("a stream was just started");
+        stream.update(&heard.bytes);
+        let line = stream.line();
+        // Back to the start of the line, and blank what a longer text left.
+        print!("\r{line:<width$}");
+        width = width.max(line.len());
+        let _ = std::io::stdout().flush();
+    }
+}
+
+/// The messages one control sends in one gesture share a key: the port,
+/// the channel, and the note or controller number.
+fn stream_key(heard: &Heard) -> String {
+    let status = heard.bytes.first().copied().unwrap_or(0);
+    let number = heard.bytes.get(1).copied().unwrap_or(0);
+    match status & 0xf0 {
+        0x80 | 0x90 | 0xa0 => format!("{}|note|{}|{number}", heard.port, status & 0x0f),
+        0xb0 => format!("{}|cc|{}|{number}", heard.port, status & 0x0f),
+        0xd0 | 0xe0 => format!("{}|{status:02X}", heard.port),
+        _ => format!("{}|{:?}", heard.port, heard.bytes),
+    }
+}
+
+struct Stream {
+    key: String,
+    port: String,
+    head: String,
+    minimum: u8,
+    maximum: u8,
+    last: u8,
+    pressure: Option<u8>,
+    released: bool,
+    status: u8,
+}
+
+impl Stream {
+    fn start(key: String, heard: &Heard) -> Self {
+        let status = heard.bytes.first().copied().unwrap_or(0);
+        let channel = (status & 0x0f) + 1;
+        let number = heard.bytes.get(1).copied().unwrap_or(0);
+        let head = match status & 0xf0 {
+            0x80..=0xa0 => format!("NOTA {number:>3}  canal {channel:>2}"),
+            0xb0 => format!("CC   {number:>3}  canal {channel:>2}"),
+            0xc0 => format!("PROGRAM CHANGE {number:>3}  canal {channel:>2}"),
+            0xd0 => format!("AFTERTOUCH  canal {channel:>2}"),
+            0xe0 => format!("PITCH BEND  canal {channel:>2}"),
+            _ => describe(&heard.bytes),
+        };
+        Self {
+            key,
+            port: heard.port.clone(),
+            head,
+            minimum: u8::MAX,
+            maximum: 0,
+            last: 0,
+            pressure: None,
+            released: false,
+            status,
+        }
+    }
+
+    fn update(&mut self, bytes: &[u8]) {
+        let status = bytes.first().copied().unwrap_or(0);
+        let value = match status & 0xf0 {
+            0xc0 | 0xd0 => bytes.get(1).copied().unwrap_or(0),
+            0xe0 => bytes.get(2).copied().unwrap_or(0),
+            _ => bytes.get(2).copied().unwrap_or(0),
+        };
+        match status & 0xf0 {
+            0x80 => self.released = true,
+            0x90 if value == 0 => self.released = true,
+            0xa0 => self.pressure = Some(value),
+            _ => {
+                self.minimum = self.minimum.min(value);
+                self.maximum = self.maximum.max(value);
+                self.last = value;
+            }
+        }
+    }
+
+    fn line(&self) -> String {
+        let body = match self.status & 0xf0 {
+            0x80..=0xa0 => {
+                let mut text = if self.maximum > 0 {
+                    format!("{}  velocidad {:>3}", self.head, self.maximum)
+                } else {
+                    self.head.clone()
+                };
+                if let Some(pressure) = self.pressure {
+                    text.push_str(&format!("  presion {pressure:>3}"));
+                }
+                if self.released {
+                    text.push_str("  (soltada)");
+                }
+                text
+            }
+            0xb0 | 0xd0 | 0xe0 if self.minimum != self.maximum => format!(
+                "{}  valor {:>3}  (de {} a {})",
+                self.head, self.last, self.minimum, self.maximum
+            ),
+            0xb0 | 0xd0 | 0xe0 => format!("{}  valor {:>3}", self.head, self.last),
+            _ => self.head.clone(),
+        };
+        format!("[{}]  {body}", self.port)
     }
 }
 
@@ -278,14 +397,14 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<String> = std::env::args().collect();
-    let monitor_only = arguments.iter().any(|argument| argument == "--monitor");
+    let guided = arguments.iter().any(|argument| argument == "--guiado");
     let everything = arguments.iter().any(|argument| argument == "--todas");
-    println!("RackForge - mapa MIDI del KeyLab Essential mk3");
+    println!("RackForge - lo que manda cada control del KeyLab Essential mk3");
     println!("Entradas:");
     let (sender, receiver) = mpsc::channel();
     let _connections = open_inputs(&sender, everything)?;
     spawn_stdin(sender);
-    if monitor_only {
+    if !guided {
         monitor(&receiver);
         return Ok(());
     }

@@ -1,9 +1,13 @@
-schema_version = 1
+schema_version = 2
 kind = "controller"
 id = "org.rackforge.arturia-keylab-essential-mk3"
 name = "Arturia KeyLab Essential 61 mk3"
-version = "0.2.37"
+vendor = "Arturia"
+version = "0.3.0"
 controller_api = "^1.0"
+# The identity the controls had under schema 1: what a player learnt on them
+# stays linked across the move.
+source_id = "controller.arturia.keylab-essential-mk3.midi"
 
 [runtime]
 kind = "process-v1"
@@ -23,131 +27,223 @@ firmware_write = false
 filesystem = false
 network = false
 
-[[host_actions]]
-target = "keyboard_parts"
+# Inputs: the DAW preset's nine encoders and nine faders, and the part key.
+# The four LITTLE soft keys and the transport stay with the driver, on the
+# controller plane; they are not performance MIDI.
+[[inputs]]
+id = "encoder-1"
+name = "Encoder 1"
+kind = "encoder"
+group = "Encoders"
+midi = { cc = 96, channel = 0 }
 
-[host_actions.midi_cc]
-channel = 0
-controller = 119
-press_value = 127
-release_value = 0
+[[inputs]]
+id = "encoder-2"
+name = "Encoder 2"
+kind = "encoder"
+group = "Encoders"
+midi = { cc = 97, channel = 0 }
 
-# RackForge Control Profile v1. The first eight DAW-preset encoders and faders
-# are transport-independent controls. Encoder 9 and fader 9 use the same
-# semantic vocabulary for RackForge's global pan and level; they are not
-# private controller shortcuts. Plugins opt in by publishing matching roles.
-[semantic_profile]
-schema_version = 1
-source_id = "controller.arturia.keylab-essential-mk3.midi"
+[[inputs]]
+id = "encoder-3"
+name = "Encoder 3"
+kind = "encoder"
+group = "Encoders"
+midi = { cc = 98, channel = 0 }
 
-[[semantic_profile.controls]]
+[[inputs]]
+id = "encoder-4"
+name = "Encoder 4"
+kind = "encoder"
+group = "Encoders"
+midi = { cc = 99, channel = 0 }
+
+[[inputs]]
+id = "encoder-5"
+name = "Encoder 5"
+kind = "encoder"
+group = "Encoders"
+midi = { cc = 100, channel = 0 }
+
+[[inputs]]
+id = "encoder-6"
+name = "Encoder 6"
+kind = "encoder"
+group = "Encoders"
+midi = { cc = 101, channel = 0 }
+
+[[inputs]]
+id = "encoder-7"
+name = "Encoder 7"
+kind = "encoder"
+group = "Encoders"
+midi = { cc = 102, channel = 0 }
+
+[[inputs]]
+id = "encoder-8"
+name = "Encoder 8"
+kind = "encoder"
+group = "Encoders"
+midi = { cc = 103, channel = 0 }
+
+[[inputs]]
+id = "encoder-9"
+name = "Encoder 9"
+kind = "encoder"
+group = "Encoders"
+midi = { cc = 104, channel = 0 }
+
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { cc = 105, channel = 0 }
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { cc = 106, channel = 0 }
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { cc = 107, channel = 0 }
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { cc = 108, channel = 0 }
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { cc = 109, channel = 0 }
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { cc = 110, channel = 0 }
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { cc = 111, channel = 0 }
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { cc = 112, channel = 0 }
+
+[[inputs]]
+id = "fader-9"
+name = "Fader 9"
+kind = "fader"
+group = "Faders"
+midi = { cc = 113, channel = 0 }
+
+[[inputs]]
+id = "part"
+name = "Part"
+kind = "button"
+group = "Keys"
+midi = { cc = 119, channel = 0 }
+button = { press = 127, release = 0 }
+
+# RackForge Control Profile v1. The first eight encoders and faders are
+# transport-independent controls. Encoder 9 and fader 9 use the same semantic
+# vocabulary for RackForge's global pan and level; they are not private
+# controller shortcuts. Plugins opt in by publishing matching roles.
+[[roles]]
+input = "encoder-1"
 role = "synth.oscillator.pulse_width"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 96
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-2"
 role = "synth.oscillator.sub.level"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 97
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-3"
 role = "synth.oscillator.noise.level"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 98
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-4"
 role = "synth.filter.envelope.amount"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 99
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-5"
 role = "synth.filter.lfo.amount"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 100
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-6"
 role = "synth.filter.key_tracking"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 101
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-7"
 role = "synth.lfo.delay"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 102
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-8"
 role = "synth.amplifier.level"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 103
 
-[[semantic_profile.controls]]
-role = "synth.envelope.amp.attack"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 105
-
-[[semantic_profile.controls]]
-role = "synth.envelope.amp.decay"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 106
-
-[[semantic_profile.controls]]
-role = "synth.envelope.amp.sustain"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 107
-
-[[semantic_profile.controls]]
-role = "synth.envelope.amp.release"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 108
-
-[[semantic_profile.controls]]
-role = "synth.filter.cutoff"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 109
-
-[[semantic_profile.controls]]
-role = "synth.filter.resonance"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 110
-
-[[semantic_profile.controls]]
-role = "synth.lfo.rate"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 111
-
-[[semantic_profile.controls]]
-role = "synth.lfo.depth"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 112
-
-[[semantic_profile.controls]]
-role = "rackforge.master.level"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 113
-
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-9"
 role = "rackforge.master.pan"
 mode = "relative"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 104
+
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"
+
+[[roles]]
+input = "fader-9"
+role = "rackforge.master.level"
+
+[[actions]]
+input = "part"
+target = "keyboard_parts"
 
 [[devices]]
 id = "arturia.keylab-essential-mk3"

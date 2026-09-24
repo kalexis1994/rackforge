@@ -1,9 +1,6 @@
-use rackforge_control_profile::{CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId, roles};
 use rackforge_controller_api::{
-    ControllerDriver, ControllerProfile, GestureCapabilities, HostActionBinding, HostActionTarget,
-    LITTLE_V1, MidiButtonBinding, MidiControlChangeBinding, SemanticControlBinding,
-    SemanticControlMode, SemanticControlProfile, SurfaceImplementation, SurfaceQuality,
-    SurfaceViewport, negotiate_surface,
+    ControllerDriver, ControllerProfile, GestureCapabilities, LITTLE_V1, SurfaceImplementation,
+    SurfaceQuality, SurfaceViewport, negotiate_surface,
 };
 use rackforge_controller_package::{ControllerPackageManifest, DeviceMatcher};
 use std::sync::OnceLock;
@@ -17,74 +14,29 @@ pub struct KeyLabEssentialMk3;
 impl ControllerDriver for KeyLabEssentialMk3 {
     fn profile(&self) -> &ControllerProfile {
         static PROFILE: OnceLock<ControllerProfile> = OnceLock::new();
-        PROFILE.get_or_init(|| ControllerProfile {
-            id: "arturia.keylab-essential-mk3".into(),
-            name: "Arturia KeyLab Essential mk3".into(),
-            driver_id: "org.rackforge.arturia-keylab-essential-mk3".into(),
-            surfaces: vec![SurfaceImplementation {
-                layout_id: LITTLE_V1.into(),
-                quality: SurfaceQuality::Native,
-                priority: 0,
-                viewport: SurfaceViewport::little_reference(),
-                gestures: GestureCapabilities {
-                    soft_key_long_press: true,
-                    emergency_home_chord: true,
-                },
-            }],
-            host_controls: Vec::new(),
-            host_actions: vec![HostActionBinding {
-                target: HostActionTarget::KeyboardParts,
-                midi_cc: MidiButtonBinding {
-                    channel: 0,
-                    controller: 119,
-                    press_value: 127,
-                    release_value: 0,
-                },
-            }],
-            semantic_profile: Some(SemanticControlProfile {
-                schema_version: CONTROL_PROFILE_SCHEMA_VERSION,
-                source_id: "controller.arturia.keylab-essential-mk3.midi".into(),
-                controls: [
-                    (roles::SYNTH_OSCILLATOR_PULSE_WIDTH, 96),
-                    (roles::SYNTH_OSCILLATOR_SUB_LEVEL, 97),
-                    (roles::SYNTH_OSCILLATOR_NOISE_LEVEL, 98),
-                    (roles::SYNTH_FILTER_ENVELOPE_AMOUNT, 99),
-                    (roles::SYNTH_FILTER_LFO_AMOUNT, 100),
-                    (roles::SYNTH_FILTER_KEY_TRACKING, 101),
-                    (roles::SYNTH_LFO_DELAY, 102),
-                    (roles::SYNTH_AMPLIFIER_LEVEL, 103),
-                    (roles::SYNTH_AMP_ENVELOPE_ATTACK, 105),
-                    (roles::SYNTH_AMP_ENVELOPE_DECAY, 106),
-                    (roles::SYNTH_AMP_ENVELOPE_SUSTAIN, 107),
-                    (roles::SYNTH_AMP_ENVELOPE_RELEASE, 108),
-                    (roles::SYNTH_FILTER_CUTOFF, 109),
-                    (roles::SYNTH_FILTER_RESONANCE, 110),
-                    (roles::SYNTH_LFO_RATE, 111),
-                    (roles::SYNTH_LFO_DEPTH, 112),
-                    (roles::RACKFORGE_MASTER_LEVEL, 113),
-                ]
-                .into_iter()
-                .map(|(role, controller)| SemanticControlBinding {
-                    role: SemanticControlId::new(role).expect("built-in semantic role is valid"),
-                    midi_cc: MidiControlChangeBinding {
-                        channel: 0,
-                        controller,
+        PROFILE.get_or_init(|| {
+            // The part key and the encoder and fader roles are the package's:
+            // the driver reports what the manifest lowers to rather than a
+            // second copy of it, so the two cannot drift apart.
+            let package = package_manifest().profile();
+            ControllerProfile {
+                id: "arturia.keylab-essential-mk3".into(),
+                name: "Arturia KeyLab Essential mk3".into(),
+                driver_id: "org.rackforge.arturia-keylab-essential-mk3".into(),
+                surfaces: vec![SurfaceImplementation {
+                    layout_id: LITTLE_V1.into(),
+                    quality: SurfaceQuality::Native,
+                    priority: 0,
+                    viewport: SurfaceViewport::little_reference(),
+                    gestures: GestureCapabilities {
+                        soft_key_long_press: true,
+                        emergency_home_chord: true,
                     },
-                    invert: false,
-                    mode: SemanticControlMode::Absolute,
-                })
-                .chain(std::iter::once(SemanticControlBinding {
-                    role: SemanticControlId::new(roles::RACKFORGE_MASTER_PAN)
-                        .expect("built-in semantic role is valid"),
-                    midi_cc: MidiControlChangeBinding {
-                        channel: 0,
-                        controller: 104,
-                    },
-                    invert: false,
-                    mode: SemanticControlMode::Relative,
-                }))
-                .collect(),
-            }),
+                }],
+                host_controls: package.host_controls,
+                host_actions: package.host_actions,
+                semantic_profile: package.semantic_profile,
+            }
         })
     }
 
@@ -104,13 +56,21 @@ pub fn package_profile() -> &'static ControllerProfile {
     KEYLAB_ESSENTIAL_MK3.profile()
 }
 
-pub fn device_matchers() -> &'static [DeviceMatcher] {
-    static DEVICES: OnceLock<Vec<DeviceMatcher>> = OnceLock::new();
-    DEVICES.get_or_init(|| {
-        toml::from_str::<ControllerPackageManifest>(PACKAGE_MANIFEST)
-            .expect("the embedded KeyLab .rfcontroller manifest must remain valid")
-            .devices
+/// The embedded `.rfcontroller` manifest, parsed and validated once.
+fn package_manifest() -> &'static ControllerPackageManifest {
+    static MANIFEST: OnceLock<ControllerPackageManifest> = OnceLock::new();
+    MANIFEST.get_or_init(|| {
+        let manifest = toml::from_str::<ControllerPackageManifest>(PACKAGE_MANIFEST)
+            .expect("the embedded KeyLab .rfcontroller manifest must parse");
+        manifest
+            .validate()
+            .expect("the embedded KeyLab .rfcontroller manifest must remain valid");
+        manifest
     })
+}
+
+pub fn device_matchers() -> &'static [DeviceMatcher] {
+    &package_manifest().devices
 }
 
 pub fn matches_usb_device(vendor_id: u16, product_id: u16) -> bool {
@@ -247,6 +207,10 @@ fn is_alsa_address(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_control_profile::roles;
+    use rackforge_controller_api::{
+        HostActionBinding, HostActionTarget, MidiButtonBinding, SemanticControlMode,
+    };
     use std::collections::BTreeMap;
 
     #[test]
@@ -343,6 +307,27 @@ mod tests {
                 .mode,
             SemanticControlMode::Relative
         );
+        // Everything else is read absolutely, as it was under schema 1, and
+        // the source keeps the identity learnt links refer to.
+        assert!(
+            semantic
+                .controls
+                .iter()
+                .filter(|binding| binding.midi_cc.controller != 104)
+                .all(|binding| binding.mode == SemanticControlMode::Absolute)
+        );
+        assert_eq!(
+            semantic.source_id,
+            "controller.arturia.keylab-essential-mk3.midi"
+        );
+    }
+
+    #[test]
+    fn the_package_names_every_control_it_maps() {
+        let manifest = package_manifest();
+        assert_eq!(manifest.schema_version, 2);
+        assert_eq!(manifest.inputs.len(), 19);
+        assert!(manifest.inputs.iter().any(|input| input.id == "part"));
     }
 
     #[test]

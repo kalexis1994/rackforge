@@ -237,6 +237,15 @@ pub struct InputRole {
     pub role: SemanticControlId,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
+    /// How the reading moves the role. Absolute unless an encoder that
+    /// reports a position is read by the distance it turns: the same
+    /// hardware is read either way, so the role says which.
+    #[serde(default, skip_serializing_if = "is_absolute")]
+    pub mode: SemanticControlMode,
+}
+
+fn is_absolute(mode: &SemanticControlMode) -> bool {
+    *mode == SemanticControlMode::Absolute
 }
 
 /// A host action given to one button.
@@ -312,7 +321,7 @@ pub fn validate_inputs(
             )
         })?;
         binding.role.validate().map_err(|error| error.to_string())?;
-        role_control(input)?;
+        role_control(input, binding.mode)?;
         if !role_names.insert(binding.role.as_str()) {
             return Err(format!("role {} is given to two inputs", binding.role));
         }
@@ -340,8 +349,9 @@ pub fn validate_inputs(
 }
 
 /// The schema 1 semantic profile these roles mean, or `None` without roles.
+/// `source_id` is the stable MIDI source identity the profile speaks for.
 pub fn lower_roles(
-    package_id: &str,
+    source_id: &str,
     inputs: &[ControllerInput],
     roles: &[InputRole],
 ) -> Option<SemanticControlProfile> {
@@ -352,18 +362,18 @@ pub fn lower_roles(
         .iter()
         .filter_map(|binding| {
             let input = inputs.iter().find(|input| input.id == binding.input)?;
-            let (midi_cc, mode) = role_control(input).ok()?;
+            let midi_cc = role_control(input, binding.mode).ok()?;
             Some(SemanticControlBinding {
                 role: binding.role.clone(),
                 midi_cc,
                 invert: binding.invert,
-                mode,
+                mode: binding.mode,
             })
         })
         .collect();
     Some(SemanticControlProfile {
         schema_version: CONTROL_PROFILE_SCHEMA_VERSION,
-        source_id: format!("controller.{package_id}"),
+        source_id: source_id.into(),
         controls,
     })
 }
@@ -386,12 +396,14 @@ pub fn lower_actions(
 }
 
 /// A role needs a control change the runtime can read: a knob, fader, pedal,
-/// a wheel that sends a CC, or an encoder reporting a position. Notes, pitch
-/// bend and relative encodings are declared inputs the runtime does not match
-/// yet.
+/// a wheel that sends a CC, or an encoder reporting a position -- read
+/// absolutely, or, for the encoder only, by the distance it turns. Notes,
+/// pitch bend and relative encodings are declared inputs the runtime does not
+/// match yet.
 fn role_control(
     input: &ControllerInput,
-) -> Result<(MidiControlChangeBinding, SemanticControlMode), String> {
+    mode: SemanticControlMode,
+) -> Result<MidiControlChangeBinding, String> {
     let InputMessage::ControlChange {
         channel,
         controller,
@@ -402,13 +414,16 @@ fn role_control(
             input.id
         ));
     };
-    let mode = match input.kind {
+    match input.kind {
         InputKind::Knob | InputKind::Fader | InputKind::Pedal | InputKind::Wheel => {
-            SemanticControlMode::Absolute
+            if mode == SemanticControlMode::Relative {
+                return Err(format!(
+                    "input {:?}: only an encoder is read relatively",
+                    input.id
+                ));
+            }
         }
-        InputKind::Encoder if input.encoder_encoding() == EncoderEncoding::Absolute => {
-            SemanticControlMode::Relative
-        }
+        InputKind::Encoder if input.encoder_encoding() == EncoderEncoding::Absolute => {}
         InputKind::Encoder => {
             return Err(format!(
                 "input {:?}: roles do not read relative encoder encodings yet",
@@ -421,14 +436,11 @@ fn role_control(
                 input.id, input.kind
             ));
         }
-    };
-    Ok((
-        MidiControlChangeBinding {
-            channel,
-            controller,
-        },
-        mode,
-    ))
+    }
+    Ok(MidiControlChangeBinding {
+        channel,
+        controller,
+    })
 }
 
 /// A host action needs a button that sends a control change and reports its
@@ -522,6 +534,7 @@ mod tests {
             input: input.into(),
             role: SemanticControlId::new(role).unwrap(),
             invert: false,
+            mode: SemanticControlMode::Absolute,
         }
     }
 
@@ -535,7 +548,7 @@ mod tests {
         }];
         validate_inputs(&inputs, &roles, &actions).unwrap();
 
-        let profile = lower_roles("org.example.pad", &inputs, &roles).unwrap();
+        let profile = lower_roles("controller.org.example.pad", &inputs, &roles).unwrap();
         assert_eq!(profile.source_id, "controller.org.example.pad");
         assert_eq!(profile.controls.len(), 1);
         assert_eq!(profile.controls[0].midi_cc.controller, 74);
@@ -558,14 +571,25 @@ mod tests {
     }
 
     #[test]
-    fn an_absolute_encoder_is_read_as_relative() {
+    fn an_encoder_is_read_absolutely_or_by_the_distance_it_turns() {
         let mut encoder = knob("encoder-1", 16);
         encoder.kind = InputKind::Encoder;
-        let inputs = vec![encoder];
-        let roles = vec![role("encoder-1", "synth.lfo.rate")];
-        validate_inputs(&inputs, &roles, &[]).unwrap();
-        let profile = lower_roles("org.example.pad", &inputs, &roles).unwrap();
+        let inputs = vec![encoder, knob("knob-1", 74)];
+
+        let absolute = vec![role("encoder-1", "synth.lfo.rate")];
+        validate_inputs(&inputs, &absolute, &[]).unwrap();
+        let profile = lower_roles("controller.example", &inputs, &absolute).unwrap();
+        assert_eq!(profile.controls[0].mode, SemanticControlMode::Absolute);
+
+        let mut relative = absolute.clone();
+        relative[0].mode = SemanticControlMode::Relative;
+        validate_inputs(&inputs, &relative, &[]).unwrap();
+        let profile = lower_roles("controller.example", &inputs, &relative).unwrap();
         assert_eq!(profile.controls[0].mode, SemanticControlMode::Relative);
+
+        let mut knob_relative = vec![role("knob-1", "synth.filter.cutoff")];
+        knob_relative[0].mode = SemanticControlMode::Relative;
+        assert!(validate_inputs(&inputs, &knob_relative, &[]).is_err());
     }
 
     #[test]

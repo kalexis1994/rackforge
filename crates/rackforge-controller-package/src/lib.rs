@@ -424,6 +424,11 @@ pub struct ControllerPackageManifest {
     /// Schema 2: host actions, by input.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<InputAction>,
+    /// Schema 2: the stable MIDI source identity the roles speak for,
+    /// `controller.<id>` when left out. A package moving from schema 1 keeps
+    /// its old one, so what a player learnt on its controls stays linked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
     #[serde(default)]
     pub surfaces: Vec<SurfaceImplementation>,
     #[serde(default)]
@@ -663,9 +668,13 @@ impl ControllerPackageManifest {
     pub fn profile(&self) -> ControllerProfile {
         let (host_actions, semantic_profile) =
             if self.schema_version == CONTROLLER_PACKAGE_SCHEMA_VERSION_2 {
+                let source_id = self
+                    .source_id
+                    .clone()
+                    .unwrap_or_else(|| format!("controller.{}", self.id));
                 (
                     inputs::lower_actions(&self.inputs, &self.actions),
-                    inputs::lower_roles(&self.id, &self.inputs, &self.roles),
+                    inputs::lower_roles(&source_id, &self.inputs, &self.roles),
                 )
             } else {
                 (self.host_actions.clone(), self.semantic_profile.clone())
@@ -688,13 +697,16 @@ impl ControllerPackageManifest {
             || !self.inputs.is_empty()
             || !self.roles.is_empty()
             || !self.actions.is_empty()
+            || self.source_id.is_some()
             || self
                 .devices
                 .iter()
                 .any(|device| device.sysex_identity.is_some())
         {
             return Err(PackageError::InvalidManifest(
-                "vendor, inputs, roles, actions and sysex_identity need schema_version = 2".into(),
+                "vendor, inputs, roles, actions, source_id and sysex_identity need \
+                 schema_version = 2"
+                    .into(),
             ));
         }
         Ok(())
@@ -719,6 +731,9 @@ impl ControllerPackageManifest {
             return Err(PackageError::InvalidManifest(
                 "vendor is empty, too long or contains NUL".into(),
             ));
+        }
+        if let Some(source_id) = &self.source_id {
+            validate_identifier(source_id)?;
         }
         inputs::validate_inputs(&self.inputs, &self.roles, &self.actions)
             .map_err(PackageError::InvalidManifest)
@@ -1375,6 +1390,7 @@ mod tests {
             inputs: Vec::new(),
             roles: Vec::new(),
             actions: Vec::new(),
+            source_id: None,
             surfaces: vec![SurfaceImplementation {
                 layout_id: "little@1".into(),
                 quality: SurfaceQuality::Native,
@@ -1427,6 +1443,7 @@ mod tests {
             inputs: Vec::new(),
             roles: Vec::new(),
             actions: Vec::new(),
+            source_id: None,
             surfaces: Vec::new(),
             host_controls: vec![HostControlBinding {
                 target: HostControlTarget::MasterLevel,

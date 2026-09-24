@@ -146,9 +146,10 @@ input = "button-9"
 target = "keyboard_parts"
 ```
 
-A role takes its mode from the input: an encoder reporting a position is read
-relatively, every other kind absolutely. `invert = true` flips a role's
-direction. An input carries at most one meaning, and a role is given to one
+A role is read absolutely unless it says `mode = "relative"`, which only an
+encoder reporting a position may: the same endless encoder can move a value
+to where it points or by the distance it turns, so the role, not the
+hardware, decides. `invert = true` flips a role's direction. An input carries at most one meaning, and a role is given to one
 input. Schema 1's `host_controls` has no schema 2 form: RackForge's master
 level and pan are the roles `rackforge.master.level` and `rackforge.master.pan`.
 A schema 2 package that declares `host_controls`, `host_actions` or
@@ -157,8 +158,11 @@ A schema 2 package that declares `host_controls`, `host_actions` or
 
 RackForge lowers these declarations into the schema 1 runtime structures
 (`ControllerPackageManifest::profile`), so every host that runs schema 1 runs
-schema 2 without a change. The lowered semantic profile's source id is
-`controller.<package id>`.
+schema 2 without a change. The lowered semantic profile's source id is the
+top-level `source_id` when the package declares one, and
+`controller.<package id>` otherwise. A package that moves from schema 1 keeps
+its old source id, so the links a player learnt on its controls stay
+attached.
 
 For now roles accept inputs that send a control change (knobs, faders,
 pedals, wheels on a CC, encoders reporting a position), and host actions
@@ -268,7 +272,7 @@ while the section is open, in addition to Learn's one-shot capture.
 1. Schema 2 manifests: identity, inputs and meanings, lowered to the schema 1
    runtime. The generic example moves to schema 2. *(Done.)*
 2. The KeyLab package moves to schema 2; its driver reports the lowered
-   profile.
+   profile. *(Done.)*
 3. The player's mappings and modes in Core, applied in PLAY; MIDI Learn writes
    to them.
 4. The Controllers section, with the live input feed; packages made from it.

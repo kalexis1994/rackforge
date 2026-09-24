@@ -17,6 +17,7 @@ use rackforge_core::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
     process_slots_sequential, spawn_telemetry_publisher,
 };
+use rackforge_core::rack_voice::{self, RackEngine};
 use rackforge_core::{
     CompiledParameterLink, ControllerMapLinkContext, LiveParameterStateStore, LiveParameterTarget,
     LiveParameterWriter, LiveParameterWriterHandle, LoadedPlugin, PluginInstance, PluginPackage,
@@ -359,7 +360,10 @@ impl AndroidControllerMenu {
             })),
             // Previewing a DRAFT Rack needs a rack engine Android does not
             // have yet; saving and activating are the honest paths.
-            MenuCommand::PreviewRack { .. } => None,
+            MenuCommand::PreviewRack { rack } => Some(serde_json::json!({
+                "type": "preview_rack",
+                "rack": rack,
+            })),
             MenuCommand::LoadPluginPreset { preset_id } => {
                 let result = engine_call(|engine| {
                     engine.plugin_state_command(
@@ -850,7 +854,28 @@ struct AndroidEngine {
     next_program_draft_id: u64,
     _live_parameter_writer: LiveParameterWriter,
     live_parameter_writer_handle: LiveParameterWriterHandle,
+    /// The LIVE Rack, while one is loaded. It plays in place of PLAY's
+    /// voice and chain, which stay built and untouched for the way back.
+    rack: Option<AndroidRack>,
 }
+
+/// A LIVE Rack on Android: every Slot, through the same Rack code the
+/// appliance plays it with.
+struct AndroidRack {
+    rack_id: String,
+    engine: RackEngine<'static>,
+}
+
+// SAFETY: Android admits only portable wasm-v1 plugins, so every Slot's
+// instance and unit instances live in the sandbox. The Rack is owned by the
+// engine behind ENGINE's mutex, and the render pool enters a Slot only under
+// its epoch protocol, as it does the PLAY voice.
+unsafe impl Send for AndroidRack {}
+
+/// Set by a panic: the next block resets every Slot of a loaded Rack. The
+/// panic's all-notes-off messages also go through the queue, but a Slot
+/// whose stages take notes only would never hear them.
+static RACK_RESET_PENDING: AtomicBool = AtomicBool::new(false);
 
 struct SendablePluginInstance(PluginInstance<'static>);
 
@@ -1296,6 +1321,7 @@ impl AndroidEngine {
             next_program_draft_id: 1,
             _live_parameter_writer: live_parameter_writer,
             live_parameter_writer_handle,
+            rack: None,
         })
     }
 
@@ -1790,38 +1816,6 @@ impl AndroidEngine {
             }
             // A Rack Slot's saved sound, loaded into the one voice Android
             // plays: LIVE loads a Rack this way.
-            "restore_state" => {
-                let state: PluginStateReference = serde_json::from_value(
-                    params
-                        .get("state")
-                        .cloned()
-                        .context("restore state command is missing state")?,
-                )?;
-                state.validate().context("validating the Rack Slot state")?;
-                if state.plugin_id != self.plugin_id {
-                    bail!(
-                        "the state is for {}, not the plugin playing ({})",
-                        state.plugin_id,
-                        self.plugin_id
-                    );
-                }
-                let installed_state_version = self.runtime.0.manifest().state_version;
-                if state.state_version != installed_state_version {
-                    bail!(
-                        "the saved state v{} does not fit the installed plugin's v{}",
-                        state.state_version,
-                        installed_state_version
-                    );
-                }
-                let bytes = store.read(&state)?;
-                self.mirror_control(|instance| instance.load_state(&bytes))?;
-                self.process_faulted = false;
-                self.live_parameter_writer_handle.clear(0);
-                if let Some(sound_id) = state.selected_sound_id.as_ref() {
-                    self.selected_sound_id = sound_id.clone();
-                }
-                Ok(serde_json::json!({ "status": "ok" }))
-            }
             "rename_preset" => {
                 let preset_id = params
                     .get("preset_id")
@@ -2241,6 +2235,43 @@ impl AndroidEngine {
         if output.len() != frames as usize * 2 {
             bail!("invalid Android stereo output buffer");
         }
+        let reset_rack = RACK_RESET_PENDING.swap(false, Ordering::AcqRel);
+        if let Some(rack) = self.rack.as_mut() {
+            // LIVE: the Rack plays in place of PLAY's voice and chain. Every
+            // Slot hears the keyboard through its own stages, and links to
+            // a Slot's parameters move that Slot.
+            if reset_rack {
+                rack.engine.reset();
+            }
+            if let Ok(mut queue) = midi_queue().try_lock() {
+                for ingress in queue.drain(..) {
+                    rack.engine.route(
+                        IngressMidiEvent {
+                            source: ingress.source,
+                            packet: MidiPacket {
+                                frame: ingress.event.frame,
+                                length: ingress.event.length,
+                                data: ingress.event.data,
+                                wide: None,
+                            },
+                        },
+                        None,
+                    );
+                }
+            }
+            let dropped = rack.engine.take_dropped_events();
+            if dropped > 0 {
+                MIDI_DROPPED_EVENTS.fetch_add(dropped, Ordering::Relaxed);
+            }
+            let deadline_ns = u64::from(frames) * 1_000_000_000 / SAMPLE_RATE as u64;
+            return rack.engine.render(
+                &mut self.render_pool,
+                &self.render_telemetry,
+                frames,
+                deadline_ns,
+                output,
+            );
+        }
         if let Ok(mut queue) = midi_queue().try_lock() {
             for ingress in queue.drain(..) {
                 let packet = MidiPacket {
@@ -2397,14 +2428,164 @@ impl AndroidEngine {
                 },
             )?);
         }
+        // Links to a Rack's Slots move them while the Rack is loaded; the
+        // rest wait, as they always did.
+        if let Some(rack) = self.rack.as_mut() {
+            let rack_links = compile_rack_parameter_links(&rack.engine, &links, &sources);
+            rack.engine.set_parameter_links(rack_links);
+        }
         self.persisted_parameter_links = links;
         self.parameter_links = compiled;
         Ok(())
     }
 
+    /// Puts a built Rack on stage, with its Slots' links compiled; the Rack
+    /// it replaces is handed back, to be let go outside the engine's lock.
+    fn install_rack(&mut self, mut rack: AndroidRack) -> Result<Option<AndroidRack>> {
+        let sources = midi_sources()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?;
+        let links =
+            compile_rack_parameter_links(&rack.engine, &self.persisted_parameter_links, &sources);
+        rack.engine.set_parameter_links(links);
+        Ok(self.rack.replace(rack))
+    }
+
     fn recompile_parameter_links(&mut self) -> Result<()> {
         self.replace_parameter_links(self.persisted_parameter_links.clone())
     }
+}
+
+/// The session's links that name one of this Rack's Slots, compiled against
+/// that Slot's plugin. A link from a controller that is not connected waits.
+fn compile_rack_parameter_links(
+    rack: &RackEngine<'static>,
+    links: &[ParameterLink],
+    sources: &MidiSourceRegistry,
+) -> Vec<CompiledParameterLink> {
+    links
+        .iter()
+        .filter_map(|link| {
+            let plugin = rack.link_target_plugin(&link.instance_id)?;
+            let source_key = sources.resolve_optional(&link.source.source_id)?;
+            CompiledParameterLink::new(link.clone(), source_key, plugin.parameters())
+                .map_err(|error| {
+                    eprintln!(
+                        "PARAMETER_LINK_PENDING link={} instance={} reason={error:#}",
+                        link.id, link.instance_id
+                    );
+                })
+                .ok()
+        })
+        .collect()
+}
+
+/// Builds the Rack a LIVE location names: its graph compiled, each Slot's
+/// plugin loaded from its installed package and its sound from the store,
+/// every Slot activated. Nothing is locked while the plugins load.
+fn build_android_rack(
+    data_root: &Path,
+    location: &rackforge_performance_api::LiveLocation,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<(AndroidRack, serde_json::Value)> {
+    let (library, rack) = {
+        let guard = performance()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+        let state = guard.as_ref().context("the LIVE library is not loaded")?;
+        let library = state.repository.library().clone();
+        let rack = library
+            .resolve_playable(location)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        (library, rack)
+    };
+    build_android_rack_from(data_root, &library, &rack, package_roots)
+}
+
+/// A Rack the editor has not saved, built to be heard: the library as it
+/// stands, with the draft in place of the Rack it edits.
+fn build_android_preview_rack(
+    data_root: &Path,
+    draft: rackforge_performance_api::RackDefinition,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<(AndroidRack, serde_json::Value)> {
+    let mut library = {
+        let guard = performance()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+        guard
+            .as_ref()
+            .context("the LIVE library is not loaded")?
+            .repository
+            .library()
+            .clone()
+    };
+    match library.racks.iter_mut().find(|rack| rack.id == draft.id) {
+        Some(saved) => *saved = draft.clone(),
+        None => library.racks.push(draft.clone()),
+    }
+    build_android_rack_from(data_root, &library, &draft, package_roots)
+}
+
+fn build_android_rack_from(
+    data_root: &Path,
+    library: &rackforge_performance_api::PerformanceLibrary,
+    rack: &rackforge_performance_api::RackDefinition,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<(AndroidRack, serde_json::Value)> {
+    let store = PluginStateStore::new(Some(data_root))?;
+    let specs = rack_voice::rack_runtime_specs(library, rack, &store)?;
+    let mut plugins = BTreeMap::new();
+    for spec in &specs {
+        if plugins.contains_key(&spec.plugin_id) {
+            continue;
+        }
+        let package_root = package_roots.get(&spec.plugin_id).with_context(|| {
+            format!(
+                "{} needs {}, which is not installed on this device",
+                rack.name, spec.plugin_id
+            )
+        })?;
+        let package = PluginPackage::open(Path::new(package_root))
+            .with_context(|| format!("opening {}", spec.plugin_id))?;
+        ensure_rack_slot_plugin(&package)?;
+        let runtime = cached_isolated_plugin_runtime(&package, data_root)?;
+        plugins.insert(spec.plugin_id.clone(), runtime.0);
+    }
+    let engine = RackEngine::build(&plugins, &specs, SAMPLE_RATE as u32, MAX_FRAMES, 2)
+        .with_context(|| format!("building {}", rack.name))?;
+    let summary = serde_json::json!({
+        "rack_id": rack.id,
+        "rack_name": rack.name,
+        "slots": engine
+            .slots()
+            .map(|(slot_id, plugin_id)| serde_json::json!({
+                "slot_id": slot_id,
+                "plugin_id": plugin_id,
+            }))
+            .collect::<Vec<_>>(),
+    });
+    Ok((
+        AndroidRack {
+            rack_id: rack.id.as_str().to_owned(),
+            engine,
+        },
+        summary,
+    ))
+}
+
+/// Takes the Rack off the stage: PLAY's voice plays again. The Rack is let
+/// go outside the engine's lock.
+fn drop_android_rack() -> Result<()> {
+    let retired = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+        .as_mut()
+        .and_then(|engine| engine.rack.take());
+    if let Some(rack) = retired {
+        println!("LIVE_RACK_RELEASED rack={}", rack.rack_id);
+    }
+    Ok(())
 }
 
 fn isolated_plugin_state_command(
@@ -2845,6 +3026,7 @@ fn release_all_midi_notes() {
         }
         MIDI_PANIC_COUNT.fetch_add(1, Ordering::Relaxed);
     }
+    RACK_RESET_PENDING.store(true, Ordering::Release);
 }
 
 fn aaudio_error(operation: &str, result: i32) -> anyhow::Error {
@@ -4135,32 +4317,63 @@ fn android_live_command(
         .get("kind")
         .and_then(serde_json::Value::as_str)
         .context("the LIVE command has no kind")?;
+    // A Rack is built before anything is locked: its plugins load and
+    // activate, which takes a moment, and audio keeps playing meanwhile.
+    let package_roots = || -> Result<BTreeMap<String, String>> {
+        serde_json::from_value(
+            command
+                .get("package_roots")
+                .cloned()
+                .context("the LIVE command names no installed packages")?,
+        )
+        .context("reading the installed packages")
+    };
+    let put_on_stage = |rack: AndroidRack| -> Result<()> {
+        let retired = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_mut()
+            .context("RackForge's audio engine is not running")?
+            .install_rack(rack)?;
+        drop(retired);
+        Ok(())
+    };
+    let mut loaded = None;
+    match kind {
+        "load" => {
+            let (rack, summary) = build_android_rack(data_root, &location()?, &package_roots()?)?;
+            put_on_stage(rack)?;
+            println!("LIVE_RACK_LOADED summary={summary}");
+            loaded = Some(summary);
+        }
+        // A Rack being edited, heard as it stands. It is not the loaded
+        // Rack: LIVE's record is left as it was, and leaving the editor
+        // loads what was playing again.
+        "preview" => {
+            let draft: rackforge_performance_api::RackDefinition = serde_json::from_value(
+                command
+                    .get("rack")
+                    .cloned()
+                    .context("the preview names no Rack")?,
+            )
+            .context("reading the Rack to preview")?;
+            let (rack, summary) = build_android_preview_rack(data_root, draft, &package_roots()?)?;
+            put_on_stage(rack)?;
+            println!("LIVE_RACK_PREVIEWED summary={summary}");
+            return Ok(summary);
+        }
+        "deactivate" => drop_android_rack()?,
+        _ => {}
+    }
     let mut guard = performance()
         .lock()
         .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
     let state = guard.as_mut().context("the LIVE library is not loaded")?;
     let snapshot = match kind {
         "state" => return Ok(serde_json::to_value(&state.live)?),
-        "plan" => {
-            let rack = state
-                .repository
-                .library()
-                .resolve_playable(&location()?)
-                .map_err(|error| anyhow::anyhow!("{error}"))?;
-            return Ok(serde_json::json!({
-                "rack_id": rack.id,
-                "rack_name": rack.name,
-                "slots": rack.slots.iter().filter(|slot| slot.enabled).map(|slot| {
-                    serde_json::json!({
-                        "id": slot.id,
-                        "plugin_id": slot.plugin_id,
-                        "state": slot.state,
-                        "legacy_program_id": slot.legacy_program_id,
-                    })
-                }).collect::<Vec<_>>(),
-            }));
-        }
-        "commit" => {
+        // The Rack is on stage; LIVE records it only now, so a Rack that
+        // did not build is never shown as playing.
+        "load" => {
             let location = location()?;
             let rack = state
                 .repository
@@ -4192,6 +4405,9 @@ fn android_live_command(
         .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?
         .menu
         .sync_performance_snapshot(snapshot.clone());
+    if let Some(summary) = loaded {
+        return Ok(summary);
+    }
     Ok(serde_json::to_value(snapshot)?)
 }
 

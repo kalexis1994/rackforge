@@ -37,6 +37,10 @@ pub mod parallel_render;
 pub mod parameter_link;
 pub mod performance;
 pub mod rack_graph;
+/// A LIVE Rack's Slots and their mix, for every host with a render pool:
+/// the appliance's loop and Android's render worker play a Rack through it.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod rack_voice;
 pub mod realtime;
 pub mod realtime_budget;
 pub mod session;

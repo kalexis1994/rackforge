@@ -34,7 +34,7 @@ use rackforge_midi_api::{
 use rackforge_performance_api::PerformanceLibrary;
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
-    RackDefinition, RackId, RackKeyboardParts, RackMidiTransform,
+    RackDefinition, RackId,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{
@@ -64,33 +64,11 @@ const AUDIO_COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
 const AUDIO_RECONFIGURE_TIMEOUT: Duration = Duration::from_secs(8);
 const AUDITION_LEASE_TIMEOUT: Duration = Duration::from_secs(15);
 const AUDITION_WATCHDOG_PERIOD: Duration = Duration::from_millis(250);
-pub const MAX_ACTIVE_RACK_SLOTS: usize = 8;
-pub const MAX_EVENTS_PER_BLOCK: usize = 256;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RackSlotStateLoad {
-    Default,
-    Opaque(Vec<u8>),
-    LegacyPreset(String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RackMidiStageRuntimeSpec {
-    pub transform: RackMidiTransform,
-    pub keyboard_parts: Option<RackKeyboardParts>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RackSlotRuntimeSpec {
-    pub slot_id: String,
-    pub plugin_id: String,
-    pub state: RackSlotStateLoad,
-    pub midi_stages: Vec<RackMidiStageRuntimeSpec>,
-    pub audio_sources: Vec<CompiledAudioSource>,
-    pub sends_to_main: bool,
-    pub level_per_mille: u16,
-    pub pan_per_mille: i16,
-}
+// A Rack's Slots are described where every host can build them.
+pub use crate::rack_voice::{
+    MAX_ACTIVE_RACK_SLOTS, MAX_EVENTS_PER_BLOCK, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec,
+    RackSlotStateLoad,
+};
 
 pub enum AudioControlCommand {
     InjectVirtualMidi {

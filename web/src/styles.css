@@ -6789,9 +6789,13 @@ body {
   font-size: 11px;
 }
 
+/* One column: the browser is the whole choice. This was two, sized for an
+   ON STAGE card beside the lists; with the card gone the lists sat in the
+   narrow first column beside an empty one, and on a wide screen a Rack's
+   name was squeezed to nothing under its LOAD key. */
 .live-content {
   display: grid;
-  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 16px;
 }
@@ -7054,6 +7058,36 @@ body {
   margin: 0;
   color: var(--muted);
   font-size: 10px;
+}
+
+/* A name longer than its column ends in an ellipsis instead of running
+   under the key beside it. */
+.target-card > div {
+  min-width: 0;
+}
+
+.target-card h3,
+.target-card p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Measured on the list, not the window: wherever the list is narrow, the
+   key takes a row of its own under the name. */
+.target-grid {
+  container-type: inline-size;
+}
+
+@container (max-width: 240px) {
+  .target-grid .target-card {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .target-grid .target-card .activate-button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
 }
 
 .activate-button {
@@ -10619,7 +10653,6 @@ body {
   }
 
   .live-content {
-    grid-template-columns: minmax(210px, 0.72fr) minmax(0, 1.6fr);
     gap: 12px;
   }
 
@@ -11214,11 +11247,6 @@ body {
   }
 }
 
-@media (orientation: landscape) and (max-height: 600px) and (max-width: 640px) {
-  .live-surface-active .live-perform-surface .live-content {
-    grid-template-columns: minmax(145px, 0.52fr) minmax(0, 1.48fr);
-  }
-}
 
 /* Kind tags: every card in the manager says what it is. */
 .plugin-kind-tag {

@@ -7695,6 +7695,47 @@
   accent-color: var(--rf-color-input);
 }
 
+/* Where a learnt control is kept, and what it does: the controller's map
+   or this session, and the mode, as the Controllers section offers them. */
+.parameter-link-destination,
+.parameter-link-mode {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  border: 0;
+}
+
+.parameter-link-destination legend,
+.parameter-link-mode legend {
+  margin-bottom: 4px;
+  color: var(--fp-rail-label);
+  font: 700 10px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.parameter-link-form .parameter-link-destination label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--ink);
+  font: 500 13px/1.4 var(--display-font);
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.parameter-link-destination input[type="radio"] {
+  margin-top: 3px;
+  accent-color: var(--rf-color-input);
+}
+
+.parameter-link-kind {
+  display: grid;
+  gap: 4px;
+}
+
 /* The MIDI inputs chosen in Settings are input too. */
 .host-audio-form fieldset.midi-ports input[type="checkbox"] {
   accent-color: var(--rf-color-input);

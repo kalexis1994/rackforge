@@ -1,23 +1,69 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import {
+  type ControllerPackageSummary,
+  defaultMode,
+  emptyControllerMap,
+  learntInput,
+  MODE_HINTS,
+  MODE_LABELS,
+  mappingsForParameter,
+  modeProblem,
+  modesFor,
+  newMappingId,
+  suggestedMode,
+  withMapping,
+  withoutMapping,
+} from "../controllerMapping";
+import {
   beginMidiLearn,
   cancelMidiLearn,
   removeParameterLink,
+  requestControllerMaps,
   requestMidiLearnStatus,
   requestMidiSources,
   requestSessionSnapshot,
+  saveControllerMap,
   upsertParameterLink,
 } from "../gateway";
+import { hostJson, IS_BROWSER_HOST, isNativeHost } from "../host";
 import { randomIdToken } from "../ids";
 import type {
+  ControlMapping,
+  ControllerMap,
   MidiLearnCandidate,
   MidiSourceStatus,
   ParameterLink,
   ParameterLinkMessage,
+  ParameterLinkMode,
+  PluginParameterDescriptor,
   PluginParameterSnapshot,
+  RegisteredController,
 } from "../types";
 import { AsyncActionLabel } from "./AsyncSpinner";
 import { ModalDialog } from "./ModalDialog";
+import { ModeFields } from "./controllers/ModeFields";
+
+/** The controllers attached here, their maps and their packages' controls. */
+interface ControllerData {
+  controllers: RegisteredController[];
+  maps: ControllerMap[];
+  packages: ControllerPackageSummary[];
+}
+
+async function loadControllerData(): Promise<ControllerData> {
+  const [maps, packages] = await Promise.all([
+    requestControllerMaps(),
+    hostJson<{ controllers?: ControllerPackageSummary[] }>("/api/v1/controllers")
+      .then((response) => response.controllers ?? [])
+      .catch(() => []),
+  ]);
+  return { controllers: maps.controllers, maps: maps.maps, packages };
+}
+
+/** Only a host that keeps controller maps is offered one. */
+function hostKeepsMaps() {
+  return !IS_BROWSER_HOST && !isNativeHost();
+}
 
 const PARAMETER_ATTRIBUTE = "data-rackforge-parameter-index";
 const LONG_PRESS_MS = 560;
@@ -53,6 +99,20 @@ function draftFromLink(link?: ParameterLink): Draft {
   };
 }
 
+/** A draft of a controller map's mapping, heard on its controller's input. */
+function draftFromMapping(mapping: ControlMapping, sourceId: string): Draft {
+  const message = mapping.input.message;
+  return {
+    id: `parameter.${randomIdToken()}`,
+    sourceId,
+    channel: mapping.input.channel.mode === "channel" ? String(mapping.input.channel.channel) : "omni",
+    messageType: message.type,
+    number: "controller" in message ? message.controller : "note" in message ? message.note : 0,
+    invert: mapping.invert ?? false,
+    passThrough: mapping.pass_through ?? "pass_through",
+  };
+}
+
 function messageFromDraft(draft: Draft): ParameterLinkMessage {
   switch (draft.messageType) {
     case "control_change": return { type: "control_change", controller: draft.number };
@@ -83,6 +143,8 @@ export function ParameterLinkHost({
   frameLoaded,
   frameDocumentGeneration,
   instanceId,
+  pluginId,
+  pluginName,
   links,
   loadParameters,
   resetParameter,
@@ -91,6 +153,8 @@ export function ParameterLinkHost({
   frameLoaded: boolean;
   frameDocumentGeneration: number;
   instanceId: string;
+  pluginId?: string;
+  pluginName?: string;
   links: ParameterLink[];
   loadParameters: () => Promise<Pick<PluginParameterSnapshot, "schema">>;
   resetParameter: (parameterIndex: number) => Promise<void>;
@@ -99,11 +163,48 @@ export function ParameterLinkHost({
   const [editing, setEditing] = useState<Target | null>(null);
   const [resetting, setResetting] = useState(false);
   const [menuError, setMenuError] = useState<string | null>(null);
+  // The controller maps, asked for when a menu opens: what already drives
+  // the parameter from a controller, and where a learnt control is kept.
+  const [controllerData, setControllerData] = useState<ControllerData | null>(null);
+  // The map's mapping the dialog opens on, when no session link is there.
+  const [editingMapped, setEditingMapped] = useState<{ controller_id: string; mapping: ControlMapping } | null>(null);
+  // The id of the parameter a menu is open on, with the index it was read for.
+  const [targetParameter, setTargetParameter] = useState<{ index: number; id: string | null } | null>(null);
+  const targetParameterId = target && targetParameter?.index === target.parameterIndex ? targetParameter.id : null;
   const menuRef = useRef<HTMLDivElement | null>(null);
   const highlightRef = useRef<HTMLDivElement | null>(null);
   const activeLink = target
     ? links.find((link) => link.instance_id === instanceId && link.parameter_index === target.parameterIndex)
     : undefined;
+  const mapsHere = Boolean(pluginId) && hostKeepsMaps();
+  const mappedHere = target && pluginId && targetParameterId && controllerData
+    ? mappingsForParameter(controllerData.maps, pluginId, targetParameterId)
+    : [];
+
+  const refreshControllers = useCallback(async () => {
+    if (!mapsHere) return;
+    setControllerData(await loadControllerData());
+  }, [mapsHere]);
+
+  useEffect(() => {
+    if (!target || !mapsHere) return;
+    let active = true;
+    loadParameters()
+      .then((snapshot) => {
+        if (!active) return;
+        const parameter = snapshot.schema.parameters.find((item) => item.index === target.parameterIndex);
+        setTargetParameter({ index: target.parameterIndex, id: parameter?.id ?? null });
+      })
+      .catch(() => undefined);
+    loadControllerData()
+      .then((data) => {
+        if (active) setControllerData(data);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [loadParameters, mapsHere, target]);
 
   useEffect(() => {
     if (!frameLoaded) return;
@@ -329,7 +430,7 @@ export function ParameterLinkHost({
   const menuLeft = target
     ? Math.max(8, Math.min(target.x + 4, window.innerWidth - 206))
     : 0;
-  const menuHeight = (activeLink ? 132 : 90) + (menuError ? 58 : 0);
+  const menuHeight = (activeLink ? 132 : 90) + mappedHere.length * 42 + (menuError ? 58 : 0);
   const menuTop = target
     ? Math.max(8, Math.min(target.y + 4, window.innerHeight - menuHeight - 8))
     : 0;
@@ -344,8 +445,16 @@ export function ParameterLinkHost({
           style={{ left: menuLeft, top: menuTop }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <button type="button" role="menuitem" onClick={() => { setEditing(target); setTarget(null); }}>
-            {activeLink ? "Edit MIDI Link…" : "Link MIDI…"}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setEditingMapped(activeLink ? null : mappedHere[0] ?? null);
+              setEditing(target);
+              setTarget(null);
+            }}
+          >
+            {activeLink || mappedHere.length > 0 ? "Edit MIDI Link…" : "Link MIDI…"}
           </button>
           <button
             type="button"
@@ -378,6 +487,27 @@ export function ParameterLinkHost({
               Remove MIDI Link
             </button>
           ) : null}
+          {mappedHere.map((entry) => (
+            <button
+              key={`${entry.controller_id}:${entry.mapping.id}`}
+              type="button"
+              role="menuitem"
+              className="danger"
+              onClick={() => {
+                const map = controllerData?.maps.find((candidate) => candidate.controller_id === entry.controller_id);
+                if (!map || !pluginId) return;
+                setMenuError(null);
+                saveControllerMap(withoutMapping(map, pluginId, entry.mapping.id))
+                  .then(() => refreshControllers())
+                  .then(() => setTarget(null))
+                  .catch((reason: unknown) => setMenuError(
+                    reason instanceof Error ? reason.message : "Could not remove this mapping.",
+                  ));
+              }}
+            >
+              Remove {entry.controller_name} · {entry.mapping.input.name}
+            </button>
+          ))}
           {menuError ? <p className="parameter-link-context-error" role="alert">{menuError}</p> : null}
         </div>
       ) : null}
@@ -387,6 +517,10 @@ export function ParameterLinkHost({
           parameterIndex={editing.parameterIndex}
           existing={links.find((link) => link.instance_id === instanceId && link.parameter_index === editing.parameterIndex)}
           loadParameters={loadParameters}
+          plugin={mapsHere && pluginId ? { plugin_id: pluginId, plugin_name: pluginName ?? pluginId } : undefined}
+          controllerData={controllerData}
+          mapped={editingMapped ?? undefined}
+          onSaved={() => refreshControllers().catch(() => undefined)}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -399,20 +533,44 @@ function ParameterLinkDialog({
   parameterIndex,
   existing,
   loadParameters,
+  plugin,
+  controllerData,
+  mapped,
+  onSaved,
   onClose,
 }: {
   instanceId: string;
   parameterIndex: number;
   existing?: ParameterLink;
   loadParameters: () => Promise<Pick<PluginParameterSnapshot, "schema">>;
+  /** The plugin the parameter belongs to, when its controls can go in a controller map. */
+  plugin?: { plugin_id: string; plugin_name: string };
+  controllerData: ControllerData | null;
+  /** The controller map's mapping being edited, when there is no session link. */
+  mapped?: { controller_id: string; mapping: ControlMapping };
+  onSaved: () => void;
   onClose: () => void;
 }) {
-  const [draft, setDraft] = useState(() => draftFromLink(existing));
+  const [draft, setDraft] = useState(() => {
+    const mappedSource = mapped
+      ? controllerData?.controllers.find((candidate) => candidate.controller_id === mapped.controller_id)?.source?.id
+      : undefined;
+    return mapped && mappedSource ? draftFromMapping(mapped.mapping, mappedSource) : draftFromLink(existing);
+  });
   const [sources, setSources] = useState<MidiSourceStatus[]>([]);
   const [parameterName, setParameterName] = useState(`Parameter ${parameterIndex}`);
+  const [parameter, setParameter] = useState<PluginParameterDescriptor | null>(null);
   const [busy, setBusy] = useState(true);
   const [learning, setLearning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A link learnt in this session stays one until the player says otherwise;
+  // a new one goes in the controller's map, where it lasts.
+  const [saveIn, setSaveIn] = useState<"map" | "session">(existing ? "session" : "map");
+  const [mode, setMode] = useState<ParameterLinkMode | null>(existing?.mode ?? mapped?.mapping.mode ?? null);
+  const [isButton, setIsButton] = useState(false);
+  const [passThroughTouched, setPassThroughTouched] = useState(
+    Boolean(existing) || mapped?.mapping.pass_through !== undefined,
+  );
   const learnIdRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -427,6 +585,7 @@ function ParameterLinkDialog({
         }
         setSources(midiSources);
         setParameterName(parameter.name);
+        setParameter(parameter);
         setDraft((current) => ({
           ...current,
           sourceId: current.sourceId || midiSources.find((source) => source.connected)?.source.id || midiSources[0]?.source.id || "",
@@ -479,6 +638,31 @@ function ParameterLinkDialog({
     }
   };
 
+  // The controller the chosen input belongs to, when a package claims it:
+  // its map is where a learnt control can be kept for every session.
+  const controller = plugin && controllerData
+    ? controllerData.controllers.find((candidate) => candidate.source?.id === draft.sourceId)
+    : undefined;
+  const controllerPackage = controller
+    ? controllerData?.packages.find((candidate) => candidate.id === controller.controller_id)
+    : undefined;
+  const learnt = learntInput(
+    messageFromDraft(draft),
+    draft.channel === "omni" ? 1 : Number(draft.channel),
+    controllerPackage?.inputs ?? [],
+  );
+  const namedByPackage = Boolean(controllerPackage?.inputs?.some((input) => input.id === learnt.input.id));
+  const kind = !namedByPackage && draft.messageType === "control_change" && isButton ? "button" : learnt.kind;
+  const toMap = saveIn === "map" && Boolean(controller) && Boolean(plugin);
+  const effectiveMode = parameter
+    ? mode && modeProblem({ kind }, parameter, mode) === null
+      ? mode
+      : mode && modesFor({ kind }, parameter).includes(mode.kind)
+        ? mode
+        : suggestedMode({ kind }, parameter)
+    : null;
+  const problem = parameter && effectiveMode ? modeProblem({ kind }, parameter, effectiveMode) : null;
+
   const apply = async () => {
     const source = sources.find((candidate) => candidate.source.id === draft.sourceId);
     if (!source) {
@@ -489,19 +673,47 @@ function ParameterLinkDialog({
     setError(null);
     try {
       await stopLearn();
-      await upsertParameterLink({
-        schema_version: 1,
-        id: draft.id,
-        instance_id: instanceId,
-        parameter_index: parameterIndex,
-        source: { source_id: source.source.id, display_name: source.source.name },
-        channel: draft.channel === "omni"
-          ? { mode: "omni" }
-          : { mode: "channel", channel: Number(draft.channel) },
-        message: messageFromDraft(draft),
-        transform: { invert: draft.invert },
-        pass_through: draft.passThrough,
-      });
+      if (toMap && controller && plugin && parameter && effectiveMode) {
+        const map = controllerData?.maps.find((candidate) => candidate.controller_id === controller.controller_id)
+          ?? emptyControllerMap(
+            controller.controller_id,
+            controllerPackage?.name ?? controller.source?.name ?? controller.controller_id,
+          );
+        const input: ControlMapping["input"] = draft.channel === "omni"
+          ? { ...learnt.input, channel: { mode: "omni" } }
+          : learnt.input;
+        // The same control on the same parameter keeps its mapping's id.
+        const previous = map.plugins
+          .find((entry) => entry.plugin_id === plugin.plugin_id)
+          ?.mappings.find((mapping) => mapping.input.id === input.id && mapping.parameter_id === parameter.id);
+        await saveControllerMap(withMapping(map, plugin, {
+          id: previous?.id ?? newMappingId(),
+          input,
+          parameter_id: parameter.id,
+          mode: effectiveMode,
+          ...(draft.invert ? { invert: true } : {}),
+          ...(passThroughTouched ? { pass_through: draft.passThrough } : {}),
+        }));
+        // A session link on this parameter would win over the map; the
+        // player chose the map.
+        if (existing) await removeParameterLink(existing.id);
+        onSaved();
+      } else {
+        await upsertParameterLink({
+          schema_version: 1,
+          id: draft.id,
+          instance_id: instanceId,
+          parameter_index: parameterIndex,
+          source: { source_id: source.source.id, display_name: source.source.name },
+          channel: draft.channel === "omni"
+            ? { mode: "omni" }
+            : { mode: "channel", channel: Number(draft.channel) },
+          message: messageFromDraft(draft),
+          transform: { invert: draft.invert },
+          pass_through: draft.passThrough,
+          ...(effectiveMode && effectiveMode.kind !== "direct" ? { mode: effectiveMode } : {}),
+        });
+      }
       await requestSessionSnapshot();
       onClose();
     } catch (reason) {
@@ -523,7 +735,7 @@ function ParameterLinkDialog({
       actions={
         <>
           <button className="secondary-button" type="button" disabled={busy} onClick={() => { void stopLearn().finally(onClose); }}>Cancel</button>
-          <button className="primary-button" type="button" disabled={busy || !selectedSource} onClick={() => void apply()}>
+          <button className="primary-button" type="button" disabled={busy || !selectedSource || problem !== null} onClick={() => void apply()}>
             <AsyncActionLabel active={busy} activeLabel="Applying…">Apply</AsyncActionLabel>
           </button>
         </>
@@ -570,12 +782,68 @@ function ParameterLinkDialog({
           <label><input type="checkbox" checked={draft.invert} disabled={busy} onChange={(event) => setDraft((current) => ({ ...current, invert: event.target.checked }))} />Invert input</label>
           <label>
             <span>MIDI pass-through</span>
-            <select value={draft.passThrough} disabled={busy} onChange={(event) => setDraft((current) => ({ ...current, passThrough: event.target.value as ParameterLink["pass_through"] }))}>
+            <select
+              value={draft.passThrough}
+              disabled={busy}
+              onChange={(event) => {
+                setPassThroughTouched(true);
+                setDraft((current) => ({ ...current, passThrough: event.target.value as ParameterLink["pass_through"] }));
+              }}
+            >
               <option value="pass_through">Pass through to instrument</option>
               <option value="consume">Consume message</option>
             </select>
           </label>
         </div>
+        {controller && plugin ? (
+          <fieldset className="parameter-link-destination">
+            <legend>Save in</legend>
+            <label>
+              <input type="radio" name="parameter-link-destination" checked={saveIn === "map"} disabled={busy} onChange={() => setSaveIn("map")} />
+              <span>
+                {controllerPackage?.name ?? controller.source?.name ?? "The controller"}'s map · every session, whenever {plugin.plugin_name} plays
+              </span>
+            </label>
+            <label>
+              <input type="radio" name="parameter-link-destination" checked={saveIn === "session"} disabled={busy} onChange={() => setSaveIn("session")} />
+              <span>This session only · this instance</span>
+            </label>
+          </fieldset>
+        ) : null}
+        {parameter && effectiveMode ? (
+          <fieldset className="controller-mode-picker parameter-link-mode">
+            <legend>Mode</legend>
+            {!namedByPackage && draft.messageType === "control_change" ? (
+              <label className="parameter-link-kind">
+                <span>The control is a</span>
+                <select value={isButton ? "button" : "continuous"} disabled={busy} onChange={(event) => { setIsButton(event.target.value === "button"); setMode(null); }}>
+                  <option value="continuous">Knob or fader</option>
+                  <option value="button">Button</option>
+                </select>
+              </label>
+            ) : null}
+            <div className="controller-mode-keys" role="radiogroup" aria-label="Mode">
+              {modesFor({ kind }, parameter).map((candidate) => (
+                <button
+                  key={candidate}
+                  type="button"
+                  role="radio"
+                  aria-checked={effectiveMode.kind === candidate}
+                  className={effectiveMode.kind === candidate ? "active" : undefined}
+                  disabled={busy}
+                  onClick={() => setMode(candidate === effectiveMode.kind ? effectiveMode : defaultMode(candidate, parameter))}
+                >
+                  {MODE_LABELS[candidate]}
+                </button>
+              ))}
+            </div>
+            <p className="parameter-link-help">{MODE_HINTS[effectiveMode.kind]}</p>
+            <div className="controller-mapping-editor">
+              <ModeFields mode={effectiveMode} parameter={parameter} disabled={busy} onChange={setMode} />
+            </div>
+            {problem ? <p className="parameter-link-error" role="alert">{problem}</p> : null}
+          </fieldset>
+        ) : null}
         <button className={`midi-learn-button${learning ? " learning" : ""}`} type="button" disabled={busy} onClick={() => learning ? void stopLearn() : void learn()}>
           {learning ? "Listening… tap to stop" : "Learn next MIDI message"}
         </button>

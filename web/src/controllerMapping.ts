@@ -533,6 +533,60 @@ export function suggestedControllerName(sourceName: string): string {
   return name || sourceName.trim() || "Controller";
 }
 
+/**
+ * The input a learnt message is, as a mapping records it: the package's own
+ * control when one sends that message, or one named after the message.
+ * The kind says which modes it can take; a control change nobody named is
+ * taken for a knob, and the player may say it is a button.
+ */
+export function learntInput(
+  message: ParameterLinkMessage,
+  channel: number,
+  packageInputs: readonly ControllerInput[] = [],
+): { input: ControlMapping["input"]; kind: InputKind } {
+  const heard: ControlMapping["input"] = {
+    id: "",
+    name: "",
+    channel: { mode: "channel", channel },
+    message,
+  };
+  for (const candidate of packageInputs) {
+    const mapped = mappedInputFor(candidate);
+    if (mapped && sameMessage(mapped, heard)) return { input: mapped, kind: candidate.kind };
+  }
+  switch (message.type) {
+    case "control_change":
+      return {
+        input: { ...heard, id: `cc-${channel}-${message.controller}`, name: `CC ${message.controller}` },
+        kind: "knob",
+      };
+    case "note":
+      return { input: { ...heard, id: `note-${channel}-${message.note}`, name: `Note ${message.note}` }, kind: "pad" };
+    case "pitch_bend":
+      return { input: { ...heard, id: `bend-${channel}`, name: "Pitch wheel" }, kind: "wheel" };
+    case "channel_pressure":
+      return { input: { ...heard, id: `pressure-${channel}`, name: "Pressure" }, kind: "knob" };
+    case "poly_pressure":
+      return {
+        input: { ...heard, id: `poly-${channel}-${message.note}`, name: `Pressure ${message.note}` },
+        kind: "knob",
+      };
+  }
+}
+
+/** Every mapping, in every controller's map, that drives one parameter of one plugin. */
+export function mappingsForParameter(
+  maps: readonly ControllerMap[],
+  pluginId: string,
+  parameterId: string,
+): Array<{ controller_id: string; controller_name: string; mapping: ControlMapping }> {
+  return maps.flatMap((map) =>
+    (map.plugins.find((plugin) => plugin.plugin_id === pluginId)?.mappings ?? [])
+      .filter((mapping) => mapping.parameter_id === parameterId)
+      .map((mapping) => ({ controller_id: map.controller_id, controller_name: map.controller_name, mapping })),
+  );
+}
+
 /** Package ids a player made, which this editor may save again. */
 export function isUserController(id: string): boolean {
   return id.startsWith("user.");

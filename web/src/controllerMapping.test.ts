@@ -11,8 +11,10 @@ import {
   inputMessageLabel,
   isUserController,
   kindsForInput,
+  learntInput,
   mappedInputFor,
   mappingsForInput,
+  mappingsForParameter,
   modeProblem,
   modesFor,
   newMappingId,
@@ -275,6 +277,41 @@ describe("a controller RackForge does not know", () => {
     expect(kindsForInput(wheel)).toEqual(["wheel"]);
     expect(isUserController("user.oxygen")).toBe(true);
     expect(isUserController("org.rackforge.keylab")).toBe(false);
+  });
+});
+
+describe("a control learnt from a plugin's own panel", () => {
+  it("is the package's control when one sends the message", () => {
+    const found = learntInput({ type: "control_change", controller: 20 }, 1, [knob, button]);
+    expect(found.kind).toBe("button");
+    expect(found.input.id).toBe("button-1");
+  });
+
+  it("is named after the message otherwise", () => {
+    expect(learntInput({ type: "control_change", controller: 21 }, 2)).toEqual({
+      input: {
+        id: "cc-2-21",
+        name: "CC 21",
+        channel: { mode: "channel", channel: 2 },
+        message: { type: "control_change", controller: 21 },
+      },
+      kind: "knob",
+    });
+    expect(learntInput({ type: "note", note: 40 }, 10).kind).toBe("pad");
+    expect(learntInput({ type: "pitch_bend" }, 1).input.id).toBe("bend-1");
+  });
+
+  it("finds what already drives the parameter, in every map", () => {
+    const organ = { plugin_id: "org.rackforge.organ", plugin_name: "RF-Organ" };
+    const mapped = { id: "a", input: mappedInputFor(button)!, parameter_id: "leslie.speed", mode: { kind: "trigger" } } as const;
+    const maps = [
+      withMapping(emptyControllerMap("user.a", "A"), organ, { ...mapped }),
+      withMapping(emptyControllerMap("user.b", "B"), organ, { ...mapped, id: "b", parameter_id: "drive" }),
+    ];
+    expect(mappingsForParameter(maps, organ.plugin_id, "leslie.speed").map((entry) => entry.controller_id)).toEqual([
+      "user.a",
+    ]);
+    expect(mappingsForParameter(maps, "other", "leslie.speed")).toEqual([]);
   });
 });
 

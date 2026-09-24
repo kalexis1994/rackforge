@@ -1355,6 +1355,8 @@ export function PluginFrame({
         frameLoaded={frameLoaded}
         frameDocumentGeneration={frameDocumentGeneration}
         instanceId={parameterLinkInstanceId ?? instance.instance_id}
+        pluginId={instance.plugin_id}
+        pluginName={instance.plugin_name}
         links={snapshot?.parameter_links ?? []}
         loadParameters={loadParameterSchemaForLink}
         resetParameter={resetParameterForLink}

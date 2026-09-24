@@ -2910,6 +2910,15 @@ fn ensure_controller_maps(data_root: &Path) -> Result<bool> {
         return Ok(false);
     }
     let store = ControllerMapStore::new(Some(data_root));
+    // An offer that fails costs the player nothing they had: their maps
+    // still load.
+    match store.seed_factory_maps() {
+        Ok(seeded) if !seeded.is_empty() => {
+            println!("FACTORY_CONTROLLER_MAPS_SEEDED controllers={seeded:?}");
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}"),
+    }
     maps.maps = store
         .load_all()
         .map_err(|error| anyhow::anyhow!("loading controller maps: {error:#}"))?;

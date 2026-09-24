@@ -444,6 +444,13 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         )
     })?;
 
+    match options.controller_maps.seed_factory_maps() {
+        Ok(seeded) if !seeded.is_empty() => {
+            eprintln!("FACTORY_CONTROLLER_MAPS_SEEDED controllers={seeded:?}");
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}"),
+    }
     // A map that cannot be read is reported and skipped inside; only a data
     // root that cannot be listed at all stops the engine from starting maps.
     let controller_maps = options.controller_maps.load_all().unwrap_or_else(|error| {

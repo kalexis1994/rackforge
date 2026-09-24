@@ -1,0 +1,3787 @@
+{
+  "format": "org.rackforge.map",
+  "schema_version": 1,
+  "exported_by": "RackForge",
+  "exported_unix_ms": 1790208000000,
+  "map": {
+    "schema_version": 1,
+    "controller_id": "org.rackforge.arturia-keylab-essential-mk3",
+    "controller_name": "Arturia KeyLab Essential 61 mk3",
+    "plugins": [
+      {
+        "plugin_id": "org.rackforge.organ",
+        "plugin_name": "RF-Organ",
+        "mappings": [
+          {
+            "id": "keylab.organ.fader-1",
+            "input": {
+              "id": "fader-1",
+              "name": "Fader 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 105
+              }
+            },
+            "parameter_id": "drawbar-16",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.fader-2",
+            "input": {
+              "id": "fader-2",
+              "name": "Fader 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 106
+              }
+            },
+            "parameter_id": "drawbar-5-1-3",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.fader-3",
+            "input": {
+              "id": "fader-3",
+              "name": "Fader 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 107
+              }
+            },
+            "parameter_id": "drawbar-8",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.fader-4",
+            "input": {
+              "id": "fader-4",
+              "name": "Fader 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 108
+              }
+            },
+            "parameter_id": "drawbar-4",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.fader-5",
+            "input": {
+              "id": "fader-5",
+              "name": "Fader 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 109
+              }
+            },
+            "parameter_id": "drawbar-2-2-3",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.fader-6",
+            "input": {
+              "id": "fader-6",
+              "name": "Fader 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 110
+              }
+            },
+            "parameter_id": "drawbar-2",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.fader-7",
+            "input": {
+              "id": "fader-7",
+              "name": "Fader 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 111
+              }
+            },
+            "parameter_id": "drawbar-1-3-5",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.fader-8",
+            "input": {
+              "id": "fader-8",
+              "name": "Fader 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 112
+              }
+            },
+            "parameter_id": "drawbar-1-1-3",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.encoder-8",
+            "input": {
+              "id": "encoder-8",
+              "name": "Knob 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 103
+              }
+            },
+            "parameter_id": "drawbar-1",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.encoder-1",
+            "input": {
+              "id": "encoder-1",
+              "name": "Knob 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 96
+              }
+            },
+            "parameter_id": "expression",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.encoder-2",
+            "input": {
+              "id": "encoder-2",
+              "name": "Knob 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 97
+              }
+            },
+            "parameter_id": "console-drive",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.encoder-3",
+            "input": {
+              "id": "encoder-3",
+              "name": "Knob 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 98
+              }
+            },
+            "parameter_id": "key-click",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.encoder-4",
+            "input": {
+              "id": "encoder-4",
+              "name": "Knob 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 99
+              }
+            },
+            "parameter_id": "rotary-mix",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.encoder-5",
+            "input": {
+              "id": "encoder-5",
+              "name": "Knob 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 100
+              }
+            },
+            "parameter_id": "rotary-acceleration",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.encoder-6",
+            "input": {
+              "id": "encoder-6",
+              "name": "Knob 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 101
+              }
+            },
+            "parameter_id": "console-bass",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.encoder-7",
+            "input": {
+              "id": "encoder-7",
+              "name": "Knob 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 102
+              }
+            },
+            "parameter_id": "console-treble",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.organ.pad-1",
+            "input": {
+              "id": "pad-1",
+              "name": "Pad 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 40
+              }
+            },
+            "parameter_id": "rotary-mode",
+            "mode": {
+              "kind": "toggle",
+              "first": 2,
+              "second": 3
+            }
+          },
+          {
+            "id": "keylab.organ.pad-2",
+            "input": {
+              "id": "pad-2",
+              "name": "Pad 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 41
+              }
+            },
+            "parameter_id": "rotary-mode",
+            "mode": {
+              "kind": "set",
+              "value": 1
+            }
+          },
+          {
+            "id": "keylab.organ.pad-3",
+            "input": {
+              "id": "pad-3",
+              "name": "Pad 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 42
+              }
+            },
+            "parameter_id": "percussion-enabled",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.organ.pad-4",
+            "input": {
+              "id": "pad-4",
+              "name": "Pad 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 43
+              }
+            },
+            "parameter_id": "percussion-harmonic",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.organ.pad-5",
+            "input": {
+              "id": "pad-5",
+              "name": "Pad 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 36
+              }
+            },
+            "parameter_id": "percussion-volume",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.organ.pad-6",
+            "input": {
+              "id": "pad-6",
+              "name": "Pad 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 37
+              }
+            },
+            "parameter_id": "percussion-decay",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.organ.pad-7",
+            "input": {
+              "id": "pad-7",
+              "name": "Pad 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 38
+              }
+            },
+            "parameter_id": "upper-scanner",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.organ.pad-8",
+            "input": {
+              "id": "pad-8",
+              "name": "Pad 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 39
+              }
+            },
+            "parameter_id": "scanner-mode",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ]
+            }
+          },
+          {
+            "id": "keylab.organ.pad-b1",
+            "input": {
+              "id": "pad-b1",
+              "name": "Pad 1 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 48
+              }
+            },
+            "parameter_id": "registration",
+            "mode": {
+              "kind": "set",
+              "value": 2
+            }
+          },
+          {
+            "id": "keylab.organ.pad-b2",
+            "input": {
+              "id": "pad-b2",
+              "name": "Pad 2 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 49
+              }
+            },
+            "parameter_id": "registration",
+            "mode": {
+              "kind": "set",
+              "value": 1
+            }
+          },
+          {
+            "id": "keylab.organ.pad-b3",
+            "input": {
+              "id": "pad-b3",
+              "name": "Pad 3 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 50
+              }
+            },
+            "parameter_id": "registration",
+            "mode": {
+              "kind": "set",
+              "value": 7
+            }
+          },
+          {
+            "id": "keylab.organ.pad-b4",
+            "input": {
+              "id": "pad-b4",
+              "name": "Pad 4 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 51
+              }
+            },
+            "parameter_id": "registration",
+            "mode": {
+              "kind": "set",
+              "value": 11
+            }
+          },
+          {
+            "id": "keylab.organ.pad-b5",
+            "input": {
+              "id": "pad-b5",
+              "name": "Pad 5 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 44
+              }
+            },
+            "parameter_id": "rotary-mode",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 2
+            }
+          },
+          {
+            "id": "keylab.organ.pad-b6",
+            "input": {
+              "id": "pad-b6",
+              "name": "Pad 6 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 45
+              }
+            },
+            "parameter_id": "lower-scanner",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.organ.pad-b7",
+            "input": {
+              "id": "pad-b7",
+              "name": "Pad 7 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 46
+              }
+            },
+            "parameter_id": "rotary-microphone-type",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.organ.pad-b8",
+            "input": {
+              "id": "pad-b8",
+              "name": "Pad 8 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 47
+              }
+            },
+            "parameter_id": "rotary-mode",
+            "mode": {
+              "kind": "hold",
+              "pressed": 3,
+              "released": 2
+            }
+          },
+          {
+            "id": "keylab.organ.rewind",
+            "input": {
+              "id": "rewind",
+              "name": "Rewind",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 25
+              }
+            },
+            "parameter_id": "registration",
+            "mode": {
+              "kind": "step",
+              "direction": "down",
+              "wrap": false
+            }
+          },
+          {
+            "id": "keylab.organ.forward",
+            "input": {
+              "id": "forward",
+              "name": "Forward",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 26
+              }
+            },
+            "parameter_id": "registration",
+            "mode": {
+              "kind": "step",
+              "direction": "up",
+              "wrap": false
+            }
+          },
+          {
+            "id": "keylab.organ.undo",
+            "input": {
+              "id": "undo",
+              "name": "Undo",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 42
+              }
+            },
+            "parameter_id": "scanner-mode",
+            "mode": {
+              "kind": "step",
+              "direction": "down",
+              "wrap": false
+            }
+          },
+          {
+            "id": "keylab.organ.redo",
+            "input": {
+              "id": "redo",
+              "name": "Redo",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 43
+              }
+            },
+            "parameter_id": "scanner-mode",
+            "mode": {
+              "kind": "step",
+              "direction": "up",
+              "wrap": false
+            }
+          }
+        ]
+      },
+      {
+        "plugin_id": "org.rackforge.concert-grand",
+        "plugin_name": "RF - Concert Grand",
+        "mappings": [
+          {
+            "id": "keylab.grand.fader-1",
+            "input": {
+              "id": "fader-1",
+              "name": "Fader 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 105
+              }
+            },
+            "parameter_id": "brightness",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.fader-2",
+            "input": {
+              "id": "fader-2",
+              "name": "Fader 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 106
+              }
+            },
+            "parameter_id": "dynamics",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.fader-3",
+            "input": {
+              "id": "fader-3",
+              "name": "Fader 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 107
+              }
+            },
+            "parameter_id": "decay",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.fader-4",
+            "input": {
+              "id": "fader-4",
+              "name": "Fader 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 108
+              }
+            },
+            "parameter_id": "unison",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.fader-5",
+            "input": {
+              "id": "fader-5",
+              "name": "Fader 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 109
+              }
+            },
+            "parameter_id": "lab_air",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.fader-6",
+            "input": {
+              "id": "fader-6",
+              "name": "Fader 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 110
+              }
+            },
+            "parameter_id": "room_size",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.fader-7",
+            "input": {
+              "id": "fader-7",
+              "name": "Fader 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 111
+              }
+            },
+            "parameter_id": "mic_distance",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.fader-8",
+            "input": {
+              "id": "fader-8",
+              "name": "Fader 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 112
+              }
+            },
+            "parameter_id": "width",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.encoder-1",
+            "input": {
+              "id": "encoder-1",
+              "name": "Knob 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 96
+              }
+            },
+            "parameter_id": "lab_hammer_hard",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.encoder-2",
+            "input": {
+              "id": "encoder-2",
+              "name": "Knob 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 97
+              }
+            },
+            "parameter_id": "lab_hammer_mass",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.encoder-3",
+            "input": {
+              "id": "encoder-3",
+              "name": "Knob 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 98
+              }
+            },
+            "parameter_id": "lab_detune",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.encoder-4",
+            "input": {
+              "id": "encoder-4",
+              "name": "Knob 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 99
+              }
+            },
+            "parameter_id": "lab_sympathy",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.encoder-5",
+            "input": {
+              "id": "encoder-5",
+              "name": "Knob 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 100
+              }
+            },
+            "parameter_id": "lab_treble_life",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.encoder-6",
+            "input": {
+              "id": "encoder-6",
+              "name": "Knob 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 101
+              }
+            },
+            "parameter_id": "lid",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.encoder-7",
+            "input": {
+              "id": "encoder-7",
+              "name": "Knob 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 102
+              }
+            },
+            "parameter_id": "room_hardness",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.encoder-8",
+            "input": {
+              "id": "encoder-8",
+              "name": "Knob 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 103
+              }
+            },
+            "parameter_id": "mic_pattern",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.grand.pad-1",
+            "input": {
+              "id": "pad-1",
+              "name": "Pad 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 40
+              }
+            },
+            "parameter_id": "action",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.grand.pad-2",
+            "input": {
+              "id": "pad-2",
+              "name": "Pad 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 41
+              }
+            },
+            "parameter_id": "room_size",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                100.0,
+                311.3,
+                3000.0,
+                15000.0
+              ]
+            }
+          },
+          {
+            "id": "keylab.grand.pad-3",
+            "input": {
+              "id": "pad-3",
+              "name": "Pad 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 42
+              }
+            },
+            "parameter_id": "mic_distance",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.6598,
+                2.0,
+                6.0
+              ]
+            }
+          },
+          {
+            "id": "keylab.grand.pad-4",
+            "input": {
+              "id": "pad-4",
+              "name": "Pad 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 43
+              }
+            },
+            "parameter_id": "lid",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                24.35,
+                12.0,
+                2.8647890090942383
+              ]
+            }
+          },
+          {
+            "id": "keylab.grand.pad-5",
+            "input": {
+              "id": "pad-5",
+              "name": "Pad 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 36
+              }
+            },
+            "parameter_id": "action_noise",
+            "mode": {
+              "kind": "toggle",
+              "first": -24.082401275634766,
+              "second": -5.298128128051758
+            }
+          },
+          {
+            "id": "keylab.grand.pad-6",
+            "input": {
+              "id": "pad-6",
+              "name": "Pad 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 37
+              }
+            },
+            "parameter_id": "release_noise",
+            "mode": {
+              "kind": "toggle",
+              "first": -24.082401275634766,
+              "second": -9.632960319519043
+            }
+          },
+          {
+            "id": "keylab.grand.pad-7",
+            "input": {
+              "id": "pad-7",
+              "name": "Pad 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 38
+              }
+            },
+            "parameter_id": "pedal_noise",
+            "mode": {
+              "kind": "toggle",
+              "first": -24.082401275634766,
+              "second": 0.0
+            }
+          },
+          {
+            "id": "keylab.grand.pad-8",
+            "input": {
+              "id": "pad-8",
+              "name": "Pad 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 39
+              }
+            },
+            "parameter_id": "width",
+            "mode": {
+              "kind": "toggle",
+              "first": 0.0,
+              "second": 0.35
+            }
+          },
+          {
+            "id": "keylab.grand.pad-b1",
+            "input": {
+              "id": "pad-b1",
+              "name": "Pad 1 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 48
+              }
+            },
+            "parameter_id": "brightness",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.3,
+                0.44,
+                0.6,
+                0.75
+              ]
+            }
+          },
+          {
+            "id": "keylab.grand.pad-b2",
+            "input": {
+              "id": "pad-b2",
+              "name": "Pad 2 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 49
+              }
+            },
+            "parameter_id": "dynamics",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.25,
+                0.45,
+                0.7
+              ]
+            }
+          },
+          {
+            "id": "keylab.grand.pad-b3",
+            "input": {
+              "id": "pad-b3",
+              "name": "Pad 3 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 50
+              }
+            },
+            "parameter_id": "lab_detune",
+            "mode": {
+              "kind": "toggle",
+              "first": 0.9,
+              "second": 0.5
+            }
+          },
+          {
+            "id": "keylab.grand.pad-b4",
+            "input": {
+              "id": "pad-b4",
+              "name": "Pad 4 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 51
+              }
+            },
+            "parameter_id": "lab_air",
+            "mode": {
+              "kind": "toggle",
+              "first": 0.0,
+              "second": 0.5
+            }
+          },
+          {
+            "id": "keylab.grand.pad-b5",
+            "input": {
+              "id": "pad-b5",
+              "name": "Pad 5 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 44
+              }
+            },
+            "parameter_id": "room_hardness",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.1,
+                0.35,
+                0.7
+              ]
+            }
+          },
+          {
+            "id": "keylab.grand.pad-b6",
+            "input": {
+              "id": "pad-b6",
+              "name": "Pad 6 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 45
+              }
+            },
+            "parameter_id": "mic_pattern",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.0,
+                0.6,
+                1.0
+              ]
+            }
+          },
+          {
+            "id": "keylab.grand.pad-b7",
+            "input": {
+              "id": "pad-b7",
+              "name": "Pad 7 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 46
+              }
+            },
+            "parameter_id": "decay",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.2,
+                0.35,
+                0.6
+              ]
+            }
+          },
+          {
+            "id": "keylab.grand.pad-b8",
+            "input": {
+              "id": "pad-b8",
+              "name": "Pad 8 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 47
+              }
+            },
+            "parameter_id": "lab_sympathy",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.0,
+                0.5,
+                1.0
+              ]
+            }
+          },
+          {
+            "id": "keylab.grand.modulation",
+            "input": {
+              "id": "modulation",
+              "name": "Modulation",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 1
+              }
+            },
+            "parameter_id": "lab_air",
+            "mode": {
+              "kind": "direct"
+            }
+          }
+        ]
+      },
+      {
+        "plugin_id": "org.rackforge.rf-106",
+        "plugin_name": "RF-106",
+        "mappings": [
+          {
+            "id": "keylab.rf106.encoder-1",
+            "input": {
+              "id": "encoder-1",
+              "name": "Knob 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 96
+              }
+            },
+            "parameter_id": "dco-pwm",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.encoder-2",
+            "input": {
+              "id": "encoder-2",
+              "name": "Knob 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 97
+              }
+            },
+            "parameter_id": "dco-sub",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.encoder-3",
+            "input": {
+              "id": "encoder-3",
+              "name": "Knob 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 98
+              }
+            },
+            "parameter_id": "dco-noise",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.encoder-4",
+            "input": {
+              "id": "encoder-4",
+              "name": "Knob 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 99
+              }
+            },
+            "parameter_id": "vcf-envelope",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.encoder-5",
+            "input": {
+              "id": "encoder-5",
+              "name": "Knob 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 100
+              }
+            },
+            "parameter_id": "vcf-lfo",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.encoder-6",
+            "input": {
+              "id": "encoder-6",
+              "name": "Knob 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 101
+              }
+            },
+            "parameter_id": "vcf-keyboard",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.encoder-7",
+            "input": {
+              "id": "encoder-7",
+              "name": "Knob 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 102
+              }
+            },
+            "parameter_id": "lfo-delay",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.encoder-8",
+            "input": {
+              "id": "encoder-8",
+              "name": "Knob 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 103
+              }
+            },
+            "parameter_id": "vca-level",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.fader-1",
+            "input": {
+              "id": "fader-1",
+              "name": "Fader 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 105
+              }
+            },
+            "parameter_id": "env-attack",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.fader-2",
+            "input": {
+              "id": "fader-2",
+              "name": "Fader 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 106
+              }
+            },
+            "parameter_id": "env-decay",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.fader-3",
+            "input": {
+              "id": "fader-3",
+              "name": "Fader 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 107
+              }
+            },
+            "parameter_id": "env-sustain",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.fader-4",
+            "input": {
+              "id": "fader-4",
+              "name": "Fader 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 108
+              }
+            },
+            "parameter_id": "env-release",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.fader-5",
+            "input": {
+              "id": "fader-5",
+              "name": "Fader 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 109
+              }
+            },
+            "parameter_id": "vcf-cutoff",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.fader-6",
+            "input": {
+              "id": "fader-6",
+              "name": "Fader 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 110
+              }
+            },
+            "parameter_id": "vcf-resonance",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.fader-7",
+            "input": {
+              "id": "fader-7",
+              "name": "Fader 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 111
+              }
+            },
+            "parameter_id": "lfo-rate",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.fader-8",
+            "input": {
+              "id": "fader-8",
+              "name": "Fader 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 112
+              }
+            },
+            "parameter_id": "dco-lfo",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-1",
+            "input": {
+              "id": "pad-1",
+              "name": "Pad 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 40
+              }
+            },
+            "parameter_id": "dco-pulse",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-2",
+            "input": {
+              "id": "pad-2",
+              "name": "Pad 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 41
+              }
+            },
+            "parameter_id": "dco-saw",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-3",
+            "input": {
+              "id": "pad-3",
+              "name": "Pad 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 42
+              }
+            },
+            "parameter_id": "chorus-mode",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-4",
+            "input": {
+              "id": "pad-4",
+              "name": "Pad 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 43
+              }
+            },
+            "parameter_id": "chorus-mode",
+            "mode": {
+              "kind": "toggle",
+              "first": 2,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-5",
+            "input": {
+              "id": "pad-5",
+              "name": "Pad 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 36
+              }
+            },
+            "parameter_id": "pwm-mode",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-6",
+            "input": {
+              "id": "pad-6",
+              "name": "Pad 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 37
+              }
+            },
+            "parameter_id": "vcf-envelope-polarity",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-7",
+            "input": {
+              "id": "pad-7",
+              "name": "Pad 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 38
+              }
+            },
+            "parameter_id": "vca-mode",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-8",
+            "input": {
+              "id": "pad-8",
+              "name": "Pad 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 39
+              }
+            },
+            "parameter_id": "hpf-frequency",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0,
+                1,
+                2,
+                3
+              ]
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-b1",
+            "input": {
+              "id": "pad-b1",
+              "name": "Pad 1 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 48
+              }
+            },
+            "parameter_id": "lfo-trigger",
+            "mode": {
+              "kind": "trigger"
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-b2",
+            "input": {
+              "id": "pad-b2",
+              "name": "Pad 2 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 49
+              }
+            },
+            "parameter_id": "portamento-switch",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf106.pad-b3",
+            "input": {
+              "id": "pad-b3",
+              "name": "Pad 3 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 50
+              }
+            },
+            "parameter_id": "allocation-mode",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0,
+                1,
+                2
+              ]
+            }
+          },
+          {
+            "id": "keylab.rf106.rewind",
+            "input": {
+              "id": "rewind",
+              "name": "Rewind",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 25
+              }
+            },
+            "parameter_id": "dco-range",
+            "mode": {
+              "kind": "step",
+              "direction": "down",
+              "wrap": false
+            }
+          },
+          {
+            "id": "keylab.rf106.forward",
+            "input": {
+              "id": "forward",
+              "name": "Forward",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 26
+              }
+            },
+            "parameter_id": "dco-range",
+            "mode": {
+              "kind": "step",
+              "direction": "up",
+              "wrap": false
+            }
+          }
+        ]
+      },
+      {
+        "plugin_id": "org.rackforge.rf-5",
+        "plugin_name": "RF-5",
+        "mappings": [
+          {
+            "id": "keylab.rf5.encoder-1",
+            "input": {
+              "id": "encoder-1",
+              "name": "Knob 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 96
+              }
+            },
+            "parameter_id": "oscillator-a-pulse-width",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.encoder-2",
+            "input": {
+              "id": "encoder-2",
+              "name": "Knob 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 97
+              }
+            },
+            "parameter_id": "oscillator-b-detune",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.encoder-3",
+            "input": {
+              "id": "encoder-3",
+              "name": "Knob 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 98
+              }
+            },
+            "parameter_id": "oscillator-b-frequency",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.encoder-4",
+            "input": {
+              "id": "encoder-4",
+              "name": "Knob 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 99
+              }
+            },
+            "parameter_id": "filter-envelope-amount",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.encoder-5",
+            "input": {
+              "id": "encoder-5",
+              "name": "Knob 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 100
+              }
+            },
+            "parameter_id": "filter-attack",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.encoder-6",
+            "input": {
+              "id": "encoder-6",
+              "name": "Knob 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 101
+              }
+            },
+            "parameter_id": "filter-decay",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.encoder-7",
+            "input": {
+              "id": "encoder-7",
+              "name": "Knob 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 102
+              }
+            },
+            "parameter_id": "filter-sustain",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.encoder-8",
+            "input": {
+              "id": "encoder-8",
+              "name": "Knob 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 103
+              }
+            },
+            "parameter_id": "filter-release",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.fader-1",
+            "input": {
+              "id": "fader-1",
+              "name": "Fader 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 105
+              }
+            },
+            "parameter_id": "amp-attack",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.fader-2",
+            "input": {
+              "id": "fader-2",
+              "name": "Fader 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 106
+              }
+            },
+            "parameter_id": "amp-decay",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.fader-3",
+            "input": {
+              "id": "fader-3",
+              "name": "Fader 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 107
+              }
+            },
+            "parameter_id": "amp-sustain",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.fader-4",
+            "input": {
+              "id": "fader-4",
+              "name": "Fader 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 108
+              }
+            },
+            "parameter_id": "amp-release",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.fader-5",
+            "input": {
+              "id": "fader-5",
+              "name": "Fader 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 109
+              }
+            },
+            "parameter_id": "filter-cutoff",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.fader-6",
+            "input": {
+              "id": "fader-6",
+              "name": "Fader 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 110
+              }
+            },
+            "parameter_id": "filter-resonance",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.fader-7",
+            "input": {
+              "id": "fader-7",
+              "name": "Fader 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 111
+              }
+            },
+            "parameter_id": "lfo-frequency",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.fader-8",
+            "input": {
+              "id": "fader-8",
+              "name": "Fader 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 112
+              }
+            },
+            "parameter_id": "poly-mod-filter-envelope-amount",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-1",
+            "input": {
+              "id": "pad-1",
+              "name": "Pad 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 40
+              }
+            },
+            "parameter_id": "oscillator-a-saw",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-2",
+            "input": {
+              "id": "pad-2",
+              "name": "Pad 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 41
+              }
+            },
+            "parameter_id": "oscillator-a-pulse",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-3",
+            "input": {
+              "id": "pad-3",
+              "name": "Pad 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 42
+              }
+            },
+            "parameter_id": "oscillator-b-saw",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-4",
+            "input": {
+              "id": "pad-4",
+              "name": "Pad 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 43
+              }
+            },
+            "parameter_id": "oscillator-b-triangle",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-5",
+            "input": {
+              "id": "pad-5",
+              "name": "Pad 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 36
+              }
+            },
+            "parameter_id": "oscillator-b-pulse",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-6",
+            "input": {
+              "id": "pad-6",
+              "name": "Pad 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 37
+              }
+            },
+            "parameter_id": "oscillator-sync",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-7",
+            "input": {
+              "id": "pad-7",
+              "name": "Pad 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 38
+              }
+            },
+            "parameter_id": "unison",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-8",
+            "input": {
+              "id": "pad-8",
+              "name": "Pad 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 39
+              }
+            },
+            "parameter_id": "filter-keyboard",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-b1",
+            "input": {
+              "id": "pad-b1",
+              "name": "Pad 1 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 48
+              }
+            },
+            "parameter_id": "poly-mod-oscillator-a-frequency",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-b2",
+            "input": {
+              "id": "pad-b2",
+              "name": "Pad 2 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 49
+              }
+            },
+            "parameter_id": "poly-mod-oscillator-a-pulse-width",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-b3",
+            "input": {
+              "id": "pad-b3",
+              "name": "Pad 3 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 50
+              }
+            },
+            "parameter_id": "poly-mod-filter",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-b4",
+            "input": {
+              "id": "pad-b4",
+              "name": "Pad 4 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 51
+              }
+            },
+            "parameter_id": "poly-mod-oscillator-b-amount",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.0,
+                0.25,
+                0.5
+              ]
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-b5",
+            "input": {
+              "id": "pad-b5",
+              "name": "Pad 5 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 44
+              }
+            },
+            "parameter_id": "wheel-mod-oscillator-a-frequency",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-b6",
+            "input": {
+              "id": "pad-b6",
+              "name": "Pad 6 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 45
+              }
+            },
+            "parameter_id": "wheel-mod-oscillator-b-frequency",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-b7",
+            "input": {
+              "id": "pad-b7",
+              "name": "Pad 7 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 46
+              }
+            },
+            "parameter_id": "wheel-mod-filter",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.pad-b8",
+            "input": {
+              "id": "pad-b8",
+              "name": "Pad 8 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 47
+              }
+            },
+            "parameter_id": "glide",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.0,
+                0.2,
+                0.45
+              ]
+            }
+          },
+          {
+            "id": "keylab.rf5.save",
+            "input": {
+              "id": "save",
+              "name": "Save",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 40
+              }
+            },
+            "parameter_id": "lfo-saw",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.quant",
+            "input": {
+              "id": "quant",
+              "name": "Quant",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 41
+              }
+            },
+            "parameter_id": "lfo-triangle",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.undo",
+            "input": {
+              "id": "undo",
+              "name": "Undo",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 42
+              }
+            },
+            "parameter_id": "lfo-square",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.redo",
+            "input": {
+              "id": "redo",
+              "name": "Redo",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 43
+              }
+            },
+            "parameter_id": "oscillator-b-keyboard",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf5.metronome",
+            "input": {
+              "id": "metronome",
+              "name": "Metronome",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 27
+              }
+            },
+            "parameter_id": "release-enable",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          }
+        ]
+      },
+      {
+        "plugin_id": "org.rackforge.rf7",
+        "plugin_name": "RF-7",
+        "mappings": [
+          {
+            "id": "keylab.rf7.encoder-1",
+            "input": {
+              "id": "encoder-1",
+              "name": "Knob 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 96
+              }
+            },
+            "parameter_id": "master_tune",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.encoder-2",
+            "input": {
+              "id": "encoder-2",
+              "name": "Knob 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 97
+              }
+            },
+            "parameter_id": "bend_range",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.encoder-7",
+            "input": {
+              "id": "encoder-7",
+              "name": "Knob 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 102
+              }
+            },
+            "parameter_id": "lfo_delay",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.fader-1",
+            "input": {
+              "id": "fader-1",
+              "name": "Fader 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 105
+              }
+            },
+            "parameter_id": "envelope_time",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.fader-2",
+            "input": {
+              "id": "fader-2",
+              "name": "Fader 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 106
+              }
+            },
+            "parameter_id": "velocity_depth",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.fader-3",
+            "input": {
+              "id": "fader-3",
+              "name": "Fader 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 107
+              }
+            },
+            "parameter_id": "wheel_range",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.fader-4",
+            "input": {
+              "id": "fader-4",
+              "name": "Fader 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 108
+              }
+            },
+            "parameter_id": "portamento_time",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.fader-5",
+            "input": {
+              "id": "fader-5",
+              "name": "Fader 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 109
+              }
+            },
+            "parameter_id": "brightness",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.fader-7",
+            "input": {
+              "id": "fader-7",
+              "name": "Fader 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 111
+              }
+            },
+            "parameter_id": "lfo_rate",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.fader-8",
+            "input": {
+              "id": "fader-8",
+              "name": "Fader 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 112
+              }
+            },
+            "parameter_id": "lfo_depth",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-1",
+            "input": {
+              "id": "pad-1",
+              "name": "Pad 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 40
+              }
+            },
+            "parameter_id": "operator_1",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-2",
+            "input": {
+              "id": "pad-2",
+              "name": "Pad 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 41
+              }
+            },
+            "parameter_id": "operator_2",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-3",
+            "input": {
+              "id": "pad-3",
+              "name": "Pad 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 42
+              }
+            },
+            "parameter_id": "operator_3",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-4",
+            "input": {
+              "id": "pad-4",
+              "name": "Pad 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 43
+              }
+            },
+            "parameter_id": "operator_4",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-5",
+            "input": {
+              "id": "pad-5",
+              "name": "Pad 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 36
+              }
+            },
+            "parameter_id": "operator_5",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-6",
+            "input": {
+              "id": "pad-6",
+              "name": "Pad 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 37
+              }
+            },
+            "parameter_id": "operator_6",
+            "mode": {
+              "kind": "toggle",
+              "first": 0,
+              "second": 1
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-7",
+            "input": {
+              "id": "pad-7",
+              "name": "Pad 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 38
+              }
+            },
+            "parameter_id": "voice_mode",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-8",
+            "input": {
+              "id": "pad-8",
+              "name": "Pad 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 39
+              }
+            },
+            "parameter_id": "wheel_target",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0,
+                1,
+                2,
+                3
+              ]
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-b1",
+            "input": {
+              "id": "pad-b1",
+              "name": "Pad 1 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 48
+              }
+            },
+            "parameter_id": "transpose",
+            "mode": {
+              "kind": "set",
+              "value": -12
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-b2",
+            "input": {
+              "id": "pad-b2",
+              "name": "Pad 2 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 49
+              }
+            },
+            "parameter_id": "transpose",
+            "mode": {
+              "kind": "set",
+              "value": 0
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-b3",
+            "input": {
+              "id": "pad-b3",
+              "name": "Pad 3 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 50
+              }
+            },
+            "parameter_id": "transpose",
+            "mode": {
+              "kind": "set",
+              "value": 12
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-b4",
+            "input": {
+              "id": "pad-b4",
+              "name": "Pad 4 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 51
+              }
+            },
+            "parameter_id": "bend_range",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                2,
+                7,
+                12
+              ]
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-b5",
+            "input": {
+              "id": "pad-b5",
+              "name": "Pad 5 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 44
+              }
+            },
+            "parameter_id": "envelope_time",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.5,
+                1.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-b6",
+            "input": {
+              "id": "pad-b6",
+              "name": "Pad 6 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 45
+              }
+            },
+            "parameter_id": "brightness",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.6,
+                1.0,
+                1.4
+              ]
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-b7",
+            "input": {
+              "id": "pad-b7",
+              "name": "Pad 7 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 46
+              }
+            },
+            "parameter_id": "velocity_depth",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.5,
+                1.0,
+                1.5
+              ]
+            }
+          },
+          {
+            "id": "keylab.rf7.pad-b8",
+            "input": {
+              "id": "pad-b8",
+              "name": "Pad 8 (bank 2)",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 47
+              }
+            },
+            "parameter_id": "lfo_depth",
+            "mode": {
+              "kind": "toggle",
+              "first": 0.3,
+              "second": 0.0
+            }
+          },
+          {
+            "id": "keylab.rf7.rewind",
+            "input": {
+              "id": "rewind",
+              "name": "Rewind",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 25
+              }
+            },
+            "parameter_id": "transpose",
+            "mode": {
+              "kind": "step",
+              "direction": "down",
+              "wrap": false
+            }
+          },
+          {
+            "id": "keylab.rf7.forward",
+            "input": {
+              "id": "forward",
+              "name": "Forward",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 26
+              }
+            },
+            "parameter_id": "transpose",
+            "mode": {
+              "kind": "step",
+              "direction": "up",
+              "wrap": false
+            }
+          }
+        ]
+      },
+      {
+        "plugin_id": "org.rackforge.rftines",
+        "plugin_name": "RF-Tines",
+        "mappings": [
+          {
+            "id": "keylab.tines.encoder-1",
+            "input": {
+              "id": "encoder-1",
+              "name": "Knob 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 96
+              }
+            },
+            "parameter_id": "hardness",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.encoder-2",
+            "input": {
+              "id": "encoder-2",
+              "name": "Knob 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 97
+              }
+            },
+            "parameter_id": "bell",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.encoder-3",
+            "input": {
+              "id": "encoder-3",
+              "name": "Knob 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 98
+              }
+            },
+            "parameter_id": "sustain",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.encoder-4",
+            "input": {
+              "id": "encoder-4",
+              "name": "Knob 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 99
+              }
+            },
+            "parameter_id": "dynamics",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.encoder-5",
+            "input": {
+              "id": "encoder-5",
+              "name": "Knob 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 100
+              }
+            },
+            "parameter_id": "distance",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.encoder-6",
+            "input": {
+              "id": "encoder-6",
+              "name": "Knob 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 101
+              }
+            },
+            "parameter_id": "alignment",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.encoder-7",
+            "input": {
+              "id": "encoder-7",
+              "name": "Knob 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 102
+              }
+            },
+            "parameter_id": "bass-boost",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.fader-1",
+            "input": {
+              "id": "fader-1",
+              "name": "Fader 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 105
+              }
+            },
+            "parameter_id": "bass",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.fader-2",
+            "input": {
+              "id": "fader-2",
+              "name": "Fader 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 106
+              }
+            },
+            "parameter_id": "treble",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.fader-7",
+            "input": {
+              "id": "fader-7",
+              "name": "Fader 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 111
+              }
+            },
+            "parameter_id": "speed",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.fader-8",
+            "input": {
+              "id": "fader-8",
+              "name": "Fader 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 112
+              }
+            },
+            "parameter_id": "intensity",
+            "mode": {
+              "kind": "direct"
+            }
+          },
+          {
+            "id": "keylab.tines.pad-1",
+            "input": {
+              "id": "pad-1",
+              "name": "Pad 1",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 40
+              }
+            },
+            "parameter_id": "vibrato",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.tines.pad-2",
+            "input": {
+              "id": "pad-2",
+              "name": "Pad 2",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 41
+              }
+            },
+            "parameter_id": "vibrato",
+            "mode": {
+              "kind": "hold",
+              "pressed": 1,
+              "released": 0
+            }
+          },
+          {
+            "id": "keylab.tines.pad-3",
+            "input": {
+              "id": "pad-3",
+              "name": "Pad 3",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 42
+              }
+            },
+            "parameter_id": "preamp",
+            "mode": {
+              "kind": "toggle",
+              "first": 1,
+              "second": 0
+            }
+          },
+          {
+            "id": "keylab.tines.pad-4",
+            "input": {
+              "id": "pad-4",
+              "name": "Pad 4",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 43
+              }
+            },
+            "parameter_id": "law",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0,
+                1,
+                2
+              ]
+            }
+          },
+          {
+            "id": "keylab.tines.pad-5",
+            "input": {
+              "id": "pad-5",
+              "name": "Pad 5",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 36
+              }
+            },
+            "parameter_id": "speed",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                2.0,
+                4.0,
+                7.0
+              ]
+            }
+          },
+          {
+            "id": "keylab.tines.pad-6",
+            "input": {
+              "id": "pad-6",
+              "name": "Pad 6",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 37
+              }
+            },
+            "parameter_id": "hardness",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.25,
+                0.42,
+                0.7
+              ]
+            }
+          },
+          {
+            "id": "keylab.tines.pad-7",
+            "input": {
+              "id": "pad-7",
+              "name": "Pad 7",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 38
+              }
+            },
+            "parameter_id": "bell",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.1,
+                0.22,
+                0.45
+              ]
+            }
+          },
+          {
+            "id": "keylab.tines.pad-8",
+            "input": {
+              "id": "pad-8",
+              "name": "Pad 8",
+              "channel": {
+                "mode": "channel",
+                "channel": 11
+              },
+              "message": {
+                "type": "note",
+                "note": 39
+              }
+            },
+            "parameter_id": "intensity",
+            "mode": {
+              "kind": "cycle",
+              "values": [
+                0.3,
+                0.6,
+                1.0
+              ]
+            }
+          },
+          {
+            "id": "keylab.tines.modulation",
+            "input": {
+              "id": "modulation",
+              "name": "Modulation",
+              "channel": {
+                "mode": "channel",
+                "channel": 1
+              },
+              "message": {
+                "type": "control_change",
+                "controller": 1
+              }
+            },
+            "parameter_id": "intensity",
+            "mode": {
+              "kind": "direct"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

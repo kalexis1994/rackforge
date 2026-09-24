@@ -857,6 +857,11 @@ impl DesktopApp {
         #[cfg(not(windows))]
         let controller_semantic_profiles = BTreeMap::new();
         let controller_map_store = ControllerMapStore::new(Some(&options.data_root));
+        if let Err(error) = controller_map_store.seed_factory_maps() {
+            warnings.push(format!(
+                "Factory controller maps were not offered: {error:#}"
+            ));
+        }
         let controller_maps = controller_map_store.load_all().unwrap_or_else(|error| {
             warnings.push(format!("Controller maps were not loaded: {error:#}"));
             BTreeMap::new()

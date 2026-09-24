@@ -5,6 +5,12 @@
 //! A map belongs to the player, so it lives with their data rather than in
 //! the controller package, which RackForge replaces on update. Writes go to
 //! a temporary file renamed into place, so a map is never half written.
+//!
+//! RackForge ships a map for the controllers it bundles, made for its own
+//! instruments. It is offered once, into the player's store, and kept up to
+//! date only while the player leaves it as it came: the copy last offered
+//! sits in `controller-maps/factory/`, and a stored map that still equals it
+//! was never touched.
 
 use anyhow::{Context, Result, bail};
 use rackforge_midi_api::controller_map::{ControllerMap, RfMapFile};
@@ -15,6 +21,33 @@ use std::path::{Path, PathBuf};
 pub const CONTROLLER_MAP_DIRECTORY: &str = "controller-maps";
 /// A map with every mapping it may hold stays far below this.
 const MAX_MAP_BYTES: u64 = 4 * 1024 * 1024;
+/// Where the factory map last offered for each controller is kept.
+const FACTORY_DIRECTORY: &str = "factory";
+
+/// The maps RackForge ships, as `.rfmap` documents.
+const FACTORY_MAP_FILES: &[&str] = &[include_str!(
+    "../../../hardware/controllers/arturia-keylab-essential-mk3/maps/rackforge-instruments.rfmap"
+)];
+
+/// The maps RackForge ships. One that does not read as a valid map is
+/// reported and left out; a test keeps that from ever shipping.
+pub fn factory_maps() -> Vec<ControllerMap> {
+    FACTORY_MAP_FILES
+        .iter()
+        .filter_map(|text| {
+            let parsed = serde_json::from_str::<RfMapFile>(text)
+                .map_err(anyhow::Error::from)
+                .and_then(|file| {
+                    file.validate()
+                        .map_err(|error| anyhow::anyhow!("invalid controller map: {error}"))?;
+                    Ok(file.map)
+                });
+            parsed
+                .map_err(|error| eprintln!("FACTORY_CONTROLLER_MAP_INVALID error={error:#}"))
+                .ok()
+        })
+        .collect()
+}
 
 #[derive(Clone, Debug)]
 pub struct ControllerMapStore {
@@ -73,15 +106,54 @@ impl ControllerMapStore {
             return Ok(());
         };
         ensure_real_directory(directory)?;
-        let path = directory.join(file_name(&map.controller_id)?);
-        let temporary = path.with_extension(format!("json.new-{}", std::process::id()));
-        let bytes = serde_json::to_vec_pretty(map)?;
-        fs::write(&temporary, bytes).with_context(|| format!("writing {}", temporary.display()))?;
-        fs::rename(&temporary, &path).with_context(|| {
-            let _ = fs::remove_file(&temporary);
-            format!("replacing {}", path.display())
-        })?;
-        Ok(())
+        write_map(&directory.join(file_name(&map.controller_id)?), map)
+    }
+
+    /// Offers every factory map, and names the controllers whose stored map
+    /// it wrote. Run before `load_all`.
+    pub fn seed_factory_maps(&self) -> Result<Vec<String>> {
+        let mut seeded = Vec::new();
+        for map in factory_maps() {
+            if self.seed(&map)? {
+                seeded.push(map.controller_id);
+            }
+        }
+        Ok(seeded)
+    }
+
+    /// Writes a factory map where the player has no map and was never
+    /// offered one, and over a map they kept exactly as it was last offered,
+    /// so an update to it reaches them. A map of their own -- made before,
+    /// edited since, or removed -- stays as they left it.
+    fn seed(&self, factory: &ControllerMap) -> Result<bool> {
+        let Some(directory) = &self.directory else {
+            return Ok(false);
+        };
+        let name = file_name(&factory.controller_id)?;
+        let offered_directory = directory.join(FACTORY_DIRECTORY);
+        ensure_real_directory(directory)?;
+        ensure_real_directory(&offered_directory)?;
+        let offered_path = offered_directory.join(&name);
+        // A damaged record is as good as none: the player's map still
+        // decides, and only a missing one is written.
+        let offered = match stored_map(&offered_path) {
+            Stored::Map(map) => Some(map),
+            Stored::Missing | Stored::Unreadable => None,
+        };
+        if offered.as_ref() == Some(factory) {
+            return Ok(false);
+        }
+        let path = directory.join(&name);
+        let write = match (offered, stored_map(&path)) {
+            (None, Stored::Missing) => true,
+            (Some(previous), Stored::Map(current)) => current == previous,
+            _ => false,
+        };
+        if write {
+            write_map(&path, factory)?;
+        }
+        write_map(&offered_path, factory)?;
+        Ok(write)
     }
 
     pub fn remove(&self, controller_id: &str) -> Result<()> {
@@ -137,6 +209,30 @@ fn file_name(controller_id: &str) -> Result<String> {
         bail!("controller id {controller_id:?} cannot name a map file");
     }
     Ok(format!("{controller_id}.json"))
+}
+
+fn write_map(path: &Path, map: &ControllerMap) -> Result<()> {
+    let temporary = path.with_extension(format!("json.new-{}", std::process::id()));
+    let bytes = serde_json::to_vec_pretty(map)?;
+    fs::write(&temporary, bytes).with_context(|| format!("writing {}", temporary.display()))?;
+    fs::rename(&temporary, path).with_context(|| {
+        let _ = fs::remove_file(&temporary);
+        format!("replacing {}", path.display())
+    })?;
+    Ok(())
+}
+
+enum Stored {
+    Missing,
+    Map(ControllerMap),
+    Unreadable,
+}
+
+fn stored_map(path: &Path) -> Stored {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Stored::Missing,
+        _ => read_map(path).map_or(Stored::Unreadable, Stored::Map),
+    }
 }
 
 fn read_map(path: &Path) -> Result<ControllerMap> {
@@ -262,6 +358,73 @@ mod tests {
         assert!(file_name("user/escape").is_err());
         assert!(file_name("User.Upper").is_err());
         assert_eq!(file_name("user.oxygen-49").unwrap(), "user.oxygen-49.json");
+    }
+
+    #[test]
+    fn rackforge_ships_a_valid_keylab_map() {
+        let maps = factory_maps();
+        assert_eq!(
+            maps.len(),
+            FACTORY_MAP_FILES.len(),
+            "every factory map reads"
+        );
+        let keylab = maps
+            .iter()
+            .find(|map| map.controller_id == "org.rackforge.arturia-keylab-essential-mk3")
+            .expect("the KeyLab map ships");
+        for plugin in [
+            "org.rackforge.concert-grand",
+            "org.rackforge.organ",
+            "org.rackforge.rf-106",
+            "org.rackforge.rf-5",
+            "org.rackforge.rf7",
+            "org.rackforge.rftines",
+        ] {
+            assert!(keylab.plugin(plugin).is_some(), "{plugin} is mapped");
+        }
+    }
+
+    #[test]
+    fn a_factory_map_is_offered_once_and_updated_while_untouched() {
+        let root = root("factory");
+        let store = ControllerMapStore::new(Some(&root.0));
+        let first = leslie_map();
+        assert!(store.seed(&first).unwrap(), "no map yet: offered");
+        assert_eq!(store.load_all().unwrap()["user.oxygen-49"], first);
+        assert!(!store.seed(&first).unwrap(), "offered already");
+
+        // Kept as it came, a new version replaces it.
+        let mut second = leslie_map();
+        second.plugins[0].plugin_name = "RF-Organ 2".into();
+        assert!(store.seed(&second).unwrap());
+        assert_eq!(store.load_all().unwrap()["user.oxygen-49"], second);
+
+        // Edited, it stays the player's.
+        let mut edited = second.clone();
+        edited.plugins[0].mappings[0].parameter_id = "drive".into();
+        store.save(&edited).unwrap();
+        let mut third = leslie_map();
+        third.plugins[0].plugin_name = "RF-Organ 3".into();
+        assert!(!store.seed(&third).unwrap());
+        assert_eq!(store.load_all().unwrap()["user.oxygen-49"], edited);
+
+        // Removed, it does not come back.
+        store.remove("user.oxygen-49").unwrap();
+        let mut fourth = leslie_map();
+        fourth.plugins[0].plugin_name = "RF-Organ 4".into();
+        assert!(!store.seed(&fourth).unwrap());
+        assert!(store.load_all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_map_made_before_the_factory_one_stays() {
+        let root = root("factory-own");
+        let store = ControllerMapStore::new(Some(&root.0));
+        let mut own = leslie_map();
+        own.plugins[0].mappings[0].parameter_id = "drive".into();
+        store.save(&own).unwrap();
+        assert!(!store.seed(&leslie_map()).unwrap());
+        assert_eq!(store.load_all().unwrap()["user.oxygen-49"], own);
     }
 
     #[test]

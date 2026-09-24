@@ -58,6 +58,18 @@ export interface ControllerPackageSummary {
   inputs?: ControllerInput[];
   roles?: ControllerRole[];
   actions?: ControllerAction[];
+  /** What the package sends to its controller, and whether it may. */
+  output?: ControllerOutput;
+}
+
+/**
+ * A package's messages to its controller: none, asked for and waiting on
+ * the player, or allowed (by the player, or because RackForge ships it).
+ */
+export interface ControllerOutput {
+  state: "none" | "asked" | "allowed";
+  messages: string[];
+  sysex: boolean;
 }
 
 export type ModeKind = ParameterLinkMode["kind"];
@@ -506,6 +518,8 @@ export interface ControllerDevice {
   /** The input the host attached it to, when it did. */
   source?: { id: string; name: string };
   connected: boolean;
+  /** Recognised by the device's own Identity Reply. */
+  identified?: boolean;
   map?: ControllerMap;
   inputs: ControllerInput[];
   roles: ControllerRole[];
@@ -681,7 +695,12 @@ function inputFromMapped(input: ControlMapping["input"]): ControllerInput {
  */
 export function buildControllerDevices(
   packages: readonly ControllerPackageSummary[],
-  registered: ReadonlyArray<{ controller_id: string; source?: { id: string; name: string }; connected: boolean }>,
+  registered: ReadonlyArray<{
+    controller_id: string;
+    source?: { id: string; name: string };
+    connected: boolean;
+    identified?: boolean;
+  }>,
   maps: readonly ControllerMap[],
 ): ControllerDevice[] {
   const ids = new Set<string>([
@@ -710,6 +729,7 @@ export function buildControllerDevices(
       package: summary,
       source: attached?.source ? { id: attached.source.id, name: attached.source.name } : undefined,
       connected: attached?.connected ?? false,
+      identified: attached?.identified ?? false,
       map,
       inputs,
       roles: summary?.roles ?? [],

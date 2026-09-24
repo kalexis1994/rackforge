@@ -229,6 +229,9 @@ pub enum DesktopControlCall {
         preferences: WebServerPreferences,
         response: Sender<Result<Value, String>>,
     },
+    /// The player allowed or stopped a package's messages to its
+    /// controller: the packages are attached again. Posted, never answered.
+    ControllerOutputChanged,
 }
 
 pub fn control_channel() -> (Sender<DesktopControlCall>, Receiver<DesktopControlCall>) {
@@ -828,6 +831,10 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
         .route(
             "/api/v1/controllers/{controller_id}/settings",
             axum::routing::put(apply_controller_settings),
+        )
+        .route(
+            "/api/v1/controllers/{controller_id}/output",
+            axum::routing::put(allow_controller_output),
         );
     let router = if allow_native_resources {
         router
@@ -2159,10 +2166,44 @@ async fn controller_catalog(State(state): State<WebState>) -> Response {
                 "inputs": editor.inputs,
                 "roles": editor.roles,
                 "actions": editor.actions,
+                "output": controller.output_summary(),
             })
         })
         .collect();
     Json(json!({"status": "ok", "controllers": controllers})).into_response()
+}
+
+#[derive(Deserialize)]
+struct ControllerOutputRequest {
+    allow: bool,
+}
+
+/// The player allows -- or stops -- a package's messages to its controller.
+/// The answer holds for the package's active version.
+async fn allow_controller_output(
+    AxumPath(controller_id): AxumPath<String>,
+    State(state): State<WebState>,
+    Json(request): Json<ControllerOutputRequest>,
+) -> Response {
+    let store = rackforge_controller_package::PackageStore::new(&state.controllers_root);
+    match store.allow_output(&controller_id, request.allow) {
+        Ok(installed) => {
+            let _ = state
+                .control
+                .send(DesktopControlCall::ControllerOutputChanged);
+            Json(json!({
+                "status": "ok",
+                "id": installed.record.id,
+                "output": installed.output_summary(),
+            }))
+            .into_response()
+        }
+        Err(error) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
 fn controller_settings_path(state: &WebState, controller_id: &str) -> PathBuf {

@@ -7,10 +7,12 @@ import { RfLoader } from "../components/RfLoader";
 import { ControllerInputList } from "../components/controllers/ControllerInputList";
 import { InputEditor, UserControllerForm } from "../components/controllers/ControlsEditor";
 import { InputAssignments } from "../components/controllers/InputAssignments";
+import { ControllerOutputNotice } from "../components/controllers/ControllerOutputNotice";
 import {
   buildControllerDevices,
   type ControllerDevice,
   type ControllerInput,
+  type ControllerOutput,
   type ControllerPackageSummary,
   emptyControllerMap,
   inputForActivity,
@@ -34,7 +36,7 @@ import {
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   hostJson,
-  IS_BROWSER_HOST,
+  hostKeepsControllerMaps,
   isDesktopHost,
   isNativeHost,
   readNativeTextFile,
@@ -93,7 +95,7 @@ export function ControllersPage() {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [busy, setBusy] = useState<"export" | "import" | "controls" | null>(null);
+  const [busy, setBusy] = useState<"export" | "import" | "controls" | "output" | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedInputId, setSelectedInputId] = useState<string | null>(null);
   const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
@@ -114,7 +116,7 @@ export function ControllersPage() {
     () => catalog.plugins.filter((plugin) => plugin.kind === "instrument" || plugin.kind === "effect"),
     [catalog.plugins],
   );
-  const keepsMaps = !IS_BROWSER_HOST && !isNativeHost();
+  const keepsMaps = hostKeepsControllerMaps();
 
   useEffect(() => writeLearnt(learnt), [learnt]);
 
@@ -328,6 +330,47 @@ export function ControllersPage() {
     }
   };
 
+  /** The player's answer to a package asking to talk to its controller. */
+  const answerOutput = async (allow: boolean) => {
+    if (!device?.package) return;
+    const packageId = device.package.id;
+    setBusy("output");
+    setNotice(null);
+    try {
+      const response = await hostJson<{ output?: ControllerOutput }>(
+        `/api/v1/controllers/${encodeURIComponent(packageId)}/output`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ allow }),
+        },
+      );
+      const output = response.output;
+      if (output) {
+        setLoaded((current) =>
+          current
+            ? {
+                ...current,
+                packages: current.packages.map((entry) => (entry.id === packageId ? { ...entry, output } : entry)),
+              }
+            : current,
+        );
+      }
+      setNotice({
+        tone: "success",
+        text: allow
+          ? device.connected
+            ? `${device.name} hears its package's messages now.`
+            : `${device.name} hears its package's messages when it connects.`
+          : `Nothing more is sent to ${device.name}.`,
+      });
+    } catch (reason) {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not save the answer." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const exportMap = async () => {
     if (!device?.map) return;
     setBusy("export");
@@ -428,8 +471,8 @@ export function ControllersPage() {
         <div className="controllers-notices">
           {keepsMaps ? null : (
             <AsyncNotice tone="info" title="No maps kept here">
-              This device shows a controller's controls. RackForge on a computer or a Raspberry Pi keeps
-              what you map them to.
+              This edition shows a controller's controls. RackForge on a computer, a phone or a Raspberry
+              Pi keeps what you map them to.
             </AsyncNotice>
           )}
           {notice ? (
@@ -472,7 +515,7 @@ export function ControllersPage() {
               {device.unknown
                 ? device.connected ? "No package knows this controller yet" : "This input is not connected"
                 : device.connected
-                  ? `Listening on ${device.source?.name ?? "its input"}`
+                  ? `Listening on ${device.source?.name ?? "its input"}${device.identified ? " · recognised by its identity" : ""}`
                   : device.orphaned
                     ? "Its package is no longer installed"
                     : "Not connected: mappings apply when it returns"}
@@ -513,6 +556,16 @@ export function ControllersPage() {
               ) : null}
             </div>
           </header>
+
+          {device.package?.output && !editingControls ? (
+            <ControllerOutputNotice
+              output={device.package.output}
+              shipped={device.package.trust === "official" || device.package.trust === "certified"}
+              canAnswer={keepsMaps}
+              busy={busy === "output"}
+              onAnswer={(allow) => void answerOutput(allow)}
+            />
+          ) : null}
 
           {editingControls ? (
             <section className="controllers-describe">

@@ -267,6 +267,8 @@ export interface RegisteredController {
   controller_id: string;
   source?: MidiSourceDescriptor;
   connected: boolean;
+  /** The device's Identity Reply chose the package, not its port name alone. */
+  identified?: boolean;
 }
 
 /** The portable `.rfmap` document. */

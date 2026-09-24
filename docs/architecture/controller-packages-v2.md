@@ -56,7 +56,7 @@ name_contains = ["oxygen 49"]
 exclude_contains = ["daw", "mcu"]
 
 # Optional: the Universal SysEx Identity Reply, the most reliable way to tell
-# models apart. Declared now; matched once hosts send the Identity Request.
+# models apart.
 [devices.sysex_identity]
 manufacturer = [0x00, 0x01, 0x05]
 family = 0x0027
@@ -67,6 +67,20 @@ Endpoint names and USB identity work as in schema 1. `sysex_identity` is new:
 the manufacturer ID (one byte, or three beginning with `0x00`), the 14-bit
 family and model codes of the Identity Reply. It never replaces the endpoint
 matcher, which stays the required positive identity.
+
+When a device some package claims by its port name connects, the host sends
+it the Identity Request (`F0 7E 7F 06 01 F7`) and waits 400 ms for the reply
+on that input. The reply then decides:
+
+- a package whose `sysex_identity` differs from the reply does not get the
+  device, however well its name matches;
+- of several packages that claim the same port name, the one whose identity
+  matches gets it;
+- a device that does not answer is bound by its name alone, as before.
+
+A reply that arrives late binds the device again. The Controllers section
+says when the device was recognised by its reply. The Pi's controller host,
+the desktop and Android all ask; the KeyLab's driver speaks for the KeyLab.
 
 `[runtime]` and `[permissions]` become optional. Left out, a package is
 declarative and asks for MIDI input only. A declarative schema 2 package needs
@@ -172,16 +186,49 @@ may still declare those inputs; the player's mappings and the editor use them.
 
 ### 4. Feedback
 
-Messages a declarative package may send, without code:
+Messages a declarative package sends when its controller connects, without
+code -- typically the SysEx that puts a keyboard in the mode the package
+describes:
 
 ```toml
+[permissions]
+midi_input = true
+midi_output = true
+sysex = true
+
 [[on_connect]]
-sysex = "F0 00 20 6B 7F 42 02 00 40 50 01 F7"
+message = "F0 00 20 6B 7F 42 02 00 40 50 01 F7"
+
+[[on_connect]]
+message = "B0 7F 00"
 ```
 
-and, later, LED states bound to inputs. A package with layer 4 asks for MIDI
-output and SysEx, which the player grants. Layer 4 is specified here and
-implemented after the editor.
+The rules for the messages:
+
+- Each is one complete message in hex bytes: a channel message, or one SysEx
+  message from `F0` to `F7` with 7-bit data. There are at most 32, of at most
+  1 KiB each.
+- System common and realtime messages (clock, start, stop, reset) are the
+  host's to send, never a package's.
+- The permissions follow from the messages exactly. `midi_output` is asked for
+  if and only if there are messages, and `sysex` if and only if one of them is
+  SysEx. The player therefore reads the request as what the package will do.
+- A driver sends its own messages, so `on_connect` belongs to declarative
+  packages only.
+
+Nothing is sent until the player allows it. The Controllers section shows
+the messages and an Allow button, and the answer is kept in the package's
+install record for its active version. A new version asks again, because what
+it sends may have changed. Packages RackForge ships (official and certified
+trust) are allowed as installed.
+
+Hosts send the messages once per connection, after the Identity Request had
+its answer or its 400 ms, with 20 ms between messages. A package allowed while
+its controller is connected sends at once. The route is
+`PUT /api/v1/controllers/{id}/output {"allow": true}` on every host that keeps
+controllers.
+
+LED states bound to inputs come later.
 
 ### 5. Driver
 
@@ -287,9 +334,11 @@ while the section is open, in addition to Learn's one-shot capture.
 2. The KeyLab package moves to schema 2; its driver reports the lowered
    profile. *(Done.)*
 3. The player's mappings and modes in Core, applied in PLAY; MIDI Learn writes
-   to them. *(Done on the Pi and the desktop, except Learn; Android, the
-   browser and the VST3 editor answer an empty list.)*
+   to them. *(Done on the Pi, the desktop and Android. The browser demo and
+   the VST3 editor show controllers and keep no maps.)*
 4. The Controllers section, with the live input feed; packages made from it.
+   *(Done.)*
 5. Published profiles for common controllers, from their vendors' charts.
-6. Feedback (layer 4) and SysEx identity matching.
+6. Feedback (layer 4) and SysEx identity matching. *(Done for connect
+   messages; LED states bound to inputs remain.)*
 7. LIVE: which slot a controller-and-plugin mapping follows, and Rack links.

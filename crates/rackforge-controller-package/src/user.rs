@@ -131,6 +131,7 @@ pub fn user_controller_manifest(
         roles: Vec::new(),
         actions: Vec::new(),
         source_id: None,
+        on_connect: Vec::new(),
         surfaces: Vec::new(),
         host_controls: Vec::new(),
         host_actions: Vec::new(),

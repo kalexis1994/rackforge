@@ -358,6 +358,8 @@ struct RegisteredSemanticProfile {
     profile: Option<SemanticControlProfile>,
     runtime_source_id: Option<rackforge_midi_api::MidiSourceId>,
     runtime_source_name: Option<String>,
+    /// The device's Identity Reply chose the package.
+    identified: bool,
 }
 
 struct ControlContext {
@@ -2874,6 +2876,7 @@ fn controller_maps(context: &ControlContext) -> ControlResponse {
                             .as_ref()
                             .is_some_and(|present| present.contains(&key.get()))
                     }),
+                    identified: registered.identified,
                 }
             })
             .collect(),
@@ -3276,6 +3279,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             actions,
             midi_source_name,
             semantic_profile,
+            identified,
         } => {
             let invalid = ClientId::new(&controller_id).is_err()
                 || controls
@@ -3340,6 +3344,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                                     profile: semantic_profile,
                                     runtime_source_id: resolved.0,
                                     runtime_source_name: resolved.1,
+                                    identified,
                                 },
                             );
                             previous

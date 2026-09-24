@@ -1880,6 +1880,18 @@ pub enum DesktopControllerEvent {
         data: [u8; 3],
         observed_at: Instant,
     },
+    /// A byte port opened: its device is asked which model it is.
+    MidiInputConnected {
+        name: String,
+    },
+    MidiInputLost {
+        name: String,
+    },
+    /// A device's answer to the Identity Request.
+    IdentityReply {
+        source: MidiSourceKey,
+        reply: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -3974,6 +3986,7 @@ fn reconcile_midi_inputs(
         if keylab_controller::little_driver(&name).is_some() {
             let _ = controller_sender.try_send(DesktopControllerEvent::Disconnected);
         }
+        let _ = controller_sender.try_send(DesktopControllerEvent::MidiInputLost { name });
         release_held_notes(sender, telemetry);
     }
     for name in &desired {
@@ -3991,6 +4004,11 @@ fn reconcile_midi_inputs(
                 println!("DESKTOP_MIDI_SOURCE_CONNECTED name={name:?}");
                 if keylab_controller::little_driver(name).is_some() {
                     let _ = controller_sender.try_send(DesktopControllerEvent::Connected);
+                } else {
+                    let _ =
+                        controller_sender.try_send(DesktopControllerEvent::MidiInputConnected {
+                            name: name.clone(),
+                        });
                 }
             }
             Err(error) => {
@@ -4051,6 +4069,17 @@ fn deliver_midi_message(
     telemetry: &AudioTelemetry,
     controller_sender: &SyncSender<DesktopControllerEvent>,
 ) {
+    // An Identity Reply is for the controller packages, not the instrument.
+    if (15..=17).contains(&message.len())
+        && message[..2] == [0xf0, 0x7e]
+        && message[3..5] == [0x06, 0x02]
+    {
+        let _ = controller_sender.try_send(DesktopControllerEvent::IdentityReply {
+            source,
+            reply: message.to_vec(),
+        });
+        return;
+    }
     if !message.is_empty() && message.len() <= 3 {
         let mut data = [0; 3];
         data[..message.len()].copy_from_slice(message);
@@ -4620,6 +4649,57 @@ fn discover_midi_outputs() -> Result<Vec<String>> {
     Ok(names)
 }
 
+/// The output port that talks back to the device behind an input port:
+/// Windows names both alike -- `Oxygen 49` and `Oxygen 49`, or
+/// `MIDIIN2 (KeyLab)` and `MIDIOUT2 (KeyLab)`.
+fn paired_output_name(input_name: &str, outputs: &[String]) -> Option<String> {
+    let exact = outputs.iter().find(|name| name.as_str() == input_name);
+    let renamed = input_name.replacen("MIDIIN", "MIDIOUT", 1);
+    exact
+        .or_else(|| outputs.iter().find(|name| **name == renamed))
+        .cloned()
+}
+
+/// Sends a controller package's messages -- the Identity Request, its
+/// connect messages -- to the device behind an input port, off the calling
+/// thread: the port is opened, written with a short pause between messages
+/// for a device changing modes, and closed.
+pub fn send_to_midi_device(input_name: &str, messages: Vec<Vec<u8>>) {
+    let input_name = input_name.to_owned();
+    let _ = thread::Builder::new()
+        .name("rackforge-controller-output".into())
+        .spawn(move || {
+            let result = (|| -> Result<()> {
+                let output = MidiOutput::new("rackforge-desktop-controller")
+                    .context("opening a Windows MIDI output client")?;
+                let ports = output.ports();
+                let names = ports
+                    .iter()
+                    .map(|port| output.port_name(port).unwrap_or_default())
+                    .collect::<Vec<_>>();
+                let name = paired_output_name(&input_name, &names)
+                    .with_context(|| format!("no MIDI output answers to {input_name:?}"))?;
+                let index = names
+                    .iter()
+                    .position(|candidate| *candidate == name)
+                    .expect("the paired name came from these ports");
+                let mut connection = output
+                    .connect(&ports[index], "rackforge-controller")
+                    .map_err(|error| anyhow::anyhow!("opening MIDI output {name:?}: {error}"))?;
+                for message in &messages {
+                    connection
+                        .send(message)
+                        .map_err(|error| anyhow::anyhow!("writing to {name:?}: {error}"))?;
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                eprintln!("DESKTOP_CONTROLLER_OUTPUT_FAILED input={input_name:?} error={error:#}");
+            }
+        });
+}
+
 fn release_held_notes(sender: &SyncSender<MidiPacket>, telemetry: &AudioTelemetry) {
     let packets = panic_packets(PanicScope::AllChannels);
     let count = packets.len();
@@ -4700,6 +4780,56 @@ mod tests {
         assert!(
             LOUDEST_INSTRUMENT_PEAK * gain <= rackforge_dsp::OUTPUT_KNEE,
             "the default gain drives the loudest instrument into the ceiling"
+        );
+    }
+
+    /// A package's messages go back to the device the input belongs to.
+    #[test]
+    fn an_input_is_answered_through_its_own_device_output() {
+        let outputs = [
+            "Microsoft GS Wavetable Synth".to_owned(),
+            "MIDIOUT2 (KeyLab Essential 61 mk3)".to_owned(),
+            "Oxygen 49".to_owned(),
+        ];
+        assert_eq!(
+            super::paired_output_name("Oxygen 49", &outputs).as_deref(),
+            Some("Oxygen 49")
+        );
+        assert_eq!(
+            super::paired_output_name("MIDIIN2 (KeyLab Essential 61 mk3)", &outputs).as_deref(),
+            Some("MIDIOUT2 (KeyLab Essential 61 mk3)")
+        );
+        assert_eq!(super::paired_output_name("nanoKONTROL2", &outputs), None);
+    }
+
+    /// Only a whole Identity Reply is taken from the stream for the packages.
+    #[test]
+    fn an_identity_reply_goes_to_the_packages_not_the_instrument() {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(4);
+        let (controller_sender, controller_receiver) = std::sync::mpsc::sync_channel(4);
+        let telemetry = super::AudioTelemetry::default();
+        let source = rackforge_midi_api::MidiSourceKey::new(9);
+        let reply = [
+            0xf0, 0x7e, 0x7f, 0x06, 0x02, 0x41, 0x1a, 0x02, 0x03, 0x00, 0x01, 0x02, 0x03, 0x04,
+            0xf7,
+        ];
+        super::deliver_midi_message(
+            &reply,
+            None,
+            None,
+            false,
+            source,
+            &sender,
+            &telemetry,
+            &controller_sender,
+        );
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(
+            controller_receiver.try_recv().unwrap(),
+            super::DesktopControllerEvent::IdentityReply {
+                source,
+                reply: reply.to_vec(),
+            }
         );
     }
 

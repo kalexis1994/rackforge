@@ -201,7 +201,9 @@ fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
             );
         }
         #[cfg(target_os = "linux")]
-        if let Err(error) = register_declarative_controllers(root) {
+        let mut declarative = DeclarativeControllers::default();
+        #[cfg(target_os = "linux")]
+        if let Err(error) = declarative.refresh(root) {
             eprintln!("DECLARATIVE_CONTROLLER_INITIAL_REGISTER_FAILED error={error:#}");
         }
         startup.advance(rackforge_startup::StartupPhase::ControlReady)?;
@@ -217,7 +219,7 @@ fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
         );
         loop {
             #[cfg(target_os = "linux")]
-            if let Err(error) = register_declarative_controllers(root) {
+            if let Err(error) = declarative.refresh(root) {
                 eprintln!("DECLARATIVE_CONTROLLER_REFRESH_FAILED error={error:#}");
             }
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -229,8 +231,9 @@ fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
         std::thread::Builder::new()
             .name("rackforge-declarative-controllers".into())
             .spawn(move || {
+                let mut declarative = DeclarativeControllers::default();
                 loop {
-                    if let Err(error) = register_declarative_controllers(&declarative_root) {
+                    if let Err(error) = declarative.refresh(&declarative_root) {
                         eprintln!("DECLARATIVE_CONTROLLER_REFRESH_FAILED error={error:#}");
                     }
                     std::thread::sleep(std::time::Duration::from_secs(2));
@@ -264,61 +267,204 @@ fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
     Ok(())
 }
 
+/// The MIDI inputs seen so far and what their devices said: each device is
+/// asked which model it is once per connection, and hears its package's
+/// connect messages once.
 #[cfg(target_os = "linux")]
-fn register_declarative_controllers(root: &Path) -> Result<usize> {
-    use midir::MidiInput;
+#[derive(Default)]
+struct DeclarativeControllers {
+    endpoints: std::collections::BTreeMap<String, SeenEndpoint>,
+}
 
-    let midi = MidiInput::new("rackforge-declarative-controller-discovery")?;
-    let store = PackageStore::new(root);
-    let mut registered = std::collections::BTreeSet::new();
-    for port in midi.ports() {
-        let endpoint_name = midi.port_name(&port)?;
-        let Some(binding) = store.resolve_declarative_input(&endpoint_name)? else {
-            continue;
-        };
-        if !registered.insert(binding.controller_id.clone()) {
-            bail!(
-                "declarative controller {} matches more than one MIDI input; refine its endpoint matcher",
-                binding.controller_id
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct SeenEndpoint {
+    identity: Option<rackforge_controller_package::IdentityReply>,
+    /// The packages whose connect messages went to this endpoint.
+    sent: std::collections::BTreeSet<String>,
+}
+
+#[cfg(target_os = "linux")]
+impl DeclarativeControllers {
+    fn refresh(&mut self, root: &Path) -> Result<usize> {
+        use midir::MidiInput;
+
+        let midi = MidiInput::new("rackforge-declarative-controller-discovery")?;
+        let names = midi
+            .ports()
+            .iter()
+            .map(|port| midi.port_name(port))
+            .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
+        drop(midi);
+        // A device unplugged is asked again when it comes back.
+        self.endpoints.retain(|name, _| names.contains(name));
+        let store = PackageStore::new(root);
+        for name in &names {
+            if self.endpoints.contains_key(name) {
+                continue;
+            }
+            // Only a device some package claims by name is asked: to choose
+            // between packages, or to confirm the one.
+            let claimed = !matches!(store.resolve_declarative_input(name), Ok(None));
+            let identity = if claimed { query_identity(name) } else { None };
+            if let Some(identity) = &identity {
+                println!(
+                    "DECLARATIVE_CONTROLLER_IDENTITY endpoint={name:?} manufacturer={:02X?} family={:#06x} model={:#06x}",
+                    identity.manufacturer, identity.family, identity.model
+                );
+            }
+            self.endpoints.insert(
+                name.clone(),
+                SeenEndpoint {
+                    identity,
+                    sent: Default::default(),
+                },
             );
         }
-        let command = SessionCommand::RegisterHostBindings {
-            controller_id: binding.controller_id.clone(),
-            // Declarative input remains part of the normal musical stream.
-            // Process-driver reservations are consuming by design, so do not
-            // reuse them here merely to publish the semantic profile.
-            controls: Vec::new(),
-            actions: Vec::new(),
-            midi_source_name: Some(endpoint_name.clone()),
-            semantic_profile: binding.semantic_profile,
-        };
-        let request = ControlRequest::Dispatch {
-            envelope: CommandEnvelope::new(
-                ClientId::new(format!("controller.{}", binding.controller_id))
-                    .map_err(anyhow::Error::msg)?,
-                NEXT_DECLARATIVE_COMMAND_ID.fetch_add(1, Ordering::Relaxed),
-                command,
-            ),
-        };
-        let endpoint = rackforge_control_api::transport::endpoint_from_env(default_control_socket)?;
-        match rackforge_control_api::transport::exchange(&endpoint, &request)? {
-            ControlResponse::CommandApplied { .. } => println!(
+        let mut registered = std::collections::BTreeSet::new();
+        for (endpoint_name, seen) in &mut self.endpoints {
+            let Some(binding) =
+                store.resolve_identified_input(endpoint_name, seen.identity.as_ref())?
+            else {
+                continue;
+            };
+            if !registered.insert(binding.controller_id.clone()) {
+                bail!(
+                    "declarative controller {} matches more than one MIDI input; refine its endpoint matcher",
+                    binding.controller_id
+                );
+            }
+            register_declarative_controller(endpoint_name, &binding)?;
+            if !binding.on_connect.is_empty() && seen.sent.insert(binding.controller_id.clone()) {
+                match send_to_endpoint(endpoint_name, &binding.on_connect) {
+                    Ok(()) => println!(
+                        "DECLARATIVE_CONTROLLER_ON_CONNECT id={} endpoint={endpoint_name:?} messages={}",
+                        binding.controller_id,
+                        binding.on_connect.len()
+                    ),
+                    Err(error) => eprintln!(
+                        "DECLARATIVE_CONTROLLER_ON_CONNECT_FAILED id={} endpoint={endpoint_name:?} error={error:#}",
+                        binding.controller_id
+                    ),
+                }
+            }
+        }
+        Ok(registered.len())
+    }
+}
+
+/// Asks the device behind an input which model it is, and waits briefly for
+/// its Identity Reply on that input. ALSA lets this listen beside the
+/// engine, which keeps its own subscription to the port.
+#[cfg(target_os = "linux")]
+fn query_identity(endpoint_name: &str) -> Option<rackforge_controller_package::IdentityReply> {
+    use midir::{Ignore, MidiInput};
+    use std::sync::mpsc;
+
+    let mut input = MidiInput::new("rackforge-controller-identity").ok()?;
+    input.ignore(Ignore::None);
+    let port = input
+        .ports()
+        .into_iter()
+        .find(|port| input.port_name(port).as_deref() == Ok(endpoint_name))?;
+    let (sender, receiver) = mpsc::channel();
+    let _connection = input
+        .connect(
+            &port,
+            "rackforge-controller-identity",
+            move |_, message, _| {
+                if let Some(reply) = rackforge_controller_package::IdentityReply::parse(message) {
+                    let _ = sender.send(reply);
+                }
+            },
+            (),
+        )
+        .ok()?;
+    if let Err(error) = send_to_endpoint(
+        endpoint_name,
+        &[rackforge_controller_package::IDENTITY_REQUEST.to_vec()],
+    ) {
+        eprintln!(
+            "DECLARATIVE_CONTROLLER_IDENTITY_UNASKED endpoint={endpoint_name:?} error={error:#}"
+        );
+        return None;
+    }
+    receiver
+        .recv_timeout(std::time::Duration::from_millis(
+            rackforge_controller_package::IDENTITY_REPLY_WINDOW_MS,
+        ))
+        .ok()
+}
+
+/// Writes messages to the output port of the device behind an input: ALSA
+/// names a device port's two directions alike.
+#[cfg(target_os = "linux")]
+fn send_to_endpoint(endpoint_name: &str, messages: &[Vec<u8>]) -> Result<()> {
+    use midir::MidiOutput;
+
+    let output = MidiOutput::new("rackforge-controller-output")?;
+    let port = output
+        .ports()
+        .into_iter()
+        .find(|port| output.port_name(port).as_deref() == Ok(endpoint_name))
+        .with_context(|| format!("no MIDI output answers to {endpoint_name:?}"))?;
+    let mut connection = output
+        .connect(&port, "rackforge-controller-output")
+        .map_err(|error| anyhow::anyhow!("opening MIDI output {endpoint_name:?}: {error}"))?;
+    for message in messages {
+        connection
+            .send(message)
+            .map_err(|error| anyhow::anyhow!("writing to {endpoint_name:?}: {error}"))?;
+        // A device may need a moment between mode changes.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn register_declarative_controller(
+    endpoint_name: &str,
+    binding: &rackforge_controller_package::DeclarativeControllerBinding,
+) -> Result<()> {
+    let command = SessionCommand::RegisterHostBindings {
+        controller_id: binding.controller_id.clone(),
+        // Declarative input remains part of the normal musical stream.
+        // Process-driver reservations are consuming by design, so do not
+        // reuse them here merely to publish the semantic profile.
+        controls: Vec::new(),
+        actions: Vec::new(),
+        midi_source_name: Some(endpoint_name.to_owned()),
+        semantic_profile: binding.semantic_profile.clone(),
+        identified: binding.identified,
+    };
+    let request = ControlRequest::Dispatch {
+        envelope: CommandEnvelope::new(
+            ClientId::new(format!("controller.{}", binding.controller_id))
+                .map_err(anyhow::Error::msg)?,
+            NEXT_DECLARATIVE_COMMAND_ID.fetch_add(1, Ordering::Relaxed),
+            command,
+        ),
+    };
+    let endpoint = rackforge_control_api::transport::endpoint_from_env(default_control_socket)?;
+    match rackforge_control_api::transport::exchange(&endpoint, &request)? {
+        ControlResponse::CommandApplied { .. } => {
+            println!(
                 "DECLARATIVE_CONTROLLER_REGISTERED id={} endpoint={:?}",
                 binding.controller_id, endpoint_name
-            ),
-            ControlResponse::Error { message, .. } => {
-                bail!(
-                    "registering declarative controller {}: {message}",
-                    binding.controller_id
-                )
-            }
-            response => bail!(
-                "registering declarative controller {} returned {response:?}",
-                binding.controller_id
-            ),
+            );
+            Ok(())
         }
+        ControlResponse::Error { message, .. } => {
+            bail!(
+                "registering declarative controller {}: {message}",
+                binding.controller_id
+            )
+        }
+        response => bail!(
+            "registering declarative controller {} returned {response:?}",
+            binding.controller_id
+        ),
     }
-    Ok(registered.len())
 }
 
 #[cfg(target_os = "linux")]

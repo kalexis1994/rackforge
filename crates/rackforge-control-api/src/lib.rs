@@ -993,6 +993,10 @@ pub struct RegisteredController {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<MidiSourceDescriptor>,
     pub connected: bool,
+    /// The device answered the Identity Request with the package's identity,
+    /// rather than being matched by its port name alone.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub identified: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

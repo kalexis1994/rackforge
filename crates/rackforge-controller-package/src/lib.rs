@@ -11,10 +11,15 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
+pub mod feedback;
 pub mod inputs;
 pub mod supervise;
 pub mod user;
 
+pub use feedback::{
+    IDENTITY_REPLY_WINDOW_MS, IDENTITY_REQUEST, IdentityReply, OnConnectMessage, OutputState,
+    OutputSummary,
+};
 pub use inputs::{
     ButtonReport, ControllerInput, EncoderEncoding, InputAction, InputKind, InputMessage,
     InputMidi, InputRole, SysexIdentity,
@@ -227,8 +232,9 @@ impl PartialOrd for EndpointRole {
     }
 }
 
+/// What a package may do. A permission left out is not granted.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct ControllerPermissions {
     pub midi_input: bool,
     pub midi_output: bool,
@@ -241,7 +247,11 @@ pub struct ControllerPermissions {
 }
 
 impl ControllerPermissions {
-    fn validate(self, runtime: DriverRuntimeKind) -> Result<(), PackageError> {
+    fn validate(
+        self,
+        runtime: DriverRuntimeKind,
+        on_connect: &[OnConnectMessage],
+    ) -> Result<(), PackageError> {
         if !self.midi_input {
             return Err(PackageError::InvalidManifest(
                 "controller packages require MIDI input".into(),
@@ -253,13 +263,31 @@ impl ControllerPermissions {
                     .into(),
             ));
         }
-        if runtime == DriverRuntimeKind::DeclarativeV1
-            && (self.midi_output || self.sysex || self.usb_metadata)
-        {
-            return Err(PackageError::InvalidManifest(
-                "declarative-v1 is input-only and cannot request MIDI output, SysEx or USB metadata"
-                    .into(),
-            ));
+        if runtime == DriverRuntimeKind::DeclarativeV1 {
+            if self.usb_metadata {
+                return Err(PackageError::InvalidManifest(
+                    "declarative-v1 cannot request USB metadata".into(),
+                ));
+            }
+            // A declarative package sends only its on_connect messages, and
+            // asks for exactly what they need: the player reads the request
+            // as what the package will do.
+            let sends = !on_connect.is_empty();
+            if self.midi_output != sends {
+                return Err(PackageError::InvalidManifest(if sends {
+                    "a package that sends on_connect messages asks for midi_output".into()
+                } else {
+                    "declarative-v1 asks for MIDI output only to send on_connect messages".into()
+                }));
+            }
+            let sysex = feedback::sends_sysex(on_connect);
+            if self.sysex != sysex {
+                return Err(PackageError::InvalidManifest(if sysex {
+                    "a package that sends SysEx on connect asks for sysex".into()
+                } else {
+                    "declarative-v1 asks for SysEx only when an on_connect message is SysEx".into()
+                }));
+            }
         }
         if runtime != DriverRuntimeKind::DeclarativeV1 && !self.midi_output {
             return Err(PackageError::InvalidManifest(
@@ -281,6 +309,11 @@ pub struct DeclarativeControllerBinding {
     pub host_controls: Vec<HostControlBinding>,
     pub host_actions: Vec<HostActionBinding>,
     pub semantic_profile: Option<SemanticControlProfile>,
+    /// Whether the device's Identity Reply matched the package's.
+    pub identified: bool,
+    pub output_state: OutputState,
+    /// What to send when the controller connects: empty until allowed.
+    pub on_connect: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -289,6 +322,8 @@ pub struct DeclarativeMidiDevice<'a> {
     pub product_name: Option<&'a str>,
     pub usb_vendor_id: Option<u16>,
     pub usb_product_id: Option<u16>,
+    /// The device's answer to the Identity Request, when it gave one.
+    pub identity: Option<&'a IdentityReply>,
 }
 
 impl DeviceMatcher {
@@ -317,7 +352,20 @@ impl DeviceMatcher {
         {
             return false;
         }
+        // A device that said which model it is is not another model, however
+        // alike their port names.
+        if let (Some(expected), Some(reply)) = (&self.sysex_identity, device.identity)
+            && !expected.matches(reply)
+        {
+            return false;
+        }
         true
+    }
+
+    fn identifies(&self, device: DeclarativeMidiDevice<'_>) -> bool {
+        self.sysex_identity.is_some()
+            && device.identity.is_some()
+            && self.matches_declarative_device(device)
     }
 }
 
@@ -431,6 +479,10 @@ pub struct ControllerPackageManifest {
     /// its old one, so what a player learnt on its controls stays linked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
+    /// Schema 2, layer 4: messages sent to the controller when it connects,
+    /// once the player allows it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub on_connect: Vec<OnConnectMessage>,
     #[serde(default)]
     pub surfaces: Vec<SurfaceImplementation>,
     #[serde(default)]
@@ -579,7 +631,8 @@ impl ControllerPackageManifest {
             validate_target(target)?;
             validate_relative_path(entrypoint)?;
         }
-        self.permissions.validate(self.runtime.kind)?;
+        self.permissions
+            .validate(self.runtime.kind, &self.on_connect)?;
         if self.devices.is_empty() {
             return Err(PackageError::InvalidManifest(
                 "controller package requires at least one device matcher".into(),
@@ -700,14 +753,15 @@ impl ControllerPackageManifest {
             || !self.roles.is_empty()
             || !self.actions.is_empty()
             || self.source_id.is_some()
+            || !self.on_connect.is_empty()
             || self
                 .devices
                 .iter()
                 .any(|device| device.sysex_identity.is_some())
         {
             return Err(PackageError::InvalidManifest(
-                "vendor, inputs, roles, actions, source_id and sysex_identity need \
-                 schema_version = 2"
+                "vendor, inputs, roles, actions, source_id, on_connect and sysex_identity \
+                 need schema_version = 2"
                     .into(),
             ));
         }
@@ -737,6 +791,14 @@ impl ControllerPackageManifest {
         if let Some(source_id) = &self.source_id {
             validate_identifier(source_id)?;
         }
+        if !self.on_connect.is_empty() && !self.is_declarative() {
+            return Err(PackageError::InvalidManifest(
+                "a driver sends its controller's messages itself; on_connect is for \
+                 declarative packages"
+                    .into(),
+            ));
+        }
+        feedback::validate_on_connect(&self.on_connect).map_err(PackageError::InvalidManifest)?;
         inputs::validate_inputs(&self.inputs, &self.roles, &self.actions)
             .map_err(PackageError::InvalidManifest)
     }
@@ -1009,12 +1071,62 @@ pub struct InstallRecord {
     pub version: String,
     pub trust: PackageTrust,
     pub enabled: bool,
+    /// The version whose on_connect messages the player allowed. A new
+    /// version asks again: what it sends may have changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_allowed_version: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct InstalledController {
     pub record: InstallRecord,
     pub package: ControllerPackage,
+}
+
+impl InstalledController {
+    /// Whether RackForge sends this package's messages to its controller.
+    /// RackForge's own packages and certified ones are allowed as installed.
+    pub fn output_state(&self) -> OutputState {
+        if self.package.manifest().on_connect.is_empty() {
+            OutputState::None
+        } else if matches!(
+            self.record.trust,
+            PackageTrust::Official | PackageTrust::Certified
+        ) || self.record.output_allowed_version.as_deref() == Some(&self.record.version)
+        {
+            OutputState::Allowed
+        } else {
+            OutputState::Asked
+        }
+    }
+
+    /// What the package asks to send, as the catalog shows it to the player.
+    pub fn output_summary(&self) -> OutputSummary {
+        OutputSummary {
+            state: self.output_state(),
+            messages: self
+                .package
+                .manifest()
+                .on_connect
+                .iter()
+                .map(|message| message.message.clone())
+                .collect(),
+            sysex: self.package.manifest().permissions.sysex,
+        }
+    }
+
+    /// The messages to send when the controller connects: none until allowed.
+    pub fn on_connect_messages(&self) -> Vec<Vec<u8>> {
+        if self.output_state() != OutputState::Allowed {
+            return Vec::new();
+        }
+        self.package
+            .manifest()
+            .on_connect
+            .iter()
+            .filter_map(|message| message.bytes().ok())
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1050,12 +1162,18 @@ impl PackageStore {
                     version: version.clone(),
                 });
             }
+            // The same package again: what the player allowed it still holds.
+            let output_allowed_version = self
+                .read_active_record(id)
+                .ok()
+                .and_then(|record| record.output_allowed_version);
             self.write_active_record(&InstallRecord {
                 schema_version: INSTALL_RECORD_SCHEMA_VERSION,
                 id: id.clone(),
                 version: version.clone(),
                 trust,
                 enabled: true,
+                output_allowed_version,
             })?;
             return self.resolve(id);
         }
@@ -1080,12 +1198,17 @@ impl PackageStore {
             fs::create_dir_all(parent)?;
         }
         fs::rename(&staging, &destination)?;
+        let output_allowed_version = self
+            .read_active_record(id)
+            .ok()
+            .and_then(|record| record.output_allowed_version);
         let record = InstallRecord {
             schema_version: INSTALL_RECORD_SCHEMA_VERSION,
             id: id.clone(),
             version: version.clone(),
             trust,
             enabled: true,
+            output_allowed_version,
         };
         if let Err(error) = self.write_active_record(&record) {
             let _ = fs::remove_dir_all(&destination);
@@ -1128,7 +1251,17 @@ impl PackageStore {
             version: version.into(),
             trust: current.trust,
             enabled: current.enabled,
+            output_allowed_version: current.output_allowed_version,
         })?;
+        self.resolve(id)
+    }
+
+    /// Records whether the player lets the active version of a package send
+    /// its on_connect messages.
+    pub fn allow_output(&self, id: &str, allow: bool) -> Result<InstalledController, PackageError> {
+        let mut record = self.read_active_record(id)?;
+        record.output_allowed_version = allow.then(|| record.version.clone());
+        self.write_active_record(&record)?;
         self.resolve(id)
     }
 
@@ -1163,11 +1296,22 @@ impl PackageStore {
         &self,
         endpoint_name: &str,
     ) -> Result<Option<DeclarativeControllerBinding>, PackageError> {
+        self.resolve_identified_input(endpoint_name, None)
+    }
+
+    /// As [`Self::resolve_declarative_input`], with the device's answer to
+    /// the Identity Request when the host asked and it replied.
+    pub fn resolve_identified_input(
+        &self,
+        endpoint_name: &str,
+        identity: Option<&IdentityReply>,
+    ) -> Result<Option<DeclarativeControllerBinding>, PackageError> {
         self.resolve_declarative_device(DeclarativeMidiDevice {
             endpoint_name,
             product_name: None,
             usb_vendor_id: None,
             usb_product_id: None,
+            identity,
         })
     }
 
@@ -1179,6 +1323,18 @@ impl PackageStore {
         if endpoint_name.is_empty() || endpoint_name.contains('\0') {
             return Err(PackageError::InvalidEndpointName);
         }
+        let device = DeclarativeMidiDevice {
+            endpoint_name,
+            ..device
+        };
+        let identifies = |installed: &InstalledController| {
+            installed
+                .package
+                .manifest()
+                .devices
+                .iter()
+                .any(|matcher| matcher.identifies(device))
+        };
         let mut matches = self
             .list()?
             .into_iter()
@@ -1186,14 +1342,19 @@ impl PackageStore {
                 installed.record.enabled && installed.package.manifest().is_declarative()
             })
             .filter(|installed| {
-                installed.package.manifest().devices.iter().any(|matcher| {
-                    matcher.matches_declarative_device(DeclarativeMidiDevice {
-                        endpoint_name,
-                        ..device
-                    })
-                })
+                installed
+                    .package
+                    .manifest()
+                    .devices
+                    .iter()
+                    .any(|matcher| matcher.matches_declarative_device(device))
             })
             .collect::<Vec<_>>();
+        // Several packages claim the port name: the one that knows the
+        // device's Identity Reply is the one it belongs to.
+        if matches.len() > 1 && matches.iter().any(identifies) {
+            matches.retain(identifies);
+        }
         if matches.len() > 1 {
             matches.sort_by(|left, right| left.record.id.cmp(&right.record.id));
             return Err(PackageError::AmbiguousDeviceMatch {
@@ -1214,6 +1375,9 @@ impl PackageStore {
                 host_controls: profile.host_controls,
                 host_actions: profile.host_actions,
                 semantic_profile: profile.semantic_profile,
+                identified: identifies(&installed),
+                output_state: installed.output_state(),
+                on_connect: installed.on_connect_messages(),
             }
         }))
     }
@@ -1490,6 +1654,7 @@ mod tests {
             roles: Vec::new(),
             actions: Vec::new(),
             source_id: None,
+            on_connect: Vec::new(),
             surfaces: vec![SurfaceImplementation {
                 layout_id: "little@1".into(),
                 quality: SurfaceQuality::Native,
@@ -1543,6 +1708,7 @@ mod tests {
             roles: Vec::new(),
             actions: Vec::new(),
             source_id: None,
+            on_connect: Vec::new(),
             surfaces: Vec::new(),
             host_controls: vec![HostControlBinding {
                 target: HostControlTarget::MasterLevel,
@@ -1619,6 +1785,7 @@ mod tests {
                     product_name: None,
                     usb_vendor_id: Some(0xabcd),
                     usb_product_id: Some(0x5678),
+                    identity: None,
                 })
                 .unwrap()
                 .is_none()
@@ -1916,6 +2083,170 @@ target = "keyboard_parts"
         let mut future: ControllerPackageManifest = toml::from_str(SCHEMA_2).unwrap();
         future.schema_version = 3;
         assert!(future.validate().is_err());
+
+        schema_1 = declarative_manifest("org.rackforge.generic-midi", "generic midi");
+        schema_1.on_connect.push(OnConnectMessage {
+            message: "B0 7F 00".into(),
+        });
+        schema_1.permissions.midi_output = true;
+        assert!(schema_1.validate().is_err());
+    }
+
+    fn sending(messages: &[&str]) -> ControllerPackageManifest {
+        let mut manifest: ControllerPackageManifest = toml::from_str(SCHEMA_2).unwrap();
+        manifest.on_connect = messages
+            .iter()
+            .map(|message| OnConnectMessage {
+                message: (*message).into(),
+            })
+            .collect();
+        manifest
+    }
+
+    #[test]
+    fn a_package_asks_for_exactly_the_output_its_messages_need() {
+        // Sends, but asks for nothing.
+        let mut manifest = sending(&["B0 7F 00"]);
+        assert!(manifest.validate().is_err());
+        manifest.permissions.midi_output = true;
+        manifest.validate().unwrap();
+        // Asks for SysEx it never sends.
+        manifest.permissions.sysex = true;
+        assert!(manifest.validate().is_err());
+
+        let mut manifest = sending(&["F0 00 20 6B 7F 42 02 00 40 50 01 F7"]);
+        manifest.permissions.midi_output = true;
+        assert!(manifest.validate().is_err());
+        manifest.permissions.sysex = true;
+        manifest.validate().unwrap();
+
+        // Asks for output with nothing to send.
+        let mut manifest = sending(&[]);
+        manifest.permissions.midi_output = true;
+        assert!(manifest.validate().is_err());
+
+        let mut manifest = sending(&["F0 00 20 F7", "F8"]);
+        manifest.permissions.midi_output = true;
+        manifest.permissions.sysex = true;
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn nothing_is_sent_until_the_player_allows_this_version() {
+        let sources = TestDirectory::new("output-sources");
+        let store_root = TestDirectory::new("output-store");
+        let store = PackageStore::new(&store_root.0);
+        let install = |manifest: &ControllerPackageManifest, trust| {
+            let root = sources.0.join(&manifest.version);
+            fs::create_dir_all(&root).unwrap();
+            fs::write(
+                root.join(CONTROLLER_MANIFEST_FILE),
+                toml::to_string_pretty(manifest).unwrap(),
+            )
+            .unwrap();
+            store.install_directory(root, trust).unwrap()
+        };
+
+        let mut manifest = sending(&["F0 7D 01 F7"]);
+        manifest.permissions.midi_output = true;
+        manifest.permissions.sysex = true;
+        let installed = install(&manifest, PackageTrust::Local);
+        assert_eq!(installed.output_state(), OutputState::Asked);
+        let binding = store
+            .resolve_declarative_input("Oxygen 49 MIDI 1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.output_state, OutputState::Asked);
+        assert!(binding.on_connect.is_empty());
+
+        store.allow_output(&manifest.id, true).unwrap();
+        let binding = store
+            .resolve_declarative_input("Oxygen 49 MIDI 1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.output_state, OutputState::Allowed);
+        assert_eq!(binding.on_connect, vec![vec![0xf0, 0x7d, 0x01, 0xf7]]);
+
+        // Installing the same version again keeps the answer; a new version
+        // asks again.
+        assert_eq!(
+            install(&manifest, PackageTrust::Local).output_state(),
+            OutputState::Allowed
+        );
+        manifest.version = "1.1.0".into();
+        manifest.on_connect[0].message = "F0 7D 02 F7".into();
+        assert_eq!(
+            install(&manifest, PackageTrust::Local).output_state(),
+            OutputState::Asked
+        );
+
+        // RackForge's own packages are allowed as installed.
+        manifest.version = "1.2.0".into();
+        assert_eq!(
+            install(&manifest, PackageTrust::Official).output_state(),
+            OutputState::Allowed
+        );
+        store.allow_output(&manifest.id, false).unwrap();
+    }
+
+    #[test]
+    fn an_identity_reply_tells_apart_models_that_share_a_port_name() {
+        let sources = TestDirectory::new("identity-sources");
+        let store_root = TestDirectory::new("identity-store");
+        let store = PackageStore::new(&store_root.0);
+        let install = |manifest: &ControllerPackageManifest| {
+            let root = sources.0.join(&manifest.id);
+            fs::create_dir_all(&root).unwrap();
+            fs::write(
+                root.join(CONTROLLER_MANIFEST_FILE),
+                toml::to_string_pretty(manifest).unwrap(),
+            )
+            .unwrap();
+            store
+                .install_directory(root, PackageTrust::Community)
+                .unwrap();
+        };
+        // The Oxygen 49 of SCHEMA_2, family 0x27 model 1, and a second
+        // generation under the same port name, model 2.
+        let first: ControllerPackageManifest = toml::from_str(SCHEMA_2).unwrap();
+        let mut second = first.clone();
+        second.id = "user.m-audio-oxygen-49-mk2".into();
+        second.devices[0].sysex_identity.as_mut().unwrap().model = 2;
+        install(&first);
+        install(&second);
+
+        let reply = |model: u8| {
+            IdentityReply::parse(&[
+                0xf0, 0x7e, 0x7f, 0x06, 0x02, 0x00, 0x01, 0x05, 0x27, 0x00, model, 0x00, 0x01,
+                0x00, 0x00, 0x00, 0xf7,
+            ])
+            .unwrap()
+        };
+        let port = "Oxygen 49:Oxygen 49 MIDI 1 28:0";
+        // Without an answer, the name alone cannot choose.
+        assert!(matches!(
+            store.resolve_declarative_input(port),
+            Err(PackageError::AmbiguousDeviceMatch { .. })
+        ));
+        let binding = store
+            .resolve_identified_input(port, Some(&reply(2)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.controller_id, "user.m-audio-oxygen-49-mk2");
+        assert!(binding.identified);
+        let binding = store
+            .resolve_identified_input(port, Some(&reply(1)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.controller_id, "user.m-audio-oxygen-49");
+
+        // A third model neither package knows is neither of them.
+        assert!(
+            store
+                .resolve_identified_input(port, Some(&reply(3)))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

@@ -2076,6 +2076,7 @@ fn register_controller_bindings(midi_source_name: Option<&str>) -> Result<(), St
         actions: profile.host_actions.clone(),
         midi_source_name: midi_source_name.map(str::to_owned),
         semantic_profile: profile.semantic_profile.clone(),
+        identified: false,
     })?;
     println!(
         "HOST_BINDINGS_RESERVED controller={} controls={} actions={} semantic={}",

@@ -594,6 +594,10 @@ async fn main() -> Result<()> {
             axum::routing::put(apply_controller_settings),
         )
         .route(
+            "/api/v1/controllers/{controller_id}/output",
+            axum::routing::put(allow_controller_output),
+        )
+        .route(
             "/api/v1/plugins/{plugin_id}",
             get(plugin_web_descriptor).delete(uninstall_managed_plugin),
         )
@@ -1292,12 +1296,37 @@ async fn controller_catalog(
                 "inputs": editor.inputs,
                 "roles": editor.roles,
                 "actions": editor.actions,
+                "output": controller.output_summary(),
             })
         })
         .collect();
     Ok(Json(
         serde_json::json!({"status": "ok", "controllers": controllers}),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ControllerOutputRequest {
+    allow: bool,
+}
+
+/// The player allows -- or stops -- a package's messages to its controller.
+/// The controller host sends them on its next pass over the inputs.
+async fn allow_controller_output(
+    axum::extract::Path(controller_id): axum::extract::Path<String>,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ControllerOutputRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    require_authorized(&state, &headers)?;
+    let installed = rackforge_controller_package::PackageStore::new(&state.controllers_root)
+        .allow_output(&controller_id, request.allow)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "id": installed.record.id,
+        "output": installed.output_summary(),
+    })))
 }
 
 #[derive(Debug, Deserialize)]

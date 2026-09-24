@@ -25,7 +25,7 @@ import {
   saveControllerMap,
   upsertParameterLink,
 } from "../gateway";
-import { hostJson, IS_BROWSER_HOST, isNativeHost } from "../host";
+import { hostJson, hostKeepsControllerMaps } from "../host";
 import { randomIdToken } from "../ids";
 import type {
   ControlMapping,
@@ -58,11 +58,6 @@ async function loadControllerData(): Promise<ControllerData> {
       .catch(() => []),
   ]);
   return { controllers: maps.controllers, maps: maps.maps, packages };
-}
-
-/** Only a host that keeps controller maps is offered one. */
-function hostKeepsMaps() {
-  return !IS_BROWSER_HOST && !isNativeHost();
 }
 
 const PARAMETER_ATTRIBUTE = "data-rackforge-parameter-index";
@@ -176,7 +171,7 @@ export function ParameterLinkHost({
   const activeLink = target
     ? links.find((link) => link.instance_id === instanceId && link.parameter_index === target.parameterIndex)
     : undefined;
-  const mapsHere = Boolean(pluginId) && hostKeepsMaps();
+  const mapsHere = Boolean(pluginId) && hostKeepsControllerMaps();
   const mappedHere = target && pluginId && targetParameterId && controllerData
     ? mappingsForParameter(controllerData.maps, pluginId, targetParameterId)
     : [];

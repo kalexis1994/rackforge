@@ -162,6 +162,13 @@ struct RegisteredSemanticProfile {
     runtime_source_name: Option<String>,
     host_controls: Vec<HostControlBinding>,
     host_actions: Vec<HostActionBinding>,
+    /// Attached by the desktop from a declarative package, not registered by
+    /// a driver: attached again whenever an input or a package changes.
+    declarative: bool,
+    /// The device's Identity Reply chose the package.
+    identified: bool,
+    /// What the package sends when its controller connects, once allowed.
+    on_connect: Vec<Vec<u8>>,
 }
 
 #[cfg(windows)]
@@ -510,6 +517,14 @@ struct DesktopApp {
     controller_map_store: ControllerMapStore,
     /// What came in lately, for the Controllers editor.
     midi_activity: rackforge_core::midi_activity::MidiActivityLog,
+    /// What each connected input's device answered to the Identity Request.
+    midi_identities: BTreeMap<String, rackforge_controller_package::IdentityReply>,
+    /// Inputs asked which model they are, and when their answer stops being
+    /// waited for.
+    pending_controller_connects: BTreeMap<String, Instant>,
+    /// The (input, package) pairs whose connect messages went out while the
+    /// input stayed connected.
+    controller_output_sent: BTreeSet<(String, String)>,
     virtual_midi: BTreeMap<ClientId, VirtualMidiClientState>,
     next_program_draft_id: u64,
     next_audition_lease_id: u64,
@@ -803,7 +818,11 @@ impl DesktopApp {
         }
         #[cfg(windows)]
         let controller_semantic_profiles = match audio_preferences.as_ref().map(|preferences| {
-            declarative_semantic_profiles(&options.rackforge_root, &preferences.midi_inputs)
+            declarative_semantic_profiles(
+                &options.rackforge_root,
+                &preferences.midi_inputs,
+                &BTreeMap::new(),
+            )
         }) {
             Some(Ok(profiles)) => profiles,
             Some(Err(error)) => {
@@ -918,6 +937,9 @@ impl DesktopApp {
             controller_maps,
             controller_map_store,
             midi_activity: Default::default(),
+            midi_identities: BTreeMap::new(),
+            pending_controller_connects: BTreeMap::new(),
+            controller_output_sent: BTreeSet::new(),
             virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
@@ -2270,6 +2292,7 @@ impl DesktopApp {
             let Some(event) = event else { break };
             self.handle_controller_event(event);
         }
+        self.poll_controller_connects();
         if !self.controller_home_chord_emitted
             && let (Some(ok), Some(back)) = (
                 self.controller_button_down[0],
@@ -2491,6 +2514,11 @@ impl DesktopApp {
             DesktopControllerEvent::Connected => {
                 self.status = "Arturia KeyLab connected · LITTLE active".into();
                 self.render_controller_screen();
+            }
+            DesktopControllerEvent::MidiInputConnected { name } => self.midi_input_connected(name),
+            DesktopControllerEvent::MidiInputLost { name } => self.midi_input_lost(&name),
+            DesktopControllerEvent::IdentityReply { source, reply } => {
+                self.midi_identity_reply(source, &reply)
             }
             DesktopControllerEvent::Disconnected => {
                 for index in 0..4 {
@@ -2736,6 +2764,14 @@ impl DesktopApp {
                         })
                         .map_err(|error| format!("{error:#}"));
                     let _ = response.send(result);
+                }
+                web::DesktopControlCall::ControllerOutputChanged => {
+                    // A package allowed now sends to a controller already
+                    // connected, and one stopped is sent to no more.
+                    #[cfg(windows)]
+                    if let Err(message) = self.reload_declarative_controllers() {
+                        eprintln!("DECLARATIVE_CONTROLLER_NOT_ATTACHED error={message}");
+                    }
                 }
             }
         }
@@ -3300,6 +3336,7 @@ impl DesktopApp {
                 // Only inputs the player enabled are registered here, and a
                 // registration is dropped with its input.
                 connected: registered.runtime_source_id.is_some(),
+                identified: registered.identified,
             })
             .collect();
         ControlResponse::ControllerMaps {
@@ -3318,8 +3355,16 @@ impl DesktopApp {
             .as_ref()
             .map(|preferences| preferences.midi_inputs.clone())
             .unwrap_or_default();
-        let profiles = declarative_semantic_profiles(&self.options.rackforge_root, &approved)
-            .map_err(|error| format!("{error:#}"))?;
+        let profiles = declarative_semantic_profiles(
+            &self.options.rackforge_root,
+            &approved,
+            &self.midi_identities,
+        )
+        .map_err(|error| format!("{error:#}"))?;
+        // What an answer or a new package changed replaces what was attached
+        // before; what a driver registered stays.
+        self.controller_semantic_profiles
+            .retain(|_, registered| !registered.declarative);
         self.controller_semantic_profiles.extend(profiles);
         let links = self
             .session
@@ -3327,7 +3372,123 @@ impl DesktopApp {
             .expect("session lock poisoned")
             .parameter_links
             .clone();
-        self.replace_parameter_links(links)
+        let result = self.replace_parameter_links(links);
+        self.send_controller_connect_messages();
+        result
+    }
+
+    /// An enabled input connected: its device is asked which model it is,
+    /// and its package attached once it answered or the wait ran out.
+    #[cfg(windows)]
+    fn midi_input_connected(&mut self, name: String) {
+        let approved = self
+            .audio_preferences
+            .as_ref()
+            .is_some_and(|preferences| preferences.midi_inputs.contains(&name));
+        if !approved {
+            return;
+        }
+        desktop_audio::send_to_midi_device(
+            &name,
+            vec![rackforge_controller_package::IDENTITY_REQUEST.to_vec()],
+        );
+        self.pending_controller_connects.insert(
+            name,
+            Instant::now()
+                + Duration::from_millis(rackforge_controller_package::IDENTITY_REPLY_WINDOW_MS),
+        );
+    }
+
+    #[cfg(windows)]
+    fn midi_input_lost(&mut self, name: &str) {
+        self.midi_identities.remove(name);
+        self.pending_controller_connects.remove(name);
+        self.controller_output_sent
+            .retain(|(endpoint, _)| endpoint != name);
+    }
+
+    #[cfg(windows)]
+    fn midi_identity_reply(&mut self, source: MidiSourceKey, reply: &[u8]) {
+        let Some(identity) = rackforge_controller_package::IdentityReply::parse(reply) else {
+            return;
+        };
+        let Some(name) = self.audio_preferences.as_ref().and_then(|preferences| {
+            preferences
+                .midi_inputs
+                .iter()
+                .find(|name| desktop_audio::stable_midi_source_key(name) == source)
+                .cloned()
+        }) else {
+            return;
+        };
+        println!(
+            "DESKTOP_MIDI_IDENTITY name={name:?} manufacturer={:02X?} family={:#06x} model={:#06x}",
+            identity.manufacturer, identity.family, identity.model
+        );
+        let known = self.midi_identities.insert(name.clone(), identity.clone());
+        // A device that answered after the wait is attached again now.
+        if !self.pending_controller_connects.contains_key(&name) && known != Some(identity) {
+            if let Err(message) = self.reload_declarative_controllers() {
+                eprintln!("DECLARATIVE_CONTROLLER_NOT_ATTACHED error={message}");
+            }
+        }
+    }
+
+    /// Attaches the packages of the inputs whose Identity Reply was waited
+    /// for long enough.
+    #[cfg(windows)]
+    fn poll_controller_connects(&mut self) {
+        let now = Instant::now();
+        let due = self
+            .pending_controller_connects
+            .iter()
+            .filter(|(_, deadline)| **deadline <= now)
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        if due.is_empty() {
+            return;
+        }
+        for name in &due {
+            self.pending_controller_connects.remove(name);
+        }
+        if let Err(message) = self.reload_declarative_controllers() {
+            eprintln!("DECLARATIVE_CONTROLLER_NOT_ATTACHED error={message}");
+        }
+    }
+
+    /// Sends each attached package's connect messages to its controller,
+    /// once per connection, and only after the device had its chance to say
+    /// which model it is.
+    #[cfg(windows)]
+    fn send_controller_connect_messages(&mut self) {
+        let mut sends = Vec::new();
+        for (controller_id, registered) in &self.controller_semantic_profiles {
+            let Some(name) = registered.runtime_source_name.as_ref() else {
+                continue;
+            };
+            if registered.on_connect.is_empty()
+                || self.pending_controller_connects.contains_key(name)
+            {
+                continue;
+            }
+            if self
+                .controller_output_sent
+                .insert((name.clone(), controller_id.clone()))
+            {
+                sends.push((
+                    name.clone(),
+                    controller_id.clone(),
+                    registered.on_connect.clone(),
+                ));
+            }
+        }
+        for (name, controller_id, messages) in sends {
+            println!(
+                "DESKTOP_CONTROLLER_ON_CONNECT controller={controller_id} name={name:?} messages={}",
+                messages.len()
+            );
+            desktop_audio::send_to_midi_device(&name, messages);
+        }
     }
 
     /// Stores a controller's whole map and applies it at once, as a learnt
@@ -3655,6 +3816,7 @@ impl DesktopApp {
                 actions,
                 midi_source_name,
                 semantic_profile,
+                identified,
             } => {
                 // A controller driver reserving its host-control CCs. On this
                 // host the driver owns its surface endpoint exclusively (the
@@ -3713,6 +3875,9 @@ impl DesktopApp {
                                     runtime_source_name,
                                     host_controls: controls.clone(),
                                     host_actions: actions.clone(),
+                                    declarative: false,
+                                    identified,
+                                    on_connect: Vec::new(),
                                 },
                             );
                         } else {
@@ -7604,12 +7769,13 @@ fn external_controller_enabled(rackforge_root: &Path) -> bool {
 fn declarative_semantic_profiles(
     rackforge_root: &Path,
     approved_midi_inputs: &[String],
+    identities: &BTreeMap<String, rackforge_controller_package::IdentityReply>,
 ) -> Result<BTreeMap<String, RegisteredSemanticProfile>> {
     let store = rackforge_controller_package::PackageStore::new(rackforge_root.join("controllers"));
     let mut profiles = BTreeMap::new();
     for endpoint_name in approved_midi_inputs {
         let Some(binding) = store
-            .resolve_declarative_input(endpoint_name)
+            .resolve_identified_input(endpoint_name, identities.get(endpoint_name))
             .with_context(|| format!("resolving declarative controller for {endpoint_name:?}"))?
         else {
             continue;
@@ -7629,6 +7795,9 @@ fn declarative_semantic_profiles(
                 runtime_source_name: Some(descriptor.name),
                 host_controls: binding.host_controls,
                 host_actions: binding.host_actions,
+                declarative: true,
+                identified: binding.identified,
+                on_connect: binding.on_connect,
             },
         );
     }

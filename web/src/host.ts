@@ -99,6 +99,15 @@ export function isVstHost() {
   return window.__RACKFORGE_HOST_SHELL__ === "vst3";
 }
 
+/**
+ * Whether this host keeps the player's controller maps: the Pi, the desktop
+ * and Android do. The browser demo and the VST3 edition, whose DAW owns the
+ * MIDI, only show a controller's controls.
+ */
+export function hostKeepsControllerMaps() {
+  return !IS_BROWSER_HOST && !isVstHost();
+}
+
 export function isRemoteWebClient() {
   return !isNativeHost() && !isDesktopHost() && !isVstHost() && !IS_BROWSER_HOST;
 }

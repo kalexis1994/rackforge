@@ -862,6 +862,10 @@ pub enum SessionCommand {
         midi_source_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         semantic_profile: Option<SemanticControlProfile>,
+        /// The device's Identity Reply chose the package, not only the
+        /// endpoint's name.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        identified: bool,
     },
     SetMasterLevel {
         level: MasterLevel,

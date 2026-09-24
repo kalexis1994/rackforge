@@ -137,6 +137,8 @@ public final class MainActivity extends Activity {
     private final List<MidiOutputPort> openMidiPorts = new ArrayList<>();
     private final List<MidiInputPort> openMidiDestinations = new ArrayList<>();
     private final Map<MidiInputPort, Integer> openKeyLabDestinations = new LinkedHashMap<>();
+    /** Where each source's package messages go: the device's own MIDI in. */
+    private final Map<Integer, MidiInputPort> openControllerDestinations = new LinkedHashMap<>();
     private AudioDeviceCallback audioDeviceCallback;
     private MidiManager.DeviceCallback midiDeviceCallback;
     private volatile int midiGeneration;
@@ -274,6 +276,12 @@ public final class MainActivity extends Activity {
     private static native int registerMidiSource(
             String sourceId, String displayName, boolean primary, String controllerId);
     private static native boolean replaceParameterLinks(String linksJson);
+    private static native String controllerSessionCommand(String dataRoot, String requestJson);
+    private static native boolean loadControllerMaps(String dataRoot);
+    private static native boolean identifyMidiSource(int sourceKey, byte[] reply);
+    private static native String midiSourceConnectPlan(int sourceKey);
+    private static native String controllerAllowOutput(String storeRoot, String controllerId,
+            boolean allow);
     private static native void releaseMidiNotes();
     private static native String keyLabAcquirePlan();
     private static native String keyLabRestorePlan();
@@ -1136,6 +1144,18 @@ public final class MainActivity extends Activity {
                         sendControllerPlanToKeyLab(repaint.toString(), midiGeneration);
                     }
                     result = new JSONObject().put("status", "ok");
+                } else if ("PUT".equals(method) && path.startsWith("/api/v1/controllers/")
+                        && path.endsWith("/output")) {
+                    // The player allows -- or stops -- a package's messages
+                    // to its controller.
+                    String controllerId = java.net.URLDecoder.decode(
+                            path.substring("/api/v1/controllers/".length(),
+                                    path.length() - "/output".length()),
+                            "UTF-8");
+                    JSONObject body = new JSONObject(params.optString("body", "{}"));
+                    result = new JSONObject(controllerAllowOutput(
+                            controllerStoreRoot(), controllerId, body.getBoolean("allow")));
+                    mainHandler.post(this::sendControllerConnectPlans);
                 } else if ("POST".equals(method)
                         && "/api/v1/plugins/inspect".equals(path)) {
                     JSONObject body = new JSONObject(params.optString("body", "{}"));
@@ -2056,31 +2076,19 @@ public final class MainActivity extends Activity {
                         .toString());
                 return;
             }
-            // Controller maps are not kept here yet: the list is empty, and a
-            // change is refused out loud rather than dropped, so the
-            // interface never waits on it.
-            if ("controller_maps".equals(operation)) {
-                emitNativeSessionEvent("message", new JSONObject()
-                        .put("status", "controller_maps")
-                        .put("controllers", new JSONArray())
-                        .put("maps", new JSONArray())
-                        .toString());
-                return;
-            }
-            if ("midi_activity".equals(operation)) {
-                emitNativeSessionEvent("message", new JSONObject()
-                        .put("status", "midi_activity")
-                        .put("cursor", 0)
-                        .put("events", new JSONArray())
-                        .toString());
-                return;
-            }
-            if ("save_controller_map".equals(operation)
+            // The player's controller maps, the inputs that came in, and the
+            // controllers they make: kept and answered by the native engine,
+            // as the desktop and the Pi do.
+            if ("controller_maps".equals(operation)
+                    || "midi_activity".equals(operation)
+                    || "save_controller_map".equals(operation)
                     || "export_controller_map".equals(operation)
                     || "import_controller_map".equals(operation)
                     || "save_user_controller".equals(operation)) {
-                throw new UnsupportedOperationException(
-                        "Controller maps are not available on Android yet");
+                emitNativeSessionEvent("message",
+                        controllerSessionCommand(pluginDataRoot().getAbsolutePath(),
+                                request.toString()));
+                return;
             }
             if (!"dispatch".equals(operation)) {
                 // Unanswered on purpose for now (LIVE, the sequencer, audio
@@ -5092,6 +5100,13 @@ public final class MainActivity extends Activity {
         lastObservedRenderErrors = -1;
         lastObservedMidiDroppedEvents = -1;
         lastObservedMaximumCallbackUs = -1;
+        try {
+            // Before the links compile: a mapped control works from the
+            // first note.
+            loadControllerMaps(pluginDataRoot().getAbsolutePath());
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not load the controller maps", error);
+        }
         syncParameterLinksToRuntime();
         if (!startNativeAudio(selectedAudioDeviceId, latencyMode)) {
             throw new IllegalStateException("Native low-latency audio rejected the selected output");
@@ -5391,6 +5406,10 @@ public final class MainActivity extends Activity {
         private int dataCount;
         private final byte[] messageData = new byte[2];
         private boolean inSysEx;
+        // SysEx is dropped, except an Identity Reply: at most 17 bytes, read
+        // whole and handed to the native side, which knows the packages.
+        private final byte[] sysEx = new byte[20];
+        private int sysExLength;
 
         MidiStreamDecoder(boolean keyLabSurface, boolean forwardMidi, int generation,
                 int sourceKey, MidiSourceIdentity source) {
@@ -5417,15 +5436,27 @@ public final class MainActivity extends Activity {
         private void acceptStatus(int status) {
             if (status == 0xF0) {
                 inSysEx = true;
+                sysEx[0] = (byte) 0xF0;
+                sysExLength = 1;
                 resetMessage();
                 runningStatus = -1;
                 return;
             }
             if (status == 0xF7) {
+                if (inSysEx && sysExLength > 0 && sysExLength < sysEx.length) {
+                    sysEx[sysExLength++] = (byte) 0xF7;
+                    acceptSysEx();
+                }
                 inSysEx = false;
+                sysExLength = 0;
                 resetMessage();
                 runningStatus = -1;
                 return;
+            }
+            // Any other status ends a SysEx message cut short.
+            if (inSysEx) {
+                inSysEx = false;
+                sysExLength = 0;
             }
             if (inSysEx) return;
             if (status >= 0x80 && status <= 0xEF) {
@@ -5439,8 +5470,32 @@ public final class MainActivity extends Activity {
             }
         }
 
+        private void acceptSysEx() {
+            boolean identityReply = sysExLength >= 15 && (sysEx[1] & 0xFF) == 0x7E
+                    && (sysEx[3] & 0xFF) == 0x06 && (sysEx[4] & 0xFF) == 0x02;
+            if (!identityReply || !forwardMidi || sourceKey <= 0) return;
+            byte[] reply = java.util.Arrays.copyOf(sysEx, sysExLength);
+            try {
+                if (identifyMidiSource(sourceKey, reply)) {
+                    // A package the name alone could not choose: its messages
+                    // may go out now.
+                    mainHandler.post(() -> sendControllerConnectPlan(sourceKey, generation));
+                }
+            } catch (Throwable error) {
+                Log.w("RackForge", "Could not read an Identity Reply from " + source.name, error);
+            }
+        }
+
         private void acceptData(byte value) {
-            if (inSysEx) return;
+            if (inSysEx) {
+                // Longer than any Identity Reply: not one, so not kept.
+                if (sysExLength > 0 && sysExLength < sysEx.length - 1) {
+                    sysEx[sysExLength++] = value;
+                } else {
+                    sysExLength = 0;
+                }
+                return;
+            }
             if (messageStatus < 0) {
                 if (runningStatus < 0) return;
                 messageStatus = runningStatus;
@@ -5657,6 +5712,7 @@ public final class MainActivity extends Activity {
                 }
                 synchronized (openMidiDevices) { openMidiDevices.add(device); }
                 if (keyLab) openKeyLabDestinations(device, info, generation);
+                List<Integer> deviceSources = new ArrayList<>();
                 for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
                     if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_OUTPUT) continue;
                     boolean keyLabPrimary = keyLab && isPrimaryKeyLabPort(portInfo);
@@ -5700,9 +5756,118 @@ public final class MainActivity extends Activity {
                         }
                     });
                     synchronized (openMidiPorts) { openMidiPorts.add(port); }
+                    if (sourceKey > 0) deviceSources.add(sourceKey);
+                }
+                // The KeyLab's in-process driver talks to it; any other
+                // device is asked which model it is, and hears its package's
+                // messages once the player allows them.
+                if (!keyLab && !deviceSources.isEmpty()) {
+                    openControllerDestination(device, info, generation, deviceSources);
                 }
             }, null);
         }
+    }
+
+    /** Universal Non-Realtime Identity Request, to every device on the cable. */
+    private static final byte[] MIDI_IDENTITY_REQUEST = {
+            (byte) 0xF0, 0x7E, 0x7F, 0x06, 0x01, (byte) 0xF7 };
+    /** How long a device has to answer before its package's messages go out. */
+    private static final long MIDI_IDENTITY_WINDOW_MS = 400;
+
+    private void openControllerDestination(MidiDevice device, MidiDeviceInfo info,
+            int generation, List<Integer> sourceKeys) {
+        // A device's first MIDI in is the one its own controls answer on.
+        MidiDeviceInfo.PortInfo target = null;
+        for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
+            if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_INPUT) continue;
+            if (target == null || portInfo.getPortNumber() < target.getPortNumber()) {
+                target = portInfo;
+            }
+        }
+        if (target == null) return;
+        MidiInputPort port = device.openInputPort(target.getPortNumber());
+        if (port == null) {
+            Log.w("RackForge", "Could not open the MIDI in of " + midiDeviceName(info));
+            return;
+        }
+        if (!audioRunning || generation != midiGeneration) {
+            try { port.close(); } catch (Exception ignored) { }
+            return;
+        }
+        synchronized (openMidiDestinations) { openMidiDestinations.add(port); }
+        synchronized (openControllerDestinations) {
+            for (int sourceKey : sourceKeys) openControllerDestinations.put(sourceKey, port);
+        }
+        try {
+            port.send(MIDI_IDENTITY_REQUEST, 0, MIDI_IDENTITY_REQUEST.length);
+        } catch (Exception error) {
+            Log.w("RackForge", "Could not ask " + midiDeviceName(info) + " which model it is",
+                    error);
+        }
+        mainHandler.postDelayed(() -> {
+            for (int sourceKey : sourceKeys) sendControllerConnectPlan(sourceKey, generation);
+        }, MIDI_IDENTITY_WINDOW_MS);
+    }
+
+    /**
+     * Sends a source's package messages to its device, once per connection:
+     * the native side answers an empty plan when there are none, they are not
+     * allowed, or they were sent.
+     */
+    private void sendControllerConnectPlan(int sourceKey, int generation) {
+        if (generation != midiGeneration) return;
+        MidiInputPort port;
+        synchronized (openControllerDestinations) {
+            port = openControllerDestinations.get(sourceKey);
+        }
+        if (port == null) return;
+        String json;
+        try {
+            json = midiSourceConnectPlan(sourceKey);
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not read the controller's connect messages", error);
+            return;
+        }
+        try {
+            JSONArray plan = new JSONArray(json);
+            long delayMs = 0;
+            for (int index = 0; index < plan.length(); index++) {
+                JSONObject step = plan.getJSONObject(index);
+                JSONArray values = step.getJSONArray("bytes");
+                byte[] message = new byte[values.length()];
+                for (int byteIndex = 0; byteIndex < values.length(); byteIndex++) {
+                    message[byteIndex] = (byte) values.getInt(byteIndex);
+                }
+                mainHandler.postDelayed(() -> {
+                    if (generation != midiGeneration) return;
+                    synchronized (openMidiDestinations) {
+                        if (!openMidiDestinations.contains(port)) return;
+                    }
+                    try {
+                        port.send(message, 0, message.length);
+                    } catch (Exception error) {
+                        Log.w("RackForge", "A controller connect message was not sent", error);
+                    }
+                }, delayMs);
+                delayMs += step.optLong("settle_after_ms", 0);
+            }
+            if (plan.length() > 0) {
+                Log.i("RackForge", "Controller connect messages scheduled for source "
+                        + sourceKey + " steps=" + plan.length());
+            }
+        } catch (Exception error) {
+            Log.e("RackForge", "Invalid controller connect plan", error);
+        }
+    }
+
+    /** After the player allowed a package: what it sends goes out now. */
+    private void sendControllerConnectPlans() {
+        List<Integer> sourceKeys;
+        synchronized (openControllerDestinations) {
+            sourceKeys = new ArrayList<>(openControllerDestinations.keySet());
+        }
+        int generation = midiGeneration;
+        for (int sourceKey : sourceKeys) sendControllerConnectPlan(sourceKey, generation);
     }
 
     private void openKeyLabDestinations(MidiDevice device, MidiDeviceInfo info,
@@ -5984,6 +6149,7 @@ public final class MainActivity extends Activity {
             for (MidiOutputPort port : openMidiPorts) try { port.close(); } catch (Exception ignored) { }
             openMidiPorts.clear();
         }
+        synchronized (openControllerDestinations) { openControllerDestinations.clear(); }
         synchronized (openMidiDestinations) {
             for (MidiInputPort port : openMidiDestinations) {
                 try { port.close(); } catch (Exception ignored) { }

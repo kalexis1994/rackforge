@@ -11,9 +11,19 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
+pub mod inputs;
 pub mod supervise;
 
+pub use inputs::{
+    ButtonReport, ControllerInput, EncoderEncoding, InputAction, InputKind, InputMessage,
+    InputMidi, InputRole, SysexIdentity,
+};
+
+/// The schema that describes mappings only, each repeating its MIDI message.
 pub const CONTROLLER_PACKAGE_SCHEMA_VERSION: u32 = 1;
+/// The layered schema: identity, the controller's inputs, the meanings given
+/// to them, and optionally a driver (docs/architecture/controller-packages-v2.md).
+pub const CONTROLLER_PACKAGE_SCHEMA_VERSION_2: u32 = 2;
 pub const CONTROLLER_DRIVER_API_VERSION: &str = "1.1.0";
 pub const CONTROLLER_MANIFEST_FILE: &str = "rackforge-controller.toml";
 pub const INSTALL_RECORD_SCHEMA_VERSION: u32 = 1;
@@ -122,6 +132,9 @@ pub struct DeviceMatcher {
     #[serde(default)]
     pub product_names: Vec<String>,
     pub endpoints: Vec<EndpointMatcher>,
+    /// Schema 2: the Identity Reply the device answers with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sysex_identity: Option<SysexIdentity>,
 }
 
 impl DeviceMatcher {
@@ -159,6 +172,11 @@ impl DeviceMatcher {
         }
         for endpoint in &self.endpoints {
             endpoint.validate()?;
+        }
+        if let Some(identity) = &self.sysex_identity {
+            identity.validate().map_err(|error| {
+                PackageError::InvalidManifest(format!("device {:?}: {error}", self.id))
+            })?;
         }
         let roles = self
             .endpoints
@@ -364,6 +382,22 @@ impl ControllerSetting {
     }
 }
 
+/// Schema 2 leaves the runtime out of a package that is data only.
+fn declarative_runtime() -> DriverRuntime {
+    DriverRuntime {
+        kind: DriverRuntimeKind::DeclarativeV1,
+        entrypoints: BTreeMap::new(),
+    }
+}
+
+/// Schema 2 leaves the permissions out of a package that only listens.
+fn input_only_permissions() -> ControllerPermissions {
+    ControllerPermissions {
+        midi_input: true,
+        ..ControllerPermissions::default()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ControllerPackageManifest {
@@ -371,11 +405,25 @@ pub struct ControllerPackageManifest {
     pub kind: String,
     pub id: String,
     pub name: String,
+    /// Schema 2: who makes the hardware.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<String>,
     pub version: String,
     pub controller_api: String,
+    #[serde(default = "declarative_runtime")]
     pub runtime: DriverRuntime,
+    #[serde(default = "input_only_permissions")]
     pub permissions: ControllerPermissions,
     pub devices: Vec<DeviceMatcher>,
+    /// Schema 2: every physical control, with the message it sends.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<ControllerInput>,
+    /// Schema 2: semantic roles, by input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<InputRole>,
+    /// Schema 2: host actions, by input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<InputAction>,
     #[serde(default)]
     pub surfaces: Vec<SurfaceImplementation>,
     #[serde(default)]
@@ -449,17 +497,18 @@ impl ProcessDriverInfo {
                 "driver layouts do not match the manifest".into(),
             ));
         }
-        if self.host_controls != manifest.host_controls {
+        let profile = manifest.profile();
+        if self.host_controls != profile.host_controls {
             return Err(PackageError::DriverContract(
                 "driver reserved host controls do not match the manifest".into(),
             ));
         }
-        if self.host_actions != manifest.host_actions {
+        if self.host_actions != profile.host_actions {
             return Err(PackageError::DriverContract(
                 "driver reserved host actions do not match the manifest".into(),
             ));
         }
-        if self.semantic_profile != manifest.semantic_profile {
+        if self.semantic_profile != profile.semantic_profile {
             return Err(PackageError::DriverContract(
                 "driver semantic control profile does not match the manifest".into(),
             ));
@@ -470,11 +519,14 @@ impl ProcessDriverInfo {
 
 impl ControllerPackageManifest {
     pub fn validate(&self) -> Result<(), PackageError> {
-        if self.schema_version != CONTROLLER_PACKAGE_SCHEMA_VERSION {
-            return Err(PackageError::InvalidManifest(format!(
-                "unsupported controller package schema {}",
-                self.schema_version
-            )));
+        match self.schema_version {
+            CONTROLLER_PACKAGE_SCHEMA_VERSION => self.validate_schema_1_fields()?,
+            CONTROLLER_PACKAGE_SCHEMA_VERSION_2 => self.validate_schema_2_fields()?,
+            other => {
+                return Err(PackageError::InvalidManifest(format!(
+                    "unsupported controller package schema {other}"
+                )));
+            }
         }
         if self.kind != "controller" {
             return Err(PackageError::InvalidManifest(
@@ -537,12 +589,22 @@ impl ControllerPackageManifest {
                     "declarative-v1 has no executable settings handler".into(),
                 ));
             }
-            if self.host_controls.is_empty()
+            // Schema 1 exists only through its mappings. Schema 2 exists
+            // through its inputs: a player's M-Audio with named knobs and
+            // no roles is a complete package, whose knobs they map.
+            if self.schema_version == CONTROLLER_PACKAGE_SCHEMA_VERSION
+                && self.host_controls.is_empty()
                 && self.host_actions.is_empty()
                 && self.semantic_profile.is_none()
             {
                 return Err(PackageError::InvalidManifest(
                     "declarative-v1 must declare at least one host or semantic MIDI mapping".into(),
+                ));
+            }
+            if self.schema_version == CONTROLLER_PACKAGE_SCHEMA_VERSION_2 && self.inputs.is_empty()
+            {
+                return Err(PackageError::InvalidManifest(
+                    "a declarative schema 2 controller declares at least one input".into(),
                 ));
             }
         } else if self.surfaces.is_empty() {
@@ -565,15 +627,7 @@ impl ControllerPackageManifest {
                 )));
             }
         }
-        let profile = ControllerProfile {
-            id: self.id.clone(),
-            name: self.name.clone(),
-            driver_id: self.id.clone(),
-            surfaces: self.surfaces.clone(),
-            host_controls: self.host_controls.clone(),
-            host_actions: self.host_actions.clone(),
-            semantic_profile: self.semantic_profile.clone(),
-        };
+        let profile = self.profile();
         if self.runtime.kind == DriverRuntimeKind::DeclarativeV1 {
             profile.validate_declarative()
         } else {
@@ -603,16 +657,71 @@ impl ControllerPackageManifest {
         Ok(())
     }
 
+    /// The runtime profile, the same shape for either schema: schema 2's
+    /// roles and actions are lowered onto the inputs they name. Hosts read
+    /// mappings from here, never from the manifest's own fields.
     pub fn profile(&self) -> ControllerProfile {
+        let (host_actions, semantic_profile) =
+            if self.schema_version == CONTROLLER_PACKAGE_SCHEMA_VERSION_2 {
+                (
+                    inputs::lower_actions(&self.inputs, &self.actions),
+                    inputs::lower_roles(&self.id, &self.inputs, &self.roles),
+                )
+            } else {
+                (self.host_actions.clone(), self.semantic_profile.clone())
+            };
         ControllerProfile {
             id: self.id.clone(),
             name: self.name.clone(),
             driver_id: self.id.clone(),
             surfaces: self.surfaces.clone(),
             host_controls: self.host_controls.clone(),
-            host_actions: self.host_actions.clone(),
-            semantic_profile: self.semantic_profile.clone(),
+            host_actions,
+            semantic_profile,
         }
+    }
+
+    /// Schema 1 has none of schema 2's fields: an older package that carries
+    /// one is a mistake, not a hybrid.
+    fn validate_schema_1_fields(&self) -> Result<(), PackageError> {
+        if self.vendor.is_some()
+            || !self.inputs.is_empty()
+            || !self.roles.is_empty()
+            || !self.actions.is_empty()
+            || self
+                .devices
+                .iter()
+                .any(|device| device.sysex_identity.is_some())
+        {
+            return Err(PackageError::InvalidManifest(
+                "vendor, inputs, roles, actions and sysex_identity need schema_version = 2".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Schema 2 names inputs instead of repeating messages: schema 1's
+    /// mapping fields are replaced by `roles` and `actions`.
+    fn validate_schema_2_fields(&self) -> Result<(), PackageError> {
+        if !self.host_controls.is_empty()
+            || !self.host_actions.is_empty()
+            || self.semantic_profile.is_some()
+        {
+            return Err(PackageError::InvalidManifest(
+                "schema 2 gives meanings to inputs with roles and actions, not host_controls, \
+                 host_actions or semantic_profile"
+                    .into(),
+            ));
+        }
+        if let Some(vendor) = &self.vendor
+            && (vendor.trim().is_empty() || vendor.contains('\0') || vendor.chars().count() > 64)
+        {
+            return Err(PackageError::InvalidManifest(
+                "vendor is empty, too long or contains NUL".into(),
+            ));
+        }
+        inputs::validate_inputs(&self.inputs, &self.roles, &self.actions)
+            .map_err(PackageError::InvalidManifest)
     }
 
     pub fn entrypoint_for(&self, target: &str) -> Result<&str, PackageError> {
@@ -983,13 +1092,14 @@ impl PackageStore {
         }
         Ok(matches.pop().map(|installed| {
             let manifest = installed.package.manifest();
+            let profile = manifest.profile();
             DeclarativeControllerBinding {
                 controller_id: manifest.id.clone(),
                 controller_name: manifest.name.clone(),
                 endpoint_name: endpoint_name.into(),
-                host_controls: manifest.host_controls.clone(),
-                host_actions: manifest.host_actions.clone(),
-                semantic_profile: manifest.semantic_profile.clone(),
+                host_controls: profile.host_controls,
+                host_actions: profile.host_actions,
+                semantic_profile: profile.semantic_profile,
             }
         }))
     }
@@ -1222,6 +1332,7 @@ mod tests {
             kind: "controller".into(),
             id: "org.rackforge.example-controller".into(),
             name: "Example Controller".into(),
+            vendor: None,
             version: "1.2.3".into(),
             controller_api: "^1.0".into(),
             runtime: DriverRuntime {
@@ -1259,7 +1370,11 @@ mod tests {
                         exclude_contains: vec!["daw".into()],
                     },
                 ],
+                sysex_identity: None,
             }],
+            inputs: Vec::new(),
+            roles: Vec::new(),
+            actions: Vec::new(),
             surfaces: vec![SurfaceImplementation {
                 layout_id: "little@1".into(),
                 quality: SurfaceQuality::Native,
@@ -1284,6 +1399,7 @@ mod tests {
             kind: "controller".into(),
             id: id.into(),
             name: "Declarative MIDI Controller".into(),
+            vendor: None,
             version: "1.0.0".into(),
             controller_api: "^1.0".into(),
             runtime: DriverRuntime {
@@ -1306,7 +1422,11 @@ mod tests {
                     name_ends_with: None,
                     exclude_contains: Vec::new(),
                 }],
+                sysex_identity: None,
             }],
+            inputs: Vec::new(),
+            roles: Vec::new(),
+            actions: Vec::new(),
             surfaces: Vec::new(),
             host_controls: vec![HostControlBinding {
                 target: HostControlTarget::MasterLevel,
@@ -1569,5 +1689,124 @@ mod tests {
             impersonating.validate_against(&package_manifest),
             Err(PackageError::DriverContract(_))
         ));
+    }
+
+    const SCHEMA_2: &str = r#"
+schema_version = 2
+kind = "controller"
+id = "user.m-audio-oxygen-49"
+name = "Oxygen 49"
+vendor = "M-Audio"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "oxygen-49"
+
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["oxygen 49"]
+
+[devices.sysex_identity]
+manufacturer = [0x00, 0x01, 0x05]
+family = 0x27
+model = 1
+
+[[inputs]]
+id = "knob-1"
+name = "Knob 1"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 74, channel = 0 }
+
+[[inputs]]
+id = "button-1"
+name = "Button 1"
+kind = "button"
+midi = { cc = 119, channel = 0 }
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+midi = { note = 36, channel = 9 }
+
+[[roles]]
+input = "knob-1"
+role = "synth.filter.cutoff"
+
+[[actions]]
+input = "button-1"
+target = "keyboard_parts"
+"#;
+
+    #[test]
+    fn a_schema_2_package_is_data_its_hosts_already_run() {
+        let manifest: ControllerPackageManifest = toml::from_str(SCHEMA_2).unwrap();
+        manifest.validate().unwrap();
+        // Left out, the runtime is declarative and the package only listens.
+        assert!(manifest.is_declarative());
+        assert!(!manifest.permissions.midi_output && manifest.permissions.midi_input);
+        assert_eq!(manifest.inputs.len(), 3);
+
+        let profile = manifest.profile();
+        let semantic = profile.semantic_profile.as_ref().unwrap();
+        assert_eq!(semantic.source_id, "controller.user.m-audio-oxygen-49");
+        assert_eq!(semantic.controls[0].midi_cc.controller, 74);
+        assert_eq!(profile.host_actions.len(), 1);
+        assert_eq!(profile.host_actions[0].midi_cc.controller, 119);
+        assert!(matches!(
+            profile.declarative_input(&[0xb0, 119, 127]),
+            Some(rackforge_controller_api::DeclarativeControllerInput::HostAction { .. })
+        ));
+    }
+
+    #[test]
+    fn a_schema_2_package_survives_stamping() {
+        let stamped = stamp_bundled_manifest(SCHEMA_2, &[]).unwrap();
+        let manifest: ControllerPackageManifest = toml::from_str(&stamped).unwrap();
+        manifest.validate().unwrap();
+        assert_eq!(manifest.inputs.len(), 3);
+        assert_eq!(manifest.roles.len(), 1);
+    }
+
+    #[test]
+    fn named_inputs_alone_make_a_package() {
+        let mut manifest: ControllerPackageManifest = toml::from_str(SCHEMA_2).unwrap();
+        manifest.roles.clear();
+        manifest.actions.clear();
+        manifest.validate().unwrap();
+        manifest.inputs.clear();
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn each_schema_keeps_to_its_own_fields() {
+        let mut schema_2: ControllerPackageManifest = toml::from_str(SCHEMA_2).unwrap();
+        schema_2.host_controls.push(HostControlBinding {
+            target: HostControlTarget::MasterLevel,
+            midi_cc: MidiControlChangeBinding {
+                channel: 0,
+                controller: 7,
+            },
+        });
+        assert!(schema_2.validate().is_err());
+
+        let mut schema_1 = declarative_manifest("org.rackforge.generic-midi", "generic midi");
+        schema_1.vendor = Some("Example".into());
+        assert!(schema_1.validate().is_err());
+
+        let mut future: ControllerPackageManifest = toml::from_str(SCHEMA_2).unwrap();
+        future.schema_version = 3;
+        assert!(future.validate().is_err());
+    }
+
+    #[test]
+    fn the_generic_example_is_a_valid_package() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/controllers/generic-midi");
+        let package = ControllerPackage::open(&root).unwrap();
+        assert!(package.manifest().is_declarative());
     }
 }

@@ -363,15 +363,15 @@ fn verify_conformance(root: &Path, id: &str, allow_community: bool) -> Result<()
         .resolve(id)
         .with_context(|| format!("resolving installed controller {id:?}"))?;
     if installed.package.manifest().runtime.kind == DriverRuntimeKind::DeclarativeV1 {
+        let profile = installed.package.manifest().profile();
         println!(
-            "CONTROLLER_CONFORMANCE_OK id={} version={} runtime=declarative-v1 mappings={}",
+            "CONTROLLER_CONFORMANCE_OK id={} version={} runtime=declarative-v1 inputs={} mappings={}",
             installed.record.id,
             installed.record.version,
-            installed.package.manifest().host_controls.len()
-                + installed.package.manifest().host_actions.len()
-                + installed
-                    .package
-                    .manifest()
+            installed.package.manifest().inputs.len(),
+            profile.host_controls.len()
+                + profile.host_actions.len()
+                + profile
                     .semantic_profile
                     .as_ref()
                     .map_or(0, |profile| profile.controls.len())

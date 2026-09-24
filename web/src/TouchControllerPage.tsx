@@ -813,12 +813,24 @@ export function TouchControllerPage({
         </div>
       ) : null}
       <div className="touch-controller-dockbar">
+        {/* On a narrow screen the icons alone name these, so the bar keeps
+            room for Sustain, Panic and Settings. */}
         <div className="touch-mode-switch" aria-label="Touch controller layout">
-          <button className={mode === "keyboard" ? "active" : ""} onClick={() => changeMode("keyboard")}>
-            <Piano aria-hidden="true" /> Keyboard
+          <button
+            className={mode === "keyboard" ? "active" : ""}
+            onClick={() => changeMode("keyboard")}
+            aria-label="Keyboard"
+            title="Keyboard"
+          >
+            <Piano aria-hidden="true" /> <span className="touch-mode-label">Keyboard</span>
           </button>
-          <button className={mode === "pads" ? "active" : ""} onClick={() => changeMode("pads")}>
-            <Grid3X3 aria-hidden="true" /> Pads
+          <button
+            className={mode === "pads" ? "active" : ""}
+            onClick={() => changeMode("pads")}
+            aria-label="Pads"
+            title="Pads"
+          >
+            <Grid3X3 aria-hidden="true" /> <span className="touch-mode-label">Pads</span>
           </button>
         </div>
         <span className="touch-controller-range-summary">

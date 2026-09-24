@@ -6554,6 +6554,21 @@ body {
     display: none;
   }
 
+  /* A phone's width does not hold both layout keys spelled out and the three
+     actions after them: Settings was cut off the edge. The icons say which
+     is which, so the words go; the key keeps its name for touch and screen
+     readers. */
+  @media (max-width: 560px) {
+    .touch-controller-dockbar .touch-mode-label {
+      display: none;
+    }
+
+    .touch-controller.docked .touch-controller-dockbar .touch-mode-switch button {
+      min-width: 38px;
+      padding-inline: 10px;
+    }
+  }
+
   .touch-controller.docked .touch-controller-dock-resizer {
     position: absolute;
     z-index: 26;

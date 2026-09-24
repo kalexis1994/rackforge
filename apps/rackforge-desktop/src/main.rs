@@ -980,6 +980,11 @@ impl DesktopApp {
         };
         app.sync_little_plugin_parameters();
         app.sync_little_play_chain();
+        // LITTLE opens on what is playing: the LIVE lists need the library
+        // and the LIVE position before the screen can go there.
+        let performance = app.performance_snapshot();
+        app.menu.sync_performance_snapshot(performance);
+        app.menu.show_active_mode();
         Ok(app)
     }
 
@@ -1092,6 +1097,10 @@ impl DesktopApp {
             state.revision = Revision::new(state.revision.get().saturating_add(1));
         }
         self.menu = menu;
+        // The rebuilt menu opens on what is playing, not on its home page.
+        let performance = self.performance_snapshot();
+        self.menu.sync_performance_snapshot(performance);
+        self.menu.show_active_mode();
         self.plugins = plugins;
         #[cfg(windows)]
         if let Some(audio) = replacement_audio {

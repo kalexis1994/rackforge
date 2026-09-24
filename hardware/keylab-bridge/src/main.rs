@@ -1393,6 +1393,11 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
     if let Err(error) = refresh_live_catalog(&mut menu) {
         eprintln!("Catálogo LIVE todavía no disponible: {error}");
     }
+    // The KeyLab connection LITTLE last opened on what was playing. A new one
+    // -- the driver starting, the keyboard plugged in again -- opens there
+    // too; a Core restart under the same connection leaves the player's page
+    // alone.
+    let mut shown_for_usb: Option<Option<String>> = None;
     // A driver must never outlive its supervisor: when the host hands us a
     // piped stdin (RACKFORGE_SUPERVISOR_PIPE=1), EOF on it means the
     // supervisor died -- orphaned drivers were holding MIDI ports hostage.
@@ -1478,6 +1483,15 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let transport_clock = Instant::now();
         let mut next_transport_poll = Instant::now();
         menu.clear_pressed_button();
+        if shown_for_usb.as_ref() != Some(&usb_generation) {
+            match refresh_live_catalog(&mut menu) {
+                Ok(()) => {
+                    menu.show_active_mode();
+                    shown_for_usb = Some(usb_generation.clone());
+                }
+                Err(error) => eprintln!("LITTLE abre sin la sesión todavía: {error}"),
+            }
+        }
         let mut messages = render_menu_messages(&menu)?;
         let port_name = port.name.clone();
         let mut session = match KeyLabSession::open(midi, port) {

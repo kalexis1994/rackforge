@@ -3580,6 +3580,8 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabAcquirePlan
             .lock()
             .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?;
         let mut messages = keylab_protocol::acquire_messages().map_err(anyhow::Error::msg)?;
+        // LITTLE opens on what is playing each time the KeyLab is taken.
+        controller.menu.show_active_mode();
         let screen = controller.menu.render();
         controller
             .compositor

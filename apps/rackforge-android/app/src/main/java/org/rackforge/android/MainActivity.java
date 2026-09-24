@@ -5693,6 +5693,10 @@ public final class MainActivity extends Activity {
     private void openMidiInputs() {
         MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
         if (manager == null) return;
+        // LITTLE opens on the mode the app is in, so it hears the mode before
+        // the KeyLab is taken.
+        syncControllerActiveMode("live".equals(currentPage) ? "live"
+                : "idle".equals(currentPage) ? "idle" : "play", false);
         int generation = midiGeneration;
         AtomicInteger registeredSources = new AtomicInteger();
         Set<String> enabledInputs = preferences.getStringSet("midi.inputs", null);

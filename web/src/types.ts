@@ -253,6 +253,15 @@ export interface ControllerMap {
   plugins: { plugin_id: string; plugin_name: string; mappings: ControlMapping[] }[];
 }
 
+/** One channel message the host received, numbered in arrival order. */
+export interface MidiActivityEvent {
+  sequence: number;
+  source: MidiSourceDescriptor;
+  status: number;
+  data1: number;
+  data2: number;
+}
+
 /** A controller package the host attached to a MIDI input. */
 export interface RegisteredController {
   controller_id: string;

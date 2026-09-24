@@ -137,6 +137,7 @@ import { InstallPluginDialog } from "./dialogs/InstallPluginDialog";
 import { TypingKeyboardListener } from "./components/TypingKeyboardListener";
 import {  PluginFrame } from "./components/PluginFrame";
 import { ControllerPage, } from "./pages/ControllerPage";
+import { ControllersPage } from "./pages/ControllersPage";
 import { AboutPage } from "./pages/AboutPage";
 import { PlayPage } from "./pages/PlayPage";
 import { PluginsPage } from "./pages/PluginsPage";
@@ -671,6 +672,10 @@ function RackForgeApp() {
             <Route
               path="/plugins/:instanceId"
               element={<PluginPage snapshot={snapshot} connection={connection} />}
+            />
+            <Route
+              path="/controllers"
+              element={vstHost ? <Navigate to="/plugins" replace /> : <ControllersPage />}
             />
             <Route path="/controllers/:controllerId" element={<ControllerPage />} />
             <Route

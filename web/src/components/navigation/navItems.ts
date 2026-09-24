@@ -1,4 +1,4 @@
-import { Blocks, Info, Piano, Play, RadioTower, Settings2 } from "lucide-react";
+import { Blocks, Info, Piano, Play, RadioTower, Settings2, SlidersVertical } from "lucide-react";
 
 export const liveNavItem = {
     path: "/live",
@@ -36,6 +36,17 @@ export const pluginManagerNavItem = {
     tint: "system",
   } as const;
 
+/* MIDI controllers and what each control does in each plugin: violet, the
+   colour code's input, as MIDI is everywhere else. */
+export const controllersNavItem = {
+    path: "/controllers",
+    label: "Controllers",
+    detail: "Map a MIDI controller's knobs, faders and buttons",
+    section: "system",
+    icon: SlidersVertical,
+    tint: "controller",
+  } as const;
+
 export const settingsNavItem = {
     path: "/settings",
     label: "Settings",
@@ -67,7 +78,12 @@ export const workspaceNavItems = [
   touchControllerNavItem,
 ];
 
-export const systemNavItems = [pluginManagerNavItem, settingsNavItem, aboutItem];
+export const systemNavItems = [
+  pluginManagerNavItem,
+  controllersNavItem,
+  settingsNavItem,
+  aboutItem,
+];
 
 export const navItems = [...workspaceNavItems, ...systemNavItems];
 

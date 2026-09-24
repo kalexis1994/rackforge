@@ -38,6 +38,7 @@ import type {
   OutputMeterSnapshot,
   ParameterLink,
   ControllerMap,
+  MidiActivityEvent,
   RegisteredController,
   RfMapFile,
   SessionSnapshot,
@@ -121,6 +122,17 @@ const pendingSnapshotRefreshes = new Set<{
   timeout: number;
 }>();
 const outputMeterListeners = new Set<(meter: OutputMeterSnapshot) => void>();
+/*
+ * MIDI activity for the Controllers editor: polled beside the output meter,
+ * with a latch of its own, never through the one-at-a-time request queue --
+ * a slow import there must not freeze the lights. `null` means the next ask
+ * only learns where the host's log stands, so messages the host kept from
+ * before anyone watched do not light anything.
+ */
+const midiActivityListeners = new Set<(events: MidiActivityEvent[]) => void>();
+let midiActivityCursor: number | null = null;
+let midiActivityInFlight = false;
+let midiActivitySentAt = 0;
 const audioHealthListeners = new Set<(health: AudioHealthSnapshot) => void>();
 const sequencerStatusListeners = new Set<(status: SequencerStatus) => void>();
 const connectionOutage = new DeferredConnectionOutage(
@@ -269,10 +281,13 @@ export function connectGateway() {
         PERFORMANCE_REFRESH_MS,
       );
       if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
+      midiActivityInFlight = false;
+      midiActivityCursor = null;
       outputMeterTimer = window.setInterval(
         () => {
           sendOutputMeterRequest();
           sendAudioHealthRequest();
+          sendMidiActivityRequest();
         },
         OUTPUT_METER_REFRESH_MS,
       );
@@ -327,6 +342,15 @@ export function connectGateway() {
           outputMeterSentAt = 0;
           const meterMessage = message as unknown as OutputMeterMessage;
           for (const listener of outputMeterListeners) listener(meterMessage.meter);
+        } else if (message.status === "midi_activity" && "cursor" in message) {
+          midiActivityInFlight = false;
+          midiActivitySentAt = 0;
+          const baseline = midiActivityCursor === null;
+          midiActivityCursor = Number(message.cursor) || 0;
+          const events = (message.events ?? []) as MidiActivityEvent[];
+          if (!baseline && events.length > 0) {
+            for (const listener of midiActivityListeners) listener(events);
+          }
         } else if (message.status === "core_restarting") {
           coreReady = false;
           store.dispatch(connectionChanged("connecting"));
@@ -387,6 +411,8 @@ export function connectGateway() {
           audioHealthSentAt = 0;
           sequencerStatusInFlight = false;
           sequencerStatusSentAt = 0;
+          midiActivityInFlight = false;
+          midiActivitySentAt = 0;
           if (pendingPresetRequest?.timeout !== undefined) {
             window.clearTimeout(pendingPresetRequest.timeout);
           }
@@ -762,6 +788,38 @@ function sendOutputMeterRequest() {
     outputMeterSentAt = Date.now();
     socket.send(JSON.stringify({ op: "output_meter" }));
   }
+}
+
+function sendMidiActivityRequest() {
+  if (
+    !isVstHost()
+    && socket
+    && sessionConnected
+    && coreReady
+    && midiActivityListeners.size > 0
+    && (!midiActivityInFlight || latchIsStale(midiActivitySentAt))
+  ) {
+    midiActivityInFlight = true;
+    midiActivitySentAt = Date.now();
+    socket.send(JSON.stringify({
+      op: "midi_activity",
+      // The first ask only finds where the log stands.
+      after: midiActivityCursor ?? Number.MAX_SAFE_INTEGER,
+    }));
+  }
+}
+
+/**
+ * Every channel message the host receives from now on, in batches as they
+ * are polled. Watching starts afresh: what the host kept from before is not
+ * delivered.
+ */
+export function subscribeMidiActivity(listener: (events: MidiActivityEvent[]) => void) {
+  if (midiActivityListeners.size === 0) midiActivityCursor = null;
+  midiActivityListeners.add(listener);
+  return () => {
+    midiActivityListeners.delete(listener);
+  };
 }
 
 function sendSequencerStatusRequest() {

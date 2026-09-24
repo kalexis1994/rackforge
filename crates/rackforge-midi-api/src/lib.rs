@@ -767,6 +767,23 @@ impl MidiSourceRegistry {
             .map(|source| (source.key, &source.descriptor))
     }
 
+    /// Resolves the source a controller driver names, by its port or by
+    /// another port of the same device. A driver opens the port it talks
+    /// to the device on -- a KeyLab's DAW port, for its display -- while the
+    /// host listens on the device's performance port, where its keys and
+    /// faders arrive. Matched by name alone, the controller was left with no
+    /// source, and the player's map of it never reached the engine.
+    pub fn resolve_device(&self, name: &str) -> Option<(MidiSourceKey, &MidiSourceDescriptor)> {
+        if let Some(exact) = self.resolve_name(name) {
+            return Some(exact);
+        }
+        let device = alsa_device_of(name)?;
+        self.sources
+            .iter()
+            .find(|source| alsa_device_of(&source.descriptor.name) == Some(device))
+            .map(|source| (source.key, &source.descriptor))
+    }
+
     pub fn descriptors(&self) -> impl Iterator<Item = &MidiSourceDescriptor> {
         self.sources.iter().map(|source| &source.descriptor)
     }
@@ -1071,8 +1088,69 @@ fn validate_midi_range(kind: &'static str, low: u8, high: u8) -> Result<(), Midi
     Ok(())
 }
 
+/// The device an ALSA sequencer port belongs to: its client name and client
+/// number. ALSA names a port `Client:Port Name 28:0`, and every port of one
+/// device shares `Client` and `28`; a second unit of the same model has
+/// another number. `None` for a name that is not shaped that way, so no other
+/// backend's names are ever matched loosely.
+fn alsa_device_of(name: &str) -> Option<(&str, &str)> {
+    let (client, _) = name.split_once(':')?;
+    let (_, address) = name.rsplit_once(' ')?;
+    let (client_number, port_number) = address.split_once(':')?;
+    let numeric = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    (!client.is_empty() && numeric(client_number) && numeric(port_number))
+        .then_some((client, client_number))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_driver_naming_one_port_of_a_device_finds_the_port_the_host_listens_on() {
+        use super::{MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry};
+        let mut registry = MidiSourceRegistry::default();
+        for (index, name) in [
+            "Scarlett Solo USB:Scarlett Solo USB MIDI 1 24:0",
+            "KL Essential 61 mk3:KL Essential 61 mk3 MIDI 28:0",
+            "KL Essential 61 mk3:KL Essential 61 mk3 MIDI 32:0",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            registry
+                .register(
+                    MidiSourceKey::new(index as u32),
+                    MidiSourceDescriptor {
+                        id: MidiSourceId::new(format!("alsa.port-{index}")).unwrap(),
+                        name: name.into(),
+                        primary: index == 0,
+                    },
+                )
+                .unwrap();
+        }
+        let key = |name: &str| registry.resolve_device(name).map(|(key, _)| key.get());
+        assert_eq!(
+            key("KL Essential 61 mk3:KL Essential 61 mk3 MIDI 28:0"),
+            Some(1)
+        );
+        // The display's port of the same unit.
+        assert_eq!(
+            key("KL Essential 61 mk3:KL Essential 61 mk3 DAW 28:1"),
+            Some(1)
+        );
+        // The second unit of the same model is its own device.
+        assert_eq!(
+            key("KL Essential 61 mk3:KL Essential 61 mk3 DAW 32:1"),
+            Some(2)
+        );
+        assert_eq!(
+            key("KL Essential 61 mk3:KL Essential 61 mk3 DAW 40:1"),
+            None
+        );
+        // Names from other backends are matched exactly or not at all.
+        assert_eq!(key("KL Essential 61 mk3 DAW"), None);
+        assert_eq!(key("MIDIIN2 (KL Essential 61 mk3 MIDI)"), None);
+    }
+
     /// The bytes of a wide packet are its top bits, and a note-on never
     /// projects to the byte that would make it a note-off.
     #[test]

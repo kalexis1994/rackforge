@@ -145,7 +145,7 @@ export function MappingEditor({
             <input
               type="search"
               value={query}
-              placeholder="Leslie, cutoff, drive…"
+              placeholder="Cutoff, reverb, drive…"
               disabled={saving}
               onChange={(event) => setQuery(event.target.value)}
             />

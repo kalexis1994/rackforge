@@ -880,7 +880,9 @@ fn accept_virtual_midi(
         }
     };
     let source = match source_name.as_deref() {
-        Some(name) => match context.midi_sources.resolve_name(name) {
+        // A driver forwards what it hears on its own port as the device's,
+        // the source its registration resolved to.
+        Some(name) => match context.midi_sources.resolve_device(name) {
             Some((source, _)) => source,
             None => {
                 return error_response(
@@ -1771,6 +1773,14 @@ fn edit_performance(
     let revision = repository.revision();
     let library = repository.library().clone();
     drop(repository);
+
+    // A Slot added or removed takes its controller maps with it.
+    if let Err(failure) = replace_runtime_parameter_links(context) {
+        eprintln!(
+            "PARAMETER_LINKS_RECOMPILE_FAILED reason=library-edit error={}",
+            failure.message
+        );
+    }
 
     // A save of the Rack on stage is heard at once. The engine kept the
     // voices it built at LOAD, so the saved sound played only after the
@@ -3145,6 +3155,35 @@ fn compile_parameter_links(
                 })?,
             );
         }
+        // The player's map plays a Rack's Slots as it plays PLAY's plugin:
+        // every Slot running a mapped plugin, in any Rack, takes the map.
+        // Only the Rack on stage has voices, and a link reaches only the
+        // voice it names, so a Rack not loaded costs a table entry.
+        if let Some(map) = controller_maps.get(controller_id) {
+            for slot in repository
+                .library()
+                .racks
+                .iter()
+                .flat_map(|rack| rack.slots.iter())
+            {
+                let Some(plugin) = context.portable_plugins.get(&slot.plugin_id) else {
+                    continue;
+                };
+                compiled.extend(
+                    compile_controller_map_links(ControllerMapLinkContext {
+                        map,
+                        plugin_id: &slot.plugin_id,
+                        runtime_source_id: source_id,
+                        source_name: controller_name,
+                        source_key,
+                        instance_id: slot.id.as_str(),
+                        schema: plugin.0.parameters(),
+                        explicit_links: links,
+                    })
+                    .links,
+                );
+            }
+        }
     }
     Ok(compiled)
 }
@@ -3372,7 +3411,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                             // player's map of it.
                             let resolved = midi_source_name
                                 .as_deref()
-                                .and_then(|name| context.midi_sources.resolve_name(name))
+                                .and_then(|name| context.midi_sources.resolve_device(name))
                                 .map(|(_, source)| {
                                     (Some(source.id.clone()), Some(source.name.clone()))
                                 })

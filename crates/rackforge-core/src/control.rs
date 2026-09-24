@@ -1775,6 +1775,14 @@ fn edit_performance(
         );
     }
     let previous_live = live.clone();
+    let active_rack =
+        |library: &rackforge_performance_api::PerformanceLibrary,
+         live: &rackforge_performance_api::LivePerformanceState| {
+            live.active_rack_id
+                .as_ref()
+                .and_then(|id| library.racks.iter().find(|rack| &rack.id == id).cloned())
+        };
+    let previous_active_rack = active_rack(repository.library(), &live);
     if let Err(error) = repository.apply_edit(&expected_revision, edit, &mut live) {
         return error_response(
             ControlErrorCode::Rejected,
@@ -1786,6 +1794,28 @@ fn edit_performance(
     let library = repository.library().clone();
     drop(repository);
 
+    // A save of the Rack on stage is heard at once. The engine kept the
+    // voices it built at LOAD, so the saved sound played only after the
+    // Rack was loaded again. The save stands if the rebuild fails; what was
+    // playing keeps playing, and the log says why.
+    if let (Some(before), Some(after)) = (previous_active_rack, active_rack(&library, &live))
+        && before != after
+    {
+        let session = match context.store.lock() {
+            Ok(store) => store.snapshot(),
+            Err(_) => return internal_error("session store lock is poisoned", None),
+        };
+        if session.active_mode == rackforge_session_api::SurfaceMode::Live {
+            match load_rack_into_engine(context, &session, &library, &after) {
+                Ok(()) => println!("LIVE_RACK_REBUILT rack={} reason=saved", after.id),
+                Err(failure) => eprintln!(
+                    "LIVE_RACK_REBUILD_FAILED rack={} error={}",
+                    after.id, failure.message
+                ),
+            }
+        }
+    }
+
     let active_rack_deleted =
         previous_live.active_rack_id.is_some() && live.active_rack_id.is_none();
     if active_rack_deleted {
@@ -1796,7 +1826,20 @@ fn edit_performance(
                 reply: reply_sender,
             },
         )
-        .and_then(|()| receive_audio(reply_receiver, "stop deleted LIVE Rack"));
+        .and_then(|()| receive_audio(reply_receiver, "stop deleted LIVE Rack"))
+        // An emergency stop keeps the Rack's voices for a return to LIVE;
+        // a deleted Rack's are let go, or that return would play it again.
+        .and_then(|()| {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            send_audio(
+                context,
+                AudioControlCommand::SetRenderMode {
+                    mode: rackforge_session_api::SurfaceMode::Idle,
+                    reply: reply_sender,
+                },
+            )?;
+            receive_audio(reply_receiver, "release deleted LIVE Rack")
+        });
         match silence_result {
             Ok(()) => println!("LIVE_RACK_DEACTIVATED reason=deleted mode=Empty"),
             Err(failure) => eprintln!(
@@ -3454,9 +3497,33 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                         return failure.into_response();
                     }
                     let mut events = vec![SessionEvent::ActiveModeChanged { mode }];
-                    if mode == rackforge_session_api::SurfaceMode::Play
-                        && snapshot.live.active.is_some()
-                    {
+                    let live_target_lost = match mode {
+                        rackforge_session_api::SurfaceMode::Play => snapshot.live.active.is_some(),
+                        // Leaving LIVE released the Rack's voices; the Rack
+                        // LIVE still names is built again on the way back,
+                        // or LIVE came back silent under a PLAYING label.
+                        rackforge_session_api::SurfaceMode::Live
+                            if snapshot.active_mode != rackforge_session_api::SurfaceMode::Live =>
+                        {
+                            match snapshot.live.active.as_ref() {
+                                Some(location) => {
+                                    match reload_live_target(context, &snapshot, location) {
+                                        Ok(()) => false,
+                                        Err(failure) => {
+                                            eprintln!(
+                                                "LIVE_RACK_RELOAD_FAILED error={}",
+                                                failure.message
+                                            );
+                                            true
+                                        }
+                                    }
+                                }
+                                None => false,
+                            }
+                        }
+                        _ => false,
+                    };
+                    if live_target_lost {
                         let mut live = snapshot.live.clone();
                         live.deactivate();
                         events.push(SessionEvent::LiveStateReconciled { live });
@@ -3653,39 +3720,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 }
             };
             let rack_id = rack.id.clone();
-            let (instance_id, slots) = match prepare_rack_definition_runtime(
-                &snapshot,
-                &library,
-                &rack,
-                &context.state_store,
-            ) {
-                Ok(runtime) => runtime,
-                Err(failure) => return failure.into_response(),
-            };
-            let prepared_slots =
-                match prepare_portable_rack_slots(context, snapshot.revision, &slots) {
-                    Ok(prepared) => prepared,
-                    Err(failure) => return failure.into_response(),
-                };
-            let slots = if prepared_slots.is_some() {
-                Vec::new()
-            } else {
-                slots
-            };
-            let (reply_sender, reply_receiver) = sync_channel(1);
-            if let Err(failure) = send_audio(
-                context,
-                AudioControlCommand::ActivateRack {
-                    rack_id: rack_id.as_str().to_owned(),
-                    instance_id: instance_id.clone(),
-                    slots,
-                    prepared_slots,
-                    reply: reply_sender,
-                },
-            ) {
-                return failure.into_response();
-            }
-            match receive_audio(reply_receiver, "activate LIVE Rack") {
+            match load_rack_into_engine(context, &snapshot, &library, &rack) {
                 Ok(()) => {
                     // The Part carries its groove on stage with it: queue its
                     // bound patterns, each on its lane, all on the next bar.
@@ -5245,6 +5280,65 @@ fn prepare_compiled_rack_runtime(
     Ok((active_instance.instance_id.clone(), specs))
 }
 
+/// Builds the Rack a LIVE location names, as the library has it now.
+fn reload_live_target(
+    context: &ControlContext,
+    snapshot: &rackforge_session_api::SessionState,
+    location: &rackforge_performance_api::LiveLocation,
+) -> Result<(), ControlFailure> {
+    let (library, rack) = {
+        let repository = context.performance_repository.lock().map_err(|_| {
+            control_failure(
+                ControlErrorCode::Internal,
+                "performance repository lock is poisoned",
+                Some(snapshot.revision),
+            )
+        })?;
+        let rack = repository
+            .library()
+            .resolve_playable(location)
+            .map_err(|error| {
+                control_failure(
+                    ControlErrorCode::NotFound,
+                    error.to_string(),
+                    Some(snapshot.revision),
+                )
+            })?;
+        (repository.library().clone(), rack)
+    };
+    load_rack_into_engine(context, snapshot, &library, &rack)
+}
+
+/// Builds a saved Rack into the engine in place of what plays: the path a
+/// LIVE activation takes, and a save of the Rack on stage.
+fn load_rack_into_engine(
+    context: &ControlContext,
+    snapshot: &rackforge_session_api::SessionState,
+    library: &rackforge_performance_api::PerformanceLibrary,
+    rack: &RackDefinition,
+) -> Result<(), ControlFailure> {
+    let (instance_id, slots) =
+        prepare_rack_definition_runtime(snapshot, library, rack, &context.state_store)?;
+    let prepared_slots = prepare_portable_rack_slots(context, snapshot.revision, &slots)?;
+    let slots = if prepared_slots.is_some() {
+        Vec::new()
+    } else {
+        slots
+    };
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    send_audio(
+        context,
+        AudioControlCommand::ActivateRack {
+            rack_id: rack.id.as_str().to_owned(),
+            instance_id,
+            slots,
+            prepared_slots,
+            reply: reply_sender,
+        },
+    )?;
+    receive_audio(reply_receiver, "activate LIVE Rack")
+}
+
 fn prepare_rack_definition_runtime(
     snapshot: &rackforge_session_api::SessionState,
     library: &rackforge_performance_api::PerformanceLibrary,
@@ -5973,11 +6067,21 @@ mod tests {
             .record(None, SessionEvent::LiveStateReconciled { live })
             .unwrap();
         let expected_revision = context.performance_repository.lock().unwrap().revision();
-        let audio = thread::spawn(move || match receiver.recv().unwrap() {
-            AudioControlCommand::EmergencyStop { reply } => {
-                reply.send(Ok(())).unwrap();
+        let audio = thread::spawn(move || {
+            match receiver.recv().unwrap() {
+                AudioControlCommand::EmergencyStop { reply } => {
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected deleted Rack to silence LIVE audio"),
             }
-            _ => panic!("expected deleted Rack to silence LIVE audio"),
+            // Its voices are let go, so a return to LIVE cannot play it.
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetRenderMode { mode, reply } => {
+                    assert_eq!(mode, rackforge_session_api::SurfaceMode::Idle);
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected the deleted Rack's voices to be released"),
+            }
         });
 
         let response = edit_performance(

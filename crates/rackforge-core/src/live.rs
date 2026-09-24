@@ -926,6 +926,59 @@ fn reactivate_standalone_parallel_units(
     }
 }
 
+/// The runtime Slots of the Rack LIVE had on stage, empty when none was.
+fn initial_rack_runtime_specs(
+    live: &rackforge_performance_api::LivePerformanceState,
+    library: &rackforge_performance_api::PerformanceLibrary,
+    state_store: &PluginStateStore,
+) -> Result<Vec<RackSlotRuntimeSpec>> {
+    let Some(rack) = live
+        .active
+        .as_ref()
+        .and_then(|location| library.resolve_playable(location).ok())
+    else {
+        return Ok(Vec::new());
+    };
+    let compiled_slots = compile_instrument_definition(library, &rack)?;
+    if compiled_slots.len() > control::MAX_ACTIVE_RACK_SLOTS {
+        bail!(
+            "initial Rack {} compiles to {} Slots; this engine supports at most {}",
+            rack.id,
+            compiled_slots.len(),
+            control::MAX_ACTIVE_RACK_SLOTS
+        );
+    }
+    let mut specs = Vec::with_capacity(compiled_slots.len());
+    for compiled in compiled_slots {
+        let slot = &compiled.slot;
+        let state = if let Some(reference) = &slot.state {
+            RackSlotStateLoad::Opaque(state_store.read(reference)?)
+        } else if let Some(program_id) = &slot.legacy_program_id {
+            RackSlotStateLoad::LegacyPreset(program_id.clone())
+        } else {
+            RackSlotStateLoad::Default
+        };
+        specs.push(RackSlotRuntimeSpec {
+            slot_id: compiled.runtime_slot_id,
+            plugin_id: slot.plugin_id.clone(),
+            state,
+            midi_stages: compiled
+                .midi_stages
+                .iter()
+                .map(|stage| RackMidiStageRuntimeSpec {
+                    transform: stage.transform.clone(),
+                    keyboard_parts: stage.keyboard_parts,
+                })
+                .collect(),
+            audio_sources: compiled.audio_sources.clone(),
+            sends_to_main: compiled.sends_to_main,
+            level_per_mille: slot.level_per_mille,
+            pan_per_mille: slot.pan_per_mille,
+        });
+    }
+    Ok(specs)
+}
+
 fn create_rack_voices<'plugin>(
     plugins: &BTreeMap<String, &'plugin LoadedPlugin>,
     specs: &[RackSlotRuntimeSpec],
@@ -1723,57 +1776,30 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
     if initial_surface_mode != SurfaceMode::Live {
         live_state.deactivate();
     }
-    let mut initial_rack_specs = Vec::new();
-    if let Some(rack) = live_state.active.as_ref().and_then(|location| {
-        performance_repository
-            .library()
-            .resolve_playable(location)
-            .ok()
-    }) {
-        let compiled_slots = compile_instrument_definition(&performance_library, &rack)?;
-        if compiled_slots.len() > control::MAX_ACTIVE_RACK_SLOTS {
-            bail!(
-                "initial Rack {} compiles to {} Slots; this engine supports at most {}",
-                rack.id,
-                compiled_slots.len(),
-                control::MAX_ACTIVE_RACK_SLOTS
-            );
-        }
-        for compiled in compiled_slots {
-            let slot = &compiled.slot;
-            let state = if let Some(reference) = &slot.state {
-                RackSlotStateLoad::Opaque(state_store.read(reference)?)
-            } else if let Some(program_id) = &slot.legacy_program_id {
-                RackSlotStateLoad::LegacyPreset(program_id.clone())
-            } else {
-                RackSlotStateLoad::Default
-            };
-            initial_rack_specs.push(RackSlotRuntimeSpec {
-                slot_id: compiled.runtime_slot_id,
-                plugin_id: slot.plugin_id.clone(),
-                state,
-                midi_stages: compiled
-                    .midi_stages
-                    .iter()
-                    .map(|stage| RackMidiStageRuntimeSpec {
-                        transform: stage.transform.clone(),
-                        keyboard_parts: stage.keyboard_parts,
-                    })
-                    .collect(),
-                audio_sources: compiled.audio_sources.clone(),
-                sends_to_main: compiled.sends_to_main,
-                level_per_mille: slot.level_per_mille,
-                pan_per_mille: slot.pan_per_mille,
+    // The Rack that was on stage is built again. One that no longer builds
+    // -- a plugin removed, a state file lost -- must not keep the engine
+    // from starting: that took PLAY and every other Rack down with it. It
+    // starts in LIVE with nothing loaded and says why.
+    let initial_rack =
+        initial_rack_runtime_specs(&live_state, performance_repository.library(), &state_store)
+            .and_then(|specs| {
+                let voices = create_rack_voices(
+                    &plugins,
+                    &specs,
+                    output_rate,
+                    period_frames as u32,
+                    channels as u32,
+                )?;
+                Ok((specs, voices))
             });
+    let (initial_rack_specs, rack_voices) = match initial_rack {
+        Ok(built) => built,
+        Err(error) => {
+            eprintln!("LIVE_BOOT_RACK_FAILED reason={error:#}");
+            live_state.deactivate();
+            (Vec::new(), Vec::new())
         }
-    }
-    let rack_voices = create_rack_voices(
-        &plugins,
-        &initial_rack_specs,
-        output_rate,
-        period_frames as u32,
-        channels as u32,
-    )?;
+    };
 
     let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
     let (midi_port_names, mut midi_sources, midi_observer, connected_midi_sources) =

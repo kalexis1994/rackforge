@@ -9196,7 +9196,7 @@
      whatever `height: auto` says, and a visible overflow spills the column
      past the bottom edge with nothing able to reach it -- html and body are
      both clipped. It is the scroller; everything inside it is a block. */
-  .app-shell.live-surface-active:not(.graph-workspace-active) {
+  .app-shell.live-surface-active:not(.graph-workspace-active):not(.controller-dock-active) {
     height: auto !important;
     min-height: 0 !important;
     overflow-x: hidden !important;
@@ -9204,19 +9204,37 @@
     overscroll-behavior: contain;
   }
 
-  .live-surface-active:not(.graph-workspace-active) .workspace,
-  .live-surface-active:not(.graph-workspace-active) .page.live-host-page,
+  .live-surface-active:not(.graph-workspace-active):not(.controller-dock-active) .workspace,
+  .live-surface-active:not(.graph-workspace-active):not(.controller-dock-active)
+    .page.live-host-page,
   .live-surface-active:not(.graph-workspace-active) .live-shell {
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
   }
 
+  /* With the Touch Controller docked, the screen is divided after all: the
+     dock takes the height it is dragged to and the list scrolls in what is
+     left, as PLAY does. Growing the whole shell to fit the list instead left
+     the dock at the list's foot, a strip of nothing under the keys, and a
+     drag that resized the keys inside a dock that could not grow. */
+  .app-shell.live-surface-active.controller-dock-active:not(.graph-workspace-active)
+    .page.live-host-page {
+    display: block !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    flex: 1 1 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+  }
+
   /* Blocks keep the height their content needs; nothing here is a pane to be
      divided between. The page was `flex: 1 1 0`, and a basis of zero inside a
      container that now sizes to its content collapses the whole column to
      nothing — height alone does not undo that. */
-  .live-surface-active:not(.graph-workspace-active) .page.live-host-page,
+  .live-surface-active:not(.graph-workspace-active):not(.controller-dock-active)
+    .page.live-host-page,
   .live-surface-active:not(.graph-workspace-active) .live-zone,
   .live-surface-active:not(.graph-workspace-active) .sequencer-shell {
     flex: 0 0 auto !important;

@@ -108,10 +108,35 @@ pub use rackforge_performance_api::{
     PerformanceSnapshot,
 };
 pub use rackforge_plugin_api::{
-    HostPreset, HostPresetSummary, ParameterSchema, PluginStateReference,
+    HostPreset, HostPresetSummary, ParameterDescriptor, ParameterSchema, PluginStateReference,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// Where a control stood against the parameter it moved.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterTouchPickup {
+    /// The control set the value.
+    Engaged,
+    /// The control has not reached the parameter: raise it to the value.
+    MoveUp,
+    /// As `MoveUp`, lowered.
+    MoveDown,
+}
+
+/// What a control last did to a plugin parameter, for a screen to name it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterTouchReport {
+    /// The PLAY instance or Rack Slot whose parameter moved.
+    pub instance_id: String,
+    pub parameter: ParameterDescriptor,
+    pub value: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_decimals: Option<u8>,
+    pub pickup: ParameterTouchPickup,
+}
 
 /// The sequencer wire shapes, recorded for the surfaces that build them.
 pub mod sequencer_wire;
@@ -615,6 +640,14 @@ pub enum ControlRequest {
         #[serde(default)]
         after: u64,
     },
+    /// What a control last did to a plugin parameter, if anything since
+    /// `after`: the header a screen shows while a fader moves. `after` zero
+    /// only learns the current sequence, so a screen starting up is not
+    /// shown an old touch.
+    ParameterTouch {
+        #[serde(default)]
+        after: u64,
+    },
     /// The controllers the host knows and the player's map for each: what
     /// every mapped input does in every plugin.
     ControllerMaps,
@@ -843,6 +876,12 @@ pub enum ControlResponse {
     MidiActivity {
         cursor: u64,
         events: Vec<MidiActivityEvent>,
+    },
+    ParameterTouched {
+        /// What to ask from next time.
+        sequence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        touch: Option<Box<ParameterTouchReport>>,
     },
     ControllerMaps {
         controllers: Vec<RegisteredController>,

@@ -7751,6 +7751,51 @@ fn little_parameter_display(
     }
 }
 
+/// Which way a control must move to reach a parameter it has not picked up.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PickupArrow {
+    Up,
+    Down,
+}
+
+/// LITTLE's header for a parameter a control just moved: its own name and
+/// its value in its own units, in the header's 18 columns -- "ROOM SIZE
+/// 1462 m3". A control still on its way to the parameter shows where the
+/// parameter stands and which way to move: "ROOM SIZE  ^45 m3".
+pub fn parameter_touch_header(
+    parameter: &ParameterDescriptor,
+    value: f64,
+    display_decimals: Option<u8>,
+    pickup: Option<PickupArrow>,
+) -> String {
+    let mut shown = clean_surface_text(
+        &little_parameter_display(parameter, value, display_decimals),
+        "",
+    );
+    if let Some(arrow) = pickup {
+        shown.insert(
+            0,
+            match arrow {
+                PickupArrow::Up => '^',
+                PickupArrow::Down => 'v',
+            },
+        );
+    }
+    let shown: String = shown.chars().take(DISPLAY_COLUMNS).collect();
+    let room = DISPLAY_COLUMNS.saturating_sub(shown.chars().count() + 1);
+    let name: String = clean_surface_text(&parameter.name, "PARAMETER")
+        .to_ascii_uppercase()
+        .chars()
+        .take(room)
+        .collect::<String>()
+        .trim_end()
+        .to_owned();
+    let gap = DISPLAY_COLUMNS
+        .saturating_sub(name.chars().count() + shown.chars().count())
+        .max(usize::from(!name.is_empty()));
+    format!("{name}{}{shown}", " ".repeat(gap))
+}
+
 fn parameter_display_decimals(step: f64, display_decimals: Option<u8>) -> usize {
     display_decimals.map_or_else(|| parameter_decimals(step), usize::from)
 }
@@ -7931,10 +7976,18 @@ fn normalized_display_text(value: &str, fallback: &str) -> String {
 }
 
 fn clean_surface_text(value: &str, fallback: &str) -> String {
+    // The units parameters use have ASCII spellings the display can show;
+    // anything else is a '?'. "m³" was "m?".
     let mut normalized = value
         .chars()
         .filter(|character| !character.is_control())
-        .map(|character| if character.is_ascii() { character } else { '?' })
+        .map(|character| match character {
+            _ if character.is_ascii() => character,
+            '²' => '2',
+            '³' => '3',
+            'µ' | 'μ' => 'u',
+            _ => '?',
+        })
         .collect::<String>();
     if normalized.trim().is_empty() {
         normalized = fallback.into();
@@ -8659,6 +8712,41 @@ pub fn demo_frames() -> Vec<Screen> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_touched_parameter_is_named_in_its_own_units() {
+        use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterTaper};
+        let room = ParameterDescriptor {
+            index: 23,
+            id: "room_size".into(),
+            name: "Room Size".into(),
+            page: "room".into(),
+            group: None,
+            order: 0,
+            kind: ParameterKind::Float {
+                minimum: 45.0,
+                maximum: 45000.0,
+                default: 311.3,
+                step: 1.0,
+                unit: Some("m³".into()),
+                taper: ParameterTaper::Logarithmic,
+            },
+            flags: Default::default(),
+            suggested_control: Default::default(),
+        };
+        let header = super::parameter_touch_header(&room, 1462.3, None, None);
+        assert_eq!(header, "ROOM SIZE  1462 m3");
+        assert_eq!(header.chars().count(), super::DISPLAY_COLUMNS);
+        let waiting =
+            super::parameter_touch_header(&room, 45.0, None, Some(super::PickupArrow::Down));
+        assert_eq!(waiting, "ROOM SIZE   v45 m3");
+        let long = ParameterDescriptor {
+            name: "Sympathetic Resonance Amount".into(),
+            ..room
+        };
+        let header = super::parameter_touch_header(&long, 45000.0, None, None);
+        assert_eq!(header, "SYMPATHET 45000 m3");
+    }
+
     /// A step can be far finer than a whole number is "close to zero".
     #[test]
     fn a_very_fine_step_still_asks_for_decimals() {

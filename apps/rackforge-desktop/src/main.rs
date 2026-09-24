@@ -60,7 +60,7 @@ use rackforge_session_api::{
     MasterLevel, MasterPan, ParameterLink, PlayChainEffect, PlayChainState, PluginInstanceState,
     ProgramDraftState, RackForgeParameterMapper, RackForgeParameterValue, Revision,
     SESSION_SCHEMA_VERSION, SemanticControlProfile, SessionCommand, SessionEvent, SessionId,
-    SessionState, SoundSummary, semantic_control_little_header,
+    SessionState, SoundSummary,
 };
 use rackforge_surface_api::{SurfaceActivationRequest, SurfaceMode};
 use rackforge_surface_runtime::{
@@ -486,6 +486,9 @@ struct DesktopApp {
     controller_encoder_down: Option<Instant>,
     #[cfg(windows)]
     controller_header_restore_at: Option<Instant>,
+    /// The last parameter touch the header showed.
+    #[cfg(windows)]
+    parameter_touch_seen: u64,
     #[cfg(windows)]
     controller_parameter_mapper: RackForgeParameterMapper,
     web_url: String,
@@ -935,6 +938,9 @@ impl DesktopApp {
             controller_encoder_down: None,
             #[cfg(windows)]
             controller_header_restore_at: None,
+            #[cfg(windows)]
+            parameter_touch_seen: rackforge_core::parameter_touch::PARAMETER_TOUCHES
+                .current_sequence(),
             #[cfg(windows)]
             controller_parameter_mapper: RackForgeParameterMapper::default(),
             web_url,
@@ -2367,6 +2373,15 @@ impl DesktopApp {
             self.menu.set_button_pressed(short_input(index), false);
             self.apply_input(long_input(index));
         }
+        // What a control just did to a parameter, named in the header: any
+        // link -- the player's map, a learnt link, the controller's defaults
+        // -- in PLAY or in a Rack's Slot.
+        if let Some(touch) = rackforge_core::parameter_touch::PARAMETER_TOUCHES
+            .latest(&mut self.parameter_touch_seen)
+            && let Some(header) = self.parameter_touch_header(&touch)
+        {
+            self.show_controller_host_value(header);
+        }
         if self
             .controller_header_restore_at
             .is_some_and(|deadline| Instant::now() >= deadline)
@@ -2593,9 +2608,10 @@ impl DesktopApp {
                 }
                 self.show_controller_host_value(parameter.little_header());
             }
-            DesktopControllerEvent::SemanticControl(input) => {
-                self.show_controller_host_value(semantic_control_little_header(&input));
-            }
+            // The header names the parameter the control actually moved,
+            // once its link has run; the role's fixed label and the raw CC
+            // said nothing of the plugin, and flashed before the real name.
+            DesktopControllerEvent::SemanticControl(_) => {}
             DesktopControllerEvent::Surface { input, phase } => match input {
                 Input::Button1 | Input::Button2 | Input::Button3 | Input::Button4 => {
                     let index = match input {
@@ -2656,6 +2672,48 @@ impl DesktopApp {
                 _ => {}
             },
         }
+    }
+
+    /// LITTLE's header for a touch: the parameter's own name and value, when
+    /// the touch names a PLAY instance or a Slot of a saved Rack.
+    #[cfg(windows)]
+    fn parameter_touch_header(
+        &self,
+        touch: &rackforge_core::parameter_touch::ParameterTouch,
+    ) -> Option<String> {
+        use rackforge_core::parameter_touch::{TouchPickup, touch_names};
+        let plugin = self
+            .plugins
+            .iter()
+            .find(|plugin| touch_names(touch, &plugin.instance_id))
+            .or_else(|| {
+                let slot = self
+                    .performance_repository
+                    .library()
+                    .racks
+                    .iter()
+                    .flat_map(|rack| rack.slots.iter())
+                    .find(|slot| touch_names(touch, slot.id.as_str()))?;
+                self.plugins
+                    .iter()
+                    .find(|plugin| plugin.plugin_id == slot.plugin_id)
+            })?;
+        let schema = plugin.runtime.parameters();
+        let parameter = schema
+            .parameters
+            .iter()
+            .find(|parameter| parameter.index == touch.parameter_index)?;
+        let arrow = match touch.pickup {
+            TouchPickup::Engaged => None,
+            TouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
+            TouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
+        };
+        Some(rackforge_surface_runtime::parameter_touch_header(
+            parameter,
+            touch.value,
+            schema.display_decimals,
+            arrow,
+        ))
     }
 
     #[cfg(windows)]

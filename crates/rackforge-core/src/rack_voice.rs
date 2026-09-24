@@ -962,6 +962,18 @@ impl<'plugin> RackEngine<'plugin> {
             .map(|voice| voice.plugin)
     }
 
+    /// The plugin of the Slot a parameter touch names, when it is one of
+    /// this Rack's: for the header that says what a control just moved.
+    pub fn touched_plugin(
+        &self,
+        touch: &crate::parameter_touch::ParameterTouch,
+    ) -> Option<&'plugin LoadedPlugin> {
+        self.voices
+            .iter()
+            .find(|voice| crate::parameter_touch::touch_names(touch, &voice.slot_id))
+            .map(|voice| voice.plugin)
+    }
+
     /// The links to this Rack's Slots, compiled by the host against
     /// [`Self::link_target_plugin`].
     pub fn set_parameter_links(&mut self, links: Vec<CompiledParameterLink>) {

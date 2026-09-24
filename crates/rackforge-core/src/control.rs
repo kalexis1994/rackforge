@@ -703,6 +703,7 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             )
         }
         ControlRequest::MidiActivity { after } => midi_activity(context, after),
+        ControlRequest::ParameterTouch { after } => parameter_touch(context, after),
         ControlRequest::ControllerMaps => controller_maps(context),
         ControlRequest::SaveControllerMap { map } => save_controller_map(context, *map),
         ControlRequest::SaveUserController { controller } => {
@@ -2999,6 +3000,70 @@ fn replace_runtime_parameter_links(context: &ControlContext) -> Result<(), Contr
         },
     )?;
     receive_audio(reply_receiver, "apply controller maps")
+}
+
+/// What a control last did to a parameter, named for the screen: the PLAY
+/// instance or Rack Slot the link moved, the parameter's descriptor, and the
+/// value or, before pickup, where the parameter stands.
+fn parameter_touch(context: &ControlContext, after: u64) -> ControlResponse {
+    use crate::parameter_touch::{PARAMETER_TOUCHES, TouchPickup, touch_names};
+    use rackforge_control_api::{ParameterTouchPickup, ParameterTouchReport};
+    if after == 0 {
+        return ControlResponse::ParameterTouched {
+            sequence: PARAMETER_TOUCHES.current_sequence(),
+            touch: None,
+        };
+    }
+    let mut sequence = after;
+    let Some(touch) = PARAMETER_TOUCHES.latest(&mut sequence) else {
+        return ControlResponse::ParameterTouched {
+            sequence,
+            touch: None,
+        };
+    };
+    let named = (|| {
+        let instances = context.store.lock().ok()?.state().instances.clone();
+        let (instance_id, plugin_id) = match instances
+            .iter()
+            .find(|instance| touch_names(&touch, instance.instance_id.as_str()))
+        {
+            Some(instance) => (
+                instance.instance_id.as_str().to_owned(),
+                instance.plugin_id.clone(),
+            ),
+            None => {
+                let repository = context.performance_repository.lock().ok()?;
+                let slot = repository
+                    .library()
+                    .racks
+                    .iter()
+                    .flat_map(|rack| rack.slots.iter())
+                    .find(|slot| touch_names(&touch, slot.id.as_str()))?;
+                (slot.id.as_str().to_owned(), slot.plugin_id.clone())
+            }
+        };
+        let schema = context.portable_plugins.get(&plugin_id)?.0.parameters();
+        let parameter = schema
+            .parameters
+            .iter()
+            .find(|parameter| parameter.index == touch.parameter_index)?
+            .clone();
+        Some(ParameterTouchReport {
+            instance_id,
+            parameter,
+            value: touch.value,
+            display_decimals: schema.display_decimals,
+            pickup: match touch.pickup {
+                TouchPickup::Engaged => ParameterTouchPickup::Engaged,
+                TouchPickup::MoveUp => ParameterTouchPickup::MoveUp,
+                TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
+            },
+        })
+    })();
+    ControlResponse::ParameterTouched {
+        sequence,
+        touch: named.map(Box::new),
+    }
 }
 
 /// The plugin a link's target runs: a PLAY instance, or a Rack Slot.

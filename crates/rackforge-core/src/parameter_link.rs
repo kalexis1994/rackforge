@@ -10,6 +10,7 @@ use rackforge_plugin_api::abi::ParameterEventV1;
 use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterSchema, ParameterTaper};
 use rackforge_session_api::{RackForgeParameterId, SemanticControlProfile};
 
+use crate::parameter_touch::{PARAMETER_TOUCHES, ParameterTouch, TouchPickup};
 use crate::validate_parameter_write;
 
 /// How close, as a fraction of the range, a control has to come to the
@@ -45,6 +46,8 @@ pub struct CompiledParameterLink {
     /// The parameter's value as this link last wrote or saw it: what a
     /// toggle, cycle or step starts from when the host cannot say.
     last_value: Option<f64>,
+    /// The key the screen knows the link's instance by.
+    instance_key: u64,
 }
 
 /// How many presses a Step takes to cross a float parameter's range: its own
@@ -75,13 +78,36 @@ impl CompiledParameterLink {
         }
         validate_parameter_write(schema, parameter.index, default_value(&parameter.kind))?;
         validate_mode(&link.mode, &parameter, schema)?;
+        let instance_key = crate::parameter_touch::instance_key(&link.instance_id);
         Ok(Self {
             link,
             source_key,
             parameter,
             pickup: Pickup::default(),
             last_value: None,
+            instance_key,
         })
+    }
+
+    /// Tells the screen what this link just did to its parameter.
+    fn touch(&self, value: f64, pickup: TouchPickup) {
+        PARAMETER_TOUCHES.record(ParameterTouch {
+            instance_key: self.instance_key,
+            parameter_index: self.parameter.index,
+            value,
+            pickup,
+        });
+    }
+
+    /// The parameter value at a position along the control's travel: the
+    /// inverse of [`Self::position_of`].
+    fn value_at(&self, position: f64) -> f64 {
+        match &self.link.mode {
+            ParameterLinkMode::Range { min, max } => {
+                range_value(&self.parameter.kind, min.get(), max.get(), position)
+            }
+            _ => map_parameter_value(&self.parameter.kind, position),
+        }
     }
 
     /// The parameter's index on its plugin.
@@ -116,6 +142,7 @@ impl CompiledParameterLink {
 
     fn output(&mut self, frame: u32, value: f64) -> ParameterLinkOutput {
         self.last_value = Some(value);
+        self.touch(value, TouchPickup::Engaged);
         ParameterLinkOutput {
             event: ParameterEventV1 {
                 frame,
@@ -251,6 +278,16 @@ impl CompiledParameterLink {
                     } else {
                         self.pickup.parameter = Some(position);
                         self.pickup.input = Some(normalized);
+                        // Said, not swallowed: the screen shows where the
+                        // parameter is and which way to move to reach it.
+                        self.touch(
+                            self.value_at(position),
+                            if normalized < position {
+                                TouchPickup::MoveUp
+                            } else {
+                                TouchPickup::MoveDown
+                            },
+                        );
                         return None;
                     }
                 }

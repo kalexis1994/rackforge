@@ -52,9 +52,8 @@ use rackforge_repository::{
 };
 use rackforge_session_api::{
     InstanceId, MAX_PLAY_CHAIN_EFFECTS, MasterLevel, MasterPan, PlayChainEffect, ProgramDraftState,
-    RackForgeParameterMapper, RackForgeParameterValue, SemanticControlInput,
-    SemanticControlProfile, rackforge_parameter_input, semantic_control_input,
-    semantic_control_little_header,
+    RackForgeParameterMapper, RackForgeParameterValue, SemanticControlProfile,
+    rackforge_parameter_input, semantic_control_input,
 };
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayChainEffectItem,
@@ -262,29 +261,19 @@ impl AndroidControllerMenu {
     }
 
     fn render_rackforge_parameter(&mut self, parameter: RackForgeParameterValue) -> Result<String> {
-        let header = parameter.little_header();
-        self.compositor
-            .publish(self.menu.render(), SurfaceUpdatePriority::Background);
-        self.compositor
-            .invalidate(ScreenRegions::header(), SurfaceUpdatePriority::Immediate);
-        Ok(serde_json::json!({
-            "plan": controller_plan_value(keylab_protocol::transient_header_messages(&header))?,
-            "command": null,
-            "restore_header_after_ms": HOST_CONTROL_HEADER_MS,
-        })
-        .to_string())
+        self.render_transient_header(&parameter.little_header())
     }
 
-    fn render_semantic_control(&mut self, input: &SemanticControlInput) -> Result<String> {
-        let header = semantic_control_little_header(input);
+    /// A header shown for a moment over the screen -- what a control just
+    /// did -- after which Java restores the screen.
+    fn render_transient_header(&mut self, header: &str) -> Result<String> {
         self.compositor
             .publish(self.menu.render(), SurfaceUpdatePriority::Background);
         self.compositor
             .invalidate(ScreenRegions::header(), SurfaceUpdatePriority::Immediate);
         Ok(serde_json::json!({
-            "plan": controller_plan_value(keylab_protocol::transient_header_messages(&header))?,
+            "plan": controller_plan_value(keylab_protocol::transient_header_messages(header))?,
             "command": null,
-            "consume": false,
             "restore_header_after_ms": HOST_CONTROL_HEADER_MS,
         })
         .to_string())
@@ -2442,6 +2431,44 @@ impl AndroidEngine {
         Ok(())
     }
 
+    /// LITTLE's header for a touch on PLAY's instrument, one of its effects
+    /// or a Slot of the Rack on stage.
+    fn parameter_touch_header(
+        &self,
+        touch: &rackforge_core::parameter_touch::ParameterTouch,
+    ) -> Option<String> {
+        use rackforge_core::parameter_touch::{TouchPickup, touch_names};
+        let runtime = if touch_names(touch, ANDROID_INSTANCE_ID) {
+            Some(self.runtime.0)
+        } else if let Some(effect) = self
+            .chain
+            .iter()
+            .find(|effect| touch_names(touch, &effect.instance_id))
+        {
+            Some(effect.runtime.0)
+        } else {
+            self.rack
+                .as_ref()
+                .and_then(|rack| rack.engine.touched_plugin(touch))
+        }?;
+        let schema = runtime.parameters();
+        let parameter = schema
+            .parameters
+            .iter()
+            .find(|parameter| parameter.index == touch.parameter_index)?;
+        let arrow = match touch.pickup {
+            TouchPickup::Engaged => None,
+            TouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
+            TouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
+        };
+        Some(rackforge_surface_runtime::parameter_touch_header(
+            parameter,
+            touch.value,
+            schema.display_decimals,
+            arrow,
+        ))
+    }
+
     /// Puts a built Rack on stage, with its Slots' links compiled; the Rack
     /// it replaces is handed back, to be let go outside the engine's lock.
     fn install_rack(&mut self, mut rack: AndroidRack) -> Result<Option<AndroidRack>> {
@@ -4555,6 +4582,38 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabRestorePlan
     )
 }
 
+/// The last parameter touch the KeyLab's header showed.
+static PARAMETER_TOUCH_SEEN: AtomicU64 = AtomicU64::new(0);
+
+/// The header for what a control last did to a parameter, if anything new:
+/// its name and value in its own units, or where it stands and which way to
+/// move while the control has not picked it up. Java asks just after it
+/// forwards a control change, once the render thread has applied the link.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabParameterTouch(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let mut seen = PARAMETER_TOUCH_SEEN.load(Ordering::Relaxed);
+    let Some(touch) = rackforge_core::parameter_touch::PARAMETER_TOUCHES.latest(&mut seen) else {
+        return ptr::null_mut();
+    };
+    PARAMETER_TOUCH_SEEN.store(seen, Ordering::Relaxed);
+    let header = engine().lock().ok().and_then(|guard| {
+        guard
+            .as_ref()
+            .and_then(|engine| engine.parameter_touch_header(&touch))
+    });
+    let Some(header) = header else {
+        return ptr::null_mut();
+    };
+    let result = controller_menu()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
+        .and_then(|mut controller| controller.render_transient_header(&header));
+    result_string(&mut env, result)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
     mut env: JNIEnv,
@@ -4593,16 +4652,18 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
             });
         return result_string(&mut env, result);
     }
-    if let Some(input) = profile
+    // A default-mapped control plays on to its link; the header names the
+    // parameter it moved once the link has run (keyLabParameterTouch), not
+    // the role's fixed label and the raw CC.
+    // Nothing to draw and nothing consumed, so no answer at all: an empty
+    // one would still cancel the pending restore of a header on screen.
+    if profile
         .semantic_profile
         .as_ref()
         .and_then(|profile| semantic_control_input(profile, &message))
+        .is_some()
     {
-        let result = controller_menu()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
-            .and_then(|mut controller| controller.render_semantic_control(&input));
-        return result_string(&mut env, result);
+        return ptr::null_mut();
     }
     let Some(event) = keylab_protocol::parse_input(&message) else {
         return ptr::null_mut();

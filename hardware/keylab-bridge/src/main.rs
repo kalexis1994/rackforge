@@ -13,9 +13,7 @@ use rackforge_control_api::{
     transport::ControlConnection,
 };
 use rackforge_controller_api::{ButtonPhase, HostActionBinding, HostActionTarget, mcu};
-use rackforge_controller_api::{
-    LITTLE_V1, rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
-};
+use rackforge_controller_api::{LITTLE_V1, rackforge_parameter_input, semantic_control_input};
 use rackforge_controller_arturia_keylab_essential_mk3::{controller, protocol as keylab_protocol};
 use rackforge_controller_package::{
     CONTROLLER_DRIVER_API_VERSION, PROCESS_DRIVER_PROTOCOL_VERSION, ProcessDriverInfo,
@@ -28,8 +26,8 @@ use rackforge_platform_api::{
 use rackforge_session_api::SurfaceMode;
 use rackforge_session_api::{
     ClientId, CommandEnvelope, EventEnvelope, InstanceId, PluginInstanceState,
-    RackForgeParameterInput, RackForgeParameterMapper, RackForgeParameterValue,
-    SemanticControlInput, SessionCommand, SessionState,
+    RackForgeParameterInput, RackForgeParameterMapper, RackForgeParameterValue, SessionCommand,
+    SessionState,
 };
 use rackforge_session_api::{SessionEvent, SurfaceActivationRequest};
 use rackforge_surface_runtime as menu;
@@ -393,7 +391,9 @@ struct KeyLabInput {
     input_receiver: Receiver<PhysicalInputEvent>,
     transport_receiver: Receiver<(HostActionTarget, ButtonPhase)>,
     rackforge_parameter_receiver: Receiver<RackForgeParameterInput>,
-    semantic_feedback_receiver: Receiver<SemanticControlInput>,
+    /// A control change went on to the engine: its link may have moved a
+    /// parameter the header should name.
+    control_moved_receiver: Receiver<()>,
 }
 
 struct MidiForwarder {
@@ -1530,6 +1530,11 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut next_spinner_frame = Instant::now();
         let mut next_settings_check = Instant::now();
         let mut parameter_mapper = RackForgeParameterMapper::default();
+        // Where the engine's parameter touches stand: learnt now, so the
+        // header names only what a control moves from here on.
+        let mut touch_sequence = parameter_touch_start();
+        let mut touch_poll_until: Option<Instant> = None;
+        let mut next_touch_poll = Instant::now();
         'surface: loop {
             if shutdown_requested.load(Ordering::Acquire) {
                 eprintln!("Restaurando OLED, LEDs y preset Arturia antes de salir...");
@@ -1566,8 +1571,16 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     Err(error) => eprintln!("No se pudo aplicar el parámetro global: {error}"),
                 }
             }
-            for feedback in input.semantic_feedback_receiver.try_iter() {
-                latest_feedback = Some(semantic_control_little_header(&feedback));
+            if input.control_moved_receiver.try_iter().count() > 0 {
+                touch_poll_until = Some(Instant::now() + PARAMETER_TOUCH_POLL_WINDOW);
+            }
+            if touch_poll_until.is_some_and(|until| Instant::now() < until)
+                && Instant::now() >= next_touch_poll
+            {
+                next_touch_poll = Instant::now() + PARAMETER_TOUCH_POLL_INTERVAL;
+                if let Some(header) = parameter_touch_header(&mut touch_sequence) {
+                    latest_feedback = Some(header);
+                }
             }
             if let Some(feedback) = latest_feedback {
                 match transient_header.show(&feedback, Instant::now()) {
@@ -1893,6 +1906,50 @@ fn control_socket_generation() -> Option<(u64, u64, i64, i64)> {
 #[cfg(not(target_os = "linux"))]
 fn control_socket_generation() -> Option<(u64, u64, i64, i64)> {
     None
+}
+
+/// How long after a control moves the engine is asked what it touched, and
+/// how often: long enough for the link to run, often enough to follow a
+/// fader as it travels.
+const PARAMETER_TOUCH_POLL_WINDOW: Duration = Duration::from_millis(400);
+const PARAMETER_TOUCH_POLL_INTERVAL: Duration = Duration::from_millis(40);
+
+/// The engine's touch sequence now, so an old touch is never shown.
+fn parameter_touch_start() -> u64 {
+    match control_request(&ControlRequest::ParameterTouch { after: 0 }) {
+        Ok(ControlResponse::ParameterTouched { sequence, .. }) => sequence,
+        _ => 0,
+    }
+}
+
+/// The header for what a control last did to a parameter, if the engine
+/// has a new touch: the parameter's own name and value, or where it stands
+/// and which way to move while the control has not picked it up.
+fn parameter_touch_header(sequence: &mut u64) -> Option<String> {
+    if *sequence == 0 {
+        *sequence = parameter_touch_start();
+        return None;
+    }
+    let Ok(ControlResponse::ParameterTouched {
+        sequence: next,
+        touch,
+    }) = control_request(&ControlRequest::ParameterTouch { after: *sequence })
+    else {
+        return None;
+    };
+    *sequence = next;
+    let touch = touch?;
+    let arrow = match touch.pickup {
+        rackforge_control_api::ParameterTouchPickup::Engaged => None,
+        rackforge_control_api::ParameterTouchPickup::MoveUp => Some(menu::PickupArrow::Up),
+        rackforge_control_api::ParameterTouchPickup::MoveDown => Some(menu::PickupArrow::Down),
+    };
+    Some(menu::parameter_touch_header(
+        &touch.parameter,
+        touch.value,
+        touch.display_decimals,
+        arrow,
+    ))
 }
 
 fn control_request(request: &ControlRequest) -> Result<ControlResponse, String> {
@@ -3210,7 +3267,7 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     let (input_sender, input_receiver) = mpsc::channel();
     let (rackforge_parameter_sender, rackforge_parameter_receiver) = mpsc::channel();
     let (transport_sender, transport_receiver) = mpsc::channel();
-    let (semantic_feedback_sender, semantic_feedback_receiver) = mpsc::channel();
+    let (control_moved_sender, control_moved_receiver) = mpsc::channel();
     let semantic_profile = controller::package_profile().semantic_profile.clone();
     let host_actions = controller::package_profile().host_actions.clone();
     let midi_forwarder = MidiForwarder::from_environment(&port.name)?;
@@ -3254,19 +3311,22 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
                     InputPhase::Turn,
                 ));
             }
-            if let Some(input) = semantic_profile
+            if semantic_profile
                 .as_ref()
                 .and_then(|profile| semantic_control_input(profile, message))
-            {
-                if let Some(parameter) = semantic_profile
+                .is_some()
+                && let Some(parameter) = semantic_profile
                     .as_ref()
                     .and_then(|profile| rackforge_parameter_input(profile, message))
-                {
-                    let _ = rackforge_parameter_sender.send(parameter);
-                    consumed_by_surface = true;
-                } else {
-                    let _ = semantic_feedback_sender.send(input);
-                }
+            {
+                let _ = rackforge_parameter_sender.send(parameter);
+                consumed_by_surface = true;
+            }
+            // Any control change the engine takes may move a parameter
+            // through a link -- the controller's defaults, the player's map,
+            // a learnt link -- and the header names what it moved.
+            if !consumed_by_surface && message.first().is_some_and(|status| status & 0xf0 == 0xb0) {
+                let _ = control_moved_sender.send(());
             }
             if let Some(message) = forwardable_performance_message(message, consumed_by_surface)
                 && let Some(sender) = midi_forward_sender.as_ref()
@@ -3295,7 +3355,7 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
         input_receiver,
         transport_receiver,
         rackforge_parameter_receiver,
-        semantic_feedback_receiver,
+        control_moved_receiver,
     })
 }
 

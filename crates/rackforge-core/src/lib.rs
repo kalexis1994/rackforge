@@ -35,6 +35,8 @@ pub mod package;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod parallel_render;
 pub mod parameter_link;
+/// The parameter a control last moved, for LITTLE's header on every host.
+pub mod parameter_touch;
 pub mod performance;
 pub mod rack_graph;
 /// A LIVE Rack's Slots and their mix, for every host with a render pool:

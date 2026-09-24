@@ -74,6 +74,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -152,6 +153,11 @@ public final class MainActivity extends Activity {
     private volatile int midiGeneration;
     private volatile long midiReconnectAttempts;
     private final AtomicInteger keyLabHeaderGeneration = new AtomicInteger();
+    /** A header ask is pending: the moves until it runs share it. */
+    private final AtomicBoolean parameterTouchScheduled = new AtomicBoolean();
+    /** Long enough for the render thread to apply the link, short enough to
+     *  follow a fader as it moves. */
+    private static final long PARAMETER_TOUCH_HEADER_DELAY_MS = 40;
     private volatile boolean audioRecoveryInProgress;
     private ThermalMonitor thermalMonitor;
     private int thermalStatus = PowerManager.THERMAL_STATUS_NONE;
@@ -300,6 +306,7 @@ public final class MainActivity extends Activity {
     private static native boolean keyLabMatchesProductName(String name);
     private static native boolean keyLabMatchesEndpointName(String name);
     private static native String keyLabHandleMidi(int status, int data1, int data2);
+    private static native String keyLabParameterTouch();
     private static native String keyLabPollLongPress();
     private static native boolean keyLabSyncPlugins(String storeRoot);
     private static native boolean ensurePerformanceLibrary(String dataRoot);
@@ -5712,6 +5719,7 @@ public final class MainActivity extends Activity {
             if (!consumed && forwardMidi && audioRunning) {
                 sendMidiMessageFromSource(
                         sourceKey, messageStatus, data1, data2, expectedDataBytes + 1);
+                if ((messageStatus & 0xF0) == 0xB0) scheduleParameterTouchHeader(generation);
             }
             messageStatus = runningStatus;
             dataCount = 0;
@@ -5727,6 +5735,22 @@ public final class MainActivity extends Activity {
             int command = status & 0xF0;
             return command == 0xC0 || command == 0xD0 ? 1 : 2;
         }
+    }
+
+    /**
+     * After a control change reaches the engine, LITTLE's header names the
+     * parameter its link moved -- the player's map, a learnt link or the
+     * controller's defaults -- with its value. Asked once the render thread
+     * has had a block to apply the link; moves in between share one ask.
+     */
+    private void scheduleParameterTouchHeader(int generation) {
+        if (!parameterTouchScheduled.compareAndSet(false, true)) return;
+        mainHandler.postDelayed(() -> {
+            parameterTouchScheduled.set(false);
+            if (generation != midiGeneration) return;
+            String response = keyLabParameterTouch();
+            if (response != null) handleKeyLabResponse(response, generation);
+        }, PARAMETER_TOUCH_HEADER_DELAY_MS);
     }
 
     private void handleKeyLabResponse(String json, int generation) {

@@ -708,6 +708,28 @@ impl DesktopApp {
                 });
         let performance_repository = PerformanceRepository::load_or_empty(Some(&options.data_root))
             .context("loading Desktop performance library")?;
+        // Where LIVE was, kept across a restart. The saved session was
+        // written back over with an empty LIVE, so every start forgot the
+        // lists' positions and what was on stage. What was playing is loaded
+        // again once the app exists, through the same path as LOAD; until
+        // then nothing is claimed to be playing.
+        let mut restored_live_target = None;
+        let restored_live = match session_checkpoint.live_state(&session_id) {
+            Ok(Some(mut live)) if live.validate(performance_repository.library()).is_ok() => {
+                restored_live_target = live.active.take();
+                live.deactivate();
+                Some(live)
+            }
+            Ok(Some(_)) => {
+                warnings.push("The saved LIVE position no longer matches the library".into());
+                None
+            }
+            Ok(None) => None,
+            Err(error) => {
+                warnings.push(format!("Could not restore the LIVE position: {error:#}"));
+                None
+            }
+        };
         *performance_revision_shared
             .write()
             .expect("performance revision lock poisoned") =
@@ -814,6 +836,9 @@ impl DesktopApp {
             state.instances = plugins.iter().map(plugin_session_state).collect();
             state.parameter_links = restored_parameter_links.clone();
             state.play_chains = prune_play_chains(restored_play_chains, &state.instances, &plugins);
+            if let Some(live) = restored_live {
+                state.live = live;
+            }
             menu.sync_active_mode(active_mode_from_surface(state.active_mode));
         }
         #[cfg(windows)]
@@ -980,6 +1005,18 @@ impl DesktopApp {
         };
         app.sync_little_plugin_parameters();
         app.sync_little_play_chain();
+        let starts_live = app
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .active_mode
+            == SurfaceMode::Live;
+        if starts_live && let Some(location) = restored_live_target {
+            if let Err(error) = app.activate_live_target(location, None) {
+                eprintln!("LIVE_RESTORE_FAILED reason={error}");
+                app.status = format!("The LIVE target could not be loaded again: {error}");
+            }
+        }
         // LITTLE opens on what is playing: the LIVE lists need the library
         // and the LIVE position before the screen can go there.
         let performance = app.performance_snapshot();
@@ -3926,10 +3963,9 @@ impl DesktopApp {
                     })()
                 }
             }
-            SessionCommand::SetLiveBrowseMode { mode } => self.apply_program_events(
-                vec![SessionEvent::LiveBrowseModeChanged { mode }],
-                Some(command_ref),
-            ),
+            SessionCommand::SetLiveBrowseMode { mode } => {
+                self.set_live_browse_mode(mode, Some(command_ref))
+            }
             SessionCommand::SetPlayChain {
                 instrument_id,
                 effects,
@@ -5598,6 +5634,19 @@ impl DesktopApp {
         Ok(vec![event])
     }
 
+    /// Which list LIVE browses, kept across a restart like the rest of the
+    /// session: the mode alone was never checkpointed.
+    fn set_live_browse_mode(
+        &mut self,
+        mode: rackforge_performance_api::LiveBrowseMode,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        let events =
+            self.apply_program_events(vec![SessionEvent::LiveBrowseModeChanged { mode }], command)?;
+        self.persist_session_checkpoint();
+        Ok(events)
+    }
+
     /// Puts a LIVE target on stage: the session state and the Part's
     /// sequencer freight. The Desktop keeps playing its active voice —
     /// multi-Slot Rack audio remains the appliance's — so the Part's
@@ -5617,12 +5666,12 @@ impl DesktopApp {
         }
         let (rack_id, part_commands, sounding, unsounded_slots) = {
             let library = self.performance_repository.library();
+            // Every saved Rack is offered and every saved Rack loads, as on
+            // the appliance: `enabled` stays in the data, unused. Refusing a
+            // disabled one here made LOAD fail on the Desktop alone.
             let rack = library
                 .resolve_playable(&location)
                 .map_err(|error| error.to_string())?;
-            if !rack.enabled {
-                return Err("the selected Rack is disabled".into());
-            }
             let commands = library
                 .resolve_part(&location)
                 .map(|part| {
@@ -5630,41 +5679,41 @@ impl DesktopApp {
                 })
                 .unwrap_or_default();
             // The Desktop renders one voice at a time, so a Rack sounds
-            // through its first enabled Slot. Mixing several Slots is the
-            // appliance's, and the Slot order is the Rack's own.
-            let enabled = rack.slots.iter().filter(|slot| slot.enabled);
-            let mut enabled = enabled.peekable();
+            // through its first enabled instrument Slot. An effect cannot be
+            // the voice -- nothing would play into it -- and mixing several
+            // Slots is the appliance's. The Slot order is the Rack's own.
+            let enabled: Vec<_> = rack.slots.iter().filter(|slot| slot.enabled).collect();
             let first = enabled
-                .next()
-                .map(|slot| (slot.plugin_id.clone(), slot.state.clone()));
-            let remaining = enabled.count();
+                .iter()
+                .find(|slot| {
+                    self.plugins.iter().any(|plugin| {
+                        plugin.plugin_id == slot.plugin_id
+                            && plugin.runtime.manifest().kind == PluginKind::Instrument
+                    })
+                })
+                .map(|slot| {
+                    (
+                        slot.plugin_id.clone(),
+                        slot.state.clone(),
+                        slot.legacy_program_id.clone(),
+                    )
+                });
+            if first.is_none() {
+                return Err(if enabled.is_empty() {
+                    format!("{} has no enabled Slots", rack.name)
+                } else {
+                    format!("{} has no instrument installed here", rack.name)
+                });
+            }
+            let remaining = enabled.len().saturating_sub(1);
             (rack.id.clone(), commands, first, remaining)
         };
-        // A binding that fails must never fail the activation: the show
-        // goes on with the lanes that resolve.
-        for part_command in part_commands {
-            match self
-                .audio
-                .as_ref()
-                .map(|audio| audio.sequencer_command(part_command))
-            {
-                Some(Ok(Ok(()))) => {}
-                Some(Ok(Err(reason))) => {
-                    eprintln!("SEQUENCER_PART_QUEUE_REJECTED reason={reason}");
-                }
-                Some(Err(error)) => {
-                    eprintln!("SEQUENCER_PART_QUEUE_UNREACHABLE reason={error:#}");
-                    break;
-                }
-                None => break,
-            }
-        }
         // Until here the activation only moved LIVE's state, which is how a
         // Rack could be shown on stage while PLAY's instrument kept sounding:
         // the Desktop engine has no notion of a Rack, so nobody ever pointed
         // the voice at the one the player chose.
         let mut events = Vec::new();
-        if let Some((plugin_id, state)) = sounding {
+        if let Some((plugin_id, state, legacy_program_id)) = sounding {
             let instance_id = self
                 .plugins
                 .iter()
@@ -5729,6 +5778,12 @@ impl DesktopApp {
                         .restore_state(instance_id.as_str(), bytes)
                         .map_err(|error| format!("Could not load the Slot's sound: {error:#}"))?;
                 }
+            } else if let Some(program_id) = legacy_program_id {
+                // A Slot saved before states were captured names a program.
+                events.extend(
+                    self.select_sound(&instance_id, &program_id, command.clone())
+                        .map_err(|error| format!("Could not load the Slot's program: {error}"))?,
+                );
             }
             if unsounded_slots > 0 {
                 // Said out loud rather than mixed silently into nothing.
@@ -5745,6 +5800,27 @@ impl DesktopApp {
             command,
         )?);
         self.persist_session_checkpoint();
+        // The Part's patterns go out once the Rack is on stage: queued
+        // before, a load that failed left them playing over the old one. A
+        // binding that fails never fails the activation; the show goes on
+        // with the lanes that resolve.
+        for part_command in part_commands {
+            match self
+                .audio
+                .as_ref()
+                .map(|audio| audio.sequencer_command(part_command))
+            {
+                Some(Ok(Ok(()))) => {}
+                Some(Ok(Err(reason))) => {
+                    eprintln!("SEQUENCER_PART_QUEUE_REJECTED reason={reason}");
+                }
+                Some(Err(error)) => {
+                    eprintln!("SEQUENCER_PART_QUEUE_UNREACHABLE reason={error:#}");
+                    break;
+                }
+                None => break,
+            }
+        }
         Ok(events)
     }
 
@@ -6991,6 +7067,48 @@ impl DesktopApp {
                     return;
                 }
                 self.status = "Emergency HOME · audio stopped".into();
+            }
+            // LIVE from LITTLE goes where the web's goes. These fell through
+            // to the pending arm, so LITTLE's LOAD did nothing and a Rack
+            // saved from it waited on its busy page for ever.
+            MenuCommand::SetLiveBrowseMode { mode } => {
+                match self.set_live_browse_mode(mode, None) {
+                    Ok(_) => {
+                        let snapshot = self.performance_snapshot();
+                        self.menu.sync_performance_snapshot(snapshot);
+                    }
+                    Err(error) => self.status = error,
+                }
+            }
+            MenuCommand::ActivateLiveTarget { location } => {
+                match self.activate_live_target(location, None) {
+                    Ok(_) => {
+                        let snapshot = self.performance_snapshot();
+                        self.menu.sync_performance_snapshot(snapshot);
+                    }
+                    Err(error) => self.status = format!("Could not load: {error}"),
+                }
+            }
+            MenuCommand::EditPerformance {
+                expected_revision,
+                edit,
+            } => {
+                let result =
+                    match self.handle_performance_control(ControlRequest::EditPerformance {
+                        expected_revision,
+                        edit,
+                    }) {
+                        ControlResponse::PerformanceEdited { snapshot } => Ok(*snapshot),
+                        ControlResponse::Error { message, .. } => Err(message),
+                        other => Err(format!("Unexpected performance response: {other:?}")),
+                    };
+                if let Err(error) = &result {
+                    self.status = error.clone();
+                }
+                self.menu.complete_performance_edit(result);
+            }
+            MenuCommand::PreviewRack { .. } => {
+                self.status = "The Desktop plays saved Racks: save this Rack, then load it".into();
             }
             other => {
                 self.status = format!("Desktop bridge pending: {other:?}");

@@ -151,6 +151,9 @@ public final class MainActivity extends Activity {
     private String currentPage = "play";
     private String currentSharedRoute = "/play";
     private volatile boolean engineStarting;
+    /** The PLAY plugin's package while LIVE has taken the one voice for a
+     *  Rack: PLAY gets it back, with its sound and chain, on the way out. */
+    private volatile String playVoiceRoot;
     private File pluginPackageRoot;
     private String pluginWebEntry;
     private String pluginConfigWebEntry;
@@ -279,6 +282,7 @@ public final class MainActivity extends Activity {
     private static native String controllerSessionCommand(String dataRoot, String requestJson);
     private static native String performanceCommand(String dataRoot, String requestJson,
             String packageRootsJson);
+    private static native String liveCommand(String dataRoot, String commandJson);
     private static native boolean loadControllerMaps(String dataRoot);
     private static native boolean identifyMidiSource(int sourceKey, byte[] reply);
     private static native String midiSourceConnectPlan(int sourceKey);
@@ -1820,6 +1824,17 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** What LIVE has loaded, as the native library records it. */
+    private JSONObject sharedLiveState() throws Exception {
+        try {
+            return new JSONObject(liveCommand(pluginDataRoot().getAbsolutePath(),
+                    new JSONObject().put("kind", "state").toString()));
+        } catch (Throwable error) {
+            Log.w("RackForge", "LIVE state unavailable", error);
+            return new JSONObject().put("mode", "rack");
+        }
+    }
+
     private JSONObject sharedSessionSnapshot() throws Exception {
         nativeSessionRevision++;
         JSONArray instances = new JSONArray();
@@ -1842,7 +1857,7 @@ public final class MainActivity extends Activity {
                 .put("active_mode", mode)
                 .put("master_level", nativeMasterLevel())
                 .put("master_pan", nativeMasterPan())
-                .put("live", new JSONObject().put("mode", "rack"))
+                .put("live", sharedLiveState())
                 .put("parameter_links", parameterLinks());
         // The chain is the player's; the instances are the effects the engine
         // could build out of it, and each is what a panel opens on.
@@ -2153,7 +2168,19 @@ public final class MainActivity extends Activity {
                     removeParameterLink(command.getString("link_id"));
                     confirmSharedCommand(envelope);
                 }
-                default -> Log.d("RackForge", "Shared UI command pending on Android: " + type);
+                case "activate_live_target" ->
+                        activateLiveTarget(envelope, command.getJSONObject("location"));
+                case "set_live_browse_mode" -> runConfirmedSharedCommand(envelope, () ->
+                        liveCommand(pluginDataRoot().getAbsolutePath(), new JSONObject()
+                                .put("kind", "browse")
+                                .put("mode", command.getString("mode"))
+                                .toString()));
+                // Answered, never dropped: a command the surface waits on and
+                // this host cannot perform is refused out loud.
+                case "preview_rack" -> throw new UnsupportedOperationException(
+                        "Android plays saved Racks: save this Rack, then load it");
+                default -> throw new UnsupportedOperationException(
+                        "RackForge for Android cannot " + type.replace('_', ' ') + " yet");
             }
         } catch (Throwable error) {
             Log.e("RackForge", "Could not handle shared UI session request", error);
@@ -4413,6 +4440,17 @@ public final class MainActivity extends Activity {
             return;
         }
         engineStarting = true;
+        // Choosing PLAY's plugin ends LIVE: nothing is loaded any more, and
+        // the plugin chosen now is PLAY's, not the one LIVE borrowed from.
+        if ("live".equals(currentPage)) {
+            try {
+                liveCommand(pluginDataRoot().getAbsolutePath(),
+                        new JSONObject().put("kind", "deactivate").toString());
+            } catch (Throwable error) {
+                Log.w("RackForge", "Could not mark LIVE as unloaded", error);
+            }
+        }
+        playVoiceRoot = null;
         currentPage = "play";
         pluginWebSurface = "play";
         // PLAY owns plugin replacement. Navigating through the generic engine-state page would
@@ -4493,6 +4531,183 @@ public final class MainActivity extends Activity {
                 });
             }
         }, "rackforge-plugin-activate").start();
+    }
+
+    /**
+     * Loads a LIVE location -- a Rack, a Song Part, a Setlist entry -- into
+     * the one voice Android plays: the Rack's first installed instrument,
+     * with its Slot's saved sound. The library records the Rack as loaded
+     * only once it sounds; a load that fails leaves what was playing and
+     * says why. The web and LITTLE both come here; `envelope` is null for
+     * LITTLE, which is told through a toast.
+     */
+    private void activateLiveTarget(JSONObject envelope, JSONObject location) {
+        if (engineStarting) {
+            failLiveTarget(envelope, new IllegalStateException(
+                    "RackForge is still changing plugins; try again in a moment"));
+            return;
+        }
+        engineStarting = true;
+        new Thread(() -> {
+            try {
+                String dataRoot = pluginDataRoot().getAbsolutePath();
+                JSONObject plan = new JSONObject(liveCommand(dataRoot, new JSONObject()
+                        .put("kind", "plan")
+                        .put("location", location)
+                        .toString()));
+                JSONArray slots = plan.getJSONArray("slots");
+                JSONObject slot = null;
+                JSONObject record = null;
+                int instruments = 0;
+                for (int index = 0; index < slots.length(); index++) {
+                    JSONObject candidate = slots.getJSONObject(index);
+                    JSONObject installed = installedPluginRecord(candidate.getString("plugin_id"));
+                    if (installed == null || !"instrument".equals(installed.optString("kind"))) {
+                        continue;
+                    }
+                    instruments++;
+                    if (slot == null) {
+                        slot = candidate;
+                        record = installed;
+                    }
+                }
+                if (slot == null) {
+                    throw new IllegalStateException(plan.optString("rack_name", "This Rack")
+                            + " has no instrument installed on this device");
+                }
+                // PLAY's own plugin is remembered once, when LIVE first takes
+                // the voice, so leaving LIVE gives it back.
+                if (playVoiceRoot == null && pluginPackageRoot != null) {
+                    playVoiceRoot = pluginPackageRoot.getAbsolutePath();
+                }
+                if (!slot.getString("plugin_id").equals(activePluginId())) {
+                    swapEngineTo(record.getString("package_root"));
+                }
+                if (!slot.isNull("state")) {
+                    pluginStateCommand("restore_state", new JSONObject()
+                            .put("state", slot.getJSONObject("state"))
+                            .toString());
+                } else if (!slot.isNull("legacy_program_id")) {
+                    if (!selectPluginSound(slot.getString("legacy_program_id"))) {
+                        throw new IllegalStateException("The Rack Slot's program is not available");
+                    }
+                }
+                liveCommand(dataRoot, new JSONObject()
+                        .put("kind", "commit")
+                        .put("location", location)
+                        .toString());
+                int skipped = slots.length() - 1;
+                Log.i("RackForge", "LIVE_RACK_LOADED rack=" + plan.optString("rack_id")
+                        + " plugin=" + slot.getString("plugin_id")
+                        + " other_slots_silent=" + skipped);
+                runOnUiThread(() -> {
+                    currentPage = "live";
+                    syncControllerActiveMode("live", true);
+                    updateModeButtons();
+                    refreshKeyLabDisplay();
+                    if (skipped > 0) {
+                        Toast.makeText(this, plan.optString("rack_name", "The Rack")
+                                + ": this device plays its first instrument; "
+                                + skipped + " other Slot(s) stay silent",
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+                if (envelope != null) confirmSharedCommand(envelope);
+                else emitSessionSnapshot();
+            } catch (Throwable error) {
+                Log.e("RackForge", "Loading the LIVE target failed", error);
+                failLiveTarget(envelope, error);
+            } finally {
+                engineStarting = false;
+            }
+        }, "rackforge-live-load").start();
+    }
+
+    private void failLiveTarget(JSONObject envelope, Throwable error) {
+        if (envelope != null) {
+            emitSharedSessionError(error);
+            return;
+        }
+        String message = error.getMessage() == null ? error.toString() : error.getMessage();
+        runOnUiThread(() -> Toast.makeText(this, "Could not load: " + message,
+                Toast.LENGTH_LONG).show());
+    }
+
+    /**
+     * Replaces the voice's plugin without leaving the page the player is on
+     * -- the part of a plugin activation LIVE shares with PLAY. On failure
+     * the previous plugin is put back before the error is raised.
+     */
+    private void swapEngineTo(String root) throws Exception {
+        File previousRoot = pluginPackageRoot;
+        try {
+            releaseMidiNotes();
+            stopNativeAudio();
+            audioRunning = false;
+            if (!activateInstalledPlugin(root, pluginStoreRoot().getAbsolutePath(),
+                    pluginDataRoot().getAbsolutePath())) {
+                throw new IllegalStateException("The runtime rejected the Rack's instrument");
+            }
+            refreshActivePluginMetadata();
+            restoreActivePluginResources();
+            keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
+            startAudio();
+        } catch (Throwable error) {
+            if (previousRoot != null) {
+                try {
+                    if (activateInstalledPlugin(previousRoot.getAbsolutePath(),
+                            pluginStoreRoot().getAbsolutePath(),
+                            pluginDataRoot().getAbsolutePath())) {
+                        refreshActivePluginMetadata();
+                        restoreActivePluginResources();
+                        restorePersistedPluginSound();
+                        restorePersistedPlayChain();
+                        keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
+                        startAudio();
+                    }
+                } catch (Throwable rollbackError) {
+                    error.addSuppressed(rollbackError);
+                }
+            }
+            throw error instanceof Exception ? (Exception) error : new RuntimeException(error);
+        }
+    }
+
+    /**
+     * Leaving LIVE: nothing is loaded any more, and PLAY gets back the plugin,
+     * sound and chain it had before a Rack took the voice.
+     */
+    private void leaveLive() {
+        try {
+            liveCommand(pluginDataRoot().getAbsolutePath(),
+                    new JSONObject().put("kind", "deactivate").toString());
+        } catch (Throwable error) {
+            Log.w("RackForge", "Could not mark LIVE as unloaded", error);
+        }
+        String root = playVoiceRoot;
+        playVoiceRoot = null;
+        if (root == null) return;
+        if (engineStarting) {
+            Log.w("RackForge", "PLAY voice not restored: a plugin change is in progress");
+            return;
+        }
+        engineStarting = true;
+        new Thread(() -> {
+            try {
+                if (pluginPackageRoot == null
+                        || !root.equals(pluginPackageRoot.getAbsolutePath())) {
+                    swapEngineTo(root);
+                }
+                restorePersistedPluginSound();
+                restorePersistedPlayChain();
+                refreshKeyLabDisplay();
+                emitSessionSnapshot();
+            } catch (Throwable error) {
+                Log.e("RackForge", "Restoring the PLAY voice after LIVE failed", error);
+            } finally {
+                engineStarting = false;
+            }
+        }, "rackforge-play-restore").start();
     }
 
     private void deactivatePlugin(String pluginId) {
@@ -4656,6 +4871,8 @@ public final class MainActivity extends Activity {
     }
 
     private void showPlay() {
+        boolean fromLive = "live".equals(currentPage);
+        if (fromLive) leaveLive();
         currentPage = "play";
         pluginWebSurface = "play";
         syncControllerActiveMode("play", true);
@@ -4675,6 +4892,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showIdle() {
+        if ("live".equals(currentPage)) leaveLive();
         currentPage = "idle";
         syncControllerActiveMode("idle", false);
         updateModeButtons();
@@ -5636,6 +5854,10 @@ public final class MainActivity extends Activity {
             case "select_plugin" -> mainHandler.post(() -> activatePlugin(
                     command.optString("root"), command.optString("name"),
                     command.optString("version")));
+            case "activate_live" -> {
+                JSONObject location = command.optJSONObject("location");
+                if (location != null) activateLiveTarget(null, location);
+            }
             case "select_sound" -> selectControllerSound(command.optString("sound_id"));
             case "return_mode" -> {
                 String soundId = command.optString("sound_id");

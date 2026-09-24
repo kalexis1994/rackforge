@@ -350,45 +350,13 @@ impl AndroidControllerMenu {
                 }
                 None
             }
-            MenuCommand::ActivateLiveTarget { location } => {
-                let outcome = (|| -> Result<(PerformanceSnapshot, Option<String>)> {
-                    let mut guard = performance()
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
-                    let state = guard
-                        .as_mut()
-                        .context("the performance library is not ready yet")?;
-                    let rack = state
-                        .repository
-                        .library()
-                        .resolve_playable(&location)
-                        .map_err(|error| anyhow::anyhow!("{error}"))?;
-                    state.live.activate(location, rack.id.clone());
-                    let plugin_id = rack
-                        .slots
-                        .iter()
-                        .find(|slot| slot.enabled)
-                        .map(|slot| slot.plugin_id.clone());
-                    Ok((performance_snapshot(state), plugin_id))
-                })();
-                match outcome {
-                    Ok((snapshot, plugin_id)) => {
-                        self.menu.sync_performance_snapshot(snapshot);
-                        // Android hosts ONE plugin instance, so LIVE plays the
-                        // Rack's first enabled slot; the switch itself rides
-                        // the existing select_plugin path through Java.
-                        plugin_id
-                            .filter(|id| self.plugins.contains_key(id))
-                            .and_then(|id| {
-                                self.command_json(MenuCommand::SelectPlugin { instance_id: id })
-                            })
-                    }
-                    Err(error) => {
-                        eprintln!("LIVE_TARGET_FAILED {error:#}");
-                        None
-                    }
-                }
-            }
+            // The web and LITTLE load a Rack the same way: through the
+            // Activity, which switches the one voice to the Rack's instrument
+            // with its saved sound and commits the location once it sounds.
+            MenuCommand::ActivateLiveTarget { location } => Some(serde_json::json!({
+                "type": "activate_live",
+                "location": location,
+            })),
             // Previewing a DRAFT Rack needs a rack engine Android does not
             // have yet; saving and activating are the honest paths.
             MenuCommand::PreviewRack { .. } => None,
@@ -1819,6 +1787,40 @@ impl AndroidEngine {
                     self.selected_sound_id = sound_id.clone();
                 }
                 Ok(serde_json::to_value(preset)?)
+            }
+            // A Rack Slot's saved sound, loaded into the one voice Android
+            // plays: LIVE loads a Rack this way.
+            "restore_state" => {
+                let state: PluginStateReference = serde_json::from_value(
+                    params
+                        .get("state")
+                        .cloned()
+                        .context("restore state command is missing state")?,
+                )?;
+                state.validate().context("validating the Rack Slot state")?;
+                if state.plugin_id != self.plugin_id {
+                    bail!(
+                        "the state is for {}, not the plugin playing ({})",
+                        state.plugin_id,
+                        self.plugin_id
+                    );
+                }
+                let installed_state_version = self.runtime.0.manifest().state_version;
+                if state.state_version != installed_state_version {
+                    bail!(
+                        "the saved state v{} does not fit the installed plugin's v{}",
+                        state.state_version,
+                        installed_state_version
+                    );
+                }
+                let bytes = store.read(&state)?;
+                self.mirror_control(|instance| instance.load_state(&bytes))?;
+                self.process_faulted = false;
+                self.live_parameter_writer_handle.clear(0);
+                if let Some(sound_id) = state.selected_sound_id.as_ref() {
+                    self.selected_sound_id = sound_id.clone();
+                }
+                Ok(serde_json::json!({ "status": "ok" }))
             }
             "rename_preset" => {
                 let preset_id = params
@@ -3373,7 +3375,10 @@ fn ensure_performance_menu(data_root: &Path) -> Result<()> {
             .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
         if guard.is_none() {
             let repository = PerformanceRepository::load_or_empty(Some(data_root))?;
-            let live = repository.initial_live_state();
+            // Android loads a Rack only when asked, so none is active at start:
+            // the library must never say a Rack sounds that does not.
+            let mut live = repository.initial_live_state();
+            live.deactivate();
             *guard = Some(AndroidPerformance { repository, live });
         }
         guard
@@ -4084,6 +4089,110 @@ fn android_performance_command(
         }
         _ => bail!("not a LIVE library request"),
     }
+}
+
+/// LIVE's navigation on Android, which plays one voice: the Activity asks
+/// for a plan (the Rack a location resolves to and its Slots), switches the
+/// voice to the Rack's instrument, and commits only once it sounds -- so the
+/// library never says a Rack is loaded that is not.
+///
+/// `{"kind": "plan", "location"}` -> `{rack_id, rack_name, slots: [...]}`
+/// `{"kind": "commit", "location"}` -> the performance snapshot
+/// `{"kind": "browse", "mode"}` / `{"kind": "deactivate"}` -> the snapshot
+/// `{"kind": "state"}` -> the LIVE state the session snapshot carries
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_liveCommand(
+    mut env: JNIEnv,
+    _class: JClass,
+    data_root: JString,
+    command_json: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        let command: serde_json::Value =
+            serde_json::from_str(&java_string(&mut env, command_json)?)
+                .context("reading the LIVE command")?;
+        Ok(android_live_command(&data_root, &command)?.to_string())
+    })();
+    result_string(&mut env, result)
+}
+
+fn android_live_command(
+    data_root: &Path,
+    command: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    ensure_performance_menu(data_root)?;
+    let location = || -> Result<rackforge_performance_api::LiveLocation> {
+        serde_json::from_value(
+            command
+                .get("location")
+                .cloned()
+                .context("the LIVE command names no location")?,
+        )
+        .context("reading the LIVE location")
+    };
+    let kind = command
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .context("the LIVE command has no kind")?;
+    let mut guard = performance()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+    let state = guard.as_mut().context("the LIVE library is not loaded")?;
+    let snapshot = match kind {
+        "state" => return Ok(serde_json::to_value(&state.live)?),
+        "plan" => {
+            let rack = state
+                .repository
+                .library()
+                .resolve_playable(&location()?)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            return Ok(serde_json::json!({
+                "rack_id": rack.id,
+                "rack_name": rack.name,
+                "slots": rack.slots.iter().filter(|slot| slot.enabled).map(|slot| {
+                    serde_json::json!({
+                        "id": slot.id,
+                        "plugin_id": slot.plugin_id,
+                        "state": slot.state,
+                        "legacy_program_id": slot.legacy_program_id,
+                    })
+                }).collect::<Vec<_>>(),
+            }));
+        }
+        "commit" => {
+            let location = location()?;
+            let rack = state
+                .repository
+                .library()
+                .resolve_playable(&location)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            state.live.activate(location, rack.id.clone());
+            performance_snapshot(state)
+        }
+        "browse" => {
+            state.live.mode = serde_json::from_value(
+                command
+                    .get("mode")
+                    .cloned()
+                    .context("the browse command names no mode")?,
+            )
+            .context("reading the LIVE browse mode")?;
+            performance_snapshot(state)
+        }
+        "deactivate" => {
+            state.live.deactivate();
+            performance_snapshot(state)
+        }
+        other => bail!("unknown LIVE command {other:?}"),
+    };
+    drop(guard);
+    controller_menu()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?
+        .menu
+        .sync_performance_snapshot(snapshot.clone());
+    Ok(serde_json::to_value(snapshot)?)
 }
 
 /// A Rack saved with a Slot that has no state yet gets one made from its

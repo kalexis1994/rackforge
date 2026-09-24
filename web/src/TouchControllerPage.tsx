@@ -14,6 +14,7 @@ import { releaseVirtualMidi, sendVirtualMidi } from "./gateway";
 import { hostHaptic } from "./host";
 import type { SessionSnapshot } from "./types";
 import { padGridLayout } from "./touchControllerLayout";
+import { useMediaQuery } from "./hooks/useMediaQuery";
 
 type ControllerMode = "keyboard" | "pads";
 type KeyboardWidth = "auto" | number;
@@ -50,6 +51,8 @@ const FULL_KEYBOARD_START_NOTE = 21;
 const FULL_KEYBOARD_WHITE_KEYS = 52;
 const FULL_KEYBOARD_MIN_WHITE_KEY_PX = 22;
 const WINDOWED_KEY_MIN_PX = 42;
+/** The portrait branch of the stylesheet's compact-dock query (styles.css). */
+const PORTRAIT_DOCK_QUERY = "(max-width: 760px) and (orientation: portrait)";
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -286,8 +289,14 @@ export function TouchControllerPage({
     ? FULL_KEYBOARD_START_NOTE
     : windowBaseNote;
   const playable = connection === "online" && session.active_mode !== "idle";
+  // The portrait dock is the stylesheet's to draw, so it is the stylesheet's
+  // query that decides it. Working it out from the controller's own width
+  // disagreed with the CSS whenever the window was a little wider than 760px
+  // (the rail makes the controller narrower): the navigator was rendered
+  // with none of its rules, and the keys were squeezed to a strip.
   const sizingHeight = docked ? window.innerHeight : controllerSize.height;
-  const portraitDock = docked && controllerWidth <= 760 && sizingHeight > controllerWidth;
+  const portraitViewport = useMediaQuery(PORTRAIT_DOCK_QUERY);
+  const portraitDock = docked && portraitViewport;
   const portraitKeyboardNavigator = portraitDock && mode === "keyboard" && !fullKeyboard;
   const minimumKeyboardViewportWidth = Math.min(
     FULL_KEYBOARD_WHITE_KEYS,

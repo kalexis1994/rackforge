@@ -109,6 +109,45 @@
   background: var(--chassis);
 }
 
+/* A section scrolls inside itself, under a bar that stays where it is: the
+   page is the scroller, not the shell around the bar and the page. It is the
+   arrangement the surfaces and the controller dock already had; About,
+   Controllers and the rest scrolled the bar away with them. */
+.app-shell.section-page-active {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.section-page-active .workspace {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.section-page-active .workspace > .topbar,
+.section-page-active .workspace > .error-banner {
+  flex: 0 0 auto;
+}
+
+.section-page-active .workspace > .page {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  /* The shell is the fixed inset rectangle here; its height is that. */
+  .app-shell.section-page-active {
+    height: auto;
+    overflow: hidden;
+  }
+}
+
 /* --------------------------------------------------------------- rail ---- */
 
 .topbar {

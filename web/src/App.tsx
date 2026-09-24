@@ -528,6 +528,10 @@ function RackForgeApp() {
   }, [controllerDockOpen, dockableController, location.pathname, navigate]);
 
   const showControllerDock = dockableController && controllerDockOpen;
+  // A section -- About, Controllers, Settings, the plugin list -- scrolls
+  // inside itself under a bar that stays put, as the surfaces already do.
+  const isSectionPage = !isPluginSurface && !isControllerSurface && !isPerformanceSurface
+    && !liveWorkspace && !showControllerDock;
   const completePlayNavigation = useCallback(async (instance?: PluginInstance) => {
     setPreferredPlayInstanceId(instance?.instance_id ?? null);
     if (instance) {
@@ -573,6 +577,7 @@ function RackForgeApp() {
       isLiveSurface ? " live-surface-active" : ""
     }${liveWorkspace ? " graph-workspace-active" : ""
     }${showControllerDock ? " controller-dock-active" : ""
+    }${isSectionPage ? " section-page-active" : ""
     }`}>
       <aside className="rail">
         <div className="brand-lockup" aria-label="RackForge">

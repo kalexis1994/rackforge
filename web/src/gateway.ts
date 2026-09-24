@@ -58,6 +58,9 @@ const OUTPUT_METER_REFRESH_MS = 50;
 // Ten frames a second reads as a moving clock without competing with audio.
 const SEQUENCER_STATUS_REFRESH_MS = 100;
 const COMMAND_TIMEOUT_MS = 8_000;
+/** Long enough for a phone to load a Slot's plugin for the first time and
+ *  make its state; a save is never waited on for ever. */
+const PERFORMANCE_EDIT_TIMEOUT_MS = 45_000;
 
 let socket: SessionChannel | null = null;
 let sessionConnected = false;
@@ -743,7 +746,7 @@ export function dispatchPerformanceEdit(
   }
   store.dispatch(performanceEditStarted());
   return new Promise((resolve, reject) => {
-    pendingPerformanceEdit = {
+    const pending = {
       resolve,
       reject,
       request: {
@@ -751,6 +754,16 @@ export function dispatchPerformanceEdit(
         edit,
       },
     };
+    pendingPerformanceEdit = pending;
+    // A host that never answers must not leave Save spinning for ever. An
+    // answer that comes after this still updates the library it describes.
+    window.setTimeout(() => {
+      if (pendingPerformanceEdit !== pending) return;
+      pendingPerformanceEdit = null;
+      const message = "RackForge did not confirm the save in time. Check the library and try again.";
+      store.dispatch(errorReceived(message));
+      reject(new Error(message));
+    }, PERFORMANCE_EDIT_TIMEOUT_MS);
     sendPendingPerformanceEdit();
   });
 }

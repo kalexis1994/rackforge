@@ -1000,9 +1000,30 @@ struct SendableLoadedPlugin(&'static LoadedPlugin);
 
 #[derive(Clone)]
 struct AndroidIsolatedStateContext {
-    runtime: SendableLoadedPlugin,
+    /// The active plugin's runtime, when a plugin is active: a Slot holding
+    /// that plugin shares it. Any other plugin is loaded from its package.
+    runtime: Option<SendableLoadedPlugin>,
     resource_overrides: BTreeMap<String, PathBuf>,
     data_root: PathBuf,
+}
+
+impl AndroidIsolatedStateContext {
+    /// No plugin is active: every Slot's plugin comes from its package.
+    fn without_engine(data_root: &Path) -> Self {
+        Self {
+            runtime: None,
+            resource_overrides: BTreeMap::new(),
+            data_root: data_root.to_path_buf(),
+        }
+    }
+
+    /// The active plugin's runtime, when it is the one asked for.
+    fn active(&self, plugin_id: &str, version: Option<&str>) -> Option<SendableLoadedPlugin> {
+        self.runtime.filter(|runtime| {
+            let manifest = runtime.0.manifest();
+            manifest.id == plugin_id && version.is_none_or(|version| manifest.version == version)
+        })
+    }
 }
 
 // SAFETY: access to the plugin instance is serialized by ENGINE's mutex. The
@@ -1876,7 +1897,7 @@ impl AndroidEngine {
 
     fn isolated_state_context(&self) -> AndroidIsolatedStateContext {
         AndroidIsolatedStateContext {
-            runtime: self.runtime,
+            runtime: Some(self.runtime),
             resource_overrides: self.resource_overrides.clone(),
             data_root: self.data_root.clone(),
         }
@@ -2465,8 +2486,7 @@ fn isolated_plugin_catalog(
         .get("plugin_id")
         .and_then(serde_json::Value::as_str)
         .context("plugin catalog command is missing plugin_id")?;
-    // Reading programs is as safe for an effect as for an instrument.
-    let (runtime, resource_overrides) = rack_slot_runtime(context, params, plugin_id, false)?;
+    let (runtime, resource_overrides) = rack_slot_runtime(context, params, plugin_id)?;
     let catalog = runtime
         .0
         .create_instance_with_resource_overrides(&resource_overrides)?
@@ -2494,11 +2514,9 @@ fn rack_slot_runtime(
     context: &AndroidIsolatedStateContext,
     params: &serde_json::Value,
     plugin_id: &str,
-    instrument_only: bool,
 ) -> Result<(SendableLoadedPlugin, BTreeMap<String, PathBuf>)> {
-    let active_manifest = context.runtime.0.manifest();
-    if active_manifest.id == plugin_id {
-        return Ok((context.runtime, context.resource_overrides.clone()));
+    if let Some(runtime) = context.active(plugin_id, None) {
+        return Ok((runtime, context.resource_overrides.clone()));
     }
     let package_root = PathBuf::from(
         params
@@ -2511,16 +2529,24 @@ fn rack_slot_runtime(
     if package.manifest().id != plugin_id {
         bail!("Rack Slot plugin package identity does not match the requested plugin");
     }
-    if package.manifest().portable_component().is_none() {
-        bail!("Rack Slot plugin must provide a portable wasm-v1 runtime");
-    }
-    if instrument_only && package.manifest().kind != PluginKind::Instrument {
-        bail!("Rack Slot plugin must provide a portable wasm-v1 instrument runtime");
-    }
+    ensure_rack_slot_plugin(&package)?;
     Ok((
         cached_isolated_plugin_runtime(&package, &context.data_root)?,
         BTreeMap::new(),
     ))
+}
+
+/// What a Rack Slot may hold on Android: an instrument or an effect -- the
+/// Rack editor offers both -- with a portable runtime to run it in.
+fn ensure_rack_slot_plugin(package: &PluginPackage) -> Result<()> {
+    let manifest = package.manifest();
+    if manifest.portable_component().is_none() {
+        bail!("{} has no portable wasm-v1 runtime", manifest.name);
+    }
+    if !matches!(manifest.kind, PluginKind::Instrument | PluginKind::Effect) {
+        bail!("{} is neither an instrument nor an effect", manifest.name);
+    }
+    Ok(())
 }
 
 fn materialize_isolated_plugin_state(
@@ -2531,7 +2557,7 @@ fn materialize_isolated_plugin_state(
         .get("plugin_id")
         .and_then(serde_json::Value::as_str)
         .context("materialize plugin state command is missing plugin_id")?;
-    let (runtime, resource_overrides) = rack_slot_runtime(context, params, plugin_id, true)?;
+    let (runtime, resource_overrides) = rack_slot_runtime(context, params, plugin_id)?;
 
     let requested_sound_id = params
         .get("sound_id")
@@ -2571,9 +2597,8 @@ fn isolated_plugin_runtime(
     params: &serde_json::Value,
     state: &PluginStateReference,
 ) -> Result<(SendableLoadedPlugin, BTreeMap<String, PathBuf>)> {
-    let active_manifest = context.runtime.0.manifest();
-    if active_manifest.id == state.plugin_id && active_manifest.version == state.plugin_version {
-        return Ok((context.runtime, context.resource_overrides.clone()));
+    if let Some(runtime) = context.active(&state.plugin_id, Some(&state.plugin_version)) {
+        return Ok((runtime, context.resource_overrides.clone()));
     }
 
     let store_root = PathBuf::from(
@@ -2592,9 +2617,7 @@ fn isolated_plugin_runtime(
     if manifest.id != state.plugin_id || manifest.version != state.plugin_version {
         bail!("Rack Slot plugin package identity does not match its state reference");
     }
-    if manifest.kind != PluginKind::Instrument || manifest.portable_component().is_none() {
-        bail!("Rack Slot plugin must provide a portable wasm-v1 instrument runtime");
-    }
+    ensure_rack_slot_plugin(&package)?;
 
     Ok((
         cached_isolated_plugin_runtime(&package, &context.data_root)?,
@@ -3987,6 +4010,124 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_ensurePerformance
     }
 }
 
+/// LIVE's library requests -- the snapshot, and an edit -- answered from the
+/// repository in the data root, as the Pi and the desktop answer them.
+/// Returns the response's JSON; a refused edit is an `error` response, never
+/// an exception, so the surface waiting on it hears why.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_performanceCommand(
+    mut env: JNIEnv,
+    _class: JClass,
+    data_root: JString,
+    request_json: JString,
+    package_roots_json: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        let request_json = java_string(&mut env, request_json)?;
+        let package_roots: BTreeMap<String, String> =
+            serde_json::from_str(&java_string(&mut env, package_roots_json)?).unwrap_or_default();
+        let response = android_performance_command(&data_root, &request_json, &package_roots)
+            .unwrap_or_else(|error| ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("{error:#}"),
+                current_revision: None,
+            });
+        Ok(serde_json::to_string(&response)?)
+    })();
+    result_string(&mut env, result)
+}
+
+fn android_performance_command(
+    data_root: &Path,
+    request_json: &str,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<ControlResponse> {
+    ensure_performance_menu(data_root)?;
+    let request: ControlRequest =
+        serde_json::from_str(request_json).context("reading the LIVE library request")?;
+    match request {
+        ControlRequest::PerformanceSnapshot => {
+            let guard = performance()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+            let state = guard.as_ref().context("the LIVE library is not loaded")?;
+            Ok(ControlResponse::PerformanceSnapshot {
+                snapshot: Box::new(performance_snapshot(state)),
+            })
+        }
+        ControlRequest::EditPerformance {
+            expected_revision,
+            edit,
+        } => {
+            expected_revision.validate()?;
+            // Plugin work happens before the library is locked.
+            let edit = materialize_rack_edit(edit, data_root, package_roots)?;
+            let snapshot = {
+                let mut guard = performance()
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+                let state = guard.as_mut().context("the LIVE library is not loaded")?;
+                state
+                    .repository
+                    .apply_edit(&expected_revision, edit, &mut state.live)?;
+                performance_snapshot(state)
+            };
+            controller_menu()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?
+                .menu
+                .sync_performance_snapshot(snapshot.clone());
+            Ok(ControlResponse::PerformanceEdited {
+                snapshot: Box::new(snapshot),
+            })
+        }
+        _ => bail!("not a LIVE library request"),
+    }
+}
+
+/// A Rack saved with a Slot that has no state yet gets one made from its
+/// plugin's package -- its first program, or the program the Slot names --
+/// as the Pi makes it from the running instance.
+fn materialize_rack_edit(
+    edit: rackforge_performance_api::PerformanceEdit,
+    data_root: &Path,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<rackforge_performance_api::PerformanceEdit> {
+    let rackforge_performance_api::PerformanceEdit::PutRack { mut rack } = edit else {
+        return Ok(edit);
+    };
+    if rack.slots.iter().all(|slot| slot.state.is_some()) {
+        return Ok(rackforge_performance_api::PerformanceEdit::PutRack { rack });
+    }
+    // The active plugin's runtime when there is one; a Rack is saved just
+    // the same with no plugin active.
+    let context = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+        .as_ref()
+        .map_or_else(
+            || AndroidIsolatedStateContext::without_engine(data_root),
+            AndroidEngine::isolated_state_context,
+        );
+    for slot in rack.slots.iter_mut().filter(|slot| slot.state.is_none()) {
+        let package_root = package_roots
+            .get(&slot.plugin_id)
+            .with_context(|| format!("plugin {} is not installed", slot.plugin_id))?;
+        let state = materialize_isolated_plugin_state(
+            &context,
+            &serde_json::json!({
+                "plugin_id": slot.plugin_id,
+                "package_root": package_root,
+                "sound_id": slot.legacy_program_id,
+            }),
+        )
+        .with_context(|| format!("making the state of Rack Slot {}", slot.id))?;
+        slot.state = Some(serde_json::from_value(state)?);
+    }
+    Ok(rackforge_performance_api::PerformanceEdit::PutRack { rack })
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabSyncPlugins(
     mut env: JNIEnv,
@@ -5148,15 +5289,21 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginStateComman
         ) {
             // State inspection creates a separate portable instance. Copy its immutable
             // context while holding ENGINE, then release the audio lock before Wasm
-            // instantiation, state loading and hashing.
+            // instantiation, state loading and hashing. With no plugin active a
+            // Slot's plugin still comes from its package, given the data root.
             let context = {
                 let guard = engine()
                     .lock()
                     .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
-                guard
-                    .as_ref()
-                    .context("RackForge engine is not initialized")?
-                    .isolated_state_context()
+                match guard.as_ref() {
+                    Some(engine) => engine.isolated_state_context(),
+                    None => AndroidIsolatedStateContext::without_engine(Path::new(
+                        params
+                            .get("data_root")
+                            .and_then(serde_json::Value::as_str)
+                            .context("RackForge engine is not initialized")?,
+                    )),
+                }
             };
             return Ok(isolated_plugin_state_command(&context, &method, &params)?.to_string());
         }

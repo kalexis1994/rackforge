@@ -277,6 +277,8 @@ public final class MainActivity extends Activity {
             String sourceId, String displayName, boolean primary, String controllerId);
     private static native boolean replaceParameterLinks(String linksJson);
     private static native String controllerSessionCommand(String dataRoot, String requestJson);
+    private static native String performanceCommand(String dataRoot, String requestJson,
+            String packageRootsJson);
     private static native boolean loadControllerMaps(String dataRoot);
     private static native boolean identifyMidiSource(int sourceKey, byte[] reply);
     private static native String midiSourceConnectPlan(int sourceKey);
@@ -1341,6 +1343,22 @@ public final class MainActivity extends Activity {
         return null;
     }
 
+    /** Where each usable installed plugin lives, by id: a Rack Slot saved
+     *  without a state has one made from its plugin's package. */
+    private JSONObject installedPackageRoots() throws Exception {
+        JSONArray installed = new JSONObject(
+                installedPlugins(pluginStoreRoot().getAbsolutePath()))
+                .getJSONArray("plugins");
+        JSONObject roots = new JSONObject();
+        for (int index = 0; index < installed.length(); index++) {
+            JSONObject plugin = installed.getJSONObject(index);
+            if (usableOnAndroid(plugin) && plugin.has("package_root")) {
+                roots.put(plugin.getString("plugin_id"), plugin.getString("package_root"));
+            }
+        }
+        return roots;
+    }
+
     private JSONObject sharedPluginDescriptor(JSONObject plugin) throws Exception {
         String pluginId = plugin.getString("plugin_id");
         String assetVersion = "?v=" + Uri.encode(plugin.getString("version"));
@@ -1874,22 +1892,26 @@ public final class MainActivity extends Activity {
                 releaseVirtualMidi(request.getString("client_id"));
                 return;
             }
+            // LIVE's library -- Racks, Songs, Setlists -- kept by the native
+            // engine in the data root, as the Pi and the desktop keep it. An
+            // edit is answered once it is stored; left unanswered, Save waited
+            // for ever.
             if ("performance_snapshot".equals(operation)) {
-                JSONObject live = new JSONObject().put("mode", "rack");
-                JSONObject library = new JSONObject()
-                        .put("schema_version", 1)
-                        .put("racks", new JSONArray())
-                        .put("songs", new JSONArray())
-                        .put("setlists", new JSONArray());
-                JSONObject snapshot = new JSONObject()
-                        .put("schema_version", 1)
-                        .put("revision", "android-0")
-                        .put("library", library)
-                        .put("live", live);
-                emitNativeSessionEvent("message", new JSONObject()
-                        .put("status", "performance_snapshot")
-                        .put("snapshot", snapshot)
-                        .toString());
+                emitNativeSessionEvent("message", performanceCommand(
+                        pluginDataRoot().getAbsolutePath(), request.toString(), "{}"));
+                return;
+            }
+            if ("edit_performance".equals(operation)) {
+                pluginParameterExecutor.execute(() -> {
+                    try {
+                        emitNativeSessionEvent("message", performanceCommand(
+                                pluginDataRoot().getAbsolutePath(), request.toString(),
+                                installedPackageRoots().toString()));
+                    } catch (Throwable error) {
+                        Log.e("RackForge", "Saving to the LIVE library failed", error);
+                        emitSharedSessionError(error);
+                    }
+                });
                 return;
             }
             if ("plugin_presets".equals(operation)) {
@@ -2540,7 +2562,8 @@ public final class MainActivity extends Activity {
                 }
                 JSONObject params = new JSONObject()
                         .put("plugin_id", pluginId)
-                        .put("package_root", plugin.getString("package_root"));
+                        .put("package_root", plugin.getString("package_root"))
+                        .put("data_root", pluginDataRoot().getAbsolutePath());
                 if (request.has("sound_id")) {
                     params.put("sound_id", request.getString("sound_id"));
                 }
@@ -2572,7 +2595,8 @@ public final class MainActivity extends Activity {
                 }
                 JSONObject params = new JSONObject()
                         .put("plugin_id", pluginId)
-                        .put("package_root", plugin.getString("package_root"));
+                        .put("package_root", plugin.getString("package_root"))
+                        .put("data_root", pluginDataRoot().getAbsolutePath());
                 JSONObject catalog = new JSONObject(
                         pluginStateCommand("catalog", params.toString()));
                 emitNativeSessionEvent("message", catalog

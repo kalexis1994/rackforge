@@ -35,8 +35,7 @@ import { scopedId } from "./ids";
 import {
   isDesktopHost,
   isNativeHost,
-  IS_BROWSER_HOST,
-  isRemoteWebClient,
+  hostPreviewsRacks,
   readNativeTextFile,
   savePortableTextFile,
 } from "./host";
@@ -1859,11 +1858,7 @@ function useSongPartPreview(
   session: SessionSnapshot | null,
   performance: PerformanceSnapshot,
 ) {
-  // Rack preview is a host capability, not a UI default: the appliance and
-  // the in-page browser host implement PreviewRack, the desktop still rejects
-  // it, and an editor must not greet every added instrument with an error
-  // banner for asking.
-  const previewSupported = isRemoteWebClient() || IS_BROWSER_HOST;
+  const previewSupported = hostPreviewsRacks();
   const initialMode = session?.active_mode ?? "idle";
   const originRef = useRef({ mode: initialMode, active: performance.live.active });
   const sequenceRef = useRef(0);
@@ -1992,11 +1987,7 @@ function RackEditor({
     role: RackPluginRole;
     insertAfter?: { node_id: string; port_id: string };
   } | null>(null);
-  // Rack preview is a host capability, not a UI default: the appliance and
-  // the in-page browser host implement PreviewRack, the desktop still rejects
-  // it, and an editor must not greet every added instrument with an error
-  // banner for asking.
-  const previewSupported = isRemoteWebClient() || IS_BROWSER_HOST;
+  const previewSupported = hostPreviewsRacks();
   const initialPreviewMode = session?.active_mode ?? "idle";
   const previewOriginRef = useRef({
     mode: initialPreviewMode,

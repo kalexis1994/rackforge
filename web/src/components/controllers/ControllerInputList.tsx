@@ -1,3 +1,5 @@
+import { Pencil } from "lucide-react";
+import { useEffect, useRef } from "react";
 import {
   type ControllerDevice,
   groupInputs,
@@ -7,25 +9,42 @@ import {
 } from "../../controllerMapping";
 
 /**
- * The controller's inputs, in the package's groups. Each lights while its
- * control moves, and says whether it has a mapping -- and whether one applies
- * to the plugin playing.
+ * The controller's inputs, in the package's groups. Moving a control lights
+ * its LED and brings its row into view, so the player finds the one in their
+ * hand; its Edit button opens what it does. Each row also says whether the
+ * control has a mapping -- and whether one applies to the plugin playing.
  */
 export function ControllerInputList({
   device,
   selectedId,
   lit,
+  latestLitId,
   playingPluginId,
+  editLabel = "Edit",
   onSelect,
 }: {
   device: ControllerDevice;
   selectedId: string | null;
   lit: ReadonlySet<string>;
+  /** The control that moved last: its row is scrolled into view. */
+  latestLitId?: string | null;
   playingPluginId?: string;
+  editLabel?: string;
   onSelect: (inputId: string) => void;
 }) {
+  const list = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!latestLitId || !list.current) return;
+    const row = [...list.current.querySelectorAll<HTMLElement>("[data-input-id]")].find(
+      (element) => element.dataset.inputId === latestLitId,
+    );
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    row?.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
+  }, [latestLitId]);
+
   return (
-    <div className="controller-input-list" role="listbox" aria-label={`${device.name} controls`}>
+    <div ref={list} className="controller-input-list" aria-label={`${device.name} controls`}>
       {groupInputs(device.inputs).map((group) => (
         <section key={group.group} className="controller-input-group" aria-label={group.group}>
           <h3>{group.group}</h3>
@@ -35,40 +54,48 @@ export function ControllerInputList({
               const playing = assignments.some((entry) => entry.plugin_id === playingPluginId);
               const standard = standardMeaning(input, device.roles, device.actions);
               const selected = input.id === selectedId;
+              const moving = lit.has(input.id);
               return (
-                <li key={input.id}>
+                <li
+                  key={input.id}
+                  data-input-id={input.id}
+                  aria-current={selected ? "true" : undefined}
+                  className={[
+                    "controller-input",
+                    selected ? "selected" : "",
+                    moving ? "lit" : "",
+                    assignments.length > 0 ? "mapped" : "",
+                    playing ? "playing" : "",
+                  ].filter(Boolean).join(" ")}
+                >
+                  <i className="controller-input-lamp" aria-hidden="true" />
+                  <span className="controller-input-copy">
+                    <strong>{input.name}</strong>
+                    <small>
+                      {assignments.length > 0
+                        ? assignments.map((entry) => entry.plugin_name).join(", ")
+                        : standard ?? inputMessageLabel(input)}
+                    </small>
+                  </span>
+                  {assignments.length > 0 ? (
+                    <span
+                      className="controller-input-mark"
+                      title={playing ? "Mapped in the plugin playing" : "Mapped in another plugin"}
+                    >
+                      {assignments.length}
+                    </span>
+                  ) : null}
                   <button
                     type="button"
-                    role="option"
-                    aria-selected={selected}
-                    className={[
-                      "controller-input",
-                      selected ? "selected" : "",
-                      lit.has(input.id) ? "lit" : "",
-                      assignments.length > 0 ? "mapped" : "",
-                      playing ? "playing" : "",
-                    ].filter(Boolean).join(" ")}
+                    className="controller-input-edit"
+                    aria-label={`${editLabel} ${input.name}`}
+                    aria-pressed={selected}
                     onClick={() => onSelect(input.id)}
                   >
-                    <i className="controller-input-lamp" aria-hidden="true" />
-                    <span className="controller-input-copy">
-                      <strong>{input.name}</strong>
-                      <small>
-                        {assignments.length > 0
-                          ? assignments.map((entry) => entry.plugin_name).join(", ")
-                          : standard ?? inputMessageLabel(input)}
-                      </small>
-                    </span>
-                    {assignments.length > 0 ? (
-                      <span
-                        className="controller-input-mark"
-                        title={playing ? "Mapped in the plugin playing" : "Mapped in another plugin"}
-                      >
-                        {assignments.length}
-                      </span>
-                    ) : null}
-                    {lit.has(input.id) ? <span className="visually-hidden">Moving</span> : null}
+                    <Pencil size={14} aria-hidden="true" />
+                    <span>{editLabel}</span>
                   </button>
+                  {moving ? <span className="visually-hidden">Moving</span> : null}
                 </li>
               );
             })}

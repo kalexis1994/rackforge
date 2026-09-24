@@ -9509,32 +9509,23 @@
   list-style: none;
 }
 
+/* One control: its LED, its name and what it does, and the key that opens
+   it. Moving the control lights the LED; it never opens the control. */
 .controller-input {
   width: 100%;
   min-height: 46px;
-  padding: 6px 10px;
+  padding: 6px 6px 6px 10px;
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-columns: 12px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   color: var(--ink);
-  text-align: left;
   background: var(--panel-inset);
   border: var(--fp-seam);
   border-radius: var(--fp-radius-key);
-  cursor: pointer;
   transition:
     background var(--rf-motion-fast) var(--rf-ease-standard),
     box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
-}
-
-.controller-input:hover {
-  background: color-mix(in srgb, var(--rf-color-input) 6%, var(--panel-inset));
-}
-
-.controller-input:focus-visible {
-  outline: 2px solid var(--rf-color-input);
-  outline-offset: 1px;
 }
 
 .controller-input.selected {
@@ -9542,23 +9533,65 @@
   box-shadow: inset 3px 0 0 var(--rf-color-input);
 }
 
+/* An LED set in the panel: dark in its bezel at rest, lit with a halo while
+   its control moves. */
 .controller-input-lamp {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  background: color-mix(in srgb, var(--muted) 35%, var(--panel-inset));
+  box-shadow:
+    inset 0 1px 2px color-mix(in srgb, black 45%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--muted) 18%, transparent);
   transition:
     background var(--rf-motion-instant) var(--rf-ease-standard),
     box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
 }
 
 .controller-input.lit .controller-input-lamp {
-  background: var(--rf-color-input);
-  box-shadow: 0 0 10px var(--rf-color-input);
+  background: radial-gradient(circle at 35% 35%, white 0 12%, var(--rf-color-input) 55%);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--rf-color-input) 35%, transparent),
+    0 0 12px 2px var(--rf-color-input);
 }
 
 .controller-input.lit {
+  background: color-mix(in srgb, var(--rf-color-input) 9%, var(--panel-inset));
   box-shadow: inset 0 0 0 1px var(--rf-color-input);
+}
+
+.controller-input-edit {
+  min-height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background var(--rf-motion-fast) var(--rf-ease-standard),
+    color var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.controller-input-edit:hover {
+  background: color-mix(in srgb, var(--rf-color-input) 10%, var(--fp-panel));
+}
+
+.controller-input-edit:focus-visible {
+  outline: 2px solid var(--rf-color-input);
+  outline-offset: 1px;
+}
+
+.controller-input-edit[aria-pressed="true"] {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-input);
 }
 
 .controller-input.selected.lit {

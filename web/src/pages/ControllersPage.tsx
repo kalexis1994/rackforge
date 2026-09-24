@@ -99,6 +99,7 @@ export function ControllersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedInputId, setSelectedInputId] = useState<string | null>(null);
   const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
+  const [latestLitId, setLatestLitId] = useState<string | null>(null);
   const [stray, setStray] = useState<string | null>(null);
   const [learnt, setLearnt] = useState<Map<string, ControllerInput[]>>(readLearnt);
   // A player's own controller whose controls are being changed.
@@ -185,6 +186,7 @@ export function ControllersPage() {
   const selectDevice = (id: string) => {
     setSelectedInputId(null);
     setStray(null);
+    setLatestLitId(null);
     setSearchParams((params) => {
       const next = new URLSearchParams(params);
       next.set("device", id);
@@ -192,18 +194,17 @@ export function ControllersPage() {
     }, { replace: true });
   };
 
-  // What the device's input sends lights its controls. While controls are
-  // being described, a message no control answers becomes a new one;
-  // otherwise it is shown as such, so a knob in another bank is not a
-  // mystery.
+  // What the device's input sends lights its controls -- and only lights
+  // them: the player opens one with its Edit button, so turning a knob to
+  // find it never takes the list away. While controls are being described,
+  // a message no control answers becomes a new one; otherwise it is shown as
+  // such, so a knob in another bank is not a mystery.
   const deviceRef = useRef(device);
-  const selectedRef = useRef(selectedInputId);
   const learningRef = useRef(editingControls);
   useEffect(() => {
     deviceRef.current = device;
-    selectedRef.current = selectedInputId;
     learningRef.current = editingControls;
-  }, [device, editingControls, selectedInputId]);
+  }, [device, editingControls]);
   useEffect(() => {
     const unsubscribe = subscribeMidiActivity((events) => {
       const current = deviceRef.current;
@@ -219,7 +220,7 @@ export function ControllersPage() {
           litUntil.current.set(input.id, now + LIT_MS);
           changed = true;
           setStray(null);
-          if (selectedRef.current === null) setSelectedInputId(input.id);
+          setLatestLitId(input.id);
           continue;
         }
         const unknown = inputFromActivity(event);
@@ -228,7 +229,7 @@ export function ControllersPage() {
           heard = withLearntInput(heard, unknown);
           litUntil.current.set(unknown.id, now + LIT_MS);
           changed = true;
-          if (selectedRef.current === null) setSelectedInputId(unknown.id);
+          setLatestLitId(unknown.id);
         } else {
           setStray(inputMessageLabel(unknown));
         }
@@ -623,7 +624,9 @@ export function ControllersPage() {
                 device={device}
                 selectedId={selectedInputId}
                 lit={lit}
+                latestLitId={latestLitId}
                 playingPluginId={playingPluginId}
+                editLabel={editingControls ? "Name" : "Edit"}
                 onSelect={setSelectedInputId}
               />
               {selectedInput && editingControls ? (
@@ -666,13 +669,13 @@ export function ControllersPage() {
                 />
               ) : (
                 <section className="controller-input-detail controller-input-hint">
-                  <h2>{editingControls ? "Choose a control to name it" : "Move a control"}</h2>
+                  <h2>{editingControls ? "Name the controls" : "Find a control"}</h2>
                   <p>
                     {editingControls
-                      ? "Or move another one to add it to the list."
+                      ? "Each control you move joins the list and lights. Press Name on one to name it."
                       : device.connected
-                        ? "Turn a knob, push a fader or press a button on the controller: it lights in the list and opens here."
-                        : "Choose a control in the list. Moving one lights it once the controller is connected."}
+                        ? "Turn a knob, push a fader or press a button: its LED lights in the list. Press Edit on it to choose what it does."
+                        : "Press Edit on a control to choose what it does. Its LED lights when it moves, once the controller is connected."}
                   </p>
                 </section>
               )}

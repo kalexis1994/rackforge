@@ -209,6 +209,64 @@ export interface ParameterLink {
   message: ParameterLinkMessage;
   transform: { invert: boolean };
   pass_through: "pass_through" | "consume";
+  /** Left out, the control drives the parameter across its whole range. */
+  mode?: ParameterLinkMode;
+}
+
+/**
+ * What a control does to its parameter. Values are in the parameter's own
+ * units: a choice's value, a boolean's 0 or 1, a float within its range.
+ * Knobs and faders use direct, range or zones; buttons and pads the rest.
+ */
+export type ParameterLinkMode =
+  | { kind: "direct" }
+  | { kind: "range"; min: number; max: number }
+  | { kind: "zones"; values: number[] }
+  | { kind: "set"; value: number }
+  | { kind: "toggle"; first: number; second: number }
+  | { kind: "cycle"; values: number[] }
+  | { kind: "hold"; pressed: number; released: number }
+  | { kind: "step"; direction: "up" | "down"; wrap?: boolean }
+  | { kind: "trigger" };
+
+/** One input of a controller driving one plugin parameter, by its id. */
+export interface ControlMapping {
+  id: string;
+  input: {
+    id: string;
+    name: string;
+    channel: ParameterLink["channel"];
+    message: ParameterLinkMessage;
+  };
+  parameter_id: string;
+  mode?: ParameterLinkMode;
+  invert?: boolean;
+  /** Left out, a button consumes its message and a knob passes it on. */
+  pass_through?: "pass_through" | "consume";
+}
+
+/** Every mapping a player made for one controller, plugin by plugin. */
+export interface ControllerMap {
+  schema_version: 1;
+  controller_id: string;
+  controller_name: string;
+  plugins: { plugin_id: string; plugin_name: string; mappings: ControlMapping[] }[];
+}
+
+/** A controller package the host attached to a MIDI input. */
+export interface RegisteredController {
+  controller_id: string;
+  source?: MidiSourceDescriptor;
+  connected: boolean;
+}
+
+/** The portable `.rfmap` document. */
+export interface RfMapFile {
+  format: "org.rackforge.map";
+  schema_version: 1;
+  exported_by: string;
+  exported_unix_ms: number;
+  map: ControllerMap;
 }
 
 export interface MidiLearnCandidate {

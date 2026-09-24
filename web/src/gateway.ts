@@ -37,6 +37,9 @@ import type {
   OutputMeterMessage,
   OutputMeterSnapshot,
   ParameterLink,
+  ControllerMap,
+  RegisteredController,
+  RfMapFile,
   SessionSnapshot,
   SessionCommand,
 } from "./types";
@@ -964,6 +967,50 @@ export function cancelMidiLearn(learnId: number): Promise<void> {
     { op: "cancel_midi_learn", learn_id: learnId },
     "midi_learn_cancelled",
     () => undefined,
+  );
+}
+
+export function requestControllerMaps(): Promise<{
+  controllers: RegisteredController[];
+  maps: ControllerMap[];
+}> {
+  return requestPresetOperation(
+    { op: "controller_maps" },
+    "controller_maps",
+    (message) => ({
+      controllers: (message.controllers ?? []) as RegisteredController[],
+      maps: (message.maps ?? []) as ControllerMap[],
+    }),
+  );
+}
+
+/** Replaces one controller's whole map; the host applies it at once. */
+export function saveControllerMap(map: ControllerMap): Promise<ControllerMap> {
+  return requestPresetOperation(
+    { op: "save_controller_map", map },
+    "controller_map_saved",
+    (message) => message.map as ControllerMap,
+  );
+}
+
+export function exportControllerMap(
+  controllerId: string,
+): Promise<{ file_name: string; file: RfMapFile }> {
+  return requestPresetOperation(
+    { op: "export_controller_map", controller_id: controllerId },
+    "controller_map_exported",
+    (message) => ({
+      file_name: String(message.file_name),
+      file: message.file as RfMapFile,
+    }),
+  );
+}
+
+export function importControllerMap(file: RfMapFile): Promise<ControllerMap> {
+  return requestPresetOperation(
+    { op: "import_controller_map", file },
+    "controller_map_imported",
+    (message) => message.map as ControllerMap,
   );
 }
 

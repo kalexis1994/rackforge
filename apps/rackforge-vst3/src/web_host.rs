@@ -515,6 +515,12 @@ fn handle_session_command(
             "plugin_id": model.plugin_id,
             "presets": [],
         })]),
+        // The DAW maps its controllers to the plug-in's parameters itself.
+        "controller_maps" => Ok(vec![json!({
+            "status": "controller_maps",
+            "controllers": [],
+            "maps": [],
+        })]),
         // The DAW owns the inputs; the plug-in captures none of its own.
         "audio_input" => Ok(vec![json!({
             "status": "audio_input",

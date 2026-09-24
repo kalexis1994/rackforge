@@ -6,6 +6,7 @@ pub mod audio_reliability;
 pub mod capture_route;
 #[cfg(target_os = "linux")]
 pub mod control;
+pub mod controller_map_store;
 pub mod default_instrument;
 /// The handshake between the interface and the native shell holding it.
 /// Outside every platform gate: Android and the VST3 editor both stamp it,
@@ -75,8 +76,8 @@ pub use live_parameter_state::{
 };
 pub use package::{PluginPackage, platform_key};
 pub use parameter_link::{
-    CompiledParameterLink, ParameterLinkOutput, SemanticParameterLinkContext,
-    compile_semantic_parameter_links,
+    CompiledControllerMap, CompiledParameterLink, ControllerMapLinkContext, ParameterLinkOutput,
+    SemanticParameterLinkContext, compile_controller_map_links, compile_semantic_parameter_links,
 };
 pub use sequencer::{CompiledPattern, SequencerEngine, SequencerLane};
 pub use state_store::{MAX_PLUGIN_STATE_BYTES, PluginStateStore};

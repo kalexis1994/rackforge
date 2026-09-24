@@ -2056,6 +2056,23 @@ public final class MainActivity extends Activity {
                         .toString());
                 return;
             }
+            // Controller maps are not kept here yet: the list is empty, and a
+            // change is refused out loud rather than dropped, so the
+            // interface never waits on it.
+            if ("controller_maps".equals(operation)) {
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "controller_maps")
+                        .put("controllers", new JSONArray())
+                        .put("maps", new JSONArray())
+                        .toString());
+                return;
+            }
+            if ("save_controller_map".equals(operation)
+                    || "export_controller_map".equals(operation)
+                    || "import_controller_map".equals(operation)) {
+                throw new UnsupportedOperationException(
+                        "Controller maps are not available on Android yet");
+            }
             if (!"dispatch".equals(operation)) {
                 // Unanswered on purpose for now (LIVE, the sequencer, audio
                 // health), but never silently: a request the UI waits on and

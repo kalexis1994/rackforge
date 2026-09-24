@@ -567,6 +567,13 @@ impl BrowserHost {
                 ControlErrorCode::Unavailable,
                 "the browser host plays through the page's audio output, which it cannot reconfigure",
             )),
+            // No controller package is attached here yet, so there is no
+            // map to show: an empty answer, never a silence the interface
+            // would wait out.
+            ControlRequest::ControllerMaps => Ok(ControlResponse::ControllerMaps {
+                controllers: Vec::new(),
+                maps: Vec::new(),
+            }),
             ControlRequest::VirtualMidi {
                 client_id, message, ..
             } => self.virtual_midi(client_id, message),

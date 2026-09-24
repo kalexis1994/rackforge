@@ -1,4 +1,5 @@
 use crate::PluginStorage;
+use crate::controller_map_store::{ControllerMapStore, export_rfmap};
 use crate::performance::PerformanceRepository;
 use crate::rack_graph::{
     CompiledAudioSource, CompiledRackSlot, compile_instrument_definition, compile_instrument_rack,
@@ -6,7 +7,8 @@ use crate::rack_graph::{
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{
-    CompiledParameterLink, SemanticParameterLinkContext, compile_semantic_parameter_links,
+    CompiledParameterLink, ControllerMapLinkContext, SemanticParameterLinkContext,
+    compile_controller_map_links, compile_semantic_parameter_links,
 };
 use crate::{
     IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginStateStore,
@@ -18,11 +20,10 @@ use rackforge_audio_api::{
     AudioOutputState, InputMeter, OutputMeter,
 };
 use rackforge_control_api::{
-    ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
-    MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, VirtualMidiMessage, decode_request,
-    encode_line,
+    ControlErrorCode, ControlRequest, ControlResponse, ControllerMap, MAX_CONTROL_MESSAGE_BYTES,
+    MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, RegisteredController,
+    VirtualMidiMessage, decode_request, encode_line,
 };
-#[cfg(test)]
 use rackforge_midi_api::MidiSourceDescriptor;
 use rackforge_midi_api::{
     IngressMidiEvent, MidiMessageKind, MidiPacket, MidiSourceRegistry, ParameterLink,
@@ -348,9 +349,12 @@ impl ControlFailure {
     }
 }
 
+/// A controller package attached to a MIDI input. Its semantic profile is
+/// optional: a controller with no roles -- a player's own, whose knobs only
+/// they assign -- still has to be known, so its map can find its input.
 #[derive(Clone)]
 struct RegisteredSemanticProfile {
-    profile: SemanticControlProfile,
+    profile: Option<SemanticControlProfile>,
     runtime_source_id: Option<rackforge_midi_api::MidiSourceId>,
     runtime_source_name: Option<String>,
 }
@@ -368,6 +372,9 @@ struct ControlContext {
     plugin_manifests: BTreeMap<String, PluginManifest>,
     portable_plugins: BTreeMap<String, PortableControlPlugin>,
     semantic_profiles: Mutex<BTreeMap<String, RegisteredSemanticProfile>>,
+    controller_map_store: ControllerMapStore,
+    /// The player's maps, by controller id, as stored.
+    controller_maps: Mutex<BTreeMap<String, ControllerMap>>,
     midi_sources: MidiSourceRegistry,
     connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
     midi_observer: Mutex<Receiver<IngressMidiEvent>>,
@@ -411,6 +418,8 @@ pub struct ControlServerOptions {
     pub plugin_output_channels: u32,
     pub storage: Option<PluginStorage>,
     pub checkpoint: Option<SessionCheckpointStore>,
+    /// Where the player's controller maps are kept.
+    pub controller_maps: ControllerMapStore,
 }
 
 pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<ControlServer> {
@@ -446,6 +455,12 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         )
     })?;
 
+    // A map that cannot be read is reported and skipped inside; only a data
+    // root that cannot be listed at all stops the engine from starting maps.
+    let controller_maps = options.controller_maps.load_all().unwrap_or_else(|error| {
+        eprintln!("CONTROLLER_MAPS_UNAVAILABLE error={error:#}");
+        BTreeMap::new()
+    });
     let context = Arc::new(ControlContext {
         store: options.store,
         audio_sender: options.audio_sender,
@@ -459,6 +474,8 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         plugin_manifests: options.plugin_manifests,
         portable_plugins: options.portable_plugins,
         semantic_profiles: Mutex::new(BTreeMap::new()),
+        controller_map_store: options.controller_maps,
+        controller_maps: Mutex::new(controller_maps),
         midi_sources: options.midi_sources,
         connected_midi_sources: options.connected_midi_sources,
         midi_observer: Mutex::new(options.midi_observer),
@@ -694,6 +711,20 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
                 None,
             )
         }
+        ControlRequest::ControllerMaps => controller_maps(context),
+        ControlRequest::SaveControllerMap { map } => save_controller_map(context, *map),
+        ControlRequest::ExportControllerMap { controller_id } => {
+            export_controller_map(context, &controller_id)
+        }
+        ControlRequest::ImportControllerMap { file } => match file.validate() {
+            Err(error) => error_response(ControlErrorCode::InvalidRequest, error.to_string(), None),
+            Ok(()) => match save_controller_map(context, file.map) {
+                ControlResponse::ControllerMapSaved { map } => {
+                    ControlResponse::ControllerMapImported { map }
+                }
+                other => other,
+            },
+        },
         ControlRequest::BeginMidiLearn {
             instance_id,
             parameter_index,
@@ -2748,6 +2779,129 @@ fn cancel_midi_learn(context: &ControlContext, learn_id: u64) -> ControlResponse
     }
 }
 
+/// The controllers attached to inputs and every stored map, including maps
+/// of controllers not connected now.
+fn controller_maps(context: &ControlContext) -> ControlResponse {
+    let connected = context.connected_midi_sources.lock().ok();
+    let controllers = match context.semantic_profiles.lock() {
+        Ok(profiles) => profiles
+            .iter()
+            .map(|(controller_id, registered)| {
+                let key = registered
+                    .runtime_source_id
+                    .as_ref()
+                    .and_then(|id| context.midi_sources.resolve_optional(id));
+                RegisteredController {
+                    controller_id: controller_id.clone(),
+                    source: registered
+                        .runtime_source_id
+                        .as_ref()
+                        .map(|id| MidiSourceDescriptor {
+                            id: id.clone(),
+                            name: registered
+                                .runtime_source_name
+                                .clone()
+                                .unwrap_or_else(|| controller_id.clone()),
+                            primary: false,
+                        }),
+                    connected: key.is_some_and(|key| {
+                        connected
+                            .as_ref()
+                            .is_some_and(|present| present.contains(&key.get()))
+                    }),
+                }
+            })
+            .collect(),
+        Err(_) => return internal_error("semantic controller profile lock is poisoned", None),
+    };
+    let maps = match context.controller_maps.lock() {
+        Ok(maps) => maps.values().cloned().collect(),
+        Err(_) => return internal_error("controller map lock is poisoned", None),
+    };
+    ControlResponse::ControllerMaps { controllers, maps }
+}
+
+/// Stores a controller's whole map and puts it to work at once: the link
+/// table is compiled again with it, as it is when a link is learnt.
+fn save_controller_map(context: &ControlContext, map: ControllerMap) -> ControlResponse {
+    if let Err(error) = map.validate() {
+        return error_response(ControlErrorCode::InvalidRequest, error.to_string(), None);
+    }
+    let _dispatch = match context.dispatch_lock.lock() {
+        Ok(guard) => guard,
+        Err(_) => return internal_error("control dispatch lock is poisoned", None),
+    };
+    if let Err(error) = context.controller_map_store.save(&map) {
+        return internal_error(format!("storing the controller map: {error:#}"), None);
+    }
+    match context.controller_maps.lock() {
+        Ok(mut maps) => {
+            if map.is_empty() {
+                maps.remove(&map.controller_id);
+            } else {
+                maps.insert(map.controller_id.clone(), map.clone());
+            }
+        }
+        Err(_) => return internal_error("controller map lock is poisoned", None),
+    }
+    if let Err(failure) = replace_runtime_parameter_links(context) {
+        return failure.into_response();
+    }
+    ControlResponse::ControllerMapSaved { map: Box::new(map) }
+}
+
+fn export_controller_map(context: &ControlContext, controller_id: &str) -> ControlResponse {
+    let map = match context.controller_maps.lock() {
+        Ok(maps) => maps.get(controller_id).cloned(),
+        Err(_) => return internal_error("controller map lock is poisoned", None),
+    };
+    let Some(map) = map else {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("no map is stored for controller {controller_id}"),
+            None,
+        );
+    };
+    let exported_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64);
+    let (file_name, file) = export_rfmap(
+        &map,
+        &format!("RackForge {}", env!("CARGO_PKG_VERSION")),
+        exported_unix_ms,
+    );
+    ControlResponse::ControllerMapExported {
+        file_name,
+        file: Box::new(file),
+    }
+}
+
+/// Compiles the session's links, the player's maps and the controllers'
+/// defaults again, and hands the table to the audio thread.
+fn replace_runtime_parameter_links(context: &ControlContext) -> Result<(), ControlFailure> {
+    let snapshot = context
+        .store
+        .lock()
+        .map(|store| store.snapshot())
+        .map_err(|_| {
+            control_failure(
+                ControlErrorCode::Internal,
+                "session store lock is poisoned",
+                None,
+            )
+        })?;
+    let compiled = compile_parameter_links(context, &snapshot, &snapshot.parameter_links)?;
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    send_audio(
+        context,
+        AudioControlCommand::ReplaceParameterLinks {
+            links: compiled,
+            reply: reply_sender,
+        },
+    )?;
+    receive_audio(reply_receiver, "apply controller maps")
+}
+
 fn compile_parameter_links(
     context: &ControlContext,
     snapshot: &rackforge_session_api::SessionState,
@@ -2822,32 +2976,66 @@ fn compile_parameter_links(
             Some(snapshot.revision),
         )
     })?;
+    let controller_maps = context.controller_maps.lock().map_err(|_| {
+        control_failure(
+            ControlErrorCode::Internal,
+            "controller map lock is poisoned",
+            Some(snapshot.revision),
+        )
+    })?;
     for (controller_id, registered) in semantic_profiles.iter() {
         let Some(source_id) = &registered.runtime_source_id else {
             continue;
         };
-        let profile = &registered.profile;
         let Some(source_key) = context.midi_sources.resolve_optional(source_id) else {
             // The package remains registered while its device is absent.
             continue;
         };
+        let controller_name = registered
+            .runtime_source_name
+            .as_deref()
+            .unwrap_or(controller_id);
         for instance in &snapshot.instances {
             let Some(plugin) = context.portable_plugins.get(&instance.plugin_id) else {
+                continue;
+            };
+            // The player's map for this controller and plugin sits between
+            // the session's own links and the package's defaults: what the
+            // map takes, a default does not also drive.
+            let mut explicit_links = links.to_vec();
+            if let Some(map) = controller_maps.get(controller_id) {
+                let mapped = compile_controller_map_links(ControllerMapLinkContext {
+                    map,
+                    plugin_id: &instance.plugin_id,
+                    runtime_source_id: source_id,
+                    source_name: controller_name,
+                    source_key,
+                    instance_id: instance.instance_id.as_str(),
+                    schema: plugin.0.parameters(),
+                    explicit_links: links,
+                });
+                for (mapping, reason) in &mapped.pending {
+                    eprintln!(
+                        "CONTROLLER_MAPPING_PENDING controller={controller_id} plugin={} mapping={mapping} reason={reason:?}",
+                        instance.plugin_id
+                    );
+                }
+                explicit_links.extend(mapped.links.iter().map(|link| link.link.clone()));
+                compiled.extend(mapped.links);
+            }
+            let Some(profile) = &registered.profile else {
                 continue;
             };
             compiled.extend(
                 compile_semantic_parameter_links(SemanticParameterLinkContext {
                     controller_id,
-                    controller_name: registered
-                        .runtime_source_name
-                        .as_deref()
-                        .unwrap_or(controller_id),
+                    controller_name,
                     profile,
                     runtime_source_id: source_id,
                     source_key,
                     instance_id: instance.instance_id.as_str(),
                     schema: plugin.0.parameters(),
-                    explicit_links: links,
+                    explicit_links: &explicit_links,
                 })
                 .map_err(|error| {
                     control_failure(
@@ -3060,42 +3248,35 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     let previous = match context.semantic_profiles.lock() {
                         Ok(mut profiles) => {
                             let previous = profiles.get(&controller_id).cloned();
-                            match semantic_profile {
-                                Some(profile) => {
-                                    let resolved = midi_source_name
-                                        .as_deref()
-                                        .and_then(|name| context.midi_sources.resolve_name(name))
-                                        .map(|(_, source)| {
-                                            (Some(source.id.clone()), Some(source.name.clone()))
+                            // Registered with or without roles: a controller
+                            // with none still needs its input known, for the
+                            // player's map of it.
+                            let resolved = midi_source_name
+                                .as_deref()
+                                .and_then(|name| context.midi_sources.resolve_name(name))
+                                .map(|(_, source)| {
+                                    (Some(source.id.clone()), Some(source.name.clone()))
+                                })
+                                .unwrap_or_else(|| {
+                                    if midi_source_name.is_none() {
+                                        previous.as_ref().map_or((None, None), |registered| {
+                                            (
+                                                registered.runtime_source_id.clone(),
+                                                registered.runtime_source_name.clone(),
+                                            )
                                         })
-                                        .unwrap_or_else(|| {
-                                            if midi_source_name.is_none() {
-                                                previous.as_ref().map_or(
-                                                    (None, None),
-                                                    |registered| {
-                                                        (
-                                                            registered.runtime_source_id.clone(),
-                                                            registered.runtime_source_name.clone(),
-                                                        )
-                                                    },
-                                                )
-                                            } else {
-                                                (None, None)
-                                            }
-                                        });
-                                    profiles.insert(
-                                        controller_id.clone(),
-                                        RegisteredSemanticProfile {
-                                            profile,
-                                            runtime_source_id: resolved.0,
-                                            runtime_source_name: resolved.1,
-                                        },
-                                    );
-                                }
-                                None => {
-                                    profiles.remove(&controller_id);
-                                }
-                            }
+                                    } else {
+                                        (None, None)
+                                    }
+                                });
+                            profiles.insert(
+                                controller_id.clone(),
+                                RegisteredSemanticProfile {
+                                    profile: semantic_profile,
+                                    runtime_source_id: resolved.0,
+                                    runtime_source_name: resolved.1,
+                                },
+                            );
                             previous
                         }
                         Err(_) => {
@@ -5553,6 +5734,8 @@ mod tests {
                 )]),
                 portable_plugins: BTreeMap::new(),
                 semantic_profiles: Mutex::new(BTreeMap::new()),
+                controller_map_store: ControllerMapStore::new(None),
+                controller_maps: Mutex::new(BTreeMap::new()),
                 midi_sources,
                 connected_midi_sources: Arc::new(Mutex::new(BTreeSet::from([0, 1]))),
                 midi_observer: Mutex::new(midi_receiver),

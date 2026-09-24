@@ -159,6 +159,7 @@ impl ControllerMap {
                 )));
             }
             let mut inputs = BTreeSet::new();
+            let mut messages: Vec<(ParameterLinkMessage, ParameterLinkChannel)> = Vec::new();
             for mapping in &plugin.mappings {
                 count += 1;
                 if count > MAX_CONTROLLER_MAP_MAPPINGS {
@@ -187,6 +188,17 @@ impl ControllerMap {
                         mapping.input.id, plugin.plugin_id
                     )));
                 }
+                // The same control under two names -- learnt from its message
+                // once, picked from the package's list another time -- is
+                // still one control.
+                let heard = (mapping.input.message, mapping.input.channel);
+                if messages.contains(&heard) {
+                    return Err(invalid(format!(
+                        "two mappings in {:?} listen to the same message",
+                        plugin.plugin_id
+                    )));
+                }
+                messages.push(heard);
             }
         }
         Ok(())
@@ -240,7 +252,10 @@ mod tests {
                 id: input.into(),
                 name: input.into(),
                 channel: ParameterLinkChannel::Omni,
-                message: ParameterLinkMessage::ControlChange { controller: 20 },
+                // Each input sends a message of its own, as real ones do.
+                message: ParameterLinkMessage::ControlChange {
+                    controller: 20 + input.bytes().last().map_or(0, |byte| byte % 10),
+                },
             },
             parameter_id: "leslie.speed".into(),
             mode,
@@ -324,6 +339,14 @@ mod tests {
             ),
         ]);
         two_buttons_one_parameter.validate().unwrap();
+    }
+
+    #[test]
+    fn one_control_under_two_names_is_still_one_control() {
+        let mut learnt = mapping("a", "cc.0.21", ParameterLinkMode::Trigger);
+        let picked = mapping("b", "button-1", ParameterLinkMode::Trigger);
+        learnt.input.message = picked.input.message;
+        assert!(map(vec![learnt, picked]).validate().is_err());
     }
 
     #[test]

@@ -22,8 +22,9 @@ use eframe::egui::{
     StrokeKind, Vec2,
 };
 use rackforge_control_api::{
-    ClientId, ControlErrorCode, ControlRequest, ControlResponse, MidiInputSetting,
-    MidiLearnCandidate, MidiSourceStatus, ParameterLinkMessage, VirtualMidiMessage,
+    ClientId, ControlErrorCode, ControlRequest, ControlResponse, ControllerMap, MidiInputSetting,
+    MidiLearnCandidate, MidiSourceStatus, ParameterLinkMessage, RegisteredController,
+    VirtualMidiMessage,
 };
 #[cfg(windows)]
 use rackforge_controller_api::{
@@ -31,12 +32,13 @@ use rackforge_controller_api::{
     rackforge_parameter_input, semantic_control_input,
 };
 use rackforge_controller_api::{HostActionBinding, HostControlBinding};
+use rackforge_core::controller_map_store::{ControllerMapStore, export_rfmap};
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
-    CompiledParameterLink, IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginPackage,
-    PluginStateStore, PluginStorage, SemanticParameterLinkContext,
-    compile_semantic_parameter_links, validate_state_reference,
+    CompiledParameterLink, ControllerMapLinkContext, IsolatedPluginStateEditor, LoadedPlugin,
+    PluginInstance, PluginPackage, PluginStateStore, PluginStorage, SemanticParameterLinkContext,
+    compile_controller_map_links, compile_semantic_parameter_links, validate_state_reference,
 };
 #[cfg(windows)]
 use rackforge_midi_api::{
@@ -168,6 +170,7 @@ fn compile_desktop_parameter_links(
     plugins: &[DesktopPlugin],
     performance: &PerformanceRepository,
     semantic_profiles: &BTreeMap<String, RegisteredSemanticProfile>,
+    controller_maps: &BTreeMap<String, ControllerMap>,
 ) -> Result<Vec<CompiledParameterLink>> {
     let mut compiled = links
         .iter()
@@ -210,25 +213,49 @@ fn compile_desktop_parameter_links(
         let Some(runtime_source_id) = &registered.runtime_source_id else {
             continue;
         };
-        let Some(profile) = &registered.profile else {
-            continue;
-        };
         let source_id = MidiSourceId::new(runtime_source_id.clone())?;
         let source_key = desktop_audio::stable_midi_source_key_from_id(&source_id);
+        let controller_name = registered
+            .runtime_source_name
+            .as_deref()
+            .unwrap_or(controller_id);
         for plugin in plugins {
+            // The player's map for this controller and plugin sits between
+            // the session's own links and the package's defaults.
+            let mut explicit_links = links.to_vec();
+            if let Some(map) = controller_maps.get(controller_id) {
+                let mapped = compile_controller_map_links(ControllerMapLinkContext {
+                    map,
+                    plugin_id: &plugin.plugin_id,
+                    runtime_source_id: &source_id,
+                    source_name: controller_name,
+                    source_key,
+                    instance_id: &plugin.instance_id,
+                    schema: plugin.runtime.parameters(),
+                    explicit_links: links,
+                });
+                for (mapping, reason) in &mapped.pending {
+                    eprintln!(
+                        "CONTROLLER_MAPPING_PENDING controller={controller_id} plugin={} mapping={mapping} reason={reason:?}",
+                        plugin.plugin_id
+                    );
+                }
+                explicit_links.extend(mapped.links.iter().map(|link| link.link.clone()));
+                compiled.extend(mapped.links);
+            }
+            let Some(profile) = &registered.profile else {
+                continue;
+            };
             compiled.extend(
                 compile_semantic_parameter_links(SemanticParameterLinkContext {
                     controller_id,
-                    controller_name: registered
-                        .runtime_source_name
-                        .as_deref()
-                        .unwrap_or(controller_id),
+                    controller_name,
                     profile,
                     runtime_source_id: &source_id,
                     source_key,
                     instance_id: &plugin.instance_id,
                     schema: plugin.runtime.parameters(),
-                    explicit_links: links,
+                    explicit_links: &explicit_links,
                 })
                 .with_context(|| {
                     format!(
@@ -478,6 +505,9 @@ struct DesktopApp {
     /// Runtime controller defaults. They are deliberately not persisted as
     /// user MIDI links; the signed controller package registers them again.
     controller_semantic_profiles: BTreeMap<String, RegisteredSemanticProfile>,
+    /// The player's controller maps, by controller id, and where they live.
+    controller_maps: BTreeMap<String, ControllerMap>,
+    controller_map_store: ControllerMapStore,
     virtual_midi: BTreeMap<ClientId, VirtualMidiClientState>,
     next_program_draft_id: u64,
     next_audition_lease_id: u64,
@@ -784,6 +814,11 @@ impl DesktopApp {
         };
         #[cfg(not(windows))]
         let controller_semantic_profiles = BTreeMap::new();
+        let controller_map_store = ControllerMapStore::new(Some(&options.data_root));
+        let controller_maps = controller_map_store.load_all().unwrap_or_else(|error| {
+            warnings.push(format!("Controller maps were not loaded: {error:#}"));
+            BTreeMap::new()
+        });
         #[cfg(windows)]
         if let Some(audio) = &audio {
             sync_desktop_audio(audio, &session, &menu)?;
@@ -792,6 +827,7 @@ impl DesktopApp {
                 &plugins,
                 &performance_repository,
                 &controller_semantic_profiles,
+                &controller_maps,
             )?)?;
             let active = session
                 .read()
@@ -877,6 +913,8 @@ impl DesktopApp {
             play_voice: None,
             live_state_dirty: None,
             controller_semantic_profiles,
+            controller_maps,
+            controller_map_store,
             virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
@@ -3233,6 +3271,75 @@ impl DesktopApp {
         }
     }
 
+    /// The controllers attached to enabled inputs, and every stored map.
+    fn controller_maps_response(&self) -> ControlResponse {
+        let controllers = self
+            .controller_semantic_profiles
+            .iter()
+            .map(|(controller_id, registered)| RegisteredController {
+                controller_id: controller_id.clone(),
+                source: registered
+                    .runtime_source_id
+                    .as_ref()
+                    .and_then(|id| rackforge_midi_api::MidiSourceId::new(id.clone()).ok())
+                    .map(|id| rackforge_midi_api::MidiSourceDescriptor {
+                        id,
+                        name: registered
+                            .runtime_source_name
+                            .clone()
+                            .unwrap_or_else(|| controller_id.clone()),
+                        primary: false,
+                    }),
+                // Only inputs the player enabled are registered here, and a
+                // registration is dropped with its input.
+                connected: registered.runtime_source_id.is_some(),
+            })
+            .collect();
+        ControlResponse::ControllerMaps {
+            controllers,
+            maps: self.controller_maps.values().cloned().collect(),
+        }
+    }
+
+    /// Stores a controller's whole map and applies it at once, as a learnt
+    /// link is.
+    fn save_controller_map(&mut self, map: ControllerMap) -> ControlResponse {
+        if let Err(error) = map.validate() {
+            return ControlResponse::Error {
+                code: ControlErrorCode::InvalidRequest,
+                message: error.to_string(),
+                current_revision: None,
+            };
+        }
+        if let Err(error) = self.controller_map_store.save(&map) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Internal,
+                message: format!("Could not store the controller map: {error:#}"),
+                current_revision: None,
+            };
+        }
+        if map.is_empty() {
+            self.controller_maps.remove(&map.controller_id);
+        } else {
+            self.controller_maps
+                .insert(map.controller_id.clone(), map.clone());
+        }
+        let links = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .parameter_links
+            .clone();
+        if let Err(message) = self.replace_parameter_links(links) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message,
+                current_revision: None,
+            };
+        }
+        ControlResponse::ControllerMapSaved { map: Box::new(map) }
+    }
+
     fn replace_parameter_links(&mut self, links: Vec<ParameterLink>) -> Result<(), String> {
         #[cfg(windows)]
         {
@@ -3241,6 +3348,7 @@ impl DesktopApp {
                 &self.plugins,
                 &self.performance_repository,
                 &self.controller_semantic_profiles,
+                &self.controller_maps,
             )
             .map_err(|error| format!("Could not compile MIDI parameter links: {error:#}"))?;
             self.audio
@@ -3966,6 +4074,42 @@ impl DesktopApp {
                     }
                 }
             }
+            ControlRequest::ControllerMaps => self.controller_maps_response(),
+            ControlRequest::SaveControllerMap { map } => self.save_controller_map(*map),
+            ControlRequest::ExportControllerMap { controller_id } => {
+                let Some(map) = self.controller_maps.get(&controller_id) else {
+                    return ControlResponse::Error {
+                        code: ControlErrorCode::NotFound,
+                        message: format!("no map is stored for controller {controller_id}"),
+                        current_revision: None,
+                    };
+                };
+                let exported_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| elapsed.as_millis() as u64);
+                let (file_name, file) = export_rfmap(
+                    map,
+                    &format!("RackForge {}", env!("CARGO_PKG_VERSION")),
+                    exported_unix_ms,
+                );
+                ControlResponse::ControllerMapExported {
+                    file_name,
+                    file: Box::new(file),
+                }
+            }
+            ControlRequest::ImportControllerMap { file } => match file.validate() {
+                Err(error) => ControlResponse::Error {
+                    code: ControlErrorCode::InvalidRequest,
+                    message: error.to_string(),
+                    current_revision: None,
+                },
+                Ok(()) => match self.save_controller_map(file.map) {
+                    ControlResponse::ControllerMapSaved { map } => {
+                        ControlResponse::ControllerMapImported { map }
+                    }
+                    other => other,
+                },
+            },
             ControlRequest::MidiSources => {
                 #[cfg(windows)]
                 {

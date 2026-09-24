@@ -2072,6 +2072,9 @@ pub fn run(config: LiveConfig) -> Result<()> {
             plugin_output_channels: channels as u32,
             storage: control_storage,
             checkpoint,
+            controller_maps: crate::controller_map_store::ControllerMapStore::new(
+                config.data_root.as_deref(),
+            ),
         },
     )?;
     println!("CONTROL_READY socket={}", control_path.display());

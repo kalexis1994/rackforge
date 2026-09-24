@@ -93,8 +93,13 @@ pub enum AudioDriverPanel {
 
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 pub use rackforge_midi_api::{
-    MidiChannel, MidiSourceDescriptor, ParameterLink, ParameterLinkChannel, ParameterLinkId,
-    ParameterLinkMessage, ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
+    LinkValue, MidiChannel, MidiSourceDescriptor, MidiSourceId, ParameterLink,
+    ParameterLinkChannel, ParameterLinkId, ParameterLinkMessage, ParameterLinkMode,
+    ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform, StepDirection,
+    controller_map::{
+        ControlMapping, ControllerMap, MappedInput, PluginControlMap, RFMAP_FORMAT,
+        RFMAP_SCHEMA_VERSION, RfMapFile,
+    },
     velocity_curve::VelocityCurve,
 };
 pub use rackforge_performance_api::{
@@ -117,7 +122,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 16;
+pub const CONTROL_SCHEMA_VERSION: u32 = 17;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 /// Sized for the largest documents the wire carries: a `.rfpreset` embeds
 /// one base64-encoded 1 MiB plugin state; a `.rflive` show embeds every
@@ -601,6 +606,21 @@ pub enum ControlRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         curve: Option<VelocityCurve>,
     },
+    /// The controllers the host knows and the player's map for each: what
+    /// every mapped input does in every plugin.
+    ControllerMaps,
+    /// Replaces one controller's whole map. An empty map removes it.
+    SaveControllerMap {
+        map: Box<ControllerMap>,
+    },
+    /// Wraps one controller's map as a portable `.rfmap` document.
+    ExportControllerMap {
+        controller_id: String,
+    },
+    /// Replaces the map of the controller the file names with the file's.
+    ImportControllerMap {
+        file: Box<RfMapFile>,
+    },
     /// Arms a transient observer. No persisted link is changed by Learn.
     BeginMidiLearn {
         instance_id: String,
@@ -806,6 +826,20 @@ pub enum ControlResponse {
         /// The reading for a keybed with none of its own.
         shared_curve: VelocityCurve,
     },
+    ControllerMaps {
+        controllers: Vec<RegisteredController>,
+        maps: Vec<ControllerMap>,
+    },
+    ControllerMapSaved {
+        map: Box<ControllerMap>,
+    },
+    ControllerMapExported {
+        file_name: String,
+        file: Box<RfMapFile>,
+    },
+    ControllerMapImported {
+        map: Box<ControllerMap>,
+    },
     MidiLearnStarted {
         learn_id: u64,
     },
@@ -911,6 +945,17 @@ pub struct MidiInputSetting {
 #[serde(deny_unknown_fields)]
 pub struct MidiSourceStatus {
     pub source: MidiSourceDescriptor,
+    pub connected: bool,
+}
+
+/// A controller package the host has attached to a MIDI input: the key its
+/// map is stored under, and the input it listens on.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisteredController {
+    pub controller_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<MidiSourceDescriptor>,
     pub connected: bool,
 }
 

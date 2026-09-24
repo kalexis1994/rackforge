@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use rackforge_midi_api::controller_map::ControllerMap;
 use rackforge_midi_api::{
     IngressMidiEvent, MidiChannel, MidiMessageKind, MidiSourceId, MidiSourceKey,
     PARAMETER_LINK_SCHEMA_VERSION, ParameterLink, ParameterLinkChannel, ParameterLinkId,
@@ -522,6 +523,110 @@ pub fn compile_semantic_parameter_links(
         compiled.push(CompiledParameterLink::new(link, source_key, schema)?);
     }
     Ok(compiled)
+}
+
+/// Compiles a player's controller map for one plugin instance: the mappings
+/// the map holds for the instance's plugin, each resolved from its parameter
+/// id to the instance's own parameter.
+///
+/// These links sit between the session's explicit links and the semantic
+/// defaults: an explicit link on the same parameter or the same control wins
+/// over a mapping, and a mapping wins over a default (pass the compiled links'
+/// `link`s to [`compile_semantic_parameter_links`] as explicit).
+pub struct ControllerMapLinkContext<'a> {
+    pub map: &'a ControllerMap,
+    pub plugin_id: &'a str,
+    pub runtime_source_id: &'a MidiSourceId,
+    pub source_name: &'a str,
+    pub source_key: MidiSourceKey,
+    pub instance_id: &'a str,
+    pub schema: &'a ParameterSchema,
+    pub explicit_links: &'a [ParameterLink],
+}
+
+/// A controller map compiled for one instance.
+#[derive(Debug, Default)]
+pub struct CompiledControllerMap {
+    pub links: Vec<CompiledParameterLink>,
+    /// Mappings that could not be compiled, with why: a parameter a newer
+    /// plugin version no longer has stays in the map, pending, and costs the
+    /// other mappings nothing.
+    pub pending: Vec<(String, String)>,
+}
+
+pub fn compile_controller_map_links(
+    context: ControllerMapLinkContext<'_>,
+) -> CompiledControllerMap {
+    let ControllerMapLinkContext {
+        map,
+        plugin_id,
+        runtime_source_id,
+        source_name,
+        source_key,
+        instance_id,
+        schema,
+        explicit_links,
+    } = context;
+    let mut compiled = CompiledControllerMap::default();
+    let Some(plugin) = map.plugin(plugin_id) else {
+        return compiled;
+    };
+    for mapping in &plugin.mappings {
+        let pending = |reason: String| (mapping.id.as_str().to_owned(), reason);
+        let Some(parameter) = schema
+            .parameters
+            .iter()
+            .find(|parameter| parameter.id == mapping.parameter_id)
+        else {
+            compiled.pending.push(pending(format!(
+                "the plugin has no parameter {:?}",
+                mapping.parameter_id
+            )));
+            continue;
+        };
+        let channel = match mapping.input.channel {
+            ParameterLinkChannel::Omni => None,
+            ParameterLinkChannel::Channel { channel } => Some(channel),
+        };
+        if explicit_links.iter().any(|link| {
+            link.instance_id == instance_id
+                && (link.parameter_index == parameter.index
+                    || (link.source.source_id == *runtime_source_id
+                        && link.message == mapping.input.message
+                        && channel.is_none_or(|channel| link.matches_channel(channel))))
+        }) {
+            continue;
+        }
+        let id = match ParameterLinkId::new(format!("map.{instance_id}.{}", mapping.id)) {
+            Ok(id) => id,
+            Err(error) => {
+                compiled.pending.push(pending(error.to_string()));
+                continue;
+            }
+        };
+        let link = ParameterLink {
+            schema_version: PARAMETER_LINK_SCHEMA_VERSION,
+            id,
+            instance_id: instance_id.to_owned(),
+            parameter_index: parameter.index,
+            source: ParameterLinkSource {
+                source_id: runtime_source_id.clone(),
+                display_name: source_name.to_owned(),
+            },
+            channel: mapping.input.channel,
+            message: mapping.input.message,
+            transform: ParameterLinkTransform {
+                invert: mapping.invert,
+            },
+            pass_through: mapping.effective_pass_through(),
+            mode: mapping.mode.clone(),
+        };
+        match CompiledParameterLink::new(link, source_key, schema) {
+            Ok(link) => compiled.links.push(link),
+            Err(error) => compiled.pending.push(pending(format!("{error:#}"))),
+        }
+    }
+    compiled
 }
 
 fn explicit_link_overrides_semantic(
@@ -1379,6 +1484,79 @@ mod tests {
         .unwrap();
         assert_eq!(press(&mut compiled, 0.0), Some(1.0));
         assert_eq!(release(&mut compiled, 1.0), Some(0.0));
+    }
+
+    fn organ_map(parameter_id: &str) -> ControllerMap {
+        use rackforge_midi_api::controller_map::{ControlMapping, MappedInput, PluginControlMap};
+        let mut map = ControllerMap::new("user.oxygen-49", "Oxygen 49");
+        map.plugins.push(PluginControlMap {
+            plugin_id: "org.rackforge.organ".into(),
+            plugin_name: "RF-Organ".into(),
+            mappings: vec![ControlMapping {
+                id: ParameterLinkId::new("leslie").unwrap(),
+                input: MappedInput {
+                    id: "button-1".into(),
+                    name: "Button 1".into(),
+                    channel: ParameterLinkChannel::Omni,
+                    message: ParameterLinkMessage::ControlChange { controller: 20 },
+                },
+                parameter_id: parameter_id.into(),
+                mode: ParameterLinkMode::Toggle {
+                    first: value(1.0),
+                    second: value(2.0),
+                },
+                invert: false,
+                pass_through: None,
+            }],
+        });
+        map
+    }
+
+    #[test]
+    fn a_controller_map_becomes_links_between_the_session_and_the_defaults() {
+        let speeds = leslie();
+        let source = MidiSourceId::new("alsa.oxygen-49").unwrap();
+        let compile = |map: &ControllerMap, plugin_id: &str, explicit: &[ParameterLink]| {
+            compile_controller_map_links(ControllerMapLinkContext {
+                map,
+                plugin_id,
+                runtime_source_id: &source,
+                source_name: "Oxygen 49",
+                source_key: MidiSourceKey::new(7),
+                instance_id: "desktop.main",
+                schema: &speeds,
+                explicit_links: explicit,
+            })
+        };
+
+        // The organ's mapping, resolved by parameter id, a button that
+        // consumes what it presses.
+        let map = organ_map("cutoff");
+        let mut compiled = compile(&map, "org.rackforge.organ", &[]);
+        assert!(compiled.pending.is_empty(), "{:?}", compiled.pending);
+        assert_eq!(compiled.links.len(), 1);
+        assert_eq!(compiled.links[0].link.parameter_index, 17);
+        let output = compiled.links[0]
+            .apply(ingress(&[0xb0, 20, 127]), |_| Some(1.0))
+            .unwrap();
+        assert_eq!(output.event.value, 2.0);
+        assert_eq!(output.pass_through, ParameterLinkPassThrough::Consume);
+
+        // Another plugin has no mapping here.
+        assert!(compile(&map, "org.rackforge.rf-106", &[]).links.is_empty());
+
+        // A parameter the plugin no longer has stays pending.
+        let stale = compile(&organ_map("leslie.gone"), "org.rackforge.organ", &[]);
+        assert!(stale.links.is_empty());
+        assert_eq!(stale.pending.len(), 1);
+
+        // The session's own link on the same parameter wins.
+        let explicit = link(ParameterLinkMessage::ControlChange { controller: 74 });
+        assert!(
+            compile(&map, "org.rackforge.organ", std::slice::from_ref(&explicit))
+                .links
+                .is_empty()
+        );
     }
 
     #[test]

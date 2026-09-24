@@ -1251,6 +1251,44 @@ fn a_unit_wider_than_its_instrument_survives_the_transport() {
     }
 }
 
+/// Units made for a short block and reconfigured for a longer one render the
+/// longer one whole.
+///
+/// The player changing the buffer from 128 samples to 256 on the appliance
+/// did exactly this, and `reconfigure` sized the unit buffers by the
+/// instrument's two channels: a buffer made for 128 frames of the Concert
+/// Grand's twenty-float sections looked big enough for 256 frames of stereo,
+/// the first 256-frame block ran off its end, and the piano was quarantined
+/// into silence.
+#[test]
+fn units_reconfigured_for_a_longer_block_render_it_whole() {
+    let plugin = build_package_from(WIDE_UNIT_SYNTH);
+    let telemetry = RenderTelemetry::new(1);
+    let mut reference_voices = vec![TestVoice::create(plugin, false)];
+    let reference = render_scripted(&mut reference_voices, PROGRAM, |voices| {
+        process_slots_sequential(voices, FRAMES, CHANNELS, &telemetry);
+    });
+
+    for workers in [2_usize, 3, 4] {
+        let telemetry = RenderTelemetry::new(workers);
+        let mut pool = RenderPool::with_workers(workers, telemetry);
+        if pool.worker_count() < 2 {
+            continue;
+        }
+        let mut voice = TestVoice::create(plugin, false);
+        let mut units = ParallelUnits::create(plugin, 48_000.0, FRAMES / 2, 0, CHANNELS)
+            .unwrap()
+            .expect("the fixture declares parallel_render_v1");
+        units.reconfigure(48_000.0, FRAMES, 0, CHANNELS).unwrap();
+        voice.parallel = Some(units);
+        let mut voices = vec![voice];
+        let produced = render_scripted(&mut voices, PROGRAM, |voices| {
+            assert!(pool.process(voices, FRAMES, CHANNELS, 1_000_000_000));
+        });
+        assert_eq!(reference, produced, "workers={workers} diverged");
+    }
+}
+
 /// How many blocks the Concert Grand is held to below. Long enough for
 /// strikes to decay into the sympathetic bank and for the pedal to move
 /// under sounding notes, which is where per-voice state crosses the

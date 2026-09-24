@@ -1771,13 +1771,19 @@ impl<'plugin> ParallelUnits<'plugin> {
         input_channels: u32,
         output_channels: u32,
     ) -> anyhow::Result<()> {
-        let samples = maximum_frames as usize * output_channels as usize;
+        // As wide as a unit writes, as at creation: sized by the output
+        // channels, a buffer made for 128 frames of a twenty-float section
+        // looked big enough for 256 frames of stereo, and the first 256-frame
+        // block ran off its end and quarantined the instrument.
+        let unit_channels = self.layout.unit_width(output_channels as usize);
+        let samples = maximum_frames as usize * unit_channels;
         for cell in &mut self.cells {
             cell.instance
                 .activate(sample_rate, maximum_frames, input_channels, output_channels)?;
             if cell.output.len() < samples {
                 cell.output = vec![0.0_f32; samples].into_boxed_slice();
             }
+            cell.unit_channels = unit_channels;
         }
         self.maximum_frames = maximum_frames;
         self.input_channels = input_channels;

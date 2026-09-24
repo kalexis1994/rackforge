@@ -2792,6 +2792,22 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 );
                                 voice.process_faulted = true;
                             }
+                            // An effect rendered in units takes the new block
+                            // as the instruments do.
+                            if let Some(units) = voice.parallel.as_mut()
+                                && let Err(error) = units.reconfigure(
+                                    output_rate as f64,
+                                    period_frames as u32,
+                                    voice.input_channels as u32,
+                                    channels as u32,
+                                )
+                            {
+                                eprintln!(
+                                    "PLAY_CHAIN_UNITS_REACTIVATE_FAILED instance={} error={error:#}",
+                                    voice.instance_id
+                                );
+                                voice.process_faulted = true;
+                            }
                         }
                         device_output.resize(period_frames * channels, 0);
                         meter_frames = 0;

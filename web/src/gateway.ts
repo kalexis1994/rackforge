@@ -7,7 +7,7 @@ import {
   snapshotReceived,
   store,
 } from "./store";
-import { IS_BROWSER_HOST, isVstHost, openSessionChannel, type SessionChannel } from "./host";
+import { isDesktopHost, isVstHost, openSessionChannel, type SessionChannel } from "./host";
 import { randomIdToken } from "./ids";
 import { invalidatePluginCatalog } from "./pluginCatalog";
 import { serializeSessionCommand } from "./sessionCommandProtocol";
@@ -756,14 +756,14 @@ function commandPayload(id: number, command: SessionCommand) {
 }
 
 function sendAudioHealthRequest() {
-  // The browser host has no audio driver to report on and answers
-  // audio_health as unavailable. Session errors carry no request id, so that
-  // answer rejected whatever command was waiting beside it: switching
-  // instrument in the browser failed with "does not implement this request"
-  // though the switch itself had worked.
+  // Only the desktop measures its audio driver. The browser host and the Pi
+  // answer audio_health as unavailable, and Android not at all. Session
+  // errors carry no request id, so that answer rejected whatever command
+  // was waiting beside it -- switching instrument in the browser failed with
+  // "does not implement this request" though the switch had worked -- and on
+  // the Pi it was shown above PLAY on every poll.
   if (
-    !isVstHost()
-    && !IS_BROWSER_HOST
+    isDesktopHost()
     && socket
     && sessionConnected
     && coreReady

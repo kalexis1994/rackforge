@@ -1368,7 +1368,19 @@ fn plugin_instance_id(plugin_id: &str, primary: bool) -> Result<InstanceId> {
     InstanceId::new(format!("play.{plugin_id}")).map_err(|message| anyhow::anyhow!(message))
 }
 
-pub fn run(config: LiveConfig) -> Result<()> {
+pub fn run(mut config: LiveConfig) -> Result<()> {
+    // An input saved beside an older output -- the buffer changed since --
+    // starts on the output's clock rather than refusing to start.
+    if let Some(input) = config.audio_input.as_mut() {
+        let following = input_following(input, &config.audio_output);
+        if following != *input {
+            println!(
+                "AUDIO_INPUT_FOLLOWS_OUTPUT rate={} period={} buffer={}",
+                following.sample_rate_hz, following.period_frames, following.buffer_frames
+            );
+            *input = following;
+        }
+    }
     // Before any voice is built: a voice copies what the store remembers for
     // its plugin at construction, and one built against an unloaded store
     // starts every session from scratch -- measured on the appliance as a
@@ -2266,6 +2278,17 @@ fn ensure_supported_engine_profile(profile: &AudioOutputProfile) -> Result<()> {
     Ok(())
 }
 
+/// The capture runs on the engine's clock: it takes the output's rate, block
+/// and queue, whatever they are. They are never the player's to set apart --
+/// the engine reads a block in and writes a block out in the same turn.
+fn input_following(input: &AudioInputProfile, output: &AudioOutputProfile) -> AudioInputProfile {
+    let mut following = input.clone();
+    following.sample_rate_hz = output.sample_rate_hz;
+    following.period_frames = output.period_frames;
+    following.buffer_frames = output.buffer_frames;
+    following
+}
+
 fn ensure_supported_input_profile(
     input: &AudioInputProfile,
     output: &AudioOutputProfile,
@@ -2634,29 +2657,109 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     let _ = reply.try_send(Ok(sequencer.capture_take(lane)));
                 }
                 AudioControlCommand::ApplyAudioOutput { profile, reply } => {
-                    let result = if input.as_ref().is_some_and(|capture| {
+                    // A new rate or block takes the capture with it: closed
+                    // before the output changes -- they may be one device --
+                    // and opened again on the output's new clock, on the same
+                    // device and inputs.
+                    let capture_follows = input.as_ref().is_some_and(|capture| {
                         capture.profile.sample_rate_hz != profile.sample_rate_hz
                             || capture.profile.period_frames != profile.period_frames
-                    }) {
-                        Err(anyhow::anyhow!(
-                            "audio output rate/period cannot change while capture is active; disable or reconfigure the input first"
-                        ))
+                            || capture.profile.buffer_frames != profile.buffer_frames
+                    });
+                    let previous_input = if capture_follows {
+                        input.take().map(|capture| {
+                            let mut profile = capture.profile.clone();
+                            profile.device = rackforge_audio_api::AudioDeviceSelector::Id {
+                                id: capture.device.id.clone(),
+                            };
+                            profile
+                        })
                     } else {
-                        reconfigure_audio_output(
-                            &mut output,
-                            standalone_voices,
-                            &mut rack_voices,
-                            profile,
-                            &active_profile,
-                            &audio_state,
-                        )
+                        None
                     };
+                    let previous_output = active_profile.clone();
+                    let mut result = reconfigure_audio_output(
+                        &mut output,
+                        standalone_voices,
+                        &mut rack_voices,
+                        profile,
+                        &active_profile,
+                        &audio_state,
+                    );
+                    if let Some(previous_input) = previous_input {
+                        let devices = audio_state
+                            .lock()
+                            .map(|state| state.devices.clone())
+                            .unwrap_or_default();
+                        let reopen =
+                            |profile: &AudioInputProfile, output: &Option<OpenedAudioOutput>| {
+                                open_audio_input_from_inventory(
+                                    profile,
+                                    &devices,
+                                    output.as_ref().map(|output| &output.device.id),
+                                )
+                            };
+                        let followed = match &result {
+                            Ok(snapshot) => Some(reopen(
+                                &input_following(&previous_input, &snapshot.active_profile),
+                                &output,
+                            )),
+                            Err(_) => None,
+                        };
+                        match followed {
+                            Some(Ok(opened)) => {
+                                println!(
+                                    "AUDIO_INPUT_FOLLOWED id={} rate={} period={} buffer={}",
+                                    opened.device.id,
+                                    opened.profile.sample_rate_hz,
+                                    opened.profile.period_frames,
+                                    opened.profile.buffer_frames
+                                );
+                                input = Some(opened);
+                            }
+                            other => {
+                                // The input could not follow, or the output
+                                // never changed: both go back to the clock
+                                // they shared, and the player hears why.
+                                if let Some(Err(error)) = other {
+                                    eprintln!("AUDIO_INPUT_FOLLOW_FAILED error={error:#}");
+                                    if let Err(back) = reconfigure_audio_output(
+                                        &mut output,
+                                        standalone_voices,
+                                        &mut rack_voices,
+                                        previous_output.clone(),
+                                        &previous_output,
+                                        &audio_state,
+                                    ) {
+                                        eprintln!("AUDIO_OUTPUT_ROLLBACK_FAILED error={back:#}");
+                                    }
+                                    result = Err(anyhow::anyhow!(
+                                        "the audio input could not follow the new output: {error}"
+                                    ));
+                                }
+                                match reopen(&previous_input, &output) {
+                                    Ok(opened) => input = Some(opened),
+                                    Err(error) => {
+                                        eprintln!("AUDIO_INPUT_REOPEN_FAILED error={error:#}")
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if let Ok(snapshot) = &result {
                         active_profile = snapshot.active_profile.clone();
                         period_frames = snapshot.active_profile.period_frames as usize;
                         channels = snapshot.active_profile.channels as usize;
                         output_rate = snapshot.active_profile.sample_rate_hz as usize;
                         xruns.reconfigure(output_rate as u32, period_frames);
+                        // The capture followed: same inputs, the new block.
+                        input_xruns.reconfigure(output_rate as u32, period_frames);
+                        device_input.resize(period_frames * capture_stream_channels, 0);
+                        captured_input.resize(period_frames * capture_channels, 0.0);
+                        plugin_input.resize(
+                            period_frames * rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS,
+                            0.0,
+                        );
                         plugin_output.resize(period_frames * channels, 0.0);
                         mix_output.resize(period_frames * channels, 0.0);
                         for voice in &mut rack_voices {

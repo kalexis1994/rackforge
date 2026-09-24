@@ -344,8 +344,9 @@ public final class MainActivity extends Activity {
                 ? "live" : "play";
         currentSharedRoute = "live".equals(currentPage) ? "/live" : "/play";
         selectedAudioDeviceKey = preferences.getString("audio.output", "default");
-        // Balanced keeps a render-ahead queue for measured portable WASM CPU
-        // spikes. Users can still opt into the more aggressive Low profile.
+        // 256 samples, RackForge's buffer on every platform: its render-ahead
+        // queue absorbs measured portable WASM CPU spikes. 128 is the tighter
+        // choice, 512 the safer.
         latencyMode = preferences.getInt("audio.latency", 1);
         outputGainDb = preferences.getInt("audio.gain_db", 0);
         if (!setNativeMasterLevel(preferences.getInt("session.master_level", 1000))) {
@@ -4692,9 +4693,9 @@ public final class MainActivity extends Activity {
 
         Spinner latency = new Spinner(this);
         latency.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
-                new String[] {"Low latency", "Balanced", "Safe"}));
+                new String[] {latencyLabel(0), latencyLabel(1), latencyLabel(2)}));
         latency.setSelection(latencyMode);
-        audioCard.addView(settingsControl("Latency mode", latency));
+        audioCard.addView(settingsControl("Buffer", latency));
         try {
             JSONObject status = new JSONObject(nativeAudioStatus());
             int actualRate = status.optInt("sample_rate", SAMPLE_RATE);
@@ -4864,11 +4865,12 @@ public final class MainActivity extends Activity {
         return row;
     }
 
+    /** The buffer a mode runs, in samples: the latency follows from it. */
     private static String latencyLabel(int mode) {
         return switch (mode) {
-            case 1 -> "Balanced";
-            case 2 -> "Safe";
-            default -> "Low latency";
+            case 1 -> "256 samples";
+            case 2 -> "512 samples";
+            default -> "128 samples";
         };
     }
 

@@ -63,6 +63,8 @@ const CONTROLLER_QUEUE_CAPACITY: usize = 256;
 const MAX_MIDI_EVENTS_PER_BLOCK: usize = 256;
 const COMMON_SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
 const COMMON_BUFFER_FRAMES: [u32; 8] = [32, 64, 128, 256, 512, 1_024, 2_048, 4_096];
+/// The buffer a new installation plays at, as on the Pi and Android.
+const DEFAULT_BUFFER_FRAMES: u32 = 256;
 /// Unity, because an instrument already reaches full scale on its own.
 ///
 /// This was 6 dB, undocumented, and it was making the harshness players heard
@@ -663,7 +665,12 @@ impl AudioInventory {
             driver: output.driver.clone(),
             output_device: output.name.clone(),
             sample_rate_hz: output.default_sample_rate,
-            buffer_frames: None,
+            // RackForge's buffer on every platform, where the output takes
+            // it; the driver's own otherwise.
+            buffer_frames: output
+                .buffer_frames
+                .contains(&DEFAULT_BUFFER_FRAMES)
+                .then_some(DEFAULT_BUFFER_FRAMES),
             output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
             input_device: None,
             input_channels: Vec::new(),

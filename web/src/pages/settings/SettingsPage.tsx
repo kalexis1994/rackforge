@@ -12,6 +12,14 @@ import { HostSettingsBootstrap } from "../../pages/settings/hostSettings";
 import { SettingsTab, isSettingsTab, settingsTabsFor } from "../../pages/settings/tabs";
 import { type HostAudioPreferences, type HostAudioSettings, type WebPublicConfig } from "../../types";
 
+/** RackForge's buffer on every platform, in samples. */
+const DEFAULT_BUFFER_FRAMES = 256;
+
+/** The default buffer where a device takes it; the system's otherwise. */
+function defaultBufferFor(supported: readonly number[]): number | undefined {
+  return supported.includes(DEFAULT_BUFFER_FRAMES) ? DEFAULT_BUFFER_FRAMES : undefined;
+}
+
 export function SettingsPage({
   initial,
   onConfigChange,
@@ -127,7 +135,7 @@ export function SettingsPage({
       driver,
       output_device: output.name,
       sample_rate_hz: output.default_sample_rate,
-      buffer_frames: undefined,
+      buffer_frames: defaultBufferFor(output.buffer_frames),
       input_device: undefined,
       input_channels: [],
     });
@@ -146,7 +154,7 @@ export function SettingsPage({
         : output.default_sample_rate,
       buffer_frames: output.buffer_frames.includes(audioDraft.buffer_frames ?? -1)
         ? audioDraft.buffer_frames
-        : undefined,
+        : defaultBufferFor(output.buffer_frames),
     });
   };
   const selectAudioInput = (name: string) => {
@@ -169,7 +177,7 @@ export function SettingsPage({
         : input.default_sample_rate,
       buffer_frames: input.buffer_frames.includes(audioDraft.buffer_frames ?? -1)
         ? audioDraft.buffer_frames
-        : undefined,
+        : defaultBufferFor(input.buffer_frames),
     });
   };
   // A reading is heard while it is being drawn: a curve you cannot play is a
@@ -523,7 +531,7 @@ export function SettingsPage({
                       <span>Buffer</span>
                       <select value={audioDraft.buffer_frames ?? ""} onChange={(event) => setAudioDraft({ ...audioDraft, buffer_frames: event.target.value ? Number(event.target.value) : undefined })}>
                         <option value="">System default</option>
-                        {output.buffer_frames.map((frames) => <option key={frames} value={frames}>{frames} frames · {(frames * 1000 / audioDraft.sample_rate_hz).toFixed(1)} ms</option>)}
+                        {output.buffer_frames.map((frames) => <option key={frames} value={frames}>{frames} samples · {(frames * 1000 / audioDraft.sample_rate_hz).toFixed(1)} ms</option>)}
                       </select>
                     </label>
                   </>

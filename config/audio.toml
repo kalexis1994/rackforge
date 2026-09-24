@@ -34,8 +34,10 @@ data_root = "@RACKFORGE_ROOT@/data"
 sample_format = "s32_le"
 sample_rate_hz = 48000
 channels = 2
-period_frames = 128
-buffer_frames = 384
+# RackForge's buffer on every platform: 256 samples a block, played from a
+# queue of three. LITTLE and the web settings change it to 128 or 512.
+period_frames = 256
+buffer_frames = 768
 
 [audio.output.device]
 mode = "automatic"
@@ -48,12 +50,14 @@ mode = "automatic"
 # To capture only some inputs, list them: `channels = [1]` for a mono guitar
 # on input 1 alone. PLAY takes what is captured as a whole, as a Rack cable
 # left on "All" does -- one input on both sides, a pair side for side.
+# Core runs the capture on the output's rate and buffer whatever is written
+# here, and takes it along when the output's buffer changes.
 #
 # [audio.input]
 # sample_format = "s32_le"
 # sample_rate_hz = 48000
-# period_frames = 128
-# buffer_frames = 384
+# period_frames = 256
+# buffer_frames = 768
 # gain_db = 0
 #
 # [audio.input.device]

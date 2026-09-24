@@ -5349,55 +5349,76 @@ impl Menu {
         )
     }
 
+    /// A value to choose, shown as programs are: the one under the cursor,
+    /// marked `|...|` only when it is the one in use, with what applying it
+    /// would mean below.
     fn render_audio_value(&self) -> Screen {
-        let mut footer = "OK TO APPLY".to_owned();
-        let (title, value, count) = match self.page {
-            Page::AudioOutput => {
-                let devices = self.compatible_audio_devices();
-                let value = devices
-                    .get(self.audio_value_index)
-                    .map(|device| device.name.clone())
-                    .unwrap_or_else(|| "NO OUTPUTS".into());
-                ("OUTPUT", value, devices.len())
-            }
-            Page::AudioRate => {
-                let rates = self.audio_rates();
-                let value = rates
-                    .get(self.audio_value_index)
-                    .map(|rate| format!("{rate} HZ"))
-                    .unwrap_or_else(|| "NO RATES".into());
-                ("SAMPLE RATE", value, rates.len())
-            }
-            Page::AudioBuffer => {
-                let sizes = self.audio_buffer_sizes();
-                let size = sizes.get(self.audio_value_index).copied();
-                let value = size
-                    .map(|size| format!("{size} SAMPLES"))
-                    .unwrap_or_else(|| "NO SIZES".into());
-                // What the size means at this rate, beside the key to apply.
-                if let (Some(size), Some(state)) = (size, self.audio_state.as_ref()) {
-                    let mut profile = state.active_profile.clone();
-                    profile.period_frames = size;
-                    profile.buffer_frames = size * AUDIO_BUFFER_BLOCKS;
-                    footer = format!("{:.0} MS OK TO APPLY", profile.nominal_buffer_latency_ms());
-                }
-                ("BUFFER", value, sizes.len())
-            }
+        let Some(state) = self.audio_state.as_ref() else {
+            return Screen::with_header("AUDIO", "UNAVAILABLE", "BACK TO RETURN");
+        };
+        let action = |in_use: bool| if in_use { "IN USE" } else { "OK TO APPLY" };
+        // (label, in use, detail) for every value offered.
+        let (title, empty, values): (&str, &str, Vec<(String, bool, String)>) = match self.page {
+            Page::AudioOutput => (
+                "OUTPUT",
+                "NO OUTPUTS",
+                self.compatible_audio_devices()
+                    .into_iter()
+                    .map(|device| {
+                        let in_use = state
+                            .active_device
+                            .as_ref()
+                            .is_some_and(|active| active.id == device.id);
+                        (device.name.clone(), in_use, action(in_use).to_owned())
+                    })
+                    .collect(),
+            ),
+            Page::AudioRate => (
+                "SAMPLE RATE",
+                "NO RATES",
+                self.audio_rates()
+                    .into_iter()
+                    .map(|rate| {
+                        let in_use = rate == state.active_profile.sample_rate_hz;
+                        (format!("{rate} HZ"), in_use, action(in_use).to_owned())
+                    })
+                    .collect(),
+            ),
+            Page::AudioBuffer => (
+                "BUFFER",
+                "NO SIZES",
+                self.audio_buffer_sizes()
+                    .into_iter()
+                    .map(|size| {
+                        let in_use = size == state.active_profile.period_frames;
+                        // What the size means at this rate.
+                        let mut profile = state.active_profile.clone();
+                        profile.period_frames = size;
+                        profile.buffer_frames = size * AUDIO_BUFFER_BLOCKS;
+                        // The bars mark the size in use; below is what a
+                        // size means at this rate.
+                        let detail =
+                            format!("{:.0} MS LATENCY", profile.nominal_buffer_latency_ms());
+                        (format!("{size} SAMPLES"), in_use, detail)
+                    })
+                    .collect(),
+            ),
             _ => unreachable!(),
         };
-        let value = normalized_display_text(&value, "UNAVAILABLE")
-            .chars()
-            .take(DISPLAY_COLUMNS.saturating_sub(2))
-            .collect::<String>();
-        Screen::with_header(
-            indexed_title(
-                title,
-                self.audio_value_index.min(count.saturating_sub(1)),
-                count.max(1),
-            ),
-            format!("[{value}]"),
-            footer,
-        )
+        if values.is_empty() {
+            return Screen::with_header(title, empty, "BACK TO RETURN");
+        }
+        let selected = self.audio_value_index.min(values.len() - 1);
+        let mut carousel = SimpleCarousel::new(
+            "audio-values",
+            values.iter().map(|(label, in_use, detail)| {
+                CarouselItem::new(carousel_label(label, *in_use), detail)
+            }),
+        );
+        carousel.set_selected(selected);
+        carousel.set_focused(true);
+        let [line_1, line_2] = component_lines(&carousel, false);
+        Screen::with_header(indexed_title(title, selected, values.len()), line_1, line_2)
     }
 
     fn render_audio_result(&self) -> Screen {
@@ -11067,16 +11088,17 @@ mod tests {
         assert_eq!(menu.render().line_1, "BUFFER");
         assert_eq!(menu.render().line_2, "128 SAMPLES 8 MS");
 
+        // As programs are: only the size in use is marked.
         menu.apply(Action::Select);
-        assert_eq!(menu.render().line_1, "[128 SAMPLES]");
-        assert_eq!(menu.render().line_2, "8 MS OK TO APPLY");
+        assert_eq!(menu.render().line_1.trim(), "|128 SAMPLES|");
+        assert_eq!(menu.render().line_2.trim(), "8 MS LATENCY");
         menu.apply(Action::Next);
-        assert_eq!(menu.render().line_1, "[256 SAMPLES]");
-        assert_eq!(menu.render().line_2, "16 MS OK TO APPLY");
+        assert_eq!(menu.render().line_1.trim(), "256 SAMPLES");
+        assert_eq!(menu.render().line_2.trim(), "16 MS LATENCY");
 
         // The host refreshes the state while the player chooses.
         menu.sync_audio_state(test_audio_state());
-        assert_eq!(menu.render().line_1, "[256 SAMPLES]");
+        assert_eq!(menu.render().line_1.trim(), "256 SAMPLES");
 
         menu.apply(Action::Select);
         let Some(MenuCommand::ApplyAudioOutput { profile }) = menu.take_command() else {

@@ -83,10 +83,15 @@ let outputMeterSentAt = 0;
 let audioHealthInFlight = false;
 let audioHealthSentAt = 0;
 let sequencerStatusSentAt = 0;
+/// The LIVE library is the one poll whose latch also holds back a queued
+/// Save: a lost reply froze LIVE on the last library and kept the Save
+/// waiting until it timed out. It is a larger read, so it gets longer.
+let performanceSnapshotSentAt = 0;
 const POLL_LATCH_STALE_MS = 2000;
+const PERFORMANCE_LATCH_STALE_MS = 5000;
 
-function latchIsStale(sentAt: number) {
-  return sentAt !== 0 && Date.now() - sentAt > POLL_LATCH_STALE_MS;
+function latchIsStale(sentAt: number, staleMs = POLL_LATCH_STALE_MS) {
+  return sentAt !== 0 && Date.now() - sentAt > staleMs;
 }
 let intentionallyStopped = false;
 let pendingPerformanceEdit:
@@ -241,20 +246,33 @@ function sendPerformanceSnapshotRequest() {
     socket &&
     sessionConnected &&
     coreReady &&
-    !performanceSnapshotInFlight &&
+    !performanceSnapshotLatched() &&
     !pendingPerformanceEdit &&
     !store.getState().rackforge.performancePending
   ) {
     performanceSnapshotInFlight = true;
+    performanceSnapshotSentAt = Date.now();
     socket.send(JSON.stringify({ op: "performance_snapshot" }));
   }
+}
+
+/** Whether a snapshot reply is still expected; a lost one stops counting. */
+function performanceSnapshotLatched() {
+  if (
+    performanceSnapshotInFlight &&
+    latchIsStale(performanceSnapshotSentAt, PERFORMANCE_LATCH_STALE_MS)
+  ) {
+    performanceSnapshotInFlight = false;
+    performanceSnapshotSentAt = 0;
+  }
+  return performanceSnapshotInFlight;
 }
 
 function sendPendingPerformanceEdit() {
   if (
     !socket ||
     !sessionConnected ||
-    performanceSnapshotInFlight ||
+    performanceSnapshotLatched() ||
     !pendingPerformanceEdit?.request
   ) return;
   const request = pendingPerformanceEdit.request;
@@ -281,7 +299,12 @@ export function connectGateway() {
       void invalidatePluginCatalog().catch(() => undefined);
       if (performanceTimer !== null) window.clearInterval(performanceTimer);
       performanceTimer = window.setInterval(
-        sendPerformanceSnapshotRequest,
+        () => {
+          // A Save queued behind a snapshot whose reply was lost goes out
+          // once that latch turns stale, not only when a reply arrives.
+          sendPendingPerformanceEdit();
+          sendPerformanceSnapshotRequest();
+        },
         PERFORMANCE_REFRESH_MS,
       );
       if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
@@ -379,6 +402,7 @@ export function connectGateway() {
             message as unknown as PerformanceSnapshotMessage;
           if (message.status === "performance_snapshot") {
             performanceSnapshotInFlight = false;
+            performanceSnapshotSentAt = 0;
           }
           store.dispatch(
             performanceReceived({
@@ -1129,6 +1153,7 @@ export async function removeParameterLink(linkId: string): Promise<void> {
 
 export function dispatchCommandAwait(
   command: SessionCommand,
+  options: { timeoutMs?: number } = {},
 ): Promise<CoreCommandAppliedMessage> {
   if (!socket || !sessionConnected) {
     return Promise.reject(new Error("RackForge Core is not connected."));
@@ -1139,7 +1164,7 @@ export function dispatchCommandAwait(
     const timeout = window.setTimeout(() => {
       pendingCommands.delete(id);
       reject(new Error("RackForge Core did not confirm the command in time."));
-    }, COMMAND_TIMEOUT_MS);
+    }, options.timeoutMs ?? COMMAND_TIMEOUT_MS);
     pendingCommands.set(id, { resolve, reject, timeout });
     try {
       socket!.send(commandPayload(id, command));

@@ -6805,6 +6805,27 @@ body {
   overflow: hidden;
 }
 
+/* Why a LOAD failed, above the list, until it is dismissed or retried. */
+.live-content > .live-load-error {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+
+.live-load-error button {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  color: inherit;
+  background: none;
+  border: 0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .live-mode-tabs {
   padding: 14px;
   border-bottom: 1px solid var(--line);

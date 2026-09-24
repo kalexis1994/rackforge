@@ -1,7 +1,9 @@
 import {
+  createContext,
   lazy,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -410,21 +412,50 @@ function PerformanceBrowser({
     }
   }, [performance.live.active, performance.live.mode]);
   const mode = performance.live.mode;
+  // A load is waited on: its key says LOADING until the host confirms it or
+  // says why not, and every other key waits meanwhile. It used to be sent
+  // and forgotten, so a host that dropped it left a key that did nothing.
+  const [loading, setLoading] = useState<LiveLocation | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const activate = (location: LiveLocation) => {
-    if (session?.active_mode !== "live") {
-      dispatchCommand({ type: "set_active_mode", mode: "live" });
-    }
-    dispatchCommand({ type: "activate_live_target", location });
+    if (loading) return;
+    setLoading(location);
+    setLoadError(null);
+    void loadLiveTarget(location, session?.active_mode === "live")
+      .catch((reason: unknown) => {
+        if (mounted.current) {
+          setLoadError(reason instanceof Error ? reason.message : String(reason));
+        }
+      })
+      .finally(() => {
+        if (mounted.current) setLoading(null);
+      });
   };
   const changeMode = (nextMode: LiveBrowseMode) => {
     dispatchCommand({ type: "set_live_browse_mode", mode: nextMode });
   };
 
   return (
+    <LiveLoadContext.Provider value={loading}>
     <div className="live-content">
       {/* What is on stage is the header's window to say -- the mode, where
           in the library, what is playing -- so the browser is only the
           choice. An ON STAGE card here said it a second time. */}
+      {loadError ? (
+        <p className="form-error live-load-error" role="alert">
+          <span>Could not load: {loadError}</span>
+          <button type="button" onClick={() => setLoadError(null)} aria-label="Dismiss">
+            ×
+          </button>
+        </p>
+      ) : null}
       <div className="live-browser">
         <div className="live-mode-tabs" role="tablist" aria-label="LIVE target type">
           {(["rack", "song", "setlist"] as LiveBrowseMode[]).map((item) => (
@@ -453,6 +484,27 @@ function PerformanceBrowser({
         </div>
       </div>
     </div>
+    </LiveLoadContext.Provider>
+  );
+}
+
+/** The LIVE location being loaded, or null when no load is waited on. */
+const LiveLoadContext = createContext<LiveLocation | null>(null);
+
+/** Long enough for a Rack's instruments to load their samples. */
+const LIVE_LOAD_TIMEOUT_MS = 45_000;
+
+/**
+ * Loads a LIVE location, each step confirmed before the next: the host enters
+ * LIVE first, then loads, and the promise fails with the host's reason.
+ */
+async function loadLiveTarget(location: LiveLocation, alreadyLive: boolean) {
+  if (!alreadyLive) {
+    await dispatchCommandAwait({ type: "set_active_mode", mode: "live" });
+  }
+  await dispatchCommandAwait(
+    { type: "activate_live_target", location },
+    { timeoutMs: LIVE_LOAD_TIMEOUT_MS },
   );
 }
 
@@ -460,21 +512,27 @@ function ActivateButton({
   active,
   disabled,
   label = "Load",
+  location,
   onClick,
 }: {
   active: boolean;
   disabled?: boolean;
   label?: string;
+  /** What the key loads, so it can say LOADING while it does. */
+  location?: LiveLocation;
   onClick: () => void;
 }) {
+  const loading = useContext(LiveLoadContext);
+  const mine = Boolean(loading && location && sameLocation(loading, location));
   return (
     <button
       type="button"
       className={`activate-button live-item-state${active ? " active" : ""}`}
-      disabled={disabled || active}
+      disabled={disabled || active || loading !== null}
+      aria-busy={mine}
       onClick={onClick}
     >
-      {active ? "PLAYING" : label.toUpperCase()}
+      {active ? "PLAYING" : mine ? "LOADING…" : label.toUpperCase()}
     </button>
   );
 }
@@ -507,12 +565,13 @@ function StageNavigator({
   onPrevious?: () => void;
   onNext?: () => void;
 }) {
+  const loading = useContext(LiveLoadContext) !== null;
   return (
     <header className={`live-stage-navigator entity-${kind}`}>
       <button
         type="button"
         className="live-stage-step"
-        disabled={!onPrevious}
+        disabled={!onPrevious || loading}
         onClick={onPrevious}
         aria-label={previousLabel}
       >
@@ -527,7 +586,7 @@ function StageNavigator({
       <button
         type="button"
         className="live-stage-step"
-        disabled={!onNext}
+        disabled={!onNext || loading}
         onClick={onNext}
         aria-label={nextLabel}
       >
@@ -548,6 +607,7 @@ function SongPartTargets({
   locationForPart: (part: SongPart) => LiveLocation;
   activate: (location: LiveLocation) => void;
 }) {
+  const loading = useContext(LiveLoadContext);
   const parts = playableSongParts(performance, song);
   if (parts.length === 0) return <LiveEmpty label="This Song has no playable Parts" />;
   return (
@@ -555,12 +615,15 @@ function SongPartTargets({
       {parts.map((part, index) => {
         const location = locationForPart(part);
         const playing = sameLocation(performance.live.active, location);
+        const mine = Boolean(loading && sameLocation(loading, location));
         return (
           <button
             type="button"
             className={`live-part-target live-selectable-item entity-song-part${playing ? " active" : ""}`}
             key={part.id}
             onClick={() => activate(location)}
+            disabled={loading !== null}
+            aria-busy={mine}
             aria-pressed={playing}
           >
             <span className="live-part-index">{String(index + 1).padStart(2, "0")}</span>
@@ -569,7 +632,7 @@ function SongPartTargets({
               <small>{part.content ? "Part graph" : "Rack"}</small>
             </span>
             <span className="live-part-state live-item-state">
-              {playing ? "PLAYING" : "LOAD"}
+              {playing ? "PLAYING" : mine ? "LOADING…" : "LOAD"}
             </span>
           </button>
         );
@@ -610,6 +673,7 @@ function RackTargets({
               </div>
               <ActivateButton
                 active={playing}
+                location={location}
                 onClick={() => activate(location)}
               />
             </article>
@@ -886,7 +950,7 @@ function ShowTransfer({ performance }: { performance: PerformanceSnapshot }) {
   // The snapshot half of the import: the library edits made the show
   // exist; these gestures make it sound — tempo, meter, the deck's slots
   // loaded into the engine, and the artist's place on stage reactivated.
-  const restoreShowMoment = (file: RfLiveFile) => {
+  const restoreShowMoment = async (file: RfLiveFile) => {
     if (typeof file.tempo_bpm === "number") {
       sendSequencerCommand({ kind: "set_tempo", bpm: file.tempo_bpm });
     }
@@ -907,9 +971,8 @@ function ShowTransfer({ performance }: { performance: PerformanceSnapshot }) {
         }
       });
     }
-    if (file.live?.active) {
-      dispatchCommand({ type: "activate_live_target", location: file.live.active });
-    }
+    // A location loads only in LIVE: the host enters it first, as LOAD does.
+    if (file.live?.active) await loadLiveTarget(file.live.active, false);
   };
   const commitImport = () => {
     if (!candidate) return;
@@ -917,13 +980,19 @@ function ShowTransfer({ performance }: { performance: PerformanceSnapshot }) {
     setMessage(null);
     const { file } = candidate;
     importLiveShow(file)
-      .then((preview) => {
+      .then(async (preview) => {
         setCandidate(null);
-        restoreShowMoment(file);
+        let stage = "deck loaded, stage restored.";
+        try {
+          await restoreShowMoment(file);
+        } catch (reason) {
+          const why = reason instanceof Error ? reason.message : String(reason);
+          stage = `deck loaded; the stage could not be restored: ${why}`;
+        }
         setMessage(
           `Imported ${preview.name}: ${preview.racks} Racks, ${preview.songs} Songs, ` +
             `${preview.setlists} Setlists, ${preview.patterns} Patterns, ` +
-            `${preview.tabs ?? 0} Sequencers — deck loaded, stage restored.`,
+            `${preview.tabs ?? 0} Sequencers — ${stage}`,
         );
       })
       .catch((error: Error) => setMessage(error.message))

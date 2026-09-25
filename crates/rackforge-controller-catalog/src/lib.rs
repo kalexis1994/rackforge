@@ -74,6 +74,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "m-audio-keystation-mk3/88",
     "akai-mpk-mini-mk3",
     "akai-mpk-mini-plus",
+    "akai-mpk-mini-iv",
 ];
 
 /// What installing the catalog did with one package.
@@ -821,6 +822,45 @@ mod tests {
                 "{port}"
             );
         }
+    }
+
+    /// An MPK mini IV is read on its DAW port, where its knobs turn, and is
+    /// put in its DAW preset there; its other ports are not it.
+    #[test]
+    fn an_mpk_mini_iv_is_read_on_its_daw_port() {
+        let (_root, store) = installed_store("mpk-mini-iv");
+        for port in [
+            "MPK mini IV DAW Port",
+            "MPK mini IV:MPK mini IV MPK mini IV DAW Por 24:1",
+            "MIDIIN2 (MPK mini IV)",
+        ] {
+            assert_eq!(
+                resolved(&store, port, None).as_deref(),
+                Some("org.rackforge.akai-mpk-mini-iv"),
+                "{port}"
+            );
+        }
+        for port in [
+            "MPK mini IV MIDI Port",
+            "MPK mini IV Plugin Port",
+            "MPK mini IV",
+            "MPK mini Plus II DAW Port",
+            "MIDIIN2 (MPK mini Plus II)",
+        ] {
+            assert_ne!(
+                resolved(&store, port, None).as_deref(),
+                Some("org.rackforge.akai-mpk-mini-iv"),
+                "{port}"
+            );
+        }
+        let iv = store
+            .resolve_identified_input("MPK mini IV DAW Port", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            iv.setup_messages,
+            vec![vec![0xf0, 0x47, 0x7f, 0x5d, 0x2d, 0x00, 0x00, 0xf7]]
+        );
     }
 
     /// The Launch Control XL is put on User Template 1, the template its

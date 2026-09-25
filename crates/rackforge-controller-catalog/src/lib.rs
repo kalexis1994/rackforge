@@ -75,6 +75,9 @@ pub const BUNDLED: &[BundledController] = bundled![
     "akai-mpk-mini-mk3",
     "akai-mpk-mini-plus",
     "akai-mpk-mini-iv",
+    "akai-mpk2/225",
+    "akai-mpk2/249",
+    "akai-mpk2/261",
 ];
 
 /// What installing the catalog did with one package.
@@ -861,6 +864,39 @@ mod tests {
             iv.setup_messages,
             vec![vec![0xf0, 0x47, 0x7f, 0x5d, 0x2d, 0x00, 0x00, 0xf7]]
         );
+    }
+
+    /// An MPK2 keyboard is read on its Port A on every system; its Port B,
+    /// 5-pin MIDI and Remote ports are not it, and the sizes never meet.
+    #[test]
+    fn an_mpk2_is_read_on_its_port_a() {
+        let (_root, store) = installed_store("mpk2");
+        for size in ["225", "249", "261"] {
+            let expected = format!("org.rackforge.akai-mpk{size}");
+            for port in [
+                format!("MPK{size}"),
+                format!("MPK{size} Port A"),
+                format!("MPK{size}:MPK{size} MIDI 1 20:0"),
+            ] {
+                assert_eq!(
+                    resolved(&store, &port, None).as_deref(),
+                    Some(expected.as_str()),
+                    "{port}"
+                );
+            }
+            for port in [
+                format!("MIDIIN2 (MPK{size})"),
+                format!("MIDIIN3 (MPK{size})"),
+                format!("MIDIIN4 (MPK{size})"),
+                format!("MPK{size} Port B"),
+                format!("MPK{size} MIDI"),
+                format!("MPK{size} Remote"),
+                format!("MPK{size}:MPK{size} MIDI 2 20:1"),
+                format!("MPK{size}:MPK{size} MIDI 4 20:3"),
+            ] {
+                assert_eq!(resolved(&store, &port, None), None, "{port}");
+            }
+        }
     }
 
     /// The Launch Control XL is put on User Template 1, the template its

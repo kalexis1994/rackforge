@@ -91,6 +91,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "arturia-keylab-mkii/88",
     "arturia-keylab-essential",
     "novation-launchkey-mk2",
+    "novation-launchkey-mini-mk2",
 ];
 
 /// What installing the catalog did with one package.
@@ -354,7 +355,6 @@ mod tests {
             "Launchkey Mini MIDI IN2",
             "MIDIIN2 (Launchkey Mini MK3)",
             "Launchkey Mini MK3:Launchkey Mini MK3 MIDI 2 20:1",
-            "Launchkey Mini",
             "MIDIIN2 (Launchkey Mini)",
         ] {
             assert_eq!(resolved(&store, port, None), None, "{port}");
@@ -1165,6 +1165,42 @@ mod tests {
             .unwrap();
         // Pots, sliders, their buttons, Track, the transport, InControl.
         assert_eq!(binding.held_controls.len(), 38);
+    }
+
+    /// A Launchkey Mini, first or MK2, is read on its MIDI port, never on
+    /// its InControl port; the Mini MK3 and MK4 and the Launchkey MK2 are
+    /// not it.
+    #[test]
+    fn a_launchkey_mini_mk2_is_read_on_its_midi_port() {
+        let (_root, store) = installed_store("launchkey-mini-mk2");
+        for (port, expected) in [
+            (
+                "Launchkey Mini",
+                Some("org.rackforge.novation-launchkey-mini-mk2"),
+            ),
+            (
+                "Launchkey Mini LK Mini MIDI",
+                Some("org.rackforge.novation-launchkey-mini-mk2"),
+            ),
+            (
+                "Launchkey Mini:Launchkey Mini MIDI 1 24:0",
+                Some("org.rackforge.novation-launchkey-mini-mk2"),
+            ),
+            ("MIDIIN2 (Launchkey Mini)", None),
+            ("Launchkey Mini MIDI IN2", None),
+            ("Launchkey Mini LK Mini InControl", None),
+            ("Launchkey Mini:Launchkey Mini MIDI 2 24:1", None),
+            (
+                "Launchkey Mini MK3 MIDI Port",
+                Some("org.rackforge.novation-launchkey-mini-mk3"),
+            ),
+            (
+                "MIDIIN2 (Launchkey MIDI)",
+                Some("org.rackforge.novation-launchkey-mk2"),
+            ),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
     }
 
     /// The Launch Control XL is put on User Template 1, the template its

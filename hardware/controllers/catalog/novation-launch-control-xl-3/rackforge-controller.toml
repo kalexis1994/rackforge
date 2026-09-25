@@ -48,6 +48,9 @@ to = "setup_output"
 
 # Encoders, Mode 16: row 1 CC 13-20, row 2 CC 21-28, row 3 CC 29-36, on
 # channel 16 [UG p88]. Endless, reporting absolute values [UG p16; PR p10].
+# The XL 3 has no keys, and its controls' numbers are an instrument's
+# controllers (its buttons' CC 37-52 are LSBs of volume, pan and expression):
+# none of them ever plays.
 [[inputs]]
 id = "encoder-1-1"
 name = "Row 1 encoder 1"
@@ -56,6 +59,7 @@ encoder = "absolute"
 group = "Encoders, row 1"
 midi = { channel = 15, cc = 13 }
 slot = "control-2.1"
+plays = false
 
 [[inputs]]
 id = "encoder-1-2"
@@ -65,6 +69,7 @@ encoder = "absolute"
 group = "Encoders, row 1"
 midi = { channel = 15, cc = 14 }
 slot = "control-2.2"
+plays = false
 
 [[inputs]]
 id = "encoder-1-3"
@@ -74,6 +79,7 @@ encoder = "absolute"
 group = "Encoders, row 1"
 midi = { channel = 15, cc = 15 }
 slot = "control-2.3"
+plays = false
 
 [[inputs]]
 id = "encoder-1-4"
@@ -83,6 +89,7 @@ encoder = "absolute"
 group = "Encoders, row 1"
 midi = { channel = 15, cc = 16 }
 slot = "control-2.4"
+plays = false
 
 [[inputs]]
 id = "encoder-1-5"
@@ -92,6 +99,7 @@ encoder = "absolute"
 group = "Encoders, row 1"
 midi = { channel = 15, cc = 17 }
 slot = "control-2.5"
+plays = false
 
 [[inputs]]
 id = "encoder-1-6"
@@ -101,6 +109,7 @@ encoder = "absolute"
 group = "Encoders, row 1"
 midi = { channel = 15, cc = 18 }
 slot = "control-2.6"
+plays = false
 
 [[inputs]]
 id = "encoder-1-7"
@@ -110,6 +119,7 @@ encoder = "absolute"
 group = "Encoders, row 1"
 midi = { channel = 15, cc = 19 }
 slot = "control-2.7"
+plays = false
 
 [[inputs]]
 id = "encoder-1-8"
@@ -119,6 +129,7 @@ encoder = "absolute"
 group = "Encoders, row 1"
 midi = { channel = 15, cc = 20 }
 slot = "control-2.8"
+plays = false
 
 [[inputs]]
 id = "encoder-2-1"
@@ -128,6 +139,7 @@ encoder = "absolute"
 group = "Encoders, row 2"
 midi = { channel = 15, cc = 21 }
 slot = "control-3.1"
+plays = false
 
 [[inputs]]
 id = "encoder-2-2"
@@ -137,6 +149,7 @@ encoder = "absolute"
 group = "Encoders, row 2"
 midi = { channel = 15, cc = 22 }
 slot = "control-3.2"
+plays = false
 
 [[inputs]]
 id = "encoder-2-3"
@@ -146,6 +159,7 @@ encoder = "absolute"
 group = "Encoders, row 2"
 midi = { channel = 15, cc = 23 }
 slot = "control-3.3"
+plays = false
 
 [[inputs]]
 id = "encoder-2-4"
@@ -155,6 +169,7 @@ encoder = "absolute"
 group = "Encoders, row 2"
 midi = { channel = 15, cc = 24 }
 slot = "control-3.4"
+plays = false
 
 [[inputs]]
 id = "encoder-2-5"
@@ -164,6 +179,7 @@ encoder = "absolute"
 group = "Encoders, row 2"
 midi = { channel = 15, cc = 25 }
 slot = "control-3.5"
+plays = false
 
 [[inputs]]
 id = "encoder-2-6"
@@ -173,6 +189,7 @@ encoder = "absolute"
 group = "Encoders, row 2"
 midi = { channel = 15, cc = 26 }
 slot = "control-3.6"
+plays = false
 
 [[inputs]]
 id = "encoder-2-7"
@@ -182,6 +199,7 @@ encoder = "absolute"
 group = "Encoders, row 2"
 midi = { channel = 15, cc = 27 }
 slot = "control-3.7"
+plays = false
 
 [[inputs]]
 id = "encoder-2-8"
@@ -191,6 +209,7 @@ encoder = "absolute"
 group = "Encoders, row 2"
 midi = { channel = 15, cc = 28 }
 slot = "control-3.8"
+plays = false
 
 [[inputs]]
 id = "encoder-3-1"
@@ -199,6 +218,7 @@ kind = "encoder"
 encoder = "absolute"
 group = "Encoders, row 3"
 midi = { channel = 15, cc = 29 }
+plays = false
 
 [[inputs]]
 id = "encoder-3-2"
@@ -207,6 +227,7 @@ kind = "encoder"
 encoder = "absolute"
 group = "Encoders, row 3"
 midi = { channel = 15, cc = 30 }
+plays = false
 
 [[inputs]]
 id = "encoder-3-3"
@@ -215,6 +236,7 @@ kind = "encoder"
 encoder = "absolute"
 group = "Encoders, row 3"
 midi = { channel = 15, cc = 31 }
+plays = false
 
 [[inputs]]
 id = "encoder-3-4"
@@ -223,6 +245,7 @@ kind = "encoder"
 encoder = "absolute"
 group = "Encoders, row 3"
 midi = { channel = 15, cc = 32 }
+plays = false
 
 [[inputs]]
 id = "encoder-3-5"
@@ -231,6 +254,7 @@ kind = "encoder"
 encoder = "absolute"
 group = "Encoders, row 3"
 midi = { channel = 15, cc = 33 }
+plays = false
 
 [[inputs]]
 id = "encoder-3-6"
@@ -239,6 +263,7 @@ kind = "encoder"
 encoder = "absolute"
 group = "Encoders, row 3"
 midi = { channel = 15, cc = 34 }
+plays = false
 
 [[inputs]]
 id = "encoder-3-7"
@@ -247,6 +272,7 @@ kind = "encoder"
 encoder = "absolute"
 group = "Encoders, row 3"
 midi = { channel = 15, cc = 35 }
+plays = false
 
 [[inputs]]
 id = "encoder-3-8"
@@ -255,6 +281,7 @@ kind = "encoder"
 encoder = "absolute"
 group = "Encoders, row 3"
 midi = { channel = 15, cc = 36 }
+plays = false
 
 # Faders, Mode 16: CC 5-12 on channel 16 [UG p88].
 [[inputs]]
@@ -264,6 +291,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 15, cc = 5 }
 slot = "control-1.1"
+plays = false
 
 [[inputs]]
 id = "fader-2"
@@ -272,6 +300,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 15, cc = 6 }
 slot = "control-1.2"
+plays = false
 
 [[inputs]]
 id = "fader-3"
@@ -280,6 +309,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 15, cc = 7 }
 slot = "control-1.3"
+plays = false
 
 [[inputs]]
 id = "fader-4"
@@ -288,6 +318,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 15, cc = 8 }
 slot = "control-1.4"
+plays = false
 
 [[inputs]]
 id = "fader-5"
@@ -296,6 +327,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 15, cc = 9 }
 slot = "control-1.5"
+plays = false
 
 [[inputs]]
 id = "fader-6"
@@ -304,6 +336,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 15, cc = 10 }
 slot = "control-1.6"
+plays = false
 
 [[inputs]]
 id = "fader-7"
@@ -312,6 +345,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 15, cc = 11 }
 slot = "control-1.7"
+plays = false
 
 [[inputs]]
 id = "fader-8"
@@ -320,6 +354,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 15, cc = 12 }
 slot = "control-1.8"
+plays = false
 
 # Buttons, Mode 16: top row CC 37-44, bottom row CC 45-52, on channel 16
 # [UG p88]. Page, Track, Record, Play, Solo/Arm and Mute/Select send nothing
@@ -331,6 +366,7 @@ kind = "button"
 group = "Buttons, top row"
 midi = { channel = 15, cc = 37 }
 slot = "switch-1.1"
+plays = false
 
 [[inputs]]
 id = "button-1-2"
@@ -339,6 +375,7 @@ kind = "button"
 group = "Buttons, top row"
 midi = { channel = 15, cc = 38 }
 slot = "switch-1.2"
+plays = false
 
 [[inputs]]
 id = "button-1-3"
@@ -347,6 +384,7 @@ kind = "button"
 group = "Buttons, top row"
 midi = { channel = 15, cc = 39 }
 slot = "switch-1.3"
+plays = false
 
 [[inputs]]
 id = "button-1-4"
@@ -355,6 +393,7 @@ kind = "button"
 group = "Buttons, top row"
 midi = { channel = 15, cc = 40 }
 slot = "switch-1.4"
+plays = false
 
 [[inputs]]
 id = "button-1-5"
@@ -363,6 +402,7 @@ kind = "button"
 group = "Buttons, top row"
 midi = { channel = 15, cc = 41 }
 slot = "switch-1.5"
+plays = false
 
 [[inputs]]
 id = "button-1-6"
@@ -371,6 +411,7 @@ kind = "button"
 group = "Buttons, top row"
 midi = { channel = 15, cc = 42 }
 slot = "switch-1.6"
+plays = false
 
 [[inputs]]
 id = "button-1-7"
@@ -379,6 +420,7 @@ kind = "button"
 group = "Buttons, top row"
 midi = { channel = 15, cc = 43 }
 slot = "switch-1.7"
+plays = false
 
 [[inputs]]
 id = "button-1-8"
@@ -387,6 +429,7 @@ kind = "button"
 group = "Buttons, top row"
 midi = { channel = 15, cc = 44 }
 slot = "switch-1.8"
+plays = false
 
 [[inputs]]
 id = "button-2-1"
@@ -395,6 +438,7 @@ kind = "button"
 group = "Buttons, bottom row"
 midi = { channel = 15, cc = 45 }
 slot = "switch-2.1"
+plays = false
 
 [[inputs]]
 id = "button-2-2"
@@ -403,6 +447,7 @@ kind = "button"
 group = "Buttons, bottom row"
 midi = { channel = 15, cc = 46 }
 slot = "switch-2.2"
+plays = false
 
 [[inputs]]
 id = "button-2-3"
@@ -411,6 +456,7 @@ kind = "button"
 group = "Buttons, bottom row"
 midi = { channel = 15, cc = 47 }
 slot = "switch-2.3"
+plays = false
 
 [[inputs]]
 id = "button-2-4"
@@ -419,6 +465,7 @@ kind = "button"
 group = "Buttons, bottom row"
 midi = { channel = 15, cc = 48 }
 slot = "switch-2.4"
+plays = false
 
 [[inputs]]
 id = "button-2-5"
@@ -427,6 +474,7 @@ kind = "button"
 group = "Buttons, bottom row"
 midi = { channel = 15, cc = 49 }
 slot = "switch-2.5"
+plays = false
 
 [[inputs]]
 id = "button-2-6"
@@ -435,6 +483,7 @@ kind = "button"
 group = "Buttons, bottom row"
 midi = { channel = 15, cc = 50 }
 slot = "switch-2.6"
+plays = false
 
 [[inputs]]
 id = "button-2-7"
@@ -443,6 +492,7 @@ kind = "button"
 group = "Buttons, bottom row"
 midi = { channel = 15, cc = 51 }
 slot = "switch-2.7"
+plays = false
 
 [[inputs]]
 id = "button-2-8"
@@ -451,6 +501,7 @@ kind = "button"
 group = "Buttons, bottom row"
 midi = { channel = 15, cc = 52 }
 slot = "switch-2.8"
+plays = false
 
 # RackForge's default meanings for rows of knobs and eight faders: the first
 # row shapes the tone, the faders take the envelope, filter and LFO; the other

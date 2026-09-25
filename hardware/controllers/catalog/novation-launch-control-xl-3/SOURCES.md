@@ -58,6 +58,7 @@ control, not restated for this one), **Not documented**.
 | Values the buttons send on press and release | 127 / 0 assumed | **Not documented** for Mode 16 | — |
 | Page, Track, Record, Play, Solo/Arm and Mute/Select send nothing in standalone mode | not declared | Documented | PR p7 |
 | Shift and Mode open menus | not declared | Documented | PR p7; UG p12–14 |
+| Held from instruments | every control (`plays = false`): no keys, and the buttons' CC 37–52 are LSBs of an instrument's volume, pan and expression | Convention | catalog README (added 2026-09-25) |
 
 ## Open questions, until someone with the hardware checks
 

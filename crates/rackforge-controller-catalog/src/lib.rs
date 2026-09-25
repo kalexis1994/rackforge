@@ -523,6 +523,12 @@ mod tests {
             Some(xl3),
             "an XL MK2"
         );
+        // Its 24 encoders, 8 faders and 16 buttons never play.
+        let binding = store
+            .resolve_identified_input("LCXL3 1 MIDI", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.held_controls.len(), 48);
     }
 
     /// The first FLkey generation's MIDI interface as its user guides show

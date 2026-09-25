@@ -916,6 +916,10 @@ mod tests {
                 "MPK mini Play mk3",
                 Some("org.rackforge.akai-mpk-mini-play-mk3"),
             ),
+            (
+                "MPK mini Play mk3 MIDI 1",
+                Some("org.rackforge.akai-mpk-mini-play-mk3"),
+            ),
             ("MPK mini 3", Some("org.rackforge.akai-mpk-mini-mk3")),
             (
                 "APC Key 25 mk2 Control",

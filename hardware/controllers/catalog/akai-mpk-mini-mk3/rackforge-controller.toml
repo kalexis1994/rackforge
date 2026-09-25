@@ -1,10 +1,9 @@
 # Akai Professional MPK mini mk3, on Program 1 ("PGM:MPC"), the program it
-# starts on. Every value below is sourced in SOURCES.md; [PGM] is Akai's own
-# factory file for that program, "Program 1 PGM-MPC.mpkmini3", shipped with
-# the MPK mini III Program Editor 1.0.4; [EG] the editor's User Guide v1.0;
-# [QS] the Quickstart Guide v1.3; [FAQ] Akai's MPK mini mk3 FAQ; [BW] Bitwig's
-# MPK mini mk3 extension; [AB] Ableton Live 12's MPK_mini_mkIII script;
-# [SX] Spectrasonics' Omnisphere setup for the MPK mini mk3.
+# starts on. Every value below is sourced in SOURCES.md; [QS] is the
+# Quickstart Guide v1.3, [FAQ] Akai's MPK mini mk3 FAQ, [SX] Spectrasonics'
+# Omnisphere setup for the MPK mini mk3, which relies on that program, [BW]
+# Bitwig's MPK mini mk3 extension, [AB] Ableton Live 12's MPK_mini_mkIII
+# script.
 schema_version = 2
 kind = "controller"
 id = "org.rackforge.akai-mpk-mini-mk3"
@@ -27,12 +26,11 @@ role = "performance_input"
 name_contains = ["mpk mini 3"]
 exclude_contains = ["play", "plus"]
 
-# Knobs 1-8: CC 70-77, absolute, 0-127, on the keyboard's channel, 1 [PGM
-# knob mode 0, CC 70-77, Lo 0, Hi 127; keybed / controls channel 0; SX
-# "Knob 1 (CC#70)" to "Knob 8 (CC#77)"]. They turn endlessly [QS "360°
-# knobs"], and in absolute mode stop at 0 and 127 [EG p11]. K1-K4 are the
-# top row, K5-K8 the bottom one [BW control positions]. No faders: the knobs
-# take the first row.
+# Knobs 1-8: CC 70-77 on channel 1 [SX "Knob 1 (CC#70)" to "Knob 8
+# (CC#77)" in Program 1; BW binds its knobs to CC 70-77], read as absolute
+# knobs (see SOURCES.md). They turn endlessly [QS "360° knobs"]. K1-K4 are
+# the top row, K5-K8 the bottom one [BW control positions]. No faders: the
+# knobs take the first row.
 [[inputs]]
 id = "knob-1"
 name = "Knob 1"
@@ -98,11 +96,11 @@ midi = { channel = 0, cc = 77 }
 slot = "control-1.8"
 
 # Pads, in note mode (the CC and Prog Change buttons off): notes on channel
-# 10 [PGM pad channel 9]. Bank A sends 36-43 and bank B 44-51, pad by pad
-# [PGM; AB PAD_TRANSLATION, notes 36-51 on channel 10; BW pads 36-43 on
-# channel 10]. Pads 1-4 are the bottom row, 5-8 the top one [Akai, "How To
-# Program MPK mini Pads in a DAW"]. A pad takes the slot of the note it
-# sends, as on every keyboard in the catalog.
+# 10. Bank A sends 36-43 and bank B 44-51, pad by pad [AB PAD_TRANSLATION,
+# notes 36-51 on channel 10; BW pads 36-43 on channel 10]. Pads 1-4 are the
+# bottom row, 5-8 the top one [Akai, "How To Program MPK mini Pads in a
+# DAW"]. A pad takes the slot of the note it sends, as on every keyboard in
+# the catalog.
 [[inputs]]
 id = "pad-1"
 name = "Pad 1"
@@ -232,9 +230,9 @@ midi = { channel = 9, note = 51 }
 slot = "switch-2.4"
 
 # The joystick, on the keyboard's channel: left and right bend the pitch;
-# up and down both send CC 1 from 0 at the centre, a modulation wheel either
-# way [PGM X axis 0 (Pitchbend), Y axis 2 (Dual CC) with CC 1 and CC 1; EG
-# p12; QS item 8; FAQ "Modulation 2 ... the center axis is 0"].
+# up and down apply a modulation wheel effect [QS item 8], CC 1 [BW keys
+# input "b001??"; BW's program sets the Y axis to Dual CC with CC 1 both
+# ways, FAQ "Modulation 2 ... the center axis is 0"].
 [[inputs]]
 id = "joystick-x"
 name = "Joystick left / right"

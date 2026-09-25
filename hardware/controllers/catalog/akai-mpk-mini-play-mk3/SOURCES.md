@@ -1,62 +1,51 @@
 # Akai Professional MPK mini Play mk3 — sources
 
-The package describes the keyboard on **Favorite 1**. No value was measured
-on hardware.
+The package describes the keyboard on **Favorite 1 ("FAV 1")**, which is
+typically active at power-on ([SX]). No value was measured here.
 
 The User Guide names the controls but gives no MIDI values. The values come
-from Akai's factory favorites, shipped with its MPK mini Play mk3 Favorite
-Editor. The editor was downloaded from Akai's page with the user's leave,
-and extracted, not installed or run.
+from two sources that agree:
+- Spectrasonics' hardware profile, which relies on FAV 1;
+- a list of the messages the keyboard sent, taken from the hardware by
+  seq66's author, Chris Ahlstrom.
 
-The files have the MPK mini mk3's record structure. Their fields follow the
-same order, with one field more before the tempo (see
-`../akai-mpk-mini-mk3/SOURCES.md`, where Bitwig's program checks the
-reading).
+An earlier version of this file read the factory favorites inside Akai's MPK
+mini Play mk3 Favorite Editor, and took the port name from the editor's
+binary. Akai's software licence forbids reverse engineering the editor, so
+those readings were withdrawn on 2026-09-25, with the pads they alone
+described. Nothing below rests on them.
 
 ## Documents
 
 | Tag | Document | Where | Retrieved | sha256 |
 |---|---|---|---|---|
 | UG | MPK mini Play mk3 User Guide v1.0 | https://cdn.inmusicbrands.com/akai/mpk-mini-play-mk3/MPK_mini_Play_mk3_User_Guide_v1.0.pdf | 2026-09-25 | `bc24e9e8dcc5851b6f46a5bbac9463518b38fc5f4935bddc0265f5aae3cd53d0` |
-| FAV | Akai, `Fav1.mpkminiplaymk3` (and Fav2–8), inside `AkaiMPKminiPlaymk3FavoriteEditorOSX 1.0.3.dmg` → `/Library/Application Support/inMusic/MPKminiPlaymk3FavoriteEditor/…` | https://cdn.inmusicbrands.com/akai/MACEDITORS/AkaiMPKminiPlaymk3FavoriteEditorOSX%201.0.3.dmg | 2026-09-25 | `feef8594e6aab4625e72b32054efa81ab0fc66fcca2201954c5cfc594a9124f8` (Fav 1); DMG `825aa00d226cd6cb5e5cdb0d63b0b442b7ac2f3972545682e95fce4ef4c62db5` |
-| EG | MPK mini Play mk3 Editor User Guide v1.0 (in the app bundle) | as above | 2026-09-25 | `139c16f4fd076c54f588f9f62dfae64aeab7f5746ce9e16e3a80407777e9f689` |
-
-## The favorite file
-
-| Field | Meaning | Favorite 1 |
-|---|---|---|
-| 1 | pad channel (0-based) | 9 |
-| 2 | pad aftertouch | 2 |
-| 3 | keybed & controls channel (0-based) | 0 |
-| 15–17 | joystick X: mode, CC, CC | 0 0 0 (Pitchbend) |
-| 18–20 | joystick Y: mode, CC, CC | 2 1 1 (Dual CC, CC 1 both ways) |
-| 21–36 | 16 pad notes, bank A then bank B | 36 … 51 |
-| 37–68 | 8 knobs × (CC, Min, Max, name) | 70 0 127 "Q-Link" … 77 0 127 |
-| 69–78 | the internal sound and its effects | — |
-
-Across the eight favorites:
-- The channels and the joystick are the same in all of them.
-- The knobs are CC 70–77 in seven, and CC 1–8 in Favorite 2.
-- The pads are 36–51 in five of them. Favorite 4 has the MPC layout; 7 and 8 lay the pads out in a scale.
+| SX | Spectrasonics, Omnisphere 3 Hardware Guide, "Setting up the MPK Mini Play mk3" | https://support.spectrasonics.net/manual/Omnisphere3HW/3/en/topic/setting-up-the-mpk-mini-play-mk3 | 2026-09-25 | — (web page) |
+| RT | Chris Ahlstrom, "MPK Mini Play Mk3 Outputs" (2025-10-06), `extras/notes/MPK_mini_Play_mk3.text` (community; taken from the hardware) | https://github.com/ahlstromcj/rtl66 (commit `9d816899`) | 2026-09-25 | `b65fb8994cd4e8c1e7e58bfd6a921ff7b696b89d40733edc9ac768e9da74f66a` |
+| SQ | seq66 manual, `doc/latex/tex/recording.tex` (`aplaymidi -l`, `arecordmidi -l` listings; community) | https://github.com/ahlstromcj/seq66 (commit `a96ed3c1`) | 2026-09-25 | `0315489ace565e82e678c56f396e9af841e2a059dfffc23a00629890dd1bba31` |
+| JZ | JZZ-midi-Gear, `data/models.txt` (Identity Replies collected from devices; community) | https://github.com/jazz-soft/JZZ-midi-Gear (commit `9952b39f`) | 2026-09-25 | `1ec17b488f7f60cc560199a91b25498a6252435196c0ff648e44e2349fe7c03d` |
 
 ## Facts, one by one
 
 | Fact | Value | Evidence | Source |
 |---|---|---|---|
-| Port name | `MPK mini Play mk3` | Official software (Akai's editor, the name it looks for) | the editor binary's device string |
-| Knobs | four 270° knobs, two banks: bank A CC 70–73, bank B CC 74–77, 0–127, channel 1 | Documented (knobs, banks, which four per bank); Official software (values) | UG items 16–20; EG p5 ("4 … when Bank A is active, and the other 4 … Bank B"), p11; FAV |
-| The knobs with the internal sounds | bank A sets filter, resonance, reverb, chorus; bank B attack, release, EQ low, EQ high; "in USB mode" they send their CCs | Documented | UG items 17–20. Whether they also send the CCs with the internal sounds on is not said |
-| Pads | notes on channel 10: bank A 36–43, bank B 44–51 | Official software | FAV; EG p5 (8 pads per bank) |
-| Joystick | X pitch bend; Y CC 1 up and down, 0 at centre | Official software; Documented (it sends pitch bend or CCs) | FAV; UG item 3 |
-| Sustain | the input; CC 64 | Documented (input); Convention (the MIDI standard) | UG rear panel item 4 |
+| The starting favorite | FAV 1, "typically active by default" at power-on; Favorites + Pad 1 recalls it | A plugin vendor | SX |
+| Port name | Linux client `MPK mini Play mk3`, port `MPK mini Play mk3 MIDI 1` | Community (a listing) | SQ `aplaymidi -l`, `arecordmidi -l`; also its `port_mapping.tex` |
+| Port name elsewhere | `MPK mini Play mk3` | **Assumed**, from the model's name as the Linux client gives it | — |
+| Identity Reply, for the record | `F0 7E 7F 06 02 47 50 00 19 00 …` | Community (collected) | JZ. Not needed: the port name singles the model out |
+| Knobs | four 270° knobs, two banks: bank A CC 70–73, bank B CC 74–77, channel 1 | Documented (knobs, banks); a plugin vendor and Community (values) | UG items 16–20; SX "Knob 1 (CC#70)" … "Knob 8 (CC#77)"; RT `0xB0 0x46`…`0x4D` |
+| The knobs with the internal sounds | bank A filter, resonance, reverb, chorus; bank B attack, release, EQ low, EQ high; they still send their CCs | Documented (the sounds); Community (the CCs) | UG items 17–20; RT, taken with a drum kit playing. RT notes knob A1 "and some 0xEn" |
+| Pads | channel 10; the notes follow the drum kit: the Standard Set sends 36, 38, 42, 46, 40, 45, 51, 49 (bank A) and 60, 62, 63, 64, 58, 75, 56, 77 (bank B) | Community | RT, "Others may emit different numbers". **Not declared**: FAV 1's pads with the internal sounds off are not public |
+| Joystick | X pitch bend; Y CC 1; channel 1 | Documented (pitch bend or CCs); Community (values) | UG item 3; RT `0xE0`, `0xB0 0x01` |
+| Sustain | the input; CC 64, 0 or 127 | Documented (input); Community (values) | UG rear panel item 4; RT `0xB0 0x40` |
 | Internal Sounds button | off: "send and receive MIDI only using the USB port" | Documented | UG item 14 |
-| Slots | knobs 1–8 (bank A then B) `control-1`; pads by note; the joystick's Y `mod-wheel` | Convention | catalog README |
+| Slots | knobs 1–8 (bank A then B) `control-1`; the joystick's Y `mod-wheel` | Convention | catalog README |
 | Roles | the eight-knobs rule: tone on bank A, the amp envelope on bank B | Convention | catalog README |
 
 ## Open questions, until someone with the hardware checks
 
-1. **Which favorite the keyboard starts on.** The package describes Favorite
-   1. Favorites 2, 4, 7 and 8 send other knob CCs or pad notes.
-2. **Whether the knobs send their CCs while the internal sounds are on.**
-3. **The Linux port name** (`… MIDI 1`?). The endpoint matches the model's
+1. **The pads with the internal sounds off**, on FAV 1. A MIDI monitor
+   settles it; they can then be declared by note, as on the MPK mini mk3.
+2. **The port name on Windows and a Mac.** The endpoint matches the model's
    name wherever it appears.
+3. **The knob A1 pitch-bend messages** RT saw alongside its CC.

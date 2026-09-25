@@ -1,8 +1,8 @@
 # Akai Professional MPK mini Plus, on Program 1 ("MPC"), the first of its
-# eight. Every value below is sourced in SOURCES.md; [PGM] is Akai's own
-# factory file for it, "Preset1.mpkminiplus", shipped with the MPK mini Plus
-# Program Editor 1.0.7; [UG] the MPK mini Plus User Guide v1.2; [AKA] and
-# [AKF] Akai's own Ableton and FL Studio scripts for it; [BW] Bitwig's MPK
+# eight, which it loads at power-on. Every value below is sourced in
+# SOURCES.md; [UG] is the MPK mini Plus User Guide v1.2; [AKA] and [AKF]
+# Akai's own Ableton and FL Studio scripts for it; [SX] Spectrasonics'
+# Omnisphere setup for it, which relies on that program; [BW] Bitwig's MPK
 # mini Plus extension; [AB] Ableton Live 12's MPK_mini_Plus script.
 schema_version = 2
 kind = "controller"
@@ -33,10 +33,10 @@ exclude_contains = [
     "porto 2",
 ]
 
-# Knobs 1-8: CC 70-77, absolute, 0-127, on the keyboard's channel, 1 [PGM
-# knob CC 70-77, Lo 0, Hi 127, mode 0; AKA Encoder1-8 70-77, channel 0,
-# "Absolute"; AKF ID_KNOB_BASE = 70, KNOB_HW_MODE_ABS = 0]. They turn
-# endlessly [UG item 20]. No faders: the knobs take the first row.
+# Knobs 1-8: CC 70-77, absolute, on the keyboard's channel, 1 [AKA
+# Encoder1-8 70-77, channel 0, "Absolute"; AKF ID_KNOB_BASE = 70; SX "Knob 1
+# (CC#70)" to "Knob 8 (CC#77)" in Program 1]. They turn endlessly [UG item
+# 20]. No faders: the knobs take the first row.
 [[inputs]]
 id = "knob-1"
 name = "Knob 1"
@@ -101,11 +101,10 @@ group = "Knobs"
 midi = { channel = 0, cc = 77 }
 slot = "control-1.8"
 
-# Pads: notes on channel 10 [PGM pad channel 9, every pad in note mode].
-# Bank A sends 36-43 and bank B 44-51, pad by pad [PGM; AKA Pad1-16Note
-# 36-51 on channel 10]. Pads 1-4 are the bottom row, 5-8 the top one [Akai,
-# "How To Program MPK mini Pads in a DAW"]. A pad takes the slot of the note
-# it sends, as on every keyboard in the catalog.
+# Pads: notes on channel 10. Bank A sends 36-43 and bank B 44-51, pad by
+# pad [AKA Pad1-16Note 36-51, PadChannel 10]. Pads 1-4 are the bottom row,
+# 5-8 the top one [Akai, "How To Program MPK mini Pads in a DAW"]. A pad
+# takes the slot of the note it sends, as on every keyboard in the catalog.
 [[inputs]]
 id = "pad-1"
 name = "Pad 1"
@@ -252,24 +251,8 @@ group = "Wheels"
 midi = { channel = 0, cc = 1 }
 slot = "mod-wheel"
 
-# The joystick, in Dual CC mode on both axes, on the keyboard's channel:
-# left and right both send CC 12, up and down both CC 2, from 0 at the
-# centre [PGM X axis 2 with CC 12 and CC 12, Y axis 2 with CC 2 and CC 2;
-# UG p22 "Dual CC"]. The reading of these fields is SOURCES.md's, with one
-# program to check it against; no slot until the hardware confirms it.
-[[inputs]]
-id = "joystick-x"
-name = "Joystick left / right"
-kind = "wheel"
-group = "Joystick"
-midi = { channel = 0, cc = 12 }
-
-[[inputs]]
-id = "joystick-y"
-name = "Joystick up / down"
-kind = "wheel"
-group = "Joystick"
-midi = { channel = 0, cc = 2 }
+# The joystick is not declared: no public source gives what Program 1 makes
+# it send (see SOURCES.md).
 
 # Transport, CC on the keyboard's channel [UG items 21-25; AKA and AKF
 # alike: << 115, >> 116, Stop 117, Play 118, Rec 119; BW the same, 127 on

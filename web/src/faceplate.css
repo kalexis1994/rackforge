@@ -9432,7 +9432,24 @@
    plugin. On a phone the two take turns. */
 .controllers-workspace {
   display: grid;
+  /* Cards keep their own height: a tall page must not stretch them. */
+  align-content: start;
   gap: 12px;
+}
+
+/* A settings card's floor suits the Settings grid, not a one-line card
+   above a controller's controls (the Fn button, a check). */
+.controllers-workspace > .settings-card {
+  min-height: 0;
+  padding: 14px 16px;
+}
+
+/* Text beside its buttons, which wrap below it on a narrow screen. A
+   settings card lays out in a column, where the text's flex basis would be
+   a height. */
+.controllers-workspace > .controller-fn-card,
+.controllers-workspace > .controller-check {
+  flex-direction: row;
 }
 
 .controllers-notices {
@@ -9934,6 +9951,125 @@
 .controller-fn-open {
   color: var(--rf-color-on-code);
   background: var(--rf-color-input);
+}
+
+/* Listening for the button to use as Fn: the card's LED is lit, steady --
+   a blink would need a guard of its own under reduced motion. */
+.controller-fn-card.listening {
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--rf-color-input);
+}
+
+.controller-fn-listening {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, white 0 12%, var(--rf-color-input) 55%);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--rf-color-input) 35%, transparent),
+    0 0 12px 2px var(--rf-color-input);
+}
+
+.controller-fn-problem {
+  color: var(--amber-ink);
+}
+
+/* Checking a controller against its package: the count above the list, the
+   list's LEDs steady green once a control is heard, amber when its values
+   say something the package does not. */
+.controller-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.controller-check-copy {
+  min-width: 0;
+  flex: 1 1 320px;
+  display: grid;
+  gap: 6px;
+}
+
+.controller-check-copy h2 {
+  margin: 0;
+}
+
+.controller-check-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.controller-check-copy .controller-check-count {
+  color: var(--ink);
+  font: 500 12px/1.4 var(--mono-font);
+}
+
+.controller-check-meter {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--green);
+}
+
+.controller-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.controller-check-strays {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+  list-style: none;
+}
+
+.controller-check-strays li {
+  min-width: 0;
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+  background: var(--panel-inset);
+  border-radius: var(--fp-radius-key);
+  box-shadow: inset 3px 0 0 var(--amber);
+  font: 500 11px/1.4 var(--mono-font);
+}
+
+.controller-check-strays strong {
+  font-size: 12px;
+}
+
+.controller-check-strays span,
+.controller-check-strays small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controller-check-strays .controller-check-more {
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.controller-input.checked:not(.lit) .controller-input-lamp {
+  background: var(--green);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 30%, transparent);
+}
+
+.controller-input.checked.doubtful:not(.lit) .controller-input-lamp {
+  background: var(--amber);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 30%, transparent);
+}
+
+.controller-input.checked .controller-input-copy small {
+  font-family: var(--mono-font);
 }
 
 .controller-fn-card {

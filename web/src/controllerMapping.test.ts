@@ -5,6 +5,7 @@ import {
   defaultMode,
   describeMode,
   emptyControllerMap,
+  fnCandidate,
   groupInputs,
   inputForActivity,
   inputFromActivity,
@@ -242,6 +243,26 @@ describe("a map as it is edited", () => {
     expect(map.plugins[0].mappings.map((m) => m.id)).toEqual(["a", "c"]);
     map = withMapping(map, organ, mapping("d", knob, "chorus"));
     expect(map.plugins[0].mappings.map((m) => m.id)).toEqual(["c", "d"]);
+  });
+
+  it("picks the Fn button from a press, and refuses what cannot be one", () => {
+    const play: ControllerInput = { id: "play", name: "Play", kind: "button", midi: { realtime: "start" } };
+    const inputs = [knob, button, pad, play];
+    expect(fnCandidate({ status: 0xb0, data1: 20, data2: 127 }, inputs)).toEqual({ input: button });
+    expect(fnCandidate({ status: 0x99, data1: 36, data2: 90 }, inputs)).toEqual({ input: pad });
+    // Releases choose nothing: the press already did, or will.
+    expect(fnCandidate({ status: 0xb0, data1: 20, data2: 0 }, inputs)).toBeNull();
+    expect(fnCandidate({ status: 0x89, data1: 36, data2: 0 }, inputs)).toBeNull();
+    expect(fnCandidate({ status: 0x99, data1: 36, data2: 0 }, inputs)).toBeNull();
+    expect(fnCandidate({ status: 0xb0, data1: 74, data2: 64 }, inputs)).toEqual({
+      problem: "Knob 1 is not a button. Press a button or a pad.",
+    });
+    expect(fnCandidate({ status: 0xfa, data1: 0, data2: 0 }, inputs)).toEqual({
+      problem: "Play sends MIDI Start, which cannot open a layer.",
+    });
+    expect(fnCandidate({ status: 0xb3, data1: 99, data2: 127 }, inputs)).toEqual({
+      problem: "CC 99 · ch 4 is none of this controller's controls.",
+    });
   });
 
   it("makes a button the Fn button, which then does nothing else", () => {

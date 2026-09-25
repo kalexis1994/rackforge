@@ -1,5 +1,6 @@
 import { Pencil } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { type ControllerCheck, checkHint, valuesLabel } from "../../controllerCheck";
 import {
   type ControllerDevice,
   groupInputs,
@@ -22,6 +23,7 @@ export function ControllerInputList({
   latestLitId,
   playingPluginId,
   editLabel = "Edit",
+  check,
   onSelect,
 }: {
   device: ControllerDevice;
@@ -31,6 +33,8 @@ export function ControllerInputList({
   latestLitId?: string | null;
   playingPluginId?: string;
   editLabel?: string;
+  /** A hardware check under way: each row says what its control was heard sending. */
+  check?: ControllerCheck;
   onSelect: (inputId: string) => void;
 }) {
   const list = useRef<HTMLDivElement | null>(null);
@@ -57,6 +61,8 @@ export function ControllerInputList({
               const selected = input.id === selectedId;
               const moving = lit.has(input.id);
               const fn = isModifierInput(device.map, input);
+              const heard = check?.heard[input.id];
+              const hint = heard ? checkHint(input, heard) : null;
               return (
                 <li
                   key={input.id}
@@ -68,13 +74,19 @@ export function ControllerInputList({
                     moving ? "lit" : "",
                     assignments.length > 0 ? "mapped" : "",
                     playing ? "playing" : "",
+                    check ? (heard ? "checked" : "unchecked") : "",
+                    hint ? "doubtful" : "",
                   ].filter(Boolean).join(" ")}
                 >
                   <i className="controller-input-lamp" aria-hidden="true" />
                   <span className="controller-input-copy">
                     <strong>{input.name}</strong>
                     <small>
-                      {fn
+                      {check
+                        ? heard
+                          ? `${inputMessageLabel(input)} · ${valuesLabel(heard, typeof input.midi.note === "number")}${hint ? ` · ${hint}` : ""}`
+                          : `Not heard yet · ${inputMessageLabel(input)}`
+                        : fn
                         ? "Fn button"
                         : assignments.length > 0
                           ? assignments.map((entry) => entry.plugin_name).join(", ")

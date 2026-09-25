@@ -567,6 +567,32 @@ export function isModifierInput(map: ControllerMap | undefined, input: Controlle
   return modifier.input.id === input.id || (mapped !== null && sameMessage(modifier.input, mapped));
 }
 
+/**
+ * What a message heard while the player picks an Fn button says: the button
+ * pressed, a reason it cannot be one, or nothing (a release, a knob's
+ * travel already refused). Only a press chooses, so the release of the
+ * button that opened the choice never does.
+ */
+export type FnCandidate = { input: ControllerInput } | { problem: string };
+
+export function fnCandidate(
+  event: Pick<MidiActivityEvent, "status" | "data1" | "data2">,
+  inputs: readonly ControllerInput[],
+): FnCandidate | null {
+  const kind = event.status & 0xf0;
+  const input = inputForActivity(event, inputs);
+  if (!input) {
+    const unknown = inputFromActivity(event);
+    return unknown ? { problem: `${inputMessageLabel(unknown)} is none of this controller's controls.` } : null;
+  }
+  if (!isButtonInput(input)) return { problem: `${input.name} is not a button. Press a button or a pad.` };
+  if (!mappedInputFor(input)) {
+    return { problem: `${input.name} sends ${inputMessageLabel(input)}, which cannot open a layer.` };
+  }
+  const pressed = kind === 0x90 ? event.data2 > 0 : kind === 0xb0 ? event.data2 > 0 : false;
+  return pressed ? { input } : null;
+}
+
 /** The map without one mapping; a plugin left with none is dropped. */
 export function withoutMapping(map: ControllerMap, pluginId: string, mappingId: string): ControllerMap {
   return {

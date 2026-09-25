@@ -4,11 +4,12 @@ import { Link, useSearchParams } from "react-router";
 import { AsyncNotice } from "../components/AsyncStateBoundary";
 import { PageHeading } from "../components/PageHeading";
 import { RfLoader } from "../components/RfLoader";
+import { ControllerCheckCard } from "../components/controllers/ControllerCheckCard";
 import { ControllerInputList } from "../components/controllers/ControllerInputList";
 import { InputEditor, UserControllerForm } from "../components/controllers/ControlsEditor";
 import { InputAssignments } from "../components/controllers/InputAssignments";
 import { ControllerOutputNotice } from "../components/controllers/ControllerOutputNotice";
-import { FnButtonCard } from "../components/controllers/FnButtonCard";
+import { FnButtonCard, type FnPick } from "../components/controllers/FnButtonCard";
 import {
   buildControllerDevices,
   type ControllerDevice,
@@ -16,18 +17,21 @@ import {
   type ControllerOutput,
   type ControllerPackageSummary,
   emptyControllerMap,
+  fnCandidate,
   inputForActivity,
   inputFromActivity,
   inputMessageLabel,
   isButtonInput,
   isModifierInput,
   isUserController,
+  mappingsForInput,
   unknownSourceDevices,
   withLearntInput,
   withMapping,
   withModifier,
   withoutMapping,
 } from "../controllerMapping";
+import { type ControllerCheck, checkReport, recordCheckEvents, startCheck } from "../controllerCheck";
 import {
   exportControllerMap,
   importControllerMap,
@@ -48,7 +52,13 @@ import {
 } from "../host";
 import { usePluginCatalog } from "../pluginCatalog";
 import type { RootState } from "../store";
-import type { ControllerMap, MidiSourceStatus, RegisteredController, RfMapFile } from "../types";
+import type {
+  ControllerMap,
+  MidiActivityEvent,
+  MidiSourceStatus,
+  RegisteredController,
+  RfMapFile,
+} from "../types";
 
 /** How long a control stays lit after its last message. */
 const LIT_MS = 450;
@@ -109,6 +119,8 @@ export function ControllersPage() {
   const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
   const [latestLitId, setLatestLitId] = useState<string | null>(null);
   const [stray, setStray] = useState<string | null>(null);
+  const [check, setCheck] = useState<ControllerCheck | null>(null);
+  const [fnPick, setFnPick] = useState<FnPick | null>(null);
   const [learnt, setLearnt] = useState<Map<string, ControllerInput[]>>(readLearnt);
   // A player's own controller whose controls are being changed.
   const [controlsDraft, setControlsDraft] = useState<{ deviceId: string; inputs: ControllerInput[] } | null>(null);
@@ -197,10 +209,14 @@ export function ControllersPage() {
     [chosen, controlsDraft],
   );
   const selectedInput = device?.inputs.find((input) => input.id === selectedInputId);
+  const activeCheck = check && device && check.deviceId === device.id && !editingControls ? check : null;
+  const activePick = fnPick && device && fnPick.deviceId === device.id && !editingControls ? fnPick : null;
 
   const selectDevice = (id: string) => {
     setSelectedInputId(null);
     setStray(null);
+    setCheck(null);
+    setFnPick(null);
     setLatestLitId(null);
     setSearchParams((params) => {
       const next = new URLSearchParams(params);
@@ -216,10 +232,14 @@ export function ControllersPage() {
   // such, so a knob in another bank is not a mystery.
   const deviceRef = useRef(device);
   const learningRef = useRef(editingControls);
+  const checkingRef = useRef(false);
+  const pickingRef = useRef(false);
   useEffect(() => {
     deviceRef.current = device;
     learningRef.current = editingControls;
-  }, [device, editingControls]);
+    checkingRef.current = activeCheck !== null;
+    pickingRef.current = activePick !== null;
+  }, [device, editingControls, activeCheck, activePick]);
   // The Fn button pressed or released: the host is asked again, a moment
   // later, whether the layer is open -- a tap latches only once released.
   const fnRead = useRef<number | undefined>(undefined);
@@ -232,8 +252,22 @@ export function ControllersPage() {
       let changed = false;
       let fnHeard = false;
       let heard: ControllerInput[] = [];
+      const checked: MidiActivityEvent[] = [];
       for (const event of events) {
         if (event.source.id !== sourceId) continue;
+        if (checkingRef.current) checked.push(event);
+        if (pickingRef.current) {
+          const found = fnCandidate(event, current.inputs);
+          if (found) {
+            setFnPick((previous) =>
+              previous && previous.deviceId === current.id
+                ? "input" in found
+                  ? { deviceId: current.id, candidate: found.input }
+                  : { ...previous, problem: found.problem }
+                : previous,
+            );
+          }
+        }
         const input = inputForActivity(event, [...current.inputs, ...heard]);
         if (input) {
           if (isModifierInput(current.map, input)) fnHeard = true;
@@ -264,6 +298,13 @@ export function ControllersPage() {
             previous && previous.deviceId === current.id ? { ...previous, inputs: add(previous.inputs) } : previous,
           );
         }
+      }
+      if (checked.length > 0) {
+        setCheck((previous) =>
+          previous && previous.deviceId === current.id
+            ? recordCheckEvents(previous, checked, current.inputs)
+            : previous,
+        );
       }
       if (changed) setLit(new Set(litUntil.current.keys()));
       if (fnHeard) {
@@ -311,13 +352,15 @@ export function ControllersPage() {
   };
 
   /** The Fn button changed from its card: its mode, or none at all. */
-  const changeFn = async (next: ControllerMap) => {
+  const changeFn = async (next: ControllerMap): Promise<boolean> => {
     setBusy("fn");
     setNotice(null);
     try {
       await commit(next);
+      return true;
     } catch (reason) {
       setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not change the Fn button." });
+      return false;
     } finally {
       setBusy(null);
     }
@@ -410,6 +453,29 @@ export function ControllersPage() {
       setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not save the answer." });
     } finally {
       setBusy(null);
+    }
+  };
+
+  // The check's report, for the package's SOURCES.md: copied where the page
+  // may write the clipboard (a secure page), saved as a file everywhere.
+  const canCopyReport = typeof navigator !== "undefined" && Boolean(navigator.clipboard) && window.isSecureContext;
+  const copyReport = async () => {
+    if (!device || !activeCheck) return;
+    try {
+      await navigator.clipboard.writeText(checkReport(device, activeCheck));
+      setNotice({ tone: "success", text: "Report copied." });
+    } catch {
+      setNotice({ tone: "error", text: "Could not copy the report. Save it instead." });
+    }
+  };
+  const saveReport = async () => {
+    if (!device || !activeCheck) return;
+    const file_name = `${device.id.replace(/[^a-z0-9._-]+/gi, "-")}-check.md`;
+    try {
+      await savePortableTextFile({ file_name, mime_type: "text/markdown", text: checkReport(device, activeCheck) });
+      setNotice({ tone: "success", text: `${file_name} saved.` });
+    } catch (reason) {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not save the report." });
     }
   };
 
@@ -563,6 +629,21 @@ export function ControllersPage() {
                     : "Not connected: mappings apply when it returns"}
             </span>
             <div className="controllers-actions">
+              {!device.unknown && device.connected && !editingControls && !activeCheck && device.inputs.length > 0 ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy !== null}
+                  title="Move every control and see whether each sends what its package says"
+                  onClick={() => {
+                    setStray(null);
+                    setFnPick(null);
+                    setCheck(startCheck(device.id));
+                  }}
+                >
+                  Check controls
+                </button>
+              ) : null}
               {canEditControls && !editingControls ? (
                 <button
                   type="button"
@@ -615,6 +696,19 @@ export function ControllersPage() {
               open={loaded.fnOpen.includes(device.id)}
               readOnly={!keepsMaps}
               busy={busy === "fn"}
+              pick={activePick}
+              candidateMappings={activePick?.candidate ? mappingsForInput(device.map, activePick.candidate).length : 0}
+              onListen={() => {
+                setCheck(null);
+                setFnPick({ deviceId: device.id });
+              }}
+              onCancel={() => setFnPick(null)}
+              onConfirm={(input) => {
+                const map = device.map ?? emptyControllerMap(device.id, device.name);
+                void changeFn(withModifier(map, input, map.modifier?.mode)).then((saved) => {
+                  if (saved) setFnPick(null);
+                });
+              }}
               onMode={(mode) => {
                 const map = device.map;
                 if (!map?.modifier) return;
@@ -652,7 +746,19 @@ export function ControllersPage() {
             </section>
           ) : null}
 
-          {stray && device.connected && !editingControls ? (
+          {activeCheck ? (
+            <ControllerCheckCard
+              device={device}
+              check={activeCheck}
+              canCopy={canCopyReport}
+              onCopy={() => void copyReport()}
+              onSave={() => void saveReport()}
+              onRestart={() => setCheck(startCheck(device.id))}
+              onStop={() => setCheck(null)}
+            />
+          ) : null}
+
+          {stray && device.connected && !editingControls && !activeCheck && !activePick ? (
             <p className="controllers-stray" role="status">
               {stray} is not one of the controls this package names.
             </p>
@@ -685,6 +791,7 @@ export function ControllersPage() {
                 latestLitId={latestLitId}
                 playingPluginId={playingPluginId}
                 editLabel={editingControls ? "Name" : "Edit"}
+                check={activeCheck ?? undefined}
                 onSelect={setSelectedInputId}
               />
               {selectedInput && editingControls ? (

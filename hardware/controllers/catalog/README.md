@@ -122,6 +122,18 @@ each keyboard the map the two make. The same rules place every keyboard:
 
 ## Checking a package on hardware
 
-Plug the keyboard in, open Controllers and move each control; the MIDI
-activity must show the messages the package declares. Write any difference
-into `SOURCES.md` as a correction, with the firmware version.
+Plug the keyboard in, open Controllers, choose it and press **Check
+controls**. Then move every knob and fader through its whole travel, turn
+each encoder both ways, and press every button and pad:
+
+- each control ticks off when its declared message arrives, with the values
+  heard (a note's velocity and release, a bend's 14 bits);
+- a message no control declares is listed, with the control it resembles
+  (the same number on another channel, or a note where a CC is declared);
+- an encoder whose values contradict its declared encoding is flagged.
+
+**Save report** (or **Copy report** on a secure page) gives it as Markdown:
+the package and version, the port RackForge reads, whether the Identity Reply
+chose the package, and a table of every control. Only that port is heard, so
+a control that sends on another port of the device shows as not heard. Write
+any difference into `SOURCES.md` as a correction, with the firmware version.

@@ -1137,6 +1137,7 @@ impl DesktopAudio {
             parameter_links: Vec::new(),
             control_layers: Default::default(),
             host_buttons: Vec::new(),
+            held_controls: Vec::new(),
             velocity_curve: preferences.velocity_curve.sanitised(),
             velocity_curves: compile_velocity_curves(&preferences.velocity_curves),
             last_strike: Arc::clone(&last_strike),
@@ -2261,6 +2262,9 @@ struct AudioProcessor {
     /// Controllers' transport and lane buttons, on their ports: the host
     /// acts on them, and no instrument hears them.
     host_buttons: Vec<(MidiSourceKey, rackforge_session_api::HostActionBinding)>,
+    /// Controllers' controls that never play, on their ports: the links read
+    /// them, and no instrument or sequencer hears them.
+    held_controls: Vec<(MidiSourceKey, rackforge_session_api::HeldControl)>,
     /// The reading for a device with none of its own.
     velocity_curve: VelocityCurve,
     /// And the readings that belong to a particular keybed. A handful of
@@ -2427,10 +2431,20 @@ impl AudioProcessor {
                 }
                 continue;
             }
+            // A control its controller keeps from the instruments: the links
+            // read it, and nothing plays or records it.
+            let held = rackforge_core::parameter_link::ParameterLinkTable::holds_back(
+                &self.held_controls,
+                ingress,
+            );
             if let Some(rack) = self.rack.as_mut() {
                 // The Rack's Slots take it through their own stages, and the
                 // links to their parameters; conducting still comes first.
                 rack_taken += 1;
+                if held {
+                    rack.0.route_held(ingress, &mut self.control_layers);
+                    continue;
+                }
                 let conducted = self.conducting
                     && feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
                 if !conducted {
@@ -2473,7 +2487,7 @@ impl AudioProcessor {
                     }
                 }
             }
-            if !consume {
+            if !consume && !held {
                 let conducted = self.conducting
                     && feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
                 if !conducted {
@@ -3061,6 +3075,7 @@ impl AudioProcessor {
                     self.parameter_links = links;
                     self.control_layers.replace(table.modifiers);
                     self.host_buttons = table.host_buttons;
+                    self.held_controls = table.held;
                     let _ = reply.try_send(Ok(()));
                 }
                 AudioCommand::InjectMidi(packet) => {

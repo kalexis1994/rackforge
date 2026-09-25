@@ -147,6 +147,9 @@ const VIRTUAL_MIDI_SOURCE_KEY: MidiSourceKey = MidiSourceKey::new(u32::MAX);
 struct AndroidMidiIngress {
     source: MidiSourceKey,
     event: MidiEventV1,
+    /// A control its controller keeps from the instruments: links read it,
+    /// and nothing plays it.
+    held: bool,
 }
 
 /// One connected MIDI source and the package resolved for it: by the port's
@@ -163,6 +166,8 @@ struct AndroidMidiController {
     /// instrument's, as on every other host.
     host_controls: Vec<HostControlBinding>,
     host_actions: Vec<HostActionBinding>,
+    /// The controls it keeps from the instruments (`plays = false`).
+    held_controls: Vec<rackforge_session_api::HeldControl>,
     on_connect: Vec<Vec<u8>>,
     /// What goes to the device's setup output -- a DAW port -- and how that
     /// port is found among the device's.
@@ -182,6 +187,7 @@ impl AndroidMidiController {
             profile: None,
             host_controls: Vec::new(),
             host_actions: Vec::new(),
+            held_controls: Vec::new(),
             on_connect: Vec::new(),
             setup_output: None,
             setup_messages: Vec::new(),
@@ -202,6 +208,7 @@ impl AndroidMidiController {
             // The in-process driver reads its own buttons.
             self.host_controls.clear();
             self.host_actions.clear();
+            self.held_controls.clear();
             self.on_connect.clear();
             self.setup_output = None;
             self.setup_messages.clear();
@@ -235,6 +242,10 @@ impl AndroidMidiController {
         self.host_actions = binding
             .as_ref()
             .map(|binding| binding.host_actions.clone())
+            .unwrap_or_default();
+        self.held_controls = binding
+            .as_ref()
+            .map(|binding| binding.held_controls.clone())
             .unwrap_or_default();
         self.setup_output = binding
             .as_ref()
@@ -2307,7 +2318,11 @@ impl AndroidEngine {
                     if self.control_layers.observe(event, Instant::now()) {
                         continue;
                     }
-                    rack.engine.route(event, None, &mut self.control_layers);
+                    if ingress.held {
+                        rack.engine.route_held(event, &mut self.control_layers);
+                    } else {
+                        rack.engine.route(event, None, &mut self.control_layers);
+                    }
                 }
             }
             let dropped = rack.engine.take_dropped_events();
@@ -2370,7 +2385,7 @@ impl AndroidEngine {
                         consume |= output.pass_through == ParameterLinkPassThrough::Consume;
                     }
                 }
-                if !consume {
+                if !consume && !ingress.held {
                     self.midi.push(ingress.event);
                 }
             }
@@ -3226,7 +3241,7 @@ fn smooth_master_sample(current: &mut f32, target: f32) {
     };
 }
 
-fn enqueue_midi(source: MidiSourceKey, bytes: &[u8]) {
+fn enqueue_midi(source: MidiSourceKey, bytes: &[u8], held: bool) {
     if bytes.is_empty() || bytes.len() > 3 {
         return;
     }
@@ -3244,6 +3259,7 @@ fn enqueue_midi(source: MidiSourceKey, bytes: &[u8]) {
                 length: bytes.len() as u8,
                 data,
             },
+            held,
         });
     }
 }
@@ -3302,6 +3318,7 @@ fn release_all_midi_notes() {
                     length: packet.length,
                     data: packet.data,
                 },
+                held: false,
             });
         }
         MIDI_PANIC_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -5228,7 +5245,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessage(
 ) {
     let bytes = [status as u8, data_1 as u8, data_2 as u8];
     if (1..=3).contains(&length) {
-        enqueue_midi(VIRTUAL_MIDI_SOURCE_KEY, &bytes[..length as usize]);
+        enqueue_midi(VIRTUAL_MIDI_SOURCE_KEY, &bytes[..length as usize], false);
     }
 }
 
@@ -5256,8 +5273,28 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessageFr
         if MidiPacket::transport_realtime(0, message).is_some() {
             return;
         }
-        enqueue_midi(source, message);
+        enqueue_midi(source, message, held_by_controller(source, message));
     }
+}
+
+/// Whether a declarative controller keeps this control from the
+/// instruments: its links still read it.
+fn held_by_controller(source: MidiSourceKey, message: &[u8]) -> bool {
+    let Some(source_id) = midi_sources().lock().ok().and_then(|sources| {
+        sources
+            .descriptor(source)
+            .map(|descriptor| descriptor.id.clone())
+    }) else {
+        return false;
+    };
+    midi_controllers().lock().is_ok_and(|controllers| {
+        controllers.get(&source_id).is_some_and(|controller| {
+            controller
+                .held_controls
+                .iter()
+                .any(|control| control.matches(message))
+        })
+    })
 }
 
 /// A declarative controller's reserved controls and buttons, as the other

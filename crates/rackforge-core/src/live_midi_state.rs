@@ -5,7 +5,9 @@ use rackforge_plugin_api::abi::MidiEventV1;
 
 use crate::midi2::{Midi2Event, Midi2Message, scale_down};
 use rackforge_controller_api::MidiRealtime;
-use rackforge_session_api::{ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding};
+use rackforge_session_api::{
+    ButtonPhase, HeldControl, HostActionBinding, HostActionTarget, HostControlBinding,
+};
 
 const MIDI_CHANNELS: usize = 16;
 const CONTINUOUS_CONTROLLERS: usize = 120;
@@ -18,9 +20,14 @@ pub(super) struct ReservedBindingSet {
     pub(super) source: Option<MidiSourceKey>,
     pub(super) controls: Vec<HostControlBinding>,
     pub(super) actions: Vec<HostActionBinding>,
+    /// Controls maps read and no instrument hears.
+    pub(super) held: Vec<HeldControl>,
 }
 
 pub(super) struct ReservedMidiControls {
+    /// Controls a controller keeps from the instruments: maps still read
+    /// them.
+    held: Vec<(Option<MidiSourceKey>, HeldControl)>,
     /// Control Changes reserved on every source.
     control_changes: [[bool; 120]; MIDI_CHANNELS],
     /// Control Changes reserved on one source only: a controller's port.
@@ -53,6 +60,7 @@ impl Default for ReservedMidiControls {
 impl ReservedMidiControls {
     pub(super) fn with_sources(source_count: usize) -> Self {
         Self {
+            held: Vec::new(),
             control_changes: [[false; 120]; MIDI_CHANNELS],
             scoped_control_changes: Vec::new(),
             keyboard_parts: None,
@@ -73,11 +81,14 @@ impl ReservedMidiControls {
         self.scoped_control_changes.clear();
         self.keyboard_parts = None;
         self.sequencer_actions.clear();
+        self.held.clear();
         for source in &mut self.sources {
             source.keyboard_parts_held = false;
             source.suppressed_notes = [[false; 128]; MIDI_CHANNELS];
         }
         for set in sets {
+            self.held
+                .extend(set.held.iter().map(|control| (set.source, *control)));
             let reserved = set
                 .controls
                 .iter()
@@ -130,6 +141,15 @@ impl ReservedMidiControls {
                 speaks_for(*scope, source) && binding.phase(message) == Some(ButtonPhase::Press)
             })
             .map(|(_, binding)| binding.target)
+    }
+
+    /// Whether the event is a control its controller keeps from the
+    /// instruments and the sequencer: maps and actions still read it.
+    pub(super) fn holds_back(&self, source: MidiSourceKey, event: MidiEventV1) -> bool {
+        let message = &event.data[..usize::from(event.length.min(3))];
+        self.held
+            .iter()
+            .any(|(scope, control)| speaks_for(*scope, source) && control.matches(message))
     }
 
     pub(super) fn consume(&mut self, source: MidiSourceKey, event: MidiEventV1) -> bool {

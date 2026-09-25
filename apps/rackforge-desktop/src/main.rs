@@ -164,6 +164,8 @@ struct RegisteredSemanticProfile {
     runtime_source_name: Option<String>,
     host_controls: Vec<HostControlBinding>,
     host_actions: Vec<HostActionBinding>,
+    /// Controls that maps read and no instrument hears.
+    held: Vec<rackforge_session_api::HeldControl>,
     /// Attached by the desktop from a declarative package, not registered by
     /// a driver: attached again whenever an input or a package changes.
     declarative: bool,
@@ -225,6 +227,7 @@ fn compile_desktop_parameter_links(
 
     let mut modifiers = Vec::new();
     let mut host_buttons = Vec::new();
+    let mut held = Vec::new();
     for (controller_id, registered) in semantic_profiles {
         let Some(runtime_source_id) = &registered.runtime_source_id else {
             continue;
@@ -239,6 +242,9 @@ fn compile_desktop_parameter_links(
                 .iter()
                 .map(|binding| (source_key, *binding)),
         );
+        // Its controls that never play: the links read them, and the audio
+        // loop keeps them from the instruments.
+        held.extend(registered.held.iter().map(|control| (source_key, *control)));
         // The player's Fn button for this controller, on its port.
         if let Some(modifier) = controller_maps.get(controller_id).and_then(|map| {
             rackforge_core::parameter_link::CompiledModifier::from_map(map, source_key)
@@ -303,6 +309,7 @@ fn compile_desktop_parameter_links(
         links: compiled,
         modifiers,
         host_buttons,
+        held,
     })
 }
 
@@ -4144,6 +4151,7 @@ impl DesktopApp {
                 controller_id,
                 controls,
                 actions,
+                held,
                 midi_source_name,
                 semantic_profile,
                 identified,
@@ -4157,6 +4165,7 @@ impl DesktopApp {
                     .iter()
                     .any(|binding| binding.midi_cc.validate().is_err())
                     || actions.iter().any(|binding| binding.validate().is_err())
+                    || held.iter().any(|control| control.validate().is_err())
                 {
                     Err("invalid reserved host binding registration".into())
                 } else {
@@ -4168,7 +4177,10 @@ impl DesktopApp {
                             .controller_semantic_profiles
                             .get(&controller_id)
                             .cloned();
-                        if semantic_profile.is_some() || !controls.is_empty() || !actions.is_empty()
+                        if semantic_profile.is_some()
+                            || !controls.is_empty()
+                            || !actions.is_empty()
+                            || !held.is_empty()
                         {
                             #[cfg(windows)]
                             let resolved_source = midi_source_name.as_deref().and_then(|name| {
@@ -4203,6 +4215,7 @@ impl DesktopApp {
                                     runtime_source_name,
                                     host_controls: controls.clone(),
                                     host_actions: actions.clone(),
+                                    held: held.clone(),
                                     declarative: false,
                                     identified,
                                     on_connect: Vec::new(),
@@ -8222,6 +8235,7 @@ fn declarative_semantic_profiles(
                 runtime_source_name: Some(descriptor.name),
                 host_controls: binding.host_controls,
                 host_actions: binding.host_actions,
+                held: binding.held_controls,
                 declarative: true,
                 identified: binding.identified,
                 on_connect: binding.on_connect,

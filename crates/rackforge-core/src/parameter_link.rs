@@ -1002,6 +1002,9 @@ pub struct ParameterLinkTable {
     /// own to hold their messages back from the instruments. The host acts
     /// on them elsewhere.
     pub host_buttons: Vec<(MidiSourceKey, rackforge_session_api::HostActionBinding)>,
+    /// The controls controllers keep from the instruments on their ports:
+    /// the links read them, and nothing plays them.
+    pub held: Vec<(MidiSourceKey, rackforge_session_api::HeldControl)>,
 }
 
 impl ParameterLinkTable {
@@ -1010,7 +1013,19 @@ impl ParameterLinkTable {
             links,
             modifiers: Vec::new(),
             host_buttons: Vec::new(),
+            held: Vec::new(),
         }
+    }
+
+    /// Whether the message is a control its controller keeps from the
+    /// instruments, on its own port.
+    pub fn holds_back(
+        held: &[(MidiSourceKey, rackforge_session_api::HeldControl)],
+        ingress: IngressMidiEvent,
+    ) -> bool {
+        let message = &ingress.packet.data[..usize::from(ingress.packet.length.min(3))];
+        held.iter()
+            .any(|(source, control)| *source == ingress.source && control.matches(message))
     }
 
     /// Whether the message is a controller's host-action button, pressed or
@@ -1730,6 +1745,52 @@ mod tests {
             &buttons,
             on(8, &[0x90, 91, 127])
         ));
+    }
+
+    /// A controller's held fader is held on its own port only; a link to it
+    /// still reads it, since holding it back consumes nothing.
+    #[test]
+    fn a_held_control_is_known_on_its_own_port() {
+        let keylab = MidiSourceKey::new(7);
+        let held = [(
+            keylab,
+            rackforge_session_api::HeldControl::PitchBend { channel: 3 },
+        )];
+        let on = |source: u32, message: &[u8]| IngressMidiEvent {
+            source: MidiSourceKey::new(source),
+            packet: MidiPacket::new(0, message).unwrap(),
+        };
+        assert!(ParameterLinkTable::holds_back(&held, on(7, &[0xe3, 0, 90])));
+        assert!(!ParameterLinkTable::holds_back(
+            &held,
+            on(7, &[0xe0, 0, 90])
+        ));
+        assert!(!ParameterLinkTable::holds_back(
+            &held,
+            on(8, &[0xe3, 0, 90])
+        ));
+
+        let mut fader = link(ParameterLinkMessage::PitchBend);
+        fader.channel = ParameterLinkChannel::Channel {
+            channel: MidiChannel::from_zero_based(3).unwrap(),
+        };
+        let mut compiled = CompiledParameterLink::new(
+            fader,
+            keylab,
+            &schema(ParameterKind::Float {
+                minimum: 0.0,
+                maximum: 1.0,
+                default: 0.5,
+                step: 0.01,
+                unit: None,
+                taper: ParameterTaper::Linear,
+            }),
+        )
+        .unwrap();
+        let top = compiled
+            .apply(on(7, &[0xe3, 0x7f, 0x7f]), |_| None)
+            .unwrap();
+        assert!((top.event.value - 1.0).abs() < 1e-6);
     }
 
     /// Compiled again, an identical link keeps its control's hold on the

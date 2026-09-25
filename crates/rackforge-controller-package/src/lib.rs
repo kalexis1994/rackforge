@@ -1,5 +1,5 @@
 use rackforge_controller_api::{
-    ControllerProfile, HostActionBinding, HostControlBinding, SemanticControlProfile,
+    ControllerProfile, HeldControl, HostActionBinding, HostControlBinding, SemanticControlProfile,
     SurfaceImplementation,
 };
 use semver::{BuildMetadata, Version, VersionReq};
@@ -374,6 +374,8 @@ pub struct DeclarativeControllerBinding {
     pub endpoint_name: String,
     pub host_controls: Vec<HostControlBinding>,
     pub host_actions: Vec<HostActionBinding>,
+    /// The controls that never reach an instrument (`plays = false`).
+    pub held_controls: Vec<HeldControl>,
     pub semantic_profile: Option<SemanticControlProfile>,
     /// Whether the device's Identity Reply matched the package's.
     pub identified: bool,
@@ -983,6 +985,7 @@ impl ControllerPackageManifest {
                     encoder: None,
                     slot: None,
                     modifier: false,
+                    plays: true,
                 });
             }
             id
@@ -1525,6 +1528,11 @@ impl PackageStore {
                 endpoint_name: endpoint_name.into(),
                 host_controls: profile.host_controls,
                 host_actions: profile.host_actions,
+                held_controls: manifest
+                    .inputs
+                    .iter()
+                    .filter_map(inputs::ControllerInput::held_control)
+                    .collect(),
                 semantic_profile: profile.semantic_profile,
                 identified: identifies(&installed),
                 output_state: installed.output_state(),

@@ -2324,6 +2324,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 } => {
                     let set = ReservedBindingSet {
                         source: None,
+                        held: Vec::new(),
                         controls: bindings.clone(),
                         actions: Vec::new(),
                     };
@@ -2341,14 +2342,16 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     controller_id,
                     controls,
                     actions,
+                    held,
                     source,
                     reply,
                 } => {
-                    let counts = (controls.len(), actions.len());
+                    let counts = (controls.len(), actions.len(), held.len());
                     let set = ReservedBindingSet {
                         source,
                         controls,
                         actions,
+                        held,
                     };
                     // Controllers register again every few seconds. The same
                     // bindings change nothing, and must not let go of a
@@ -2357,9 +2360,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         reserved_binding_sets.insert(controller_id.clone(), set);
                         reserved_midi_controls.replace(reserved_binding_sets.values());
                         println!(
-                            "HOST_BINDINGS_REGISTERED controller={controller_id} controls={} actions={} source={}",
+                            "HOST_BINDINGS_REGISTERED controller={controller_id} controls={} actions={} held={} source={}",
                             counts.0,
                             counts.1,
+                            counts.2,
                             source.map_or_else(|| "any".to_owned(), |key| key.get().to_string())
                         );
                     }
@@ -3097,8 +3101,14 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         }
         for event in pending_virtual_midi.drain(..) {
             let packet = event.packet;
-            controller_states.observe(event.source, plugin_midi_event(packet));
-            if feed_sequencer_input(&mut sequencer, packet.data, packet.length) {
+            // A control its controller keeps from the instruments: maps and
+            // actions read it below, and nothing plays it.
+            let held = event.source != virtual_midi_source
+                && reserved_midi_controls.holds_back(event.source, plugin_midi_event(packet));
+            if !held {
+                controller_states.observe(event.source, plugin_midi_event(packet));
+            }
+            if !held && feed_sequencer_input(&mut sequencer, packet.data, packet.length) {
                 continue;
             }
             if event.source != virtual_midi_source {
@@ -3160,7 +3170,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 );
                             }
                         }
-                        if !consume && let Some(routed) = play_route.route(event) {
+                        if !consume
+                            && !held
+                            && let Some(routed) = play_route.route(event)
+                        {
                             if events.len() < MAX_EVENTS_PER_BLOCK {
                                 events.push(crate::midi2::Midi2Event::from_packet(&routed.packet));
                             } else {
@@ -3185,6 +3198,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 &mut |index| instance.get_parameter(index).ok(),
                             );
                             if !consume
+                                && !held
                                 && let Some(routed) = route_rack_event_through_stages(
                                     event,
                                     &voice.midi_stages,
@@ -3232,7 +3246,11 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         }
         while let Ok(event) = receiver.try_recv() {
             let plugin_event = plugin_midi_event(event.packet);
-            if feed_sequencer_input(&mut sequencer, event.packet.data, event.packet.length) {
+            // A control its controller keeps from the instruments: maps and
+            // actions read it below, and nothing plays it.
+            let held = reserved_midi_controls.holds_back(event.source, plugin_event);
+            if !held && feed_sequencer_input(&mut sequencer, event.packet.data, event.packet.length)
+            {
                 continue;
             }
             if let Some(action) = reserved_midi_controls.pressed_action(event.source, plugin_event)
@@ -3257,7 +3275,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             if control_layers.observe(event, Instant::now()) {
                 continue;
             }
-            controller_states.observe(event.source, plugin_event);
+            if !held {
+                controller_states.observe(event.source, plugin_event);
+            }
             match render_mode {
                 AudioRenderMode::Silent => {}
                 AudioRenderMode::Plugin => {
@@ -3293,7 +3313,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             );
                         }
                     }
-                    if !consume && let Some(routed) = play_route.route(event) {
+                    if !consume
+                        && !held
+                        && let Some(routed) = play_route.route(event)
+                    {
                         if events.len() < MAX_EVENTS_PER_BLOCK {
                             events.push(crate::midi2::Midi2Event::from_packet(&routed.packet));
                         } else {
@@ -3318,6 +3341,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             &mut |index| instance.get_parameter(index).ok(),
                         );
                         if !consume
+                            && !held
                             && let Some(routed) = route_rack_event_through_stages(
                                 event,
                                 &voice.midi_stages,
@@ -4904,6 +4928,7 @@ mod tests {
         let mut reserved = ReservedMidiControls::default();
         reserved.replace(&[ReservedBindingSet {
             source: None,
+            held: Vec::new(),
             controls: vec![HostControlBinding {
                 target: HostControlTarget::MasterLevel,
                 midi_cc: MidiControlChangeBinding {
@@ -4929,6 +4954,7 @@ mod tests {
         let mut reserved = ReservedMidiControls::default();
         reserved.replace(&[ReservedBindingSet {
             source: None,
+            held: Vec::new(),
             controls: Vec::new(),
             actions: vec![HostActionBinding::control_change(
                 HostActionTarget::KeyboardParts,
@@ -4961,6 +4987,7 @@ mod tests {
         let drum_machine = MidiSourceKey::new(2);
         let keylab = ReservedBindingSet {
             source: None,
+            held: Vec::new(),
             controls: Vec::new(),
             actions: vec![HostActionBinding::control_change(
                 HostActionTarget::TransportStop,
@@ -4974,6 +5001,7 @@ mod tests {
         };
         let play = ReservedBindingSet {
             source: Some(launchkey),
+            held: Vec::new(),
             controls: Vec::new(),
             actions: vec![HostActionBinding::realtime(
                 HostActionTarget::TransportPlay,
@@ -5012,6 +5040,7 @@ mod tests {
         let keyboard = MidiSourceKey::new(2);
         let play = ReservedBindingSet {
             source: Some(apc),
+            held: Vec::new(),
             controls: Vec::new(),
             actions: vec![HostActionBinding::note(
                 HostActionTarget::TransportPlay,
@@ -5037,6 +5066,30 @@ mod tests {
             None
         );
         assert!(!reserved.consume(keyboard, midi(3, [0x90, 91, 127])));
+    }
+
+    /// A KeyLab mkII's faders send pitch bend in its DAW mode: on its port a
+    /// fader's bend is held from the instruments -- the links read it, since
+    /// it is never consumed -- while a keyboard's pitch wheel still bends.
+    #[test]
+    fn a_controllers_held_fader_never_bends_an_instrument() {
+        let keylab = MidiSourceKey::new(1);
+        let keyboard = MidiSourceKey::new(2);
+        let faders = ReservedBindingSet {
+            source: Some(keylab),
+            controls: Vec::new(),
+            actions: Vec::new(),
+            held: vec![rackforge_session_api::HeldControl::PitchBend { channel: 0 }],
+        };
+        let mut reserved = ReservedMidiControls::with_sources(3);
+        reserved.replace([&faders]);
+
+        assert!(reserved.holds_back(keylab, midi(3, [0xe0, 0, 100])));
+        assert!(!reserved.consume(keylab, midi(3, [0xe0, 0, 100])));
+        assert!(!reserved.holds_back(keylab, midi(3, [0xe1, 0, 100])));
+        assert!(!reserved.holds_back(keyboard, midi(3, [0xe0, 0, 100])));
+        reserved.replace([]);
+        assert!(!reserved.holds_back(keylab, midi(3, [0xe0, 0, 100])));
     }
 
     #[test]

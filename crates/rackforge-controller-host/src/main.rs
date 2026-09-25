@@ -522,6 +522,9 @@ fn register_declarative_controller(
         // keeps each controller's reservations apart and holds them to the
         // port named below, so they take nothing from another controller.
         actions: binding.host_actions.clone(),
+        // And the controls the package says never play: maps read them, no
+        // instrument hears them.
+        held: binding.held_controls.clone(),
         midi_source_name: Some(endpoint_name.to_owned()),
         semantic_profile: binding.semantic_profile.clone(),
         identified: binding.identified,

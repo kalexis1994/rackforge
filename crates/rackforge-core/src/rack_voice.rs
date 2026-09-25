@@ -1006,6 +1006,26 @@ impl<'plugin> RackEngine<'plugin> {
         play_route: Option<&CompiledMidiRoute>,
         layers: &mut crate::parameter_link::ControlLayers,
     ) {
+        self.deliver(event, play_route, layers, true);
+    }
+
+    /// A control its controller keeps from the instruments: it moves the
+    /// parameters linked to it, and no Slot plays it.
+    pub fn route_held(
+        &mut self,
+        event: IngressMidiEvent,
+        layers: &mut crate::parameter_link::ControlLayers,
+    ) {
+        self.deliver(event, None, layers, false);
+    }
+
+    fn deliver(
+        &mut self,
+        event: IngressMidiEvent,
+        play_route: Option<&CompiledMidiRoute>,
+        layers: &mut crate::parameter_link::ControlLayers,
+        plays: bool,
+    ) {
         let voices = &self.voices;
         let layer = layers.layer_for(event, &self.parameter_links, |link| {
             voices.iter().any(|voice| {
@@ -1035,7 +1055,7 @@ impl<'plugin> RackEngine<'plugin> {
                     self.dropped_events += 1;
                 }
             }
-            if consume {
+            if consume || !plays {
                 continue;
             }
             if let Some(routed) = route_through_stages(event, &voice.midi_stages, play_route) {

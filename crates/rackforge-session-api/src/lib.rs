@@ -7,10 +7,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
 pub use rackforge_controller_api::{
-    ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
-    MidiButtonBinding, MidiControlChangeBinding, MidiNoteButtonBinding, RackForgeParameterId,
-    RackForgeParameterInput, SemanticControlBinding, SemanticControlInput, SemanticControlMode,
-    SemanticControlProfile, rackforge_parameter_input, semantic_control_input,
+    ButtonPhase, HeldControl, HostActionBinding, HostActionTarget, HostControlBinding,
+    HostControlTarget, MidiButtonBinding, MidiControlChangeBinding, MidiNoteButtonBinding,
+    RackForgeParameterId, RackForgeParameterInput, SemanticControlBinding, SemanticControlInput,
+    SemanticControlMode, SemanticControlProfile, rackforge_parameter_input, semantic_control_input,
     semantic_control_little_header,
 };
 pub use rackforge_surface_api::{
@@ -857,6 +857,9 @@ pub enum SessionCommand {
         controller_id: String,
         controls: Vec<HostControlBinding>,
         actions: Vec<HostActionBinding>,
+        /// Controls that maps and actions read and no instrument ever hears.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        held: Vec<HeldControl>,
         /// Current backend endpoint selected by the driver. Hosts resolve this
         /// display hint to their own stable MIDI source identity.
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -2187,6 +2187,7 @@ fn register_controller_bindings(midi_source_name: Option<&str>) -> Result<(), St
         controller_id: profile.driver_id.clone(),
         controls: profile.host_controls.clone(),
         actions: profile.host_actions.clone(),
+        held: Vec::new(),
         midi_source_name: midi_source_name.map(str::to_owned),
         semantic_profile: profile.semantic_profile.clone(),
         identified: false,

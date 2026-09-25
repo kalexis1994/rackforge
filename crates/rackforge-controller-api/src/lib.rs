@@ -271,6 +271,59 @@ impl MidiRealtime {
     }
 }
 
+/// A control whose messages are the controller's alone: maps and host actions
+/// read them, and no instrument or sequencer ever hears them, mapped or not.
+/// A fader that sends pitch bend in a DAW protocol is one; a mixer button that
+/// sends a note, another.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "message", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HeldControl {
+    ControlChange { channel: u8, controller: u8 },
+    Note { channel: u8, note: u8 },
+    PitchBend { channel: u8 },
+}
+
+impl HeldControl {
+    pub fn validate(self) -> Result<(), String> {
+        let (channel, number) = match self {
+            Self::ControlChange {
+                channel,
+                controller,
+            } => (channel, controller),
+            Self::Note { channel, note } => (channel, note),
+            Self::PitchBend { channel } => (channel, 0),
+        };
+        if channel > 15 {
+            return Err("MIDI channel must be within 0..15".into());
+        }
+        if number > 127 {
+            return Err("MIDI note or controller must be within 0..127".into());
+        }
+        Ok(())
+    }
+
+    /// Whether the message is this control's, whatever its value: a held
+    /// note's note-off and pressure are the control's as well.
+    pub fn matches(self, message: &[u8]) -> bool {
+        let Some(&status) = message.first() else {
+            return false;
+        };
+        let data = message.get(1).copied();
+        match self {
+            Self::ControlChange {
+                channel,
+                controller,
+            } => status == 0xb0 | channel && data == Some(controller),
+            Self::Note { channel, note } => {
+                matches!(status & 0xf0, 0x80 | 0x90 | 0xa0)
+                    && status & 0x0f == channel
+                    && data == Some(note)
+            }
+            Self::PitchBend { channel } => status == 0xe0 | channel,
+        }
+    }
+}
+
 /// A host action and the one MIDI message that triggers it: a button's
 /// Control Change, its note, or a System Real Time message. Exactly one is
 /// set.
@@ -1255,5 +1308,35 @@ mod tests {
         let realtime: HostActionBinding =
             serde_json::from_str(r#"{"target":"transport_stop","midi_realtime":"stop"}"#).unwrap();
         assert_eq!(realtime.midi_realtime, Some(MidiRealtime::Stop));
+    }
+
+    /// A held control is its message whatever the value: a fader's every
+    /// bend on its channel, a button's note-on, note-off and pressure.
+    #[test]
+    fn a_held_control_is_its_message_whatever_its_value() {
+        let fader = HeldControl::PitchBend { channel: 2 };
+        assert!(fader.matches(&[0xe2, 0, 64]));
+        assert!(fader.matches(&[0xe2, 127, 127]));
+        assert!(!fader.matches(&[0xe0, 0, 64]));
+        let button = HeldControl::Note {
+            channel: 0,
+            note: 94,
+        };
+        assert!(button.matches(&[0x90, 94, 127]));
+        assert!(button.matches(&[0x80, 94, 0]));
+        assert!(button.matches(&[0xa0, 94, 20]));
+        assert!(!button.matches(&[0x90, 95, 127]));
+        assert!(!button.matches(&[0x91, 94, 127]));
+        let knob = HeldControl::ControlChange {
+            channel: 0,
+            controller: 16,
+        };
+        assert!(knob.matches(&[0xb0, 16, 65]));
+        assert!(!knob.matches(&[0xb0, 17, 65]));
+        assert!(!knob.matches(&[]));
+        assert!(HeldControl::PitchBend { channel: 16 }.validate().is_err());
+        let wire: HeldControl =
+            serde_json::from_str(r#"{"message":"pitch_bend","channel":8}"#).unwrap();
+        assert_eq!(wire, HeldControl::PitchBend { channel: 8 });
     }
 }

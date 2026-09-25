@@ -53,6 +53,12 @@ A family with a single model keeps its `rackforge-controller.toml` beside
   note (the APCs'). They take host actions as a Control Change button does:
   a note-on presses, a note-off or a note-on at velocity 0 releases. Their
   notes are held back from the instruments on that controller's port.
+- **Controls that never play.** A DAW protocol's faders send pitch bend, one
+  channel each, and its buttons send notes. `plays = false` on such an input
+  keeps its messages from every instrument and the sequencer, mapped or not;
+  maps and host actions still read it. A fader may send pitch bend
+  (`midi = { channel = 2, pitch_bend = true }`) and fills a row as any fader
+  does. Pads that should play when nothing maps them keep the default.
 - **A Fn button.** `modifier = true` on the one button or pad the device
   itself uses as a modifier (an APC's Shift) makes it the Fn button of the
   maps RackForge offers. A player can choose another.

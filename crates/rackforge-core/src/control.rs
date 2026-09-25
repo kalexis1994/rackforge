@@ -100,6 +100,7 @@ pub enum AudioControlCommand {
         controller_id: String,
         controls: Vec<HostControlBinding>,
         actions: Vec<HostActionBinding>,
+        held: Vec<rackforge_session_api::HeldControl>,
         /// The controller's own MIDI source, when its port is known: its
         /// reservations then apply to that input only.
         source: Option<rackforge_midi_api::MidiSourceKey>,
@@ -3405,9 +3406,10 @@ fn compile_parameter_links(
     Ok(ParameterLinkTable {
         links: compiled,
         modifiers,
-        // This engine holds reserved buttons back itself, controller by
-        // controller (`live_midi_state`).
+        // This engine holds reserved buttons and held controls back itself,
+        // controller by controller (`live_midi_state`).
         host_buttons: Vec::new(),
+        held: Vec::new(),
     })
 }
 
@@ -3589,6 +3591,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             controller_id,
             controls,
             actions,
+            held,
             midi_source_name,
             semantic_profile,
             identified,
@@ -3598,6 +3601,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     .iter()
                     .any(|binding| binding.midi_cc.validate().is_err())
                 || actions.iter().any(|binding| binding.validate().is_err())
+                || held.iter().any(|control| control.validate().is_err())
                 || semantic_profile.as_ref().is_some_and(|profile| {
                     profile
                         .validate_against_reserved(&controls, &actions)
@@ -3623,6 +3627,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     controller_id: controller_id.clone(),
                     controls,
                     actions,
+                    held,
                     source,
                     reply: reply_sender,
                 },

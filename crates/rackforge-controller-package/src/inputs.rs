@@ -10,7 +10,7 @@
 
 use rackforge_control_profile::{CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId};
 use rackforge_controller_api::{
-    HostActionBinding, HostActionTarget, MidiButtonBinding, MidiControlChangeBinding,
+    HeldControl, HostActionBinding, HostActionTarget, MidiButtonBinding, MidiControlChangeBinding,
     MidiNoteButtonBinding, MidiRealtime, SemanticControlBinding, SemanticControlMode,
     SemanticControlProfile,
 };
@@ -198,9 +198,42 @@ pub struct ControllerInput {
     /// nothing else changes while it is held. At most one per package.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub modifier: bool,
+    /// False for a control whose messages must never reach an instrument,
+    /// mapped or not: a DAW protocol's fader that sends pitch bend, or its
+    /// buttons' notes. Maps and host actions still read it.
+    #[serde(default = "plays_by_default", skip_serializing_if = "plays_as_usual")]
+    pub plays: bool,
+}
+
+const fn plays_by_default() -> bool {
+    true
+}
+
+fn plays_as_usual(plays: &bool) -> bool {
+    *plays
 }
 
 impl ControllerInput {
+    /// The control's message as one the hosts hold back from instruments,
+    /// when the package says it never plays.
+    pub fn held_control(&self) -> Option<HeldControl> {
+        if self.plays {
+            return None;
+        }
+        match self.midi.message().ok()? {
+            InputMessage::ControlChange {
+                channel,
+                controller,
+            } => Some(HeldControl::ControlChange {
+                channel,
+                controller,
+            }),
+            InputMessage::Note { channel, note } => Some(HeldControl::Note { channel, note }),
+            InputMessage::PitchBend { channel } => Some(HeldControl::PitchBend { channel }),
+            InputMessage::Realtime(_) => None,
+        }
+    }
+
     /// This control in its slot, with the message a map listens to; `None`
     /// without a slot.
     pub fn slotted_input(&self) -> Option<SlottedInput> {
@@ -211,7 +244,8 @@ impl ControllerInput {
     }
 
     /// The control as a map names it: its id, name and message. `None` for
-    /// one a map cannot listen to (pitch bend, a real time message).
+    /// one a map cannot listen to: the pitch wheel, a real time message. A
+    /// fader that sends pitch bend, as in a DAW protocol, is a fader.
     pub fn mapped_input(&self) -> Option<MappedInput> {
         let channel = MidiChannel::from_zero_based(self.midi.channel).ok()?;
         let message = match self.midi.message().ok()? {
@@ -219,6 +253,9 @@ impl ControllerInput {
                 ParameterLinkMessage::ControlChange { controller }
             }
             InputMessage::Note { note, .. } => ParameterLinkMessage::Note { note },
+            InputMessage::PitchBend { .. } if self.kind == InputKind::Fader => {
+                ParameterLinkMessage::PitchBend
+            }
             InputMessage::PitchBend { .. } | InputMessage::Realtime(_) => return None,
         };
         let relative = match (self.kind, self.encoder_encoding()) {
@@ -269,7 +306,9 @@ impl ControllerInput {
         if !matches!(
             message,
             InputMessage::ControlChange { .. } | InputMessage::Note { .. }
-        ) {
+        ) && !(self.kind == InputKind::Fader
+            && matches!(message, InputMessage::PitchBend { .. }))
+        {
             return Err(format!(
                 "input {:?}: slot {slot} needs a control change or a note",
                 self.id
@@ -298,9 +337,14 @@ impl ControllerInput {
             .message()
             .map_err(|error| format!("input {:?}: {error}", self.id))?;
         let allowed = match self.kind {
-            InputKind::Knob | InputKind::Fader | InputKind::Encoder | InputKind::Pedal => {
+            InputKind::Knob | InputKind::Encoder | InputKind::Pedal => {
                 matches!(message, InputMessage::ControlChange { .. })
             }
+            // A DAW protocol's fader sends pitch bend, one channel each.
+            InputKind::Fader => matches!(
+                message,
+                InputMessage::ControlChange { .. } | InputMessage::PitchBend { .. }
+            ),
             InputKind::Pad => matches!(message, InputMessage::Note { .. }),
             InputKind::Button => matches!(
                 message,
@@ -358,6 +402,12 @@ impl ControllerInput {
             ));
         }
         self.validate_slot(message)?;
+        if !self.plays && matches!(message, InputMessage::Realtime(_)) {
+            return Err(format!(
+                "input {:?}: a real time message never reaches an instrument anyway",
+                self.id
+            ));
+        }
         if self.modifier {
             if !matches!(self.kind, InputKind::Button | InputKind::Pad)
                 || !matches!(
@@ -717,6 +767,7 @@ mod tests {
             encoder: None,
             slot: None,
             modifier: false,
+            plays: true,
         }
     }
 
@@ -783,6 +834,7 @@ mod tests {
             encoder: None,
             slot: None,
             modifier: false,
+            plays: true,
         }
     }
 
@@ -818,6 +870,57 @@ mod tests {
             ParameterLinkMessage::ControlChange { controller: 21 }
         );
         assert!(knob("knob-4", 24).slotted_input().is_none());
+    }
+
+    /// A DAW protocol's fader sends pitch bend on a channel of its own: it
+    /// fills a row as any fader does, and with `plays = false` no instrument
+    /// hears it. The pitch wheel's bend stays unmappable.
+    #[test]
+    fn a_fader_that_sends_pitch_bend_fills_a_row_and_never_plays() {
+        let mut fader = slotted(
+            ControllerInput {
+                id: "fader-3".into(),
+                name: "Fader 3".into(),
+                kind: InputKind::Fader,
+                group: None,
+                midi: InputMidi {
+                    channel: 2,
+                    pitch_bend: true,
+                    ..InputMidi::default()
+                },
+                button: None,
+                encoder: None,
+                slot: None,
+                modifier: false,
+                plays: true,
+            },
+            "control-1.3",
+        );
+        validate_inputs(std::slice::from_ref(&fader), &[], &[]).unwrap();
+        assert_eq!(
+            fader.slotted_input().unwrap().input.message,
+            ParameterLinkMessage::PitchBend
+        );
+        assert_eq!(fader.held_control(), None);
+        fader.plays = false;
+        validate_inputs(std::slice::from_ref(&fader), &[], &[]).unwrap();
+        assert_eq!(
+            fader.held_control(),
+            Some(HeldControl::PitchBend { channel: 2 })
+        );
+
+        let mut wheel = fader.clone();
+        wheel.kind = InputKind::Wheel;
+        wheel.slot = None;
+        assert!(wheel.mapped_input().is_none());
+
+        let mut knob = knob("knob-9", 30);
+        knob.midi = fader.midi;
+        assert!(validate_inputs(&[knob], &[], &[]).is_err());
+
+        let mut start = realtime_button("play", MidiRealtime::Start);
+        start.plays = false;
+        assert!(validate_inputs(&[start], &[], &[]).is_err());
     }
 
     /// A Launchkey MK4's Play and Stop send MIDI Start and Stop: they are

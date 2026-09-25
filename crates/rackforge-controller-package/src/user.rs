@@ -247,6 +247,7 @@ mod tests {
                 encoder: None,
                 slot: None,
                 modifier: false,
+                plays: true,
             }],
         }
     }

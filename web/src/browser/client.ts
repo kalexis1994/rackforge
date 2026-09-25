@@ -949,7 +949,10 @@ export function isKeyLabMainEndpoint(
   const maker = (manufacturer ?? "").trim().toLowerCase();
   if (
     !folded ||
-    !["keylab", "kl essential"].some((part) => folded.includes(part)) ||
+    // This keyboard alone: "keylab" also names a KeyLab mkII's or mk3's main
+    // port and the first KeyLab Essential's, which speak other protocols.
+    !["keylab essential", "kl essential"].some((part) => folded.includes(part)) ||
+    !folded.includes("mk3") ||
     ["mcu", "hui", "dinthru", "alv"].some((part) => folded.includes(part))
   ) {
     return false;

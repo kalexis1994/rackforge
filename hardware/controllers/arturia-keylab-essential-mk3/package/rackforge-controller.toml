@@ -503,19 +503,22 @@ product_names = ["KeyLab Essential 61 mk3"]
 
 [[devices.endpoints]]
 role = "surface_input"
-name_contains_any = ["keylab", "kl essential"]
+name_contains = ["mk3"]
+name_contains_any = ["keylab essential", "kl essential"]
 name_ends_with = "midi"
 exclude_contains = ["mcu", "hui", "dinthru", "alv"]
 
 [[devices.endpoints]]
 role = "display_output"
-name_contains_any = ["keylab", "kl essential"]
+name_contains = ["mk3"]
+name_contains_any = ["keylab essential", "kl essential"]
 name_ends_with = "midi"
 exclude_contains = ["mcu", "hui", "dinthru", "alv"]
 
 [[devices.endpoints]]
 role = "performance_input"
-name_contains_any = ["keylab", "kl essential"]
+name_contains = ["mk3"]
+name_contains_any = ["keylab essential", "kl essential"]
 name_ends_with = "midi"
 exclude_contains = ["mcu", "hui", "dinthru", "alv"]
 

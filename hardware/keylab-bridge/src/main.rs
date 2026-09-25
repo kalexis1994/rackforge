@@ -453,8 +453,7 @@ struct TransportBridge {
 }
 
 fn is_mcu_port_name(name: &str) -> bool {
-    let folded = name.to_ascii_lowercase();
-    (folded.contains("keylab") || folded.contains("kl essential")) && folded.contains("mcu")
+    controller::is_keylab_endpoint(name) && name.to_ascii_lowercase().contains("mcu")
 }
 
 fn open_transport_bridge() -> Option<TransportBridge> {
@@ -1249,7 +1248,7 @@ fn run_monitor(
             .into_iter()
             .filter(|input| {
                 let folded = input.name.to_ascii_lowercase();
-                (folded.contains("keylab") || folded.contains("kl essential"))
+                controller::is_keylab_endpoint(&input.name)
                     && !folded.contains("dinthru")
                     && !folded.contains("alv")
             })
@@ -2319,8 +2318,7 @@ fn refresh_performance_snapshot(menu: &mut menu::Menu) -> Result<(), String> {
 /// standing at. The screen calls those out so that "DISABLED" is never a
 /// surprise the player performs on themselves.
 fn drives_this_surface(name: &str) -> bool {
-    let folded = name.to_ascii_lowercase();
-    folded.contains("keylab") || folded.contains("kl essential")
+    controller::is_keylab_endpoint(name)
 }
 
 /// The MIDI inputs and their velocity readings.

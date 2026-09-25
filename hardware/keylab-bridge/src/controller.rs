@@ -183,7 +183,7 @@ pub fn is_main_midi_endpoint(name: &str) -> bool {
         .filter(|(_, suffix)| is_alsa_address(suffix));
     let endpoint = address.map_or(trimmed, |(prefix, _)| prefix);
     let folded = endpoint.to_ascii_lowercase();
-    if !(folded.contains("kl essential") || folded.contains("keylab")) {
+    if !names_keylab_essential_mk3(&folded) {
         return false;
     }
     if folded.contains("mcu")
@@ -218,8 +218,17 @@ fn is_numbered_secondary_port(folded: &str) -> bool {
 }
 
 pub fn is_keylab_endpoint(name: &str) -> bool {
-    let folded = name.trim().to_ascii_lowercase();
-    folded.contains("kl essential") || folded.contains("keylab")
+    names_keylab_essential_mk3(&name.trim().to_ascii_lowercase())
+}
+
+/// The KeyLab Essential mk3, in either spelling its ports carry -- "KL
+/// Essential 61 mk3", or the product's "KeyLab Essential 61 mk3" -- and no
+/// other Arturia keyboard. "keylab" alone also named a KeyLab mkII's or
+/// mk3's main port and the first KeyLab Essential's: the driver would have
+/// sent them this one's DAW program, display and LEDs, and with two of them
+/// plugged in it found the choice ambiguous and drove neither.
+fn names_keylab_essential_mk3(folded: &str) -> bool {
+    (folded.contains("kl essential") || folded.contains("keylab essential")) && folded.contains("mk3")
 }
 
 fn is_alsa_address(value: &str) -> bool {
@@ -272,6 +281,28 @@ mod tests {
         // A device that is not a KeyLab stays out under either convention.
         assert!(!is_main_midi_endpoint("Unknown USB MIDI 31:0"));
         assert!(!is_main_midi_endpoint("MIDIIN2 (Some Other Keyboard)"));
+    }
+
+    #[test]
+    fn other_keylabs_are_never_driven_as_this_one() {
+        // The product's own spelling, as the package names the device.
+        assert!(is_main_midi_endpoint("KeyLab Essential 61 mk3 MIDI 28:0"));
+        assert!(is_main_midi_endpoint("KL Essential 49 mk3:KL Essential 49 mk3 MIDI 24:0"));
+        // Other KeyLabs' main ports end in MIDI too, and speak other
+        // protocols: a KeyLab mkII or mk3, and the first KeyLab Essential.
+        for name in [
+            "KeyLab mkII 61:KeyLab mkII 61 MIDI 24:0",
+            "KeyLab 61 mk3:KeyLab 61 mk3 MIDI 24:0",
+            "KeyLab 61 mk3",
+            "Arturia KeyLab Essential 61:Arturia KeyLab Essential 61 MIDI 24:0",
+            "Arturia KeyLab Essential 61",
+            "KeyLab 88:KeyLab 88 MIDI 24:0",
+        ] {
+            assert!(!is_main_midi_endpoint(name), "{name}");
+            assert!(!is_keylab_endpoint(name), "{name}");
+            assert!(display_driver(name).is_none(), "{name}");
+        }
+        assert!(is_keylab_endpoint("MIDIIN2 (KL Essential 61 mk3)"));
     }
 
     #[test]
@@ -400,5 +431,7 @@ mod tests {
         assert!(!matches_product_name("Generic USB MIDI"));
         assert!(matches_endpoint_name_hint("KL Essential 61 mk3"));
         assert!(!matches_endpoint_name_hint("KL Essential 61 mk3 MCU/HUI"));
+        assert!(!matches_endpoint_name_hint("KeyLab mkII 61 MIDI"));
+        assert!(!matches_endpoint_name_hint("KeyLab 61 mk3 MIDI"));
     }
 }

@@ -15,6 +15,12 @@ describe("browser Arturia controller transport", () => {
     expect(isKeyLabMainEndpoint("KL Essential 61 mk3 MCU/HUI")).toBe(false);
     expect(isKeyLabMainEndpoint("KL Essential 61 mk3 DINTHRU")).toBe(false);
     expect(isKeyLabMainEndpoint("Other MIDI")).toBe(false);
+    // Other KeyLabs, even from Arturia: they speak other protocols.
+    expect(isKeyLabMainEndpoint("KeyLab mkII 61 MIDI")).toBe(false);
+    expect(isKeyLabMainEndpoint("KeyLab 61 mk3 MIDI")).toBe(false);
+    expect(isKeyLabMainEndpoint("KeyLab 61 mk3", "Arturia")).toBe(false);
+    expect(isKeyLabMainEndpoint("Arturia KeyLab Essential 61 MIDI")).toBe(false);
+    expect(isKeyLabMainEndpoint("KeyLab Essential 61", "Arturia")).toBe(false);
   });
 
   it("keeps controller input active when Android grants MIDI without SysEx", () => {

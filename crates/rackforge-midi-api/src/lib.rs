@@ -312,6 +312,36 @@ pub enum ParameterLinkMessage {
 pub struct ParameterLinkTransform {
     #[serde(default)]
     pub invert: bool,
+    /// The control is an endless encoder that sends how far it turned, not
+    /// where it stands: each message moves the parameter from where it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative: Option<RelativeEncoding>,
+}
+
+/// How an endless encoder writes a turn into a control change's value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelativeEncoding {
+    /// 1..=63 turn up by that much, 127..=65 down by 1..=63.
+    TwosComplement,
+    /// 64 is still: 65 and above turn up, 63 and below down.
+    BinaryOffset,
+    /// The low six bits are how far; bit 6 set turns down.
+    SignMagnitude,
+}
+
+impl RelativeEncoding {
+    /// How many steps, and which way, a control change value turns.
+    pub fn delta(self, value: u8) -> i32 {
+        let value = i32::from(value & 0x7f);
+        match self {
+            Self::TwosComplement if value >= 64 => value - 128,
+            Self::TwosComplement => value,
+            Self::BinaryOffset => value - 64,
+            Self::SignMagnitude if value & 0x40 != 0 => -(value & 0x3f),
+            Self::SignMagnitude => value & 0x3f,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -345,6 +375,9 @@ impl ParameterLink {
         };
         if number.is_some_and(|number| number > 127) {
             return Err(MidiRoutingError::InvalidParameterLinkNumber);
+        }
+        if self.transform.relative.is_some() {
+            validate_relative(self.message, &self.mode)?;
         }
         self.mode.validate()
     }
@@ -1243,6 +1276,29 @@ fn validate_identifier(value: &str) -> Result<(), MidiRoutingError> {
         })
     {
         return Err(MidiRoutingError::InvalidIdentifier(value.into()));
+    }
+    Ok(())
+}
+
+/// A relative encoder sends a control change, and turns a parameter across
+/// its range or a part of it: it has no press to act on, and no position to
+/// fall into a zone.
+pub fn validate_relative(
+    message: ParameterLinkMessage,
+    mode: &ParameterLinkMode,
+) -> Result<(), MidiRoutingError> {
+    if !matches!(message, ParameterLinkMessage::ControlChange { .. }) {
+        return Err(MidiRoutingError::InvalidParameterLinkMode(
+            "a relative encoder sends a control change",
+        ));
+    }
+    if !matches!(
+        mode,
+        ParameterLinkMode::Direct | ParameterLinkMode::Range { .. }
+    ) {
+        return Err(MidiRoutingError::InvalidParameterLinkMode(
+            "a relative encoder turns a parameter directly or over a range",
+        ));
     }
     Ok(())
 }

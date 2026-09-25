@@ -353,6 +353,51 @@ impl CompiledParameterLink {
         Scaled::Moved(Some(self.output(frame, scaled_value)))
     }
 
+    /// An endless encoder: each message says how far it turned, and the
+    /// parameter moves that far from where it stands. There is nothing to
+    /// pick up, and nothing jumps.
+    fn turn(
+        &mut self,
+        frame: u32,
+        delta: i32,
+        current: impl FnOnce(u32) -> Option<f64>,
+    ) -> Option<ParameterLinkOutput> {
+        let delta = if self.link.transform.invert {
+            -delta
+        } else {
+            delta
+        };
+        if delta == 0 {
+            return None;
+        }
+        let reported = current(self.parameter.index);
+        // Where the turn starts: the position this link keeps, fractions
+        // and all -- a parameter with few values moves one for several
+        // steps -- unless something else has moved the parameter since.
+        let start = match (self.pickup.parameter, reported) {
+            (Some(position), Some(at)) if !self.moved_elsewhere(at) => position,
+            (Some(position), None) => position,
+            (_, Some(at)) => {
+                self.last_value = Some(at);
+                self.settled = Some(at);
+                self.position_of(at)
+            }
+            (None, None) => self.position_of(
+                self.last_value
+                    .unwrap_or_else(|| default_value(&self.parameter.kind)),
+            ),
+        };
+        let position = (start + f64::from(delta) * turn_step(&self.parameter.kind)).clamp(0.0, 1.0);
+        self.pickup.parameter = Some(position);
+        let value = self.value_at(position);
+        if self.last_value.is_some_and(|last| same_value(last, value)) {
+            // Still named on the screen, so the encoder is seen to answer.
+            self.touch(value, TouchPickup::Engaged, value);
+            return None;
+        }
+        Some(self.output(frame, value))
+    }
+
     fn current_value(&self, current: impl FnOnce(u32) -> Option<f64>) -> f64 {
         current(self.parameter.index)
             .or(self.last_value)
@@ -393,6 +438,9 @@ impl CompiledParameterLink {
             heard
         };
         let frame = ingress.packet.frame;
+        if let Some(encoding) = self.link.transform.relative {
+            return self.turn(frame, encoding.delta(ingress.packet.data[2]), current);
+        }
         if self.link.mode.is_button() {
             let pressed = match self.link.message {
                 ParameterLinkMessage::Note { .. } => (heard > 0.0) != self.link.transform.invert,
@@ -456,6 +504,29 @@ impl CompiledParameterLink {
         self.pickup.parameter = Some(normalized);
         self.pickup.target = None;
         Some(self.output(frame, value))
+    }
+}
+
+/// Links compiled again -- a map saved, a plugin installed, a controller
+/// registered once more -- keep what an identical link knew: whether its
+/// control had taken the parameter over, where it stood, what it last wrote.
+/// Otherwise every recompile would make each knob pick its parameter up
+/// anew, and a scaling fader lose a move.
+///
+/// Runs on the audio thread when the new links arrive: it only compares and
+/// copies.
+pub fn carry_link_state(next: &mut [CompiledParameterLink], previous: &[CompiledParameterLink]) {
+    for link in next {
+        if let Some(known) = previous.iter().find(|known| {
+            known.link.id == link.link.id
+                && known.source_key == link.source_key
+                && known.parameter.index == link.parameter.index
+                && known.link == link.link
+        }) {
+            link.pickup = known.pickup;
+            link.last_value = known.last_value;
+            link.settled = known.settled;
+        }
     }
 }
 
@@ -570,6 +641,30 @@ fn range_value(kind: &ParameterKind, min: f64, max: f64, normalized: f64) -> f64
 
 /// One step from `at`, up or down, stopping at the ends or wrapping past
 /// them.
+/// How far one step of an endless encoder moves a parameter along its
+/// travel: a 128th, so a turn of steps crosses the range as a knob's sweep
+/// would. A parameter with few values moves a value about every three steps,
+/// so each is easy to land on.
+fn turn_step(kind: &ParameterKind) -> f64 {
+    const FINE: f64 = 1.0 / 128.0;
+    const STEPS_PER_VALUE: f64 = 3.0;
+    let intervals = match kind {
+        ParameterKind::Integer {
+            minimum,
+            maximum,
+            step,
+            ..
+        } => (maximum - minimum) / (*step).max(1),
+        ParameterKind::Enum { choices, .. } => choices.len().saturating_sub(1) as i64,
+        ParameterKind::Boolean { .. } => 1,
+        _ => return FINE,
+    };
+    if intervals <= 0 {
+        return FINE;
+    }
+    FINE.max(1.0 / (intervals as f64 * STEPS_PER_VALUE))
+}
+
 fn step_value(kind: &ParameterKind, at: f64, direction: StepDirection, wrap: bool) -> f64 {
     let up = direction == StepDirection::Up;
     match kind {
@@ -708,6 +803,7 @@ pub fn compile_semantic_parameter_links(
             message,
             transform: ParameterLinkTransform {
                 invert: control.invert,
+                relative: None,
             },
             pass_through: ParameterLinkPassThrough::PassThrough,
             mode: ParameterLinkMode::Direct,
@@ -813,6 +909,7 @@ pub fn compile_controller_map_links(
             message: mapping.input.message,
             transform: ParameterLinkTransform {
                 invert: mapping.invert,
+                relative: mapping.input.relative,
             },
             pass_through: mapping.effective_pass_through(),
             mode: mapping.mode.clone(),
@@ -1276,7 +1373,7 @@ mod tests {
     use super::*;
     use rackforge_midi_api::{
         MidiChannel, MidiPacket, MidiSourceId, PARAMETER_LINK_SCHEMA_VERSION, ParameterLinkChannel,
-        ParameterLinkId, ParameterLinkSource, ParameterLinkTransform,
+        ParameterLinkId, ParameterLinkSource, ParameterLinkTransform, RelativeEncoding,
     };
     use rackforge_plugin_api::{
         EnumChoice, PARAMETER_SCHEMA_VERSION, PageDescriptor, ParameterFlags,
@@ -1470,6 +1567,103 @@ mod tests {
             .map(|output| output.event.value)
     }
 
+    fn encoder(schema: &ParameterSchema, encoding: RelativeEncoding) -> CompiledParameterLink {
+        let mut link = link(ParameterLinkMessage::ControlChange { controller: 24 });
+        link.transform.relative = Some(encoding);
+        CompiledParameterLink::new(link, MidiSourceKey::new(7), schema).unwrap()
+    }
+
+    fn turn(link: &mut CompiledParameterLink, value: u8, at: f64) -> Option<f64> {
+        link.apply(ingress(&[0xb1, 24, value]), move |_| Some(at))
+            .map(|output| output.event.value)
+    }
+
+    #[test]
+    fn relative_encodings_read_how_far_and_which_way() {
+        use RelativeEncoding::{BinaryOffset, SignMagnitude, TwosComplement};
+        for (encoding, value, delta) in [
+            (TwosComplement, 1, 1),
+            (TwosComplement, 63, 63),
+            (TwosComplement, 127, -1),
+            (TwosComplement, 65, -63),
+            (TwosComplement, 0, 0),
+            (BinaryOffset, 65, 1),
+            (BinaryOffset, 63, -1),
+            (BinaryOffset, 64, 0),
+            (SignMagnitude, 3, 3),
+            (SignMagnitude, 67, -3),
+            (SignMagnitude, 64, 0),
+        ] {
+            assert_eq!(encoding.delta(value), delta, "{encoding:?} {value}");
+        }
+    }
+
+    /// An endless encoder moves the parameter from wherever it stands --
+    /// set by the screen, a sound, or itself -- and nothing jumps.
+    #[test]
+    fn an_encoder_moves_its_parameter_from_where_it_stands() {
+        let schema = schema(ParameterKind::Float {
+            minimum: 0.0,
+            maximum: 1.0,
+            default: 0.5,
+            step: 0.0001,
+            unit: None,
+            taper: ParameterTaper::Linear,
+        });
+        let mut encoder = encoder(&schema, RelativeEncoding::TwosComplement);
+        let near = |value: f64, expected: f64| (value - expected).abs() < 0.0005;
+        let up = turn(&mut encoder, 1, 0.5).unwrap();
+        assert!(near(up, 0.5 + 1.0 / 128.0), "{up}");
+        let further = turn(&mut encoder, 2, up).unwrap();
+        assert!(near(further, up + 2.0 / 128.0), "{further}");
+        // The screen put it at 0.1: the next step starts there.
+        let down = turn(&mut encoder, 127, 0.1).unwrap();
+        assert!(near(down, 0.1 - 1.0 / 128.0), "{down}");
+        // It stops at the end of the range, and says nothing more there.
+        let mut at = down;
+        for _ in 0..3 {
+            if let Some(value) = turn(&mut encoder, 65, at) {
+                at = value;
+            }
+        }
+        assert_eq!(at, 0.0);
+        assert_eq!(turn(&mut encoder, 65, 0.0), None);
+    }
+
+    #[test]
+    fn an_encoder_steps_a_parameter_with_few_values_every_third_step() {
+        let schema = leslie();
+        let mut encoder = encoder(&schema, RelativeEncoding::BinaryOffset);
+        let mut at = 0.0;
+        let mut heard = Vec::new();
+        for _ in 0..8 {
+            let value = turn(&mut encoder, 65, at);
+            if let Some(value) = value {
+                at = value;
+            }
+            heard.push(value);
+        }
+        assert_eq!(
+            heard,
+            [None, Some(1.0), None, None, Some(2.0), None, None, None]
+        );
+    }
+
+    #[test]
+    fn an_encoder_turns_a_parameter_only_directly_or_over_a_range() {
+        let schema = leslie();
+        let mut toggle = link(ParameterLinkMessage::ControlChange { controller: 24 });
+        toggle.transform.relative = Some(RelativeEncoding::TwosComplement);
+        toggle.mode = ParameterLinkMode::Toggle {
+            first: value(0.0),
+            second: value(2.0),
+        };
+        assert!(CompiledParameterLink::new(toggle, MidiSourceKey::new(7), &schema).is_err());
+        let mut note = link(ParameterLinkMessage::Note { note: 36 });
+        note.transform.relative = Some(RelativeEncoding::TwosComplement);
+        assert!(CompiledParameterLink::new(note, MidiSourceKey::new(7), &schema).is_err());
+    }
+
     #[test]
     fn a_fader_catches_a_drawbar_wherever_it_would_set_the_same_value() {
         let schema = drawbar();
@@ -1479,6 +1673,20 @@ mod tests {
         assert_eq!(slide(&mut fader, 40, 0.0), None);
         assert_eq!(slide(&mut fader, 7, 0.0), Some(0.0));
         assert_eq!(slide(&mut fader, 20, 0.0), Some(1.0));
+    }
+
+    /// Compiled again, an identical link keeps its control's hold on the
+    /// parameter: a fader that had taken a drawbar over still moves it.
+    #[test]
+    fn a_link_compiled_again_keeps_its_hold_on_the_parameter() {
+        let schema = drawbar();
+        let mut before = fader(&schema);
+        assert_eq!(slide(&mut before, 0, 0.0), Some(0.0));
+        let mut fresh = fader(&schema);
+        assert_eq!(slide(&mut fresh, 64, 0.0), None, "a new link picks up");
+        let mut again = [fader(&schema)];
+        carry_link_state(&mut again, std::slice::from_ref(&before));
+        assert_eq!(slide(&mut again[0], 64, 0.0), Some(4.0));
     }
 
     #[test]
@@ -2093,6 +2301,7 @@ mod tests {
                     name: "Button 1".into(),
                     channel: ParameterLinkChannel::Omni,
                     message: ParameterLinkMessage::ControlChange { controller: 20 },
+                    relative: None,
                 },
                 parameter_id: parameter_id.into(),
                 mode: ParameterLinkMode::Toggle {
@@ -2239,6 +2448,7 @@ mod tests {
                     channel: MidiChannel::from_user_number(2).unwrap(),
                 },
                 message: ParameterLinkMessage::ControlChange { controller: 105 },
+                relative: None,
             },
             mode,
         });

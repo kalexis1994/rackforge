@@ -317,7 +317,14 @@ pub fn derive_controller_map(
                 },
                 input: input.input.clone(),
                 parameter_id: mapping.parameter_id.clone(),
-                mode: mapping.mode.clone(),
+                // An encoder that sends how far it turned has no position to
+                // fall into a zone: it turns the parameter directly.
+                mode: match &mapping.mode {
+                    ParameterLinkMode::Zones { .. } if input.input.relative.is_some() => {
+                        ParameterLinkMode::Direct
+                    }
+                    mode => mode.clone(),
+                },
                 invert: mapping.invert,
                 pass_through: mapping.pass_through,
                 layer,
@@ -446,6 +453,7 @@ mod tests {
                     channel: MidiChannel::from_zero_based(0).unwrap(),
                 },
                 message: ParameterLinkMessage::ControlChange { controller },
+                relative: None,
             },
         }
     }
@@ -586,6 +594,7 @@ mod tests {
                     channel: MidiChannel::from_zero_based(9).unwrap(),
                 },
                 message: ParameterLinkMessage::Note { note },
+                relative: None,
             },
         };
         let inputs = [pad("switch-1.1", "pad-1", 40), pad("step.up", "right", 41)];

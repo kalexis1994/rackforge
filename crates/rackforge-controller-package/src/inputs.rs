@@ -15,7 +15,9 @@ use rackforge_controller_api::{
 };
 use rackforge_midi_api::control_layout::{ControlSlot, SlottedInput};
 use rackforge_midi_api::controller_map::MappedInput;
-use rackforge_midi_api::{MidiChannel, ParameterLinkChannel, ParameterLinkMessage};
+use rackforge_midi_api::{
+    MidiChannel, ParameterLinkChannel, ParameterLinkMessage, RelativeEncoding,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -218,11 +220,24 @@ impl ControllerInput {
             InputMessage::Note { note, .. } => ParameterLinkMessage::Note { note },
             InputMessage::PitchBend { .. } | InputMessage::Realtime(_) => return None,
         };
+        let relative = match (self.kind, self.encoder_encoding()) {
+            (InputKind::Encoder, EncoderEncoding::RelativeTwosComplement) => {
+                Some(RelativeEncoding::TwosComplement)
+            }
+            (InputKind::Encoder, EncoderEncoding::RelativeBinaryOffset) => {
+                Some(RelativeEncoding::BinaryOffset)
+            }
+            (InputKind::Encoder, EncoderEncoding::RelativeSignMagnitude) => {
+                Some(RelativeEncoding::SignMagnitude)
+            }
+            _ => None,
+        };
         Some(MappedInput {
             id: self.id.clone(),
             name: self.name.clone(),
             channel: ParameterLinkChannel::Channel { channel },
             message,
+            relative,
         })
     }
 

@@ -15,7 +15,7 @@
 
 use crate::{
     MapLayer, MidiRoutingError, ModifierMode, ParameterLinkChannel, ParameterLinkId,
-    ParameterLinkMessage, ParameterLinkMode, ParameterLinkPassThrough,
+    ParameterLinkMessage, ParameterLinkMode, ParameterLinkPassThrough, RelativeEncoding,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -106,6 +106,10 @@ pub struct MappedInput {
     #[serde(default)]
     pub channel: ParameterLinkChannel,
     pub message: ParameterLinkMessage,
+    /// Set for an endless encoder that sends how far it turned: a copy of
+    /// the package's, as the message is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative: Option<RelativeEncoding>,
 }
 
 /// The portable `.rfmap` file: one controller map and where it came from.
@@ -203,6 +207,9 @@ impl ControllerMap {
                 validate_text(&mapping.input.name, "input name")?;
                 validate_key(&mapping.parameter_id, "parameter id")?;
                 mapping.mode.validate()?;
+                if mapping.input.relative.is_some() {
+                    crate::validate_relative(mapping.input.message, &mapping.mode)?;
+                }
                 if let ParameterLinkMessage::ControlChange { controller }
                 | ParameterLinkMessage::Note { note: controller }
                 | ParameterLinkMessage::PolyPressure { note: controller } = mapping.input.message
@@ -300,6 +307,7 @@ mod tests {
                 message: ParameterLinkMessage::ControlChange {
                     controller: 20 + input.bytes().last().map_or(0, |byte| byte % 10),
                 },
+                relative: None,
             },
             parameter_id: "leslie.speed".into(),
             mode,

@@ -2513,6 +2513,7 @@ impl AndroidEngine {
         for link in &mut compiled {
             link.set_takeover(maps.takeover);
         }
+        rackforge_core::parameter_link::carry_link_state(&mut compiled, &self.parameter_links);
         self.persisted_parameter_links = links;
         self.parameter_links = compiled;
         self.control_layers.replace(modifiers);

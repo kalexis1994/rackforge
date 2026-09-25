@@ -2727,7 +2727,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     let _ = reply.send(result);
                 }
                 AudioControlCommand::ReplaceParameterLinks { table, reply } => {
-                    parameter_links = table.links;
+                    let mut links = table.links;
+                    crate::parameter_link::carry_link_state(&mut links, &parameter_links);
+                    parameter_links = links;
                     control_layers.replace(table.modifiers);
                     let _ = reply.send(Ok(()));
                 }

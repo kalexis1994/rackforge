@@ -3038,7 +3038,12 @@ impl AudioProcessor {
                     let _ = reply.try_send(result);
                 }
                 AudioCommand::ReplaceParameterLinks { table, reply } => {
-                    self.parameter_links = table.links;
+                    let mut links = table.links;
+                    rackforge_core::parameter_link::carry_link_state(
+                        &mut links,
+                        &self.parameter_links,
+                    );
+                    self.parameter_links = links;
                     self.control_layers.replace(table.modifiers);
                     let _ = reply.try_send(Ok(()));
                 }

@@ -984,7 +984,8 @@ impl<'plugin> RackEngine<'plugin> {
 
     /// The links to this Rack's Slots, compiled by the host against
     /// [`Self::link_target_plugin`].
-    pub fn set_parameter_links(&mut self, links: Vec<CompiledParameterLink>) {
+    pub fn set_parameter_links(&mut self, mut links: Vec<CompiledParameterLink>) {
+        crate::parameter_link::carry_link_state(&mut links, &self.parameter_links);
         self.parameter_links = links;
     }
 

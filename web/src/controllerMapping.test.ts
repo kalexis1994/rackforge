@@ -142,6 +142,18 @@ describe("what an input can do to a parameter", () => {
     expect(modesFor(knob, drive)).toEqual(["direct", "range"]);
     expect(modesFor(knob, leslie)).toEqual(["zones", "direct"]);
     expect(modesFor(knob, meter)).toEqual([]);
+    // An encoder that sends how far it turned never falls into a zone.
+    const encoder: ControllerInput = {
+      id: "encoder-1",
+      name: "Encoder 1",
+      kind: "encoder",
+      encoder: "relative_twos_complement",
+      midi: { channel: 0, cc: 24 },
+    };
+    expect(modesFor(encoder, leslie)).toEqual(["direct"]);
+    expect(modesFor(encoder, drive)).toEqual(["direct", "range"]);
+    expect(mappedInputFor(encoder)?.relative).toBe("twos_complement");
+    expect(mappedInputFor(knob)).not.toHaveProperty("relative");
   });
 
   it("suggests a cycle through the Leslie for a button", () => {

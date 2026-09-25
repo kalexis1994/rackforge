@@ -250,6 +250,8 @@ export type ParameterLinkMode =
   | { kind: "trigger" };
 
 /** One input of a controller driving one plugin parameter, by its id. */
+export type RelativeEncoding = "twos_complement" | "binary_offset" | "sign_magnitude";
+
 export interface ControlMapping {
   id: string;
   input: {
@@ -257,6 +259,8 @@ export interface ControlMapping {
     name: string;
     channel: ParameterLink["channel"];
     message: ParameterLinkMessage;
+    /** An endless encoder that sends how far it turned, not where it is. */
+    relative?: RelativeEncoding;
   };
   parameter_id: string;
   mode?: ParameterLinkMode;

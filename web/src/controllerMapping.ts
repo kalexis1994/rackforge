@@ -19,6 +19,7 @@ import type {
   ParameterLinkMode,
   PluginParameterDescriptor,
   PluginParameterSnapshot,
+  RelativeEncoding,
 } from "./types";
 
 export type InputKind = "knob" | "fader" | "encoder" | "button" | "pad" | "wheel" | "pedal";
@@ -108,16 +109,32 @@ export function inputMessage(input: ControllerInput): ParameterLinkMessage | nul
   return null;
 }
 
-/** The input as a mapping records it: its id, its name, and a copy of its message. */
+const RELATIVE_ENCODINGS: Record<string, RelativeEncoding> = {
+  relative_twos_complement: "twos_complement",
+  relative_binary_offset: "binary_offset",
+  relative_sign_magnitude: "sign_magnitude",
+};
+
+/** How an endless encoder sends its turns, when it sends how far rather than where. */
+export function relativeEncoding(input: Pick<ControllerInput, "kind" | "encoder">): RelativeEncoding | undefined {
+  return input.kind === "encoder" && input.encoder ? RELATIVE_ENCODINGS[input.encoder] : undefined;
+}
+
+/**
+ * The input as a mapping records it: its id, its name, and a copy of its
+ * message -- and, for an encoder that sends how far it turned, how it says so.
+ */
 export function mappedInputFor(input: ControllerInput): ControlMapping["input"] | null {
   const message = inputMessage(input);
   if (!message || input.midi.channel === undefined) return null;
+  const relative = relativeEncoding(input);
   return {
     id: input.id,
     name: input.name,
     // Links name channels from 1, packages from 0.
     channel: { mode: "channel", channel: input.midi.channel + 1 },
     message,
+    ...(relative ? { relative } : {}),
   };
 }
 
@@ -249,10 +266,24 @@ export function parameterSections(
 
 /** The modes an input can drive a parameter with, the most natural first. */
 export function modesFor(
-  input: Pick<ControllerInput, "kind">,
+  input: Pick<ControllerInput, "kind" | "encoder">,
   parameter: PluginParameterDescriptor,
 ): ModeKind[] {
   const kind = parameter.kind.type;
+  // An encoder that sends how far it turned moves the parameter from where
+  // it is: across its range or a part of it, never to a zone.
+  if (relativeEncoding(input)) {
+    switch (kind) {
+      case "float":
+      case "integer":
+        return ["direct", "range"];
+      case "enum":
+      case "boolean":
+        return ["direct"];
+      default:
+        return [];
+    }
+  }
   if (isButtonInput(input)) {
     switch (kind) {
       case "enum":

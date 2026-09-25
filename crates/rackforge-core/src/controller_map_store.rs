@@ -426,6 +426,7 @@ mod tests {
                     name: "Button 1".into(),
                     channel: ParameterLinkChannel::Omni,
                     message: ParameterLinkMessage::ControlChange { controller: 20 },
+                    relative: None,
                 },
                 parameter_id: "leslie.speed".into(),
                 mode: ParameterLinkMode::Toggle {

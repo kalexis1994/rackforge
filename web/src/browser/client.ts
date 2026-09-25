@@ -963,11 +963,14 @@ export function isKeyLabMainEndpoint(
   // not the desktop port label. The KeyLab's main endpoint therefore appears
   // simply as "KeyLab Essential 61 mk3". Android preserves port ordering, so
   // resolveKeyLabTransport pairs the first matching input and output.
-  const androidProductNames = new Set([
-    "keylab essential 61 mk3",
-    "arturia keylab essential 61 mk3",
-    "kl essential 61 mk3",
-  ]);
+  // The 49, 61 and 88 have one panel and one display.
+  const androidProductNames = new Set(
+    ["49", "61", "88"].flatMap((size) => [
+      `keylab essential ${size} mk3`,
+      `arturia keylab essential ${size} mk3`,
+      `kl essential ${size} mk3`,
+    ]),
+  );
   return androidProductNames.has(folded) || maker.includes("arturia");
 }
 

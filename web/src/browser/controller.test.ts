@@ -15,6 +15,9 @@ describe("browser Arturia controller transport", () => {
     expect(isKeyLabMainEndpoint("KL Essential 61 mk3 MCU/HUI")).toBe(false);
     expect(isKeyLabMainEndpoint("KL Essential 61 mk3 DINTHRU")).toBe(false);
     expect(isKeyLabMainEndpoint("Other MIDI")).toBe(false);
+    // The 49 and 88 have the 61's panel and display.
+    expect(isKeyLabMainEndpoint("KeyLab Essential 49 mk3")).toBe(true);
+    expect(isKeyLabMainEndpoint("KL Essential 88 mk3 MIDI")).toBe(true);
     // Other KeyLabs, even from Arturia: they speak other protocols.
     expect(isKeyLabMainEndpoint("KeyLab mkII 61 MIDI")).toBe(false);
     expect(isKeyLabMainEndpoint("KeyLab 61 mk3 MIDI")).toBe(false);

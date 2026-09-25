@@ -1,9 +1,9 @@
 schema_version = 2
 kind = "controller"
 id = "org.rackforge.arturia-keylab-essential-mk3"
-name = "Arturia KeyLab Essential 61 mk3"
+name = "Arturia KeyLab Essential mk3"
 vendor = "Arturia"
-version = "0.5.0"
+version = "0.6.0"
 controller_api = "^1.0"
 # The identity the controls had under schema 1: what a player learnt on them
 # stays linked across the move.
@@ -495,11 +495,17 @@ role = "rackforge.master.level"
 input = "part"
 target = "keyboard_parts"
 
+# The 49, 61 and 88 "sport exactly the same buttons, knobs, faders and
+# connectivity" (Arturia's KeyLab Essential mk3 User Manual 1.1.6, p7), and
+# the same display, so one driver drives the three. Their USB product ids are
+# Ableton's (KeyLab_Essential_mk3 `get_capabilities`: 588, 652, 716). The 61's
+# product name was read from a running Android host; the 49's and 88's
+# follow it.
 [[devices]]
 id = "arturia.keylab-essential-mk3"
 usb_vendor_id = 0x1c75
-usb_product_ids = [0x028c]
-product_names = ["KeyLab Essential 61 mk3"]
+usb_product_ids = [0x024c, 0x028c, 0x02cc]
+product_names = ["KeyLab Essential 49 mk3", "KeyLab Essential 61 mk3", "KeyLab Essential 88 mk3"]
 
 [[devices.endpoints]]
 role = "surface_input"

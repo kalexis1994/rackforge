@@ -424,8 +424,16 @@ mod tests {
 
     #[test]
     fn package_identity_matches_the_supported_android_usb_device() {
-        assert!(matches_usb_device(0x1c75, 0x028c));
+        // The 49, 61 and 88: one panel, one display.
+        for product_id in [0x024c, 0x028c, 0x02cc] {
+            assert!(matches_usb_device(0x1c75, product_id));
+        }
         assert!(!matches_usb_device(0x1c75, 0xffff));
+        // The KeyLab mk3 (0x024e, 0x028e, 0x02ce) has another display.
+        assert!(!matches_usb_device(0x1c75, 0x028e));
+        assert!(matches_product_name("KeyLab Essential 49 mk3"));
+        assert!(matches_product_name("KeyLab Essential 88 mk3"));
+        assert!(!matches_product_name("KeyLab 61 mk3"));
         assert!(matches_product_name("KeyLab Essential 61 mk3"));
         assert!(matches_product_name("KeyLab Essential 61 mk3 MIDI"));
         assert!(!matches_product_name("Generic USB MIDI"));

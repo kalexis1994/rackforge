@@ -95,6 +95,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "novation-launchkey-mini-mk2",
     "novation-launch-control",
     "novation-launch-control-3",
+    "novation-sl-mkiii",
 ];
 
 /// What installing the catalog did with one package.
@@ -1184,6 +1185,38 @@ mod tests {
         // 13 buttons, 8 screen buttons, the main encoder and its press, and
         // the 12 pads of the DAW bank.
         assert_eq!(binding.held_controls.len(), 71);
+    }
+
+    /// An SL MkIII is read on its InControl port on every system; its MIDI
+    /// and DIN ports, and the SL MkII, are not it.
+    #[test]
+    fn an_sl_mkiii_is_read_on_its_incontrol_port() {
+        let (_root, store) = installed_store("sl-mkiii");
+        for (port, expected) in [
+            ("MIDIIN2 (Novation SL MkIII)", Some("org.rackforge.novation-sl-mkiii")),
+            (
+                "Novation SL MkIII SL MkIII InControl",
+                Some("org.rackforge.novation-sl-mkiii"),
+            ),
+            (
+                "Novation SL MkIII:Novation SL MkIII SL MkIII InCo 24:1",
+                Some("org.rackforge.novation-sl-mkiii"),
+            ),
+            ("Novation SL MkIII", None),
+            ("Novation SL MkIII SL MkIII MIDI", None),
+            ("MIDIIN3 (Novation SL MkIII)", None),
+            ("ZeRO SL MkII MIDI 1", None),
+            ("MIDIIN2 (SL MkII)", None),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        let binding = store
+            .resolve_identified_input("MIDIIN2 (Novation SL MkIII)", None)
+            .unwrap()
+            .unwrap();
+        // Nothing on the InControl port plays: 8 knobs, 8 faders, 24 soft
+        // buttons, 21 other buttons and 16 pads.
+        assert_eq!(binding.held_controls.len(), 77);
     }
 
     /// A Launchkey MK2 of any size is read on its InControl port on every

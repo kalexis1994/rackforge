@@ -73,6 +73,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "m-audio-keystation-mk3/61",
     "m-audio-keystation-mk3/88",
     "akai-mpk-mini-mk3",
+    "akai-mpk-mini-plus",
 ];
 
 /// What installing the catalog did with one package.
@@ -780,7 +781,45 @@ mod tests {
             "MIDIIN2 (MPK mini IV)",
             "MPK mini Play mk3",
         ] {
-            assert_eq!(resolved(&store, port, None), None, "{port}");
+            assert_ne!(
+                resolved(&store, port, None).as_deref(),
+                Some("org.rackforge.akai-mpk-mini-mk3"),
+                "{port}"
+            );
+        }
+    }
+
+    /// An MPK mini Plus is read on its first port on every system; its
+    /// 5-pin MIDI port and the MPK mini Plus II are not it.
+    #[test]
+    fn an_mpk_mini_plus_is_read_on_its_first_port() {
+        let (_root, store) = installed_store("mpk-mini-plus");
+        for port in [
+            "MPK mini Plus",
+            "MPK mini Plus Port 1",
+            "MPK mini Plus Puerto 1",
+            "MPK mini Plus:MPK mini Plus MIDI 1 20:0",
+        ] {
+            assert_eq!(
+                resolved(&store, port, None).as_deref(),
+                Some("org.rackforge.akai-mpk-mini-plus"),
+                "{port}"
+            );
+        }
+        for port in [
+            "MIDIIN2 (MPK mini Plus)",
+            "MPK mini Plus Port 2",
+            "MPK mini Plus Anschluss 2",
+            "MPK mini Plus:MPK mini Plus MIDI 2 20:1",
+            "MPK mini Plus II MIDI Port",
+            "MIDIIN2 (MPK mini Plus II)",
+            "MPK mini 3",
+        ] {
+            assert_eq!(
+                resolved(&store, port, None).as_deref(),
+                (port == "MPK mini 3").then_some("org.rackforge.akai-mpk-mini-mk3"),
+                "{port}"
+            );
         }
     }
 

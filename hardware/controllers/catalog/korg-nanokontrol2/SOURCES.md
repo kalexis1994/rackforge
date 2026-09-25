@@ -31,6 +31,9 @@ with the documents cited, not their text.
 | MX | Mixxx, `res/controllers/Korg nanoKONTROL 2.midi.xml` | https://github.com/mixxxdj/mixxx (commit `bcfb7956`) | 2026-09-25 | `a19c7e408bc1f1045988c9e4c0ef55fc9d7eab3fd0ff1d12ed6e41bb092c5422` |
 | OV | Overtone, `src/overtone/device/midi/nanoKONTROL2.clj` | https://github.com/overtone/overtone (commit `eb531784`) | 2026-09-25 | `e00087f183a2db47c5cfd22d276a4458717dbc6212c803b1906e69fe856d2cf8` |
 | MZ | midizap, `examples/nanoKONTROL2.midizaprc` (Linux port name) | https://github.com/agraef/midizap | 2026-09-25 | — |
+| OF | openfollow, `openfollow/input/midi.py` (ALSA port name, jack-named) | https://github.com/openfollowapp/openfollow | 2026-09-25 | — (community) |
+| BR | brume, `crates/ui-native/src/controllers/nanokontrol2.rs` (ALSA port name, jack-named) | https://github.com/aftertonesignal/brume | 2026-09-25 | — (community) |
+| UD | blekenbleu/midi_examples, `nanoKONTROL2.USB.txt` (the USB descriptors: jack strings `nanoKONTROL2 _ CTRL`, `nanoKONTROL2 _ SLIDER/KNOB`) | https://github.com/blekenbleu/midi_examples | 2026-09-25 | — (community) |
 
 ## Facts, one by one
 
@@ -38,7 +41,7 @@ with the documents cited, not their text.
 |---|---|---|---|
 | Operation modes | DAW modes (Cubase, DP, Live, Pro Tools, SONAR) and CC mode; the unit starts in the last used; SET MARKER + CYCLE at power-up engages CC mode | Documented | OM "Operation mode"; PG Control Mode |
 | Port names | input `nanoKONTROL2 SLIDER/KNOB` (Mac; Korg driver `nanoKONTROL2 1 SLIDER/KNOB`), `nanoKONTROL2` (Windows' driver); output `nanoKONTROL2 CTRL` | Documented | OM "nanoKONTROL2 and driver ports" |
-| Linux port name | `nanoKONTROL2 MIDI 1` | Community | MZ `JACK_IN1` |
+| Linux port name | `nanoKONTROL2 MIDI 1`; `nanoKONTROL2 _ CTRL` (`nanoKONTROL2:nanoKONTROL2 _ CTRL 20:0`) where the kernel names ports after the USB jacks, as the Pi's does | Community ×3 | MZ `JACK_IN1`; OF, BR (ALSA listings); UD (the jack strings). The endpoint keeps no word out, so the `CTRL` port is taken on Linux |
 | Identity Reply, for the record | `F0 7E 0g 06 02 42 13 01 00 00 …` | Documented | MI 1-2 |
 | Control numbers | slider 1–8 CC 0–7; knob 1–8 CC 16–23; S 32–39; M 48–55; R 64–71; Play 41, Stop 42, REW 43, FF 44, REC 45, Cycle 46; Track < 58, Track > 59, Marker Set 60, Marker < 61, Marker > 62 | Documented (native mode, channel 16); Community ×2 (CC mode, channel 1) | MI 4 (2)-(3); MX; OV |
 | Channel in CC mode | 1 | Community ×2 | MX (status B0); OV (`:chan 0 :cmd 176`) |

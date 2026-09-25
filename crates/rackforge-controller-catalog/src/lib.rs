@@ -993,7 +993,10 @@ mod tests {
                 "nanoKONTROL2:nanoKONTROL2 MIDI 1 24:0",
                 Some("org.rackforge.korg-nanokontrol2"),
             ),
-            ("nanoKONTROL2 CTRL", None),
+            (
+                "nanoKONTROL2:nanoKONTROL2 _ CTRL 20:0",
+                Some("org.rackforge.korg-nanokontrol2"),
+            ),
             ("nanoKONTROL", None),
             ("nanoKONTROL Studio", None),
         ] {

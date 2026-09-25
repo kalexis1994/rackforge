@@ -309,19 +309,40 @@ pub fn is_played_midi_input(name: &str) -> bool {
         })
 }
 
-/// Whether a port name is a keyboard RackForge should play from.
+/// Whether a port name is a keyboard RackForge should play from: a port named
+/// as MIDI, or a USB device's first port whatever its maker called it. A
+/// kernel that names ports after the device's own jacks calls a Korg nanoKEY2
+/// "nanoKEY2 _ CTRL", with no "MIDI" in it.
 ///
 /// Excludes the loopback, the DIN pass-through and the control-surface ports a
 /// controller also exposes: those carry surface traffic, not performance notes.
 pub fn is_performance_midi_input(name: &str) -> bool {
     let folded = name.to_ascii_lowercase();
-    folded.contains("midi")
+    (folded.contains("midi") || is_first_device_port(name) && !folded.contains("daw"))
         && !folded.contains("midi through")
         && !folded.contains("dinthru")
         && !folded.contains("mcu")
         && !folded.contains("hui")
         && !folded.contains(" alv")
         && !folded.contains("rackforge")
+}
+
+/// Whether the ALSA address ending a port name is a sound card's first port:
+/// client 16-127, port 0. Clients below 16 are the system's, Midi Through
+/// among them; from 128 on they are programs'.
+fn is_first_device_port(name: &str) -> bool {
+    let Some((_, address)) = name.rsplit_once(' ') else {
+        return false;
+    };
+    let Some((client, port)) = address.split_once(':') else {
+        return false;
+    };
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    digits(client)
+        && port == "0"
+        && client
+            .parse::<u32>()
+            .is_ok_and(|client| (16..128).contains(&client))
 }
 
 #[cfg(target_os = "linux")]
@@ -1053,6 +1074,32 @@ mod tests {
         ));
         assert!(!is_performance_midi_input("KL Essential 61 mk3 ALV 28:3"));
         assert!(!is_performance_midi_input("Midi Through MIDI 0:1"));
+    }
+
+    /// A device whose first port is not named MIDI is still played: Korg's
+    /// nano series, named after their jacks. Its other ports, a DAW port, the
+    /// system's clients and programs' ports stay out.
+    #[test]
+    fn a_devices_first_port_is_played_whatever_it_is_called() {
+        assert!(is_performance_midi_input(
+            "nanoKEY2:nanoKEY2 nanoKEY2 _ CTRL 36:0"
+        ));
+        assert!(is_performance_midi_input(
+            "nanoKONTROL2:nanoKONTROL2 _ CTRL 20:0"
+        ));
+        assert!(!is_performance_midi_input(
+            "Launchpad X:Launchpad X LPX DAW Out 24:0"
+        ));
+        assert!(!is_performance_midi_input(
+            "Launchkey MK3 49:Launchkey MK3 49 LKMK3 DAW Out 24:1"
+        ));
+        assert!(!is_performance_midi_input("nanoKEY2:nanoKEY2 _ CTRL 36:1"));
+        assert!(!is_performance_midi_input(
+            "Midi Through:Midi Through Port-0 14:0"
+        ));
+        assert!(!is_performance_midi_input("System:Timer 0:0"));
+        assert!(!is_performance_midi_input("VMPK Output:out 130:0"));
+        assert!(!is_performance_midi_input("nanoKEY2 _ CTRL"));
     }
 
     /// A port a controller package claims is read though its name would

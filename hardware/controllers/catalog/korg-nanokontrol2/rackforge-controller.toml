@@ -17,13 +17,14 @@ id = "nanokontrol2"
 
 # Its one input: "nanoKONTROL2 SLIDER/KNOB" on a Mac and with Korg's
 # Windows driver, "nanoKONTROL2" with Windows' own driver [OM "nanoKONTROL2
-# and driver ports"], "nanoKONTROL2 MIDI 1" on Linux. The CTRL port is the
-# output. "nanokontrol2" is in neither the first nanoKONTROL's name nor the
+# and driver ports"]. On Linux, "nanoKONTROL2 MIDI 1", or "nanoKONTROL2 _
+# CTRL" where the kernel names ports after the device's USB jacks [MZ; OF;
+# BR]. So no word is kept out: a Mac's CTRL port is an output, never matched
+# here. "nanokontrol2" is in neither the first nanoKONTROL's name nor the
 # nanoKONTROL Studio's.
 [[devices.endpoints]]
 role = "performance_input"
 name_contains = ["nanokontrol2"]
-exclude_contains = ["ctrl"]
 
 # Sliders 1-8: CC 0-7, channel 1 [MI native mode "Group 1 Slider 00, Group
 # 2 ~ 8 Slider 01 ~ 07"; MX; OV]. They take the first row.

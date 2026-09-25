@@ -1,0 +1,736 @@
+# Arturia KeyLab mk3 (49, 61 and 88), in its DAW mode, read on its DAW port.
+# Every value below is sourced in SOURCES.md; [BW] is Bitwig's KeyLab mk3
+# extension, [AB] Ableton Live 12's KeyLab_mk3 script, [BG] Bitwig's KeyLab
+# mk3 setup guide, [UM] the KeyLab mk3 User Manual. [BW] and [AB] are
+# official software and read the same controls, value for value, except
+# where a comment says otherwise.
+#
+# The player enters DAW mode on the keyboard: at power-up, or PROG, then DAW
+# [UM p51; BG p4].
+# No official script selects it by message, so RackForge does not either;
+# it sends the DAW connection message both scripts send.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.arturia-keylab-mk3"
+name = "KeyLab mk3"
+vendor = "Arturia"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "keylab-mk3"
+
+# The controls speak on the DAW port: "MIDIIN2 (KeyLab 49 mk3)" /
+# "MIDIOUT2 (KeyLab 49 mk3)" on Windows, "KeyLab 49 mk3 DAW" on a Mac,
+# "KeyLab 49 mk3 KeyLab 49 mk3 DAW" on Linux [BG p4; BW port names]. The keys,
+# wheels and pedals stay on the MIDI port and play as any keyboard does. Every
+# size has the same panel [UM p7: 9 encoders, 9 faders], so one package
+# reads the three. The KeyLab Essential mk3 ("KL Essential 61 mk3") and the
+# KeyLab mkII ("KeyLab mkII 61") never carry "keylab" and "mk3" together
+# without "essential".
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["keylab", "mk3"]
+name_contains_any = ["midiin2", "daw"]
+exclude_contains = ["essential"]
+
+# Where the connection message goes: the same port, as an output.
+[[devices.endpoints]]
+role = "setup_output"
+name_contains = ["keylab", "mk3"]
+name_contains_any = ["midiout2", "daw"]
+exclude_contains = ["essential"]
+
+# On connect, RackForge sends the DAW connection message Bitwig and Ableton
+# send when they take the keyboard [BW DAW_CONNECTION; AB CONNECTION_MESSAGE]:
+# F0 00 20 6B 7F 42 00 02 05 01 F7.
+[permissions]
+midi_input = true
+midi_output = true
+sysex = true
+
+[[on_connect]]
+message = "F0 00 20 6B 7F 42 00 02 05 01 F7"
+to = "setup_output"
+
+# Everything on the DAW port is a DAW protocol's control, none of it an
+# instrument's: every input has `plays = false` (catalog README).
+
+# Encoders 1-9: CC 91, 92, 94, 95, 96, 97, 102, 103, 104, channel 1, relative,
+# 64 standing still [BW ENCODER_CC, binary offset; AB encoders]. Encoders 1-8
+# take the second row; the ninth no slot.
+
+[[inputs]]
+id = "encoder-1"
+name = "Encoder 1"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 91 }
+encoder = "relative_binary_offset"
+slot = "control-2.1"
+plays = false
+
+[[inputs]]
+id = "encoder-2"
+name = "Encoder 2"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 92 }
+encoder = "relative_binary_offset"
+slot = "control-2.2"
+plays = false
+
+[[inputs]]
+id = "encoder-3"
+name = "Encoder 3"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 94 }
+encoder = "relative_binary_offset"
+slot = "control-2.3"
+plays = false
+
+[[inputs]]
+id = "encoder-4"
+name = "Encoder 4"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 95 }
+encoder = "relative_binary_offset"
+slot = "control-2.4"
+plays = false
+
+[[inputs]]
+id = "encoder-5"
+name = "Encoder 5"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 96 }
+encoder = "relative_binary_offset"
+slot = "control-2.5"
+plays = false
+
+[[inputs]]
+id = "encoder-6"
+name = "Encoder 6"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 97 }
+encoder = "relative_binary_offset"
+slot = "control-2.6"
+plays = false
+
+[[inputs]]
+id = "encoder-7"
+name = "Encoder 7"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 102 }
+encoder = "relative_binary_offset"
+slot = "control-2.7"
+plays = false
+
+[[inputs]]
+id = "encoder-8"
+name = "Encoder 8"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 103 }
+encoder = "relative_binary_offset"
+slot = "control-2.8"
+plays = false
+
+[[inputs]]
+id = "encoder-9"
+name = "Encoder 9"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 104 }
+encoder = "relative_binary_offset"
+plays = false
+
+# Faders 1-9: CC 105-113, channel 1, absolute [BW SLIDER 0x69 + i; AB
+# faders]. Faders 1-8 take the first row; the ninth, the master fader, no
+# slot.
+
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 105 }
+slot = "control-1.1"
+plays = false
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 106 }
+slot = "control-1.2"
+plays = false
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 107 }
+slot = "control-1.3"
+plays = false
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 108 }
+slot = "control-1.4"
+plays = false
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 109 }
+slot = "control-1.5"
+plays = false
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 110 }
+slot = "control-1.6"
+plays = false
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 111 }
+slot = "control-1.7"
+plays = false
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 112 }
+slot = "control-1.8"
+plays = false
+
+[[inputs]]
+id = "fader-9"
+name = "Master fader"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 113 }
+plays = false
+
+# Touching an encoder or a fader sends 127, letting go 0: encoders CC 8-15
+# and 38, faders CC 28-31 and 33-37 [BW ENCODER_TOUCH, SLIDER_TOUCH; AB
+# touch ids]. Declared so that they never reach an instrument: CC 11 is
+# expression. Ableton gives fader 5 CC 32, Bitwig CC 33: see SOURCES.md.
+
+[[inputs]]
+id = "encoder-1-touch"
+name = "Encoder 1 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 8 }
+plays = false
+
+[[inputs]]
+id = "encoder-2-touch"
+name = "Encoder 2 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 9 }
+plays = false
+
+[[inputs]]
+id = "encoder-3-touch"
+name = "Encoder 3 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 10 }
+plays = false
+
+[[inputs]]
+id = "encoder-4-touch"
+name = "Encoder 4 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 11 }
+plays = false
+
+[[inputs]]
+id = "encoder-5-touch"
+name = "Encoder 5 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 12 }
+plays = false
+
+[[inputs]]
+id = "encoder-6-touch"
+name = "Encoder 6 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 13 }
+plays = false
+
+[[inputs]]
+id = "encoder-7-touch"
+name = "Encoder 7 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 14 }
+plays = false
+
+[[inputs]]
+id = "encoder-8-touch"
+name = "Encoder 8 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 15 }
+plays = false
+
+[[inputs]]
+id = "encoder-9-touch"
+name = "Encoder 9 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 38 }
+plays = false
+
+[[inputs]]
+id = "fader-1-touch"
+name = "Fader 1 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 28 }
+plays = false
+
+[[inputs]]
+id = "fader-2-touch"
+name = "Fader 2 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 29 }
+plays = false
+
+[[inputs]]
+id = "fader-3-touch"
+name = "Fader 3 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 30 }
+plays = false
+
+[[inputs]]
+id = "fader-4-touch"
+name = "Fader 4 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 31 }
+plays = false
+
+[[inputs]]
+id = "fader-5-touch"
+name = "Fader 5 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 33 }
+plays = false
+
+[[inputs]]
+id = "fader-6-touch"
+name = "Fader 6 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 34 }
+plays = false
+
+[[inputs]]
+id = "fader-7-touch"
+name = "Fader 7 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 35 }
+plays = false
+
+[[inputs]]
+id = "fader-8-touch"
+name = "Fader 8 touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 36 }
+plays = false
+
+[[inputs]]
+id = "fader-9-touch"
+name = "Master fader touch"
+kind = "button"
+group = "Touch"
+midi = { channel = 0, cc = 37 }
+plays = false
+
+# Buttons: CC on channel 1, 127 pressed and 0 released [BW CcAssignment; AB
+# elements]. Rewind and fast-forward step the main selector; Save, Quantize,
+# Metro and Undo take their labelled switches.
+
+[[inputs]]
+id = "stop"
+name = "Stop"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 20 }
+plays = false
+
+[[inputs]]
+id = "play"
+name = "Play"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 21 }
+plays = false
+
+[[inputs]]
+id = "record"
+name = "Record"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 22 }
+plays = false
+
+[[inputs]]
+id = "tap"
+name = "Tap"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 23 }
+plays = false
+
+[[inputs]]
+id = "loop"
+name = "Loop"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 24 }
+plays = false
+
+[[inputs]]
+id = "rewind"
+name = "Rewind"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 25 }
+slot = "step.down"
+plays = false
+
+[[inputs]]
+id = "forward"
+name = "Fast-forward"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 26 }
+slot = "step.up"
+plays = false
+
+[[inputs]]
+id = "metro"
+name = "Metro"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 27 }
+slot = "switch-3.3"
+plays = false
+
+[[inputs]]
+id = "back"
+name = "Back"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 40 }
+plays = false
+
+[[inputs]]
+id = "save"
+name = "Save"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 41 }
+slot = "switch-3.1"
+plays = false
+
+[[inputs]]
+id = "quantize"
+name = "Quantize"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 42 }
+slot = "switch-3.2"
+plays = false
+
+[[inputs]]
+id = "undo"
+name = "Undo"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 43 }
+slot = "switch-3.4"
+plays = false
+
+[[inputs]]
+id = "redo"
+name = "Redo"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 44 }
+plays = false
+
+# The eight buttons around the screen: CC 45-52, channel 1, 127 pressed and 0
+# released [BW CONTEXT_BUTTON 0x2D + i; AB]. The keyboard has pads, so no
+# slot.
+
+[[inputs]]
+id = "screen-button-1"
+name = "Screen button 1"
+kind = "button"
+group = "Screen buttons"
+midi = { channel = 0, cc = 45 }
+plays = false
+
+[[inputs]]
+id = "screen-button-2"
+name = "Screen button 2"
+kind = "button"
+group = "Screen buttons"
+midi = { channel = 0, cc = 46 }
+plays = false
+
+[[inputs]]
+id = "screen-button-3"
+name = "Screen button 3"
+kind = "button"
+group = "Screen buttons"
+midi = { channel = 0, cc = 47 }
+plays = false
+
+[[inputs]]
+id = "screen-button-4"
+name = "Screen button 4"
+kind = "button"
+group = "Screen buttons"
+midi = { channel = 0, cc = 48 }
+plays = false
+
+[[inputs]]
+id = "screen-button-5"
+name = "Screen button 5"
+kind = "button"
+group = "Screen buttons"
+midi = { channel = 0, cc = 49 }
+plays = false
+
+[[inputs]]
+id = "screen-button-6"
+name = "Screen button 6"
+kind = "button"
+group = "Screen buttons"
+midi = { channel = 0, cc = 50 }
+plays = false
+
+[[inputs]]
+id = "screen-button-7"
+name = "Screen button 7"
+kind = "button"
+group = "Screen buttons"
+midi = { channel = 0, cc = 51 }
+plays = false
+
+[[inputs]]
+id = "screen-button-8"
+name = "Screen button 8"
+kind = "button"
+group = "Screen buttons"
+midi = { channel = 0, cc = 52 }
+plays = false
+
+# The main encoder: turning it sends CC 116, relative as the encoders [BW
+# TouchEncoder(40, 0x74, 0x75); AB], pressing it CC 117 [BW only: Ableton
+# maps no press]. It browses the keyboard's menus: no slot.
+
+[[inputs]]
+id = "main-encoder"
+name = "Main encoder"
+kind = "encoder"
+group = "Navigation"
+midi = { channel = 0, cc = 116 }
+encoder = "relative_binary_offset"
+plays = false
+
+[[inputs]]
+id = "main-encoder-press"
+name = "Main encoder press"
+kind = "button"
+group = "Navigation"
+midi = { channel = 0, cc = 117 }
+plays = false
+
+# Pads, in the DAW pad bank (BANK+ until DAW): notes 0-11 on channel 10, on
+# the DAW port [BW RgbNoteButton(i); AB channels=9]. They launch clips, never
+# notes an instrument should hear. No slot: the catalog places pads by the
+# notes 36-51, and these send 0-11. In banks A-D the pads send notes 36 and
+# up [UM p20], which the package does not describe.
+
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 0 }
+plays = false
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 1 }
+plays = false
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 2 }
+plays = false
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 3 }
+plays = false
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 4 }
+plays = false
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 5 }
+plays = false
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 6 }
+plays = false
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 7 }
+plays = false
+
+[[inputs]]
+id = "pad-9"
+name = "Pad 9"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 8 }
+plays = false
+
+[[inputs]]
+id = "pad-10"
+name = "Pad 10"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 9 }
+plays = false
+
+[[inputs]]
+id = "pad-11"
+name = "Pad 11"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 10 }
+plays = false
+
+[[inputs]]
+id = "pad-12"
+name = "Pad 12"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 11 }
+plays = false
+
+# Faders 1-8 and the master fader take the catalog's roles (catalog README,
+# "Eight knobs and nine faders"); the encoders are relative, and roles read
+# absolute controls only.
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"
+
+[[roles]]
+input = "fader-9"
+role = "rackforge.master.level"
+
+# Play and Stop take the transport.
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop"
+target = "transport_stop"

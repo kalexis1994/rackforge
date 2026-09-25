@@ -90,6 +90,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "arturia-keylab-mkii/61",
     "arturia-keylab-mkii/88",
     "arturia-keylab-essential",
+    "arturia-keylab-mk3",
     "novation-launchkey-mk2",
     "novation-launchkey-mini-mk2",
     "novation-launch-control",
@@ -1143,6 +1144,46 @@ mod tests {
             .unwrap();
         // Nine faders, eight encoders, the wheel and 20 buttons.
         assert_eq!(binding.held_controls.len(), 38);
+    }
+
+    /// A KeyLab mk3 of any size is read on its DAW port on every system;
+    /// its MIDI port, the KeyLab Essential mk3 and the KeyLab mkII are not it.
+    #[test]
+    fn a_keylab_mk3_is_read_on_its_daw_port_whatever_its_size() {
+        let (_root, store) = installed_store("keylab-mk3");
+        for (port, expected) in [
+            ("MIDIIN2 (KeyLab 49 mk3)", Some("org.rackforge.arturia-keylab-mk3")),
+            ("2- MIDIIN2 (KeyLab 88 mk3)", Some("org.rackforge.arturia-keylab-mk3")),
+            ("KeyLab 61 mk3 DAW", Some("org.rackforge.arturia-keylab-mk3")),
+            (
+                "KeyLab 61 mk3:KeyLab 61 mk3 DAW 16:1",
+                Some("org.rackforge.arturia-keylab-mk3"),
+            ),
+            (
+                "KeyLab 49 mk3 KeyLab 49 mk3 DAW",
+                Some("org.rackforge.arturia-keylab-mk3"),
+            ),
+            ("KeyLab 49 mk3", None),
+            ("KeyLab 61 mk3 MIDI", None),
+            ("KeyLab 49 mk3 KeyLab 49 mk3 MID", None),
+            ("KL Essential 61 mk3 MIDI", None),
+            ("MIDIIN2 (KL Essential 61 mk3)", None),
+            ("KeyLab Essential 61 mk3 MIDI", None),
+            (
+                "KeyLab mkII 61 DAW",
+                Some("org.rackforge.arturia-keylab-mkii-61"),
+            ),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        let binding = store
+            .resolve_identified_input("MIDIIN2 (KeyLab 61 mk3)", None)
+            .unwrap()
+            .unwrap();
+        // Nothing on the DAW port plays: 9 encoders, 9 faders, 18 touches,
+        // 13 buttons, 8 screen buttons, the main encoder and its press, and
+        // the 12 pads of the DAW bank.
+        assert_eq!(binding.held_controls.len(), 71);
     }
 
     /// A Launchkey MK2 of any size is read on its InControl port on every

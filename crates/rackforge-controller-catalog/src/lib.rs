@@ -83,6 +83,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "akai-apc-mini-mk2",
     "akai-mpd218",
     "akai-apc40-mk2",
+    "korg-nanokontrol2",
 ];
 
 /// What installing the catalog did with one package.
@@ -970,6 +971,33 @@ mod tests {
                 .find(|manifest| manifest.id == id)
                 .unwrap();
             assert_eq!(manifest.modifier_input().unwrap().id, "shift", "{id}");
+        }
+    }
+
+    /// Korg's controllers are read on their input by the model in its name,
+    /// and a sister -- the first of a line, a Studio -- is never taken.
+    #[test]
+    fn korg_controllers_are_known_by_the_model_in_their_port_names() {
+        let (_root, store) = installed_store("korg-controllers");
+        for (port, expected) in [
+            (
+                "nanoKONTROL2 SLIDER/KNOB",
+                Some("org.rackforge.korg-nanokontrol2"),
+            ),
+            (
+                "nanoKONTROL2 1 SLIDER/KNOB",
+                Some("org.rackforge.korg-nanokontrol2"),
+            ),
+            ("nanoKONTROL2", Some("org.rackforge.korg-nanokontrol2")),
+            (
+                "nanoKONTROL2:nanoKONTROL2 MIDI 1 24:0",
+                Some("org.rackforge.korg-nanokontrol2"),
+            ),
+            ("nanoKONTROL2 CTRL", None),
+            ("nanoKONTROL", None),
+            ("nanoKONTROL Studio", None),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
         }
     }
 

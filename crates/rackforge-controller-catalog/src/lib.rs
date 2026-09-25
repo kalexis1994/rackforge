@@ -86,6 +86,9 @@ pub const BUNDLED: &[BundledController] = bundled![
     "korg-nanokontrol2",
     "arturia-minilab-3",
     "arturia-minilab-37",
+    "arturia-keylab-mkii/49",
+    "arturia-keylab-mkii/61",
+    "arturia-keylab-mkii/88",
 ];
 
 /// What installing the catalog did with one package.
@@ -1039,6 +1042,54 @@ mod tests {
         ] {
             assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
         }
+    }
+
+    /// A KeyLab mkII is read on its DAW port on every system, never on its
+    /// keys' port, and each size is its own. Its faders, encoders and
+    /// buttons never reach an instrument; its pads do.
+    #[test]
+    fn a_keylab_mkii_is_read_on_its_daw_port_and_holds_its_controls() {
+        let (_root, store) = installed_store("keylab-mkii");
+        for (port, expected) in [
+            (
+                "MIDIIN2 (KeyLab mkII 61)",
+                Some("org.rackforge.arturia-keylab-mkii-61"),
+            ),
+            (
+                "KeyLab mkII 61 DAW",
+                Some("org.rackforge.arturia-keylab-mkii-61"),
+            ),
+            (
+                "KeyLab mkII 49:KeyLab mkII 49 MIDI 2 24:1",
+                Some("org.rackforge.arturia-keylab-mkii-49"),
+            ),
+            (
+                "KeyLab mkII 88 DAW",
+                Some("org.rackforge.arturia-keylab-mkii-88"),
+            ),
+            ("KeyLab mkII 61", None),
+            ("KeyLab mkII 61 MIDI", None),
+            ("KeyLab mkII 61:KeyLab mkII 61 MIDI 1 24:0", None),
+            ("KeyLab Essential 61 DAW", None),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        let binding = store
+            .resolve_identified_input("KeyLab mkII 61 DAW", None)
+            .unwrap()
+            .unwrap();
+        let held = &binding.held_controls;
+        assert!(held.contains(&rackforge_controller_api::HeldControl::PitchBend { channel: 8 }));
+        assert!(held.contains(&rackforge_controller_api::HeldControl::Note {
+            channel: 0,
+            note: 94
+        }));
+        assert!(!held.iter().any(|control| matches!(
+            control,
+            rackforge_controller_api::HeldControl::Note { channel: 9, .. }
+        )));
+        // Nine faders, nine encoders, the wheel and 31 buttons.
+        assert_eq!(held.len(), 50);
     }
 
     /// The Launch Control XL is put on User Template 1, the template its

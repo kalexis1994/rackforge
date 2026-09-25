@@ -76,6 +76,7 @@ Across the catalog, so that any keyboard feels the same in RackForge:
 - **Eight knobs, no faders:** cutoff, resonance, filter envelope amount, LFO rate, attack, decay, sustain, release.
 - **Rows of knobs and eight faders** (a mixer-style controller): the first row of knobs and faders 1–8 as in the first rule; no master level, and the other rows are left for the player.
 - **Four knobs and four faders** (the Oxygen Pro Mini): knobs cutoff, resonance, filter envelope amount, LFO rate; faders attack, decay, sustain, release.
+- **Eight knobs and four faders** (the MiniLab 3): as the rule above, and knobs 5–8 LFO depth, filter LFO amount, key tracking, amplifier level.
 - **Transport:** Play and Stop take the transport actions.
 
 ## Slots: what each control does in every instrument

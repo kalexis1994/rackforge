@@ -84,6 +84,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "akai-mpd218",
     "akai-apc40-mk2",
     "korg-nanokontrol2",
+    "arturia-minilab-3",
 ];
 
 /// What installing the catalog did with one package.
@@ -999,6 +1000,30 @@ mod tests {
             ),
             ("nanoKONTROL", None),
             ("nanoKONTROL Studio", None),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+    }
+
+    /// The MiniLab 3 is read on its MIDI port on every system, never on its
+    /// DIN Thru, MCU/HUI or ALV port, and the MiniLab 37 is not it.
+    #[test]
+    fn a_minilab_3_is_read_on_its_midi_port() {
+        let (_root, store) = installed_store("arturia-controllers");
+        for (port, expected) in [
+            ("Minilab3", Some("org.rackforge.arturia-minilab-3")),
+            ("Minilab3 MIDI", Some("org.rackforge.arturia-minilab-3")),
+            ("2- Minilab3 MIDI", Some("org.rackforge.arturia-minilab-3")),
+            (
+                "Minilab3:Minilab3 Minilab3 MIDI 24:0",
+                Some("org.rackforge.arturia-minilab-3"),
+            ),
+            ("MIDIIN2 (Minilab3)", None),
+            ("Minilab3 DIN THRU", None),
+            ("Minilab3:Minilab3 DINTHRU 24:1", None),
+            ("Minilab3 MCU/HUI", None),
+            ("Minilab3 ALV", None),
+            ("Minilab37 MIDI", None),
         ] {
             assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
         }

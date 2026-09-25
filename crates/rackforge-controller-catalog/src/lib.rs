@@ -72,6 +72,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "m-audio-keystation-mk3/49",
     "m-audio-keystation-mk3/61",
     "m-audio-keystation-mk3/88",
+    "akai-mpk-mini-mk3",
 ];
 
 /// What installing the catalog did with one package.
@@ -749,6 +750,35 @@ mod tests {
             "Keystation Mini 32 MK3",
             "Keystation 49 II",
             "Keystation 88 II",
+        ] {
+            assert_eq!(resolved(&store, port, None), None, "{port}");
+        }
+    }
+
+    /// An MPK mini mk3 is known by "MPK mini 3" on every system; its sisters
+    /// -- the first MPK mini, the mk2, Plus, IV and Play -- are not it.
+    #[test]
+    fn an_mpk_mini_mk3_is_known_by_its_port_name() {
+        let (_root, store) = installed_store("mpk-mini-mk3");
+        for port in [
+            "MPK mini 3",
+            "MPK mini 3:MPK mini 3 MIDI 1 20:0",
+            "MPK mini 3 MIDI 1",
+        ] {
+            assert_eq!(
+                resolved(&store, port, None).as_deref(),
+                Some("org.rackforge.akai-mpk-mini-mk3"),
+                "{port}"
+            );
+        }
+        for port in [
+            "MPK mini",
+            "MPKmini2",
+            "MPK mini Plus",
+            "MPK mini Plus MIDI 1",
+            "MPK mini IV MIDI Port",
+            "MIDIIN2 (MPK mini IV)",
+            "MPK mini Play mk3",
         ] {
             assert_eq!(resolved(&store, port, None), None, "{port}");
         }

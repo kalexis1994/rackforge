@@ -1,0 +1,542 @@
+# Akai Professional MPD218, on its Preset 1, "chroma10". Every value below
+# is sourced in SOURCES.md; [PR] is Akai's own factory preset file,
+# "Preset1-chroma10.mpd218", from its "MPD218 Factory Presets"; [UG] the
+# MPD218 User Guide v1.0; [AB] Ableton Live 12's MPD218 script.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.akai-mpd218"
+name = "MPD218"
+vendor = "Akai Professional"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "mpd218"
+
+# Its USB port, "MPD218" [AB model_name]. "mpd218" is in no sister's name
+# (MPD226, MPD232, the older MPD18).
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["mpd218"]
+
+# Knobs: six 360-degree knobs [UG item 3] in three control banks [UG item
+# 4]. Bank A sends CC 3, 9, 12-15; bank B CC 16-21; bank C CC 22-27; 0-127,
+# channel 1 [PR knob records]. Each bank fills a row of controls: A the
+# first, B the second, C the third.
+[[inputs]]
+id = "knob-a1"
+name = "Knob 1 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 3 }
+slot = "control-1.1"
+
+[[inputs]]
+id = "knob-a2"
+name = "Knob 2 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 9 }
+slot = "control-1.2"
+
+[[inputs]]
+id = "knob-a3"
+name = "Knob 3 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 12 }
+slot = "control-1.3"
+
+[[inputs]]
+id = "knob-a4"
+name = "Knob 4 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 13 }
+slot = "control-1.4"
+
+[[inputs]]
+id = "knob-a5"
+name = "Knob 5 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 14 }
+slot = "control-1.5"
+
+[[inputs]]
+id = "knob-a6"
+name = "Knob 6 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 15 }
+slot = "control-1.6"
+
+[[inputs]]
+id = "knob-b1"
+name = "Knob 1 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 16 }
+slot = "control-2.1"
+
+[[inputs]]
+id = "knob-b2"
+name = "Knob 2 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 17 }
+slot = "control-2.2"
+
+[[inputs]]
+id = "knob-b3"
+name = "Knob 3 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 18 }
+slot = "control-2.3"
+
+[[inputs]]
+id = "knob-b4"
+name = "Knob 4 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 19 }
+slot = "control-2.4"
+
+[[inputs]]
+id = "knob-b5"
+name = "Knob 5 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 20 }
+slot = "control-2.5"
+
+[[inputs]]
+id = "knob-b6"
+name = "Knob 6 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 21 }
+slot = "control-2.6"
+
+[[inputs]]
+id = "knob-c1"
+name = "Knob 1 (bank C)"
+kind = "knob"
+group = "Knobs, bank C"
+midi = { channel = 0, cc = 22 }
+slot = "control-3.1"
+
+[[inputs]]
+id = "knob-c2"
+name = "Knob 2 (bank C)"
+kind = "knob"
+group = "Knobs, bank C"
+midi = { channel = 0, cc = 23 }
+slot = "control-3.2"
+
+[[inputs]]
+id = "knob-c3"
+name = "Knob 3 (bank C)"
+kind = "knob"
+group = "Knobs, bank C"
+midi = { channel = 0, cc = 24 }
+slot = "control-3.3"
+
+[[inputs]]
+id = "knob-c4"
+name = "Knob 4 (bank C)"
+kind = "knob"
+group = "Knobs, bank C"
+midi = { channel = 0, cc = 25 }
+slot = "control-3.4"
+
+[[inputs]]
+id = "knob-c5"
+name = "Knob 5 (bank C)"
+kind = "knob"
+group = "Knobs, bank C"
+midi = { channel = 0, cc = 26 }
+slot = "control-3.5"
+
+[[inputs]]
+id = "knob-c6"
+name = "Knob 6 (bank C)"
+kind = "knob"
+group = "Knobs, bank C"
+midi = { channel = 0, cc = 27 }
+slot = "control-3.6"
+
+# Pads: 16 in three pad banks [UG item 6], notes on channel 10: bank A
+# 36-51, bank B 52-67, bank C 68-83 [PR pad records; AB PAD_IDS, bank A,
+# PAD_CHANNEL 9]. Pad 1 is the bottom left [AB, top row first]. Bank A's
+# pads take the slot of the note they send, as on every keyboard in the
+# catalog; banks B and C have none.
+[[inputs]]
+id = "pad-a1"
+name = "Pad 1 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 36 }
+slot = "switch-1.5"
+
+[[inputs]]
+id = "pad-a2"
+name = "Pad 2 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 37 }
+slot = "switch-1.6"
+
+[[inputs]]
+id = "pad-a3"
+name = "Pad 3 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 38 }
+slot = "switch-1.7"
+
+[[inputs]]
+id = "pad-a4"
+name = "Pad 4 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 39 }
+slot = "switch-1.8"
+
+[[inputs]]
+id = "pad-a5"
+name = "Pad 5 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 40 }
+slot = "switch-1.1"
+
+[[inputs]]
+id = "pad-a6"
+name = "Pad 6 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 41 }
+slot = "switch-1.2"
+
+[[inputs]]
+id = "pad-a7"
+name = "Pad 7 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 42 }
+slot = "switch-1.3"
+
+[[inputs]]
+id = "pad-a8"
+name = "Pad 8 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 43 }
+slot = "switch-1.4"
+
+[[inputs]]
+id = "pad-a9"
+name = "Pad 9 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 44 }
+slot = "switch-2.5"
+
+[[inputs]]
+id = "pad-a10"
+name = "Pad 10 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 45 }
+slot = "switch-2.6"
+
+[[inputs]]
+id = "pad-a11"
+name = "Pad 11 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 46 }
+slot = "switch-2.7"
+
+[[inputs]]
+id = "pad-a12"
+name = "Pad 12 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 47 }
+slot = "switch-2.8"
+
+[[inputs]]
+id = "pad-a13"
+name = "Pad 13 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 48 }
+slot = "switch-2.1"
+
+[[inputs]]
+id = "pad-a14"
+name = "Pad 14 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 49 }
+slot = "switch-2.2"
+
+[[inputs]]
+id = "pad-a15"
+name = "Pad 15 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 50 }
+slot = "switch-2.3"
+
+[[inputs]]
+id = "pad-a16"
+name = "Pad 16 (bank A)"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 9, note = 51 }
+slot = "switch-2.4"
+
+[[inputs]]
+id = "pad-b1"
+name = "Pad 1 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 52 }
+
+[[inputs]]
+id = "pad-b2"
+name = "Pad 2 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 53 }
+
+[[inputs]]
+id = "pad-b3"
+name = "Pad 3 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 54 }
+
+[[inputs]]
+id = "pad-b4"
+name = "Pad 4 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 55 }
+
+[[inputs]]
+id = "pad-b5"
+name = "Pad 5 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 56 }
+
+[[inputs]]
+id = "pad-b6"
+name = "Pad 6 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 57 }
+
+[[inputs]]
+id = "pad-b7"
+name = "Pad 7 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 58 }
+
+[[inputs]]
+id = "pad-b8"
+name = "Pad 8 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 59 }
+
+[[inputs]]
+id = "pad-b9"
+name = "Pad 9 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 60 }
+
+[[inputs]]
+id = "pad-b10"
+name = "Pad 10 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 61 }
+
+[[inputs]]
+id = "pad-b11"
+name = "Pad 11 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 62 }
+
+[[inputs]]
+id = "pad-b12"
+name = "Pad 12 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 63 }
+
+[[inputs]]
+id = "pad-b13"
+name = "Pad 13 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 64 }
+
+[[inputs]]
+id = "pad-b14"
+name = "Pad 14 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 65 }
+
+[[inputs]]
+id = "pad-b15"
+name = "Pad 15 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 66 }
+
+[[inputs]]
+id = "pad-b16"
+name = "Pad 16 (bank B)"
+kind = "pad"
+group = "Pads, bank B"
+midi = { channel = 9, note = 67 }
+
+[[inputs]]
+id = "pad-c1"
+name = "Pad 1 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 68 }
+
+[[inputs]]
+id = "pad-c2"
+name = "Pad 2 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 69 }
+
+[[inputs]]
+id = "pad-c3"
+name = "Pad 3 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 70 }
+
+[[inputs]]
+id = "pad-c4"
+name = "Pad 4 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 71 }
+
+[[inputs]]
+id = "pad-c5"
+name = "Pad 5 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 72 }
+
+[[inputs]]
+id = "pad-c6"
+name = "Pad 6 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 73 }
+
+[[inputs]]
+id = "pad-c7"
+name = "Pad 7 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 74 }
+
+[[inputs]]
+id = "pad-c8"
+name = "Pad 8 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 75 }
+
+[[inputs]]
+id = "pad-c9"
+name = "Pad 9 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 76 }
+
+[[inputs]]
+id = "pad-c10"
+name = "Pad 10 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 77 }
+
+[[inputs]]
+id = "pad-c11"
+name = "Pad 11 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 78 }
+
+[[inputs]]
+id = "pad-c12"
+name = "Pad 12 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 79 }
+
+[[inputs]]
+id = "pad-c13"
+name = "Pad 13 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 80 }
+
+[[inputs]]
+id = "pad-c14"
+name = "Pad 14 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 81 }
+
+[[inputs]]
+id = "pad-c15"
+name = "Pad 15 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 82 }
+
+[[inputs]]
+id = "pad-c16"
+name = "Pad 16 (bank C)"
+kind = "pad"
+group = "Pads, bank C"
+midi = { channel = 9, note = 83 }
+
+# RackForge's default meanings for four knobs, on bank A's first four: tone.
+[[roles]]
+input = "knob-a1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "knob-a2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "knob-a3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-a4"
+role = "synth.lfo.rate"

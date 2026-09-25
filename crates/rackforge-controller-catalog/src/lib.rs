@@ -78,6 +78,11 @@ pub const BUNDLED: &[BundledController] = bundled![
     "akai-mpk2/225",
     "akai-mpk2/249",
     "akai-mpk2/261",
+    "akai-mpk-mini-play-mk3",
+    "akai-apc-key-25-mk2",
+    "akai-apc-mini-mk2",
+    "akai-mpd218",
+    "akai-apc40-mk2",
 ];
 
 /// What installing the catalog did with one package.
@@ -896,6 +901,71 @@ mod tests {
             ] {
                 assert_eq!(resolved(&store, &port, None), None, "{port}");
             }
+        }
+    }
+
+    /// Akai's MPK mini Play mk3, APC Key 25 mk2, APC mini mk2, MPD218 and APC40
+    /// mkII
+    /// are each read on the port their controls speak on, and never take a
+    /// sister's or their own keys' port.
+    #[test]
+    fn akai_controllers_are_read_on_their_control_ports() {
+        let (_root, store) = installed_store("akai-controllers");
+        for (port, expected) in [
+            (
+                "MPK mini Play mk3",
+                Some("org.rackforge.akai-mpk-mini-play-mk3"),
+            ),
+            ("MPK mini 3", Some("org.rackforge.akai-mpk-mini-mk3")),
+            (
+                "APC Key 25 mk2 Control",
+                Some("org.rackforge.akai-apc-key-25-mk2"),
+            ),
+            (
+                "MIDIIN2 (APC Key 25 mk2)",
+                Some("org.rackforge.akai-apc-key-25-mk2"),
+            ),
+            ("APC Key 25 mk2 Keys", None),
+            ("APC Key 25 mk2", None),
+            ("APC Key 25", None),
+            (
+                "APC mini mk2 Control",
+                Some("org.rackforge.akai-apc-mini-mk2"),
+            ),
+            (
+                "APC Mini mk2:APC Mini mk2 Control 24:0",
+                Some("org.rackforge.akai-apc-mini-mk2"),
+            ),
+            ("APC mini mk2", Some("org.rackforge.akai-apc-mini-mk2")),
+            ("APC mini mk2 Notes", None),
+            ("MIDIIN2 (APC mini mk2)", None),
+            ("APC MINI", None),
+            ("MPD218", Some("org.rackforge.akai-mpd218")),
+            ("MPD226", None),
+            ("APC40 mkII", Some("org.rackforge.akai-apc40-mk2")),
+            ("Akai APC40 MkII", Some("org.rackforge.akai-apc40-mk2")),
+            (
+                "APC40 mkII:APC40 mkII MIDI 1 24:0",
+                Some("org.rackforge.akai-apc40-mk2"),
+            ),
+            ("Akai APC40", None),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        // Shift is the Fn button of each APC.
+        for id in [
+            "org.rackforge.akai-apc-key-25-mk2",
+            "org.rackforge.akai-apc-mini-mk2",
+            "org.rackforge.akai-apc40-mk2",
+        ] {
+            let manifest = BUNDLED
+                .iter()
+                .map(|bundled| {
+                    toml::from_str::<ControllerPackageManifest>(bundled.manifest).unwrap()
+                })
+                .find(|manifest| manifest.id == id)
+                .unwrap();
+            assert_eq!(manifest.modifier_input().unwrap().id, "shift", "{id}");
         }
     }
 

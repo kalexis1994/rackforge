@@ -59,6 +59,10 @@ A family with a single model keeps its `rackforge-controller.toml` beside
   maps and host actions still read it. A fader may send pitch bend
   (`midi = { channel = 2, pitch_bend = true }`) and fills a row as any fader
   does. Pads that should play when nothing maps them keep the default.
+  A controller without keys -- a Launch Control, an APC, a nanoKONTROL --
+  marks every control `plays = false`: its buttons' notes and its knobs' and
+  faders' numbers (CC 0 bank select, 7 volume, 32–63 the LSBs) are no
+  instrument's. A drum-pad controller's pads (the MPD218's) still play.
 - **A Fn button.** `modifier = true` on the one button or pad the device
   itself uses as a modifier (an APC's Shift) makes it the Fn button of the
   maps RackForge offers. A player can choose another.

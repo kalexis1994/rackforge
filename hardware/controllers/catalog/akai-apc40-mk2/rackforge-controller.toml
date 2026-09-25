@@ -22,6 +22,9 @@ id = "apc40-mk2"
 role = "performance_input"
 name_contains = ["apc40 mkii"]
 
+# The APC40 mkII has no keys: none of its controls ever plays. Its grid and
+# buttons send notes, its knobs and faders an instrument's controllers.
+
 # Track faders 1-8: CC 7, each on its track's channel, 1-8 [AB make_slider
 # (track, 7); CP "the 4-bit <chan> value will be used for the track"]. They
 # take the first row. The master fader, CC 14, keeps the master level; the
@@ -33,6 +36,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 7 }
 slot = "control-1.1"
+plays = false
 
 [[inputs]]
 id = "fader-2"
@@ -41,6 +45,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 1, cc = 7 }
 slot = "control-1.2"
+plays = false
 
 [[inputs]]
 id = "fader-3"
@@ -49,6 +54,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 2, cc = 7 }
 slot = "control-1.3"
+plays = false
 
 [[inputs]]
 id = "fader-4"
@@ -57,6 +63,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 3, cc = 7 }
 slot = "control-1.4"
+plays = false
 
 [[inputs]]
 id = "fader-5"
@@ -65,6 +72,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 4, cc = 7 }
 slot = "control-1.5"
+plays = false
 
 [[inputs]]
 id = "fader-6"
@@ -73,6 +81,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 5, cc = 7 }
 slot = "control-1.6"
+plays = false
 
 [[inputs]]
 id = "fader-7"
@@ -81,6 +90,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 6, cc = 7 }
 slot = "control-1.7"
+plays = false
 
 [[inputs]]
 id = "fader-8"
@@ -89,6 +99,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 7, cc = 7 }
 slot = "control-1.8"
+plays = false
 
 [[inputs]]
 id = "master-fader"
@@ -96,6 +107,7 @@ name = "Master fader"
 kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 14 }
+plays = false
 
 [[inputs]]
 id = "crossfader"
@@ -103,6 +115,7 @@ name = "Crossfader"
 kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 15 }
+plays = false
 
 # The top row, Track Control knobs 1-8: CC 48-55, channel 1, absolute, never
 # banked [AB make_ring_encoder(48 + track), MapMode.absolute; CP "TRACK
@@ -114,6 +127,7 @@ kind = "knob"
 group = "Track Control knobs"
 midi = { channel = 0, cc = 48 }
 slot = "control-2.1"
+plays = false
 
 [[inputs]]
 id = "track-knob-2"
@@ -122,6 +136,7 @@ kind = "knob"
 group = "Track Control knobs"
 midi = { channel = 0, cc = 49 }
 slot = "control-2.2"
+plays = false
 
 [[inputs]]
 id = "track-knob-3"
@@ -130,6 +145,7 @@ kind = "knob"
 group = "Track Control knobs"
 midi = { channel = 0, cc = 50 }
 slot = "control-2.3"
+plays = false
 
 [[inputs]]
 id = "track-knob-4"
@@ -138,6 +154,7 @@ kind = "knob"
 group = "Track Control knobs"
 midi = { channel = 0, cc = 51 }
 slot = "control-2.4"
+plays = false
 
 [[inputs]]
 id = "track-knob-5"
@@ -146,6 +163,7 @@ kind = "knob"
 group = "Track Control knobs"
 midi = { channel = 0, cc = 52 }
 slot = "control-2.5"
+plays = false
 
 [[inputs]]
 id = "track-knob-6"
@@ -154,6 +172,7 @@ kind = "knob"
 group = "Track Control knobs"
 midi = { channel = 0, cc = 53 }
 slot = "control-2.6"
+plays = false
 
 [[inputs]]
 id = "track-knob-7"
@@ -162,6 +181,7 @@ kind = "knob"
 group = "Track Control knobs"
 midi = { channel = 0, cc = 54 }
 slot = "control-2.7"
+plays = false
 
 [[inputs]]
 id = "track-knob-8"
@@ -170,6 +190,7 @@ kind = "knob"
 group = "Track Control knobs"
 midi = { channel = 0, cc = 55 }
 slot = "control-2.8"
+plays = false
 
 # Device Control knobs 1-8: CC 16-23, absolute [AB make_ring_encoder(16 +
 # index)]. In Generic Mode they send on the channel of the selected track,
@@ -182,6 +203,7 @@ kind = "knob"
 group = "Device Control knobs"
 midi = { channel = 0, cc = 16 }
 slot = "control-3.1"
+plays = false
 
 [[inputs]]
 id = "device-knob-2"
@@ -190,6 +212,7 @@ kind = "knob"
 group = "Device Control knobs"
 midi = { channel = 0, cc = 17 }
 slot = "control-3.2"
+plays = false
 
 [[inputs]]
 id = "device-knob-3"
@@ -198,6 +221,7 @@ kind = "knob"
 group = "Device Control knobs"
 midi = { channel = 0, cc = 18 }
 slot = "control-3.3"
+plays = false
 
 [[inputs]]
 id = "device-knob-4"
@@ -206,6 +230,7 @@ kind = "knob"
 group = "Device Control knobs"
 midi = { channel = 0, cc = 19 }
 slot = "control-3.4"
+plays = false
 
 [[inputs]]
 id = "device-knob-5"
@@ -214,6 +239,7 @@ kind = "knob"
 group = "Device Control knobs"
 midi = { channel = 0, cc = 20 }
 slot = "control-3.5"
+plays = false
 
 [[inputs]]
 id = "device-knob-6"
@@ -222,6 +248,7 @@ kind = "knob"
 group = "Device Control knobs"
 midi = { channel = 0, cc = 21 }
 slot = "control-3.6"
+plays = false
 
 [[inputs]]
 id = "device-knob-7"
@@ -230,6 +257,7 @@ kind = "knob"
 group = "Device Control knobs"
 midi = { channel = 0, cc = 22 }
 slot = "control-3.7"
+plays = false
 
 [[inputs]]
 id = "device-knob-8"
@@ -238,6 +266,7 @@ kind = "knob"
 group = "Device Control knobs"
 midi = { channel = 0, cc = 23 }
 slot = "control-3.8"
+plays = false
 
 # Cue level and Tempo: CC 47 and CC 13, channel 1, relative in two's
 # complement [AB make_encoder, MapMode.relative_two_compliment].
@@ -248,6 +277,7 @@ kind = "encoder"
 group = "Knobs"
 midi = { channel = 0, cc = 47 }
 encoder = "relative_twos_complement"
+plays = false
 
 [[inputs]]
 id = "tempo"
@@ -256,6 +286,7 @@ kind = "encoder"
 group = "Knobs"
 midi = { channel = 0, cc = 13 }
 encoder = "relative_twos_complement"
+plays = false
 
 # The clip grid, 5 rows of 8: notes 0-39 on channel 1, the top row 32-39
 # and the bottom row 0-7 [AB make_matrix_button: 32 + track - 8 * scene; CP
@@ -268,6 +299,7 @@ kind = "pad"
 group = "Clip grid, row 1"
 midi = { channel = 0, note = 0 }
 slot = "switch-1.5"
+plays = false
 
 [[inputs]]
 id = "clip-2"
@@ -276,6 +308,7 @@ kind = "pad"
 group = "Clip grid, row 1"
 midi = { channel = 0, note = 1 }
 slot = "switch-1.6"
+plays = false
 
 [[inputs]]
 id = "clip-3"
@@ -284,6 +317,7 @@ kind = "pad"
 group = "Clip grid, row 1"
 midi = { channel = 0, note = 2 }
 slot = "switch-1.7"
+plays = false
 
 [[inputs]]
 id = "clip-4"
@@ -292,6 +326,7 @@ kind = "pad"
 group = "Clip grid, row 1"
 midi = { channel = 0, note = 3 }
 slot = "switch-1.8"
+plays = false
 
 [[inputs]]
 id = "clip-5"
@@ -300,6 +335,7 @@ kind = "pad"
 group = "Clip grid, row 1"
 midi = { channel = 0, note = 4 }
 slot = "switch-2.5"
+plays = false
 
 [[inputs]]
 id = "clip-6"
@@ -308,6 +344,7 @@ kind = "pad"
 group = "Clip grid, row 1"
 midi = { channel = 0, note = 5 }
 slot = "switch-2.6"
+plays = false
 
 [[inputs]]
 id = "clip-7"
@@ -316,6 +353,7 @@ kind = "pad"
 group = "Clip grid, row 1"
 midi = { channel = 0, note = 6 }
 slot = "switch-2.7"
+plays = false
 
 [[inputs]]
 id = "clip-8"
@@ -324,6 +362,7 @@ kind = "pad"
 group = "Clip grid, row 1"
 midi = { channel = 0, note = 7 }
 slot = "switch-2.8"
+plays = false
 
 [[inputs]]
 id = "clip-9"
@@ -332,6 +371,7 @@ kind = "pad"
 group = "Clip grid, row 2"
 midi = { channel = 0, note = 8 }
 slot = "switch-1.1"
+plays = false
 
 [[inputs]]
 id = "clip-10"
@@ -340,6 +380,7 @@ kind = "pad"
 group = "Clip grid, row 2"
 midi = { channel = 0, note = 9 }
 slot = "switch-1.2"
+plays = false
 
 [[inputs]]
 id = "clip-11"
@@ -348,6 +389,7 @@ kind = "pad"
 group = "Clip grid, row 2"
 midi = { channel = 0, note = 10 }
 slot = "switch-1.3"
+plays = false
 
 [[inputs]]
 id = "clip-12"
@@ -356,6 +398,7 @@ kind = "pad"
 group = "Clip grid, row 2"
 midi = { channel = 0, note = 11 }
 slot = "switch-1.4"
+plays = false
 
 [[inputs]]
 id = "clip-13"
@@ -364,6 +407,7 @@ kind = "pad"
 group = "Clip grid, row 2"
 midi = { channel = 0, note = 12 }
 slot = "switch-2.1"
+plays = false
 
 [[inputs]]
 id = "clip-14"
@@ -372,6 +416,7 @@ kind = "pad"
 group = "Clip grid, row 2"
 midi = { channel = 0, note = 13 }
 slot = "switch-2.2"
+plays = false
 
 [[inputs]]
 id = "clip-15"
@@ -380,6 +425,7 @@ kind = "pad"
 group = "Clip grid, row 2"
 midi = { channel = 0, note = 14 }
 slot = "switch-2.3"
+plays = false
 
 [[inputs]]
 id = "clip-16"
@@ -388,6 +434,7 @@ kind = "pad"
 group = "Clip grid, row 2"
 midi = { channel = 0, note = 15 }
 slot = "switch-2.4"
+plays = false
 
 [[inputs]]
 id = "clip-17"
@@ -395,6 +442,7 @@ name = "Clip 3.1"
 kind = "pad"
 group = "Clip grid, row 3"
 midi = { channel = 0, note = 16 }
+plays = false
 
 [[inputs]]
 id = "clip-18"
@@ -402,6 +450,7 @@ name = "Clip 3.2"
 kind = "pad"
 group = "Clip grid, row 3"
 midi = { channel = 0, note = 17 }
+plays = false
 
 [[inputs]]
 id = "clip-19"
@@ -409,6 +458,7 @@ name = "Clip 3.3"
 kind = "pad"
 group = "Clip grid, row 3"
 midi = { channel = 0, note = 18 }
+plays = false
 
 [[inputs]]
 id = "clip-20"
@@ -416,6 +466,7 @@ name = "Clip 3.4"
 kind = "pad"
 group = "Clip grid, row 3"
 midi = { channel = 0, note = 19 }
+plays = false
 
 [[inputs]]
 id = "clip-21"
@@ -423,6 +474,7 @@ name = "Clip 3.5"
 kind = "pad"
 group = "Clip grid, row 3"
 midi = { channel = 0, note = 20 }
+plays = false
 
 [[inputs]]
 id = "clip-22"
@@ -430,6 +482,7 @@ name = "Clip 3.6"
 kind = "pad"
 group = "Clip grid, row 3"
 midi = { channel = 0, note = 21 }
+plays = false
 
 [[inputs]]
 id = "clip-23"
@@ -437,6 +490,7 @@ name = "Clip 3.7"
 kind = "pad"
 group = "Clip grid, row 3"
 midi = { channel = 0, note = 22 }
+plays = false
 
 [[inputs]]
 id = "clip-24"
@@ -444,6 +498,7 @@ name = "Clip 3.8"
 kind = "pad"
 group = "Clip grid, row 3"
 midi = { channel = 0, note = 23 }
+plays = false
 
 [[inputs]]
 id = "clip-25"
@@ -451,6 +506,7 @@ name = "Clip 4.1"
 kind = "pad"
 group = "Clip grid, row 4"
 midi = { channel = 0, note = 24 }
+plays = false
 
 [[inputs]]
 id = "clip-26"
@@ -458,6 +514,7 @@ name = "Clip 4.2"
 kind = "pad"
 group = "Clip grid, row 4"
 midi = { channel = 0, note = 25 }
+plays = false
 
 [[inputs]]
 id = "clip-27"
@@ -465,6 +522,7 @@ name = "Clip 4.3"
 kind = "pad"
 group = "Clip grid, row 4"
 midi = { channel = 0, note = 26 }
+plays = false
 
 [[inputs]]
 id = "clip-28"
@@ -472,6 +530,7 @@ name = "Clip 4.4"
 kind = "pad"
 group = "Clip grid, row 4"
 midi = { channel = 0, note = 27 }
+plays = false
 
 [[inputs]]
 id = "clip-29"
@@ -479,6 +538,7 @@ name = "Clip 4.5"
 kind = "pad"
 group = "Clip grid, row 4"
 midi = { channel = 0, note = 28 }
+plays = false
 
 [[inputs]]
 id = "clip-30"
@@ -486,6 +546,7 @@ name = "Clip 4.6"
 kind = "pad"
 group = "Clip grid, row 4"
 midi = { channel = 0, note = 29 }
+plays = false
 
 [[inputs]]
 id = "clip-31"
@@ -493,6 +554,7 @@ name = "Clip 4.7"
 kind = "pad"
 group = "Clip grid, row 4"
 midi = { channel = 0, note = 30 }
+plays = false
 
 [[inputs]]
 id = "clip-32"
@@ -500,6 +562,7 @@ name = "Clip 4.8"
 kind = "pad"
 group = "Clip grid, row 4"
 midi = { channel = 0, note = 31 }
+plays = false
 
 [[inputs]]
 id = "clip-33"
@@ -507,6 +570,7 @@ name = "Clip 5.1"
 kind = "pad"
 group = "Clip grid, row 5"
 midi = { channel = 0, note = 32 }
+plays = false
 
 [[inputs]]
 id = "clip-34"
@@ -514,6 +578,7 @@ name = "Clip 5.2"
 kind = "pad"
 group = "Clip grid, row 5"
 midi = { channel = 0, note = 33 }
+plays = false
 
 [[inputs]]
 id = "clip-35"
@@ -521,6 +586,7 @@ name = "Clip 5.3"
 kind = "pad"
 group = "Clip grid, row 5"
 midi = { channel = 0, note = 34 }
+plays = false
 
 [[inputs]]
 id = "clip-36"
@@ -528,6 +594,7 @@ name = "Clip 5.4"
 kind = "pad"
 group = "Clip grid, row 5"
 midi = { channel = 0, note = 35 }
+plays = false
 
 [[inputs]]
 id = "clip-37"
@@ -535,6 +602,7 @@ name = "Clip 5.5"
 kind = "pad"
 group = "Clip grid, row 5"
 midi = { channel = 0, note = 36 }
+plays = false
 
 [[inputs]]
 id = "clip-38"
@@ -542,6 +610,7 @@ name = "Clip 5.6"
 kind = "pad"
 group = "Clip grid, row 5"
 midi = { channel = 0, note = 37 }
+plays = false
 
 [[inputs]]
 id = "clip-39"
@@ -549,6 +618,7 @@ name = "Clip 5.7"
 kind = "pad"
 group = "Clip grid, row 5"
 midi = { channel = 0, note = 38 }
+plays = false
 
 [[inputs]]
 id = "clip-40"
@@ -556,6 +626,7 @@ name = "Clip 5.8"
 kind = "pad"
 group = "Clip grid, row 5"
 midi = { channel = 0, note = 39 }
+plays = false
 
 # Each track's buttons, notes on its channel, 1-8 [AB; CP]: Record Arm 48,
 # Solo 49, Activator 50, Clip Stop 52, Crossfader A/B 66. The Track Selection
@@ -567,6 +638,7 @@ name = "Record Arm 1"
 kind = "button"
 group = "Record Arm"
 midi = { channel = 0, note = 48 }
+plays = false
 
 [[inputs]]
 id = "arm-2"
@@ -574,6 +646,7 @@ name = "Record Arm 2"
 kind = "button"
 group = "Record Arm"
 midi = { channel = 1, note = 48 }
+plays = false
 
 [[inputs]]
 id = "arm-3"
@@ -581,6 +654,7 @@ name = "Record Arm 3"
 kind = "button"
 group = "Record Arm"
 midi = { channel = 2, note = 48 }
+plays = false
 
 [[inputs]]
 id = "arm-4"
@@ -588,6 +662,7 @@ name = "Record Arm 4"
 kind = "button"
 group = "Record Arm"
 midi = { channel = 3, note = 48 }
+plays = false
 
 [[inputs]]
 id = "arm-5"
@@ -595,6 +670,7 @@ name = "Record Arm 5"
 kind = "button"
 group = "Record Arm"
 midi = { channel = 4, note = 48 }
+plays = false
 
 [[inputs]]
 id = "arm-6"
@@ -602,6 +678,7 @@ name = "Record Arm 6"
 kind = "button"
 group = "Record Arm"
 midi = { channel = 5, note = 48 }
+plays = false
 
 [[inputs]]
 id = "arm-7"
@@ -609,6 +686,7 @@ name = "Record Arm 7"
 kind = "button"
 group = "Record Arm"
 midi = { channel = 6, note = 48 }
+plays = false
 
 [[inputs]]
 id = "arm-8"
@@ -616,6 +694,7 @@ name = "Record Arm 8"
 kind = "button"
 group = "Record Arm"
 midi = { channel = 7, note = 48 }
+plays = false
 
 [[inputs]]
 id = "solo-1"
@@ -623,6 +702,7 @@ name = "Solo 1"
 kind = "button"
 group = "Solo"
 midi = { channel = 0, note = 49 }
+plays = false
 
 [[inputs]]
 id = "solo-2"
@@ -630,6 +710,7 @@ name = "Solo 2"
 kind = "button"
 group = "Solo"
 midi = { channel = 1, note = 49 }
+plays = false
 
 [[inputs]]
 id = "solo-3"
@@ -637,6 +718,7 @@ name = "Solo 3"
 kind = "button"
 group = "Solo"
 midi = { channel = 2, note = 49 }
+plays = false
 
 [[inputs]]
 id = "solo-4"
@@ -644,6 +726,7 @@ name = "Solo 4"
 kind = "button"
 group = "Solo"
 midi = { channel = 3, note = 49 }
+plays = false
 
 [[inputs]]
 id = "solo-5"
@@ -651,6 +734,7 @@ name = "Solo 5"
 kind = "button"
 group = "Solo"
 midi = { channel = 4, note = 49 }
+plays = false
 
 [[inputs]]
 id = "solo-6"
@@ -658,6 +742,7 @@ name = "Solo 6"
 kind = "button"
 group = "Solo"
 midi = { channel = 5, note = 49 }
+plays = false
 
 [[inputs]]
 id = "solo-7"
@@ -665,6 +750,7 @@ name = "Solo 7"
 kind = "button"
 group = "Solo"
 midi = { channel = 6, note = 49 }
+plays = false
 
 [[inputs]]
 id = "solo-8"
@@ -672,6 +758,7 @@ name = "Solo 8"
 kind = "button"
 group = "Solo"
 midi = { channel = 7, note = 49 }
+plays = false
 
 [[inputs]]
 id = "activator-1"
@@ -679,6 +766,7 @@ name = "Activator 1"
 kind = "button"
 group = "Activator"
 midi = { channel = 0, note = 50 }
+plays = false
 
 [[inputs]]
 id = "activator-2"
@@ -686,6 +774,7 @@ name = "Activator 2"
 kind = "button"
 group = "Activator"
 midi = { channel = 1, note = 50 }
+plays = false
 
 [[inputs]]
 id = "activator-3"
@@ -693,6 +782,7 @@ name = "Activator 3"
 kind = "button"
 group = "Activator"
 midi = { channel = 2, note = 50 }
+plays = false
 
 [[inputs]]
 id = "activator-4"
@@ -700,6 +790,7 @@ name = "Activator 4"
 kind = "button"
 group = "Activator"
 midi = { channel = 3, note = 50 }
+plays = false
 
 [[inputs]]
 id = "activator-5"
@@ -707,6 +798,7 @@ name = "Activator 5"
 kind = "button"
 group = "Activator"
 midi = { channel = 4, note = 50 }
+plays = false
 
 [[inputs]]
 id = "activator-6"
@@ -714,6 +806,7 @@ name = "Activator 6"
 kind = "button"
 group = "Activator"
 midi = { channel = 5, note = 50 }
+plays = false
 
 [[inputs]]
 id = "activator-7"
@@ -721,6 +814,7 @@ name = "Activator 7"
 kind = "button"
 group = "Activator"
 midi = { channel = 6, note = 50 }
+plays = false
 
 [[inputs]]
 id = "activator-8"
@@ -728,6 +822,7 @@ name = "Activator 8"
 kind = "button"
 group = "Activator"
 midi = { channel = 7, note = 50 }
+plays = false
 
 [[inputs]]
 id = "clip-stop-1"
@@ -735,6 +830,7 @@ name = "Clip Stop 1"
 kind = "button"
 group = "Clip Stop"
 midi = { channel = 0, note = 52 }
+plays = false
 
 [[inputs]]
 id = "clip-stop-2"
@@ -742,6 +838,7 @@ name = "Clip Stop 2"
 kind = "button"
 group = "Clip Stop"
 midi = { channel = 1, note = 52 }
+plays = false
 
 [[inputs]]
 id = "clip-stop-3"
@@ -749,6 +846,7 @@ name = "Clip Stop 3"
 kind = "button"
 group = "Clip Stop"
 midi = { channel = 2, note = 52 }
+plays = false
 
 [[inputs]]
 id = "clip-stop-4"
@@ -756,6 +854,7 @@ name = "Clip Stop 4"
 kind = "button"
 group = "Clip Stop"
 midi = { channel = 3, note = 52 }
+plays = false
 
 [[inputs]]
 id = "clip-stop-5"
@@ -763,6 +862,7 @@ name = "Clip Stop 5"
 kind = "button"
 group = "Clip Stop"
 midi = { channel = 4, note = 52 }
+plays = false
 
 [[inputs]]
 id = "clip-stop-6"
@@ -770,6 +870,7 @@ name = "Clip Stop 6"
 kind = "button"
 group = "Clip Stop"
 midi = { channel = 5, note = 52 }
+plays = false
 
 [[inputs]]
 id = "clip-stop-7"
@@ -777,6 +878,7 @@ name = "Clip Stop 7"
 kind = "button"
 group = "Clip Stop"
 midi = { channel = 6, note = 52 }
+plays = false
 
 [[inputs]]
 id = "clip-stop-8"
@@ -784,6 +886,7 @@ name = "Clip Stop 8"
 kind = "button"
 group = "Clip Stop"
 midi = { channel = 7, note = 52 }
+plays = false
 
 [[inputs]]
 id = "crossfade-1"
@@ -791,6 +894,7 @@ name = "Crossfader A/B 1"
 kind = "button"
 group = "Crossfader A/B"
 midi = { channel = 0, note = 66 }
+plays = false
 
 [[inputs]]
 id = "crossfade-2"
@@ -798,6 +902,7 @@ name = "Crossfader A/B 2"
 kind = "button"
 group = "Crossfader A/B"
 midi = { channel = 1, note = 66 }
+plays = false
 
 [[inputs]]
 id = "crossfade-3"
@@ -805,6 +910,7 @@ name = "Crossfader A/B 3"
 kind = "button"
 group = "Crossfader A/B"
 midi = { channel = 2, note = 66 }
+plays = false
 
 [[inputs]]
 id = "crossfade-4"
@@ -812,6 +918,7 @@ name = "Crossfader A/B 4"
 kind = "button"
 group = "Crossfader A/B"
 midi = { channel = 3, note = 66 }
+plays = false
 
 [[inputs]]
 id = "crossfade-5"
@@ -819,6 +926,7 @@ name = "Crossfader A/B 5"
 kind = "button"
 group = "Crossfader A/B"
 midi = { channel = 4, note = 66 }
+plays = false
 
 [[inputs]]
 id = "crossfade-6"
@@ -826,6 +934,7 @@ name = "Crossfader A/B 6"
 kind = "button"
 group = "Crossfader A/B"
 midi = { channel = 5, note = 66 }
+plays = false
 
 [[inputs]]
 id = "crossfade-7"
@@ -833,6 +942,7 @@ name = "Crossfader A/B 7"
 kind = "button"
 group = "Crossfader A/B"
 midi = { channel = 6, note = 66 }
+plays = false
 
 [[inputs]]
 id = "crossfade-8"
@@ -840,6 +950,7 @@ name = "Crossfader A/B 8"
 kind = "button"
 group = "Crossfader A/B"
 midi = { channel = 7, note = 66 }
+plays = false
 
 # Scene Launch 1-5: notes 82-86; Stop All Clips 81; channel 1 [AB; CP].
 [[inputs]]
@@ -848,6 +959,7 @@ name = "Scene 1"
 kind = "button"
 group = "Scene buttons"
 midi = { channel = 0, note = 82 }
+plays = false
 
 [[inputs]]
 id = "scene-2"
@@ -855,6 +967,7 @@ name = "Scene 2"
 kind = "button"
 group = "Scene buttons"
 midi = { channel = 0, note = 83 }
+plays = false
 
 [[inputs]]
 id = "scene-3"
@@ -862,6 +975,7 @@ name = "Scene 3"
 kind = "button"
 group = "Scene buttons"
 midi = { channel = 0, note = 84 }
+plays = false
 
 [[inputs]]
 id = "scene-4"
@@ -869,6 +983,7 @@ name = "Scene 4"
 kind = "button"
 group = "Scene buttons"
 midi = { channel = 0, note = 85 }
+plays = false
 
 [[inputs]]
 id = "scene-5"
@@ -876,6 +991,7 @@ name = "Scene 5"
 kind = "button"
 group = "Scene buttons"
 midi = { channel = 0, note = 86 }
+plays = false
 
 [[inputs]]
 id = "stop-all-clips"
@@ -883,6 +999,7 @@ name = "Stop All Clips"
 kind = "button"
 group = "Scene buttons"
 midi = { channel = 0, note = 81 }
+plays = false
 
 # Device buttons 1-8: notes 58-65, channel 1 [AB _device_control_buttons_raw]:
 # Device <, Device >, Bank <, Bank >, Device On/Off, Device Lock,
@@ -893,6 +1010,7 @@ name = "Device <"
 kind = "button"
 group = "Device buttons"
 midi = { channel = 0, note = 58 }
+plays = false
 
 [[inputs]]
 id = "device-button-2"
@@ -900,6 +1018,7 @@ name = "Device >"
 kind = "button"
 group = "Device buttons"
 midi = { channel = 0, note = 59 }
+plays = false
 
 [[inputs]]
 id = "device-button-3"
@@ -907,6 +1026,7 @@ name = "Bank <"
 kind = "button"
 group = "Device buttons"
 midi = { channel = 0, note = 60 }
+plays = false
 
 [[inputs]]
 id = "device-button-4"
@@ -914,6 +1034,7 @@ name = "Bank >"
 kind = "button"
 group = "Device buttons"
 midi = { channel = 0, note = 61 }
+plays = false
 
 [[inputs]]
 id = "device-button-5"
@@ -921,6 +1042,7 @@ name = "Device On/Off"
 kind = "button"
 group = "Device buttons"
 midi = { channel = 0, note = 62 }
+plays = false
 
 [[inputs]]
 id = "device-button-6"
@@ -928,6 +1050,7 @@ name = "Device Lock"
 kind = "button"
 group = "Device buttons"
 midi = { channel = 0, note = 63 }
+plays = false
 
 [[inputs]]
 id = "device-button-7"
@@ -935,6 +1058,7 @@ name = "Clip/Device View"
 kind = "button"
 group = "Device buttons"
 midi = { channel = 0, note = 64 }
+plays = false
 
 [[inputs]]
 id = "device-button-8"
@@ -942,6 +1066,7 @@ name = "Detail View"
 kind = "button"
 group = "Device buttons"
 midi = { channel = 0, note = 65 }
+plays = false
 
 # The other buttons, notes on channel 1 [AB; CP]: Pan 87, Sends 88, User 89,
 # Metronome 90, Play 91, Stop 92 (CP alone), Record 93, Up 94, Down 95,
@@ -956,6 +1081,7 @@ name = "Pan"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 87 }
+plays = false
 
 [[inputs]]
 id = "sends"
@@ -963,6 +1089,7 @@ name = "Sends"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 88 }
+plays = false
 
 [[inputs]]
 id = "user"
@@ -970,6 +1097,7 @@ name = "User"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 89 }
+plays = false
 
 [[inputs]]
 id = "metronome"
@@ -978,6 +1106,7 @@ kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 90 }
 slot = "switch-3.3"
+plays = false
 
 [[inputs]]
 id = "play"
@@ -985,6 +1114,7 @@ name = "Play"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 91 }
+plays = false
 
 [[inputs]]
 id = "stop"
@@ -992,6 +1122,7 @@ name = "Stop"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 92 }
+plays = false
 
 [[inputs]]
 id = "record"
@@ -999,6 +1130,7 @@ name = "Record"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 93 }
+plays = false
 
 [[inputs]]
 id = "up"
@@ -1007,6 +1139,7 @@ kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 94 }
 slot = "step-2.up"
+plays = false
 
 [[inputs]]
 id = "down"
@@ -1015,6 +1148,7 @@ kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 95 }
 slot = "step-2.down"
+plays = false
 
 [[inputs]]
 id = "right"
@@ -1023,6 +1157,7 @@ kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 96 }
 slot = "step.up"
+plays = false
 
 [[inputs]]
 id = "left"
@@ -1031,6 +1166,7 @@ kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 97 }
 slot = "step.down"
+plays = false
 
 [[inputs]]
 id = "shift"
@@ -1039,6 +1175,7 @@ kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 98 }
 modifier = true
+plays = false
 
 [[inputs]]
 id = "tap-tempo"
@@ -1046,6 +1183,7 @@ name = "Tap Tempo"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 99 }
+plays = false
 
 [[inputs]]
 id = "nudge-down"
@@ -1053,6 +1191,7 @@ name = "Nudge -"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 100 }
+plays = false
 
 [[inputs]]
 id = "nudge-up"
@@ -1060,6 +1199,7 @@ name = "Nudge +"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 101 }
+plays = false
 
 [[inputs]]
 id = "session-record"
@@ -1067,6 +1207,7 @@ name = "Session Record"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 102 }
+plays = false
 
 [[inputs]]
 id = "bank"
@@ -1074,6 +1215,7 @@ name = "Bank"
 kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 103 }
+plays = false
 
 # The foot pedal input: CC 64, channel 1 [AB make_pedal_button(64), a CC].
 [[inputs]]
@@ -1082,6 +1224,7 @@ name = "Foot pedal"
 kind = "pedal"
 group = "Pedals"
 midi = { channel = 0, cc = 64 }
+plays = false
 
 # RackForge's default meanings for rows of knobs and eight faders: the
 # faders and the Track Control row as in the first rule; the master fader,

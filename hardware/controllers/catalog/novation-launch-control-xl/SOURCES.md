@@ -62,6 +62,7 @@ one), **Not documented**.
 | A button sends 127 on press and 0 on release | 127 / 0 | Documented | PR p8 |
 | Change current template | `F0 00 20 29 02 11 77 <template> F7`, template 00h–07h user, 08h–0Fh factory; sent on connect with 00h | Documented | PR p8 |
 | Pots are absolute, with a centre detent | knobs | Documented | GSG p3 |
+| Held from instruments | every control (`plays = false`): no keys; its buttons send notes, its knobs and faders an instrument's controllers | Convention | catalog README (added 2026-09-25) |
 
 ## Open questions, until someone with the hardware checks
 

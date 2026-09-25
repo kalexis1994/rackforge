@@ -33,6 +33,10 @@ sysex = true
 [[on_connect]]
 message = "F0 00 20 29 02 11 77 00 F7"
 
+# The Launch Control XL has no keys: none of its controls ever plays. Its
+# buttons send notes, and its knobs' and faders' numbers are an instrument's
+# controllers.
+
 # Knobs: Send A row CC 13-20, Send B row CC 29-36, Pan/Device row CC 49-56,
 # channel 1 [CG "Show Values" screenshot of the default User template].
 [[inputs]]
@@ -42,6 +46,7 @@ kind = "knob"
 group = "Send A"
 midi = { channel = 0, cc = 13 }
 slot = "control-2.1"
+plays = false
 
 [[inputs]]
 id = "send-a-2"
@@ -50,6 +55,7 @@ kind = "knob"
 group = "Send A"
 midi = { channel = 0, cc = 14 }
 slot = "control-2.2"
+plays = false
 
 [[inputs]]
 id = "send-a-3"
@@ -58,6 +64,7 @@ kind = "knob"
 group = "Send A"
 midi = { channel = 0, cc = 15 }
 slot = "control-2.3"
+plays = false
 
 [[inputs]]
 id = "send-a-4"
@@ -66,6 +73,7 @@ kind = "knob"
 group = "Send A"
 midi = { channel = 0, cc = 16 }
 slot = "control-2.4"
+plays = false
 
 [[inputs]]
 id = "send-a-5"
@@ -74,6 +82,7 @@ kind = "knob"
 group = "Send A"
 midi = { channel = 0, cc = 17 }
 slot = "control-2.5"
+plays = false
 
 [[inputs]]
 id = "send-a-6"
@@ -82,6 +91,7 @@ kind = "knob"
 group = "Send A"
 midi = { channel = 0, cc = 18 }
 slot = "control-2.6"
+plays = false
 
 [[inputs]]
 id = "send-a-7"
@@ -90,6 +100,7 @@ kind = "knob"
 group = "Send A"
 midi = { channel = 0, cc = 19 }
 slot = "control-2.7"
+plays = false
 
 [[inputs]]
 id = "send-a-8"
@@ -98,6 +109,7 @@ kind = "knob"
 group = "Send A"
 midi = { channel = 0, cc = 20 }
 slot = "control-2.8"
+plays = false
 
 [[inputs]]
 id = "send-b-1"
@@ -106,6 +118,7 @@ kind = "knob"
 group = "Send B"
 midi = { channel = 0, cc = 29 }
 slot = "control-3.1"
+plays = false
 
 [[inputs]]
 id = "send-b-2"
@@ -114,6 +127,7 @@ kind = "knob"
 group = "Send B"
 midi = { channel = 0, cc = 30 }
 slot = "control-3.2"
+plays = false
 
 [[inputs]]
 id = "send-b-3"
@@ -122,6 +136,7 @@ kind = "knob"
 group = "Send B"
 midi = { channel = 0, cc = 31 }
 slot = "control-3.3"
+plays = false
 
 [[inputs]]
 id = "send-b-4"
@@ -130,6 +145,7 @@ kind = "knob"
 group = "Send B"
 midi = { channel = 0, cc = 32 }
 slot = "control-3.4"
+plays = false
 
 [[inputs]]
 id = "send-b-5"
@@ -138,6 +154,7 @@ kind = "knob"
 group = "Send B"
 midi = { channel = 0, cc = 33 }
 slot = "control-3.5"
+plays = false
 
 [[inputs]]
 id = "send-b-6"
@@ -146,6 +163,7 @@ kind = "knob"
 group = "Send B"
 midi = { channel = 0, cc = 34 }
 slot = "control-3.6"
+plays = false
 
 [[inputs]]
 id = "send-b-7"
@@ -154,6 +172,7 @@ kind = "knob"
 group = "Send B"
 midi = { channel = 0, cc = 35 }
 slot = "control-3.7"
+plays = false
 
 [[inputs]]
 id = "send-b-8"
@@ -162,6 +181,7 @@ kind = "knob"
 group = "Send B"
 midi = { channel = 0, cc = 36 }
 slot = "control-3.8"
+plays = false
 
 [[inputs]]
 id = "pan-1"
@@ -169,6 +189,7 @@ name = "Pan 1"
 kind = "knob"
 group = "Pan / Device"
 midi = { channel = 0, cc = 49 }
+plays = false
 
 [[inputs]]
 id = "pan-2"
@@ -176,6 +197,7 @@ name = "Pan 2"
 kind = "knob"
 group = "Pan / Device"
 midi = { channel = 0, cc = 50 }
+plays = false
 
 [[inputs]]
 id = "pan-3"
@@ -183,6 +205,7 @@ name = "Pan 3"
 kind = "knob"
 group = "Pan / Device"
 midi = { channel = 0, cc = 51 }
+plays = false
 
 [[inputs]]
 id = "pan-4"
@@ -190,6 +213,7 @@ name = "Pan 4"
 kind = "knob"
 group = "Pan / Device"
 midi = { channel = 0, cc = 52 }
+plays = false
 
 [[inputs]]
 id = "pan-5"
@@ -197,6 +221,7 @@ name = "Pan 5"
 kind = "knob"
 group = "Pan / Device"
 midi = { channel = 0, cc = 53 }
+plays = false
 
 [[inputs]]
 id = "pan-6"
@@ -204,6 +229,7 @@ name = "Pan 6"
 kind = "knob"
 group = "Pan / Device"
 midi = { channel = 0, cc = 54 }
+plays = false
 
 [[inputs]]
 id = "pan-7"
@@ -211,6 +237,7 @@ name = "Pan 7"
 kind = "knob"
 group = "Pan / Device"
 midi = { channel = 0, cc = 55 }
+plays = false
 
 [[inputs]]
 id = "pan-8"
@@ -218,6 +245,7 @@ name = "Pan 8"
 kind = "knob"
 group = "Pan / Device"
 midi = { channel = 0, cc = 56 }
+plays = false
 
 # Faders CC 77-84, channel 1 [CG].
 [[inputs]]
@@ -227,6 +255,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 77 }
 slot = "control-1.1"
+plays = false
 
 [[inputs]]
 id = "fader-2"
@@ -235,6 +264,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 78 }
 slot = "control-1.2"
+plays = false
 
 [[inputs]]
 id = "fader-3"
@@ -243,6 +273,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 79 }
 slot = "control-1.3"
+plays = false
 
 [[inputs]]
 id = "fader-4"
@@ -251,6 +282,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 80 }
 slot = "control-1.4"
+plays = false
 
 [[inputs]]
 id = "fader-5"
@@ -259,6 +291,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 81 }
 slot = "control-1.5"
+plays = false
 
 [[inputs]]
 id = "fader-6"
@@ -267,6 +300,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 82 }
 slot = "control-1.6"
+plays = false
 
 [[inputs]]
 id = "fader-7"
@@ -275,6 +309,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 83 }
 slot = "control-1.7"
+plays = false
 
 [[inputs]]
 id = "fader-8"
@@ -283,6 +318,7 @@ kind = "fader"
 group = "Faders"
 midi = { channel = 0, cc = 84 }
 slot = "control-1.8"
+plays = false
 
 # Track Focus buttons (top row): notes F1 F#1 G1 G#1 A2 A#2 B2 C3 = 41-44 and
 # 57-60; Track Control buttons (bottom row): C#4 D4 D#4 E4 F5 F#5 G5 G#5 =
@@ -295,6 +331,7 @@ kind = "button"
 group = "Track Focus"
 midi = { channel = 0, note = 41 }
 slot = "switch-1.1"
+plays = false
 
 [[inputs]]
 id = "track-focus-2"
@@ -303,6 +340,7 @@ kind = "button"
 group = "Track Focus"
 midi = { channel = 0, note = 42 }
 slot = "switch-1.2"
+plays = false
 
 [[inputs]]
 id = "track-focus-3"
@@ -311,6 +349,7 @@ kind = "button"
 group = "Track Focus"
 midi = { channel = 0, note = 43 }
 slot = "switch-1.3"
+plays = false
 
 [[inputs]]
 id = "track-focus-4"
@@ -319,6 +358,7 @@ kind = "button"
 group = "Track Focus"
 midi = { channel = 0, note = 44 }
 slot = "switch-1.4"
+plays = false
 
 [[inputs]]
 id = "track-focus-5"
@@ -327,6 +367,7 @@ kind = "button"
 group = "Track Focus"
 midi = { channel = 0, note = 57 }
 slot = "switch-1.5"
+plays = false
 
 [[inputs]]
 id = "track-focus-6"
@@ -335,6 +376,7 @@ kind = "button"
 group = "Track Focus"
 midi = { channel = 0, note = 58 }
 slot = "switch-1.6"
+plays = false
 
 [[inputs]]
 id = "track-focus-7"
@@ -343,6 +385,7 @@ kind = "button"
 group = "Track Focus"
 midi = { channel = 0, note = 59 }
 slot = "switch-1.7"
+plays = false
 
 [[inputs]]
 id = "track-focus-8"
@@ -351,6 +394,7 @@ kind = "button"
 group = "Track Focus"
 midi = { channel = 0, note = 60 }
 slot = "switch-1.8"
+plays = false
 
 [[inputs]]
 id = "track-control-1"
@@ -359,6 +403,7 @@ kind = "button"
 group = "Track Control"
 midi = { channel = 0, note = 73 }
 slot = "switch-2.1"
+plays = false
 
 [[inputs]]
 id = "track-control-2"
@@ -367,6 +412,7 @@ kind = "button"
 group = "Track Control"
 midi = { channel = 0, note = 74 }
 slot = "switch-2.2"
+plays = false
 
 [[inputs]]
 id = "track-control-3"
@@ -375,6 +421,7 @@ kind = "button"
 group = "Track Control"
 midi = { channel = 0, note = 75 }
 slot = "switch-2.3"
+plays = false
 
 [[inputs]]
 id = "track-control-4"
@@ -383,6 +430,7 @@ kind = "button"
 group = "Track Control"
 midi = { channel = 0, note = 76 }
 slot = "switch-2.4"
+plays = false
 
 [[inputs]]
 id = "track-control-5"
@@ -391,6 +439,7 @@ kind = "button"
 group = "Track Control"
 midi = { channel = 0, note = 89 }
 slot = "switch-2.5"
+plays = false
 
 [[inputs]]
 id = "track-control-6"
@@ -399,6 +448,7 @@ kind = "button"
 group = "Track Control"
 midi = { channel = 0, note = 90 }
 slot = "switch-2.6"
+plays = false
 
 [[inputs]]
 id = "track-control-7"
@@ -407,6 +457,7 @@ kind = "button"
 group = "Track Control"
 midi = { channel = 0, note = 91 }
 slot = "switch-2.7"
+plays = false
 
 [[inputs]]
 id = "track-control-8"
@@ -415,6 +466,7 @@ kind = "button"
 group = "Track Control"
 midi = { channel = 0, note = 92 }
 slot = "switch-2.8"
+plays = false
 
 # Send Select up and down CC 104-105, Track Select left and right CC 106-107;
 # Device, Mute, Solo, Record Arm notes A6 A#6 B6 C7 = 105-108; channel 1 [CG;
@@ -426,6 +478,7 @@ kind = "button"
 group = "Navigation"
 midi = { channel = 0, cc = 104 }
 slot = "step-2.up"
+plays = false
 
 [[inputs]]
 id = "send-select-down"
@@ -434,6 +487,7 @@ kind = "button"
 group = "Navigation"
 midi = { channel = 0, cc = 105 }
 slot = "step-2.down"
+plays = false
 
 [[inputs]]
 id = "track-select-left"
@@ -442,6 +496,7 @@ kind = "button"
 group = "Navigation"
 midi = { channel = 0, cc = 106 }
 slot = "step.down"
+plays = false
 
 [[inputs]]
 id = "track-select-right"
@@ -450,6 +505,7 @@ kind = "button"
 group = "Navigation"
 midi = { channel = 0, cc = 107 }
 slot = "step.up"
+plays = false
 
 [[inputs]]
 id = "device"
@@ -457,6 +513,7 @@ name = "Device"
 kind = "button"
 group = "Mode buttons"
 midi = { channel = 0, note = 105 }
+plays = false
 
 [[inputs]]
 id = "mute"
@@ -464,6 +521,7 @@ name = "Mute"
 kind = "button"
 group = "Mode buttons"
 midi = { channel = 0, note = 106 }
+plays = false
 
 [[inputs]]
 id = "solo"
@@ -471,6 +529,7 @@ name = "Solo"
 kind = "button"
 group = "Mode buttons"
 midi = { channel = 0, note = 107 }
+plays = false
 
 [[inputs]]
 id = "record-arm"
@@ -478,6 +537,7 @@ name = "Record Arm"
 kind = "button"
 group = "Mode buttons"
 midi = { channel = 0, note = 108 }
+plays = false
 
 # RackForge's default meanings, as for the other controllers with eight faders:
 # the faders take the envelope, filter and LFO, the Send A knobs shape the

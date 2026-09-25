@@ -26,6 +26,7 @@ value for value.
 | Drum mode | notes 64–127 on channel 10 | Documented; Official software | CP; AB `Drum_Pads`. Not declared: Session mode is the grid's default in Live, and the package describes one mode |
 | Track buttons 1–8, Scene Launch 1–8 | notes 100–107, 112–119, channel 1 | Documented; Official software | CP; AB |
 | Shift | note 122, the device's modifier | Documented; Official software | CP; AB `add_modifier_button` |
+| Held from instruments | every control (`plays = false`): no keys on this port; its grid and buttons send notes | Convention | catalog README (added 2026-09-25) |
 | Slots | faders 1–8 `control-1`; the grid's two bottom rows the switches, as a Launchkey's two rows of pads | Convention | catalog README |
 | Fn button | Shift | Official software (the device's modifier) | AB |
 | Roles | faders 1–8: attack, decay, sustain, release, cutoff, resonance, LFO rate, LFO depth; the master fader: master level | Convention | catalog README (the faders of the first rule) |

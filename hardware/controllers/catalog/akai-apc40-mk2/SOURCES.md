@@ -39,6 +39,7 @@ out here:
 | Stop | note 92 | Documented | CP. AB maps none |
 | Foot pedal | CC 64, channel 1 | Official software | AB `make_pedal_button(64)` (a CC) |
 | Button behaviour in Generic Mode | several buttons toggle their LED; the protocol reports every button as note-on when pressed and note-off when released | Documented | CP |
+| Held from instruments | every control (`plays = false`): no keys; its grid and buttons send notes | Convention | catalog README (added 2026-09-25) |
 | Slots | faders `control-1`, Track Control `control-2`, Device Control `control-3`; the grid's two bottom rows the switches; Left/Right `step`, Down/Up `step-2`; Metronome `switch-3.3` | Convention | catalog README |
 | Fn button | Shift | Official software (the device's modifier) | AB |
 | Actions | Play `transport_play`, Stop `transport_stop`; their notes are held back from the instruments | Convention | catalog README (Play and Stop take the transport) |

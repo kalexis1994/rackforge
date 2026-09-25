@@ -47,6 +47,7 @@ with the documents cited, not their text.
 | Channel in CC mode | 1 | Community ×2 | MX (status B0); OV (`:chan 0 :cmd 176`) |
 | Buttons | 127 pressed, 0 released when momentary | Documented (the behaviour); Community (the values) | PG Button Behavior; MX; OV |
 | Button behaviour in the factory scene | **not documented** (Momentary or Toggle per button) | — | A toggling button is still read press by press |
+| Held from instruments | every control (`plays = false`): no keys; its sliders' CC 0-7 are bank select, modulation and volume to an instrument | Convention | catalog README (added 2026-09-25) |
 | Slots | sliders `control-1`, knobs `control-2`; S row `switch-1`, M row `switch-2` (no pads); Track `step`, Marker arrows `step-2` | Convention | catalog README |
 | Roles | the mixer-style rule: knobs and sliders as the first rule, no master level; Play and Stop take the transport | Convention | catalog README |
 

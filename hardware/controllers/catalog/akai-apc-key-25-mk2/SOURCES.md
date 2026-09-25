@@ -30,6 +30,7 @@ it value for value.
 | Shift is a modifier | held for second functions and fine knob moves | Official software | AB `add_modifier_button`, `sensitivity_modifier=shift_button` |
 | Oct Down / Oct Up | transpose the keys, send nothing | Documented | CP |
 | LEDs | answer notes on port 1 | Documented | CP. RackForge does not drive them |
+| Held from instruments | every control on the control port (`plays = false`): its grid and buttons send notes; the keys, on their own port, play | Convention | catalog README (added 2026-09-25) |
 | Slots | knobs `control-1`; the grid's two bottom rows the switches, as a Launchkey's two rows of pads (upper row: 1.1–1.4, 2.1–2.4; lower row: 1.5–1.8, 2.5–2.8) | Convention | catalog README |
 | Fn button | Shift | Official software (it is the device's modifier) | AB |
 | Actions | Play `transport_play`; Stop All Clips `transport_stop`, its only stop; their notes are held back from the instruments | Convention | catalog README (Play and Stop take the transport) |

@@ -148,6 +148,18 @@ public final class MainActivity extends Activity {
     private final Map<MidiInputPort, Integer> openKeyLabDestinations = new LinkedHashMap<>();
     /** Where each source's package messages go: the device's own MIDI in. */
     private final Map<Integer, MidiInputPort> openControllerDestinations = new LinkedHashMap<>();
+    /** Where each source's setup messages go, once its setup output is open. */
+    private final Map<Integer, MidiInputPort> openSetupDestinations = new LinkedHashMap<>();
+    /** The device each controller source belongs to, to find its setup output. */
+    private final Map<Integer, OpenMidiDevice> controllerDevices = new LinkedHashMap<>();
+    /**
+     * Each device opened or being opened, by its MidiDeviceInfo id: a device
+     * plugged in is opened alone and one pulled out is closed alone, so the
+     * other keyboards keep playing, as on the other hosts.
+     */
+    private final Map<Integer, OpenMidiDevice> midiDevicesById = new LinkedHashMap<>();
+    /** How many sources this connection registered: the first is primary. */
+    private final AtomicInteger registeredMidiSources = new AtomicInteger();
     private AudioDeviceCallback audioDeviceCallback;
     private MidiManager.DeviceCallback midiDeviceCallback;
     private volatile int midiGeneration;
@@ -300,6 +312,8 @@ public final class MainActivity extends Activity {
     private static native boolean loadControllerMaps(String dataRoot);
     private static native boolean identifyMidiSource(int sourceKey, byte[] reply);
     private static native String midiSourceConnectPlan(int sourceKey);
+    private static native int midiSetupPort(int sourceKey, String portNamesJson);
+    private static native void midiSourceDisconnected(int sourceKey);
     private static native String controllerAllowOutput(String storeRoot, String controllerId,
             boolean allow);
     private static native void releaseMidiNotes();
@@ -348,7 +362,9 @@ public final class MainActivity extends Activity {
 
     private final Runnable midiReconnect = () -> {
         if (!audioRunning || engineStarting) return;
-        closeMidi();
+        // Only what changed: a device gone is closed, a new one opened, and
+        // the keyboards still there keep playing.
+        closeVanishedMidiDevices();
         openMidiInputs();
         midiReconnectAttempts++;
         if ("live".equals(currentPage)) showLive();
@@ -1714,7 +1730,7 @@ public final class MainActivity extends Activity {
         MidiManager midiManager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
         if (midiManager == null) return inputs;
         for (MidiDeviceInfo info : midiManager.getDevices()) {
-            if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
+            if (!isPlayableMidiDevice(info)) continue;
             boolean hasOutput = false;
             for (MidiDeviceInfo.PortInfo port : info.getPorts()) {
                 if (port.getType() == MidiDeviceInfo.PortInfo.TYPE_OUTPUT) {
@@ -5505,12 +5521,12 @@ public final class MainActivity extends Activity {
         if (manager == null) return;
         midiDeviceCallback = new MidiManager.DeviceCallback() {
             @Override public void onDeviceAdded(MidiDeviceInfo device) {
-                if (device.getType() == MidiDeviceInfo.TYPE_USB) scheduleMidiReconnect();
+                if (isPlayableMidiDevice(device)) scheduleMidiReconnect();
             }
 
             @Override public void onDeviceRemoved(MidiDeviceInfo device) {
-                if (device.getType() != MidiDeviceInfo.TYPE_USB) return;
-                if (audioRunning) {
+                if (!isPlayableMidiDevice(device)) return;
+                if (closeMidiDevice(device.getId()) && audioRunning) {
                     releaseMidiNotes();
                     Log.i("RackForge", "MIDI device removed; sustain and active notes released");
                     Toast.makeText(MainActivity.this,
@@ -5622,7 +5638,15 @@ public final class MainActivity extends Activity {
             int end = Math.min(bytes.length, offset + count);
             for (int index = Math.max(0, offset); index < end; index++) {
                 int value = bytes[index] & 0xFF;
-                if (value >= 0xF8) continue;
+                if (value >= 0xF8) {
+                    // MIDI Start, Continue and Stop may be a controller's
+                    // transport buttons; the native side takes them as its
+                    // package says. Clock and Active Sensing are not read.
+                    if (value >= 0xFA && value <= 0xFC && forwardMidi && audioRunning) {
+                        sendMidiMessageFromSource(sourceKey, value, 0, 0, 1);
+                    }
+                    continue;
+                }
                 if ((value & 0x80) != 0) {
                     acceptStatus(value);
                 } else {
@@ -5941,24 +5965,36 @@ public final class MainActivity extends Activity {
         syncControllerActiveMode("live".equals(currentPage) ? "live"
                 : "idle".equals(currentPage) ? "idle" : "play", false);
         int generation = midiGeneration;
-        AtomicInteger registeredSources = new AtomicInteger();
         Set<String> enabledInputs = preferences.getStringSet("midi.inputs", null);
         for (MidiDeviceInfo info : manager.getDevices()) {
-            if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
+            if (!isPlayableMidiDevice(info)) continue;
+            synchronized (midiDevicesById) {
+                // Already open, or being opened: it keeps playing as it is.
+                if (midiDevicesById.containsKey(info.getId())) continue;
+            }
             String deviceName = midiDeviceName(info);
             boolean performanceEnabled = enabledInputs == null || enabledInputs.contains(deviceName);
             boolean keyLab = isKeyLabDevice(info, manager);
             // A RackForge controller is a control-plane device even when the user
             // has disabled it as a musical input. LITTLE must still be acquired.
             if (!performanceEnabled && !keyLab) continue;
+            OpenMidiDevice record = new OpenMidiDevice(info);
+            synchronized (midiDevicesById) { midiDevicesById.put(info.getId(), record); }
             manager.openDevice(info, device -> {
-                if (device == null) return;
-                if (!audioRunning || generation != midiGeneration) {
-                    try { device.close(); } catch (Exception ignored) { }
+                if (device == null) {
+                    // Not opened: the next look at the devices tries again.
+                    synchronized (midiDevicesById) { midiDevicesById.remove(info.getId(), record); }
                     return;
                 }
+                synchronized (midiDevicesById) {
+                    if (record.closed || !audioRunning || generation != midiGeneration) {
+                        try { device.close(); } catch (Exception ignored) { }
+                        return;
+                    }
+                    record.device = device;
+                }
                 synchronized (openMidiDevices) { openMidiDevices.add(device); }
-                if (keyLab) openKeyLabDestinations(device, info, generation);
+                if (keyLab) openKeyLabDestinations(record, generation);
                 List<Integer> deviceSources = new ArrayList<>();
                 for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
                     if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_OUTPUT) continue;
@@ -5966,9 +6002,12 @@ public final class MainActivity extends Activity {
                     boolean forwardMidi = performanceEnabled && (!keyLab || keyLabPrimary);
                     MidiOutputPort port = device.openOutputPort(portInfo.getPortNumber());
                     if (port == null) continue;
-                    if (!audioRunning || generation != midiGeneration) {
-                        try { port.close(); } catch (Exception ignored) { }
-                        continue;
+                    synchronized (midiDevicesById) {
+                        if (record.closed || !audioRunning || generation != midiGeneration) {
+                            try { port.close(); } catch (Exception ignored) { }
+                            continue;
+                        }
+                        record.outputs.add(port);
                     }
                     if (keyLab) {
                         Log.i("RackForge", "KeyLab source port " + portInfo.getPortNumber()
@@ -5981,7 +6020,7 @@ public final class MainActivity extends Activity {
                             sourceKey = registerMidiSource(
                                     source.id,
                                     source.name,
-                                    registeredSources.getAndIncrement() == 0,
+                                    registeredMidiSources.getAndIncrement() == 0,
                                     keyLabPrimary
                                             ? "org.rackforge.arturia-keylab-essential-mk3"
                                             : "");
@@ -6005,14 +6044,122 @@ public final class MainActivity extends Activity {
                     synchronized (openMidiPorts) { openMidiPorts.add(port); }
                     if (sourceKey > 0) deviceSources.add(sourceKey);
                 }
+                synchronized (midiDevicesById) { record.sourceKeys.addAll(deviceSources); }
                 // The KeyLab's in-process driver talks to it; any other
                 // device is asked which model it is, and hears its package's
                 // messages once the player allows them.
                 if (!keyLab && !deviceSources.isEmpty()) {
-                    openControllerDestination(device, info, generation, deviceSources);
+                    synchronized (controllerDevices) {
+                        for (int sourceKey : deviceSources) controllerDevices.put(sourceKey, record);
+                    }
+                    openControllerDestination(record, generation, deviceSources);
                 }
             }, null);
         }
+    }
+
+    /**
+     * A device Android offers as MIDI plays, whatever carries it: USB,
+     * Bluetooth or another app's virtual device, as every port does on the
+     * other hosts.
+     */
+    private static boolean isPlayableMidiDevice(MidiDeviceInfo info) {
+        int type = info.getType();
+        return type == MidiDeviceInfo.TYPE_USB || type == MidiDeviceInfo.TYPE_BLUETOOTH
+                || type == MidiDeviceInfo.TYPE_VIRTUAL;
+    }
+
+    /** One device RackForge opened, with every port it opened on it. */
+    private static final class OpenMidiDevice {
+        final MidiDeviceInfo info;
+        /** Set once Android hands the device over. */
+        MidiDevice device;
+        /** Set when the device is let go: a late open closes what it gets. */
+        boolean closed;
+        final List<MidiOutputPort> outputs = new ArrayList<>();
+        /** Its MIDI ins by port number: a port opens once, whoever asks. */
+        final Map<Integer, MidiInputPort> inputs = new LinkedHashMap<>();
+        final List<Integer> sourceKeys = new ArrayList<>();
+
+        OpenMidiDevice(MidiDeviceInfo info) {
+            this.info = info;
+        }
+    }
+
+    /** A MIDI in of an open device, opened once and shared. */
+    private MidiInputPort openDeviceInput(OpenMidiDevice record, int portNumber) {
+        synchronized (midiDevicesById) {
+            if (record.closed || record.device == null) return null;
+            MidiInputPort open = record.inputs.get(portNumber);
+            if (open != null) return open;
+            MidiInputPort port = record.device.openInputPort(portNumber);
+            if (port == null) return null;
+            record.inputs.put(portNumber, port);
+            synchronized (openMidiDestinations) { openMidiDestinations.add(port); }
+            return port;
+        }
+    }
+
+    /** The devices no longer offered, closed: what a missed removal left. */
+    private void closeVanishedMidiDevices() {
+        MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
+        if (manager == null) return;
+        Set<Integer> present = new java.util.HashSet<>();
+        for (MidiDeviceInfo info : manager.getDevices()) present.add(info.getId());
+        List<Integer> vanished = new ArrayList<>();
+        synchronized (midiDevicesById) {
+            for (int deviceId : midiDevicesById.keySet()) {
+                if (!present.contains(deviceId)) vanished.add(deviceId);
+            }
+        }
+        for (int deviceId : vanished) closeMidiDevice(deviceId);
+    }
+
+    /**
+     * Closes one device and every port opened on it, and tells the native
+     * side its sources went away; the other devices are not touched. Its
+     * sources stay registered, so a replug plays and links as before.
+     * Whether it was open.
+     */
+    private boolean closeMidiDevice(int deviceId) {
+        OpenMidiDevice record;
+        List<MidiOutputPort> outputs;
+        List<MidiInputPort> inputs;
+        List<Integer> sourceKeys;
+        synchronized (midiDevicesById) {
+            record = midiDevicesById.remove(deviceId);
+            if (record == null) return false;
+            record.closed = true;
+            outputs = new ArrayList<>(record.outputs);
+            inputs = new ArrayList<>(record.inputs.values());
+            sourceKeys = new ArrayList<>(record.sourceKeys);
+        }
+        for (MidiOutputPort port : outputs) {
+            synchronized (openMidiPorts) { openMidiPorts.remove(port); }
+            try { port.close(); } catch (Exception ignored) { }
+        }
+        for (MidiInputPort port : inputs) {
+            synchronized (openKeyLabDestinations) { openKeyLabDestinations.remove(port); }
+            synchronized (openMidiDestinations) { openMidiDestinations.remove(port); }
+            try { port.close(); } catch (Exception ignored) { }
+        }
+        for (int sourceKey : sourceKeys) {
+            synchronized (openControllerDestinations) { openControllerDestinations.remove(sourceKey); }
+            synchronized (openSetupDestinations) { openSetupDestinations.remove(sourceKey); }
+            synchronized (controllerDevices) { controllerDevices.remove(sourceKey); }
+            try {
+                midiSourceDisconnected(sourceKey);
+            } catch (Throwable error) {
+                Log.w("RackForge", "Could not forget MIDI source " + sourceKey, error);
+            }
+        }
+        if (record.device != null) {
+            synchronized (openMidiDevices) { openMidiDevices.remove(record.device); }
+            try { record.device.close(); } catch (Exception ignored) { }
+        }
+        Log.i("RackForge", "MIDI device closed: " + midiDeviceName(record.info)
+                + " sources=" + sourceKeys);
+        return true;
     }
 
     /** Universal Non-Realtime Identity Request, to every device on the cable. */
@@ -6021,8 +6168,9 @@ public final class MainActivity extends Activity {
     /** How long a device has to answer before its package's messages go out. */
     private static final long MIDI_IDENTITY_WINDOW_MS = 400;
 
-    private void openControllerDestination(MidiDevice device, MidiDeviceInfo info,
-            int generation, List<Integer> sourceKeys) {
+    private void openControllerDestination(OpenMidiDevice record, int generation,
+            List<Integer> sourceKeys) {
+        MidiDeviceInfo info = record.info;
         // A device's first MIDI in is the one its own controls answer on.
         MidiDeviceInfo.PortInfo target = null;
         for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
@@ -6032,16 +6180,12 @@ public final class MainActivity extends Activity {
             }
         }
         if (target == null) return;
-        MidiInputPort port = device.openInputPort(target.getPortNumber());
+        if (!audioRunning || generation != midiGeneration) return;
+        MidiInputPort port = openDeviceInput(record, target.getPortNumber());
         if (port == null) {
             Log.w("RackForge", "Could not open the MIDI in of " + midiDeviceName(info));
             return;
         }
-        if (!audioRunning || generation != midiGeneration) {
-            try { port.close(); } catch (Exception ignored) { }
-            return;
-        }
-        synchronized (openMidiDestinations) { openMidiDestinations.add(port); }
         synchronized (openControllerDestinations) {
             for (int sourceKey : sourceKeys) openControllerDestinations.put(sourceKey, port);
         }
@@ -6085,13 +6229,22 @@ public final class MainActivity extends Activity {
                 for (int byteIndex = 0; byteIndex < values.length(); byteIndex++) {
                     message[byteIndex] = (byte) values.getInt(byteIndex);
                 }
+                // A setup message goes to the port the package names for
+                // it, such as the DAW port a controller changes mode on.
+                MidiInputPort target = "setup".equals(step.optString("port", "input"))
+                        ? setupDestination(sourceKey) : port;
+                if (target == null) {
+                    Log.w("RackForge", "No setup output for source " + sourceKey
+                            + ": a setup message was not sent");
+                    continue;
+                }
                 mainHandler.postDelayed(() -> {
                     if (generation != midiGeneration) return;
                     synchronized (openMidiDestinations) {
-                        if (!openMidiDestinations.contains(port)) return;
+                        if (!openMidiDestinations.contains(target)) return;
                     }
                     try {
-                        port.send(message, 0, message.length);
+                        target.send(message, 0, message.length);
                     } catch (Exception error) {
                         Log.w("RackForge", "A controller connect message was not sent", error);
                     }
@@ -6107,6 +6260,45 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * The setup output of the controller on a source: among its device's MIDI
+     * ins, named as its sources are, the one the package's setup_output
+     * endpoint picks, the same choice the other hosts make. Opened once.
+     */
+    private MidiInputPort setupDestination(int sourceKey) {
+        synchronized (openSetupDestinations) {
+            MidiInputPort open = openSetupDestinations.get(sourceKey);
+            if (open != null) return open;
+        }
+        OpenMidiDevice record;
+        synchronized (controllerDevices) { record = controllerDevices.get(sourceKey); }
+        if (record == null) return null;
+        List<MidiDeviceInfo.PortInfo> inputs = new ArrayList<>();
+        JSONArray names = new JSONArray();
+        for (MidiDeviceInfo.PortInfo portInfo : record.info.getPorts()) {
+            if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_INPUT) continue;
+            inputs.add(portInfo);
+            names.put(midiSourceIdentity(record.info, portInfo).name);
+        }
+        int index;
+        try {
+            index = midiSetupPort(sourceKey, names.toString());
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not choose the setup output", error);
+            return null;
+        }
+        if (index < 0 || index >= inputs.size()) {
+            Log.w("RackForge", "No single setup output among " + names);
+            return null;
+        }
+        MidiInputPort port = openDeviceInput(record, inputs.get(index).getPortNumber());
+        if (port == null) return null;
+        synchronized (openSetupDestinations) { openSetupDestinations.put(sourceKey, port); }
+        Log.i("RackForge", "Setup output for source " + sourceKey + ": "
+                + names.optString(index));
+        return port;
+    }
+
     /** After the player allowed a package: what it sends goes out now. */
     private void sendControllerConnectPlans() {
         List<Integer> sourceKeys;
@@ -6117,8 +6309,8 @@ public final class MainActivity extends Activity {
         for (int sourceKey : sourceKeys) sendControllerConnectPlan(sourceKey, generation);
     }
 
-    private void openKeyLabDestinations(MidiDevice device, MidiDeviceInfo info,
-            int generation) {
+    private void openKeyLabDestinations(OpenMidiDevice record, int generation) {
+        MidiDeviceInfo info = record.info;
         List<MidiDeviceInfo.PortInfo> inputs = new ArrayList<>();
         List<MidiDeviceInfo.PortInfo> namedMatches = new ArrayList<>();
         for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
@@ -6142,17 +6334,13 @@ public final class MainActivity extends Activity {
         String acquirePlan = keyLabAcquirePlan();
         int opened = 0;
         for (MidiDeviceInfo.PortInfo target : targets) {
-            MidiInputPort port = device.openInputPort(target.getPortNumber());
+            if (!audioRunning || generation != midiGeneration) break;
+            MidiInputPort port = openDeviceInput(record, target.getPortNumber());
             if (port == null) {
                 Log.w("RackForge", "Could not open KeyLab destination port "
                         + target.getPortNumber());
                 continue;
             }
-            if (!audioRunning || generation != midiGeneration) {
-                try { port.close(); } catch (Exception ignored) { }
-                continue;
-            }
-            synchronized (openMidiDestinations) { openMidiDestinations.add(port); }
             synchronized (openKeyLabDestinations) {
                 openKeyLabDestinations.put(port, target.getPortNumber());
             }
@@ -6257,6 +6445,12 @@ public final class MainActivity extends Activity {
         String name = properties.getString(MidiDeviceInfo.PROPERTY_NAME, "");
         if (keyLabMatchesProductName(product) || keyLabMatchesProductName(name)) return true;
 
+        // A USB MIDI service names the USB device behind it: its vendor and
+        // product ids answer for this device alone, whatever else is plugged.
+        UsbDevice usb = midiUsbDevice(properties);
+        if (usb != null) return keyLabMatchesUsbDevice(usb.getVendorId(), usb.getProductId());
+        if (info.getType() != MidiDeviceInfo.TYPE_USB) return false;
+
         boolean physicalMatch = hasSupportedKeyLabUsbDevice();
         if (!physicalMatch) return false;
         if (keyLabMatchesEndpointName(product) || keyLabMatchesEndpointName(name)) return true;
@@ -6271,6 +6465,15 @@ public final class MainActivity extends Activity {
             if (candidate.getType() == MidiDeviceInfo.TYPE_USB) usbMidiDevices++;
         }
         return usbMidiDevices == 1;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static UsbDevice midiUsbDevice(Bundle properties) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return properties.getParcelable(MidiDeviceInfo.PROPERTY_USB_DEVICE, UsbDevice.class);
+        }
+        Object usb = properties.getParcelable(MidiDeviceInfo.PROPERTY_USB_DEVICE);
+        return usb instanceof UsbDevice device ? device : null;
     }
 
     private boolean hasSupportedKeyLabUsbDevice() {
@@ -6362,7 +6565,7 @@ public final class MainActivity extends Activity {
         MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
         if (manager != null) {
             for (MidiDeviceInfo info : manager.getDevices()) {
-                if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
+                if (!isPlayableMidiDevice(info)) continue;
                 String deviceName = midiDeviceName(info);
                 if (enabledInputs != null && !enabledInputs.contains(deviceName)) continue;
                 boolean keyLab = isKeyLabDevice(info, manager);
@@ -6397,6 +6600,13 @@ public final class MainActivity extends Activity {
             openMidiPorts.clear();
         }
         synchronized (openControllerDestinations) { openControllerDestinations.clear(); }
+        synchronized (openSetupDestinations) { openSetupDestinations.clear(); }
+        synchronized (controllerDevices) { controllerDevices.clear(); }
+        synchronized (midiDevicesById) {
+            for (OpenMidiDevice record : midiDevicesById.values()) record.closed = true;
+            midiDevicesById.clear();
+        }
+        registeredMidiSources.set(0);
         synchronized (openMidiDestinations) {
             for (MidiInputPort port : openMidiDestinations) {
                 try { port.close(); } catch (Exception ignored) { }

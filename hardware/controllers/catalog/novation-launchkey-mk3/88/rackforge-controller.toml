@@ -1,0 +1,547 @@
+# Novation Launchkey 88 [MK3], standalone (MIDI) mode, factory Custom Modes.
+# Every value below is sourced in ../SOURCES.md; [PR] is the Programmer's
+# Reference Guide v1, [UG] the User Guide v6, [CG] Novation's Components
+# guide for the Launchkey MK3.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-launchkey-mk3-88"
+name = "Launchkey 88 [MK3]"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "launchkey-88-mk3"
+
+# The MIDI interface only: the DAW interface ("LKMK3 DAW", or the second
+# interface on Windows, MIDIIN2) carries DAW mode, not the performance [PR p4].
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["launchkey"]
+name_contains_any = ["mk3"]
+exclude_contains = ["mini", "daw", "midiin2", "flkey"]
+
+# Universal Device Inquiry reply: F0 7E 00 06 02 00 20 29 <dev_type> 01 00 00
+# <app version> F7, dev_type 40h for the 88 [PR p4].
+[devices.sysex_identity]
+manufacturer = [0x00, 0x20, 0x29]
+family = 0xC0
+model = 0x0000
+
+# Pots, factory pot Custom Mode: CC 21-28 on the global (keys) channel,
+# channel 1 by default [CG pots screenshot; UG p41].
+[[inputs]]
+id = "knob-1"
+name = "Pot 1"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 21 }
+
+[[inputs]]
+id = "knob-2"
+name = "Pot 2"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 22 }
+
+[[inputs]]
+id = "knob-3"
+name = "Pot 3"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 23 }
+
+[[inputs]]
+id = "knob-4"
+name = "Pot 4"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 24 }
+
+[[inputs]]
+id = "knob-5"
+name = "Pot 5"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 25 }
+
+[[inputs]]
+id = "knob-6"
+name = "Pot 6"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 26 }
+
+[[inputs]]
+id = "knob-7"
+name = "Pot 7"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 27 }
+
+[[inputs]]
+id = "knob-8"
+name = "Pot 8"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 28 }
+
+# Faders, factory fader Custom Mode: CC 71-79 on the global channel; the
+# ninth is Master [CG faders screenshot; UG p9].
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 71 }
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 72 }
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 73 }
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 74 }
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 75 }
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 76 }
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 77 }
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 78 }
+
+[[inputs]]
+id = "fader-9"
+name = "Master fader"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 79 }
+
+# Fader buttons, factory fader Custom Mode: CC 11-19 on the global channel,
+# 127 on, 0 off; the ninth is Arm/Select [CG faders screenshot; UG p9].
+[[inputs]]
+id = "fader-button-1"
+name = "Fader button 1"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 11 }
+
+[[inputs]]
+id = "fader-button-2"
+name = "Fader button 2"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 12 }
+
+[[inputs]]
+id = "fader-button-3"
+name = "Fader button 3"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 13 }
+
+[[inputs]]
+id = "fader-button-4"
+name = "Fader button 4"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 14 }
+
+[[inputs]]
+id = "fader-button-5"
+name = "Fader button 5"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 15 }
+
+[[inputs]]
+id = "fader-button-6"
+name = "Fader button 6"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 16 }
+
+[[inputs]]
+id = "fader-button-7"
+name = "Fader button 7"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 17 }
+
+[[inputs]]
+id = "fader-button-8"
+name = "Fader button 8"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 18 }
+
+[[inputs]]
+id = "fader-button-9"
+name = "Arm/Select"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 19 }
+
+# Pads in Drum mode: notes 36-51 on channel 10, top row 40-43 48-51,
+# bottom row 36-39 44-47 [UG p28; PR p9; UG p41 Drums MIDI channel 10].
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 40 }
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 41 }
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 42 }
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 43 }
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 48 }
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 49 }
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 50 }
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 51 }
+
+[[inputs]]
+id = "pad-9"
+name = "Pad 9"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 36 }
+
+[[inputs]]
+id = "pad-10"
+name = "Pad 10"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 37 }
+
+[[inputs]]
+id = "pad-11"
+name = "Pad 11"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 38 }
+
+[[inputs]]
+id = "pad-12"
+name = "Pad 12"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 39 }
+
+[[inputs]]
+id = "pad-13"
+name = "Pad 13"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 44 }
+
+[[inputs]]
+id = "pad-14"
+name = "Pad 14"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 45 }
+
+[[inputs]]
+id = "pad-15"
+name = "Pad 15"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 46 }
+
+[[inputs]]
+id = "pad-16"
+name = "Pad 16"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 47 }
+
+# Buttons in standalone mode: Control Changes on channel 16 [PR p5; names
+# from the hardware overview, UG p8-10].
+[[inputs]]
+id = "device-select"
+name = "Device Select"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 51 }
+
+[[inputs]]
+id = "device-lock"
+name = "Device Lock"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 52 }
+
+[[inputs]]
+id = "scene-launch"
+name = "Scene Launch"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 104 }
+
+[[inputs]]
+id = "stop-solo-mute"
+name = "Stop/Solo/Mute"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 105 }
+
+[[inputs]]
+id = "pad-up"
+name = "Up"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 106 }
+
+[[inputs]]
+id = "pad-down"
+name = "Down"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 107 }
+
+[[inputs]]
+id = "track-left"
+name = "Track left"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 102 }
+
+[[inputs]]
+id = "track-right"
+name = "Track right"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 103 }
+
+[[inputs]]
+id = "capture-midi"
+name = "Capture MIDI"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 74 }
+
+[[inputs]]
+id = "quantise"
+name = "Quantise"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 75 }
+
+[[inputs]]
+id = "click"
+name = "Click"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 76 }
+
+[[inputs]]
+id = "undo"
+name = "Undo"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 77 }
+
+[[inputs]]
+id = "play"
+name = "Play"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 115 }
+
+[[inputs]]
+id = "stop"
+name = "Stop"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 116 }
+
+[[inputs]]
+id = "record"
+name = "Record"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 117 }
+
+[[inputs]]
+id = "loop"
+name = "Loop"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 118 }
+
+# Wheels on the keys channel [UG p8]; the sustain pedal sends CC 64 by
+# default [CG].
+[[inputs]]
+id = "pitch-bend"
+name = "Pitch wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, pitch_bend = true }
+
+[[inputs]]
+id = "modulation"
+name = "Modulation wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, cc = 1 }
+
+[[inputs]]
+id = "sustain"
+name = "Sustain pedal"
+kind = "pedal"
+group = "Pedal"
+midi = { channel = 0, cc = 64 }
+
+# RackForge's default meanings, as for the other keyboards with eight
+# knobs and nine faders: the pots shape the tone, the faders the envelope,
+# filter and LFO, the ninth fader the master level.
+[[roles]]
+input = "knob-1"
+role = "synth.oscillator.pulse_width"
+
+[[roles]]
+input = "knob-2"
+role = "synth.oscillator.sub.level"
+
+[[roles]]
+input = "knob-3"
+role = "synth.oscillator.noise.level"
+
+[[roles]]
+input = "knob-4"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-5"
+role = "synth.filter.lfo.amount"
+
+[[roles]]
+input = "knob-6"
+role = "synth.filter.key_tracking"
+
+[[roles]]
+input = "knob-7"
+role = "synth.lfo.delay"
+
+[[roles]]
+input = "knob-8"
+role = "synth.amplifier.level"
+
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"
+
+[[roles]]
+input = "fader-9"
+role = "rackforge.master.level"
+
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop"
+target = "transport_stop"

@@ -29,13 +29,18 @@ impl Default for MidiActivityLog {
 }
 
 impl MidiActivityLog {
-    /// Records a channel voice message. Clock, sensing, SysEx and every other
-    /// system message are nobody's control and are left out, as are
+    /// Records a channel voice message, or the Start, Continue and Stop some
+    /// keyboards' transport buttons send. Clock, sensing, SysEx and every
+    /// other system message are nobody's control and are left out, as are
     /// malformed bytes.
     pub fn record(&mut self, source: &MidiSourceDescriptor, bytes: &[u8]) -> bool {
         let Some(&status) = bytes.first() else {
             return false;
         };
+        if matches!(status, 0xfa..=0xfc) {
+            self.push(source, status, 0, 0);
+            return true;
+        }
         if !(0x80..0xf0).contains(&status) {
             return false;
         }
@@ -49,6 +54,12 @@ impl MidiActivityLog {
         if bytes.len() < 1 + data_bytes || bytes[1..=data_bytes].iter().any(|byte| *byte > 0x7f) {
             return false;
         }
+        let data2 = if data_bytes == 2 { bytes[2] } else { 0 };
+        self.push(source, status, bytes[1], data2);
+        true
+    }
+
+    fn push(&mut self, source: &MidiSourceDescriptor, status: u8, data1: u8, data2: u8) {
         if self.events.len() == MIDI_ACTIVITY_CAPACITY {
             self.events.pop_front();
         }
@@ -56,11 +67,10 @@ impl MidiActivityLog {
             sequence: self.next_sequence,
             source: source.clone(),
             status,
-            data1: bytes[1],
-            data2: if data_bytes == 2 { bytes[2] } else { 0 },
+            data1,
+            data2,
         });
         self.next_sequence += 1;
-        true
     }
 
     /// Everything numbered after `after`, and the cursor to ask from next
@@ -120,6 +130,25 @@ mod tests {
         assert!(!log.record(&source(), &[0xb0, 0x80, 1]));
         assert!(!log.record(&source(), &[]));
         assert_eq!(log.since(0).0, 0);
+    }
+
+    /// A Launchkey MK4's Play and Stop send MIDI Start and Stop: the editor
+    /// has to see them to show the buttons working.
+    #[test]
+    fn transport_real_time_messages_are_a_buttons() {
+        let mut log = MidiActivityLog::default();
+        assert!(log.record(&source(), &[0xfa]));
+        assert!(log.record(&source(), &[0xfc]));
+        assert!(!log.record(&source(), &[0xf8]));
+        assert!(!log.record(&source(), &[0xfe]));
+        let (_, events) = log.since(0);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (event.status, event.data1, event.data2))
+                .collect::<Vec<_>>(),
+            vec![(0xfa, 0, 0), (0xfc, 0, 0)]
+        );
     }
 
     #[test]

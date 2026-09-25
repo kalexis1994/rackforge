@@ -116,6 +116,12 @@ if [[ -d "$controller_package" ]]; then
     --trust official
 fi
 
+# The controllers RackForge describes from their makers' documentation. The
+# controller host's service sees its store read-only, so they are installed
+# here, with every release.
+install -d "$root/controllers"
+"$root/bin/rackforge-controller-host" install-catalog --root "$root/controllers"
+
 if [ ! -f "$root/config/rackforge.toml" ]; then
   install -m 0644 \
     "$source_root/platforms/raspberry-pi/config/rackforge.toml" \

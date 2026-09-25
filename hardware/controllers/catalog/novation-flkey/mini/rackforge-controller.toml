@@ -1,0 +1,139 @@
+# Novation FLkey Mini (the first FLkey generation), standalone use outside FL
+# Studio. Every value below is sourced in ../SOURCES.md; [UG] is the FLkey Mini
+# user guide, [CG] Novation's FLkey Components guide.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-flkey-mini"
+name = "FLkey Mini"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "flkey-mini"
+
+# The MIDI interface only: "FLkey Mini MIDI Out" in Novation's screenshot;
+# the DAW interface is "... DAW Out", named MIDIIN2 on Windows [UG]. The
+# FLkey 2 is "FLkey MK2 ..." and never matches.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["flkey mini"]
+exclude_contains = ["mk2", "daw", "midiin2", "port 2", "midi 2 "]
+
+# Pots, the default pot Custom Mode, the only pot mode outside FL Studio:
+# CC 21-28 on the global (keys) channel, channel 1 by default [CG pot editor
+# screenshot; UG p22, p33].
+[[inputs]]
+id = "pot-1"
+name = "Pot 1"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 21 }
+
+[[inputs]]
+id = "pot-2"
+name = "Pot 2"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 22 }
+
+[[inputs]]
+id = "pot-3"
+name = "Pot 3"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 23 }
+
+[[inputs]]
+id = "pot-4"
+name = "Pot 4"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 24 }
+
+[[inputs]]
+id = "pot-5"
+name = "Pot 5"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 25 }
+
+[[inputs]]
+id = "pot-6"
+name = "Pot 6"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 26 }
+
+[[inputs]]
+id = "pot-7"
+name = "Pot 7"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 27 }
+
+[[inputs]]
+id = "pot-8"
+name = "Pot 8"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 28 }
+
+# Touch strips on the keys channel: pitch bend, and modulation on CC 1. The
+# sustain input sends CC 64 by default [CG "Sustain Pedal"]. The pads and the
+# buttons are not declared: Novation does not say what they send outside FL
+# Studio.
+[[inputs]]
+id = "pitch-bend"
+name = "Pitch strip"
+kind = "wheel"
+group = "Touch strips"
+midi = { channel = 0, pitch_bend = true }
+
+[[inputs]]
+id = "modulation"
+name = "Modulation strip"
+kind = "wheel"
+group = "Touch strips"
+midi = { channel = 0, cc = 1 }
+
+[[inputs]]
+id = "sustain"
+name = "Sustain pedal"
+kind = "pedal"
+group = "Pedal"
+midi = { channel = 0, cc = 64 }
+
+# RackForge's default meanings for a keyboard with eight knobs and no
+# faders: the filter, its envelope and the LFO rate, then the amp envelope.
+[[roles]]
+input = "pot-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "pot-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "pot-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "pot-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "pot-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "pot-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "pot-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "pot-8"
+role = "synth.envelope.amp.release"

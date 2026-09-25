@@ -3433,7 +3433,7 @@ fn parse_host_action(message: &[u8], bindings: &[HostActionBinding]) -> Option<P
             // LITTLE surface; they are dispatched by the transport bridge.
             _ => return None,
         };
-        let phase = match binding.midi_cc.phase(message)? {
+        let phase = match binding.phase(message)? {
             ButtonPhase::Press => InputPhase::Press,
             ButtonPhase::Release => InputPhase::Release,
         };

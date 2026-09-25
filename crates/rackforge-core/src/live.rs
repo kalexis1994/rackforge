@@ -7,7 +7,9 @@ use crate::control::{
     PreparedChainVoice, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec, RackSlotStateLoad,
 };
 use crate::isolated_state::parameter_value_is_valid;
-use crate::live_midi_state::{MidiControllerStates, ReservedMidiControls, plugin_midi_event};
+use crate::live_midi_state::{
+    MidiControllerStates, ReservedBindingSet, ReservedMidiControls, plugin_midi_event,
+};
 use crate::midi_hotplug::{
     self, SupervisedSource, is_performance_midi_input, stable_alsa_source_id,
 };
@@ -44,6 +46,7 @@ use rackforge_midi_api::{
     MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
     MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
     MidiSourceSelector, MidiTargetId, ParameterLink, ParameterLinkPassThrough, PluginChannelModel,
+    SharedMidiSourceRegistry,
 };
 #[cfg(test)]
 use rackforge_performance_api::RackKeyboardParts;
@@ -1225,25 +1228,18 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
     };
 
     let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
-    let (midi_port_names, mut midi_sources, midi_observer, connected_midi_sources) =
-        connect_midi_sources(sender)?;
-    let virtual_midi_source = MidiSourceKey::new(midi_port_names.len() as u32);
+    let ConnectedMidiSources {
+        names: midi_port_names,
+        registry: shared_midi_sources,
+        observer: midi_observer,
+        connected: connected_midi_sources,
+        virtual_source: virtual_midi_source,
+    } = connect_midi_sources(sender)?;
     let virtual_midi_source_id = MidiSourceId::new(VIRTUAL_MIDI_SOURCE_ID)?;
-    midi_sources.register(
-        virtual_midi_source,
-        MidiSourceDescriptor {
-            id: virtual_midi_source_id.clone(),
-            name: "RackForge Touch Controller".into(),
-            // The default play route resolves the *primary* source, so with no
-            // keyboard attached something has to be it or nothing can sound.
-            // The touch controller is the instrument the player still has.
-            primary: midi_port_names.is_empty(),
-        },
-    )?;
-    connected_midi_sources
-        .lock()
-        .map_err(|_| anyhow::anyhow!("MIDI connection state lock poisoned"))?
-        .insert(virtual_midi_source.get());
+    // What the routes and links compile against at start. A keyboard plugged
+    // in later joins the shared registry, the play route hears every
+    // performance source, and the control server compiles the links again.
+    let midi_sources = shared_midi_sources.snapshot();
     let mut initial_parameter_links = compile_parameter_links_for_runtime(
         &persisted_parameter_links,
         &midi_sources,
@@ -1533,7 +1529,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
                         .map(|runtime| (plugin.manifest().id.clone(), runtime))
                 })
                 .collect(),
-            midi_sources: midi_sources.clone(),
+            midi_sources: shared_midi_sources.clone(),
             midi_observer,
             connected_midi_sources: Arc::clone(&connected_midi_sources),
             plugin_sample_rate: f64::from(output_rate),
@@ -1574,7 +1570,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         play_route: &play_route,
         virtual_play_route: &virtual_play_route,
         virtual_midi_source,
-        midi_source_count: midi_port_names.len() + 1,
+        midi_source_count: MAX_LIVE_MIDI_SOURCES,
         initial_master_level,
         initial_master_pan,
         render_mode: resolve_render_mode(initial_surface_mode, initial_rack_specs.len()),
@@ -1624,13 +1620,21 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
 /// board that boots before its USB devices enumerate recovers on its own.
 ///
 /// Connections themselves move to [`midi_hotplug`], which keeps them alive
-/// across replugging for the rest of the session.
-type ConnectedMidiSources = (
-    Vec<String>,
-    MidiSourceRegistry,
-    Receiver<IngressMidiEvent>,
-    Arc<Mutex<BTreeSet<u32>>>,
-);
+/// across replugging for the rest of the session, and adopts a keyboard
+/// plugged in while the engine runs.
+struct ConnectedMidiSources {
+    names: Vec<String>,
+    registry: SharedMidiSourceRegistry,
+    observer: Receiver<IngressMidiEvent>,
+    connected: Arc<Mutex<BTreeSet<u32>>>,
+    virtual_source: MidiSourceKey,
+}
+
+/// How many MIDI sources the engine keeps per-source state for: the
+/// keyboards found at start, the touch controller, and the keyboards plugged
+/// in afterwards. A source past it still plays; its held controllers are not
+/// replayed to a Rack loaded later.
+pub(crate) const MAX_LIVE_MIDI_SOURCES: usize = 64;
 
 fn connect_midi_sources(sender: SyncSender<IngressMidiEvent>) -> Result<ConnectedMidiSources> {
     let discovery = MidiInput::new("rackforge-core-discovery")?;
@@ -1658,16 +1662,35 @@ fn connect_midi_sources(sender: SyncSender<IngressMidiEvent>) -> Result<Connecte
             connected: false,
         });
     }
+    let virtual_source = MidiSourceKey::new(names.len() as u32);
+    registry.register(
+        virtual_source,
+        MidiSourceDescriptor {
+            id: MidiSourceId::new(VIRTUAL_MIDI_SOURCE_ID)?,
+            name: "RackForge Touch Controller".into(),
+            // With no keyboard attached the touch controller is the primary
+            // source: the instrument the player still has.
+            primary: names.is_empty(),
+        },
+    )?;
+    let registry = SharedMidiSourceRegistry::new(registry);
     let (observer_sender, observer_receiver) = mpsc::sync_channel(64);
-    let connected_sources = Arc::new(Mutex::new(BTreeSet::new()));
+    let connected_sources = Arc::new(Mutex::new(BTreeSet::from([virtual_source.get()])));
     midi_hotplug::spawn(
         sender,
         Some(observer_sender),
         Arc::clone(&connected_sources),
         supervised,
+        registry.clone(),
         midi_hotplug::DEFAULT_POLL_INTERVAL,
     )?;
-    Ok((names, registry, observer_receiver, connected_sources))
+    Ok(ConnectedMidiSources {
+        names,
+        registry,
+        observer: observer_receiver,
+        connected: connected_sources,
+        virtual_source,
+    })
 }
 
 fn play_route_id() -> &'static str {
@@ -1678,11 +1701,17 @@ fn compile_default_play_route(
     sources: &MidiSourceRegistry,
     channel_model: PluginChannelModel,
 ) -> Result<CompiledMidiRoute> {
+    // Every performance keyboard plays, as on the desktop and Android: a
+    // second keyboard is not a spare that stays silent. The touch controller
+    // has its own route.
     let route = MidiRoute {
         schema_version: MIDI_ROUTING_SCHEMA_VERSION,
         id: MidiRouteId::new(play_route_id())?,
         enabled: true,
-        matches: MidiRouteMatch::default(),
+        matches: MidiRouteMatch {
+            source: MidiSourceSelector::AllPerformance,
+            ..MidiRouteMatch::default()
+        },
         transform: MidiRouteTransform::default(),
         target: MidiRouteTarget {
             instance_id: MidiTargetId::new(DEFAULT_LIVE_INSTANCE_ID)?,
@@ -1964,6 +1993,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     let mut master_gain = MasterGain::new(initial_master_level);
     let mut master_balance = MasterBalance::new(initial_master_pan);
     let mut reserved_midi_controls = ReservedMidiControls::with_sources(midi_source_count);
+    // Each controller's reservations, by its id: the engine reserves them
+    // all at once, so one controller registering keeps the others'.
+    let mut reserved_binding_sets = std::collections::BTreeMap::<String, ReservedBindingSet>::new();
     let mut pending_virtual_midi = Vec::with_capacity(32);
     // The host sequencer: transport and lanes, advanced once per period so
     // pattern MIDI joins the block sample-accurately. Rack-mode distribution
@@ -2266,7 +2298,15 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     bindings,
                     reply,
                 } => {
-                    reserved_midi_controls.replace(&bindings, &[]);
+                    let set = ReservedBindingSet {
+                        source: None,
+                        controls: bindings.clone(),
+                        actions: Vec::new(),
+                    };
+                    if reserved_binding_sets.get(&controller_id) != Some(&set) {
+                        reserved_binding_sets.insert(controller_id.clone(), set);
+                        reserved_midi_controls.replace(reserved_binding_sets.values());
+                    }
                     println!(
                         "HOST_CONTROLS_REGISTERED controller={controller_id} count={}",
                         bindings.len()
@@ -2277,14 +2317,28 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     controller_id,
                     controls,
                     actions,
+                    source,
                     reply,
                 } => {
-                    reserved_midi_controls.replace(&controls, &actions);
-                    println!(
-                        "HOST_BINDINGS_REGISTERED controller={controller_id} controls={} actions={}",
-                        controls.len(),
-                        actions.len()
-                    );
+                    let counts = (controls.len(), actions.len());
+                    let set = ReservedBindingSet {
+                        source,
+                        controls,
+                        actions,
+                    };
+                    // Controllers register again every few seconds. The same
+                    // bindings change nothing, and must not let go of a
+                    // held parts key.
+                    if reserved_binding_sets.get(&controller_id) != Some(&set) {
+                        reserved_binding_sets.insert(controller_id.clone(), set);
+                        reserved_midi_controls.replace(reserved_binding_sets.values());
+                        println!(
+                            "HOST_BINDINGS_REGISTERED controller={controller_id} controls={} actions={} source={}",
+                            counts.0,
+                            counts.1,
+                            source.map_or_else(|| "any".to_owned(), |key| key.get().to_string())
+                        );
+                    }
                     let _ = reply.send(Ok(()));
                 }
                 AudioControlCommand::SetMasterLevel { level, reply } => {
@@ -3022,7 +3076,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             }
             if event.source != virtual_midi_source {
                 if let Some(action) =
-                    reserved_midi_controls.pressed_action(plugin_midi_event(packet))
+                    reserved_midi_controls.pressed_action(event.source, plugin_midi_event(packet))
                 {
                     apply_sequencer_host_action(
                         &mut sequencer,
@@ -3032,6 +3086,11 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     );
                 }
                 if reserved_midi_controls.consume(event.source, plugin_midi_event(packet)) {
+                    continue;
+                }
+                // Start, Continue and Stop are a controller's buttons, never
+                // an instrument's notes.
+                if packet.is_transport_realtime() {
                     continue;
                 }
                 match render_mode {
@@ -3131,7 +3190,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             if feed_sequencer_input(&mut sequencer, event.packet.data, event.packet.length) {
                 continue;
             }
-            if let Some(action) = reserved_midi_controls.pressed_action(plugin_event) {
+            if let Some(action) = reserved_midi_controls.pressed_action(event.source, plugin_event)
+            {
                 apply_sequencer_host_action(
                     &mut sequencer,
                     &mut sequencer_taps,
@@ -3140,6 +3200,11 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 );
             }
             if reserved_midi_controls.consume(event.source, plugin_event) {
+                continue;
+            }
+            // Start, Continue and Stop are a controller's buttons, never an
+            // instrument's notes.
+            if event.packet.is_transport_realtime() {
                 continue;
             }
             controller_states.observe(event.source, plugin_event);
@@ -4462,7 +4527,9 @@ mod tests {
     }
 
     #[test]
-    fn default_play_route_uses_only_primary_and_normalizes_single_part_channel() {
+    /// Every keyboard plays, the one plugged in later included -- a key it
+    /// was never compiled against -- as on the desktop and Android.
+    fn default_play_route_hears_every_keyboard_and_normalizes_single_part_channel() {
         let mut sources = MidiSourceRegistry::default();
         sources
             .register(
@@ -4495,7 +4562,12 @@ mod tests {
         };
 
         assert_eq!(route.route(primary).unwrap().packet.data, [0x90, 60, 100]);
-        assert!(route.route(secondary).is_none());
+        assert_eq!(route.route(secondary).unwrap().packet.data, [0x90, 60, 100]);
+        let adopted = IngressMidiEvent {
+            source: MidiSourceKey::new(7),
+            packet: MidiPacket::new(0, &[0x93, 64, 90]).unwrap(),
+        };
+        assert_eq!(route.route(adopted).unwrap().packet.data, [0x90, 64, 90]);
     }
 
     #[test]
@@ -4767,16 +4839,17 @@ mod tests {
     #[test]
     fn reserved_host_control_never_reaches_plugin_midi() {
         let mut reserved = ReservedMidiControls::default();
-        reserved.replace(
-            &[HostControlBinding {
+        reserved.replace(&[ReservedBindingSet {
+            source: None,
+            controls: vec![HostControlBinding {
                 target: HostControlTarget::MasterLevel,
                 midi_cc: MidiControlChangeBinding {
                     channel: 0,
                     controller: 82,
                 },
             }],
-            &[],
-        );
+            actions: Vec::new(),
+        }]);
 
         let source = MidiSourceKey::new(0);
         assert!(reserved.consume(source, midi(3, [0xb0, 82, 64])));
@@ -4784,25 +4857,26 @@ mod tests {
         assert!(!reserved.consume(source, midi(3, [0xb1, 82, 64])));
         assert!(!reserved.consume(source, midi(3, [0x90, 82, 64])));
 
-        reserved.replace(&[], &[]);
+        reserved.replace(&[]);
         assert!(!reserved.consume(source, midi(3, [0xb0, 82, 64])));
     }
 
     #[test]
     fn reserved_host_action_never_reaches_plugin_midi() {
         let mut reserved = ReservedMidiControls::default();
-        reserved.replace(
-            &[],
-            &[HostActionBinding {
-                target: HostActionTarget::KeyboardParts,
-                midi_cc: MidiButtonBinding {
+        reserved.replace(&[ReservedBindingSet {
+            source: None,
+            controls: Vec::new(),
+            actions: vec![HostActionBinding::control_change(
+                HostActionTarget::KeyboardParts,
+                MidiButtonBinding {
                     channel: 0,
                     controller: 119,
                     press_value: 127,
                     release_value: 0,
                 },
-            }],
-        );
+            )],
+        }]);
 
         let source = MidiSourceKey::new(0);
         assert!(reserved.consume(source, midi(3, [0xb0, 119, 127])));
@@ -4812,6 +4886,57 @@ mod tests {
         assert!(!reserved.consume(source, midi(3, [0x90, 61, 100])));
         assert!(!reserved.consume(source, midi(3, [0xb0, 118, 127])));
         assert!(!reserved.consume(source, midi(3, [0xb1, 119, 127])));
+    }
+
+    /// A Launchkey MK4's Play sends MIDI Start: on its own port it starts
+    /// the transport and reaches no instrument; another device's Start, a
+    /// drum machine's, is left alone. A second controller registering keeps
+    /// the first one's buttons.
+    #[test]
+    fn a_controllers_real_time_play_button_is_its_own() {
+        let launchkey = MidiSourceKey::new(1);
+        let drum_machine = MidiSourceKey::new(2);
+        let keylab = ReservedBindingSet {
+            source: None,
+            controls: Vec::new(),
+            actions: vec![HostActionBinding::control_change(
+                HostActionTarget::TransportStop,
+                MidiButtonBinding {
+                    channel: 0,
+                    controller: 116,
+                    press_value: 127,
+                    release_value: 0,
+                },
+            )],
+        };
+        let play = ReservedBindingSet {
+            source: Some(launchkey),
+            controls: Vec::new(),
+            actions: vec![HostActionBinding::realtime(
+                HostActionTarget::TransportPlay,
+                rackforge_controller_api::MidiRealtime::Start,
+            )],
+        };
+        let mut reserved = ReservedMidiControls::with_sources(3);
+        reserved.replace([&keylab, &play]);
+
+        assert_eq!(
+            reserved.pressed_action(launchkey, midi(1, [0xfa, 0, 0])),
+            Some(HostActionTarget::TransportPlay)
+        );
+        assert!(reserved.consume(launchkey, midi(1, [0xfa, 0, 0])));
+        assert_eq!(
+            reserved.pressed_action(drum_machine, midi(1, [0xfa, 0, 0])),
+            None
+        );
+        assert!(!reserved.consume(drum_machine, midi(1, [0xfa, 0, 0])));
+        // The clock is never a button.
+        assert!(!reserved.consume(launchkey, midi(1, [0xf8, 0, 0])));
+        // The other controller's stop, reserved everywhere, still works.
+        assert_eq!(
+            reserved.pressed_action(drum_machine, midi(3, [0xb0, 116, 127])),
+            Some(HostActionTarget::TransportStop)
+        );
     }
 
     #[test]

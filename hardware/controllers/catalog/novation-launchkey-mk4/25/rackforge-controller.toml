@@ -1,0 +1,409 @@
+# Novation Launchkey 25 [MK4], standalone (MIDI) mode, factory Custom Modes
+# and power-on modes. Every value below is sourced in ../SOURCES.md; [PR] is
+# the Programmer's Reference Guide 3.0, [UG] the Launchkey 25 user guide v3,
+# [CG] Novation's Components guide for the Launchkey MK4, [FL] Novation's FL
+# Studio setup article for it.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-launchkey-mk4-25"
+name = "Launchkey 25 [MK4]"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "launchkey-25-mk4"
+
+# The MIDI interface only: "Launchkey MK4 <size> MIDI" on Windows, "... MIDI
+# Out" on a Mac; the DAW interface is "MIDIIN2 (...)", "... (Port 2)" and
+# "... DAW Out" [FL; AL (the Mini's article shows the Port 2 form);
+# PR p5]. The size is part of the name, so it tells the four sizes apart: the
+# MK4 documents no Identity Reply. "Mini" is its own product.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["launchkey", "mk4 25"]
+exclude_contains = ["mini", "daw", "midiin2", "port 2", "midi 2 "]
+
+# Encoders, factory encoder Custom Mode 1, the power-on encoder mode: CC 21-28
+# on page 1 and CC 29-36 on page 2 (Encoder bank buttons), absolute 0-127, on
+# the global channel [CG encoders screenshot; UG p45].
+[[inputs]]
+id = "encoder-1"
+name = "Encoder 1"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 21 }
+
+[[inputs]]
+id = "encoder-2"
+name = "Encoder 2"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 22 }
+
+[[inputs]]
+id = "encoder-3"
+name = "Encoder 3"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 23 }
+
+[[inputs]]
+id = "encoder-4"
+name = "Encoder 4"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 24 }
+
+[[inputs]]
+id = "encoder-5"
+name = "Encoder 5"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 25 }
+
+[[inputs]]
+id = "encoder-6"
+name = "Encoder 6"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 26 }
+
+[[inputs]]
+id = "encoder-7"
+name = "Encoder 7"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 27 }
+
+[[inputs]]
+id = "encoder-8"
+name = "Encoder 8"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 28 }
+
+[[inputs]]
+id = "encoder-9"
+name = "Encoder 9"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 29 }
+
+[[inputs]]
+id = "encoder-10"
+name = "Encoder 10"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 30 }
+
+[[inputs]]
+id = "encoder-11"
+name = "Encoder 11"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 31 }
+
+[[inputs]]
+id = "encoder-12"
+name = "Encoder 12"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 32 }
+
+[[inputs]]
+id = "encoder-13"
+name = "Encoder 13"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 33 }
+
+[[inputs]]
+id = "encoder-14"
+name = "Encoder 14"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 34 }
+
+[[inputs]]
+id = "encoder-15"
+name = "Encoder 15"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 35 }
+
+[[inputs]]
+id = "encoder-16"
+name = "Encoder 16"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 36 }
+
+# Pads in Drum mode, the power-on pad mode: notes 36-51 on channel 10, top row
+# 40-43 48-51, bottom row 36-39 44-47 [UG p20-21, p45; PR p12, the DAW Drum
+# mode that "can replace the Drum mode of standalone (MIDI) mode"].
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 40 }
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 41 }
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 42 }
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 43 }
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 48 }
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 49 }
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 50 }
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 51 }
+
+[[inputs]]
+id = "pad-9"
+name = "Pad 9"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 36 }
+
+[[inputs]]
+id = "pad-10"
+name = "Pad 10"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 37 }
+
+[[inputs]]
+id = "pad-11"
+name = "Pad 11"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 38 }
+
+[[inputs]]
+id = "pad-12"
+name = "Pad 12"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 39 }
+
+[[inputs]]
+id = "pad-13"
+name = "Pad 13"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 44 }
+
+[[inputs]]
+id = "pad-14"
+name = "Pad 14"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 45 }
+
+[[inputs]]
+id = "pad-15"
+name = "Pad 15"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 46 }
+
+[[inputs]]
+id = "pad-16"
+name = "Pad 16"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 47 }
+
+# Buttons in standalone mode: Control Changes on channel 16 [PR p6 figure 1;
+# names from UG p9-10].
+[[inputs]]
+id = "track-left"
+name = "Track left"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 103 }
+
+[[inputs]]
+id = "track-right"
+name = "Track right"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 102 }
+
+[[inputs]]
+id = "capture-midi"
+name = "Capture MIDI"
+kind = "button"
+group = "Workflow"
+midi = { channel = 15, cc = 74 }
+
+[[inputs]]
+id = "quantise"
+name = "Quantise"
+kind = "button"
+group = "Workflow"
+midi = { channel = 15, cc = 75 }
+
+[[inputs]]
+id = "metronome"
+name = "Metronome"
+kind = "button"
+group = "Workflow"
+midi = { channel = 15, cc = 76 }
+
+[[inputs]]
+id = "undo"
+name = "Undo"
+kind = "button"
+group = "Workflow"
+midi = { channel = 15, cc = 77 }
+
+[[inputs]]
+id = "record"
+name = "Record"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 117 }
+
+[[inputs]]
+id = "loop"
+name = "Loop"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 118 }
+
+# Play and Stop send MIDI Real Time Start and Stop [PR p7].
+[[inputs]]
+id = "play"
+name = "Play"
+kind = "button"
+group = "Transport"
+midi = { realtime = "start" }
+
+[[inputs]]
+id = "stop"
+name = "Stop"
+kind = "button"
+group = "Transport"
+midi = { realtime = "stop" }
+
+# Wheels on the keys channel; the modulation wheel sends CC 1 and the sustain
+# input CC 64 by default [UG p9; CG "Mod Wheel/Strip" and "Pedal"].
+[[inputs]]
+id = "pitch-bend"
+name = "Pitch wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, pitch_bend = true }
+
+[[inputs]]
+id = "modulation"
+name = "Modulation wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, cc = 1 }
+
+[[inputs]]
+id = "sustain"
+name = "Sustain pedal"
+kind = "pedal"
+group = "Pedal"
+midi = { channel = 0, cc = 64 }
+
+# RackForge's default meanings for a keyboard with eight knobs and no
+# faders: the filter, its envelope and the LFO rate, then the amp envelope.
+[[roles]]
+input = "encoder-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "encoder-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "encoder-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "encoder-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "encoder-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "encoder-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "encoder-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "encoder-8"
+role = "synth.envelope.amp.release"
+
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop"
+target = "transport_stop"

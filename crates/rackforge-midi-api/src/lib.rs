@@ -820,6 +820,96 @@ impl MidiSourceRegistry {
             .map(|source| source.key)
             .ok_or(MidiRoutingError::MissingPrimarySource)
     }
+
+    /// The first key after every one registered.
+    pub fn next_key(&self) -> MidiSourceKey {
+        MidiSourceKey::new(
+            self.sources
+                .iter()
+                .map(|source| source.key.get() + 1)
+                .max()
+                .unwrap_or(0),
+        )
+    }
+}
+
+/// The MIDI source registry a running host shares between the thread that
+/// finds keyboards and the ones that route and name them. A keyboard plugged
+/// in while the host runs is registered here and heard at once: it is not
+/// left out until a restart.
+///
+/// Readers get copies, never references into the lock, so none of them can
+/// hold it across other work. `generation` counts registrations, for readers
+/// that compile something against the sources and must compile again.
+#[derive(Clone, Debug, Default)]
+pub struct SharedMidiSourceRegistry {
+    inner: std::sync::Arc<std::sync::RwLock<MidiSourceRegistry>>,
+    generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl SharedMidiSourceRegistry {
+    pub fn new(registry: MidiSourceRegistry) -> Self {
+        Self {
+            inner: std::sync::Arc::new(std::sync::RwLock::new(registry)),
+            generation: std::sync::Arc::default(),
+        }
+    }
+
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, MidiSourceRegistry> {
+        // A writer that panicked left a registry that was valid before and
+        // after each push: reading it stays safe.
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// A copy of the registry as it stands.
+    pub fn snapshot(&self) -> MidiSourceRegistry {
+        self.read().clone()
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Registers a source under the next free key and answers the key; a
+    /// source already registered keeps the key it has.
+    pub fn adopt(
+        &self,
+        descriptor: MidiSourceDescriptor,
+    ) -> Result<MidiSourceKey, MidiRoutingError> {
+        let mut registry = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(key) = registry.resolve_optional(&descriptor.id) {
+            return Ok(key);
+        }
+        let key = registry.next_key();
+        registry.register(key, descriptor)?;
+        drop(registry);
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Ok(key)
+    }
+
+    pub fn resolve_optional(&self, id: &MidiSourceId) -> Option<MidiSourceKey> {
+        self.read().resolve_optional(id)
+    }
+
+    pub fn resolve_device(&self, name: &str) -> Option<(MidiSourceKey, MidiSourceDescriptor)> {
+        self.read()
+            .resolve_device(name)
+            .map(|(key, descriptor)| (key, descriptor.clone()))
+    }
+
+    pub fn descriptor(&self, key: MidiSourceKey) -> Option<MidiSourceDescriptor> {
+        self.read().descriptor(key).cloned()
+    }
+
+    pub fn descriptors(&self) -> Vec<MidiSourceDescriptor> {
+        self.read().descriptors().cloned().collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -869,6 +959,27 @@ impl MidiPacket {
             data,
             wide: None,
         })
+    }
+
+    /// MIDI Start, Continue or Stop, which some keyboards' transport buttons
+    /// send. Only a reserved controller button reads one: it never reaches a
+    /// route or an instrument. Every other system message is still refused.
+    pub fn transport_realtime(frame: u32, message: &[u8]) -> Option<Self> {
+        let [status @ 0xfa..=0xfc] = message else {
+            return None;
+        };
+        Some(Self {
+            frame,
+            length: 1,
+            data: [*status, 0, 0],
+            wide: None,
+        })
+    }
+
+    /// Whether this is a Start, Continue or Stop rather than a channel
+    /// message.
+    pub fn is_transport_realtime(&self) -> bool {
+        self.length == 1 && matches!(self.data[0], 0xfa..=0xfc)
     }
 
     /// A channel-voice message at MIDI 2.0 width, with its byte projection
@@ -1232,6 +1343,31 @@ mod tests {
         registry
     }
 
+    /// A keyboard plugged in while the host runs is registered under a key
+    /// no other source has, once, and its readers learn that the sources
+    /// changed.
+    #[test]
+    fn a_shared_registry_adopts_a_keyboard_plugged_in_later() {
+        let shared = SharedMidiSourceRegistry::new(registry());
+        assert_eq!(shared.generation(), 0);
+        let launchkey = source("alsa.launchkey", "Launchkey MK4 25 MIDI", false);
+        let key = shared.adopt(launchkey.clone()).unwrap();
+        assert_eq!(key, MidiSourceKey::new(21));
+        assert_eq!(shared.generation(), 1);
+        // Found again: same key, nothing new.
+        assert_eq!(shared.adopt(launchkey.clone()).unwrap(), key);
+        assert_eq!(shared.generation(), 1);
+        assert_eq!(shared.resolve_optional(&launchkey.id), Some(key));
+        assert_eq!(
+            shared.descriptor(key).unwrap().name,
+            "Launchkey MK4 25 MIDI"
+        );
+        assert_eq!(shared.descriptors().len(), 3);
+        // Another handle sees the same registry.
+        let reader = shared.clone();
+        assert_eq!(reader.snapshot().next_key(), MidiSourceKey::new(22));
+    }
+
     fn route() -> MidiRoute {
         MidiRoute {
             schema_version: MIDI_ROUTING_SCHEMA_VERSION,
@@ -1458,5 +1594,34 @@ mod tests {
         assert!(MidiPacket::new(0, &[0x90, 60]).is_err());
         assert!(MidiPacket::new(0, &[0xf8]).is_err());
         assert!(MidiPacket::new(0, &[0x90, 60, 255]).is_err());
+    }
+
+    /// A keyboard's Play sends MIDI Start: it enters, as its own kind of
+    /// packet, while the clock and every other system message stay out.
+    #[test]
+    fn transport_real_time_messages_enter_and_nothing_else_does() {
+        for status in [0xfa, 0xfb, 0xfc] {
+            let packet = MidiPacket::transport_realtime(0, &[status]).unwrap();
+            assert!(packet.is_transport_realtime());
+            assert_eq!((packet.length, packet.data), (1, [status, 0, 0]));
+        }
+        for message in [
+            &[0xf8][..],
+            &[0xfe],
+            &[0xff],
+            &[0xfa, 0],
+            &[0x90, 60, 100],
+            &[],
+        ] {
+            assert!(
+                MidiPacket::transport_realtime(0, message).is_none(),
+                "{message:02x?}"
+            );
+        }
+        assert!(
+            !MidiPacket::new(0, &[0xb0, 1, 2])
+                .unwrap()
+                .is_transport_realtime()
+        );
     }
 }

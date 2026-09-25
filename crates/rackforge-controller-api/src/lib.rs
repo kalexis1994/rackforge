@@ -205,11 +205,88 @@ impl MidiButtonBinding {
     }
 }
 
+/// A MIDI System Real Time message a controller sends from a button: some
+/// keyboards' Play and Stop send these instead of a Control Change.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MidiRealtime {
+    Start,
+    Continue,
+    Stop,
+}
+
+impl MidiRealtime {
+    pub const fn byte(self) -> u8 {
+        match self {
+            Self::Start => 0xfa,
+            Self::Continue => 0xfb,
+            Self::Stop => 0xfc,
+        }
+    }
+
+    /// The message, alone or at the head of a longer buffer.
+    pub fn of(message: &[u8]) -> Option<Self> {
+        match message.first()? {
+            0xfa => Some(Self::Start),
+            0xfb => Some(Self::Continue),
+            0xfc => Some(Self::Stop),
+            _ => None,
+        }
+    }
+}
+
+/// A host action and the one MIDI message that triggers it: a button's
+/// Control Change, or a System Real Time message. Exactly one is set.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HostActionBinding {
     pub target: HostActionTarget,
-    pub midi_cc: MidiButtonBinding,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_cc: Option<MidiButtonBinding>,
+    /// A System Real Time message has no release: it only presses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_realtime: Option<MidiRealtime>,
+}
+
+impl HostActionBinding {
+    pub fn control_change(target: HostActionTarget, midi_cc: MidiButtonBinding) -> Self {
+        Self {
+            target,
+            midi_cc: Some(midi_cc),
+            midi_realtime: None,
+        }
+    }
+
+    pub fn realtime(target: HostActionTarget, message: MidiRealtime) -> Self {
+        Self {
+            target,
+            midi_cc: None,
+            midi_realtime: Some(message),
+        }
+    }
+
+    pub fn validate(self) -> Result<(), String> {
+        match (self.midi_cc, self.midi_realtime) {
+            (Some(midi_cc), None) => midi_cc.validate(),
+            (None, Some(_)) => Ok(()),
+            _ => Err("a host action has either one MIDI button or one real time message".into()),
+        }
+    }
+
+    /// The channel and controller it reserves, when a Control Change
+    /// triggers it.
+    pub fn reserved_control_change(self) -> Option<(u8, u8)> {
+        self.midi_cc
+            .map(|binding| (binding.channel, binding.controller))
+    }
+
+    pub fn phase(self, message: &[u8]) -> Option<ButtonPhase> {
+        if let Some(midi_cc) = self.midi_cc {
+            return midi_cc.phase(message);
+        }
+        (self.midi_realtime.is_some() && self.midi_realtime == MidiRealtime::of(message))
+            .then_some(ButtonPhase::Press)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -423,7 +500,7 @@ impl SemanticControlProfile {
             .chain(
                 actions
                     .iter()
-                    .map(|binding| (binding.midi_cc.channel, binding.midi_cc.controller)),
+                    .filter_map(|binding| binding.reserved_control_change()),
             )
             .collect::<BTreeSet<_>>();
         for binding in &self.controls {
@@ -627,8 +704,9 @@ impl ControllerProfile {
             }
         }
         let mut action_targets = BTreeSet::new();
+        let mut realtime = BTreeSet::new();
         for binding in &self.host_actions {
-            binding.midi_cc.validate()?;
+            binding.validate()?;
             binding.target.validate()?;
             if !action_targets.insert(format!("{:?}", binding.target)) {
                 return Err(format!(
@@ -636,11 +714,17 @@ impl ControllerProfile {
                     binding.target
                 ));
             }
-            if !midi_bindings.insert((binding.midi_cc.channel, binding.midi_cc.controller)) {
+            if let Some((channel, controller)) = binding.reserved_control_change()
+                && !midi_bindings.insert((channel, controller))
+            {
                 return Err(format!(
-                    "duplicate reserved MIDI binding ch={} cc={}",
-                    binding.midi_cc.channel, binding.midi_cc.controller
+                    "duplicate reserved MIDI binding ch={channel} cc={controller}"
                 ));
+            }
+            if let Some(message) = binding.midi_realtime
+                && !realtime.insert(message)
+            {
+                return Err(format!("duplicate reserved real time message {message:?}"));
             }
         }
         if let Some(profile) = &self.semantic_profile {
@@ -663,7 +747,7 @@ impl ControllerProfile {
         if let Some((target, phase)) = self
             .host_actions
             .iter()
-            .find_map(|binding| Some((binding.target, binding.midi_cc.phase(message)?)))
+            .find_map(|binding| Some((binding.target, binding.phase(message)?)))
         {
             return Some(DeclarativeControllerInput::HostAction { target, phase });
         }
@@ -966,15 +1050,18 @@ mod tests {
                     controller: 7,
                 },
             }],
-            host_actions: vec![HostActionBinding {
-                target: HostActionTarget::KeyboardParts,
-                midi_cc: MidiButtonBinding {
-                    channel: 0,
-                    controller: 119,
-                    press_value: 127,
-                    release_value: 0,
-                },
-            }],
+            host_actions: vec![
+                HostActionBinding::control_change(
+                    HostActionTarget::KeyboardParts,
+                    MidiButtonBinding {
+                        channel: 0,
+                        controller: 119,
+                        press_value: 127,
+                        release_value: 0,
+                    },
+                ),
+                HostActionBinding::realtime(HostActionTarget::TransportPlay, MidiRealtime::Start),
+            ],
             semantic_profile: Some(SemanticControlProfile {
                 schema_version: CONTROL_PROFILE_SCHEMA_VERSION,
                 source_id: "controller.example.declarative.main".into(),
@@ -1008,5 +1095,61 @@ mod tests {
             profile.declarative_input(&[0xb0, 74, 64]),
             Some(DeclarativeControllerInput::Semantic(_))
         ));
+        // A Play button that sends MIDI Start presses; Stop and the clock
+        // are not it.
+        assert_eq!(
+            profile.declarative_input(&[0xfa]),
+            Some(DeclarativeControllerInput::HostAction {
+                target: HostActionTarget::TransportPlay,
+                phase: ButtonPhase::Press,
+            })
+        );
+        assert_eq!(profile.declarative_input(&[0xfc]), None);
+        assert_eq!(profile.declarative_input(&[0xf8]), None);
+    }
+
+    #[test]
+    fn a_host_action_has_exactly_one_trigger() {
+        let button = MidiButtonBinding {
+            channel: 15,
+            controller: 115,
+            press_value: 127,
+            release_value: 0,
+        };
+        assert!(
+            HostActionBinding::control_change(HostActionTarget::TransportPlay, button)
+                .validate()
+                .is_ok()
+        );
+        assert!(
+            HostActionBinding::realtime(HostActionTarget::TransportStop, MidiRealtime::Stop)
+                .validate()
+                .is_ok()
+        );
+        let both = HostActionBinding {
+            target: HostActionTarget::TransportPlay,
+            midi_cc: Some(button),
+            midi_realtime: Some(MidiRealtime::Start),
+        };
+        assert!(both.validate().is_err());
+        let neither = HostActionBinding {
+            target: HostActionTarget::TransportPlay,
+            midi_cc: None,
+            midi_realtime: None,
+        };
+        assert!(neither.validate().is_err());
+    }
+
+    #[test]
+    fn a_control_change_host_action_keeps_its_wire_form() {
+        // Drivers already running send `midi_cc` as an object; that stays.
+        let binding: HostActionBinding = serde_json::from_str(
+            r#"{"target":"transport_play","midi_cc":{"channel":15,"controller":115,"press_value":127,"release_value":0}}"#,
+        )
+        .unwrap();
+        assert_eq!(binding.reserved_control_change(), Some((15, 115)));
+        let realtime: HostActionBinding =
+            serde_json::from_str(r#"{"target":"transport_stop","midi_realtime":"stop"}"#).unwrap();
+        assert_eq!(realtime.midi_realtime, Some(MidiRealtime::Stop));
     }
 }

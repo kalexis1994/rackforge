@@ -169,6 +169,10 @@ struct RegisteredSemanticProfile {
     identified: bool,
     /// What the package sends when its controller connects, once allowed.
     on_connect: Vec<Vec<u8>>,
+    /// What it sends to the device's setup output -- a DAW port -- and how
+    /// to find that output.
+    setup_output: Option<rackforge_controller_package::EndpointMatcher>,
+    setup_messages: Vec<Vec<u8>>,
 }
 
 #[cfg(windows)]
@@ -512,6 +516,9 @@ struct DesktopApp {
     /// Runtime controller defaults. They are deliberately not persisted as
     /// user MIDI links; the signed controller package registers them again.
     controller_semantic_profiles: BTreeMap<String, RegisteredSemanticProfile>,
+    /// A controller's TAP button: the host owns the timestamps.
+    controller_taps: rackforge_core::sequencer::TapTempoFold,
+    controller_tap_clock: Instant,
     /// The player's controller maps, by controller id, and where they live.
     controller_maps: BTreeMap<String, ControllerMap>,
     controller_map_store: ControllerMapStore,
@@ -970,6 +977,8 @@ impl DesktopApp {
             state_store,
             live_state_dirty: None,
             controller_semantic_profiles,
+            controller_taps: rackforge_core::sequencer::TapTempoFold::new(),
+            controller_tap_clock: Instant::now(),
             controller_maps,
             controller_map_store,
             controller_takeover,
@@ -2499,6 +2508,37 @@ impl DesktopApp {
         }
     }
 
+    /// A controller's transport, tap or lane button, pressed: the same press
+    /// the appliance's engine resolves, through the same translation.
+    #[cfg(windows)]
+    fn apply_controller_host_action(&mut self, target: HostActionTarget) {
+        let Some(audio) = self.audio.as_ref() else {
+            return;
+        };
+        let command = if target == HostActionTarget::TapTempo {
+            self.controller_taps
+                .tap(self.controller_tap_clock.elapsed().as_secs_f64())
+                .map(|bpm| rackforge_control_api::SequencerCommand::SetTempo { bpm })
+        } else {
+            audio
+                .sequencer_status()
+                .ok()
+                .and_then(|status| rackforge_core::sequencer::host_action_command(target, &status))
+        };
+        let Some(command) = command else {
+            return;
+        };
+        match audio.sequencer_command(command) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                eprintln!("CONTROLLER_HOST_ACTION_REFUSED target={target:?} error={error}")
+            }
+            Err(error) => {
+                eprintln!("CONTROLLER_HOST_ACTION_FAILED target={target:?} error={error:#}")
+            }
+        }
+    }
+
     #[cfg(windows)]
     fn handle_controller_event(&mut self, event: desktop_audio::DesktopControllerEvent) {
         use desktop_audio::DesktopControllerEvent;
@@ -2542,7 +2582,7 @@ impl DesktopApp {
                             registered.host_actions.iter().find_map(|binding| {
                                 Some(DeclarativeControllerInput::HostAction {
                                     target: binding.target,
-                                    phase: binding.midi_cc.phase(message)?,
+                                    phase: binding.phase(message)?,
                                 })
                             })
                         });
@@ -2564,6 +2604,10 @@ impl DesktopApp {
                             target: HostActionTarget::KeyboardParts,
                             phase: ButtonPhase::Press,
                         }) => self.apply_input(Input::KeyboardParts),
+                        Some(DeclarativeControllerInput::HostAction {
+                            target,
+                            phase: ButtonPhase::Press,
+                        }) => self.apply_controller_host_action(target),
                         Some(DeclarativeControllerInput::HostAction { .. }) => {}
                         Some(DeclarativeControllerInput::Semantic(_)) => unreachable!(),
                         None => {}
@@ -3653,13 +3697,28 @@ impl DesktopApp {
     #[cfg(windows)]
     fn send_controller_connect_messages(&mut self) {
         let mut sends = Vec::new();
+        let mut setups = Vec::new();
         for (controller_id, registered) in &self.controller_semantic_profiles {
             let Some(name) = registered.runtime_source_name.as_ref() else {
                 continue;
             };
-            if registered.on_connect.is_empty()
-                || self.pending_controller_connects.contains_key(name)
+            if self.pending_controller_connects.contains_key(name) {
+                continue;
+            }
+            if let Some(matcher) = &registered.setup_output
+                && !registered.setup_messages.is_empty()
+                && self
+                    .controller_output_sent
+                    .insert((name.clone(), format!("{controller_id}#setup")))
             {
+                setups.push((
+                    name.clone(),
+                    controller_id.clone(),
+                    matcher.clone(),
+                    registered.setup_messages.clone(),
+                ));
+            }
+            if registered.on_connect.is_empty() {
                 continue;
             }
             if self
@@ -3672,6 +3731,13 @@ impl DesktopApp {
                     registered.on_connect.clone(),
                 ));
             }
+        }
+        for (name, controller_id, matcher, messages) in setups {
+            println!(
+                "DESKTOP_CONTROLLER_SETUP controller={controller_id} name={name:?} messages={}",
+                messages.len()
+            );
+            desktop_audio::send_to_setup_output(&name, matcher, messages);
         }
         for (name, controller_id, messages) in sends {
             println!(
@@ -4018,9 +4084,7 @@ impl DesktopApp {
                 if controls
                     .iter()
                     .any(|binding| binding.midi_cc.validate().is_err())
-                    || actions
-                        .iter()
-                        .any(|binding| binding.midi_cc.validate().is_err())
+                    || actions.iter().any(|binding| binding.validate().is_err())
                 {
                     Err("invalid reserved host binding registration".into())
                 } else {
@@ -4070,6 +4134,8 @@ impl DesktopApp {
                                     declarative: false,
                                     identified,
                                     on_connect: Vec::new(),
+                                    setup_output: None,
+                                    setup_messages: Vec::new(),
                                 },
                             );
                         } else {
@@ -8032,9 +8098,17 @@ fn external_controller_enabled(rackforge_root: &Path) -> bool {
     if !root.join("packages").exists() {
         return false;
     }
+    // A package with a driver owns its surface; a declarative one only
+    // names controls, and must not make this host let go of the KeyLab.
     rackforge_controller_package::PackageStore::new(root)
         .list()
-        .map(|installed| installed.iter().any(|controller| controller.record.enabled))
+        .map(|installed| {
+            installed.iter().any(|controller| {
+                controller.record.enabled
+                    && controller.package.manifest().runtime.kind
+                        != rackforge_controller_package::DriverRuntimeKind::DeclarativeV1
+            })
+        })
         .unwrap_or(false)
 }
 
@@ -8047,18 +8121,26 @@ fn declarative_semantic_profiles(
     let store = rackforge_controller_package::PackageStore::new(rackforge_root.join("controllers"));
     let mut profiles = BTreeMap::new();
     for endpoint_name in approved_midi_inputs {
-        let Some(binding) = store
-            .resolve_identified_input(endpoint_name, identities.get(endpoint_name))
-            .with_context(|| format!("resolving declarative controller for {endpoint_name:?}"))?
-        else {
-            continue;
-        };
+        // A port no package can settle on costs that port, never every
+        // other controller: this used to fail the whole reload.
+        let binding =
+            match store.resolve_identified_input(endpoint_name, identities.get(endpoint_name)) {
+                Ok(Some(binding)) => binding,
+                Ok(None) => continue,
+                Err(error) => {
+                    eprintln!(
+                        "DECLARATIVE_CONTROLLER_SKIPPED endpoint={endpoint_name:?} error={error}"
+                    );
+                    continue;
+                }
+            };
         let descriptor = desktop_audio::midi_source_descriptor(endpoint_name)?;
         if profiles.contains_key(&binding.controller_id) {
-            bail!(
-                "declarative controller {} matches more than one enabled MIDI input; make its endpoint matcher more specific",
+            eprintln!(
+                "DECLARATIVE_CONTROLLER_SKIPPED endpoint={endpoint_name:?} id={} reason=already-attached-to-another-input",
                 binding.controller_id
             );
+            continue;
         }
         profiles.insert(
             binding.controller_id,
@@ -8071,6 +8153,8 @@ fn declarative_semantic_profiles(
                 declarative: true,
                 identified: binding.identified,
                 on_connect: binding.on_connect,
+                setup_output: binding.setup_output,
+                setup_messages: binding.setup_messages,
             },
         );
     }
@@ -8437,6 +8521,11 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
 
     install_bundled_default_plugin(&options)?;
     install_bundled_official_plugins(&options)?;
+    // The controllers RackForge describes from their makers' documentation,
+    // installed before the MIDI inputs are matched against the store.
+    rackforge_controller_catalog::install_bundled_and_report(
+        &options.rackforge_root.join("controllers"),
+    );
 
     let session = Arc::new(RwLock::new(SessionState::new(
         SessionId::new(DEFAULT_LIVE_SESSION_ID).expect("valid live session id"),

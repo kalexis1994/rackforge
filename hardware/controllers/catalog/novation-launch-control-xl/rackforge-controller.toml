@@ -1,0 +1,503 @@
+# Novation Launch Control XL (MK1 and MK2), User Template 1 as it leaves the
+# factory. Every value below is sourced in SOURCES.md; [PR] is the Programmer's
+# Reference Guide v2, [CG] Novation's Components guide for the Launch Control
+# XL MK1 and MK2, [AL] Novation's Ableton Live setup article for them.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-launch-control-xl"
+name = "Launch Control XL"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "launch-control-xl"
+
+# One MIDI port, "Launch Control XL n" where n is the device ID, not shown for
+# ID 1 [PR p3]. The second interface is "MIDIIN2 (Launch Control XL)" on
+# Windows and "Launch Control XL (HUI)" on a Mac [AL]. The Launch Control XL 3
+# is "LCXL3 1 MIDI" and never matches.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["launch control xl"]
+exclude_contains = ["midiin2", "hui", "port 2", "midi 2 "]
+
+# On connect, RackForge selects User Template 1, the template described below:
+# "Change current template", F0 00 20 29 02 11 77 <template> F7, template 00h
+# for User 1 [PR p8]. RackForge's own packages send without asking.
+[permissions]
+midi_input = true
+midi_output = true
+sysex = true
+
+[[on_connect]]
+message = "F0 00 20 29 02 11 77 00 F7"
+
+# Knobs: Send A row CC 13-20, Send B row CC 29-36, Pan/Device row CC 49-56,
+# channel 1 [CG "Show Values" screenshot of the default User template].
+[[inputs]]
+id = "send-a-1"
+name = "Send A 1"
+kind = "knob"
+group = "Send A"
+midi = { channel = 0, cc = 13 }
+
+[[inputs]]
+id = "send-a-2"
+name = "Send A 2"
+kind = "knob"
+group = "Send A"
+midi = { channel = 0, cc = 14 }
+
+[[inputs]]
+id = "send-a-3"
+name = "Send A 3"
+kind = "knob"
+group = "Send A"
+midi = { channel = 0, cc = 15 }
+
+[[inputs]]
+id = "send-a-4"
+name = "Send A 4"
+kind = "knob"
+group = "Send A"
+midi = { channel = 0, cc = 16 }
+
+[[inputs]]
+id = "send-a-5"
+name = "Send A 5"
+kind = "knob"
+group = "Send A"
+midi = { channel = 0, cc = 17 }
+
+[[inputs]]
+id = "send-a-6"
+name = "Send A 6"
+kind = "knob"
+group = "Send A"
+midi = { channel = 0, cc = 18 }
+
+[[inputs]]
+id = "send-a-7"
+name = "Send A 7"
+kind = "knob"
+group = "Send A"
+midi = { channel = 0, cc = 19 }
+
+[[inputs]]
+id = "send-a-8"
+name = "Send A 8"
+kind = "knob"
+group = "Send A"
+midi = { channel = 0, cc = 20 }
+
+[[inputs]]
+id = "send-b-1"
+name = "Send B 1"
+kind = "knob"
+group = "Send B"
+midi = { channel = 0, cc = 29 }
+
+[[inputs]]
+id = "send-b-2"
+name = "Send B 2"
+kind = "knob"
+group = "Send B"
+midi = { channel = 0, cc = 30 }
+
+[[inputs]]
+id = "send-b-3"
+name = "Send B 3"
+kind = "knob"
+group = "Send B"
+midi = { channel = 0, cc = 31 }
+
+[[inputs]]
+id = "send-b-4"
+name = "Send B 4"
+kind = "knob"
+group = "Send B"
+midi = { channel = 0, cc = 32 }
+
+[[inputs]]
+id = "send-b-5"
+name = "Send B 5"
+kind = "knob"
+group = "Send B"
+midi = { channel = 0, cc = 33 }
+
+[[inputs]]
+id = "send-b-6"
+name = "Send B 6"
+kind = "knob"
+group = "Send B"
+midi = { channel = 0, cc = 34 }
+
+[[inputs]]
+id = "send-b-7"
+name = "Send B 7"
+kind = "knob"
+group = "Send B"
+midi = { channel = 0, cc = 35 }
+
+[[inputs]]
+id = "send-b-8"
+name = "Send B 8"
+kind = "knob"
+group = "Send B"
+midi = { channel = 0, cc = 36 }
+
+[[inputs]]
+id = "pan-1"
+name = "Pan 1"
+kind = "knob"
+group = "Pan / Device"
+midi = { channel = 0, cc = 49 }
+
+[[inputs]]
+id = "pan-2"
+name = "Pan 2"
+kind = "knob"
+group = "Pan / Device"
+midi = { channel = 0, cc = 50 }
+
+[[inputs]]
+id = "pan-3"
+name = "Pan 3"
+kind = "knob"
+group = "Pan / Device"
+midi = { channel = 0, cc = 51 }
+
+[[inputs]]
+id = "pan-4"
+name = "Pan 4"
+kind = "knob"
+group = "Pan / Device"
+midi = { channel = 0, cc = 52 }
+
+[[inputs]]
+id = "pan-5"
+name = "Pan 5"
+kind = "knob"
+group = "Pan / Device"
+midi = { channel = 0, cc = 53 }
+
+[[inputs]]
+id = "pan-6"
+name = "Pan 6"
+kind = "knob"
+group = "Pan / Device"
+midi = { channel = 0, cc = 54 }
+
+[[inputs]]
+id = "pan-7"
+name = "Pan 7"
+kind = "knob"
+group = "Pan / Device"
+midi = { channel = 0, cc = 55 }
+
+[[inputs]]
+id = "pan-8"
+name = "Pan 8"
+kind = "knob"
+group = "Pan / Device"
+midi = { channel = 0, cc = 56 }
+
+# Faders CC 77-84, channel 1 [CG].
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 77 }
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 78 }
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 79 }
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 80 }
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 81 }
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 82 }
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 83 }
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 84 }
+
+# Track Focus buttons (top row): notes F1 F#1 G1 G#1 A2 A#2 B2 C3 = 41-44 and
+# 57-60; Track Control buttons (bottom row): C#4 D4 D#4 E4 F5 F#5 G5 G#5 =
+# 73-76 and 89-92; channel 1, momentary [CG, with middle C = C3 = 60 as
+# Novation writes notes]. A button sends 127 on press and 0 on release [PR p8].
+[[inputs]]
+id = "track-focus-1"
+name = "Track Focus 1"
+kind = "button"
+group = "Track Focus"
+midi = { channel = 0, note = 41 }
+
+[[inputs]]
+id = "track-focus-2"
+name = "Track Focus 2"
+kind = "button"
+group = "Track Focus"
+midi = { channel = 0, note = 42 }
+
+[[inputs]]
+id = "track-focus-3"
+name = "Track Focus 3"
+kind = "button"
+group = "Track Focus"
+midi = { channel = 0, note = 43 }
+
+[[inputs]]
+id = "track-focus-4"
+name = "Track Focus 4"
+kind = "button"
+group = "Track Focus"
+midi = { channel = 0, note = 44 }
+
+[[inputs]]
+id = "track-focus-5"
+name = "Track Focus 5"
+kind = "button"
+group = "Track Focus"
+midi = { channel = 0, note = 57 }
+
+[[inputs]]
+id = "track-focus-6"
+name = "Track Focus 6"
+kind = "button"
+group = "Track Focus"
+midi = { channel = 0, note = 58 }
+
+[[inputs]]
+id = "track-focus-7"
+name = "Track Focus 7"
+kind = "button"
+group = "Track Focus"
+midi = { channel = 0, note = 59 }
+
+[[inputs]]
+id = "track-focus-8"
+name = "Track Focus 8"
+kind = "button"
+group = "Track Focus"
+midi = { channel = 0, note = 60 }
+
+[[inputs]]
+id = "track-control-1"
+name = "Track Control 1"
+kind = "button"
+group = "Track Control"
+midi = { channel = 0, note = 73 }
+
+[[inputs]]
+id = "track-control-2"
+name = "Track Control 2"
+kind = "button"
+group = "Track Control"
+midi = { channel = 0, note = 74 }
+
+[[inputs]]
+id = "track-control-3"
+name = "Track Control 3"
+kind = "button"
+group = "Track Control"
+midi = { channel = 0, note = 75 }
+
+[[inputs]]
+id = "track-control-4"
+name = "Track Control 4"
+kind = "button"
+group = "Track Control"
+midi = { channel = 0, note = 76 }
+
+[[inputs]]
+id = "track-control-5"
+name = "Track Control 5"
+kind = "button"
+group = "Track Control"
+midi = { channel = 0, note = 89 }
+
+[[inputs]]
+id = "track-control-6"
+name = "Track Control 6"
+kind = "button"
+group = "Track Control"
+midi = { channel = 0, note = 90 }
+
+[[inputs]]
+id = "track-control-7"
+name = "Track Control 7"
+kind = "button"
+group = "Track Control"
+midi = { channel = 0, note = 91 }
+
+[[inputs]]
+id = "track-control-8"
+name = "Track Control 8"
+kind = "button"
+group = "Track Control"
+midi = { channel = 0, note = 92 }
+
+# Send Select up and down CC 104-105, Track Select left and right CC 106-107;
+# Device, Mute, Solo, Record Arm notes A6 A#6 B6 C7 = 105-108; channel 1 [CG;
+# the button names and order from PR p7].
+[[inputs]]
+id = "send-select-up"
+name = "Send Select up"
+kind = "button"
+group = "Navigation"
+midi = { channel = 0, cc = 104 }
+
+[[inputs]]
+id = "send-select-down"
+name = "Send Select down"
+kind = "button"
+group = "Navigation"
+midi = { channel = 0, cc = 105 }
+
+[[inputs]]
+id = "track-select-left"
+name = "Track Select left"
+kind = "button"
+group = "Navigation"
+midi = { channel = 0, cc = 106 }
+
+[[inputs]]
+id = "track-select-right"
+name = "Track Select right"
+kind = "button"
+group = "Navigation"
+midi = { channel = 0, cc = 107 }
+
+[[inputs]]
+id = "device"
+name = "Device"
+kind = "button"
+group = "Mode buttons"
+midi = { channel = 0, note = 105 }
+
+[[inputs]]
+id = "mute"
+name = "Mute"
+kind = "button"
+group = "Mode buttons"
+midi = { channel = 0, note = 106 }
+
+[[inputs]]
+id = "solo"
+name = "Solo"
+kind = "button"
+group = "Mode buttons"
+midi = { channel = 0, note = 107 }
+
+[[inputs]]
+id = "record-arm"
+name = "Record Arm"
+kind = "button"
+group = "Mode buttons"
+midi = { channel = 0, note = 108 }
+
+# RackForge's default meanings, as for the other controllers with eight faders:
+# the faders take the envelope, filter and LFO, the Send A knobs shape the
+# tone. The Send B and Pan rows are left for the player.
+[[roles]]
+input = "send-a-1"
+role = "synth.oscillator.pulse_width"
+
+[[roles]]
+input = "send-a-2"
+role = "synth.oscillator.sub.level"
+
+[[roles]]
+input = "send-a-3"
+role = "synth.oscillator.noise.level"
+
+[[roles]]
+input = "send-a-4"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "send-a-5"
+role = "synth.filter.lfo.amount"
+
+[[roles]]
+input = "send-a-6"
+role = "synth.filter.key_tracking"
+
+[[roles]]
+input = "send-a-7"
+role = "synth.lfo.delay"
+
+[[roles]]
+input = "send-a-8"
+role = "synth.amplifier.level"
+
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"

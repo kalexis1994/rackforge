@@ -3721,6 +3721,7 @@ dependencies = [
  "rackforge-audio-api",
  "rackforge-control-api",
  "rackforge-controller-arturia-keylab-essential-mk3",
+ "rackforge-controller-catalog",
  "rackforge-controller-package",
  "rackforge-core",
  "rackforge-dsp",
@@ -3832,12 +3833,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-controller-catalog"
+version = "0.1.23"
+dependencies = [
+ "rackforge-controller-api",
+ "rackforge-controller-package",
+ "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
 name = "rackforge-controller-host"
 version = "0.1.23"
 dependencies = [
  "anyhow",
  "midir",
  "rackforge-control-api",
+ "rackforge-controller-catalog",
  "rackforge-controller-package",
  "rackforge-session-api",
  "rackforge-startup",
@@ -3914,6 +3925,7 @@ dependencies = [
  "rackforge-control-api",
  "rackforge-controller-api",
  "rackforge-controller-arturia-keylab-essential-mk3",
+ "rackforge-controller-catalog",
  "rackforge-controller-package",
  "rackforge-core",
  "rackforge-dsp",

@@ -1,0 +1,263 @@
+# Novation Launchkey Mini [MK3], its MIDI interface, factory Custom Mode for
+# the knobs. Every value below is sourced in SOURCES.md; [UG] is the User
+# Guide 1.1, [CG] Novation's Components guide for the Launchkey Mini MK3,
+# [LK-UG] and [LK-PR] the User Guide v6 and Programmer's Reference v1 of its
+# larger sister, the Launchkey [MK3]. Novation publishes no Programmer's
+# Reference for the Mini.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-launchkey-mini-mk3"
+name = "Launchkey Mini [MK3]"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "launchkey-mini-mk3"
+
+# The MIDI interface only. The second interface is the DAW port: "Launchkey
+# Mini MK3 (DAW Port)" on a Mac, "Launchkey Mini MIDI IN2" on Windows [UG p11],
+# "MIDI 2" where the system numbers them (the space after it keeps a port
+# numbered 20:0 in). The Mini answers no documented Identity Reply, so the
+# port name alone decides: "mk3" keeps the Mini MK1, MK2 and MK4 out, which
+# send other messages.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["launchkey", "mini"]
+name_contains_any = ["mk3"]
+exclude_contains = ["daw", "midiin2", "midi in2", "midi 2 ", "mk4"]
+
+# Knobs, factory knob Custom Mode: CC 21-28 on the global (keys) channel,
+# channel 1 by default [CG "New Custom Mode" screenshot: the factory Custom
+# Mode is the one a new Custom Mode starts from]. The other knob modes speak
+# to a DAW [UG p10, p29].
+[[inputs]]
+id = "knob-1"
+name = "Knob 1"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 21 }
+
+[[inputs]]
+id = "knob-2"
+name = "Knob 2"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 22 }
+
+[[inputs]]
+id = "knob-3"
+name = "Knob 3"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 23 }
+
+[[inputs]]
+id = "knob-4"
+name = "Knob 4"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 24 }
+
+[[inputs]]
+id = "knob-5"
+name = "Knob 5"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 25 }
+
+[[inputs]]
+id = "knob-6"
+name = "Knob 6"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 26 }
+
+[[inputs]]
+id = "knob-7"
+name = "Knob 7"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 27 }
+
+[[inputs]]
+id = "knob-8"
+name = "Knob 8"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 28 }
+
+# Pads in Drum mode: notes 36-51 on channel 10, top row 40-43 48-51, bottom
+# row 36-39 44-47. ASSUMPTION: this is the Launchkey [MK3]'s documented Drum
+# mode [LK-UG p28, p41; LK-PR p9]; the Mini's guide names the mode [UG p8,
+# p18] but not its notes or channel. The factory pad Custom Mode is no
+# alternative: it gives pad 1 and pad 16 the same note [CG].
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 40 }
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 41 }
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 42 }
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 43 }
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 48 }
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 49 }
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 50 }
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 51 }
+
+[[inputs]]
+id = "pad-9"
+name = "Pad 9"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 36 }
+
+[[inputs]]
+id = "pad-10"
+name = "Pad 10"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 37 }
+
+[[inputs]]
+id = "pad-11"
+name = "Pad 11"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 38 }
+
+[[inputs]]
+id = "pad-12"
+name = "Pad 12"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 39 }
+
+[[inputs]]
+id = "pad-13"
+name = "Pad 13"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 44 }
+
+[[inputs]]
+id = "pad-14"
+name = "Pad 14"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 45 }
+
+[[inputs]]
+id = "pad-15"
+name = "Pad 15"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 46 }
+
+[[inputs]]
+id = "pad-16"
+name = "Pad 16"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 47 }
+
+# Touch strips on the keys channel [UG p8]; the sustain input sends CC 64 by
+# default [CG pedal screenshot]. Play, Record, >, Stop/Solo/Mute and the
+# arrows are not declared: the guide gives them to the DAW only [UG p8].
+[[inputs]]
+id = "pitch-bend"
+name = "Pitch strip"
+kind = "wheel"
+group = "Touch strips"
+midi = { channel = 0, pitch_bend = true }
+
+[[inputs]]
+id = "modulation"
+name = "Modulation strip"
+kind = "wheel"
+group = "Touch strips"
+midi = { channel = 0, cc = 1 }
+
+[[inputs]]
+id = "sustain"
+name = "Sustain pedal"
+kind = "pedal"
+group = "Pedal"
+midi = { channel = 0, cc = 64 }
+
+# RackForge's default meanings for a keyboard with eight knobs and no
+# faders: the filter, its envelope and the LFO rate, then the amp envelope.
+[[roles]]
+input = "knob-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "knob-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "knob-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "knob-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "knob-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "knob-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "knob-8"
+role = "synth.envelope.amp.release"

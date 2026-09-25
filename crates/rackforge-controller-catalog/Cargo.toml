@@ -1,0 +1,13 @@
+[package]
+name = "rackforge-controller-catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The declarative controller packages RackForge ships, built from manufacturers' documentation"
+
+[dependencies]
+rackforge-controller-package = { path = "../rackforge-controller-package" }
+toml.workspace = true
+
+[dev-dependencies]
+rackforge-controller-api = { path = "../rackforge-controller-api" }

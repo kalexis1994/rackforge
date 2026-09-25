@@ -110,6 +110,27 @@ describe("which control a message comes from", () => {
       message: { type: "note", note: 36 },
     });
   });
+
+  // A Launchkey MK4's Play and Stop send MIDI Start and Stop, which carry no
+  // channel: they light their buttons, and are learnt as buttons.
+  it("knows a transport button that sends a real time message", () => {
+    const play: ControllerInput = { id: "play", name: "Play", kind: "button", midi: { realtime: "start" } };
+    const stop: ControllerInput = { id: "stop", name: "Stop", kind: "button", midi: { realtime: "stop" } };
+    expect(inputForActivity({ status: 0xfa, data1: 0 }, [...inputs, play, stop])).toBe(play);
+    expect(inputForActivity({ status: 0xfc, data1: 0 }, [...inputs, play, stop])).toBe(stop);
+    expect(inputForActivity({ status: 0xfb, data1: 0 }, [...inputs, play, stop])).toBeUndefined();
+    expect(inputMessageLabel(play)).toBe("MIDI Start");
+    expect(kindsForInput(play)).toEqual(["button"]);
+    // No parameter link reads it: it drives the transport.
+    expect(mappedInputFor(play)).toBeNull();
+    expect(inputFromActivity({ status: 0xfa, data1: 0, data2: 0 })).toEqual({
+      id: "realtime-start",
+      name: "MIDI Start",
+      kind: "button",
+      midi: { realtime: "start" },
+    });
+    expect(inputFromActivity({ status: 0xf8, data1: 0, data2: 0 })).toBeNull();
+  });
 });
 
 describe("what an input can do to a parameter", () => {
@@ -233,6 +254,19 @@ describe("which controllers the editor shows", () => {
     const gone = devices[2];
     expect(gone).toMatchObject({ name: "Old keyboard", orphaned: true });
     expect(gone.inputs).toEqual([{ id: "pad-1", name: "Pad 1", kind: "pad", midi: { channel: 9, note: 36 } }]);
+  });
+
+  it("shows a catalog keyboard only once it is plugged in or mapped", () => {
+    const catalog = { ...keylab, runtime: "DeclarativeV1" };
+    const launchkey = { ...catalog, id: "org.rackforge.novation-launchkey-mk3-49", name: "Launchkey 49 [MK3]" };
+    const minilab = { ...catalog, id: "org.rackforge.arturia-minilab-3", name: "MiniLab 3" };
+    const oxygenPro = { ...catalog, id: "org.rackforge.m-audio-oxygen-pro-49", name: "Oxygen Pro 49" };
+    const devices = buildControllerDevices(
+      [launchkey, minilab, oxygenPro, keylab],
+      [{ controller_id: launchkey.id, source: { id: "alsa.lk", name: "Launchkey MK3 49" }, connected: true }],
+      [emptyControllerMap(minilab.id, minilab.name)],
+    );
+    expect(devices.map((device) => device.id)).toEqual([launchkey.id, keylab.id, minilab.id]);
   });
 });
 

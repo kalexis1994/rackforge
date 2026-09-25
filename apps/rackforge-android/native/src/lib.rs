@@ -51,7 +51,8 @@ use rackforge_repository::{
     set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
-    InstanceId, MAX_PLAY_CHAIN_EFFECTS, MasterLevel, MasterPan, PlayChainEffect, ProgramDraftState,
+    ButtonPhase, HostActionBinding, HostControlBinding, HostControlTarget, InstanceId,
+    MAX_PLAY_CHAIN_EFFECTS, MasterLevel, MasterPan, PlayChainEffect, ProgramDraftState,
     RackForgeParameterMapper, RackForgeParameterValue, SemanticControlProfile,
     rackforge_parameter_input, semantic_control_input,
 };
@@ -158,7 +159,15 @@ struct AndroidMidiController {
     controller_id: Option<String>,
     identified: bool,
     profile: Option<SemanticControlProfile>,
+    /// The package's reserved controls and buttons: the host's, never an
+    /// instrument's, as on every other host.
+    host_controls: Vec<HostControlBinding>,
+    host_actions: Vec<HostActionBinding>,
     on_connect: Vec<Vec<u8>>,
+    /// What goes to the device's setup output -- a DAW port -- and how that
+    /// port is found among the device's.
+    setup_output: Option<rackforge_controller_package::EndpointMatcher>,
+    setup_messages: Vec<Vec<u8>>,
     on_connect_sent: bool,
 }
 
@@ -171,7 +180,11 @@ impl AndroidMidiController {
             controller_id: None,
             identified: false,
             profile: None,
+            host_controls: Vec::new(),
+            host_actions: Vec::new(),
             on_connect: Vec::new(),
+            setup_output: None,
+            setup_messages: Vec::new(),
             on_connect_sent: false,
         };
         controller.resolve();
@@ -186,7 +199,12 @@ impl AndroidMidiController {
             self.controller_id = Some(keylab.driver_id.clone());
             self.identified = false;
             self.profile = keylab.semantic_profile.clone();
+            // The in-process driver reads its own buttons.
+            self.host_controls.clear();
+            self.host_actions.clear();
             self.on_connect.clear();
+            self.setup_output = None;
+            self.setup_messages.clear();
             return;
         }
         let binding = controller_store_root().and_then(|root| {
@@ -205,10 +223,31 @@ impl AndroidMidiController {
             .as_ref()
             .map(|binding| binding.controller_id.clone());
         self.identified = binding.as_ref().is_some_and(|binding| binding.identified);
+        let previous = (self.on_connect.clone(), self.setup_messages.clone());
         self.on_connect = binding
             .as_ref()
             .map(|binding| binding.on_connect.clone())
             .unwrap_or_default();
+        self.host_controls = binding
+            .as_ref()
+            .map(|binding| binding.host_controls.clone())
+            .unwrap_or_default();
+        self.host_actions = binding
+            .as_ref()
+            .map(|binding| binding.host_actions.clone())
+            .unwrap_or_default();
+        self.setup_output = binding
+            .as_ref()
+            .and_then(|binding| binding.setup_output.clone());
+        self.setup_messages = binding
+            .as_ref()
+            .map(|binding| binding.setup_messages.clone())
+            .unwrap_or_default();
+        // An Identity Reply that chose another package, or an output the
+        // player just allowed: its messages have not gone out yet.
+        if (self.on_connect.clone(), self.setup_messages.clone()) != previous {
+            self.on_connect_sent = false;
+        }
         self.profile = binding.and_then(|binding| binding.semantic_profile);
     }
 }
@@ -2439,7 +2478,7 @@ impl AndroidEngine {
         // rest wait, as they always did.
         if let Some(rack) = self.rack.as_mut() {
             let rack_links =
-                compile_rack_parameter_links(&rack.engine, &links, &sources, maps.takeover);
+                compile_rack_parameter_links(&rack.engine, &links, &sources, &controllers, &maps);
             rack.engine.set_parameter_links(rack_links);
         }
         // Every link takes a parameter over the way the player chose.
@@ -2519,15 +2558,18 @@ impl AndroidEngine {
         let sources = midi_sources()
             .lock()
             .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?;
-        let takeover = controller_maps()
+        let controllers = midi_controllers()
             .lock()
-            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?
-            .takeover;
+            .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+        let maps = controller_maps()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
         let links = compile_rack_parameter_links(
             &rack.engine,
             &self.persisted_parameter_links,
             &sources,
-            takeover,
+            &controllers,
+            &maps,
         );
         rack.engine.set_parameter_links(links);
         Ok(self.rack.replace(rack))
@@ -2539,31 +2581,72 @@ impl AndroidEngine {
 }
 
 /// The session's links that name one of this Rack's Slots, compiled against
-/// that Slot's plugin. A link from a controller that is not connected waits.
+/// that Slot's plugin, then each connected controller's map for the plugin
+/// every Slot runs, as the Pi and the desktop play a Rack. A link from a
+/// controller that is not connected waits.
 fn compile_rack_parameter_links(
     rack: &RackEngine<'static>,
     links: &[ParameterLink],
     sources: &MidiSourceRegistry,
-    takeover: ControlTakeover,
+    controllers: &BTreeMap<MidiSourceId, AndroidMidiController>,
+    maps: &AndroidControllerMaps,
 ) -> Vec<CompiledParameterLink> {
-    links
+    let mut compiled: Vec<CompiledParameterLink> = links
         .iter()
         .filter_map(|link| {
             let plugin = rack.link_target_plugin(&link.instance_id)?;
             let source_key = sources.resolve_optional(&link.source.source_id)?;
-            let mut compiled =
-                CompiledParameterLink::new(link.clone(), source_key, plugin.parameters())
-                    .map_err(|error| {
-                        eprintln!(
-                            "PARAMETER_LINK_PENDING link={} instance={} reason={error:#}",
-                            link.id, link.instance_id
-                        );
-                    })
-                    .ok()?;
-            compiled.set_takeover(takeover);
-            Some(compiled)
+            CompiledParameterLink::new(link.clone(), source_key, plugin.parameters())
+                .map_err(|error| {
+                    eprintln!(
+                        "PARAMETER_LINK_PENDING link={} instance={} reason={error:#}",
+                        link.id, link.instance_id
+                    );
+                })
+                .ok()
         })
-        .collect()
+        .collect();
+    for (source_id, controller) in controllers {
+        let Some(map) = controller
+            .controller_id
+            .as_deref()
+            .and_then(|controller_id| maps.maps.get(controller_id))
+        else {
+            continue;
+        };
+        let Some(source_key) = sources.resolve_optional(source_id) else {
+            continue;
+        };
+        let source_name = sources
+            .descriptor(source_key)
+            .map(|descriptor| descriptor.name.as_str())
+            .unwrap_or(source_id.as_str());
+        for (voice_id, plugin_id) in rack.slots() {
+            let Some(plugin) = rack.link_target_plugin(voice_id) else {
+                continue;
+            };
+            // A map's link names the Slot, as a link made in the Rack
+            // editor does, so the session's own link to it wins.
+            let slot_id = voice_id.rsplit_once('/').map_or(voice_id, |(_, slot)| slot);
+            compiled.extend(
+                compile_controller_map_links(ControllerMapLinkContext {
+                    map,
+                    plugin_id,
+                    runtime_source_id: source_id,
+                    source_name,
+                    source_key,
+                    instance_id: slot_id,
+                    schema: plugin.parameters(),
+                    explicit_links: links,
+                })
+                .links,
+            );
+        }
+    }
+    for link in &mut compiled {
+        link.set_takeover(maps.takeover);
+    }
+    compiled
 }
 
 /// Builds the Rack a LIVE location names: its graph compiled, each Slot's
@@ -4023,6 +4106,9 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_ensureBundledCont
             .lock()
             .map_err(|_| anyhow::anyhow!("controller store root lock poisoned"))? =
             Some(store_root.clone());
+        // The controllers RackForge describes from their makers'
+        // documentation, installed as its own beside the KeyLab.
+        rackforge_controller_catalog::install_bundled_and_report(&store_root);
         let store = rackforge_controller_package::PackageStore::new(&store_root);
         let manifest = rackforge_controller_package::stamp_bundled_manifest(
             keylab_essential_mk3::controller::PACKAGE_MANIFEST,
@@ -5068,9 +5154,67 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessageFr
         let source = MidiSourceKey::new(source_key as u32);
         let message = &bytes[..length as usize];
         record_midi_activity(source, message);
+        if apply_reserved_host_input(source, message) {
+            return;
+        }
         apply_declarative_rackforge_parameter(source, message);
+        // MIDI Start, Continue and Stop are a controller's buttons, never an
+        // instrument's input.
+        if MidiPacket::transport_realtime(0, message).is_some() {
+            return;
+        }
         enqueue_midi(source, message);
     }
+}
+
+/// A declarative controller's reserved controls and buttons, as the other
+/// hosts read them: the master level and pan move, and neither they nor a
+/// host action's button reach an instrument. Android has no sequencer yet,
+/// so a transport or lane button is taken and said so, not played as a note.
+fn apply_reserved_host_input(source: MidiSourceKey, message: &[u8]) -> bool {
+    let Some(source_id) = midi_sources().lock().ok().and_then(|sources| {
+        sources
+            .descriptor(source)
+            .map(|descriptor| descriptor.id.clone())
+    }) else {
+        return false;
+    };
+    let (control, action) = {
+        let Ok(controllers) = midi_controllers().lock() else {
+            return false;
+        };
+        let Some(controller) = controllers.get(&source_id) else {
+            return false;
+        };
+        (
+            controller
+                .host_controls
+                .iter()
+                .find_map(|binding| Some((binding.target, binding.midi_cc.value(message)?))),
+            controller
+                .host_actions
+                .iter()
+                .find_map(|binding| Some((binding.target, binding.phase(message)?))),
+        )
+    };
+    if let Some((target, value)) = control {
+        apply_rackforge_parameter(match target {
+            HostControlTarget::MasterLevel => {
+                RackForgeParameterValue::MasterLevel(MasterLevel::from_midi(value))
+            }
+            HostControlTarget::MasterPan => {
+                RackForgeParameterValue::MasterPan(MasterPan::from_midi_with_center_snap(value))
+            }
+        });
+        return true;
+    }
+    if let Some((target, phase)) = action {
+        if phase == ButtonPhase::Press {
+            eprintln!("ANDROID_HOST_ACTION_UNAVAILABLE target={target:?} reason=no-sequencer");
+        }
+        return true;
+    }
+    false
 }
 
 /// What came in, for the Controllers section's lit inputs.
@@ -5466,16 +5610,29 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_midiSourceConnect
         let Some(controller) = source_id.and_then(|id| controllers.get_mut(&id)) else {
             return Ok("[]".into());
         };
-        if controller.on_connect_sent || controller.on_connect.is_empty() {
+        if controller.on_connect_sent
+            || (controller.on_connect.is_empty() && controller.setup_messages.is_empty())
+        {
             return Ok("[]".into());
         }
         controller.on_connect_sent = true;
+        // The controller's own port first, then its setup output: the DAW
+        // port some controllers change mode through. Java finds that port
+        // with `midiSetupPort`.
         let plan = controller
             .on_connect
             .iter()
-            .map(|bytes| {
+            .map(|bytes| (bytes, "input"))
+            .chain(
+                controller
+                    .setup_messages
+                    .iter()
+                    .map(|bytes| (bytes, "setup")),
+            )
+            .map(|(bytes, port)| {
                 serde_json::json!({
                     "bytes": bytes,
+                    "port": port,
                     // A device may need a moment between mode changes.
                     "settle_after_ms": 20,
                 })
@@ -5489,6 +5646,76 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_midiSourceConnect
         Ok(serde_json::Value::Array(plan).to_string())
     })();
     result_string(&mut env, result)
+}
+
+/// Which of a device's MIDI inputs is the setup output of the controller on
+/// `source_key`, among the names Java lists them by: the index, or -1 when
+/// the package names none or no single port matches. The same choice the
+/// other hosts make, by the package's `setup_output` endpoint.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_midiSetupPort(
+    mut env: JNIEnv,
+    _class: JClass,
+    source_key: jint,
+    port_names_json: JString,
+) -> jint {
+    let result = (|| -> Result<i32> {
+        let names: Vec<String> = serde_json::from_str(&java_string(&mut env, port_names_json)?)?;
+        let source_id = midi_sources()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?
+            .descriptor(MidiSourceKey::new(source_key as u32))
+            .map(|descriptor| descriptor.id.clone());
+        let controllers = midi_controllers()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+        let Some(controller) = source_id.and_then(|id| controllers.get(&id)) else {
+            return Ok(-1);
+        };
+        let Some(matcher) = &controller.setup_output else {
+            return Ok(-1);
+        };
+        let chosen = rackforge_controller_package::setup_output_port(
+            matcher,
+            &controller.endpoint_name,
+            &names,
+        );
+        Ok(chosen
+            .and_then(|name| names.iter().position(|candidate| *candidate == name))
+            .map_or(-1, |index| index as i32))
+    })();
+    match result {
+        Ok(index) => index,
+        Err(error) => {
+            report(&mut env, error);
+            -1
+        }
+    }
+}
+
+/// A device unplugged: what its controller was sent goes again when it
+/// comes back, as a new connection.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_midiSourceDisconnected(
+    _env: JNIEnv,
+    _class: JClass,
+    source_key: jint,
+) {
+    let source_id = midi_sources().lock().ok().and_then(|sources| {
+        sources
+            .descriptor(MidiSourceKey::new(source_key as u32))
+            .map(|descriptor| descriptor.id.clone())
+    });
+    if let Some(source_id) = source_id
+        && let Ok(mut controllers) = midi_controllers().lock()
+        && let Some(controller) = controllers.get_mut(&source_id)
+    {
+        controller.on_connect_sent = false;
+        // The device may come back as another model's firmware, or answer
+        // the Identity Request differently: it is asked again.
+        controller.identity = None;
+        controller.resolve();
+    }
 }
 
 /// Records whether the player lets a package send its on_connect messages,

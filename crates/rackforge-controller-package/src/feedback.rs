@@ -72,6 +72,27 @@ impl SysexIdentity {
 #[serde(deny_unknown_fields)]
 pub struct OnConnectMessage {
     pub message: String,
+    /// Where it goes: the controller's own port, or the port the package
+    /// declares as `setup_output` -- a DAW port, on controllers that change
+    /// mode only through it.
+    #[serde(default, skip_serializing_if = "OnConnectPort::is_input")]
+    pub to: OnConnectPort,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnConnectPort {
+    /// The output of the port the controller was found on.
+    #[default]
+    Input,
+    /// The output the package's `setup_output` endpoint names.
+    SetupOutput,
+}
+
+impl OnConnectPort {
+    fn is_input(&self) -> bool {
+        *self == Self::Input
+    }
 }
 
 impl OnConnectMessage {
@@ -192,6 +213,7 @@ mod tests {
     fn message(text: &str) -> OnConnectMessage {
         OnConnectMessage {
             message: text.into(),
+            to: OnConnectPort::Input,
         }
     }
 

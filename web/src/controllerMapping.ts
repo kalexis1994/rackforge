@@ -21,14 +21,31 @@ import type {
 
 export type InputKind = "knob" | "fader" | "encoder" | "button" | "pad" | "wheel" | "pedal";
 
+/** The MIDI System Real Time messages some keyboards' transport buttons send. */
+export type RealtimeMessage = "start" | "continue" | "stop";
+
+const REALTIME_STATUS: Record<RealtimeMessage, number> = { start: 0xfa, continue: 0xfb, stop: 0xfc };
+const REALTIME_LABEL: Record<RealtimeMessage, string> = {
+  start: "MIDI Start",
+  continue: "MIDI Continue",
+  stop: "MIDI Stop",
+};
+
+function realtimeOf(status: number): RealtimeMessage | undefined {
+  return (Object.keys(REALTIME_STATUS) as RealtimeMessage[]).find((message) => REALTIME_STATUS[message] === status);
+}
+
 /** One physical control, as a controller package declares it. */
 export interface ControllerInput {
   id: string;
   name: string;
   kind: InputKind;
   group?: string;
-  /** Zero-based channel, and exactly one of the three messages. */
-  midi: { channel: number; cc?: number; note?: number; pitch_bend?: boolean };
+  /**
+   * Exactly one message: a control change, note or pitch bend on a
+   * zero-based channel, or a real time message, which has no channel.
+   */
+  midi: { channel?: number; cc?: number; note?: number; pitch_bend?: boolean; realtime?: RealtimeMessage };
   button?: { press?: number; release?: number; press_only?: boolean; latching?: boolean };
   encoder?: string;
 }
@@ -92,7 +109,7 @@ export function inputMessage(input: ControllerInput): ParameterLinkMessage | nul
 /** The input as a mapping records it: its id, its name, and a copy of its message. */
 export function mappedInputFor(input: ControllerInput): ControlMapping["input"] | null {
   const message = inputMessage(input);
-  if (!message) return null;
+  if (!message || input.midi.channel === undefined) return null;
   return {
     id: input.id,
     name: input.name,
@@ -107,6 +124,8 @@ export function inputForActivity(
   event: Pick<MidiActivityEvent, "status" | "data1">,
   inputs: readonly ControllerInput[],
 ): ControllerInput | undefined {
+  const realtime = realtimeOf(event.status);
+  if (realtime) return inputs.find((input) => input.midi.realtime === realtime);
   const kind = event.status & 0xf0;
   const channel = event.status & 0x0f;
   return inputs.find((input) => {
@@ -127,6 +146,11 @@ export function inputForActivity(
 export function inputFromActivity(
   event: Pick<MidiActivityEvent, "status" | "data1" | "data2">,
 ): ControllerInput | null {
+  const realtime = realtimeOf(event.status);
+  if (realtime) {
+    // A transport button: its Play or Stop sends the real time message.
+    return { id: `realtime-${realtime}`, name: REALTIME_LABEL[realtime], kind: "button", midi: { realtime } };
+  }
   const kind = event.status & 0xf0;
   const channel = event.status & 0x0f;
   const user = channel + 1;
@@ -156,7 +180,8 @@ export function inputFromActivity(
 
 /** What a control sends, as a player can check it on the hardware. */
 export function inputMessageLabel(input: ControllerInput): string {
-  const channel = `ch ${input.midi.channel + 1}`;
+  if (input.midi.realtime) return REALTIME_LABEL[input.midi.realtime];
+  const channel = `ch ${(input.midi.channel ?? 0) + 1}`;
   if (typeof input.midi.cc === "number") return `CC ${input.midi.cc} · ${channel}`;
   if (typeof input.midi.note === "number") return `Note ${input.midi.note} · ${channel}`;
   if (input.midi.pitch_bend) return `Pitch bend · ${channel}`;
@@ -668,6 +693,7 @@ export function userControllerProblem(name: string, inputs: readonly ControllerI
 
 /** The kinds a control can be declared as, given the message it sends. */
 export function kindsForInput(input: Pick<ControllerInput, "midi">): InputKind[] {
+  if (input.midi.realtime) return ["button"];
   if (typeof input.midi.note === "number") return ["pad", "button"];
   if (input.midi.pitch_bend) return ["wheel"];
   return ["knob", "fader", "encoder", "button", "pedal", "wheel"];
@@ -693,6 +719,12 @@ function inputFromMapped(input: ControlMapping["input"]): ControllerInput {
  * not plugged in, and maps whose controller is neither -- so a map is never
  * out of reach of the player who made it. Attached first, then by name.
  */
+/** A controller RackForge ships from its maker's documentation: its own, and
+ * with no driver. */
+export function isCatalogPackage(entry: ControllerPackageSummary): boolean {
+  return entry.trust === "official" && entry.runtime === "DeclarativeV1";
+}
+
 export function buildControllerDevices(
   packages: readonly ControllerPackageSummary[],
   registered: ReadonlyArray<{
@@ -706,7 +738,11 @@ export function buildControllerDevices(
   const ids = new Set<string>([
     ...registered.map((entry) => entry.controller_id),
     ...maps.map((map) => map.controller_id),
-    ...packages.filter((entry) => entry.enabled).map((entry) => entry.id),
+    // RackForge's catalog describes dozens of keyboards the player may never
+    // own: one of them shows once it is plugged in or has a map, not before.
+    ...packages
+      .filter((entry) => entry.enabled && !isCatalogPackage(entry))
+      .map((entry) => entry.id),
   ]);
   const devices = [...ids].map((id): ControllerDevice => {
     const summary = packages.find((entry) => entry.id === id);

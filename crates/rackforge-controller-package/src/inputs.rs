@@ -10,7 +10,7 @@
 
 use rackforge_control_profile::{CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId};
 use rackforge_controller_api::{
-    HostActionBinding, HostActionTarget, MidiButtonBinding, MidiControlChangeBinding,
+    HostActionBinding, HostActionTarget, MidiButtonBinding, MidiControlChangeBinding, MidiRealtime,
     SemanticControlBinding, SemanticControlMode, SemanticControlProfile,
 };
 use serde::{Deserialize, Serialize};
@@ -33,10 +33,13 @@ pub enum InputKind {
 }
 
 /// The message a control sends: exactly one of a control change, a note or
-/// pitch bend, on a zero-based channel.
+/// pitch bend on a zero-based channel, or a System Real Time message, which
+/// has no channel.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InputMidi {
+    /// Required for a channel message; left out for a real time one.
+    #[serde(default = "no_channel", skip_serializing_if = "is_no_channel")]
     pub channel: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cc: Option<u8>,
@@ -44,6 +47,21 @@ pub struct InputMidi {
     pub note: Option<u8>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pitch_bend: bool,
+    /// MIDI Start, Continue or Stop: what some keyboards' Play and Stop send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realtime: Option<MidiRealtime>,
+}
+
+/// What `channel` holds when a manifest leaves it out. Not a MIDI channel:
+/// a channel message without one is refused, rather than put on channel 1.
+pub const NO_CHANNEL: u8 = u8::MAX;
+
+const fn no_channel() -> u8 {
+    NO_CHANNEL
+}
+
+fn is_no_channel(channel: &u8) -> bool {
+    *channel == NO_CHANNEL
 }
 
 /// An input's message reduced to what makes it unique: two controls never
@@ -53,10 +71,25 @@ pub enum InputMessage {
     ControlChange { channel: u8, controller: u8 },
     Note { channel: u8, note: u8 },
     PitchBend { channel: u8 },
+    Realtime(MidiRealtime),
 }
 
 impl InputMidi {
     pub fn message(self) -> Result<InputMessage, String> {
+        if let Some(message) = self.realtime {
+            if self.cc.is_some() || self.note.is_some() || self.pitch_bend {
+                return Err(
+                    "an input sends exactly one of cc, note, pitch_bend or realtime".into(),
+                );
+            }
+            if self.channel != NO_CHANNEL {
+                return Err("a real time message has no MIDI channel".into());
+            }
+            return Ok(InputMessage::Realtime(message));
+        }
+        if self.channel == NO_CHANNEL {
+            return Err("a channel message needs its MIDI channel".into());
+        }
         if self.channel > 15 {
             return Err(format!("MIDI channel {} is outside 0..15", self.channel));
         }
@@ -84,7 +117,7 @@ impl InputMidi {
             (None, None, true) => Ok(InputMessage::PitchBend {
                 channel: self.channel,
             }),
-            _ => Err("an input sends exactly one of cc, note or pitch_bend".into()),
+            _ => Err("an input sends exactly one of cc, note, pitch_bend or realtime".into()),
         }
     }
 }
@@ -180,7 +213,9 @@ impl ControllerInput {
             InputKind::Pad => matches!(message, InputMessage::Note { .. }),
             InputKind::Button => matches!(
                 message,
-                InputMessage::ControlChange { .. } | InputMessage::Note { .. }
+                InputMessage::ControlChange { .. }
+                    | InputMessage::Note { .. }
+                    | InputMessage::Realtime(_)
             ),
             InputKind::Wheel => matches!(
                 message,
@@ -196,6 +231,12 @@ impl ControllerInput {
         if self.button.is_some() && self.kind != InputKind::Button {
             return Err(format!(
                 "input {:?}: only a button has a button report",
+                self.id
+            ));
+        }
+        if self.button.is_some() && matches!(message, InputMessage::Realtime(_)) {
+            return Err(format!(
+                "input {:?}: a real time message has no values to report",
                 self.id
             ));
         }
@@ -337,7 +378,7 @@ pub fn validate_inputs(
             .get(action.input.as_str())
             .ok_or_else(|| format!("action names unknown input {:?}", action.input))?;
         action.target.validate()?;
-        action_button(input)?;
+        action_trigger(action.target, input)?;
         if !meanings.insert(action.input.as_str()) {
             return Err(format!(
                 "input {:?} has more than one meaning",
@@ -387,10 +428,7 @@ pub fn lower_actions(
         .iter()
         .filter_map(|action| {
             let input = inputs.iter().find(|input| input.id == action.input)?;
-            Some(HostActionBinding {
-                target: action.target,
-                midi_cc: action_button(input).ok()?,
-            })
+            action_trigger(action.target, input).ok()
         })
         .collect()
 }
@@ -443,24 +481,43 @@ fn role_control(
     })
 }
 
-/// A host action needs a button that sends a control change and reports its
-/// release, which is what the runtime reads.
-fn action_button(input: &ControllerInput) -> Result<MidiButtonBinding, String> {
+/// A host action needs a button the runtime reads: one that sends a control
+/// change and reports its release, or one that sends a real time message.
+/// A real time message only presses, so it cannot hold a momentary action.
+fn action_trigger(
+    target: HostActionTarget,
+    input: &ControllerInput,
+) -> Result<HostActionBinding, String> {
     if input.kind != InputKind::Button {
         return Err(format!(
             "input {:?}: a host action needs a button",
             input.id
         ));
     }
-    let InputMessage::ControlChange {
-        channel,
-        controller,
-    } = input.midi.message()?
-    else {
-        return Err(format!(
-            "input {:?}: host actions read buttons that send a control change",
-            input.id
-        ));
+    let (channel, controller) = match input.midi.message()? {
+        InputMessage::ControlChange {
+            channel,
+            controller,
+        } => (channel, controller),
+        InputMessage::Realtime(message) => {
+            if matches!(
+                target,
+                HostActionTarget::KeyboardParts | HostActionTarget::SequencerFill
+            ) {
+                return Err(format!(
+                    "input {:?}: {target:?} is held, and a real time message has no release",
+                    input.id
+                ));
+            }
+            return Ok(HostActionBinding::realtime(target, message));
+        }
+        _ => {
+            return Err(format!(
+                "input {:?}: host actions read buttons that send a control change or a \
+                 real time message",
+                input.id
+            ));
+        }
     };
     let report = input.button_report();
     if report.press_only {
@@ -476,7 +533,7 @@ fn action_button(input: &ControllerInput) -> Result<MidiButtonBinding, String> {
         release_value: report.release,
     };
     binding.validate()?;
-    Ok(binding)
+    Ok(HostActionBinding::control_change(target, binding))
 }
 
 fn validate_input_id(value: &str) -> Result<(), String> {
@@ -558,15 +615,105 @@ mod tests {
         let lowered = lower_actions(&inputs, &actions);
         assert_eq!(
             lowered,
-            vec![HostActionBinding {
-                target: HostActionTarget::KeyboardParts,
-                midi_cc: MidiButtonBinding {
+            vec![HostActionBinding::control_change(
+                HostActionTarget::KeyboardParts,
+                MidiButtonBinding {
                     channel: 0,
                     controller: 119,
                     press_value: 127,
                     release_value: 0,
                 },
-            }]
+            )]
+        );
+    }
+
+    fn realtime_button(id: &str, message: MidiRealtime) -> ControllerInput {
+        ControllerInput {
+            id: id.into(),
+            name: id.into(),
+            kind: InputKind::Button,
+            group: None,
+            midi: InputMidi {
+                channel: NO_CHANNEL,
+                realtime: Some(message),
+                ..InputMidi::default()
+            },
+            button: None,
+            encoder: None,
+        }
+    }
+
+    /// A Launchkey MK4's Play and Stop send MIDI Start and Stop: they are
+    /// buttons the transport actions can take, with no channel and no
+    /// values of their own.
+    #[test]
+    fn a_play_button_that_sends_midi_start_takes_the_transport() {
+        let inputs = vec![
+            realtime_button("play", MidiRealtime::Start),
+            realtime_button("stop", MidiRealtime::Stop),
+        ];
+        let actions = vec![
+            InputAction {
+                input: "play".into(),
+                target: HostActionTarget::TransportPlay,
+            },
+            InputAction {
+                input: "stop".into(),
+                target: HostActionTarget::TransportStop,
+            },
+        ];
+        validate_inputs(&inputs, &[], &actions).unwrap();
+        assert_eq!(
+            lower_actions(&inputs, &actions),
+            vec![
+                HostActionBinding::realtime(HostActionTarget::TransportPlay, MidiRealtime::Start),
+                HostActionBinding::realtime(HostActionTarget::TransportStop, MidiRealtime::Stop),
+            ]
+        );
+
+        // A held action needs a release, which MIDI Start never sends.
+        let held = vec![InputAction {
+            input: "play".into(),
+            target: HostActionTarget::KeyboardParts,
+        }];
+        assert!(validate_inputs(&inputs, &[], &held).is_err());
+
+        // Only a button sends one, without a channel or reported values.
+        let mut knob = realtime_button("knob", MidiRealtime::Start);
+        knob.kind = InputKind::Knob;
+        assert!(knob.validate().is_err());
+        let mut with_channel = realtime_button("play", MidiRealtime::Start);
+        with_channel.midi.channel = 0;
+        assert!(with_channel.validate().is_err());
+        let mut with_values = realtime_button("play", MidiRealtime::Start);
+        with_values.button = Some(ButtonReport::default());
+        assert!(with_values.validate().is_err());
+    }
+
+    #[test]
+    fn a_channel_message_without_its_channel_is_refused() {
+        let parsed: ControllerInput = toml::from_str(
+            r#"
+            id = "knob-1"
+            name = "Knob 1"
+            kind = "knob"
+            midi = { cc = 21 }
+            "#,
+        )
+        .unwrap();
+        assert!(parsed.validate().is_err());
+        let play: ControllerInput = toml::from_str(
+            r#"
+            id = "play"
+            name = "Play"
+            kind = "button"
+            midi = { realtime = "start" }
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            play.validate().unwrap(),
+            InputMessage::Realtime(MidiRealtime::Start)
         );
     }
 

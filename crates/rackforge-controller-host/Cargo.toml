@@ -7,6 +7,7 @@ description = "Hardware-agnostic controller package host for RackForge"
 
 [dependencies]
 anyhow.workspace = true
+rackforge-controller-catalog = { path = "../rackforge-controller-catalog" }
 rackforge-controller-package = { path = "../rackforge-controller-package" }
 rackforge-control-api = { path = "../rackforge-control-api" }
 rackforge-session-api = { path = "../rackforge-session-api" }

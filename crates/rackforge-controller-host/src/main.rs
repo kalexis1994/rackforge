@@ -28,6 +28,9 @@ enum HostCommand {
     List {
         root: PathBuf,
     },
+    InstallCatalog {
+        root: PathBuf,
+    },
     Activate {
         id: String,
         version: String,
@@ -109,6 +112,29 @@ fn run() -> Result<()> {
                     controller.record.enabled,
                     controller.package.manifest().runtime.kind
                 );
+            }
+        }
+        HostCommand::InstallCatalog { root } => {
+            // The controllers RackForge describes from their makers'
+            // documentation, installed as its own. The appliance's service
+            // sees the store read-only, so its installer runs this.
+            let mut failed = 0;
+            for result in rackforge_controller_catalog::install_bundled(&root) {
+                match result {
+                    rackforge_controller_catalog::BundledInstall::Installed { id, version } => {
+                        println!("CATALOG_CONTROLLER_INSTALLED id={id} version={version}");
+                    }
+                    rackforge_controller_catalog::BundledInstall::Current { id } => {
+                        println!("CATALOG_CONTROLLER_CURRENT id={id}");
+                    }
+                    rackforge_controller_catalog::BundledInstall::Failed { path, error } => {
+                        eprintln!("CATALOG_CONTROLLER_FAILED path={path} error={error}");
+                        failed += 1;
+                    }
+                }
+            }
+            if failed > 0 {
+                bail!("{failed} catalog controller package(s) could not be installed");
             }
         }
         HostCommand::Activate { id, version, root } => {
@@ -323,18 +349,34 @@ impl DeclarativeControllers {
         }
         let mut registered = std::collections::BTreeSet::new();
         for (endpoint_name, seen) in &mut self.endpoints {
-            let Some(binding) =
-                store.resolve_identified_input(endpoint_name, seen.identity.as_ref())?
-            else {
-                continue;
+            // One port no package can settle on -- two sizes of one family
+            // that answered no Identity Request -- costs that port, never
+            // every other controller: this used to end the whole refresh.
+            let binding = match store
+                .resolve_identified_input(endpoint_name, seen.identity.as_ref())
+            {
+                Ok(Some(binding)) => binding,
+                Ok(None) => continue,
+                Err(error) => {
+                    eprintln!(
+                        "DECLARATIVE_CONTROLLER_SKIPPED endpoint={endpoint_name:?} error={error}"
+                    );
+                    continue;
+                }
             };
             if !registered.insert(binding.controller_id.clone()) {
-                bail!(
-                    "declarative controller {} matches more than one MIDI input; refine its endpoint matcher",
+                eprintln!(
+                    "DECLARATIVE_CONTROLLER_SKIPPED endpoint={endpoint_name:?} id={} reason=already-attached-to-another-input",
                     binding.controller_id
                 );
+                continue;
             }
             register_declarative_controller(endpoint_name, &binding)?;
+            if !binding.setup_messages.is_empty()
+                && seen.sent.insert(format!("{}#setup", binding.controller_id))
+            {
+                send_setup_messages(endpoint_name, &binding);
+            }
             if !binding.on_connect.is_empty() && seen.sent.insert(binding.controller_id.clone()) {
                 match send_to_endpoint(endpoint_name, &binding.on_connect) {
                     Ok(()) => println!(
@@ -396,6 +438,50 @@ fn query_identity(endpoint_name: &str) -> Option<rackforge_controller_package::I
         .ok()
 }
 
+/// Puts a controller in the mode its package describes through the output
+/// the package names as its setup output: a DAW port, for controllers that
+/// change mode only there.
+#[cfg(target_os = "linux")]
+fn send_setup_messages(
+    endpoint_name: &str,
+    binding: &rackforge_controller_package::DeclarativeControllerBinding,
+) {
+    use midir::MidiOutput;
+
+    let Some(matcher) = &binding.setup_output else {
+        return;
+    };
+    let outputs = MidiOutput::new("rackforge-controller-setup")
+        .map(|output| {
+            output
+                .ports()
+                .iter()
+                .filter_map(|port| output.port_name(port).ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let Some(output) =
+        rackforge_controller_package::setup_output_port(matcher, endpoint_name, &outputs)
+    else {
+        eprintln!(
+            "DECLARATIVE_CONTROLLER_SETUP_SKIPPED id={} endpoint={endpoint_name:?} reason=no-single-setup-output outputs={outputs:?}",
+            binding.controller_id
+        );
+        return;
+    };
+    match send_to_endpoint(&output, &binding.setup_messages) {
+        Ok(()) => println!(
+            "DECLARATIVE_CONTROLLER_SETUP id={} output={output:?} messages={}",
+            binding.controller_id,
+            binding.setup_messages.len()
+        ),
+        Err(error) => eprintln!(
+            "DECLARATIVE_CONTROLLER_SETUP_FAILED id={} output={output:?} error={error:#}",
+            binding.controller_id
+        ),
+    }
+}
+
 /// Writes messages to the output port of the device behind an input: ALSA
 /// names a device port's two directions alike.
 #[cfg(target_os = "linux")]
@@ -432,7 +518,10 @@ fn register_declarative_controller(
         // Process-driver reservations are consuming by design, so do not
         // reuse them here merely to publish the semantic profile.
         controls: Vec::new(),
-        actions: Vec::new(),
+        // Its transport and lane buttons are the host's, though: the engine
+        // keeps each controller's reservations apart and holds them to the
+        // port named below, so they take nothing from another controller.
+        actions: binding.host_actions.clone(),
         midi_source_name: Some(endpoint_name.to_owned()),
         semantic_profile: binding.semantic_profile.clone(),
         identified: binding.identified,
@@ -615,6 +704,15 @@ fn parse_args(arguments: impl Iterator<Item = String>) -> Result<HostCommand> {
             }
             Ok(HostCommand::List { root })
         }
+        "install-catalog" => {
+            let mut root = default_store_root();
+            if arguments.len() == 3 && arguments[1] == "--root" {
+                root = arguments[2].clone().into();
+            } else if arguments.len() != 1 {
+                bail!(usage());
+            }
+            Ok(HostCommand::InstallCatalog { root })
+        }
         "activate" => {
             if arguments.len() < 3 {
                 bail!(usage());
@@ -735,6 +833,7 @@ fn usage() -> &'static str {
   rackforge-controller-host verify PACKAGE.rfcontroller
   rackforge-controller-host install PACKAGE.rfcontroller [--root DIR] [--trust LEVEL]
   rackforge-controller-host list [--root DIR]
+  rackforge-controller-host install-catalog [--root DIR]
   rackforge-controller-host activate ID VERSION [--root DIR]
   rackforge-controller-host serve [--root DIR] [--allow-community]
   rackforge-controller-host restore-all [--root DIR] [--allow-community]

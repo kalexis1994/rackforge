@@ -27,8 +27,8 @@ use rackforge_control_api::{
 };
 use rackforge_midi_api::{ControlTakeover, MidiSourceDescriptor};
 use rackforge_midi_api::{
-    IngressMidiEvent, MidiMessageKind, MidiPacket, MidiSourceRegistry, ParameterLink,
-    ParameterLinkMessage,
+    IngressMidiEvent, MidiMessageKind, MidiPacket, ParameterLink, ParameterLinkMessage,
+    SharedMidiSourceRegistry,
 };
 #[cfg(test)]
 use rackforge_performance_api::PerformanceLibrary;
@@ -98,6 +98,9 @@ pub enum AudioControlCommand {
         controller_id: String,
         controls: Vec<HostControlBinding>,
         actions: Vec<HostActionBinding>,
+        /// The controller's own MIDI source, when its port is known: its
+        /// reservations then apply to that input only.
+        source: Option<rackforge_midi_api::MidiSourceKey>,
         reply: SyncSender<Result<(), String>>,
     },
     SetMasterLevel {
@@ -359,7 +362,9 @@ struct ControlContext {
     /// How knobs and faders take a parameter over, as stored.
     controller_takeover: Mutex<ControlTakeover>,
     controllers_root: Option<PathBuf>,
-    midi_sources: MidiSourceRegistry,
+    /// Shared with the MIDI supervisor, which registers a keyboard plugged
+    /// in while the engine runs.
+    midi_sources: SharedMidiSourceRegistry,
     connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
     midi_observer: Mutex<Receiver<IngressMidiEvent>>,
     midi_learn: Mutex<Option<MidiLearnState>>,
@@ -383,6 +388,7 @@ struct ControlContext {
 pub struct ControlServer {
     _server_thread: JoinHandle<()>,
     _watchdog_thread: JoinHandle<()>,
+    _sources_thread: JoinHandle<()>,
 }
 
 pub struct ControlServerOptions {
@@ -398,7 +404,7 @@ pub struct ControlServerOptions {
     pub state_store: Arc<Mutex<PluginStateStore>>,
     pub plugin_manifests: BTreeMap<String, PluginManifest>,
     pub portable_plugins: BTreeMap<String, PortableControlPlugin>,
-    pub midi_sources: MidiSourceRegistry,
+    pub midi_sources: SharedMidiSourceRegistry,
     pub midi_observer: Receiver<IngressMidiEvent>,
     pub connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
     pub plugin_sample_rate: f64,
@@ -500,14 +506,57 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         .name("rackforge-control".into())
         .spawn(move || serve(listener, path, server_context))
         .context("spawning RackForge control server")?;
+    let sources_context = Arc::clone(&context);
     let watchdog_thread = thread::Builder::new()
         .name("rackforge-audition-watchdog".into())
         .spawn(move || audition_watchdog(context))
         .context("spawning RackForge audition watchdog")?;
+    let sources_thread = thread::Builder::new()
+        .name("rackforge-midi-sources".into())
+        .spawn(move || follow_midi_sources(sources_context))
+        .context("spawning RackForge MIDI source follower")?;
     Ok(ControlServer {
         _server_thread: server_thread,
         _watchdog_thread: watchdog_thread,
+        _sources_thread: sources_thread,
     })
+}
+
+/// How often the MIDI source registry is looked at for a keyboard the
+/// supervisor took on.
+const MIDI_SOURCE_FOLLOW_PERIOD: Duration = Duration::from_millis(500);
+
+/// Compiles the links again when a keyboard plugged in while the engine runs
+/// joins the registry: the player's maps and links for it, learnt on an
+/// earlier day, apply from the moment it is heard.
+fn follow_midi_sources(context: Arc<ControlContext>) {
+    let mut seen = context.midi_sources.generation();
+    loop {
+        thread::sleep(MIDI_SOURCE_FOLLOW_PERIOD);
+        let generation = context.midi_sources.generation();
+        if generation == seen {
+            continue;
+        }
+        let _dispatch_guard = match context.dispatch_lock.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                eprintln!("MIDI_SOURCES_FOLLOW_ERROR dispatch lock is poisoned");
+                return;
+            }
+        };
+        match replace_runtime_parameter_links(&context) {
+            Ok(()) => {
+                seen = generation;
+                println!("PARAMETER_LINKS_RECOMPILED reason=midi-source-adopted");
+            }
+            // Tried again at the next look: the audio thread may have been
+            // busy loading a Rack.
+            Err(failure) => eprintln!(
+                "PARAMETER_LINKS_RECOMPILE_FAILED reason=midi-source-adopted error={}",
+                failure.message
+            ),
+        }
+    }
 }
 
 fn serve(listener: UnixListener, socket_path: PathBuf, context: Arc<ControlContext>) {
@@ -668,8 +717,8 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             let sources: Vec<MidiSourceStatus> = context
                 .midi_sources
                 .descriptors()
+                .into_iter()
                 .filter(|source| source.id.as_str() != "rackforge.virtual.touch")
-                .cloned()
                 .map(|source| {
                     let key = context.midi_sources.resolve_optional(&source.id);
                     MidiSourceStatus {
@@ -2769,7 +2818,7 @@ fn begin_midi_learn(
 }
 
 fn midi_learn_candidate(
-    sources: &MidiSourceRegistry,
+    sources: &SharedMidiSourceRegistry,
     ingress: IngressMidiEvent,
 ) -> Option<MidiLearnCandidate> {
     let message = match ingress.packet.kind() {
@@ -2787,7 +2836,7 @@ fn midi_learn_candidate(
         MidiMessageKind::ProgramChange => None,
     }?;
     Some(MidiLearnCandidate {
-        source: sources.descriptor(ingress.source)?.clone(),
+        source: sources.descriptor(ingress.source)?,
         channel: ingress.packet.channel(),
         message,
     })
@@ -2823,7 +2872,7 @@ fn record_observed_midi(
         && let Ok(mut activity) = context.midi_activity.lock()
     {
         let length = usize::from(ingress.packet.length).clamp(1, 3);
-        activity.record(source, &ingress.packet.data[..length]);
+        activity.record(&source, &ingress.packet.data[..length]);
     }
     if let Some(Some(active)) = learn
         && active.candidate.is_none()
@@ -3517,9 +3566,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 || controls
                     .iter()
                     .any(|binding| binding.midi_cc.validate().is_err())
-                || actions
-                    .iter()
-                    .any(|binding| binding.midi_cc.validate().is_err())
+                || actions.iter().any(|binding| binding.validate().is_err())
                 || semantic_profile.as_ref().is_some_and(|profile| {
                     profile
                         .validate_against_reserved(&controls, &actions)
@@ -3532,6 +3579,12 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     Some(snapshot.revision),
                 );
             }
+            // A controller that names its port reserves on that input only;
+            // another device's MIDI Start is not its Play button.
+            let source = midi_source_name
+                .as_deref()
+                .and_then(|name| context.midi_sources.resolve_device(name))
+                .map(|(key, _)| key);
             let (reply_sender, reply_receiver) = sync_channel(1);
             if let Err(failure) = send_audio(
                 context,
@@ -3539,6 +3592,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     controller_id: controller_id.clone(),
                     controls,
                     actions,
+                    source,
                     reply: reply_sender,
                 },
             ) {
@@ -5989,7 +6043,7 @@ mod tests {
             period_frames: 128,
             buffer_frames: 384,
         };
-        let mut midi_sources = MidiSourceRegistry::default();
+        let mut midi_sources = rackforge_midi_api::MidiSourceRegistry::default();
         midi_sources
             .register(
                 rackforge_midi_api::MidiSourceKey::new(0),
@@ -6091,7 +6145,7 @@ mod tests {
                 controller_maps: Mutex::new(BTreeMap::new()),
                 controller_takeover: Mutex::new(ControlTakeover::default()),
                 controllers_root: None,
-                midi_sources,
+                midi_sources: SharedMidiSourceRegistry::new(midi_sources),
                 connected_midi_sources: Arc::new(Mutex::new(BTreeSet::from([0, 1]))),
                 midi_observer: Mutex::new(midi_receiver),
                 midi_learn: Mutex::new(None),
@@ -6258,6 +6312,15 @@ mod tests {
             .unwrap();
         let expected_revision = context.performance_repository.lock().unwrap().revision();
         let audio = thread::spawn(move || {
+            // Every library edit recompiles the controller maps first: a
+            // Slot that goes takes its maps with it.
+            match receiver.recv().unwrap() {
+                AudioControlCommand::ReplaceParameterLinks { links, reply } => {
+                    assert!(links.is_empty());
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected the controller maps to be compiled again"),
+            }
             match receiver.recv().unwrap() {
                 AudioControlCommand::EmergencyStop { reply } => {
                     reply.send(Ok(())).unwrap();

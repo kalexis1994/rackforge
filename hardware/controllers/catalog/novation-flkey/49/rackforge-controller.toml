@@ -1,0 +1,304 @@
+# Novation FLkey 49 (the first FLkey generation), standalone use outside FL
+# Studio. Every value below is sourced in ../SOURCES.md; [UG] is the FLkey 49
+# user guide, [CG] Novation's FLkey Components guide.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-flkey-49"
+name = "FLkey 49"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "flkey-49"
+
+# The MIDI interface only: "FLkey 49 FLkey MIDI Out" in Novation's screenshot;
+# the DAW interface is "... DAW Out", named MIDIIN2 on Windows [UG]. The
+# FLkey 2 is "FLkey MK2 ..." and never matches.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["flkey 49"]
+exclude_contains = ["mk2", "daw", "midiin2", "port 2", "midi 2 "]
+
+# Pots, the default pot Custom Mode, the only pot mode outside FL Studio:
+# CC 21-28 on the global (keys) channel, channel 1 by default [CG pot editor
+# screenshot; UG p15, p17, p44].
+[[inputs]]
+id = "pot-1"
+name = "Pot 1"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 21 }
+
+[[inputs]]
+id = "pot-2"
+name = "Pot 2"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 22 }
+
+[[inputs]]
+id = "pot-3"
+name = "Pot 3"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 23 }
+
+[[inputs]]
+id = "pot-4"
+name = "Pot 4"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 24 }
+
+[[inputs]]
+id = "pot-5"
+name = "Pot 5"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 25 }
+
+[[inputs]]
+id = "pot-6"
+name = "Pot 6"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 26 }
+
+[[inputs]]
+id = "pot-7"
+name = "Pot 7"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 27 }
+
+[[inputs]]
+id = "pot-8"
+name = "Pot 8"
+kind = "knob"
+group = "Pots"
+midi = { channel = 0, cc = 28 }
+
+# Faders and fader buttons, the default fader Custom Mode: faders CC 71-79,
+# buttons CC 11-19, momentary, on the global channel [CG "Faders" screenshot of
+# a new Custom Mode; UG p29, p33-34].
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 71 }
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 72 }
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 73 }
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 74 }
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 75 }
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 76 }
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 77 }
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 78 }
+
+[[inputs]]
+id = "fader-9"
+name = "Fader 9"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 79 }
+
+[[inputs]]
+id = "fader-button-1"
+name = "Fader button 1"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 11 }
+
+[[inputs]]
+id = "fader-button-2"
+name = "Fader button 2"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 12 }
+
+[[inputs]]
+id = "fader-button-3"
+name = "Fader button 3"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 13 }
+
+[[inputs]]
+id = "fader-button-4"
+name = "Fader button 4"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 14 }
+
+[[inputs]]
+id = "fader-button-5"
+name = "Fader button 5"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 15 }
+
+[[inputs]]
+id = "fader-button-6"
+name = "Fader button 6"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 16 }
+
+[[inputs]]
+id = "fader-button-7"
+name = "Fader button 7"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 17 }
+
+[[inputs]]
+id = "fader-button-8"
+name = "Fader button 8"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 18 }
+
+[[inputs]]
+id = "fader-button-9"
+name = "Fader button 9"
+kind = "button"
+group = "Fader buttons"
+midi = { channel = 0, cc = 19 }
+
+# Wheels on the keys channel: pitch bend, and modulation on CC 1. The sustain
+# input sends CC 64 by default [CG "Sustain Pedal"]. The pads and the buttons
+# are not declared: Novation does not say what they send outside FL Studio.
+[[inputs]]
+id = "pitch-bend"
+name = "Pitch wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, pitch_bend = true }
+
+[[inputs]]
+id = "modulation"
+name = "Modulation wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, cc = 1 }
+
+[[inputs]]
+id = "sustain"
+name = "Sustain pedal"
+kind = "pedal"
+group = "Pedal"
+midi = { channel = 0, cc = 64 }
+
+# RackForge's default meanings, as for the other keyboards with eight knobs
+# and nine faders: the pots shape the tone, the faders the envelope, filter
+# and LFO, the ninth fader the master level.
+[[roles]]
+input = "pot-1"
+role = "synth.oscillator.pulse_width"
+
+[[roles]]
+input = "pot-2"
+role = "synth.oscillator.sub.level"
+
+[[roles]]
+input = "pot-3"
+role = "synth.oscillator.noise.level"
+
+[[roles]]
+input = "pot-4"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "pot-5"
+role = "synth.filter.lfo.amount"
+
+[[roles]]
+input = "pot-6"
+role = "synth.filter.key_tracking"
+
+[[roles]]
+input = "pot-7"
+role = "synth.lfo.delay"
+
+[[roles]]
+input = "pot-8"
+role = "synth.amplifier.level"
+
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"
+
+[[roles]]
+input = "fader-9"
+role = "rackforge.master.level"

@@ -4860,6 +4860,52 @@ pub fn send_to_midi_device(input_name: &str, messages: Vec<Vec<u8>>) {
         });
 }
 
+/// Sends a package's setup messages to its device's setup output -- the DAW
+/// port a Launch Control XL 3 changes mode through -- found by the package's
+/// matcher beside the input the controller was found on.
+pub fn send_to_setup_output(
+    input_name: &str,
+    matcher: rackforge_controller_package::EndpointMatcher,
+    messages: Vec<Vec<u8>>,
+) {
+    let input_name = input_name.to_owned();
+    let _ = thread::Builder::new()
+        .name("rackforge-controller-setup".into())
+        .spawn(move || {
+            let result = (|| -> Result<()> {
+                let output = MidiOutput::new("rackforge-desktop-controller-setup")
+                    .context("opening a Windows MIDI output client")?;
+                let ports = output.ports();
+                let names = ports
+                    .iter()
+                    .map(|port| output.port_name(port).unwrap_or_default())
+                    .collect::<Vec<_>>();
+                let name =
+                    rackforge_controller_package::setup_output_port(&matcher, &input_name, &names)
+                        .with_context(|| {
+                            format!("no single setup output beside {input_name:?} in {names:?}")
+                        })?;
+                let index = names
+                    .iter()
+                    .position(|candidate| *candidate == name)
+                    .expect("the setup output came from these ports");
+                let mut connection = output
+                    .connect(&ports[index], "rackforge-controller-setup")
+                    .map_err(|error| anyhow::anyhow!("opening MIDI output {name:?}: {error}"))?;
+                for message in &messages {
+                    connection
+                        .send(message)
+                        .map_err(|error| anyhow::anyhow!("writing to {name:?}: {error}"))?;
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                eprintln!("DESKTOP_CONTROLLER_SETUP_FAILED input={input_name:?} error={error:#}");
+            }
+        });
+}
+
 fn release_held_notes(sender: &SyncSender<MidiPacket>, telemetry: &AudioTelemetry) {
     let packets = panic_packets(PanicScope::AllChannels);
     let count = packets.len();

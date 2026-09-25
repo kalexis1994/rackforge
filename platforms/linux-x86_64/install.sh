@@ -118,6 +118,11 @@ if [[ -d "$controller_package" ]]; then
     "$controller_package" --root "$root/controllers" --trust official
 fi
 
+# The controllers RackForge describes from their makers' documentation; the
+# controller host's service sees its store read-only, so they go in here.
+install -d "$root/controllers"
+"$root/bin/rackforge-controller-host" install-catalog --root "$root/controllers"
+
 for unit in rackforge-platform-host rackforge-controller-host rackforge-web rackforge-audio
 do
   rackforge_render_systemd_unit \

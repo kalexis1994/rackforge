@@ -301,15 +301,15 @@ mod tests {
         assert!(driver.profile().host_controls.is_empty());
         assert_eq!(
             driver.profile().host_actions,
-            vec![HostActionBinding {
-                target: HostActionTarget::KeyboardParts,
-                midi_cc: MidiButtonBinding {
+            vec![HostActionBinding::control_change(
+                HostActionTarget::KeyboardParts,
+                MidiButtonBinding {
                     channel: 0,
                     controller: 119,
                     press_value: 127,
                     release_value: 0,
                 },
-            }]
+            )]
         );
     }
 

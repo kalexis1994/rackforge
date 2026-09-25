@@ -32,7 +32,7 @@ other numbers (below).
 | Port names | Windows `Minilab3` (`Minilab3 MIDI` with the MIDI Control Center; `N- Minilab3 MIDI` for more units); Mac `Minilab3 MIDI`; Linux `Minilab3 Minilab3 MIDI` | Official software | BW `listAutoDetectionMidiPortNames` |
 | The MiniLab 37 | `Minilab37` | Official software | BW `MiniLab37ExtensionDefinition` |
 | USB ids and Identity Reply, for the record | Arturia 7285 (0x1C75), product 8715; reply `00 20 6B 02 00 04` | Official software | AB `controller_id`, `identity_response_id_bytes`. Not needed: the port name singles the model out |
-| Knobs | CC 74, 71, 76, 77, 93, 18, 19, 16, keyboard channel | Documented ×2 | UM 5.4.1–5.4.2; CH "Arturia" and "Users" columns |
+| Knobs | CC 74, 71, 76, 77, 93, 18, 19, 16, keyboard channel | Documented ×2; Official software | UM 5.4.1–5.4.2; CH "Arturia" and "Users" columns; BW passes these CCs, the faders' and CC 64 through to the instrument in the ARTURIA program (`getInputMask(0x09, {… 0x4a, 0x47, 0x4c, 0x4d, 0x5d, 0x12, 0x13, 0x10, 0x52, 0x53, 0x55, 0x11 …})`) |
 | Knob mode | absolute: CC between Min and Max, or NRPN; no relative setting | Documented | MCC 3.6 |
 | Faders | CC 82, 83, 85, 17, keyboard channel | Documented ×2 | UM 5.4.3; CH |
 | DAW program, for the record | knobs CC 86, 87, 89, 90, 110, 111, 116, 117; faders 14, 15, 30, 31; Shift 27; main encoder 28 | Documented; Official software ×2 | CH "DAWs" column; AB `Elements`; BW `ENCODER_CC_MAPPING`, `SLIDER_CC_MAPPING`. Not declared: the package describes ARTURIA |

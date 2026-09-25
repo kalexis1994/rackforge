@@ -90,6 +90,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "arturia-keylab-mkii/61",
     "arturia-keylab-mkii/88",
     "arturia-keylab-essential",
+    "novation-launchkey-mk2",
 ];
 
 /// What installing the catalog did with one package.
@@ -1128,6 +1129,41 @@ mod tests {
             .unwrap()
             .unwrap();
         // Nine faders, eight encoders, the wheel and 20 buttons.
+        assert_eq!(binding.held_controls.len(), 38);
+    }
+
+    /// A Launchkey MK2 of any size is read on its InControl port on every
+    /// system, never on its MIDI port; the first Launchkey, the Minis and
+    /// the MK3 are not it.
+    #[test]
+    fn a_launchkey_mk2_is_read_on_its_incontrol_port() {
+        let (_root, store) = installed_store("launchkey-mk2");
+        for (port, expected) in [
+            (
+                "MIDIIN2 (Launchkey MIDI)",
+                Some("org.rackforge.novation-launchkey-mk2"),
+            ),
+            (
+                "Launchkey MIDI:Launchkey MIDI MIDI 2 24:1",
+                Some("org.rackforge.novation-launchkey-mk2"),
+            ),
+            (
+                "LaunchKey InControl",
+                Some("org.rackforge.novation-launchkey-mk2"),
+            ),
+            ("Launchkey MIDI", None),
+            ("Launchkey MIDI:Launchkey MIDI MIDI 1 24:0", None),
+            ("Launchkey 49 InControl", None),
+            ("Launchkey Mini LK Mini InControl", None),
+            ("MIDIIN2 (LKMK3 MIDI)", None),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        let binding = store
+            .resolve_identified_input("MIDIIN2 (Launchkey MIDI)", None)
+            .unwrap()
+            .unwrap();
+        // Pots, sliders, their buttons, Track, the transport, InControl.
         assert_eq!(binding.held_controls.len(), 38);
     }
 

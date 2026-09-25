@@ -41,7 +41,7 @@ out here:
 | Button behaviour in Generic Mode | several buttons toggle their LED; the protocol reports every button as note-on when pressed and note-off when released | Documented | CP |
 | Slots | faders `control-1`, Track Control `control-2`, Device Control `control-3`; the grid's two bottom rows the switches; Left/Right `step`, Down/Up `step-2`; Metronome `switch-3.3` | Convention | catalog README |
 | Fn button | Shift | Official software (the device's modifier) | AB |
-| Actions | none: Play and Stop send notes, and host actions read control changes and real time messages only | — | |
+| Actions | Play `transport_play`, Stop `transport_stop`; their notes are held back from the instruments | Convention | catalog README (Play and Stop take the transport) |
 | Roles | faders and Track Control knobs as the first rule; the master fader the master level | Convention | catalog README |
 
 ## Open questions, until someone with the hardware checks

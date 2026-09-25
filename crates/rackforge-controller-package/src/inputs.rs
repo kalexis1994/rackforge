@@ -10,8 +10,9 @@
 
 use rackforge_control_profile::{CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId};
 use rackforge_controller_api::{
-    HostActionBinding, HostActionTarget, MidiButtonBinding, MidiControlChangeBinding, MidiRealtime,
-    SemanticControlBinding, SemanticControlMode, SemanticControlProfile,
+    HostActionBinding, HostActionTarget, MidiButtonBinding, MidiControlChangeBinding,
+    MidiNoteButtonBinding, MidiRealtime, SemanticControlBinding, SemanticControlMode,
+    SemanticControlProfile,
 };
 use rackforge_midi_api::control_layout::{ControlSlot, SlottedInput};
 use rackforge_midi_api::controller_map::MappedInput;
@@ -614,8 +615,9 @@ fn role_control(
 }
 
 /// A host action needs a button the runtime reads: one that sends a control
-/// change and reports its release, or one that sends a real time message.
-/// A real time message only presses, so it cannot hold a momentary action.
+/// change and reports its release, one that sends a note -- a note-off is
+/// its release -- or one that sends a real time message. A real time
+/// message only presses, so it cannot hold a momentary action.
 fn action_trigger(
     target: HostActionTarget,
     input: &ControllerInput,
@@ -643,10 +645,15 @@ fn action_trigger(
             }
             return Ok(HostActionBinding::realtime(target, message));
         }
-        _ => {
+        InputMessage::Note { channel, note } => {
+            let binding = MidiNoteButtonBinding { channel, note };
+            binding.validate()?;
+            return Ok(HostActionBinding::note(target, binding));
+        }
+        InputMessage::PitchBend { .. } => {
             return Err(format!(
-                "input {:?}: host actions read buttons that send a control change or a \
-                 real time message",
+                "input {:?}: host actions read buttons that send a control change, a note \
+                 or a real time message",
                 input.id
             ));
         }

@@ -997,6 +997,11 @@ impl CompiledModifier {
 pub struct ParameterLinkTable {
     pub links: Vec<CompiledParameterLink>,
     pub modifiers: Vec<CompiledModifier>,
+    /// The buttons controllers gave host actions -- transport, lanes -- on
+    /// their ports: for a host whose audio loop has no reservations of its
+    /// own to hold their messages back from the instruments. The host acts
+    /// on them elsewhere.
+    pub host_buttons: Vec<(MidiSourceKey, rackforge_session_api::HostActionBinding)>,
 }
 
 impl ParameterLinkTable {
@@ -1004,7 +1009,20 @@ impl ParameterLinkTable {
         Self {
             links,
             modifiers: Vec::new(),
+            host_buttons: Vec::new(),
         }
+    }
+
+    /// Whether the message is a controller's host-action button, pressed or
+    /// released, on its own port.
+    pub fn is_host_button(
+        buttons: &[(MidiSourceKey, rackforge_session_api::HostActionBinding)],
+        ingress: IngressMidiEvent,
+    ) -> bool {
+        let message = &ingress.packet.data[..usize::from(ingress.packet.length.min(3))];
+        buttons
+            .iter()
+            .any(|(source, binding)| *source == ingress.source && binding.phase(message).is_some())
     }
 }
 
@@ -1673,6 +1691,45 @@ mod tests {
         assert_eq!(slide(&mut fader, 40, 0.0), None);
         assert_eq!(slide(&mut fader, 7, 0.0), Some(0.0));
         assert_eq!(slide(&mut fader, 20, 0.0), Some(1.0));
+    }
+
+    /// A controller's host-action button is known on its own port, pressed
+    /// or released, whatever it sends; the same message from another port
+    /// is not it.
+    #[test]
+    fn a_host_button_is_known_on_its_own_port() {
+        use rackforge_session_api::{HostActionBinding, HostActionTarget, MidiNoteButtonBinding};
+        let apc = MidiSourceKey::new(7);
+        let buttons = [(
+            apc,
+            HostActionBinding::note(
+                HostActionTarget::TransportPlay,
+                MidiNoteButtonBinding {
+                    channel: 0,
+                    note: 91,
+                },
+            ),
+        )];
+        let on = |source: u32, message: &[u8]| IngressMidiEvent {
+            source: MidiSourceKey::new(source),
+            packet: MidiPacket::new(0, message).unwrap(),
+        };
+        assert!(ParameterLinkTable::is_host_button(
+            &buttons,
+            on(7, &[0x90, 91, 127])
+        ));
+        assert!(ParameterLinkTable::is_host_button(
+            &buttons,
+            on(7, &[0x80, 91, 0])
+        ));
+        assert!(!ParameterLinkTable::is_host_button(
+            &buttons,
+            on(7, &[0x90, 90, 127])
+        ));
+        assert!(!ParameterLinkTable::is_host_button(
+            &buttons,
+            on(8, &[0x90, 91, 127])
+        ));
     }
 
     /// Compiled again, an identical link keeps its control's hold on the

@@ -5002,6 +5002,43 @@ mod tests {
         );
     }
 
+    /// An APC's Play sends a note on its control port: pressing it starts
+    /// the transport, and neither its note-on nor its note-off reaches an
+    /// instrument. The same note from another device, or another note, is
+    /// an instrument's.
+    #[test]
+    fn a_controllers_note_play_button_is_its_own() {
+        let apc = MidiSourceKey::new(1);
+        let keyboard = MidiSourceKey::new(2);
+        let play = ReservedBindingSet {
+            source: Some(apc),
+            controls: Vec::new(),
+            actions: vec![HostActionBinding::note(
+                HostActionTarget::TransportPlay,
+                rackforge_controller_api::MidiNoteButtonBinding {
+                    channel: 0,
+                    note: 91,
+                },
+            )],
+        };
+        let mut reserved = ReservedMidiControls::with_sources(3);
+        reserved.replace([&play]);
+
+        assert_eq!(
+            reserved.pressed_action(apc, midi(3, [0x90, 91, 127])),
+            Some(HostActionTarget::TransportPlay)
+        );
+        assert_eq!(reserved.pressed_action(apc, midi(3, [0x80, 91, 0])), None);
+        assert!(reserved.consume(apc, midi(3, [0x90, 91, 127])));
+        assert!(reserved.consume(apc, midi(3, [0x80, 91, 0])));
+        assert!(!reserved.consume(apc, midi(3, [0x90, 90, 127])));
+        assert_eq!(
+            reserved.pressed_action(keyboard, midi(3, [0x90, 91, 127])),
+            None
+        );
+        assert!(!reserved.consume(keyboard, midi(3, [0x90, 91, 127])));
+    }
+
     #[test]
     fn engine_profile_rejects_formats_and_layouts_not_rendered_yet() {
         let mut profile = AudioOutputProfile {

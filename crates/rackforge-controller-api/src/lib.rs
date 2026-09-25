@@ -205,6 +205,42 @@ impl MidiButtonBinding {
     }
 }
 
+/// A button that sends a note, as a grid controller's Play and Stop do: a
+/// note-on with a velocity presses it, a note-off -- or a note-on at
+/// velocity 0 -- releases it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiNoteButtonBinding {
+    pub channel: u8,
+    pub note: u8,
+}
+
+impl MidiNoteButtonBinding {
+    pub fn validate(self) -> Result<(), String> {
+        if self.channel > 15 {
+            return Err("MIDI channel must be within 0..15".into());
+        }
+        if self.note > 127 {
+            return Err("MIDI note must be within 0..127".into());
+        }
+        Ok(())
+    }
+
+    pub fn phase(self, message: &[u8]) -> Option<ButtonPhase> {
+        let [status, note, velocity] = message else {
+            return None;
+        };
+        if *note != self.note || status & 0x0f != self.channel {
+            return None;
+        }
+        match status & 0xf0 {
+            0x90 if *velocity > 0 => Some(ButtonPhase::Press),
+            0x90 | 0x80 => Some(ButtonPhase::Release),
+            _ => None,
+        }
+    }
+}
+
 /// A MIDI System Real Time message a controller sends from a button: some
 /// keyboards' Play and Stop send these instead of a Control Change.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -236,13 +272,16 @@ impl MidiRealtime {
 }
 
 /// A host action and the one MIDI message that triggers it: a button's
-/// Control Change, or a System Real Time message. Exactly one is set.
+/// Control Change, its note, or a System Real Time message. Exactly one is
+/// set.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HostActionBinding {
     pub target: HostActionTarget,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi_cc: Option<MidiButtonBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_note: Option<MidiNoteButtonBinding>,
     /// A System Real Time message has no release: it only presses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi_realtime: Option<MidiRealtime>,
@@ -253,6 +292,16 @@ impl HostActionBinding {
         Self {
             target,
             midi_cc: Some(midi_cc),
+            midi_note: None,
+            midi_realtime: None,
+        }
+    }
+
+    pub fn note(target: HostActionTarget, midi_note: MidiNoteButtonBinding) -> Self {
+        Self {
+            target,
+            midi_cc: None,
+            midi_note: Some(midi_note),
             midi_realtime: None,
         }
     }
@@ -261,16 +310,34 @@ impl HostActionBinding {
         Self {
             target,
             midi_cc: None,
+            midi_note: None,
             midi_realtime: Some(message),
         }
     }
 
     pub fn validate(self) -> Result<(), String> {
-        match (self.midi_cc, self.midi_realtime) {
-            (Some(midi_cc), None) => midi_cc.validate(),
-            (None, Some(_)) => Ok(()),
-            _ => Err("a host action has either one MIDI button or one real time message".into()),
+        match (self.midi_cc, self.midi_note, self.midi_realtime) {
+            (Some(midi_cc), None, None) => midi_cc.validate(),
+            (None, Some(midi_note), None) => midi_note.validate(),
+            (None, None, Some(_)) => Ok(()),
+            _ => Err(
+                "a host action has exactly one MIDI button, button note or real time message"
+                    .into(),
+            ),
         }
+    }
+
+    /// Whether a button with a release triggers it -- a Control Change or a
+    /// note -- rather than a real time message, which only presses.
+    pub fn has_release(self) -> bool {
+        self.midi_cc.is_some() || self.midi_note.is_some()
+    }
+
+    /// Whether the message is the note this action's button sends, pressed
+    /// or released: it is the host's, never an instrument's.
+    pub fn reserves_note(self, message: &[u8]) -> bool {
+        self.midi_note
+            .is_some_and(|binding| binding.phase(message).is_some())
     }
 
     /// The channel and controller it reserves, when a Control Change
@@ -283,6 +350,9 @@ impl HostActionBinding {
     pub fn phase(self, message: &[u8]) -> Option<ButtonPhase> {
         if let Some(midi_cc) = self.midi_cc {
             return midi_cc.phase(message);
+        }
+        if let Some(midi_note) = self.midi_note {
+            return midi_note.phase(message);
         }
         (self.midi_realtime.is_some() && self.midi_realtime == MidiRealtime::of(message))
             .then_some(ButtonPhase::Press)
@@ -1129,15 +1199,49 @@ mod tests {
         let both = HostActionBinding {
             target: HostActionTarget::TransportPlay,
             midi_cc: Some(button),
+            midi_note: None,
             midi_realtime: Some(MidiRealtime::Start),
         };
         assert!(both.validate().is_err());
         let neither = HostActionBinding {
             target: HostActionTarget::TransportPlay,
             midi_cc: None,
+            midi_note: None,
             midi_realtime: None,
         };
         assert!(neither.validate().is_err());
+    }
+
+    /// A grid controller's Play sends a note: a note-on presses it, a
+    /// note-off or a note-on at velocity 0 releases it, and another note or
+    /// channel is not it.
+    #[test]
+    fn a_host_action_reads_a_button_that_sends_a_note() {
+        let play = HostActionBinding::note(
+            HostActionTarget::TransportPlay,
+            MidiNoteButtonBinding {
+                channel: 0,
+                note: 91,
+            },
+        );
+        assert!(play.validate().is_ok());
+        assert!(play.has_release());
+        assert_eq!(play.phase(&[0x90, 91, 127]), Some(ButtonPhase::Press));
+        assert_eq!(play.phase(&[0x90, 91, 0]), Some(ButtonPhase::Release));
+        assert_eq!(play.phase(&[0x80, 91, 64]), Some(ButtonPhase::Release));
+        assert_eq!(play.phase(&[0x91, 91, 127]), None);
+        assert_eq!(play.phase(&[0x90, 92, 127]), None);
+        assert_eq!(play.phase(&[0xb0, 91, 127]), None);
+        assert!(play.reserves_note(&[0x80, 91, 0]));
+        assert_eq!(play.reserved_control_change(), None);
+        let out_of_range = HostActionBinding::note(
+            HostActionTarget::TransportPlay,
+            MidiNoteButtonBinding {
+                channel: 16,
+                note: 91,
+            },
+        );
+        assert!(out_of_range.validate().is_err());
     }
 
     #[test]

@@ -224,12 +224,21 @@ fn compile_desktop_parameter_links(
         .collect::<Result<Vec<_>>>()?;
 
     let mut modifiers = Vec::new();
+    let mut host_buttons = Vec::new();
     for (controller_id, registered) in semantic_profiles {
         let Some(runtime_source_id) = &registered.runtime_source_id else {
             continue;
         };
         let source_id = MidiSourceId::new(runtime_source_id.clone())?;
         let source_key = desktop_audio::stable_midi_source_key_from_id(&source_id);
+        // Its transport and lane buttons are the host's: the audio loop
+        // keeps their messages from the instruments.
+        host_buttons.extend(
+            registered
+                .host_actions
+                .iter()
+                .map(|binding| (source_key, *binding)),
+        );
         // The player's Fn button for this controller, on its port.
         if let Some(modifier) = controller_maps.get(controller_id).and_then(|map| {
             rackforge_core::parameter_link::CompiledModifier::from_map(map, source_key)
@@ -293,6 +302,7 @@ fn compile_desktop_parameter_links(
     Ok(rackforge_core::parameter_link::ParameterLinkTable {
         links: compiled,
         modifiers,
+        host_buttons,
     })
 }
 

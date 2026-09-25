@@ -8,9 +8,10 @@ use std::fmt;
 
 pub use rackforge_controller_api::{
     ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
-    MidiButtonBinding, MidiControlChangeBinding, RackForgeParameterId, RackForgeParameterInput,
-    SemanticControlBinding, SemanticControlInput, SemanticControlMode, SemanticControlProfile,
-    rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
+    MidiButtonBinding, MidiControlChangeBinding, MidiNoteButtonBinding, RackForgeParameterId,
+    RackForgeParameterInput, SemanticControlBinding, SemanticControlInput, SemanticControlMode,
+    SemanticControlProfile, rackforge_parameter_input, semantic_control_input,
+    semantic_control_little_header,
 };
 pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,

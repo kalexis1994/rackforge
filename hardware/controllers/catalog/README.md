@@ -49,6 +49,13 @@ A family with a single model keeps its `rackforge-controller.toml` beside
   `midi = { realtime = "start" }` (no channel) and give them the transport
   actions. Hosts read them on that controller's port only, and never pass them
   to an instrument.
+- **Buttons that send a note.** A grid controller's Play and Stop often send a
+  note (the APCs'). They take host actions as a Control Change button does:
+  a note-on presses, a note-off or a note-on at velocity 0 releases. Their
+  notes are held back from the instruments on that controller's port.
+- **A Fn button.** `modifier = true` on the one button or pad the device
+  itself uses as a modifier (an APC's Shift) makes it the Fn button of the
+  maps RackForge offers. A player can choose another.
 - **Putting the controller in the mode the package describes.** List the
   messages under `[[on_connect]]`. RackForge's own packages send them without
   asking. By default they go to the controller's own port, like the Launch

@@ -1136,6 +1136,7 @@ impl DesktopAudio {
             parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             parameter_links: Vec::new(),
             control_layers: Default::default(),
+            host_buttons: Vec::new(),
             velocity_curve: preferences.velocity_curve.sanitised(),
             velocity_curves: compile_velocity_curves(&preferences.velocity_curves),
             last_strike: Arc::clone(&last_strike),
@@ -2257,6 +2258,9 @@ struct AudioProcessor {
     /// Which controllers' Fn layers are open, beside the links they choose
     /// between: a layer change recompiles nothing.
     control_layers: rackforge_core::parameter_link::ControlLayers,
+    /// Controllers' transport and lane buttons, on their ports: the host
+    /// acts on them, and no instrument hears them.
+    host_buttons: Vec<(MidiSourceKey, rackforge_session_api::HostActionBinding)>,
     /// The reading for a device with none of its own.
     velocity_curve: VelocityCurve,
     /// And the readings that belong to a particular keybed. A handful of
@@ -2407,6 +2411,17 @@ impl AudioProcessor {
                 .control_layers
                 .observe(ingress, std::time::Instant::now())
             {
+                if self.rack.is_some() {
+                    rack_taken += 1;
+                }
+                continue;
+            }
+            // A controller's transport or lane button: the host acts on it
+            // (read where the port is captured), and no instrument plays it.
+            if rackforge_core::parameter_link::ParameterLinkTable::is_host_button(
+                &self.host_buttons,
+                ingress,
+            ) {
                 if self.rack.is_some() {
                     rack_taken += 1;
                 }
@@ -3045,6 +3060,7 @@ impl AudioProcessor {
                     );
                     self.parameter_links = links;
                     self.control_layers.replace(table.modifiers);
+                    self.host_buttons = table.host_buttons;
                     let _ = reply.try_send(Ok(()));
                 }
                 AudioCommand::InjectMidi(packet) => {

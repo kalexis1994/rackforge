@@ -949,8 +949,7 @@ midi = { channel = 0, note = 65 }
 # Session Record 102, Bank 103. Left and right step the main selector, down
 # and up the second; Metronome takes its switch. Shift is the modifier
 # Ableton's script holds [AB PrioritizedResource, the shifted matrix]: here,
-# the Fn button. Play and Stop take no transport action: host actions read
-# control changes, and they send notes.
+# the Fn button. Play and Stop take the transport.
 [[inputs]]
 id = "pan"
 name = "Pan"
@@ -1154,3 +1153,13 @@ role = "synth.lfo.depth"
 [[roles]]
 input = "master-fader"
 role = "rackforge.master.level"
+
+# Play and Stop take the transport; their notes are the host's, and no
+# instrument plays them.
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop"
+target = "transport_stop"

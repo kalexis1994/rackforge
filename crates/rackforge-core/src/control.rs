@@ -3405,6 +3405,9 @@ fn compile_parameter_links(
     Ok(ParameterLinkTable {
         links: compiled,
         modifiers,
+        // This engine holds reserved buttons back itself, controller by
+        // controller (`live_midi_state`).
+        host_buttons: Vec::new(),
     })
 }
 

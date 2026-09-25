@@ -5,9 +5,7 @@ use rackforge_plugin_api::abi::MidiEventV1;
 
 use crate::midi2::{Midi2Event, Midi2Message, scale_down};
 use rackforge_controller_api::MidiRealtime;
-use rackforge_session_api::{
-    ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding, MidiButtonBinding,
-};
+use rackforge_session_api::{ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding};
 
 const MIDI_CHANNELS: usize = 16;
 const CONTINUOUS_CONTROLLERS: usize = 120;
@@ -27,7 +25,9 @@ pub(super) struct ReservedMidiControls {
     control_changes: [[bool; 120]; MIDI_CHANNELS],
     /// Control Changes reserved on one source only: a controller's port.
     scoped_control_changes: Vec<(MidiSourceKey, u8, u8)>,
-    keyboard_parts: Option<(Option<MidiSourceKey>, MidiButtonBinding)>,
+    /// The button that holds the keyboard's parts: a Control Change or a
+    /// note, either with a release.
+    keyboard_parts: Option<(Option<MidiSourceKey>, HostActionBinding)>,
     /// Transport and lane buttons a controller reserved. Presses are looked
     /// up by the audio loop *before* the generic consume, so the message both
     /// drives the sequencer and stays invisible to plugins.
@@ -105,8 +105,8 @@ impl ReservedMidiControls {
             for binding in &set.actions {
                 if binding.target == HostActionTarget::KeyboardParts {
                     // Held while pressed: only a button with a release holds it.
-                    if let Some(midi_cc) = binding.midi_cc {
-                        self.keyboard_parts = Some((set.source, midi_cc));
+                    if binding.has_release() {
+                        self.keyboard_parts = Some((set.source, *binding));
                     }
                 } else {
                     self.sequencer_actions.push((set.source, *binding));
@@ -154,6 +154,15 @@ impl ReservedMidiControls {
             {
                 return true;
             }
+        }
+        // A reserved button's note is the controller's button, pressed or
+        // released, not a note an instrument plays.
+        if self
+            .sequencer_actions
+            .iter()
+            .any(|(scope, binding)| speaks_for(*scope, source) && binding.reserves_note(message))
+        {
+            return true;
         }
         // A reserved real time message is the controller's button, not a
         // clock the instruments follow.

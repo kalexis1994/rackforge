@@ -495,11 +495,9 @@ group = "Scene buttons"
 midi = { channel = 0, note = 86 }
 
 # Stop All Clips 81, Play 91, Record 93, Shift 98: notes on channel 1 [CP;
-# AB]. They take no transport action: host actions read buttons that send a
-# control change or a real time message, and these send notes. Shift is the
-# modifier Ableton's script holds for the knobs' fine mode and the buttons'
-# second functions [AB add_modifier_button]: here it is the Fn button,
-# opening the Fn layer.
+# AB]. Shift is the modifier Ableton's script holds for the knobs' fine mode
+# and the buttons' second functions [AB add_modifier_button]: here it is the
+# Fn button, opening the Fn layer.
 [[inputs]]
 id = "stop-all-clips"
 name = "Stop All Clips"
@@ -528,3 +526,13 @@ kind = "button"
 group = "Buttons"
 midi = { channel = 0, note = 98 }
 modifier = true
+
+# Play takes the transport; Stop All Clips, the only stop it has, stops it.
+# Their notes are the host's: no instrument plays them.
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop-all-clips"
+target = "transport_stop"

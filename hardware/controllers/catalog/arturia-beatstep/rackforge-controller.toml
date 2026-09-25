@@ -1,0 +1,340 @@
+# Arturia BeatStep (the first, 2014; not the BeatStep Pro), in CNTRL mode
+# with its default preset. Every value below is sourced in SOURCES.md: [UM]
+# is Arturia's BeatStep User's Manual 1.0.1, whose chapter 8 tables the
+# default settings of every control; [AB] Ableton Live 12's BeatStep script
+# names the same knobs in the same order.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.arturia-beatstep"
+name = "BeatStep"
+vendor = "Arturia"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "beatstep"
+
+# One port, named after the product: "Arturia BeatStep" [AB __init__.py
+# model_name]. The BeatStep Pro's ports all carry "Pro" or "BeatStepPro".
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["beatstep"]
+exclude_contains = ["pro"]
+
+# Encoders 1-16: absolute CC on the global channel, 1 by default [UM p37, p13].
+# They are the sixteen small knobs, in the order Ableton programs them (its
+# hardware ids 32-47 take the same numbers but the first) [AB]. The large
+# Level/Rate knob sets the master level in CNTRL mode [UM p10]; Arturia does
+# not say with which message, so it is not declared. The BeatStep has no
+# keys: its knobs never play (catalog README). The first row takes the first
+# row of slots, as on a keyboard without faders.
+
+[[inputs]]
+id = "encoder-1"
+name = "Encoder 1"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 7 }
+slot = "control-1.1"
+plays = false
+
+[[inputs]]
+id = "encoder-2"
+name = "Encoder 2"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 74 }
+slot = "control-1.2"
+plays = false
+
+[[inputs]]
+id = "encoder-3"
+name = "Encoder 3"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 71 }
+slot = "control-1.3"
+plays = false
+
+[[inputs]]
+id = "encoder-4"
+name = "Encoder 4"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 76 }
+slot = "control-1.4"
+plays = false
+
+[[inputs]]
+id = "encoder-5"
+name = "Encoder 5"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 77 }
+slot = "control-1.5"
+plays = false
+
+[[inputs]]
+id = "encoder-6"
+name = "Encoder 6"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 93 }
+slot = "control-1.6"
+plays = false
+
+[[inputs]]
+id = "encoder-7"
+name = "Encoder 7"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 73 }
+slot = "control-1.7"
+plays = false
+
+[[inputs]]
+id = "encoder-8"
+name = "Encoder 8"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 75 }
+slot = "control-1.8"
+plays = false
+
+[[inputs]]
+id = "encoder-9"
+name = "Encoder 9"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 114 }
+slot = "control-2.1"
+plays = false
+
+[[inputs]]
+id = "encoder-10"
+name = "Encoder 10"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 18 }
+slot = "control-2.2"
+plays = false
+
+[[inputs]]
+id = "encoder-11"
+name = "Encoder 11"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 19 }
+slot = "control-2.3"
+plays = false
+
+[[inputs]]
+id = "encoder-12"
+name = "Encoder 12"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 16 }
+slot = "control-2.4"
+plays = false
+
+[[inputs]]
+id = "encoder-13"
+name = "Encoder 13"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 17 }
+slot = "control-2.5"
+plays = false
+
+[[inputs]]
+id = "encoder-14"
+name = "Encoder 14"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 91 }
+slot = "control-2.6"
+plays = false
+
+[[inputs]]
+id = "encoder-15"
+name = "Encoder 15"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 79 }
+slot = "control-2.7"
+plays = false
+
+[[inputs]]
+id = "encoder-16"
+name = "Encoder 16"
+kind = "knob"
+group = "Encoders"
+midi = { channel = 0, cc = 72 }
+slot = "control-2.8"
+plays = false
+
+# Pads 1-16: notes 44-51 on the top row, 36-43 on the bottom, gate, on the
+# global channel [UM p37; AB PAD_MSG_IDS]. They are drum pads: they play when
+# nothing maps them, and take the slot of the note they send.
+
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 44 }
+slot = "switch-2.5"
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 45 }
+slot = "switch-2.6"
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 46 }
+slot = "switch-2.7"
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 47 }
+slot = "switch-2.8"
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 48 }
+slot = "switch-2.1"
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 49 }
+slot = "switch-2.2"
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 50 }
+slot = "switch-2.3"
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 51 }
+slot = "switch-2.4"
+
+[[inputs]]
+id = "pad-9"
+name = "Pad 9"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 36 }
+slot = "switch-1.5"
+
+[[inputs]]
+id = "pad-10"
+name = "Pad 10"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 37 }
+slot = "switch-1.6"
+
+[[inputs]]
+id = "pad-11"
+name = "Pad 11"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 38 }
+slot = "switch-1.7"
+
+[[inputs]]
+id = "pad-12"
+name = "Pad 12"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 39 }
+slot = "switch-1.8"
+
+[[inputs]]
+id = "pad-13"
+name = "Pad 13"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 40 }
+slot = "switch-1.1"
+
+[[inputs]]
+id = "pad-14"
+name = "Pad 14"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 41 }
+slot = "switch-1.2"
+
+[[inputs]]
+id = "pad-15"
+name = "Pad 15"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 42 }
+slot = "switch-1.3"
+
+[[inputs]]
+id = "pad-16"
+name = "Pad 16"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 43 }
+slot = "switch-1.4"
+
+# The first row of knobs takes the catalog's roles (catalog README, "Eight
+# knobs, no faders").
+[[roles]]
+input = "encoder-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "encoder-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "encoder-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "encoder-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "encoder-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "encoder-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "encoder-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "encoder-8"
+role = "synth.envelope.amp.release"

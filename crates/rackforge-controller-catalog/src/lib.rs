@@ -91,6 +91,12 @@ pub const BUNDLED: &[BundledController] = bundled![
     "arturia-keylab-mkii/88",
     "arturia-keylab-essential",
     "arturia-keylab-mk3",
+    "arturia-beatstep",
+    "arturia-minilab-mkii",
+    "akai-mpk-mini-mkii",
+    "alesis-v",
+    "akai-lpd8/lpd8",
+    "akai-lpd8/lpd8-mk2",
     "novation-launchkey-mk2",
     "novation-launchkey-mini-mk2",
     "novation-launch-control",
@@ -1217,6 +1223,72 @@ mod tests {
         // Nothing on the InControl port plays: 8 knobs, 8 faders, 24 soft
         // buttons, 21 other buttons and 16 pads.
         assert_eq!(binding.held_controls.len(), 77);
+    }
+
+    /// A BeatStep is read on its only port; the BeatStep Pro is not it. Its
+    /// knobs never play, its drum pads do.
+    #[test]
+    fn a_beatstep_is_read_on_its_port_and_its_pads_play() {
+        let (_root, store) = installed_store("beatstep");
+        for (port, expected) in [
+            ("Arturia BeatStep", Some("org.rackforge.arturia-beatstep")),
+            (
+                "Arturia BeatStep:Arturia BeatStep MIDI 1 24:0",
+                Some("org.rackforge.arturia-beatstep"),
+            ),
+            ("Arturia BeatStep Pro", None),
+            ("MIDIIN2 (Arturia BeatStep Pro)", None),
+            ("Arturia BeatStep Pro Arturia BeatStepPro", None),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        let binding = store
+            .resolve_identified_input("Arturia BeatStep", None)
+            .unwrap()
+            .unwrap();
+        // The sixteen knobs are held; the sixteen pads play.
+        assert_eq!(binding.held_controls.len(), 16);
+    }
+
+    /// The community-sourced packages match their products' ports and no
+    /// sister's, and hold nothing: they are keyboards, and their controls
+    /// play when nothing maps them.
+    #[test]
+    fn the_community_packages_are_read_on_their_ports() {
+        let (_root, store) = installed_store("community");
+        for (port, expected) in [
+            ("Arturia MiniLab mkII", Some("org.rackforge.arturia-minilab-mkii")),
+            (
+                "Arturia MiniLab mkII:Arturia MiniLab mkII MIDI 1 20:0",
+                Some("org.rackforge.arturia-minilab-mkii"),
+            ),
+            ("Arturia MiniLab", None),
+            ("MPKmini2", Some("org.rackforge.akai-mpk-mini-mkii")),
+            ("MPKmini2:MPKmini2 MIDI 1 24:0", Some("org.rackforge.akai-mpk-mini-mkii")),
+            ("MPK mini", None),
+            ("V49", Some("org.rackforge.alesis-v")),
+            ("V25:V25 MIDI 1 24:0", Some("org.rackforge.alesis-v")),
+            ("V25:V25 MIDI 2 24:1", None),
+            ("MIDIIN2 (V49)", None),
+            ("V49 MKII", None),
+            ("VI49", None),
+            ("LPD8", Some("org.rackforge.akai-lpd8")),
+            ("LPD8:LPD8 MIDI 1 24:0", Some("org.rackforge.akai-lpd8")),
+            ("LPD8 mk2", Some("org.rackforge.akai-lpd8-mk2")),
+            ("LPD8 mk2:LPD8 mk2 MIDI 1 24:0", Some("org.rackforge.akai-lpd8-mk2")),
+            ("LPD8 Wireless", None),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        for port in ["Arturia MiniLab mkII", "MPKmini2", "V49"] {
+            let binding = store.resolve_identified_input(port, None).unwrap().unwrap();
+            assert!(binding.held_controls.is_empty(), "{port}");
+        }
+        // The LPDs have no keys: their knobs are held, their pads play.
+        for port in ["LPD8", "LPD8 mk2"] {
+            let binding = store.resolve_identified_input(port, None).unwrap().unwrap();
+            assert_eq!(binding.held_controls.len(), 8, "{port}");
+        }
     }
 
     /// A Launchkey MK2 of any size is read on its InControl port on every

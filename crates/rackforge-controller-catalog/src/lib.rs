@@ -93,6 +93,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "novation-launchkey-mk2",
     "novation-launchkey-mini-mk2",
     "novation-launch-control",
+    "novation-launch-control-3",
 ];
 
 /// What installing the catalog did with one package.
@@ -512,10 +513,11 @@ mod tests {
             "MIDIIN2 (LCXL3 1 MIDI)",
             "LCXL3 1 (DAW Out)",
             "LCXL3 1:LCXL3 1 MIDI 2 20:1",
-            "LC3 1 MIDI",
         ] {
             assert_eq!(resolved(&store, port, None), None, "{port}");
         }
+        // The Launch Control 3 has its own package.
+        assert_ne!(resolved(&store, "LC3 1 MIDI", None).as_deref(), Some(xl3));
         assert_ne!(
             resolved(&store, "Launch Control XL", None).as_deref(),
             Some(xl3),
@@ -1172,6 +1174,37 @@ mod tests {
         assert_eq!(binding.held_controls.len(), 38);
     }
 
+    /// The Launch Control 3 is read on its MIDI interface and put on Mode 8
+    /// through its DAW port; the XL 3 and the first Launch Control are not it.
+    #[test]
+    fn a_launch_control_3_is_read_on_its_midi_port() {
+        let (_root, store) = installed_store("launch-control-3");
+        let lc3 = "org.rackforge.novation-launch-control-3";
+        for (port, expected) in [
+            ("LC3 1 MIDI", Some(lc3)),
+            ("LC3 2 MIDI", Some(lc3)),
+            ("MIDIIN2 (LC3 1 MIDI)", None),
+            ("LC3 1 DAW Out", None),
+            ("LC3 1:LC3 1 LC3 1 DAW Out 24:1", None),
+            (
+                "LCXL3 1 MIDI",
+                Some("org.rackforge.novation-launch-control-xl-3"),
+            ),
+            (
+                "Launch Control",
+                Some("org.rackforge.novation-launch-control"),
+            ),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        let binding = store
+            .resolve_identified_input("LC3 1 MIDI", None)
+            .unwrap()
+            .unwrap();
+        // Sixteen encoders and eight buttons.
+        assert_eq!(binding.held_controls.len(), 24);
+    }
+
     /// The first Launch Control is read on its one port, whatever its device
     /// ID, and put on factory template 1; the XL, the XL 3 and the Launch
     /// Control 3 are not it. None of its controls plays.
@@ -1195,7 +1228,10 @@ mod tests {
                 "Launch Control XL",
                 Some("org.rackforge.novation-launch-control-xl"),
             ),
-            ("LC3 1 MIDI", None),
+            (
+                "LC3 1 MIDI",
+                Some("org.rackforge.novation-launch-control-3"),
+            ),
         ] {
             assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
         }

@@ -15,7 +15,8 @@
 
 use crate::controller_map::{ControlMapping, ControllerMap, MappedInput, PluginControlMap};
 use crate::{
-    MidiRoutingError, ParameterLinkId, ParameterLinkMode, ParameterLinkPassThrough, StepDirection,
+    MapLayer, MidiRoutingError, ParameterLinkId, ParameterLinkMode, ParameterLinkPassThrough,
+    StepDirection,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
@@ -214,20 +215,31 @@ pub struct SlottedInput {
 }
 
 /// The map a keyboard is offered: each layout's slots on the controls that
-/// fill them.
+/// fill them, and `modifier`, the button its package names as Fn, if any.
 ///
 /// A keyboard without a row of continuous controls does not lose that
 /// row's parameters: they move, in order, onto the controls of its other
 /// rows that the plugin leaves empty. A keyboard with eight knobs and no
 /// faders plays the organ's drawbars on them, and its gaps take the next
 /// row's first controls. Switches and steps stay where they are named.
+///
+/// The Fn layer holds what the keyboard lacks: each row, bank or step pair
+/// it has no controls for, in order, on the rows, banks or pairs it has.
+/// With one row of knobs, Fn + knob 3 is `control-2.3`; with faders and
+/// knobs, Fn + fader 3 is `control-3.3`; with two pad banks, Fn + pad is
+/// the third bank.
 pub fn derive_controller_map(
     controller_id: &str,
     controller_name: &str,
     inputs: &[SlottedInput],
+    modifier: Option<&MappedInput>,
     layouts: &[ControlLayout],
 ) -> ControllerMap {
     let mut map = ControllerMap::new(controller_id, controller_name);
+    map.modifier = modifier.map(|input| crate::controller_map::ControllerModifier {
+        input: input.clone(),
+        mode: crate::ModifierMode::default(),
+    });
     let rows: BTreeSet<u8> = inputs
         .iter()
         .filter_map(|input| match input.slot {
@@ -235,11 +247,12 @@ pub fn derive_controller_map(
             _ => None,
         })
         .collect();
+    let fn_slot = fn_layer_shift(inputs);
     for layout in layouts {
-        let mut placed: Vec<(&SlottedInput, &SlotMapping)> = Vec::new();
+        let mut placed: Vec<(&SlottedInput, &SlotMapping, MapLayer)> = Vec::new();
         for mapping in &layout.slots {
             if let Some(input) = inputs.iter().find(|input| input.slot == mapping.slot) {
-                placed.push((input, mapping));
+                placed.push((input, mapping, MapLayer::Base));
             }
         }
         // The rows this keyboard lacks, in order, onto the continuous
@@ -265,30 +278,49 @@ pub fn derive_controller_map(
         gaps.sort_by_key(|input| input.slot);
         let mut gaps = gaps.into_iter();
         for mover in movers {
-            let taken = placed.iter().any(|(input, mapping)| {
+            let taken = placed.iter().any(|(input, mapping, _)| {
                 input.slot.is_continuous() && mapping.parameter_id == mover.parameter_id
             });
             if taken {
                 continue;
             }
             let Some(gap) = gaps.next() else { break };
-            placed.push((gap, mover));
+            placed.push((gap, mover, MapLayer::Base));
         }
-        // In the keyboard's own order, as its editor lists its controls.
-        placed.sort_by_key(|(input, _)| {
-            inputs
-                .iter()
-                .position(|candidate| std::ptr::eq(candidate, *input))
+        // With Fn, each control reaches the slot the keyboard lacks.
+        for input in inputs {
+            let Some(target) = fn_slot(input.slot) else {
+                continue;
+            };
+            if let Some(mapping) = layout.slots.iter().find(|mapping| mapping.slot == target) {
+                placed.push((input, mapping, MapLayer::Fn));
+            }
+        }
+        // In the keyboard's own order, as its editor lists its controls,
+        // the base layer first.
+        placed.sort_by_key(|(input, _, layer)| {
+            (
+                *layer,
+                inputs
+                    .iter()
+                    .position(|candidate| std::ptr::eq(candidate, *input)),
+            )
         });
         let mappings = placed
             .into_iter()
-            .map(|(input, mapping)| ControlMapping {
-                id: link_id(&[controller_id, &layout.plugin_id, &input.input.id]),
+            .map(|(input, mapping, layer)| ControlMapping {
+                id: match layer {
+                    MapLayer::Base => link_id(&[controller_id, &layout.plugin_id, &input.input.id]),
+                    MapLayer::Fn => {
+                        link_id(&[controller_id, &layout.plugin_id, "fn", &input.input.id])
+                    }
+                },
                 input: input.input.clone(),
                 parameter_id: mapping.parameter_id.clone(),
                 mode: mapping.mode.clone(),
                 invert: mapping.invert,
                 pass_through: mapping.pass_through,
+                layer,
             })
             .collect::<Vec<_>>();
         if !mappings.is_empty() {
@@ -300,6 +332,61 @@ pub fn derive_controller_map(
         }
     }
     map
+}
+
+/// Where Fn takes each of a keyboard's slots: the rows, banks and step
+/// pairs it lacks, in order, onto those it has, in order.
+fn fn_layer_shift(inputs: &[SlottedInput]) -> impl Fn(ControlSlot) -> Option<ControlSlot> {
+    let has = |group: fn(ControlSlot) -> Option<u8>, count: u8| {
+        let present: Vec<u8> = (1..=count)
+            .filter(|number| {
+                inputs
+                    .iter()
+                    .any(|input| group(input.slot) == Some(*number))
+            })
+            .collect();
+        let missing: Vec<u8> = (1..=count)
+            .filter(|number| !present.contains(number))
+            .collect();
+        present
+            .into_iter()
+            .zip(missing)
+            .collect::<std::collections::BTreeMap<u8, u8>>()
+    };
+    let rows = has(
+        |slot| match slot {
+            ControlSlot::Control { row, .. } => Some(row),
+            _ => None,
+        },
+        SLOT_ROWS,
+    );
+    let banks = has(
+        |slot| match slot {
+            ControlSlot::Switch { bank, .. } => Some(bank),
+            _ => None,
+        },
+        SLOT_ROWS,
+    );
+    let pairs = has(
+        |slot| match slot {
+            ControlSlot::Step { pair, .. } => Some(pair),
+            _ => None,
+        },
+        STEP_PAIRS,
+    );
+    move |slot| match slot {
+        ControlSlot::Control { row, index } => rows
+            .get(&row)
+            .map(|row| ControlSlot::Control { row: *row, index }),
+        ControlSlot::Switch { bank, index } => banks
+            .get(&bank)
+            .map(|bank| ControlSlot::Switch { bank: *bank, index }),
+        ControlSlot::Step { pair, direction } => pairs.get(&pair).map(|pair| ControlSlot::Step {
+            pair: *pair,
+            direction,
+        }),
+        ControlSlot::ModWheel => None,
+    }
 }
 
 /// A mapping id from ids with their own rules, made a link id: lowercase,
@@ -445,6 +532,7 @@ mod tests {
             "org.rackforge.novation-launchkey-mk3-49",
             "Novation Launchkey 49 [MK3]",
             &inputs,
+            None,
             &[layout(vec![
                 direct("control-1.1", "drawbar-16"),
                 direct("control-2.1", "expression"),
@@ -455,13 +543,92 @@ mod tests {
         let mappings = &map.plugins[0].mappings;
         let pairs = mappings
             .iter()
-            .map(|mapping| (mapping.input.id.as_str(), mapping.parameter_id.as_str()))
+            .map(|mapping| {
+                (
+                    mapping.layer,
+                    mapping.input.id.as_str(),
+                    mapping.parameter_id.as_str(),
+                )
+            })
             .collect::<Vec<_>>();
-        // In the keyboard's order; no third row, and no gap for it.
-        assert_eq!(pairs, [("knob-1", "expression"), ("fader-1", "drawbar-16")]);
+        // In the keyboard's order, the base layer first; no gap for the
+        // third row, which Fn + the first row reaches.
+        assert_eq!(
+            pairs,
+            [
+                (MapLayer::Base, "knob-1", "expression"),
+                (MapLayer::Base, "fader-1", "drawbar-16"),
+                (MapLayer::Fn, "fader-1", "leakage"),
+            ]
+        );
         assert_eq!(
             mappings[1].id.as_str(),
             "org.rackforge.novation-launchkey-mk3-49.org.rackforge.organ.fader-1"
+        );
+        assert_eq!(
+            mappings[2].id.as_str(),
+            "org.rackforge.novation-launchkey-mk3-49.org.rackforge.organ.fn.fader-1"
+        );
+        assert_eq!(map.modifier, None);
+    }
+
+    /// Fn reaches what a keyboard lacks: a second pad bank on a keyboard
+    /// with one, the second step pair, and the button its package names
+    /// becomes the Fn button.
+    #[test]
+    fn fn_reaches_the_banks_and_pairs_a_keyboard_lacks() {
+        let pad = |slot: &str, id: &str, note: u8| SlottedInput {
+            slot: slot.parse().unwrap(),
+            input: MappedInput {
+                id: id.into(),
+                name: id.into(),
+                channel: ParameterLinkChannel::Channel {
+                    channel: MidiChannel::from_zero_based(9).unwrap(),
+                },
+                message: ParameterLinkMessage::Note { note },
+            },
+        };
+        let inputs = [pad("switch-1.1", "pad-1", 40), pad("step.up", "right", 41)];
+        let toggle = |slot: &str, parameter: &str| SlotMapping {
+            mode: ParameterLinkMode::Toggle {
+                first: crate::LinkValue::new(1.0).unwrap(),
+                second: crate::LinkValue::new(0.0).unwrap(),
+            },
+            ..direct(slot, parameter)
+        };
+        let step = |slot: &str, parameter: &str| SlotMapping {
+            mode: ParameterLinkMode::Step {
+                direction: crate::StepDirection::Up,
+                wrap: false,
+            },
+            ..direct(slot, parameter)
+        };
+        let shift = cc_input("control-1.1", "shift", 99).input;
+        let map = derive_controller_map(
+            "org.rackforge.pads",
+            "Pads",
+            &inputs,
+            Some(&shift),
+            &[layout(vec![
+                toggle("switch-1.1", "percussion"),
+                toggle("switch-2.1", "vibrato"),
+                step("step.up", "registration"),
+                step("step-2.up", "scanner"),
+            ])],
+        );
+        map.validate().unwrap();
+        let fn_layer = map.plugins[0]
+            .mappings
+            .iter()
+            .filter(|mapping| mapping.layer == MapLayer::Fn)
+            .map(|mapping| (mapping.input.id.as_str(), mapping.parameter_id.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(fn_layer, [("pad-1", "vibrato"), ("right", "scanner")]);
+        assert_eq!(
+            map.modifier
+                .as_ref()
+                .map(|modifier| modifier.input.id.as_str()),
+            Some("shift")
         );
     }
 
@@ -480,6 +647,7 @@ mod tests {
             "org.rackforge.small",
             "Small",
             &inputs,
+            None,
             &[layout(vec![
                 direct("control-1.1", "bass"),
                 direct("control-1.3", "treble"),
@@ -492,6 +660,7 @@ mod tests {
         let pairs = map.plugins[0]
             .mappings
             .iter()
+            .filter(|mapping| mapping.layer == MapLayer::Base)
             .map(|mapping| (mapping.input.id.as_str(), mapping.parameter_id.as_str()))
             .collect::<Vec<_>>();
         // Treble is on knob 3 already: the second row's copy does not take

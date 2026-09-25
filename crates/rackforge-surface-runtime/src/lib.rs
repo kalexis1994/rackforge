@@ -7763,6 +7763,16 @@ pub enum PickupArrow {
 /// 1462 m3". A control still on its way to the parameter shows the value it
 /// stands at, which way to move, and where the parameter is: "4' B  2 ^6",
 /// so the number moves with the fader instead of sitting still.
+/// A touch's header, marked when the control moved the parameter through
+/// its controller's Fn layer: "Fn ROOM SIZE 1462 m3".
+pub fn fn_layer_header(header: String, fn_layer: bool) -> String {
+    if fn_layer {
+        format!("Fn {header}")
+    } else {
+        header
+    }
+}
+
 pub fn parameter_touch_header(
     parameter: &ParameterDescriptor,
     value: f64,

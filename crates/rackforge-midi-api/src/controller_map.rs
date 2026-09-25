@@ -14,8 +14,8 @@
 //! missing.
 
 use crate::{
-    MidiRoutingError, ParameterLinkChannel, ParameterLinkId, ParameterLinkMessage,
-    ParameterLinkMode, ParameterLinkPassThrough,
+    MapLayer, MidiRoutingError, ModifierMode, ParameterLinkChannel, ParameterLinkId,
+    ParameterLinkMessage, ParameterLinkMode, ParameterLinkPassThrough,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -36,8 +36,22 @@ pub struct ControllerMap {
     pub controller_id: String,
     /// The controller's name when the map was last saved, for display.
     pub controller_name: String,
+    /// The button that opens the Fn layer, if the controller has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modifier: Option<ControllerModifier>,
     #[serde(default)]
     pub plugins: Vec<PluginControlMap>,
+}
+
+/// A controller's Fn button: while it is held, or once it is latched, each
+/// control does what its Fn-layer mapping says, where it has one. The
+/// button itself does nothing else.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControllerModifier {
+    pub input: MappedInput,
+    #[serde(default)]
+    pub mode: ModifierMode,
 }
 
 /// One controller's mappings in one plugin.
@@ -67,6 +81,9 @@ pub struct ControlMapping {
     /// Leslie must not also play a note -- and a knob passes it through.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_through: Option<ParameterLinkPassThrough>,
+    /// The layer it acts in. Left out, the base one.
+    #[serde(default, skip_serializing_if = "MapLayer::is_base")]
+    pub layer: MapLayer,
 }
 
 impl ControlMapping {
@@ -133,6 +150,7 @@ impl ControllerMap {
             schema_version: CONTROLLER_MAP_SCHEMA_VERSION,
             controller_id: controller_id.into(),
             controller_name: controller_name.into(),
+            modifier: None,
             plugins: Vec::new(),
         }
     }
@@ -146,6 +164,18 @@ impl ControllerMap {
         }
         validate_key(&self.controller_id, "controller id")?;
         validate_text(&self.controller_name, "controller name")?;
+        if let Some(modifier) = &self.modifier {
+            validate_key(&modifier.input.id, "Fn button input id")?;
+            validate_text(&modifier.input.name, "Fn button input name")?;
+            if matches!(
+                modifier.input.message,
+                ParameterLinkMessage::PitchBend | ParameterLinkMessage::ChannelPressure
+            ) {
+                return Err(invalid(
+                    "the Fn button must send a note or a control change".into(),
+                ));
+            }
+        }
         let mut plugins = BTreeSet::new();
         let mut mapping_ids = BTreeSet::new();
         let mut count = 0usize;
@@ -159,7 +189,8 @@ impl ControllerMap {
                 )));
             }
             let mut inputs = BTreeSet::new();
-            let mut messages: Vec<(ParameterLinkMessage, ParameterLinkChannel)> = Vec::new();
+            let mut messages: Vec<(MapLayer, ParameterLinkMessage, ParameterLinkChannel)> =
+                Vec::new();
             for mapping in &plugin.mappings {
                 count += 1;
                 if count > MAX_CONTROLLER_MAP_MAPPINGS {
@@ -179,10 +210,22 @@ impl ControllerMap {
                 {
                     return Err(MidiRoutingError::InvalidParameterLinkNumber);
                 }
-                // One mapping per input and plugin: the input does one thing
-                // in each plugin. Two inputs may drive the same parameter --
-                // two buttons that each set the Leslie to a speed.
-                if !inputs.insert(mapping.input.id.as_str()) {
+                // The Fn button opens a layer; it does nothing else.
+                if self.modifier.as_ref().is_some_and(|modifier| {
+                    modifier.input.id == mapping.input.id
+                        || (modifier.input.message == mapping.input.message
+                            && modifier.input.channel == mapping.input.channel)
+                }) {
+                    return Err(invalid(format!(
+                        "input {:?} is the Fn button and cannot be mapped",
+                        mapping.input.id
+                    )));
+                }
+                // One mapping per input, plugin and layer: the input does one
+                // thing in each plugin, and one more with Fn. Two inputs may
+                // drive the same parameter -- two buttons that each set the
+                // Leslie to a speed.
+                if !inputs.insert((mapping.layer, mapping.input.id.as_str())) {
                     return Err(invalid(format!(
                         "input {:?} is mapped twice in {:?}",
                         mapping.input.id, plugin.plugin_id
@@ -191,7 +234,7 @@ impl ControllerMap {
                 // The same control under two names -- learnt from its message
                 // once, picked from the package's list another time -- is
                 // still one control.
-                let heard = (mapping.input.message, mapping.input.channel);
+                let heard = (mapping.layer, mapping.input.message, mapping.input.channel);
                 if messages.contains(&heard) {
                     return Err(invalid(format!(
                         "two mappings in {:?} listen to the same message",
@@ -210,9 +253,10 @@ impl ControllerMap {
             .find(|plugin| plugin.plugin_id == plugin_id)
     }
 
-    /// Whether the map holds no mapping at all.
+    /// Whether the map holds nothing: no mapping and no Fn button.
     pub fn is_empty(&self) -> bool {
-        self.plugins.iter().all(|plugin| plugin.mappings.is_empty())
+        // A chosen Fn button is kept even before anything is mapped with it.
+        self.modifier.is_none() && self.plugins.iter().all(|plugin| plugin.mappings.is_empty())
     }
 }
 
@@ -261,7 +305,43 @@ mod tests {
             mode,
             invert: false,
             pass_through: None,
+            layer: MapLayer::Base,
         }
+    }
+
+    /// An input does one thing per layer: once in the base layer and once
+    /// with Fn. The Fn button itself is mapped in neither.
+    #[test]
+    fn an_input_does_one_thing_in_each_layer() {
+        let base = mapping("map.base", "knob-1", ParameterLinkMode::Direct);
+        let mut with_fn = mapping("map.fn", "knob-1", ParameterLinkMode::Direct);
+        with_fn.layer = MapLayer::Fn;
+        let mut layered = map(vec![base.clone(), with_fn.clone()]);
+        layered.validate().unwrap();
+
+        let mut twice = with_fn.clone();
+        twice.id = ParameterLinkId::new("map.fn-2").unwrap();
+        assert!(map(vec![base.clone(), with_fn, twice]).validate().is_err());
+
+        layered.modifier = Some(ControllerModifier {
+            input: mapping("map.shift", "button-9", ParameterLinkMode::Direct).input,
+            mode: ModifierMode::default(),
+        });
+        layered.validate().unwrap();
+        layered.modifier = Some(ControllerModifier {
+            input: base.input.clone(),
+            mode: ModifierMode::Hold,
+        });
+        assert!(
+            layered.validate().is_err(),
+            "the Fn button is a mapped knob"
+        );
+
+        let text = serde_json::to_string(&layered).unwrap();
+        assert!(text.contains("\"layer\":\"fn\""));
+        assert!(text.contains("\"mode\":\"hold\""));
+        let back: ControllerMap = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, layered);
     }
 
     fn map(mappings: Vec<ControlMapping>) -> ControllerMap {

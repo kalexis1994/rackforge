@@ -1,10 +1,11 @@
 use anyhow::{Result, bail};
+use rackforge_midi_api::ModifierMode;
 use rackforge_midi_api::controller_map::ControllerMap;
 use rackforge_midi_api::{
-    ControlTakeover, IngressMidiEvent, MidiChannel, MidiMessageKind, MidiSourceId, MidiSourceKey,
-    PARAMETER_LINK_SCHEMA_VERSION, ParameterLink, ParameterLinkChannel, ParameterLinkId,
-    ParameterLinkMessage, ParameterLinkMode, ParameterLinkPassThrough, ParameterLinkSource,
-    ParameterLinkTransform, StepDirection,
+    ControlTakeover, IngressMidiEvent, MapLayer, MidiChannel, MidiMessageKind, MidiSourceId,
+    MidiSourceKey, PARAMETER_LINK_SCHEMA_VERSION, ParameterLink, ParameterLinkChannel,
+    ParameterLinkId, ParameterLinkMessage, ParameterLinkMode, ParameterLinkPassThrough,
+    ParameterLinkSource, ParameterLinkTransform, StepDirection,
 };
 use rackforge_plugin_api::abi::ParameterEventV1;
 use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterSchema, ParameterTaper};
@@ -135,6 +136,7 @@ impl CompiledParameterLink {
             value,
             pickup,
             control,
+            fn_layer: self.link.layer == MapLayer::Fn,
         };
         #[cfg(test)]
         {
@@ -362,6 +364,19 @@ impl CompiledParameterLink {
     /// press of a button; a host that cannot say answers `None`, and the link
     /// goes by what it last wrote or was told through
     /// [`Self::observe_parameter`].
+    /// Whether this link listens to the message: its source, channel and
+    /// control, whatever its value.
+    pub fn hears(&self, ingress: IngressMidiEvent) -> bool {
+        ingress.source == self.source_key
+            && self.link.matches_channel(ingress.packet.channel())
+            && normalized_input(self.link.message, ingress.packet).is_some()
+    }
+
+    /// The layer the link acts in.
+    pub fn layer(&self) -> MapLayer {
+        self.link.layer
+    }
+
     pub fn apply(
         &mut self,
         ingress: IngressMidiEvent,
@@ -696,6 +711,7 @@ pub fn compile_semantic_parameter_links(
             },
             pass_through: ParameterLinkPassThrough::PassThrough,
             mode: ParameterLinkMode::Direct,
+            layer: MapLayer::Base,
         };
         compiled.push(CompiledParameterLink::new(link, source_key, schema)?);
     }
@@ -765,8 +781,11 @@ pub fn compile_controller_map_links(
             ParameterLinkChannel::Omni => None,
             ParameterLinkChannel::Channel { channel } => Some(channel),
         };
+        // A link of the session's -- learnt -- takes a control or a
+        // parameter from the map in its own layer only.
         if explicit_links.iter().any(|link| {
             link.instance_id == instance_id
+                && link.layer == mapping.layer
                 && (link.parameter_index == parameter.index
                     || (link.source.source_id == *runtime_source_id
                         && link.message == mapping.input.message
@@ -797,6 +816,7 @@ pub fn compile_controller_map_links(
             },
             pass_through: mapping.effective_pass_through(),
             mode: mapping.mode.clone(),
+            layer: mapping.layer,
         };
         match CompiledParameterLink::new(link, source_key, schema) {
             Ok(link) => compiled.links.push(link),
@@ -814,7 +834,8 @@ fn explicit_link_overrides_semantic(
     channel: MidiChannel,
     message: ParameterLinkMessage,
 ) -> bool {
-    if link.instance_id != instance_id {
+    // A default role is the base layer's: what Fn does leaves it alone.
+    if link.instance_id != instance_id || link.layer != MapLayer::Base {
         return false;
     }
     if link.parameter_index == parameter_index {
@@ -837,6 +858,256 @@ fn default_value(kind: &ParameterKind) -> f64 {
         ParameterKind::Trigger => 0.0,
         ParameterKind::Meter { minimum, .. } => *minimum,
     }
+}
+
+/// A controller's Fn button, compiled for one MIDI source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompiledModifier {
+    pub source_key: MidiSourceKey,
+    channel: ParameterLinkChannel,
+    message: ParameterLinkMessage,
+    mode: ModifierMode,
+}
+
+impl CompiledModifier {
+    /// The Fn button a map names, on the source its controller plays from.
+    pub fn from_map(map: &ControllerMap, source_key: MidiSourceKey) -> Option<Self> {
+        let modifier = map.modifier.as_ref()?;
+        Some(Self {
+            source_key,
+            channel: modifier.input.channel,
+            message: modifier.input.message,
+            mode: modifier.mode,
+        })
+    }
+
+    fn heard(&self, ingress: IngressMidiEvent) -> Option<bool> {
+        if ingress.source != self.source_key {
+            return None;
+        }
+        if let ParameterLinkChannel::Channel { channel } = self.channel
+            && channel != ingress.packet.channel()
+        {
+            return None;
+        }
+        pressed(self.message, ingress.packet)
+    }
+}
+
+/// What a host compiles for the controllers and hands its engine as one:
+/// the links, and the Fn buttons that choose between their layers.
+#[derive(Debug, Default)]
+pub struct ParameterLinkTable {
+    pub links: Vec<CompiledParameterLink>,
+    pub modifiers: Vec<CompiledModifier>,
+}
+
+impl ParameterLinkTable {
+    pub fn links_only(links: Vec<CompiledParameterLink>) -> Self {
+        Self {
+            links,
+            modifiers: Vec::new(),
+        }
+    }
+}
+
+/// How many open Fn layers screens are told of at once: more hands than a
+/// stage holds.
+const OPEN_FN_LAYERS: usize = 16;
+
+/// The MIDI sources whose Fn layer is open, for screens: each slot holds a
+/// source key plus one, or zero. Written by the thread that applies links,
+/// read by any, with atomic loads and stores only.
+static FN_LAYERS_OPEN: [std::sync::atomic::AtomicU64; OPEN_FN_LAYERS] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; OPEN_FN_LAYERS];
+
+/// Whether a source's Fn layer is open, as screens read it.
+pub fn fn_layer_open(source: MidiSourceKey) -> bool {
+    let wanted = u64::from(source.get()) + 1;
+    FN_LAYERS_OPEN
+        .iter()
+        .any(|slot| slot.load(std::sync::atomic::Ordering::Relaxed) == wanted)
+}
+
+/// Two presses closer than this latch a hold-or-double-tap Fn button.
+const DOUBLE_TAP: std::time::Duration = std::time::Duration::from_millis(350);
+/// A press shorter than this is a tap, and may be the first of two.
+const TAP: std::time::Duration = std::time::Duration::from_millis(300);
+/// Buttons remembered between press and release: far more than two hands
+/// hold.
+const MAX_HELD_BUTTONS: usize = 64;
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ModifierState {
+    held: bool,
+    latched: bool,
+    pressed_at: Option<std::time::Instant>,
+    last_tap: Option<std::time::Instant>,
+    /// The press that unlatched: its release closes nothing more.
+    unlatching: bool,
+}
+
+type HeldButton = (MidiSourceKey, MidiChannel, ParameterLinkMessage, MapLayer);
+
+/// The Fn layers of every controller, as an engine keeps them between
+/// MIDI messages: which Fn buttons are held or latched, and which layer
+/// took each button still held, so its release reaches the same link.
+///
+/// Changing layers never recompiles anything: every link keeps its pickup
+/// and its last value.
+#[derive(Debug, Default)]
+pub struct ControlLayers {
+    modifiers: Vec<(CompiledModifier, ModifierState)>,
+    held: Vec<HeldButton>,
+}
+
+impl ControlLayers {
+    /// Takes new Fn buttons, keeping the state of those that stay.
+    pub fn replace(&mut self, modifiers: Vec<CompiledModifier>) {
+        let previous = std::mem::take(&mut self.modifiers);
+        self.modifiers = modifiers
+            .into_iter()
+            .map(|modifier| {
+                let state = previous
+                    .iter()
+                    .find(|(known, _)| *known == modifier)
+                    .map(|(_, state)| *state)
+                    .unwrap_or_default();
+                (modifier, state)
+            })
+            .collect();
+        self.publish();
+    }
+
+    /// Takes a Fn button's own message: `true` when the message was one,
+    /// and nothing else is to hear it.
+    pub fn observe(&mut self, ingress: IngressMidiEvent, now: std::time::Instant) -> bool {
+        let mut taken = false;
+        for (modifier, state) in &mut self.modifiers {
+            let Some(pressed) = modifier.heard(ingress) else {
+                continue;
+            };
+            taken = true;
+            match (modifier.mode, pressed) {
+                (ModifierMode::Hold, pressed) => state.held = pressed,
+                (ModifierMode::Toggle, true) => state.latched = !state.latched,
+                (ModifierMode::Toggle, false) => {}
+                (ModifierMode::HoldOrDoubleTap, true) => {
+                    if state.latched {
+                        // A press while latched closes the layer.
+                        state.latched = false;
+                        state.unlatching = true;
+                        state.last_tap = None;
+                    } else {
+                        if state
+                            .last_tap
+                            .is_some_and(|tap| now.duration_since(tap) <= DOUBLE_TAP)
+                        {
+                            state.latched = true;
+                            state.last_tap = None;
+                        }
+                        state.held = true;
+                        state.pressed_at = Some(now);
+                    }
+                }
+                (ModifierMode::HoldOrDoubleTap, false) => {
+                    state.held = false;
+                    if std::mem::take(&mut state.unlatching) {
+                        continue;
+                    }
+                    let tapped = state
+                        .pressed_at
+                        .take()
+                        .is_some_and(|at| now.duration_since(at) < TAP);
+                    state.last_tap = (tapped && !state.latched).then_some(now);
+                }
+            }
+        }
+        if taken {
+            self.publish();
+        }
+        taken
+    }
+
+    /// Whether a source's Fn layer is open.
+    pub fn is_open(&self, source: MidiSourceKey) -> bool {
+        self.modifiers
+            .iter()
+            .any(|(modifier, state)| modifier.source_key == source && (state.held || state.latched))
+    }
+
+    /// The layer a message acts in, among the links `targets` keeps: the Fn
+    /// layer while its source's is open and a link there hears it, the
+    /// base layer otherwise. A button's release goes to the layer that took
+    /// its press, even when Fn changed in between.
+    pub fn layer_for(
+        &mut self,
+        ingress: IngressMidiEvent,
+        links: &[CompiledParameterLink],
+        targets: impl Fn(&CompiledParameterLink) -> bool,
+    ) -> MapLayer {
+        let channel = ingress.packet.channel();
+        let heard = |link: &&CompiledParameterLink| link.hears(ingress) && targets(link);
+        let Some(message) = links.iter().find(heard).map(|link| link.link.message) else {
+            return MapLayer::Base;
+        };
+        let Some(press) = pressed(message, ingress.packet) else {
+            return MapLayer::Base;
+        };
+        let same = |(source, held_channel, held_message, _): &HeldButton| {
+            *source == ingress.source && *held_channel == channel && *held_message == message
+        };
+        if !press && let Some(position) = self.held.iter().position(same) {
+            return self.held.remove(position).3;
+        }
+        let layer = if self.is_open(ingress.source)
+            && links
+                .iter()
+                .filter(heard)
+                .any(|link| link.layer() == MapLayer::Fn)
+        {
+            MapLayer::Fn
+        } else {
+            MapLayer::Base
+        };
+        let button = links
+            .iter()
+            .filter(heard)
+            .any(|link| link.layer() == layer && link.link.mode.is_button());
+        if press && button {
+            self.held.retain(|entry| !same(entry));
+            if self.held.len() == MAX_HELD_BUTTONS {
+                self.held.remove(0);
+            }
+            self.held.push((ingress.source, channel, message, layer));
+        }
+        layer
+    }
+
+    fn publish(&self) {
+        let mut open = self
+            .modifiers
+            .iter()
+            .filter(|(_, state)| state.held || state.latched)
+            .map(|(modifier, _)| u64::from(modifier.source_key.get()) + 1);
+        for slot in &FN_LAYERS_OPEN {
+            slot.store(
+                open.next().unwrap_or(0),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+    }
+}
+
+/// Whether a message is a press (`true`) or a release (`false`) of the
+/// control `message` names; `None` when it is not that control. A note-on
+/// with velocity presses; a control change presses from 64.
+fn pressed(message: ParameterLinkMessage, packet: rackforge_midi_api::MidiPacket) -> Option<bool> {
+    let heard = normalized_input(message, packet)?;
+    Some(match message {
+        ParameterLinkMessage::Note { .. } => heard > 0.0,
+        _ => heard >= 0.5,
+    })
 }
 
 fn normalized_input(
@@ -1060,6 +1331,7 @@ mod tests {
             transform: ParameterLinkTransform::default(),
             pass_through: ParameterLinkPassThrough::PassThrough,
             mode: ParameterLinkMode::Direct,
+            layer: MapLayer::Base,
         }
     }
 
@@ -1829,6 +2101,7 @@ mod tests {
                 },
                 invert: false,
                 pass_through: None,
+                layer: rackforge_midi_api::MapLayer::Base,
             }],
         });
         map
@@ -1953,6 +2226,158 @@ mod tests {
             })
             .unwrap()
             .is_empty()
+        );
+    }
+
+    fn fn_button(mode: ModifierMode) -> CompiledModifier {
+        let mut map = ControllerMap::new("user.keys", "Keys");
+        map.modifier = Some(rackforge_midi_api::controller_map::ControllerModifier {
+            input: rackforge_midi_api::controller_map::MappedInput {
+                id: "shift".into(),
+                name: "Shift".into(),
+                channel: ParameterLinkChannel::Channel {
+                    channel: MidiChannel::from_user_number(2).unwrap(),
+                },
+                message: ParameterLinkMessage::ControlChange { controller: 105 },
+            },
+            mode,
+        });
+        CompiledModifier::from_map(&map, MidiSourceKey::new(7)).unwrap()
+    }
+
+    fn layered(
+        message: ParameterLinkMessage,
+        layer: MapLayer,
+        mode: ParameterLinkMode,
+    ) -> CompiledParameterLink {
+        let mut link = link(message);
+        link.layer = layer;
+        link.mode = mode;
+        let kind = if mode_is_button(&link.mode) {
+            ParameterKind::Boolean { default: false }
+        } else {
+            ParameterKind::Float {
+                minimum: 0.0,
+                maximum: 1.0,
+                default: 0.5,
+                step: 0.01,
+                unit: None,
+                taper: Default::default(),
+            }
+        };
+        CompiledParameterLink::new(link, MidiSourceKey::new(7), &schema(kind)).unwrap()
+    }
+
+    fn mode_is_button(mode: &ParameterLinkMode) -> bool {
+        mode.is_button()
+    }
+
+    const SHIFT_DOWN: [u8; 3] = [0xb1, 105, 127];
+    const SHIFT_UP: [u8; 3] = [0xb1, 105, 0];
+    const KNOB: [u8; 3] = [0xb1, 74, 90];
+
+    /// Held, the Fn layer is open; two quick taps latch it, and the next
+    /// press closes it. The Fn button's own messages reach nothing else.
+    #[test]
+    fn a_fn_button_opens_its_layer_while_held_or_latched() {
+        let knob = ParameterLinkMessage::ControlChange { controller: 74 };
+        let links = [
+            layered(knob, MapLayer::Base, ParameterLinkMode::Direct),
+            layered(knob, MapLayer::Fn, ParameterLinkMode::Direct),
+        ];
+        let mut layers = ControlLayers::default();
+        layers.replace(vec![fn_button(ModifierMode::HoldOrDoubleTap)]);
+        let source = MidiSourceKey::new(7);
+        let start = std::time::Instant::now();
+        let at = |ms: u64| start + std::time::Duration::from_millis(ms);
+        let all = |_: &CompiledParameterLink| true;
+
+        assert_eq!(
+            layers.layer_for(ingress(&KNOB), &links, all),
+            MapLayer::Base
+        );
+        assert!(layers.observe(ingress(&SHIFT_DOWN), at(0)));
+        assert_eq!(layers.layer_for(ingress(&KNOB), &links, all), MapLayer::Fn);
+        assert!(layers.observe(ingress(&SHIFT_UP), at(800)));
+        assert!(!layers.is_open(source), "a long hold closes on release");
+        assert!(
+            !layers.observe(ingress(&KNOB), at(900)),
+            "a knob is not the Fn button"
+        );
+
+        // Two taps latch.
+        layers.observe(ingress(&SHIFT_DOWN), at(2000));
+        layers.observe(ingress(&SHIFT_UP), at(2100));
+        assert!(!layers.is_open(source));
+        layers.observe(ingress(&SHIFT_DOWN), at(2250));
+        layers.observe(ingress(&SHIFT_UP), at(2300));
+        assert!(layers.is_open(source), "latched");
+        assert_eq!(layers.layer_for(ingress(&KNOB), &links, all), MapLayer::Fn);
+        // The next press closes it, and its release opens nothing.
+        layers.observe(ingress(&SHIFT_DOWN), at(5000));
+        assert!(!layers.is_open(source));
+        layers.observe(ingress(&SHIFT_UP), at(5050));
+        assert!(!layers.is_open(source));
+    }
+
+    #[test]
+    fn a_toggle_fn_button_flips_its_layer_on_each_press() {
+        let mut layers = ControlLayers::default();
+        layers.replace(vec![fn_button(ModifierMode::Toggle)]);
+        let source = MidiSourceKey::new(7);
+        let now = std::time::Instant::now();
+        layers.observe(ingress(&SHIFT_DOWN), now);
+        layers.observe(ingress(&SHIFT_UP), now);
+        assert!(layers.is_open(source));
+        layers.observe(ingress(&SHIFT_DOWN), now);
+        assert!(!layers.is_open(source));
+    }
+
+    /// With Fn open, a control with nothing in the Fn layer keeps doing
+    /// what it does; a button's release reaches the layer its press did.
+    #[test]
+    fn a_control_without_a_fn_mapping_keeps_its_base_one() {
+        let knob = ParameterLinkMessage::ControlChange { controller: 74 };
+        let pad = ParameterLinkMessage::Note { note: 40 };
+        let toggle = ParameterLinkMode::Toggle {
+            first: rackforge_midi_api::LinkValue::new(1.0).unwrap(),
+            second: rackforge_midi_api::LinkValue::new(0.0).unwrap(),
+        };
+        let links = [
+            layered(knob, MapLayer::Base, ParameterLinkMode::Direct),
+            layered(pad, MapLayer::Base, toggle.clone()),
+            layered(pad, MapLayer::Fn, toggle),
+        ];
+        let mut layers = ControlLayers::default();
+        layers.replace(vec![fn_button(ModifierMode::Hold)]);
+        let now = std::time::Instant::now();
+        let all = |_: &CompiledParameterLink| true;
+        layers.observe(ingress(&SHIFT_DOWN), now);
+        assert_eq!(
+            layers.layer_for(ingress(&KNOB), &links, all),
+            MapLayer::Base
+        );
+        assert_eq!(
+            layers.layer_for(ingress(&[0x91, 40, 100]), &links, all),
+            MapLayer::Fn
+        );
+        // Fn let go while the pad is held: its release still goes to Fn.
+        layers.observe(ingress(&SHIFT_UP), now);
+        assert_eq!(
+            layers.layer_for(ingress(&[0x81, 40, 0]), &links, all),
+            MapLayer::Fn
+        );
+        // And the next press is the base layer's again.
+        assert_eq!(
+            layers.layer_for(ingress(&[0x91, 40, 100]), &links, all),
+            MapLayer::Base
+        );
+        // Only the links a host keeps count: none hears the pad here.
+        assert_eq!(
+            layers.layer_for(ingress(&[0x91, 40, 100]), &links, |link| link.layer()
+                == MapLayer::Base
+                && link.link.message == knob),
+            MapLayer::Base
         );
     }
 }

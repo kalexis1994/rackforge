@@ -219,7 +219,19 @@ export interface ParameterLink {
   pass_through: "pass_through" | "consume";
   /** Left out, the control drives the parameter across its whole range. */
   mode?: ParameterLinkMode;
+  /** Left out, the base layer. */
+  layer?: MapLayer;
 }
+
+/**
+ * A layer of a controller's mappings: the base one, or the one its Fn button
+ * opens while held or latched. A control with nothing in the Fn layer keeps
+ * its base mapping.
+ */
+export type MapLayer = "base" | "fn";
+
+/** How a controller's Fn button opens its Fn layer. */
+export type ModifierMode = "hold" | "toggle" | "hold_or_double_tap";
 
 /**
  * What a control does to its parameter. Values are in the parameter's own
@@ -251,6 +263,8 @@ export interface ControlMapping {
   invert?: boolean;
   /** Left out, a button consumes its message and a knob passes it on. */
   pass_through?: "pass_through" | "consume";
+  /** Left out, the base layer. */
+  layer?: MapLayer;
 }
 
 /** Every mapping a player made for one controller, plugin by plugin. */
@@ -258,6 +272,8 @@ export interface ControllerMap {
   schema_version: 1;
   controller_id: string;
   controller_name: string;
+  /** The button that opens the Fn layer, if the controller has one. */
+  modifier?: { input: ControlMapping["input"]; mode?: ModifierMode };
   plugins: { plugin_id: string; plugin_name: string; mappings: ControlMapping[] }[];
 }
 

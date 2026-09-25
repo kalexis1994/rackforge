@@ -996,12 +996,29 @@ impl<'plugin> RackEngine<'plugin> {
 
     /// One incoming event, to every Slot that hears it. A control linked to
     /// a Slot's parameter moves the parameter, and is kept from the Slots
-    /// when the link consumes it.
-    pub fn route(&mut self, event: IngressMidiEvent, play_route: Option<&CompiledMidiRoute>) {
+    /// when the link consumes it. `layers` says which of its controller's
+    /// layers the event acts in: the host's, shared with what it plays
+    /// outside the Rack.
+    pub fn route(
+        &mut self,
+        event: IngressMidiEvent,
+        play_route: Option<&CompiledMidiRoute>,
+        layers: &mut crate::parameter_link::ControlLayers,
+    ) {
+        let voices = &self.voices;
+        let layer = layers.layer_for(event, &self.parameter_links, |link| {
+            voices.iter().any(|voice| {
+                crate::rack_graph::voice_matches_link_target(&voice.slot_id, &link.link.instance_id)
+            })
+        });
         for voice in &mut self.voices {
             let mut consume = false;
             for link in self.parameter_links.iter_mut().filter(|link| {
-                crate::rack_graph::voice_matches_link_target(&voice.slot_id, &link.link.instance_id)
+                link.layer() == layer
+                    && crate::rack_graph::voice_matches_link_target(
+                        &voice.slot_id,
+                        &link.link.instance_id,
+                    )
             }) {
                 // Asked where the parameter stands: a Slot's saved state or
                 // the screen may have moved it, and a toggle starts there.

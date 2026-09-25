@@ -12,7 +12,9 @@
 import type {
   ControlMapping,
   ControllerMap,
+  MapLayer,
   MidiActivityEvent,
+  ModifierMode,
   ParameterLinkMessage,
   ParameterLinkMode,
   PluginParameterDescriptor,
@@ -465,10 +467,16 @@ function sameMessage(left: ControlMapping["input"], right: ControlMapping["input
     && JSON.stringify(left.channel) === JSON.stringify(right.channel);
 }
 
+/** The layer a mapping acts in: the base one unless it says Fn. */
+export function mappingLayer(mapping: ControlMapping): MapLayer {
+  return mapping.layer ?? "base";
+}
+
 /**
  * The map with this mapping in place of whatever the same input -- by id or
- * by message -- did in the same plugin: an input does one thing in each
- * plugin. The map is not changed; a new one is returned.
+ * by message -- did in the same plugin and layer: an input does one thing in
+ * each plugin, and one more with Fn. The map is not changed; a new one is
+ * returned.
  */
 export function withMapping(
   map: ControllerMap,
@@ -477,16 +485,55 @@ export function withMapping(
 ): ControllerMap {
   const others = map.plugins.filter((entry) => entry.plugin_id !== plugin.plugin_id);
   const existing = map.plugins.find((entry) => entry.plugin_id === plugin.plugin_id);
+  const layer = mappingLayer(mapping);
   const kept = (existing?.mappings ?? []).filter(
     (candidate) =>
       candidate.id !== mapping.id
-      && candidate.input.id !== mapping.input.id
-      && !sameMessage(candidate.input, mapping.input),
+      && (mappingLayer(candidate) !== layer
+        || (candidate.input.id !== mapping.input.id && !sameMessage(candidate.input, mapping.input))),
   );
   return {
     ...map,
     plugins: [...others, { plugin_id: plugin.plugin_id, plugin_name: plugin.plugin_name, mappings: [...kept, mapping] }],
   };
+}
+
+/**
+ * The map with this input as its Fn button, or with none. The button opens
+ * the Fn layer and does nothing else, so what it was mapped to goes.
+ */
+export function withModifier(
+  map: ControllerMap,
+  input: ControllerInput | null,
+  mode: ModifierMode = "hold_or_double_tap",
+): ControllerMap {
+  if (!input) {
+    const rest = { ...map };
+    delete rest.modifier;
+    return rest;
+  }
+  const mapped = mappedInputFor(input);
+  if (!mapped) return map;
+  return {
+    ...map,
+    modifier: { input: mapped, mode },
+    plugins: map.plugins
+      .map((entry) => ({
+        ...entry,
+        mappings: entry.mappings.filter(
+          (mapping) => mapping.input.id !== input.id && !sameMessage(mapping.input, mapped),
+        ),
+      }))
+      .filter((entry) => entry.mappings.length > 0),
+  };
+}
+
+/** Whether an input is its controller's Fn button. */
+export function isModifierInput(map: ControllerMap | undefined, input: ControllerInput): boolean {
+  const modifier = map?.modifier;
+  if (!modifier) return false;
+  const mapped = mappedInputFor(input);
+  return modifier.input.id === input.id || (mapped !== null && sameMessage(modifier.input, mapped));
 }
 
 /** The map without one mapping; a plugin left with none is dropped. */

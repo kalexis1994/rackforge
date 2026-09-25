@@ -1309,6 +1309,7 @@ mod tests {
             transform: ParameterLinkTransform::default(),
             pass_through: ParameterLinkPassThrough::PassThrough,
             mode: Default::default(),
+            layer: Default::default(),
         }
     }
 

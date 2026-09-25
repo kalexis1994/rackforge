@@ -191,13 +191,25 @@ pub struct ControllerInput {
     /// it does in each instrument RackForge offers a map for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<ControlSlot>,
+    /// The button that opens the Fn layer, where the hardware sends it and
+    /// nothing else changes while it is held. At most one per package.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub modifier: bool,
 }
 
 impl ControllerInput {
     /// This control in its slot, with the message a map listens to; `None`
     /// without a slot.
     pub fn slotted_input(&self) -> Option<SlottedInput> {
-        let slot = self.slot?;
+        Some(SlottedInput {
+            slot: self.slot?,
+            input: self.mapped_input()?,
+        })
+    }
+
+    /// The control as a map names it: its id, name and message. `None` for
+    /// one a map cannot listen to (pitch bend, a real time message).
+    pub fn mapped_input(&self) -> Option<MappedInput> {
         let channel = MidiChannel::from_zero_based(self.midi.channel).ok()?;
         let message = match self.midi.message().ok()? {
             InputMessage::ControlChange { controller, .. } => {
@@ -206,14 +218,11 @@ impl ControllerInput {
             InputMessage::Note { note, .. } => ParameterLinkMessage::Note { note },
             InputMessage::PitchBend { .. } | InputMessage::Realtime(_) => return None,
         };
-        Some(SlottedInput {
-            slot,
-            input: MappedInput {
-                id: self.id.clone(),
-                name: self.name.clone(),
-                channel: ParameterLinkChannel::Channel { channel },
-                message,
-            },
+        Some(MappedInput {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            channel: ParameterLinkChannel::Channel { channel },
+            message,
         })
     }
 
@@ -333,6 +342,22 @@ impl ControllerInput {
             ));
         }
         self.validate_slot(message)?;
+        if self.modifier {
+            if !matches!(self.kind, InputKind::Button | InputKind::Pad)
+                || !matches!(
+                    message,
+                    InputMessage::ControlChange { .. } | InputMessage::Note { .. }
+                )
+            {
+                return Err(format!(
+                    "input {:?}: the Fn button is a button or pad that sends a note or a control change",
+                    self.id
+                ));
+            }
+            if self.slot.is_some() {
+                return Err(format!("input {:?}: the Fn button fills no slot", self.id));
+            }
+        }
         Ok(message)
     }
 }
@@ -404,6 +429,9 @@ pub fn validate_inputs(
     let mut ids = BTreeSet::new();
     let mut messages = BTreeMap::new();
     let mut slots = BTreeMap::new();
+    if inputs.iter().filter(|input| input.modifier).count() > 1 {
+        return Err("a package names one Fn button at most".into());
+    }
     for input in inputs {
         let message = input.validate()?;
         if !ids.insert(input.id.as_str()) {
@@ -455,6 +483,12 @@ pub fn validate_inputs(
             .ok_or_else(|| format!("action names unknown input {:?}", action.input))?;
         action.target.validate()?;
         action_trigger(action.target, input)?;
+        if input.modifier {
+            return Err(format!(
+                "input {:?} is the Fn button and cannot also have a host action",
+                action.input
+            ));
+        }
         // The host takes an action's button before any map hears it.
         if let Some(slot) = input.slot {
             return Err(format!(
@@ -660,6 +694,7 @@ mod tests {
             button: None,
             encoder: None,
             slot: None,
+            modifier: false,
         }
     }
 
@@ -725,6 +760,7 @@ mod tests {
             button: None,
             encoder: None,
             slot: None,
+            modifier: false,
         }
     }
 

@@ -140,6 +140,9 @@ pub struct ParameterTouchReport {
     /// stands at: what it would set if it took over now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<f64>,
+    /// Made through the controller's Fn layer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fn_layer: bool,
 }
 
 /// The sequencer wire shapes, recorded for the surfaces that build them.
@@ -902,6 +905,9 @@ pub enum ControlResponse {
         /// offered: a catalog keyboard is not listed for such a map alone.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         factory_untouched: Vec<String>,
+        /// The controllers whose Fn layer is open now, held or latched.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        fn_open: Vec<String>,
     },
     ControllerMapSaved {
         map: Box<ControllerMap>,

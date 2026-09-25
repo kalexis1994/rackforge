@@ -1153,6 +1153,8 @@ export function requestControllerMaps(): Promise<{
   takeover: ControlTakeover;
   /** Controllers whose map is still RackForge's factory map, as offered. */
   factoryUntouched: string[];
+  /** Controllers whose Fn layer is open now, held or latched. */
+  fnOpen: string[];
 }> {
   return requestPresetOperation(
     { op: "controller_maps" },
@@ -1162,6 +1164,7 @@ export function requestControllerMaps(): Promise<{
       maps: (message.maps ?? []) as ControllerMap[],
       takeover: controlTakeover(message.takeover),
       factoryUntouched: (message.factory_untouched ?? []) as string[],
+      fnOpen: (message.fn_open ?? []) as string[],
     }),
   );
 }

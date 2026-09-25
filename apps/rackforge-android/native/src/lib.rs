@@ -871,6 +871,9 @@ struct AndroidEngine {
     wide: Vec<Midi2Event>,
     parameter_events: Vec<ParameterEventV1>,
     parameter_links: Vec<CompiledParameterLink>,
+    /// Which controllers' Fn layers are open, beside the links they choose
+    /// between, the Rack's included: a layer change recompiles nothing.
+    control_layers: rackforge_core::parameter_link::ControlLayers,
     persisted_parameter_links: Vec<ParameterLink>,
     plugin_id: String,
     plugin_name: String,
@@ -1338,6 +1341,7 @@ impl AndroidEngine {
             wide: Vec::with_capacity(256),
             parameter_events: Vec::with_capacity(256),
             parameter_links: Vec::new(),
+            control_layers: Default::default(),
             persisted_parameter_links: Vec::new(),
             plugin_id,
             plugin_name,
@@ -2289,18 +2293,21 @@ impl AndroidEngine {
             }
             if let Ok(mut queue) = midi_queue().try_lock() {
                 for ingress in queue.drain(..) {
-                    rack.engine.route(
-                        IngressMidiEvent {
-                            source: ingress.source,
-                            packet: MidiPacket {
-                                frame: ingress.event.frame,
-                                length: ingress.event.length,
-                                data: ingress.event.data,
-                                wide: None,
-                            },
+                    let event = IngressMidiEvent {
+                        source: ingress.source,
+                        packet: MidiPacket {
+                            frame: ingress.event.frame,
+                            length: ingress.event.length,
+                            data: ingress.event.data,
+                            wide: None,
                         },
-                        None,
-                    );
+                    };
+                    // A controller's Fn button opens its Fn layer, and does
+                    // nothing else.
+                    if self.control_layers.observe(event, Instant::now()) {
+                        continue;
+                    }
+                    rack.engine.route(event, None, &mut self.control_layers);
                 }
             }
             let dropped = rack.engine.take_dropped_events();
@@ -2331,9 +2338,19 @@ impl AndroidEngine {
                     source: ingress.source,
                     packet,
                 };
+                // A controller's Fn button opens its Fn layer, and does
+                // nothing else.
+                if self.control_layers.observe(ingress_event, Instant::now()) {
+                    continue;
+                }
+                let layer =
+                    self.control_layers
+                        .layer_for(ingress_event, &self.parameter_links, |link| {
+                            link.link.instance_id == ANDROID_INSTANCE_ID
+                        });
                 let mut consume = false;
                 for link in &mut self.parameter_links {
-                    if link.link.instance_id != ANDROID_INSTANCE_ID {
+                    if link.link.instance_id != ANDROID_INSTANCE_ID || link.layer() != layer {
                         continue;
                     }
                     // Where the parameter stands: a knob picks it up there,
@@ -2428,6 +2445,7 @@ impl AndroidEngine {
         let maps = controller_maps()
             .lock()
             .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+        let mut modifiers = Vec::new();
         for (source_id, controller) in controllers.iter() {
             let Some(controller_id) = controller.controller_id.as_deref() else {
                 continue;
@@ -2435,6 +2453,12 @@ impl AndroidEngine {
             let Some(source_key) = sources.resolve_optional(source_id) else {
                 continue;
             };
+            // The player's Fn button for this controller, on its port.
+            if let Some(modifier) = maps.maps.get(controller_id).and_then(|map| {
+                rackforge_core::parameter_link::CompiledModifier::from_map(map, source_key)
+            }) {
+                modifiers.push(modifier);
+            }
             let display_name = sources
                 .descriptor(source_key)
                 .map(|descriptor| descriptor.name.as_str())
@@ -2491,6 +2515,7 @@ impl AndroidEngine {
         }
         self.persisted_parameter_links = links;
         self.parameter_links = compiled;
+        self.control_layers.replace(modifiers);
         Ok(())
     }
 
@@ -2533,6 +2558,7 @@ impl AndroidEngine {
                 TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
             },
             control: (touch.pickup != TouchPickup::Engaged).then_some(touch.control),
+            fn_layer: touch.fn_layer,
         })
     }
 
@@ -2547,12 +2573,15 @@ impl AndroidEngine {
             ParameterTouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
             ParameterTouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
         };
-        Some(rackforge_surface_runtime::parameter_touch_header(
-            &report.parameter,
-            report.value,
-            report.display_decimals,
-            arrow,
-            report.control,
+        Some(rackforge_surface_runtime::fn_layer_header(
+            rackforge_surface_runtime::parameter_touch_header(
+                &report.parameter,
+                report.value,
+                report.display_decimals,
+                arrow,
+                report.control,
+            ),
+            report.fn_layer,
         ))
     }
 
@@ -5587,6 +5616,17 @@ fn android_controller_maps_response() -> Result<ControlResponse> {
             .as_ref()
             .map(ControllerMapStore::untouched_factory_maps)
             .unwrap_or_default(),
+        fn_open: controllers
+            .iter()
+            .filter_map(|(source_id, controller)| {
+                let key = sources.resolve_optional(source_id)?;
+                rackforge_core::parameter_link::fn_layer_open(key)
+                    .then(|| controller.controller_id.clone())
+                    .flatten()
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect(),
     })
 }
 

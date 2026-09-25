@@ -9,6 +9,7 @@ import {
   inputForActivity,
   inputFromActivity,
   inputMessageLabel,
+  isModifierInput,
   isUserController,
   kindsForInput,
   learntInput,
@@ -27,6 +28,7 @@ import {
   userControllerProblem,
   withLearntInput,
   withMapping,
+  withModifier,
   withoutMapping,
 } from "./controllerMapping";
 import type { ControlMapping, PluginParameterDescriptor, PluginParameterSnapshot } from "./types";
@@ -217,6 +219,35 @@ describe("a map as it is edited", () => {
     withMapping(before, organ, mapping("b", knob, "drive"));
     withoutMapping(before, organ.plugin_id, "a");
     expect(JSON.stringify(before)).toBe(snapshot);
+  });
+
+  it("gives an input one more thing to do with Fn", () => {
+    let map = withMapping(emptyControllerMap("x", "X"), organ, mapping("a", knob, "drive"));
+    map = withMapping(map, organ, { ...mapping("b", knob, "leslie.speed"), layer: "fn" });
+    expect(map.plugins[0].mappings.map((m) => m.id)).toEqual(["a", "b"]);
+    // Again with Fn: it replaces only what the knob did with Fn.
+    map = withMapping(map, organ, { ...mapping("c", knob, "percussion"), layer: "fn" });
+    expect(map.plugins[0].mappings.map((m) => m.id)).toEqual(["a", "c"]);
+    map = withMapping(map, organ, mapping("d", knob, "chorus"));
+    expect(map.plugins[0].mappings.map((m) => m.id)).toEqual(["c", "d"]);
+  });
+
+  it("makes a button the Fn button, which then does nothing else", () => {
+    let map = withMapping(emptyControllerMap("x", "X"), organ, mapping("a", button, "leslie.speed"));
+    map = withMapping(map, organ, mapping("b", knob, "drive"));
+    map = withModifier(map, button);
+    expect(map.modifier).toEqual({ input: mappedInputFor(button), mode: "hold_or_double_tap" });
+    expect(map.plugins[0].mappings.map((m) => m.id)).toEqual(["b"]);
+    expect(isModifierInput(map, button)).toBe(true);
+    // The same button, learnt under another name, is still the Fn button.
+    expect(isModifierInput(map, { ...button, id: "cc-1-20", name: "CC 20" })).toBe(true);
+    expect(isModifierInput(map, knob)).toBe(false);
+
+    const toggled = withModifier(map, pad, "toggle");
+    expect(toggled.modifier?.input.id).toBe("pad-1");
+    expect(toggled.modifier?.mode).toBe("toggle");
+    expect(withModifier(toggled, null).modifier).toBeUndefined();
+    expect(withModifier(toggled, null).plugins).toEqual(toggled.plugins);
   });
 
   it("makes ids the host accepts, different every time", () => {

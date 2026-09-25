@@ -68,6 +68,42 @@ pub struct ParameterLink {
     /// across its whole range.
     #[serde(default, skip_serializing_if = "ParameterLinkMode::is_direct")]
     pub mode: ParameterLinkMode,
+    /// The layer it acts in: the base one, or the one the controller's Fn
+    /// button opens. Left out, the base one.
+    #[serde(default, skip_serializing_if = "MapLayer::is_base")]
+    pub layer: MapLayer,
+}
+
+/// A layer of a controller's mappings. The Fn layer acts while the
+/// controller's Fn button is held or latched; a control with nothing in it
+/// keeps doing what it does in the base layer.
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MapLayer {
+    #[default]
+    Base,
+    Fn,
+}
+
+impl MapLayer {
+    pub fn is_base(&self) -> bool {
+        *self == Self::Base
+    }
+}
+
+/// How a controller's Fn button opens its Fn layer.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModifierMode {
+    /// Open while the button is held.
+    Hold,
+    /// Each press opens or closes it.
+    Toggle,
+    /// Open while held; two quick presses leave it open until the next.
+    #[default]
+    HoldOrDoubleTap,
 }
 
 /// A plugin parameter value named by a link's mode, in the parameter's own

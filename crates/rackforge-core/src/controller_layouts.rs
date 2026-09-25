@@ -17,7 +17,7 @@ use rackforge_controller_package::{
 use rackforge_midi_api::control_layout::{
     CONTROL_LAYOUT_FILE, ControlLayout, SlottedInput, derive_controller_map,
 };
-use rackforge_midi_api::controller_map::ControllerMap;
+use rackforge_midi_api::controller_map::{ControllerMap, MappedInput};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -109,6 +109,8 @@ pub struct SlottedController {
     pub id: String,
     pub name: String,
     pub inputs: Vec<SlottedInput>,
+    /// The button the package names as Fn, if it names one.
+    pub modifier: Option<MappedInput>,
 }
 
 impl SlottedController {
@@ -118,6 +120,7 @@ impl SlottedController {
             id: manifest.id.clone(),
             name: manifest.display_name(),
             inputs,
+            modifier: manifest.modifier_input(),
         })
     }
 }
@@ -187,6 +190,7 @@ pub fn factory_maps(
                 &controller.id,
                 &controller.name,
                 &controller.inputs,
+                controller.modifier.as_ref(),
                 layouts,
             )
         })

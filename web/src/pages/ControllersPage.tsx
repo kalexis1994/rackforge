@@ -8,6 +8,7 @@ import { ControllerInputList } from "../components/controllers/ControllerInputLi
 import { InputEditor, UserControllerForm } from "../components/controllers/ControlsEditor";
 import { InputAssignments } from "../components/controllers/InputAssignments";
 import { ControllerOutputNotice } from "../components/controllers/ControllerOutputNotice";
+import { FnButtonCard } from "../components/controllers/FnButtonCard";
 import {
   buildControllerDevices,
   type ControllerDevice,
@@ -18,10 +19,13 @@ import {
   inputForActivity,
   inputFromActivity,
   inputMessageLabel,
+  isButtonInput,
+  isModifierInput,
   isUserController,
   unknownSourceDevices,
   withLearntInput,
   withMapping,
+  withModifier,
   withoutMapping,
 } from "../controllerMapping";
 import {
@@ -61,6 +65,8 @@ interface Loaded {
   maps: ControllerMap[];
   /** Controllers whose map is still RackForge's factory map, as offered. */
   factoryUntouched: string[];
+  /** Controllers whose Fn layer is open now, held or latched. */
+  fnOpen: string[];
   sources: MidiSourceStatus[];
 }
 
@@ -97,7 +103,7 @@ export function ControllersPage() {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [busy, setBusy] = useState<"export" | "import" | "controls" | "output" | null>(null);
+  const [busy, setBusy] = useState<"export" | "import" | "controls" | "output" | "fn" | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedInputId, setSelectedInputId] = useState<string | null>(null);
   const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
@@ -142,6 +148,7 @@ export function ControllersPage() {
       registered: maps.controllers,
       maps: maps.maps,
       factoryUntouched: maps.factoryUntouched,
+      fnOpen: maps.fnOpen,
       sources: sources ?? current?.sources ?? [],
     }));
     setLoadError(null);
@@ -213,6 +220,9 @@ export function ControllersPage() {
     deviceRef.current = device;
     learningRef.current = editingControls;
   }, [device, editingControls]);
+  // The Fn button pressed or released: the host is asked again, a moment
+  // later, whether the layer is open -- a tap latches only once released.
+  const fnRead = useRef<number | undefined>(undefined);
   useEffect(() => {
     const unsubscribe = subscribeMidiActivity((events) => {
       const current = deviceRef.current;
@@ -220,11 +230,13 @@ export function ControllersPage() {
       const sourceId = current.source.id;
       const now = performance.now();
       let changed = false;
+      let fnHeard = false;
       let heard: ControllerInput[] = [];
       for (const event of events) {
         if (event.source.id !== sourceId) continue;
         const input = inputForActivity(event, [...current.inputs, ...heard]);
         if (input) {
+          if (isModifierInput(current.map, input)) fnHeard = true;
           litUntil.current.set(input.id, now + LIT_MS);
           changed = true;
           setStray(null);
@@ -254,6 +266,10 @@ export function ControllersPage() {
         }
       }
       if (changed) setLit(new Set(litUntil.current.keys()));
+      if (fnHeard) {
+        window.clearTimeout(fnRead.current);
+        fnRead.current = window.setTimeout(() => void load().catch(() => undefined), 120);
+      }
     });
     const sweep = window.setInterval(() => {
       const now = performance.now();
@@ -269,8 +285,9 @@ export function ControllersPage() {
     return () => {
       unsubscribe();
       window.clearInterval(sweep);
+      window.clearTimeout(fnRead.current);
     };
-  }, []);
+  }, [load]);
 
   const replaceMap = (map: ControllerMap) =>
     setLoaded((current) =>
@@ -279,7 +296,8 @@ export function ControllersPage() {
             ...current,
             maps: [
               ...current.maps.filter((candidate) => candidate.controller_id !== map.controller_id),
-              ...(map.plugins.length > 0 ? [map] : []),
+              // A map with a Fn button and nothing mapped yet is still kept.
+              ...(map.plugins.length > 0 || map.modifier ? [map] : []),
             ],
             // Saved by the player, it is theirs now.
             factoryUntouched: current.factoryUntouched.filter((id) => id !== map.controller_id),
@@ -290,6 +308,19 @@ export function ControllersPage() {
   const commit = async (next: ControllerMap) => {
     const saved = await saveControllerMap(next);
     replaceMap(saved ?? next);
+  };
+
+  /** The Fn button changed from its card: its mode, or none at all. */
+  const changeFn = async (next: ControllerMap) => {
+    setBusy("fn");
+    setNotice(null);
+    try {
+      await commit(next);
+    } catch (reason) {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not change the Fn button." });
+    } finally {
+      setBusy(null);
+    }
   };
 
   /** The controls being described, changed: learnt ones or a draft's. */
@@ -578,6 +609,23 @@ export function ControllersPage() {
             />
           ) : null}
 
+          {keepsMaps && !editingControls && (device.map?.modifier || device.inputs.some(isButtonInput)) ? (
+            <FnButtonCard
+              device={device}
+              open={loaded.fnOpen.includes(device.id)}
+              readOnly={!keepsMaps}
+              busy={busy === "fn"}
+              onMode={(mode) => {
+                const map = device.map;
+                if (!map?.modifier) return;
+                void changeFn({ ...map, modifier: { ...map.modifier, mode } });
+              }}
+              onRemove={() => {
+                if (device.map) void changeFn(withModifier(device.map, null));
+              }}
+            />
+          ) : null}
+
           {editingControls ? (
             <section className="controllers-describe">
               <div className="controllers-describe-copy">
@@ -676,6 +724,12 @@ export function ControllersPage() {
                     if (!device.map) return;
                     await commit(withoutMapping(device.map, pluginId, mappingId));
                   }}
+                  onSetModifier={keepsMaps
+                    ? async (input) => {
+                      const map = device.map ?? emptyControllerMap(device.id, device.name);
+                      await commit(withModifier(map, input, map.modifier?.mode));
+                    }
+                    : undefined}
                 />
               ) : (
                 <section className="controller-input-detail controller-input-hint">

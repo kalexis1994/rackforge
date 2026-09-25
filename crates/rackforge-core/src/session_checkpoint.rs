@@ -349,6 +349,7 @@ mod tests {
                 first: rackforge_midi_api::LinkValue::new(1.0).unwrap(),
                 second: rackforge_midi_api::LinkValue::new(2.0).unwrap(),
             },
+            layer: rackforge_midi_api::MapLayer::Base,
         });
 
         store.save(&state).unwrap();

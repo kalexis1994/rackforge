@@ -37,6 +37,8 @@ pub struct ParameterTouch {
     /// once engaged, and while it is on its way, where it has got to -- so
     /// a screen can show the fader closing in rather than a frozen number.
     pub control: f64,
+    /// Made through the controller's Fn layer.
+    pub fn_layer: bool,
 }
 
 /// The process's touches: every link records into it.
@@ -79,7 +81,7 @@ impl ParameterTouchCell {
         self.sequence.fetch_add(1, Ordering::AcqRel);
         self.instance.store(touch.instance_key, Ordering::Relaxed);
         self.index_and_pickup.store(
-            u64::from(touch.parameter_index) | (pickup << 32),
+            u64::from(touch.parameter_index) | (pickup << 32) | (u64::from(touch.fn_layer) << 34),
             Ordering::Relaxed,
         );
         self.value.store(touch.value.to_bits(), Ordering::Relaxed);
@@ -109,7 +111,7 @@ impl ParameterTouchCell {
                 continue;
             }
             *seen = before;
-            let pickup = match packed >> 32 {
+            let pickup = match (packed >> 32) & 0b11 {
                 1 => TouchPickup::MoveUp,
                 2 => TouchPickup::MoveDown,
                 _ => TouchPickup::Engaged,
@@ -120,6 +122,7 @@ impl ParameterTouchCell {
                 value,
                 pickup,
                 control,
+                fn_layer: packed & (1 << 34) != 0,
             });
         }
         None
@@ -168,6 +171,7 @@ mod tests {
             value: 1462.5,
             pickup: TouchPickup::Engaged,
             control: 1462.5,
+            fn_layer: false,
         });
         cell.record(ParameterTouch {
             instance_key: key,
@@ -175,6 +179,7 @@ mod tests {
             value: 45.0,
             pickup: TouchPickup::MoveDown,
             control: 900.0,
+            fn_layer: true,
         });
         let touch = cell.latest(&mut seen).unwrap();
         assert_eq!(touch.instance_key, key);
@@ -182,6 +187,7 @@ mod tests {
         assert_eq!(touch.value, 45.0);
         assert_eq!(touch.pickup, TouchPickup::MoveDown);
         assert_eq!(touch.control, 900.0);
+        assert!(touch.fn_layer);
         assert_eq!(cell.latest(&mut seen), None);
         assert!(touch_names(&touch, "slot.piano"));
         assert!(touch_names(&touch, "rack.main/slot.piano"));

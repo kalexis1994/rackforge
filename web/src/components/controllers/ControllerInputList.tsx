@@ -4,6 +4,7 @@ import {
   type ControllerDevice,
   groupInputs,
   inputMessageLabel,
+  isModifierInput,
   mappingsForInput,
   standardMeaning,
 } from "../../controllerMapping";
@@ -55,6 +56,7 @@ export function ControllerInputList({
               const standard = standardMeaning(input, device.roles, device.actions);
               const selected = input.id === selectedId;
               const moving = lit.has(input.id);
+              const fn = isModifierInput(device.map, input);
               return (
                 <li
                   key={input.id}
@@ -72,9 +74,11 @@ export function ControllerInputList({
                   <span className="controller-input-copy">
                     <strong>{input.name}</strong>
                     <small>
-                      {assignments.length > 0
-                        ? assignments.map((entry) => entry.plugin_name).join(", ")
-                        : standard ?? inputMessageLabel(input)}
+                      {fn
+                        ? "Fn button"
+                        : assignments.length > 0
+                          ? assignments.map((entry) => entry.plugin_name).join(", ")
+                          : standard ?? inputMessageLabel(input)}
                     </small>
                   </span>
                   {assignments.length > 0 ? (

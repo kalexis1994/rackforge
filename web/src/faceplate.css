@@ -9906,6 +9906,75 @@
   justify-self: start;
 }
 
+.controller-assign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.controller-assignment-layer {
+  margin: 4px 0 0;
+  color: var(--fp-rail-label);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.controller-assignment-fn,
+.controller-fn-open {
+  padding: 1px 6px;
+  color: var(--rf-color-input);
+  border: 1px solid var(--rf-color-input);
+  border-radius: var(--fp-radius-key);
+  font: 700 9px/1.4 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.controller-fn-open {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-input);
+}
+
+.controller-fn-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.controller-fn-copy {
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.controller-fn-copy h2 {
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controller-fn-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.controller-fn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.controller-fn-actions label {
+  display: grid;
+  gap: 4px;
+}
+
 .controller-mapping-editor {
   display: grid;
   gap: 12px;

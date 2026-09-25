@@ -1982,12 +1982,15 @@ fn parameter_touch_header(sequence: &mut u64) -> Option<String> {
         rackforge_control_api::ParameterTouchPickup::MoveUp => Some(menu::PickupArrow::Up),
         rackforge_control_api::ParameterTouchPickup::MoveDown => Some(menu::PickupArrow::Down),
     };
-    Some(menu::parameter_touch_header(
-        &touch.parameter,
-        touch.value,
-        touch.display_decimals,
-        arrow,
-        touch.control,
+    Some(menu::fn_layer_header(
+        menu::parameter_touch_header(
+            &touch.parameter,
+            touch.value,
+            touch.display_decimals,
+            arrow,
+            touch.control,
+        ),
+        touch.fn_layer,
     ))
 }
 

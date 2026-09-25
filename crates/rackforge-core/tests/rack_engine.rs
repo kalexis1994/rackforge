@@ -252,9 +252,11 @@ fn every_instrument_in_a_rack_sounds_at_once() {
     for workers in [0, 4] {
         let mut rack = Harness::new(&both_slots(), workers);
         assert_eq!(rack.block(FRAMES), 0.0);
-        rack.engine.route(note(0x90, 60), None);
+        rack.engine
+            .route(note(0x90, 60), None, &mut Default::default());
         assert_eq!(rack.block(FRAMES), 11.0, "workers={workers}");
-        rack.engine.route(note(0x80, 60), None);
+        rack.engine
+            .route(note(0x80, 60), None, &mut Default::default());
         assert_eq!(rack.block(FRAMES), 0.0, "workers={workers}");
     }
 }
@@ -276,11 +278,14 @@ fn each_slot_hears_only_its_own_keys() {
         ],
         0,
     );
-    rack.engine.route(note(0x90, 48), None);
+    rack.engine
+        .route(note(0x90, 48), None, &mut Default::default());
     assert_eq!(rack.block(FRAMES), 1.0);
-    rack.engine.route(note(0x90, 72), None);
+    rack.engine
+        .route(note(0x90, 72), None, &mut Default::default());
     assert_eq!(rack.block(FRAMES), 11.0);
-    rack.engine.route(note(0x80, 48), None);
+    rack.engine
+        .route(note(0x80, 48), None, &mut Default::default());
     assert_eq!(rack.block(FRAMES), 10.0);
 }
 
@@ -291,7 +296,8 @@ fn a_slot_plays_at_its_level_and_pan() {
     specs[0].level_per_mille = 500;
     specs[0].pan_per_mille = 1_000;
     let mut rack = Harness::new(&specs, 0);
-    rack.engine.route(note(0x90, 60), None);
+    rack.engine
+        .route(note(0x90, 60), None, &mut Default::default());
     let mut output = vec![0.0; FRAMES as usize * 2];
     rack.engine
         .render(
@@ -309,7 +315,8 @@ fn a_slot_plays_at_its_level_and_pan() {
 #[test]
 fn a_host_block_shorter_than_the_rack_was_built_for_renders_in_place() {
     let mut rack = Harness::new(&both_slots(), 0);
-    rack.engine.route(note(0x90, 60), None);
+    rack.engine
+        .route(note(0x90, 60), None, &mut Default::default());
     assert_eq!(rack.block(FRAMES / 4), 11.0);
     assert_eq!(rack.block(FRAMES), 11.0);
     let mut too_long = vec![0.0; FRAMES as usize * 4];
@@ -330,7 +337,8 @@ fn a_host_block_shorter_than_the_rack_was_built_for_renders_in_place() {
 #[test]
 fn a_reset_lets_every_note_go() {
     let mut rack = Harness::new(&both_slots(), 0);
-    rack.engine.route(note(0x90, 60), None);
+    rack.engine
+        .route(note(0x90, 60), None, &mut Default::default());
     assert_eq!(rack.block(FRAMES), 11.0);
     rack.engine.reset();
     assert_eq!(rack.block(FRAMES), 0.0);

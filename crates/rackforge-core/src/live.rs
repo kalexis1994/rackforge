@@ -41,7 +41,7 @@ use rackforge_audio_api::{
 use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
     CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
-    MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
+    MapLayer, MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
     MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
     MidiSourceSelector, MidiTargetId, ParameterLink, ParameterLinkPassThrough, PluginChannelModel,
     SharedMidiSourceRegistry,
@@ -1875,15 +1875,15 @@ fn compile_parameter_links_for_runtime(
 fn apply_parameter_links(
     links: &mut [CompiledParameterLink],
     event: IngressMidiEvent,
+    layer: MapLayer,
     instance_id: &str,
     output: &mut Vec<ParameterEventV1>,
     current: &mut dyn FnMut(u32) -> Option<f64>,
 ) -> bool {
     let mut consume = false;
-    for link in links
-        .iter_mut()
-        .filter(|link| voice_matches_link_target(instance_id, &link.link.instance_id))
-    {
+    for link in links.iter_mut().filter(|link| {
+        link.layer() == layer && voice_matches_link_target(instance_id, &link.link.instance_id)
+    }) {
         let Some(mapped) = link.apply(event, &mut *current) else {
             continue;
         };
@@ -1951,6 +1951,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         live_parameter_writer,
         startup,
     } = context;
+    // Which controllers' Fn layers are open, beside the links they choose
+    // between: a layer change recompiles nothing.
+    let mut control_layers = crate::parameter_link::ControlLayers::default();
     let mut output = initial_output;
     let mut input = initial_input;
     // Taken from the open device when there is one and from the configured
@@ -2723,8 +2726,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     }
                     let _ = reply.send(result);
                 }
-                AudioControlCommand::ReplaceParameterLinks { links, reply } => {
-                    parameter_links = links;
+                AudioControlCommand::ReplaceParameterLinks { table, reply } => {
+                    parameter_links = table.links;
+                    control_layers.replace(table.modifiers);
                     let _ = reply.send(Ok(()));
                 }
                 AudioControlCommand::ReplaceStandaloneVoice {
@@ -3114,13 +3118,25 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 if packet.is_transport_realtime() {
                     continue;
                 }
+                // A controller's Fn button opens its Fn layer, and does
+                // nothing else.
+                if control_layers.observe(event, Instant::now()) {
+                    continue;
+                }
                 match render_mode {
                     AudioRenderMode::Silent => {}
                     AudioRenderMode::Plugin => {
                         let parameter_start = parameter_events.len();
+                        let layer = control_layers.layer_for(event, &parameter_links, |link| {
+                            voice_matches_link_target(
+                                active_instance_id.as_str(),
+                                &link.link.instance_id,
+                            )
+                        });
                         let consume = apply_parameter_links(
                             &mut parameter_links,
                             event,
+                            layer,
                             active_instance_id.as_str(),
                             &mut parameter_events,
                             &mut |index| {
@@ -3151,11 +3167,17 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         }
                     }
                     AudioRenderMode::Rack => {
+                        let layer = control_layers.layer_for(event, &parameter_links, |link| {
+                            rack_voices.iter().any(|voice| {
+                                voice_matches_link_target(&voice.slot_id, &link.link.instance_id)
+                            })
+                        });
                         for voice in &mut rack_voices {
                             let instance = &mut voice.instance;
                             let consume = apply_parameter_links(
                                 &mut parameter_links,
                                 event,
+                                layer,
                                 &voice.slot_id,
                                 &mut voice.parameter_events,
                                 &mut |index| instance.get_parameter(index).ok(),
@@ -3228,14 +3250,26 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             if event.packet.is_transport_realtime() {
                 continue;
             }
+            // A controller's Fn button opens its Fn layer, and does nothing
+            // else.
+            if control_layers.observe(event, Instant::now()) {
+                continue;
+            }
             controller_states.observe(event.source, plugin_event);
             match render_mode {
                 AudioRenderMode::Silent => {}
                 AudioRenderMode::Plugin => {
                     let parameter_start = parameter_events.len();
+                    let layer = control_layers.layer_for(event, &parameter_links, |link| {
+                        voice_matches_link_target(
+                            active_instance_id.as_str(),
+                            &link.link.instance_id,
+                        )
+                    });
                     let consume = apply_parameter_links(
                         &mut parameter_links,
                         event,
+                        layer,
                         active_instance_id.as_str(),
                         &mut parameter_events,
                         &mut |index| {
@@ -3266,11 +3300,17 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     }
                 }
                 AudioRenderMode::Rack => {
+                    let layer = control_layers.layer_for(event, &parameter_links, |link| {
+                        rack_voices.iter().any(|voice| {
+                            voice_matches_link_target(&voice.slot_id, &link.link.instance_id)
+                        })
+                    });
                     for voice in &mut rack_voices {
                         let instance = &mut voice.instance;
                         let consume = apply_parameter_links(
                             &mut parameter_links,
                             event,
+                            layer,
                             &voice.slot_id,
                             &mut voice.parameter_events,
                             &mut |index| instance.get_parameter(index).ok(),

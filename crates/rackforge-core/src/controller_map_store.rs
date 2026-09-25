@@ -272,6 +272,12 @@ fn merge_offer(
             current.controller_name.clone()
         },
     );
+    // The Fn button the player chose stays theirs, as their mappings do.
+    merged.modifier = if current.modifier == previous.modifier {
+        factory.modifier.clone()
+    } else {
+        current.modifier.clone()
+    };
     for plugin_id in plugin_ids {
         let kept = current.plugin(plugin_id);
         let chosen = if kept == previous.plugin(plugin_id) {
@@ -428,6 +434,7 @@ mod tests {
                 },
                 invert: false,
                 pass_through: None,
+                layer: rackforge_midi_api::MapLayer::Base,
             }],
         });
         map

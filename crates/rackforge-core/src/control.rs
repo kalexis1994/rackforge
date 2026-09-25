@@ -1,6 +1,7 @@
 use crate::PluginStorage;
 use crate::controller_map_store::{ControllerMapStore, export_rfmap};
 use crate::midi_activity::MidiActivityLog;
+use crate::parameter_link::{CompiledModifier, ParameterLinkTable};
 use crate::performance::PerformanceRepository;
 use crate::rack_graph::{
     CompiledAudioSource, CompiledRackSlot, compile_instrument_definition, compile_instrument_rack,
@@ -214,8 +215,9 @@ pub enum AudioControlCommand {
         value: f64,
         reply: SyncSender<Result<f64, String>>,
     },
+    /// The links and the Fn buttons that choose between their layers.
     ReplaceParameterLinks {
-        links: Vec<CompiledParameterLink>,
+        table: ParameterLinkTable,
         reply: SyncSender<Result<(), String>>,
     },
     ReplaceStandaloneVoice {
@@ -2953,6 +2955,7 @@ fn cancel_midi_learn(context: &ControlContext, learn_id: u64) -> ControlResponse
 /// of controllers not connected now.
 fn controller_maps(context: &ControlContext) -> ControlResponse {
     let connected = context.connected_midi_sources.lock().ok();
+    let mut fn_open = Vec::new();
     let controllers = match context.semantic_profiles.lock() {
         Ok(profiles) => profiles
             .iter()
@@ -2961,6 +2964,9 @@ fn controller_maps(context: &ControlContext) -> ControlResponse {
                     .runtime_source_id
                     .as_ref()
                     .and_then(|id| context.midi_sources.resolve_optional(id));
+                if key.is_some_and(crate::parameter_link::fn_layer_open) {
+                    fn_open.push(controller_id.clone());
+                }
                 RegisteredController {
                     controller_id: controller_id.clone(),
                     source: registered
@@ -2998,6 +3004,7 @@ fn controller_maps(context: &ControlContext) -> ControlResponse {
         maps,
         takeover,
         factory_untouched: context.controller_map_store.untouched_factory_maps(),
+        fn_open,
     }
 }
 
@@ -3095,7 +3102,7 @@ fn replace_runtime_parameter_links(context: &ControlContext) -> Result<(), Contr
     send_audio(
         context,
         AudioControlCommand::ReplaceParameterLinks {
-            links: compiled,
+            table: compiled,
             reply: reply_sender,
         },
     )?;
@@ -3171,6 +3178,7 @@ fn parameter_touch(context: &ControlContext, after: u64) -> ControlResponse {
                 TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
             },
             control: (touch.pickup != TouchPickup::Engaged).then_some(touch.control),
+            fn_layer: touch.fn_layer,
         })
     })();
     if named.is_none() {
@@ -3217,7 +3225,7 @@ fn compile_parameter_links(
     context: &ControlContext,
     snapshot: &rackforge_session_api::SessionState,
     links: &[ParameterLink],
-) -> Result<Vec<CompiledParameterLink>, ControlFailure> {
+) -> Result<ParameterLinkTable, ControlFailure> {
     let repository = context.performance_repository.lock().map_err(|_| {
         control_failure(
             ControlErrorCode::Internal,
@@ -3280,6 +3288,7 @@ fn compile_parameter_links(
             Some(snapshot.revision),
         )
     })?;
+    let mut modifiers = Vec::new();
     for (controller_id, registered) in semantic_profiles.iter() {
         let Some(source_id) = &registered.runtime_source_id else {
             continue;
@@ -3288,6 +3297,13 @@ fn compile_parameter_links(
             // The package remains registered while its device is absent.
             continue;
         };
+        // The player's Fn button for this controller, on its port.
+        if let Some(modifier) = controller_maps
+            .get(controller_id)
+            .and_then(|map| CompiledModifier::from_map(map, source_key))
+        {
+            modifiers.push(modifier);
+        }
         let controller_name = registered
             .runtime_source_name
             .as_deref()
@@ -3386,7 +3402,10 @@ fn compile_parameter_links(
     for link in &mut compiled {
         link.set_takeover(takeover);
     }
-    Ok(compiled)
+    Ok(ParameterLinkTable {
+        links: compiled,
+        modifiers,
+    })
 }
 
 fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) -> ControlResponse {
@@ -3476,7 +3495,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             if let Err(failure) = send_audio(
                 context,
                 AudioControlCommand::ReplaceParameterLinks {
-                    links: compiled,
+                    table: compiled,
                     reply: reply_sender,
                 },
             ) {
@@ -3517,7 +3536,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             if let Err(failure) = send_audio(
                 context,
                 AudioControlCommand::ReplaceParameterLinks {
-                    links: compiled,
+                    table: compiled,
                     reply: reply_sender,
                 },
             ) {
@@ -3675,7 +3694,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     if let Err(failure) = send_audio(
                         context,
                         AudioControlCommand::ReplaceParameterLinks {
-                            links: compiled,
+                            table: compiled,
                             reply: links_sender,
                         },
                     ) {
@@ -6324,8 +6343,8 @@ mod tests {
             // Every library edit recompiles the controller maps first: a
             // Slot that goes takes its maps with it.
             match receiver.recv().unwrap() {
-                AudioControlCommand::ReplaceParameterLinks { links, reply } => {
-                    assert!(links.is_empty());
+                AudioControlCommand::ReplaceParameterLinks { table, reply } => {
+                    assert!(table.links.is_empty());
                     reply.send(Ok(())).unwrap();
                 }
                 _ => panic!("expected the controller maps to be compiled again"),

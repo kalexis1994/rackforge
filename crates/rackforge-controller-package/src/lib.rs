@@ -667,6 +667,14 @@ impl ControllerPackageManifest {
         })
     }
 
+    /// The button the package names as Fn, as a map names it.
+    pub fn modifier_input(&self) -> Option<rackforge_midi_api::controller_map::MappedInput> {
+        self.inputs
+            .iter()
+            .find(|input| input.modifier)
+            .and_then(ControllerInput::mapped_input)
+    }
+
     /// The controller as a player knows it: its maker, then its name, once.
     pub fn display_name(&self) -> String {
         match &self.vendor {
@@ -974,6 +982,7 @@ impl ControllerPackageManifest {
                     button,
                     encoder: None,
                     slot: None,
+                    modifier: false,
                 });
             }
             id

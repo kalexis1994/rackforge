@@ -13,7 +13,7 @@ import {
   suggestedMode,
 } from "../../controllerMapping";
 import { usePluginParameterSchema } from "../../hooks/usePluginParameterSchema";
-import type { ControlMapping, ParameterLinkMode, PluginWebDescriptor } from "../../types";
+import type { ControlMapping, MapLayer, ParameterLinkMode, PluginWebDescriptor } from "../../types";
 import { AsyncActionLabel } from "../AsyncSpinner";
 import { ModeFields } from "./ModeFields";
 
@@ -21,12 +21,13 @@ type PassThroughChoice = "default" | "pass_through" | "consume";
 
 /**
  * One mapping of one input: which plugin, which of its parameters, and how
- * the input drives it. Nothing is stored until Save; the host checks the
- * mapping again when it is.
+ * the input drives it, in the base layer or with Fn. Nothing is stored until
+ * Save; the host checks the mapping again when it is.
  */
 export function MappingEditor({
   input,
   plugins,
+  layer = "base",
   initialPluginId,
   existing,
   onSave,
@@ -34,6 +35,8 @@ export function MappingEditor({
 }: {
   input: ControllerInput;
   plugins: PluginWebDescriptor[];
+  /** The layer the mapping acts in. */
+  layer?: MapLayer;
   initialPluginId?: string;
   existing?: { plugin_id: string; mapping: ControlMapping };
   onSave: (plugin: PluginWebDescriptor, mapping: ControlMapping) => Promise<void>;
@@ -84,6 +87,7 @@ export function MappingEditor({
         mode: effectiveMode,
         ...(invert && !button ? { invert: true } : {}),
         ...(passThrough !== "default" ? { pass_through: passThrough } : {}),
+        ...(layer === "fn" ? { layer: "fn" as const } : {}),
       });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save this mapping.");
@@ -102,6 +106,11 @@ export function MappingEditor({
         void save();
       }}
     >
+      {layer === "fn" ? (
+        <p className="controller-mapping-note">
+          With Fn: while the Fn button is held or latched, this control does this instead.
+        </p>
+      ) : null}
       <label>
         <span>Plugin</span>
         <select

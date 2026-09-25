@@ -185,7 +185,7 @@ fn compile_desktop_parameter_links(
     semantic_profiles: &BTreeMap<String, RegisteredSemanticProfile>,
     controller_maps: &BTreeMap<String, ControllerMap>,
     takeover: ControlTakeover,
-) -> Result<Vec<CompiledParameterLink>> {
+) -> Result<rackforge_core::parameter_link::ParameterLinkTable> {
     let mut compiled = links
         .iter()
         .map(|link| {
@@ -223,12 +223,19 @@ fn compile_desktop_parameter_links(
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let mut modifiers = Vec::new();
     for (controller_id, registered) in semantic_profiles {
         let Some(runtime_source_id) = &registered.runtime_source_id else {
             continue;
         };
         let source_id = MidiSourceId::new(runtime_source_id.clone())?;
         let source_key = desktop_audio::stable_midi_source_key_from_id(&source_id);
+        // The player's Fn button for this controller, on its port.
+        if let Some(modifier) = controller_maps.get(controller_id).and_then(|map| {
+            rackforge_core::parameter_link::CompiledModifier::from_map(map, source_key)
+        }) {
+            modifiers.push(modifier);
+        }
         let controller_name = registered
             .runtime_source_name
             .as_deref()
@@ -283,7 +290,10 @@ fn compile_desktop_parameter_links(
     for link in &mut compiled {
         link.set_takeover(takeover);
     }
-    Ok(compiled)
+    Ok(rackforge_core::parameter_link::ParameterLinkTable {
+        links: compiled,
+        modifiers,
+    })
 }
 
 #[cfg(windows)]
@@ -2814,6 +2824,7 @@ impl DesktopApp {
                 TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
             },
             control: (touch.pickup != TouchPickup::Engaged).then_some(touch.control),
+            fn_layer: touch.fn_layer,
         })
     }
 
@@ -2844,12 +2855,15 @@ impl DesktopApp {
             ParameterTouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
             ParameterTouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
         };
-        Some(rackforge_surface_runtime::parameter_touch_header(
-            &report.parameter,
-            report.value,
-            report.display_decimals,
-            arrow,
-            report.control,
+        Some(rackforge_surface_runtime::fn_layer_header(
+            rackforge_surface_runtime::parameter_touch_header(
+                &report.parameter,
+                report.value,
+                report.display_decimals,
+                arrow,
+                report.control,
+            ),
+            report.fn_layer,
         ))
     }
 
@@ -3580,6 +3594,22 @@ impl DesktopApp {
             maps: self.controller_maps.values().cloned().collect(),
             takeover: self.controller_takeover,
             factory_untouched: self.controller_map_store.untouched_factory_maps(),
+            fn_open: self
+                .controller_semantic_profiles
+                .iter()
+                .filter(|(_, registered)| {
+                    registered
+                        .runtime_source_id
+                        .as_ref()
+                        .and_then(|id| rackforge_midi_api::MidiSourceId::new(id.clone()).ok())
+                        .is_some_and(|id| {
+                            rackforge_core::parameter_link::fn_layer_open(
+                                desktop_audio::stable_midi_source_key_from_id(&id),
+                            )
+                        })
+                })
+                .map(|(controller_id, _)| controller_id.clone())
+                .collect(),
         }
     }
 

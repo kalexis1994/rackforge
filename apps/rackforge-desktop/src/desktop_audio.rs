@@ -1135,6 +1135,7 @@ impl DesktopAudio {
             ),
             parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             parameter_links: Vec::new(),
+            control_layers: Default::default(),
             velocity_curve: preferences.velocity_curve.sanitised(),
             velocity_curves: compile_velocity_curves(&preferences.velocity_curves),
             last_strike: Arc::clone(&last_strike),
@@ -1521,9 +1522,12 @@ impl DesktopAudio {
         receive_control_response(receiver, "set plugin parameter")
     }
 
-    pub fn replace_parameter_links(&self, links: Vec<CompiledParameterLink>) -> Result<()> {
+    pub fn replace_parameter_links(
+        &self,
+        table: rackforge_core::parameter_link::ParameterLinkTable,
+    ) -> Result<()> {
         let (reply, receiver) = mpsc::sync_channel(1);
-        self.send_command(AudioCommand::ReplaceParameterLinks { links, reply })?;
+        self.send_command(AudioCommand::ReplaceParameterLinks { table, reply })?;
         receive_control_response(receiver, "replace parameter links")
     }
 
@@ -1851,8 +1855,9 @@ enum AudioCommand {
         value: f64,
         reply: SyncSender<Result<f64, String>>,
     },
+    /// The links and the Fn buttons that choose between their layers.
     ReplaceParameterLinks {
-        links: Vec<CompiledParameterLink>,
+        table: rackforge_core::parameter_link::ParameterLinkTable,
         reply: SyncSender<Result<(), String>>,
     },
     InjectMidi(MidiPacket),
@@ -2249,6 +2254,9 @@ struct AudioProcessor {
     sequencer_scratch: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
     parameter_links: Vec<CompiledParameterLink>,
+    /// Which controllers' Fn layers are open, beside the links they choose
+    /// between: a layer change recompiles nothing.
+    control_layers: rackforge_core::parameter_link::ControlLayers,
     /// The reading for a device with none of its own.
     velocity_curve: VelocityCurve,
     /// And the readings that belong to a particular keybed. A handful of
@@ -2393,6 +2401,17 @@ impl AudioProcessor {
             );
             let active_voice = self.active_voice;
             let mut consume = false;
+            // A controller's Fn button opens its Fn layer, and does nothing
+            // else.
+            if self
+                .control_layers
+                .observe(ingress, std::time::Instant::now())
+            {
+                if self.rack.is_some() {
+                    rack_taken += 1;
+                }
+                continue;
+            }
             if let Some(rack) = self.rack.as_mut() {
                 // The Rack's Slots take it through their own stages, and the
                 // links to their parameters; conducting still comes first.
@@ -2400,7 +2419,7 @@ impl AudioProcessor {
                 let conducted = self.conducting
                     && feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
                 if !conducted {
-                    rack.0.route(ingress, None);
+                    rack.0.route(ingress, None, &mut self.control_layers);
                 }
                 continue;
             }
@@ -2410,13 +2429,16 @@ impl AudioProcessor {
                     voices,
                     parameter_events,
                     live_parameter_writer,
+                    control_layers,
                     ..
                 } = &mut *self;
                 let voice = &mut voices[active_voice];
-                for link in parameter_links
-                    .iter_mut()
-                    .filter(|link| link.link.instance_id == voice.instance_id)
-                {
+                let layer = control_layers.layer_for(ingress, parameter_links, |link| {
+                    link.link.instance_id == voice.instance_id
+                });
+                for link in parameter_links.iter_mut().filter(|link| {
+                    link.layer() == layer && link.link.instance_id == voice.instance_id
+                }) {
                     // Where the parameter stands, asked only when a control
                     // is first touched and the link does not know yet.
                     let Some(mapped) =
@@ -2473,6 +2495,7 @@ impl AudioProcessor {
                             },
                         },
                         None,
+                        &mut self.control_layers,
                     );
                     continue;
                 }
@@ -3014,8 +3037,9 @@ impl AudioProcessor {
                     }
                     let _ = reply.try_send(result);
                 }
-                AudioCommand::ReplaceParameterLinks { links, reply } => {
-                    self.parameter_links = links;
+                AudioCommand::ReplaceParameterLinks { table, reply } => {
+                    self.parameter_links = table.links;
+                    self.control_layers.replace(table.modifiers);
                     let _ = reply.try_send(Ok(()));
                 }
                 AudioCommand::InjectMidi(packet) => {

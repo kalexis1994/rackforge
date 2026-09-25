@@ -89,6 +89,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "arturia-keylab-mkii/49",
     "arturia-keylab-mkii/61",
     "arturia-keylab-mkii/88",
+    "arturia-keylab-essential",
 ];
 
 /// What installing the catalog did with one package.
@@ -1090,6 +1091,44 @@ mod tests {
         )));
         // Nine faders, nine encoders, the wheel and 31 buttons.
         assert_eq!(held.len(), 50);
+    }
+
+    /// The first KeyLab Essential is read on its DAW port whatever its size:
+    /// Windows cuts the port's name before the size. Never on its keys'
+    /// port, and neither the mkII nor the Essential mk3 is it.
+    #[test]
+    fn a_keylab_essential_is_read_on_its_daw_port_whatever_its_size() {
+        let (_root, store) = installed_store("keylab-essential");
+        for (port, expected) in [
+            (
+                "MIDIIN2 (Arturia KeyLab Essenti",
+                Some("org.rackforge.arturia-keylab-essential"),
+            ),
+            (
+                "Arturia KeyLab Essential 49 DAW In",
+                Some("org.rackforge.arturia-keylab-essential"),
+            ),
+            (
+                "Arturia KeyLab Essential 88MID #2",
+                Some("org.rackforge.arturia-keylab-essential"),
+            ),
+            ("Arturia KeyLab Essential 61", None),
+            ("Arturia KeyLab Essential 61 MIDI In", None),
+            ("Arturia KeyLab Essential 61MID", None),
+            ("KL Essential 61 mk3 MIDI", None),
+            (
+                "KeyLab mkII 61 DAW",
+                Some("org.rackforge.arturia-keylab-mkii-61"),
+            ),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        let binding = store
+            .resolve_identified_input("Arturia KeyLab Essential 49 DAW In", None)
+            .unwrap()
+            .unwrap();
+        // Nine faders, eight encoders, the wheel and 20 buttons.
+        assert_eq!(binding.held_controls.len(), 38);
     }
 
     /// The Launch Control XL is put on User Template 1, the template its

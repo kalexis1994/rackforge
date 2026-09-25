@@ -1335,35 +1335,36 @@ impl Menu {
     }
 
     pub fn set_play_plugins(&mut self, plugins: Vec<PlayPlugin>, active_instance_id: Option<&str>) {
+        // What the player is looking at, held by identity, as LIVE holds its
+        // cursor: the host refreshes on every display heartbeat, and a
+        // cursor that followed the plugin on stage each time took a player
+        // who had turned to another back to it a moment before they pressed.
+        // Only what is on stage changing re-anchors the cursor to it.
         let focused = self
             .play_plugins
             .get(self.play_index)
             .map(|plugin| plugin.instance_id.clone());
+        let on_effects_row = self.play_index >= self.play_plugins.len();
+        let stage_changed = self.pending_plugin_instance_id.is_none()
+            && self.active_plugin_instance_id.as_deref() != active_instance_id;
         self.play_plugins = plugins;
-        self.play_index = self
-            .pending_plugin_instance_id
-            .as_deref()
-            .and_then(|id| {
-                self.play_plugins
-                    .iter()
-                    .position(|plugin| plugin.instance_id == id)
-            })
-            .or_else(|| {
-                active_instance_id.and_then(|id| {
-                    self.play_plugins
-                        .iter()
-                        .position(|plugin| plugin.instance_id == id)
-                })
-            })
-            .or_else(|| {
-                focused.as_deref().and_then(|id| {
-                    self.play_plugins
-                        .iter()
-                        .position(|plugin| plugin.instance_id == id)
-                })
-            })
-            .unwrap_or(0)
-            .min(self.play_plugins.len().saturating_sub(1));
+        let position = |plugins: &[PlayPlugin], id: Option<&str>| {
+            id.and_then(|id| plugins.iter().position(|plugin| plugin.instance_id == id))
+        };
+        let pending = position(&self.play_plugins, self.pending_plugin_instance_id.as_deref());
+        let active = position(&self.play_plugins, active_instance_id);
+        let browsed = if on_effects_row && !self.play_plugins.is_empty() {
+            Some(self.play_plugins.len())
+        } else {
+            position(&self.play_plugins, focused.as_deref())
+        };
+        self.play_index = if stage_changed {
+            pending.or(active).or(browsed)
+        } else {
+            pending.or(browsed).or(active)
+        }
+        .unwrap_or(0)
+        .min(self.play_plugins.len());
         if self.pending_plugin_instance_id.is_none() {
             self.active_plugin_instance_id = active_instance_id.map(str::to_owned);
         }
@@ -4035,6 +4036,7 @@ impl Menu {
                             self.pending_command = Some(MenuCommand::SetActiveMode {
                                 mode: ActiveMode::Play,
                             });
+                            self.anchor_play_cursor_on_stage();
                             Page::Play
                         }
                         _ => Page::Config,
@@ -4341,6 +4343,19 @@ impl Menu {
     /// Hosts call it once the menu holds the session -- when LITTLE starts --
     /// so the screen opens on the music rather than on the home page. HOME
     /// keeps the mode highlighted, for the step back.
+    /// The PLAY list's cursor on the plugin on stage: where a player coming
+    /// into PLAY, or back to what is playing, expects to find it. Refreshes
+    /// leave it where the player turned it.
+    fn anchor_play_cursor_on_stage(&mut self) {
+        if let Some(index) = self.active_plugin_instance_id.as_deref().and_then(|id| {
+            self.play_plugins
+                .iter()
+                .position(|plugin| plugin.instance_id == id)
+        }) {
+            self.play_index = index;
+        }
+    }
+
     pub fn show_active_mode(&mut self) {
         self.home_index = match self.active_mode {
             ActiveMode::Play => 1,
@@ -4373,6 +4388,7 @@ impl Menu {
             }
             ActiveMode::Play => {
                 self.plugin_play_context = PluginPlayContext::Standalone;
+                self.anchor_play_cursor_on_stage();
                 let focus_sound_id = focus_sound_id.or(self.play_anchor_sound_id.as_deref());
                 if let Some(sound) = focus_sound_id
                     .and_then(|id| self.plugin_sounds.iter().find(|sound| sound.id == id))
@@ -9132,6 +9148,61 @@ mod tests {
         assert_eq!(projected.chars().count(), 18);
         assert!(projected.starts_with("RF-106"));
         assert_eq!(projected.as_bytes()[0], b'R');
+    }
+
+    #[test]
+    fn a_refresh_leaves_the_play_cursor_on_the_plugin_being_browsed() {
+        // The driver refreshes the catalog on every display heartbeat, a few
+        // seconds apart. The cursor followed the plugin on stage on each
+        // one: a player who had turned to B and pressed a moment after a
+        // heartbeat entered A instead, and nothing was even selected.
+        let plugins = vec![
+            PlayPlugin::new("play.a", "org.example.a", "PLUGIN A"),
+            PlayPlugin::new("play.b", "org.example.b", "PLUGIN B"),
+        ];
+        let mut menu = Menu::default();
+        menu.set_play_plugins(plugins.clone(), Some("play.a"));
+        menu.page = Page::Play;
+        assert_eq!(menu.render().line_1, "PLUGIN A");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "PLUGIN B");
+
+        menu.set_play_plugins(plugins.clone(), Some("play.a"));
+        assert_eq!(menu.render().line_1, "PLUGIN B");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SelectPlugin {
+                instance_id: "play.b".into(),
+            })
+        );
+
+        // The EFFECTS row, after the instruments, holds as well.
+        let mut menu = Menu::default();
+        menu.set_play_plugins(plugins.clone(), Some("play.a"));
+        menu.page = Page::Play;
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "EFFECTS");
+        menu.set_play_plugins(plugins.clone(), Some("play.a"));
+        assert_eq!(menu.render().line_1, "EFFECTS");
+
+        // What is on stage changing elsewhere -- the web, a LIVE target --
+        // still brings the cursor to it.
+        menu.set_play_plugins(plugins.clone(), Some("play.b"));
+        assert_eq!(menu.render().line_1, "PLUGIN B");
+
+        // Coming into PLAY finds the plugin on stage, not one left browsed.
+        let mut menu = Menu::default();
+        menu.set_play_plugins(plugins, Some("play.a"));
+        menu.page = Page::Play;
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "PLUGIN B");
+        menu.page = Page::Home;
+        menu.home_index = 1;
+        menu.apply(Action::Select);
+        assert_eq!(menu.page, Page::Play);
+        assert_eq!(menu.render().line_1, "PLUGIN A");
     }
 
     #[test]

@@ -92,6 +92,7 @@ pub const BUNDLED: &[BundledController] = bundled![
     "arturia-keylab-essential",
     "novation-launchkey-mk2",
     "novation-launchkey-mini-mk2",
+    "novation-launch-control",
 ];
 
 /// What installing the catalog did with one package.
@@ -473,11 +474,15 @@ mod tests {
             "MIDIIN2 (Launch Control XL)",
             "Launch Control XL (HUI)",
             "Launch Control XL:Launch Control XL MIDI 2 20:1",
-            "Launch Control",
             "LCXL3 1 MIDI (Port 2)",
         ] {
             assert_eq!(resolved(&store, port, None), None, "{port}");
         }
+        // The first Launch Control has its own package.
+        assert_ne!(
+            resolved(&store, "Launch Control", None).as_deref(),
+            Some(xl)
+        );
         assert_ne!(
             resolved(&store, "LCXL3 1 MIDI", None).as_deref(),
             Some(xl),
@@ -1165,6 +1170,41 @@ mod tests {
             .unwrap();
         // Pots, sliders, their buttons, Track, the transport, InControl.
         assert_eq!(binding.held_controls.len(), 38);
+    }
+
+    /// The first Launch Control is read on its one port, whatever its device
+    /// ID, and put on factory template 1; the XL, the XL 3 and the Launch
+    /// Control 3 are not it. None of its controls plays.
+    #[test]
+    fn a_launch_control_is_read_on_its_port_and_holds_its_controls() {
+        let (_root, store) = installed_store("launch-control");
+        for (port, expected) in [
+            (
+                "Launch Control",
+                Some("org.rackforge.novation-launch-control"),
+            ),
+            (
+                "Launch Control 2",
+                Some("org.rackforge.novation-launch-control"),
+            ),
+            (
+                "Launch Control:Launch Control MIDI 1 24:0",
+                Some("org.rackforge.novation-launch-control"),
+            ),
+            (
+                "Launch Control XL",
+                Some("org.rackforge.novation-launch-control-xl"),
+            ),
+            ("LC3 1 MIDI", None),
+        ] {
+            assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");
+        }
+        let binding = store
+            .resolve_identified_input("Launch Control", None)
+            .unwrap()
+            .unwrap();
+        // Sixteen knobs, eight pads and four buttons.
+        assert_eq!(binding.held_controls.len(), 28);
     }
 
     /// A Launchkey Mini, first or MK2, is read on its MIDI port, never on

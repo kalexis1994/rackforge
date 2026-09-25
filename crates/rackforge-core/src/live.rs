@@ -10,9 +10,7 @@ use crate::isolated_state::parameter_value_is_valid;
 use crate::live_midi_state::{
     MidiControllerStates, ReservedBindingSet, ReservedMidiControls, plugin_midi_event,
 };
-use crate::midi_hotplug::{
-    self, SupervisedSource, is_performance_midi_input, stable_alsa_source_id,
-};
+use crate::midi_hotplug::{self, SupervisedSource, is_played_midi_input, stable_alsa_source_id};
 use crate::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
     process_slots_sequential, spawn_telemetry_publisher,
@@ -932,6 +930,13 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         None => (None, None, None, None, None, None, Vec::new()),
     };
     let packages = discover_plugin_packages(&config.package)?;
+    // What each installed plugin lays out for the keyboards, read while the
+    // packages still name their roots.
+    let control_layouts = crate::controller_layouts::control_layouts(
+        packages
+            .iter()
+            .map(|package| (package.manifest().id.as_str(), package.root())),
+    );
     let primary_id = packages
         .first()
         .context("no primary plugin package was configured")?
@@ -1540,6 +1545,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
             controller_maps: crate::controller_map_store::ControllerMapStore::new(
                 config.data_root.as_deref(),
             ),
+            control_layouts,
             // The same root the controller host installs and watches.
             controllers_root: Some(
                 env::var_os("RACKFORGE_ROOT")
@@ -1602,7 +1608,7 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
     let mut matches = BTreeMap::new();
     for port in midi.ports() {
         let name = midi.port_name(&port)?;
-        if is_performance_midi_input(&name) {
+        if is_played_midi_input(&name) {
             matches.insert(name.clone(), name);
         }
     }
@@ -1637,6 +1643,21 @@ struct ConnectedMidiSources {
 pub(crate) const MAX_LIVE_MIDI_SOURCES: usize = 64;
 
 fn connect_midi_sources(sender: SyncSender<IngressMidiEvent>) -> Result<ConnectedMidiSources> {
+    // A port a controller package claims is read whatever it is called: the
+    // Oxygen Pro's knobs send on its Mackie/HUI port. The same root the
+    // controller host installs into.
+    let controllers_root = env::var_os("RACKFORGE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("rackforge")
+        })
+        .join("controllers");
+    midi_hotplug::claim_controller_inputs(&crate::controller_layouts::known_controller_packages(
+        Some(&controllers_root),
+    ));
     let discovery = MidiInput::new("rackforge-core-discovery")?;
     let names = performance_midi_names(&discovery)?;
     let mut registry = MidiSourceRegistry::default();

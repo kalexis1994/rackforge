@@ -575,6 +575,7 @@ impl BrowserHost {
                 controllers: Vec::new(),
                 maps: Vec::new(),
                 takeover: Default::default(),
+                factory_untouched: Vec::new(),
             }),
             ControlRequest::MidiActivity { .. } => Ok(ControlResponse::MidiActivity {
                 cursor: 0,

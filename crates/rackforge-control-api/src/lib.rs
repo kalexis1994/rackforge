@@ -898,6 +898,10 @@ pub enum ControlResponse {
         /// Left out by a host that predates the setting: pickup.
         #[serde(default)]
         takeover: ControlTakeover,
+        /// The controllers whose map is still RackForge's factory map, as
+        /// offered: a catalog keyboard is not listed for such a map alone.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        factory_untouched: Vec<String>,
     },
     ControllerMapSaved {
         map: Box<ControllerMap>,

@@ -153,6 +153,8 @@ struct DesktopPlugin {
     instance: PluginInstance<'static>,
     resources: BTreeMap<String, PathBuf>,
     resource_data_paths: BTreeMap<String, PathBuf>,
+    /// Where the installed package lives: its control layout is read there.
+    package_root: PathBuf,
 }
 
 #[derive(Clone)]
@@ -870,7 +872,9 @@ impl DesktopApp {
         #[cfg(not(windows))]
         let controller_semantic_profiles = BTreeMap::new();
         let controller_map_store = ControllerMapStore::new(Some(&options.data_root));
-        if let Err(error) = controller_map_store.seed_factory_maps() {
+        if let Err(error) =
+            offer_factory_controller_maps(&controller_map_store, &plugins, &options.rackforge_root)
+        {
             warnings.push(format!(
                 "Factory controller maps were not offered: {error:#}"
             ));
@@ -1173,6 +1177,33 @@ impl DesktopApp {
                     self.audio_recovery_at = Some(Instant::now() + Duration::from_secs(1));
                     self.audio_recovery_attempts = 0;
                 }
+            }
+        }
+        // A plugin installed or removed changes what each keyboard is
+        // offered: the maps take it in, and the links follow them.
+        if let Err(error) = offer_factory_controller_maps(
+            &self.controller_map_store,
+            &self.plugins,
+            &self.options.rackforge_root,
+        ) {
+            warnings.push(format!(
+                "Factory controller maps were not offered: {error:#}"
+            ));
+        }
+        match self.controller_map_store.load_all() {
+            Ok(maps) => self.controller_maps = maps,
+            Err(error) => warnings.push(format!("Controller maps were not loaded: {error:#}")),
+        }
+        #[cfg(windows)]
+        if self.audio.is_some() {
+            let links = self
+                .session
+                .read()
+                .expect("session lock poisoned")
+                .parameter_links
+                .clone();
+            if let Err(error) = self.replace_parameter_links(links) {
+                warnings.push(error);
             }
         }
         self.sync_little_play_chain();
@@ -3548,6 +3579,7 @@ impl DesktopApp {
             controllers,
             maps: self.controller_maps.values().cloned().collect(),
             takeover: self.controller_takeover,
+            factory_untouched: self.controller_map_store.untouched_factory_maps(),
         }
     }
 
@@ -8327,6 +8359,23 @@ fn sync_desktop_audio(
     Ok(())
 }
 
+/// Offers each keyboard the map made from the plugins' control layouts and
+/// the controller packages installed under `rackforge_root`.
+fn offer_factory_controller_maps(
+    store: &ControllerMapStore,
+    plugins: &[DesktopPlugin],
+    rackforge_root: &Path,
+) -> Result<Vec<String>> {
+    use rackforge_core::controller_layouts::{control_layouts, factory_maps, slotted_controllers};
+    let layouts = control_layouts(
+        plugins
+            .iter()
+            .map(|plugin| (plugin.plugin_id.as_str(), plugin.package_root.as_path())),
+    );
+    let controllers = slotted_controllers(Some(&rackforge_root.join("controllers")));
+    store.seed_factory_maps(&factory_maps(&controllers, &layouts))
+}
+
 fn load_desktop_plugins(options: &Options) -> Result<(Vec<DesktopPlugin>, Vec<String>)> {
     fs::create_dir_all(&options.plugins_root).with_context(|| {
         format!(
@@ -8479,6 +8528,7 @@ fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<Desk
     }
 
     Ok(DesktopPlugin {
+        package_root: package.root().to_path_buf(),
         instance_id,
         plugin_id: package.manifest().id.clone(),
         name: package.manifest().name.clone(),

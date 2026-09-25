@@ -61,6 +61,17 @@ pub const BUNDLED: &[BundledController] = bundled![
     "novation-flkey-2/37",
     "novation-flkey-2/49",
     "novation-flkey-2/61",
+    "m-audio-oxygen-pro/25",
+    "m-audio-oxygen-pro/49",
+    "m-audio-oxygen-pro/61",
+    "m-audio-hammer-88-pro",
+    "m-audio-oxygen-pro-mini",
+    "m-audio-oxygen-mkv/25",
+    "m-audio-oxygen-mkv/49",
+    "m-audio-oxygen-mkv/61",
+    "m-audio-keystation-mk3/49",
+    "m-audio-keystation-mk3/61",
+    "m-audio-keystation-mk3/88",
 ];
 
 /// What installing the catalog did with one package.
@@ -562,6 +573,184 @@ mod tests {
                 Some(first),
                 "{port}"
             );
+        }
+    }
+
+    /// An Oxygen Pro is read on its third port, the one Ableton's and
+    /// Bitwig's scripts read (User Guide v1.1 p110), and is put in their
+    /// mode there; its other ports, the Mini and the Oxygen MKV are not its.
+    #[test]
+    fn an_oxygen_pro_is_read_and_set_up_on_its_third_port() {
+        let (_root, store) = installed_store("oxygen-pro");
+        for (size, port) in [
+            ("25", "MIDIIN3 (Oxygen Pro 25)"),
+            ("49", "MIDIIN3 (Oxygen Pro 49)"),
+            ("49", "Oxygen Pro 49 Mackie/HUI"),
+            ("61", "Oxygen Pro 61:Oxygen Pro 61 Mackie/HUI 24:2"),
+        ] {
+            let expected = format!("org.rackforge.m-audio-oxygen-pro-{size}");
+            assert_eq!(
+                resolved(&store, port, None).as_deref(),
+                Some(expected.as_str()),
+                "{port}"
+            );
+        }
+        for port in [
+            "Oxygen Pro 49",
+            "Oxygen Pro 49 USB MIDI",
+            "MIDIIN2 (Oxygen Pro 49)",
+            "Oxygen Pro 49 MIDI DIN",
+            "MIDIIN4 (Oxygen Pro 49)",
+            "Oxygen Pro 49 EDITOR",
+            "MIDIIN3 (Oxygen 49 MKV)",
+            "Hammer 88 Pro",
+            "MIDIIN2 (Hammer 88 Pro)",
+        ] {
+            assert_eq!(resolved(&store, port, None), None, "{port}");
+        }
+        // The Hammer 88 Pro and the Oxygen Pro Mini run the Oxygen Pro's
+        // scripts: each its own package, on its own third port.
+        for (port, expected) in [
+            (
+                "MIDIIN3 (Hammer 88 Pro)",
+                "org.rackforge.m-audio-hammer-88-pro",
+            ),
+            (
+                "Hammer 88 Pro Mackie/HUI",
+                "org.rackforge.m-audio-hammer-88-pro",
+            ),
+            (
+                "MIDIIN3 (Oxygen Pro Mini)",
+                "org.rackforge.m-audio-oxygen-pro-mini",
+            ),
+            (
+                "Oxygen Pro Mini:Oxygen Pro Mini Mackie/HUI 24:2",
+                "org.rackforge.m-audio-oxygen-pro-mini",
+            ),
+        ] {
+            assert_eq!(
+                resolved(&store, port, None).as_deref(),
+                Some(expected),
+                "{port}"
+            );
+        }
+        for port in ["Oxygen Pro Mini USB MIDI", "Oxygen Pro Mini Editor"] {
+            assert_eq!(resolved(&store, port, None), None, "{port}");
+        }
+
+        let oxygen = store
+            .resolve_identified_input("MIDIIN3 (Oxygen Pro 49)", None)
+            .unwrap()
+            .unwrap();
+        let mode = |command: u8, value: u8| {
+            vec![
+                0xf0, 0x00, 0x01, 0x05, 0x7f, 0x00, 0x00, command, 0x00, 0x01, value, 0xf7,
+            ]
+        };
+        assert_eq!(
+            oxygen.setup_messages,
+            vec![mode(0x6d, 2), mode(0x6e, 2), mode(0x6e, 7)]
+        );
+        let setup = oxygen.setup_output.as_ref().unwrap();
+        let pick = |input: &str, outputs: &[&str]| {
+            let outputs = outputs
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<_>>();
+            rackforge_controller_package::setup_output_port(setup, input, &outputs)
+        };
+        assert_eq!(
+            pick(
+                "MIDIIN3 (Oxygen Pro 49)",
+                &[
+                    "Oxygen Pro 49",
+                    "MIDIOUT2 (Oxygen Pro 49)",
+                    "MIDIOUT3 (Oxygen Pro 49)",
+                    "MIDIOUT4 (Oxygen Pro 49)"
+                ]
+            )
+            .as_deref(),
+            Some("MIDIOUT3 (Oxygen Pro 49)")
+        );
+        assert_eq!(
+            pick(
+                "Oxygen Pro 49 Mackie/HUI",
+                &[
+                    "Oxygen Pro 49 USB MIDI",
+                    "Oxygen Pro 49 MIDI DIN",
+                    "Oxygen Pro 49 Mackie/HUI",
+                    "Oxygen Pro 49 EDITOR"
+                ]
+            )
+            .as_deref(),
+            Some("Oxygen Pro 49 Mackie/HUI")
+        );
+    }
+
+    /// An Oxygen MKV is read on its second port, the one Ableton's script
+    /// reads, and never meets an Oxygen Pro of its size.
+    #[test]
+    fn an_oxygen_mkv_is_read_on_its_second_port() {
+        let (_root, store) = installed_store("oxygen-mkv");
+        for (size, port) in [
+            ("25", "MIDIIN2 (Oxygen 25 MKV)"),
+            ("49", "MIDIIN2 (Oxygen 49 MKV)"),
+            ("49", "Oxygen 49 MKV Mackie/HUI"),
+            ("61", "Oxygen 61 DAW"),
+        ] {
+            let expected = format!("org.rackforge.m-audio-oxygen-mkv-{size}");
+            assert_eq!(
+                resolved(&store, port, None).as_deref(),
+                Some(expected.as_str()),
+                "{port}"
+            );
+        }
+        for port in ["Oxygen 49 MKV", "Oxygen 49 MKV USB MIDI"] {
+            assert_eq!(resolved(&store, port, None), None, "{port}");
+        }
+        assert_eq!(
+            resolved(&store, "MIDIIN3 (Oxygen Pro 49)", None).as_deref(),
+            Some("org.rackforge.m-audio-oxygen-pro-49")
+        );
+        let mkv = store
+            .resolve_identified_input("MIDIIN2 (Oxygen 49 MKV)", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            mkv.setup_messages[0],
+            vec![
+                0xf0, 0x00, 0x01, 0x05, 0x7f, 0x00, 0x00, 0x6d, 0x00, 0x01, 0x00, 0xf7
+            ]
+        );
+    }
+
+    /// A Keystation MK3 is read on its first port, by the size and the MK3
+    /// in its name; its second port, the Mini 32 and older generations are
+    /// not its.
+    #[test]
+    fn a_keystation_mk3_is_known_by_the_size_in_its_port_name() {
+        let (_root, store) = installed_store("keystation-mk3");
+        for (size, port) in [
+            ("49", "Keystation 49 MK3"),
+            ("61", "Keystation 61 MK3:Keystation 61 MK3 MIDI 1 24:0"),
+            ("88", "Keystation 88 MK3"),
+        ] {
+            let expected = format!("org.rackforge.m-audio-keystation-{size}-mk3");
+            assert_eq!(
+                resolved(&store, port, None).as_deref(),
+                Some(expected.as_str()),
+                "{port}"
+            );
+        }
+        for port in [
+            "MIDIIN2 (Keystation 49 MK3)",
+            "Keystation 49 MK3 (Port 2)",
+            "Keystation 61 MK3:Keystation 61 MK3 MIDI 2 24:1",
+            "Keystation Mini 32 MK3",
+            "Keystation 49 II",
+            "Keystation 88 II",
+        ] {
+            assert_eq!(resolved(&store, port, None), None, "{port}");
         }
     }
 

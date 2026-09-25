@@ -25,6 +25,7 @@ use rackforge_control_api::{
     MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, RegisteredController,
     VirtualMidiMessage, decode_request, encode_line,
 };
+use rackforge_midi_api::control_layout::ControlLayout;
 use rackforge_midi_api::{ControlTakeover, MidiSourceDescriptor};
 use rackforge_midi_api::{
     IngressMidiEvent, MidiMessageKind, MidiPacket, ParameterLink, ParameterLinkMessage,
@@ -414,6 +415,9 @@ pub struct ControlServerOptions {
     pub checkpoint: Option<SessionCheckpointStore>,
     /// Where the player's controller maps are kept.
     pub controller_maps: ControllerMapStore,
+    /// What each plugin lays out for the keyboards: the maps offered are
+    /// made from them.
+    pub control_layouts: Vec<ControlLayout>,
     /// The controller package store, where a controller the player makes
     /// is installed. The controller host attaches it from there.
     pub controllers_root: Option<PathBuf>,
@@ -452,7 +456,11 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         )
     })?;
 
-    match options.controller_maps.seed_factory_maps() {
+    let factory_maps = crate::controller_layouts::factory_maps(
+        &crate::controller_layouts::slotted_controllers(options.controllers_root.as_deref()),
+        &options.control_layouts,
+    );
+    match options.controller_maps.seed_factory_maps(&factory_maps) {
         Ok(seeded) if !seeded.is_empty() => {
             eprintln!("FACTORY_CONTROLLER_MAPS_SEEDED controllers={seeded:?}");
         }
@@ -2989,6 +2997,7 @@ fn controller_maps(context: &ControlContext) -> ControlResponse {
         controllers,
         maps,
         takeover,
+        factory_untouched: context.controller_map_store.untouched_factory_maps(),
     }
 }
 

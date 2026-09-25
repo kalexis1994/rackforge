@@ -256,6 +256,10 @@ impl AndroidMidiController {
 struct AndroidControllerMaps {
     store: Option<ControllerMapStore>,
     data_root: Option<PathBuf>,
+    /// Where the plugins and the controller packages are installed: the
+    /// maps offered are made from what is there.
+    plugin_store_root: Option<PathBuf>,
+    controller_store_root: Option<PathBuf>,
     maps: BTreeMap<String, ControllerMap>,
     /// How knobs and faders take a parameter over, as stored.
     takeover: ControlTakeover,
@@ -3049,15 +3053,7 @@ fn ensure_controller_maps(data_root: &Path) -> Result<bool> {
         return Ok(false);
     }
     let store = ControllerMapStore::new(Some(data_root));
-    // An offer that fails costs the player nothing they had: their maps
-    // still load.
-    match store.seed_factory_maps() {
-        Ok(seeded) if !seeded.is_empty() => {
-            println!("FACTORY_CONTROLLER_MAPS_SEEDED controllers={seeded:?}");
-        }
-        Ok(_) => {}
-        Err(error) => eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}"),
-    }
+    offer_android_factory_maps(&store, &maps);
     maps.maps = store
         .load_all()
         .map_err(|error| anyhow::anyhow!("loading controller maps: {error:#}"))?;
@@ -3065,6 +3061,63 @@ fn ensure_controller_maps(data_root: &Path) -> Result<bool> {
     maps.store = Some(store);
     maps.data_root = Some(data_root.to_path_buf());
     Ok(true)
+}
+
+/// Offers each keyboard the map made from the installed plugins' control
+/// layouts. An offer that fails costs the player nothing they had: their
+/// maps still load.
+fn offer_android_factory_maps(store: &ControllerMapStore, maps: &AndroidControllerMaps) {
+    use rackforge_core::controller_layouts::{control_layouts, factory_maps, slotted_controllers};
+    let packages = maps
+        .plugin_store_root
+        .as_deref()
+        .map(installed_plugin_packages)
+        .unwrap_or_default();
+    let layouts = control_layouts(
+        packages
+            .iter()
+            .map(|package| (package.manifest().id.as_str(), package.root())),
+    );
+    let controllers = slotted_controllers(maps.controller_store_root.as_deref());
+    match store.seed_factory_maps(&factory_maps(&controllers, &layouts)) {
+        Ok(seeded) if !seeded.is_empty() => {
+            println!("FACTORY_CONTROLLER_MAPS_SEEDED controllers={seeded:?}");
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}"),
+    }
+}
+
+/// After a plugin is installed or removed: what each keyboard is offered
+/// changes, the stored maps take it in, and the links follow them.
+fn reoffer_android_factory_maps() -> Result<()> {
+    {
+        let mut maps = controller_maps()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+        let Some(store) = maps.store.clone() else {
+            return Ok(());
+        };
+        offer_android_factory_maps(&store, &maps);
+        maps.maps = store
+            .load_all()
+            .map_err(|error| anyhow::anyhow!("loading controller maps: {error:#}"))?;
+    }
+    recompile_engine_parameter_links()
+}
+
+/// The newest enabled package of every installed plugin.
+fn installed_plugin_packages(store_root: &Path) -> Vec<PluginPackage> {
+    let Ok(entries) = std::fs::read_dir(store_root.join("packages")) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let plugin_id = entry.file_name().into_string().ok()?;
+            installed_package(store_root, &plugin_id).ok()
+        })
+        .collect()
 }
 
 /// Stores how knobs and faders take a parameter over and applies it at once.
@@ -4923,6 +4976,10 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installPluginFile
         let package = PluginPackage::open(&installed.path)
             .with_context(|| format!("opening installed plugin {}", installed.path.display()))?;
         let mut descriptor = package_descriptor(&package, false);
+        // A layout the new package carries reaches the keyboards' maps.
+        if let Err(error) = reoffer_android_factory_maps() {
+            eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}");
+        }
         descriptor["already_installed"] = installed.already_installed.into();
         descriptor["artifact_sha256"] = installed.record.artifact_sha256.into();
         Ok(descriptor.to_string())
@@ -4972,6 +5029,9 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_uninstallPlugin(
             .is_some_and(|active| active.plugin_id == plugin_id);
         let removed = uninstall_plugin(&store_root, &plugin_id)
             .context("removing the managed plugin package")?;
+        if let Err(error) = reoffer_android_factory_maps() {
+            eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}");
+        }
         if is_active {
             midi_queue()
                 .lock()
@@ -5077,6 +5137,9 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_setInstalledPlugi
         let plugin_id = java_string(&mut env, plugin_id)?;
         let store_root = PathBuf::from(java_string(&mut env, store_root)?);
         set_plugin_enabled(&store_root, &plugin_id, enabled == JNI_TRUE)?;
+        if let Err(error) = reoffer_android_factory_maps() {
+            eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}");
+        }
         Ok(())
     })();
     match result {
@@ -5371,9 +5434,19 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_loadControllerMap
     mut env: JNIEnv,
     _class: JClass,
     data_root: JString,
+    plugin_store_root: JString,
+    controller_store_root: JString,
 ) -> jboolean {
     let result = (|| -> Result<()> {
         let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        {
+            let mut maps = controller_maps()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+            maps.plugin_store_root = Some(PathBuf::from(java_string(&mut env, plugin_store_root)?));
+            maps.controller_store_root =
+                Some(PathBuf::from(java_string(&mut env, controller_store_root)?));
+        }
         if ensure_controller_maps(&data_root)? {
             recompile_engine_parameter_links()?;
         }
@@ -5509,6 +5582,11 @@ fn android_controller_maps_response() -> Result<ControlResponse> {
         controllers: registered.into_values().collect(),
         maps: maps.maps.values().cloned().collect(),
         takeover: maps.takeover,
+        factory_untouched: maps
+            .store
+            .as_ref()
+            .map(ControllerMapStore::untouched_factory_maps)
+            .unwrap_or_default(),
     })
 }
 

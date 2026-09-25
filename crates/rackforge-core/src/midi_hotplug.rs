@@ -276,6 +276,39 @@ pub fn stable_alsa_source_id(name: &str) -> Result<MidiSourceId, anyhow::Error> 
     MidiSourceId::new(format!("alsa.{slug}-{hash:016x}")).map_err(Into::into)
 }
 
+/// The inputs controller packages claim as their performance input, set once
+/// at startup from the packages the host knows.
+static CLAIMED_INPUTS: std::sync::OnceLock<Vec<rackforge_controller_package::EndpointMatcher>> =
+    std::sync::OnceLock::new();
+
+/// Takes the performance inputs of these packages as ports to read,
+/// whatever they are called. Only the first call counts.
+pub fn claim_controller_inputs(
+    packages: &[rackforge_controller_package::ControllerPackageManifest],
+) {
+    let matchers = packages
+        .iter()
+        .flat_map(|package| &package.devices)
+        .flat_map(|device| &device.endpoints)
+        .filter(|endpoint| {
+            endpoint.role == rackforge_controller_package::EndpointRole::PerformanceInput
+        })
+        .cloned()
+        .collect();
+    let _ = CLAIMED_INPUTS.set(matchers);
+}
+
+/// Whether RackForge reads a MIDI input: a keyboard it plays from, or a
+/// port a controller package claims as its own -- the DAW port an Oxygen
+/// Pro's knobs send on, which a name alone would leave out.
+pub fn is_played_midi_input(name: &str) -> bool {
+    is_performance_midi_input(name)
+        || CLAIMED_INPUTS.get().is_some_and(|matchers| {
+            !name.to_ascii_lowercase().contains("rackforge")
+                && matchers.iter().any(|matcher| matcher.matches(name))
+        })
+}
+
 /// Whether a port name is a keyboard RackForge should play from.
 ///
 /// Excludes the loopback, the DIN pass-through and the control-surface ports a
@@ -298,7 +331,7 @@ pub use supervisor::{DEFAULT_POLL_INTERVAL, spawn};
 mod supervisor {
     use super::{
         PanicScope, SupervisedMidiSources, SupervisedSource, SupervisorAction,
-        is_performance_midi_input, panic_events, stable_alsa_source_id,
+        is_played_midi_input, panic_events, stable_alsa_source_id,
     };
     use anyhow::{Context, Result};
     use midir::{Ignore, MidiInput, MidiInputConnection};
@@ -500,7 +533,7 @@ mod supervisor {
         let mut present: Vec<(MidiSourceId, String)> = Vec::new();
         for port in scan.ports() {
             let name = scan.port_name(&port)?;
-            if !is_performance_midi_input(&name) {
+            if !is_played_midi_input(&name) {
                 continue;
             }
             let id = stable_alsa_source_id(&name)?;
@@ -527,7 +560,7 @@ mod supervisor {
             .find(|port| {
                 midi.port_name(port)
                     .ok()
-                    .filter(|name| is_performance_midi_input(name))
+                    .filter(|name| is_played_midi_input(name))
                     .and_then(|name| stable_alsa_source_id(&name).ok())
                     .is_some_and(|candidate| &candidate == id)
             })
@@ -1020,5 +1053,21 @@ mod tests {
         ));
         assert!(!is_performance_midi_input("KL Essential 61 mk3 ALV 28:3"));
         assert!(!is_performance_midi_input("Midi Through MIDI 0:1"));
+    }
+
+    /// A port a controller package claims is read though its name would
+    /// leave it out; the surface ports nobody claims stay out.
+    #[test]
+    fn a_port_a_controller_package_claims_is_read() {
+        claim_controller_inputs(&crate::controller_layouts::known_controller_packages(None));
+        assert!(is_played_midi_input(
+            "Oxygen Pro 49:Oxygen Pro 49 Mackie/HUI 24:2"
+        ));
+        assert!(is_played_midi_input("KL Essential 61 mk3 MIDI 28:0"));
+        assert!(!is_played_midi_input("KL Essential 61 mk3 MCU/HUI 28:2"));
+        assert!(!is_played_midi_input(
+            "Oxygen Pro 49:Oxygen Pro 49 Editor 24:3"
+        ));
+        assert!(!is_played_midi_input("Midi Through MIDI 0:1"));
     }
 }

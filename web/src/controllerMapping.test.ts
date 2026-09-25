@@ -268,6 +268,23 @@ describe("which controllers the editor shows", () => {
     );
     expect(devices.map((device) => device.id)).toEqual([launchkey.id, keylab.id, minilab.id]);
   });
+
+  it("does not list a catalog keyboard for its factory map alone", () => {
+    const catalog = { ...keylab, runtime: "DeclarativeV1" };
+    const launchkey = { ...catalog, id: "org.rackforge.novation-launchkey-mk3-49", name: "Launchkey 49 [MK3]" };
+    const flkey = { ...catalog, id: "org.rackforge.novation-flkey-49", name: "FLkey 49" };
+    const mini = { ...catalog, id: "org.rackforge.novation-launchkey-mini-mk3", name: "Launchkey Mini [MK3]" };
+    const maps = [launchkey, flkey, mini, keylab].map((entry) => emptyControllerMap(entry.id, entry.name));
+    const devices = buildControllerDevices(
+      [launchkey, flkey, mini, keylab],
+      [{ controller_id: mini.id, source: { id: "alsa.mini", name: "Launchkey Mini MK3 MIDI" }, connected: true }],
+      maps,
+      // The FLkey's map is the player's; the others are as RackForge offered
+      // them. The KeyLab is not a catalog package: it shows either way.
+      new Set([launchkey.id, mini.id, keylab.id]),
+    );
+    expect(devices.map((device) => device.id).sort()).toEqual([flkey.id, keylab.id, mini.id].sort());
+  });
 });
 
 describe("a controller RackForge does not know", () => {

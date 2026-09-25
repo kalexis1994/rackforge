@@ -3,7 +3,7 @@ kind = "controller"
 id = "org.rackforge.arturia-keylab-essential-mk3"
 name = "Arturia KeyLab Essential 61 mk3"
 vendor = "Arturia"
-version = "0.4.0"
+version = "0.5.0"
 controller_api = "^1.0"
 # The identity the controls had under schema 1: what a player learnt on them
 # stays linked across the move.
@@ -46,6 +46,7 @@ name = "Knob 1"
 kind = "knob"
 group = "Knobs"
 midi = { cc = 96, channel = 0 }
+slot = "control-2.1"
 
 [[inputs]]
 id = "encoder-2"
@@ -53,6 +54,7 @@ name = "Knob 2"
 kind = "knob"
 group = "Knobs"
 midi = { cc = 97, channel = 0 }
+slot = "control-2.2"
 
 [[inputs]]
 id = "encoder-3"
@@ -60,6 +62,7 @@ name = "Knob 3"
 kind = "knob"
 group = "Knobs"
 midi = { cc = 98, channel = 0 }
+slot = "control-2.3"
 
 [[inputs]]
 id = "encoder-4"
@@ -67,6 +70,7 @@ name = "Knob 4"
 kind = "knob"
 group = "Knobs"
 midi = { cc = 99, channel = 0 }
+slot = "control-2.4"
 
 [[inputs]]
 id = "encoder-5"
@@ -74,6 +78,7 @@ name = "Knob 5"
 kind = "knob"
 group = "Knobs"
 midi = { cc = 100, channel = 0 }
+slot = "control-2.5"
 
 [[inputs]]
 id = "encoder-6"
@@ -81,6 +86,7 @@ name = "Knob 6"
 kind = "knob"
 group = "Knobs"
 midi = { cc = 101, channel = 0 }
+slot = "control-2.6"
 
 [[inputs]]
 id = "encoder-7"
@@ -88,6 +94,7 @@ name = "Knob 7"
 kind = "knob"
 group = "Knobs"
 midi = { cc = 102, channel = 0 }
+slot = "control-2.7"
 
 [[inputs]]
 id = "encoder-8"
@@ -95,6 +102,7 @@ name = "Knob 8"
 kind = "knob"
 group = "Knobs"
 midi = { cc = 103, channel = 0 }
+slot = "control-2.8"
 
 # Knob 9 is declared an encoder, reading absolute values, only so its pan
 # role can follow it relatively (see the role below): a package reads only
@@ -112,6 +120,7 @@ name = "Fader 1"
 kind = "fader"
 group = "Faders"
 midi = { cc = 105, channel = 0 }
+slot = "control-1.1"
 
 [[inputs]]
 id = "fader-2"
@@ -119,6 +128,7 @@ name = "Fader 2"
 kind = "fader"
 group = "Faders"
 midi = { cc = 106, channel = 0 }
+slot = "control-1.2"
 
 [[inputs]]
 id = "fader-3"
@@ -126,6 +136,7 @@ name = "Fader 3"
 kind = "fader"
 group = "Faders"
 midi = { cc = 107, channel = 0 }
+slot = "control-1.3"
 
 [[inputs]]
 id = "fader-4"
@@ -133,6 +144,7 @@ name = "Fader 4"
 kind = "fader"
 group = "Faders"
 midi = { cc = 108, channel = 0 }
+slot = "control-1.4"
 
 [[inputs]]
 id = "fader-5"
@@ -140,6 +152,7 @@ name = "Fader 5"
 kind = "fader"
 group = "Faders"
 midi = { cc = 109, channel = 0 }
+slot = "control-1.5"
 
 [[inputs]]
 id = "fader-6"
@@ -147,6 +160,7 @@ name = "Fader 6"
 kind = "fader"
 group = "Faders"
 midi = { cc = 110, channel = 0 }
+slot = "control-1.6"
 
 [[inputs]]
 id = "fader-7"
@@ -154,6 +168,7 @@ name = "Fader 7"
 kind = "fader"
 group = "Faders"
 midi = { cc = 111, channel = 0 }
+slot = "control-1.7"
 
 [[inputs]]
 id = "fader-8"
@@ -161,6 +176,7 @@ name = "Fader 8"
 kind = "fader"
 group = "Faders"
 midi = { cc = 112, channel = 0 }
+slot = "control-1.8"
 
 [[inputs]]
 id = "fader-9"
@@ -178,6 +194,7 @@ name = "Pad 1"
 kind = "pad"
 group = "Pads bank 1"
 midi = { note = 40, channel = 10 }
+slot = "switch-1.1"
 
 [[inputs]]
 id = "pad-2"
@@ -185,6 +202,7 @@ name = "Pad 2"
 kind = "pad"
 group = "Pads bank 1"
 midi = { note = 41, channel = 10 }
+slot = "switch-1.2"
 
 [[inputs]]
 id = "pad-3"
@@ -192,6 +210,7 @@ name = "Pad 3"
 kind = "pad"
 group = "Pads bank 1"
 midi = { note = 42, channel = 10 }
+slot = "switch-1.3"
 
 [[inputs]]
 id = "pad-4"
@@ -199,6 +218,7 @@ name = "Pad 4"
 kind = "pad"
 group = "Pads bank 1"
 midi = { note = 43, channel = 10 }
+slot = "switch-1.4"
 
 [[inputs]]
 id = "pad-5"
@@ -206,6 +226,7 @@ name = "Pad 5"
 kind = "pad"
 group = "Pads bank 1"
 midi = { note = 36, channel = 10 }
+slot = "switch-1.5"
 
 [[inputs]]
 id = "pad-6"
@@ -213,6 +234,7 @@ name = "Pad 6"
 kind = "pad"
 group = "Pads bank 1"
 midi = { note = 37, channel = 10 }
+slot = "switch-1.6"
 
 [[inputs]]
 id = "pad-7"
@@ -220,6 +242,7 @@ name = "Pad 7"
 kind = "pad"
 group = "Pads bank 1"
 midi = { note = 38, channel = 10 }
+slot = "switch-1.7"
 
 [[inputs]]
 id = "pad-8"
@@ -227,6 +250,7 @@ name = "Pad 8"
 kind = "pad"
 group = "Pads bank 1"
 midi = { note = 39, channel = 10 }
+slot = "switch-1.8"
 
 [[inputs]]
 id = "pad-b1"
@@ -234,6 +258,7 @@ name = "Pad 1 (bank 2)"
 kind = "pad"
 group = "Pads bank 2"
 midi = { note = 48, channel = 10 }
+slot = "switch-2.1"
 
 [[inputs]]
 id = "pad-b2"
@@ -241,6 +266,7 @@ name = "Pad 2 (bank 2)"
 kind = "pad"
 group = "Pads bank 2"
 midi = { note = 49, channel = 10 }
+slot = "switch-2.2"
 
 [[inputs]]
 id = "pad-b3"
@@ -248,6 +274,7 @@ name = "Pad 3 (bank 2)"
 kind = "pad"
 group = "Pads bank 2"
 midi = { note = 50, channel = 10 }
+slot = "switch-2.3"
 
 [[inputs]]
 id = "pad-b4"
@@ -255,6 +282,7 @@ name = "Pad 4 (bank 2)"
 kind = "pad"
 group = "Pads bank 2"
 midi = { note = 51, channel = 10 }
+slot = "switch-2.4"
 
 [[inputs]]
 id = "pad-b5"
@@ -262,6 +290,7 @@ name = "Pad 5 (bank 2)"
 kind = "pad"
 group = "Pads bank 2"
 midi = { note = 44, channel = 10 }
+slot = "switch-2.5"
 
 [[inputs]]
 id = "pad-b6"
@@ -269,6 +298,7 @@ name = "Pad 6 (bank 2)"
 kind = "pad"
 group = "Pads bank 2"
 midi = { note = 45, channel = 10 }
+slot = "switch-2.6"
 
 [[inputs]]
 id = "pad-b7"
@@ -276,6 +306,7 @@ name = "Pad 7 (bank 2)"
 kind = "pad"
 group = "Pads bank 2"
 midi = { note = 46, channel = 10 }
+slot = "switch-2.7"
 
 [[inputs]]
 id = "pad-b8"
@@ -283,6 +314,7 @@ name = "Pad 8 (bank 2)"
 kind = "pad"
 group = "Pads bank 2"
 midi = { note = 47, channel = 10 }
+slot = "switch-2.8"
 
 # The buttons that send a control change the driver does not own: 127 on
 # press, 0 on release.
@@ -308,6 +340,7 @@ name = "Save"
 kind = "button"
 group = "Buttons"
 midi = { cc = 40, channel = 0 }
+slot = "switch-3.1"
 button = { press = 127, release = 0 }
 
 [[inputs]]
@@ -316,6 +349,7 @@ name = "Quant"
 kind = "button"
 group = "Buttons"
 midi = { cc = 41, channel = 0 }
+slot = "switch-3.2"
 button = { press = 127, release = 0 }
 
 [[inputs]]
@@ -324,6 +358,7 @@ name = "Undo"
 kind = "button"
 group = "Buttons"
 midi = { cc = 42, channel = 0 }
+slot = "step-2.down"
 button = { press = 127, release = 0 }
 
 [[inputs]]
@@ -332,6 +367,7 @@ name = "Redo"
 kind = "button"
 group = "Buttons"
 midi = { cc = 43, channel = 0 }
+slot = "step-2.up"
 button = { press = 127, release = 0 }
 
 [[inputs]]
@@ -340,6 +376,7 @@ name = "Rewind"
 kind = "button"
 group = "Buttons"
 midi = { cc = 25, channel = 0 }
+slot = "step.down"
 button = { press = 127, release = 0 }
 
 [[inputs]]
@@ -348,6 +385,7 @@ name = "Forward"
 kind = "button"
 group = "Buttons"
 midi = { cc = 26, channel = 0 }
+slot = "step.up"
 button = { press = 127, release = 0 }
 
 [[inputs]]
@@ -356,6 +394,7 @@ name = "Metronome"
 kind = "button"
 group = "Buttons"
 midi = { cc = 27, channel = 0 }
+slot = "switch-3.3"
 button = { press = 127, release = 0 }
 
 [[inputs]]
@@ -371,6 +410,7 @@ name = "Modulation"
 kind = "wheel"
 group = "Wheels"
 midi = { cc = 1, channel = 0 }
+slot = "mod-wheel"
 
 # RackForge Control Profile v1. The first eight knobs and faders are
 # transport-independent controls. Knob 9 and fader 9 use the same semantic

@@ -59,6 +59,8 @@ interface Loaded {
   packages: ControllerPackageSummary[];
   registered: RegisteredController[];
   maps: ControllerMap[];
+  /** Controllers whose map is still RackForge's factory map, as offered. */
+  factoryUntouched: string[];
   sources: MidiSourceStatus[];
 }
 
@@ -139,6 +141,7 @@ export function ControllersPage() {
       packages: packages ?? current?.packages ?? [],
       registered: maps.controllers,
       maps: maps.maps,
+      factoryUntouched: maps.factoryUntouched,
       sources: sources ?? current?.sources ?? [],
     }));
     setLoadError(null);
@@ -164,7 +167,12 @@ export function ControllersPage() {
 
   const devices = useMemo(() => {
     if (!loaded) return [];
-    const known = buildControllerDevices(loaded.packages, loaded.registered, loaded.maps);
+    const known = buildControllerDevices(
+      loaded.packages,
+      loaded.registered,
+      loaded.maps,
+      new Set(loaded.factoryUntouched),
+    );
     if (!keepsMaps) return known;
     const claimed = new Set(
       loaded.registered.flatMap((entry) => (entry.source ? [entry.source.id] : [])),
@@ -273,6 +281,8 @@ export function ControllersPage() {
               ...current.maps.filter((candidate) => candidate.controller_id !== map.controller_id),
               ...(map.plugins.length > 0 ? [map] : []),
             ],
+            // Saved by the player, it is theirs now.
+            factoryUntouched: current.factoryUntouched.filter((id) => id !== map.controller_id),
           }
         : current,
     );

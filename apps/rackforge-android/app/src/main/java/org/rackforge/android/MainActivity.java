@@ -309,7 +309,8 @@ public final class MainActivity extends Activity {
     private static native String performanceCommand(String dataRoot, String requestJson,
             String packageRootsJson);
     private static native String liveCommand(String dataRoot, String commandJson);
-    private static native boolean loadControllerMaps(String dataRoot);
+    private static native boolean loadControllerMaps(String dataRoot, String pluginStoreRoot,
+            String controllerStoreRoot);
     private static native boolean identifyMidiSource(int sourceKey, byte[] reply);
     private static native String midiSourceConnectPlan(int sourceKey);
     private static native int midiSetupPort(int sourceKey, String portNamesJson);
@@ -5317,7 +5318,8 @@ public final class MainActivity extends Activity {
         try {
             // Before the links compile: a mapped control works from the
             // first note.
-            loadControllerMaps(pluginDataRoot().getAbsolutePath());
+            loadControllerMaps(pluginDataRoot().getAbsolutePath(),
+                    pluginStoreRoot().getAbsolutePath(), controllerStoreRoot());
         } catch (Throwable error) {
             Log.e("RackForge", "Could not load the controller maps", error);
         }

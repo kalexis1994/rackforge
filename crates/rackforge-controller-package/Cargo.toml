@@ -8,6 +8,7 @@ description = "Validated, versioned controller packages and installation store f
 [dependencies]
 rackforge-control-profile = { path = "../rackforge-control-profile" }
 rackforge-controller-api = { path = "../rackforge-controller-api" }
+rackforge-midi-api = { path = "../rackforge-midi-api" }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true

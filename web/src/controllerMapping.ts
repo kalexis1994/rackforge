@@ -734,12 +734,19 @@ export function buildControllerDevices(
     identified?: boolean;
   }>,
   maps: readonly ControllerMap[],
+  /** Controllers whose map is still RackForge's factory map, as offered. */
+  factoryUntouched: ReadonlySet<string> = new Set(),
 ): ControllerDevice[] {
+  const catalog = new Set(packages.filter(isCatalogPackage).map((entry) => entry.id));
   const ids = new Set<string>([
     ...registered.map((entry) => entry.controller_id),
-    ...maps.map((map) => map.controller_id),
     // RackForge's catalog describes dozens of keyboards the player may never
-    // own: one of them shows once it is plugged in or has a map, not before.
+    // own: one of them shows once it is plugged in or has a map of the
+    // player's, not before. Every one comes with a factory map; that alone
+    // does not list it.
+    ...maps
+      .filter((map) => !(catalog.has(map.controller_id) && factoryUntouched.has(map.controller_id)))
+      .map((map) => map.controller_id),
     ...packages
       .filter((entry) => entry.enabled && !isCatalogPackage(entry))
       .map((entry) => entry.id),

@@ -647,6 +647,36 @@ impl ProcessDriverInfo {
 }
 
 impl ControllerPackageManifest {
+    /// The controls that fill a slot of the plugins' control layouts, in
+    /// the package's order.
+    pub fn slotted_inputs(&self) -> Vec<rackforge_midi_api::control_layout::SlottedInput> {
+        self.inputs
+            .iter()
+            .filter_map(ControllerInput::slotted_input)
+            .collect()
+    }
+
+    /// Whether the package reads the MIDI input named so as its performance
+    /// input: a host plays and reads such a port whatever it is called, even
+    /// a DAW port another keyboard's would be left alone.
+    pub fn claims_performance_input(&self, endpoint_name: &str) -> bool {
+        self.devices.iter().any(|device| {
+            device.endpoints.iter().any(|endpoint| {
+                endpoint.role == EndpointRole::PerformanceInput && endpoint.matches(endpoint_name)
+            })
+        })
+    }
+
+    /// The controller as a player knows it: its maker, then its name, once.
+    pub fn display_name(&self) -> String {
+        match &self.vendor {
+            Some(vendor) if !self.name.starts_with(vendor.as_str()) => {
+                format!("{vendor} {}", self.name)
+            }
+            _ => self.name.clone(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), PackageError> {
         match self.schema_version {
             CONTROLLER_PACKAGE_SCHEMA_VERSION => self.validate_schema_1_fields()?,
@@ -943,6 +973,7 @@ impl ControllerPackageManifest {
                     },
                     button,
                     encoder: None,
+                    slot: None,
                 });
             }
             id

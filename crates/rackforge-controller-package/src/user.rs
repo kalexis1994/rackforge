@@ -245,6 +245,7 @@ mod tests {
                 },
                 button: None,
                 encoder: None,
+                slot: None,
             }],
         }
     }

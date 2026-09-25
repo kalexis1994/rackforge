@@ -13,6 +13,9 @@ use rackforge_controller_api::{
     HostActionBinding, HostActionTarget, MidiButtonBinding, MidiControlChangeBinding, MidiRealtime,
     SemanticControlBinding, SemanticControlMode, SemanticControlProfile,
 };
+use rackforge_midi_api::control_layout::{ControlSlot, SlottedInput};
+use rackforge_midi_api::controller_map::MappedInput;
+use rackforge_midi_api::{MidiChannel, ParameterLinkChannel, ParameterLinkMessage};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -184,9 +187,72 @@ pub struct ControllerInput {
     pub button: Option<ButtonReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encoder: Option<EncoderEncoding>,
+    /// The place this control fills in every plugin's control layout: what
+    /// it does in each instrument RackForge offers a map for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<ControlSlot>,
 }
 
 impl ControllerInput {
+    /// This control in its slot, with the message a map listens to; `None`
+    /// without a slot.
+    pub fn slotted_input(&self) -> Option<SlottedInput> {
+        let slot = self.slot?;
+        let channel = MidiChannel::from_zero_based(self.midi.channel).ok()?;
+        let message = match self.midi.message().ok()? {
+            InputMessage::ControlChange { controller, .. } => {
+                ParameterLinkMessage::ControlChange { controller }
+            }
+            InputMessage::Note { note, .. } => ParameterLinkMessage::Note { note },
+            InputMessage::PitchBend { .. } | InputMessage::Realtime(_) => return None,
+        };
+        Some(SlottedInput {
+            slot,
+            input: MappedInput {
+                id: self.id.clone(),
+                name: self.name.clone(),
+                channel: ParameterLinkChannel::Channel { channel },
+                message,
+            },
+        })
+    }
+
+    /// Whether the control can fill its slot: a knob, fader or encoder a
+    /// row of continuous controls, the modulation wheel the wheel's slot,
+    /// a button or pad a switch or a step; each sending a control change
+    /// or a note a map can listen to.
+    fn validate_slot(&self, message: InputMessage) -> Result<(), String> {
+        let Some(slot) = self.slot else {
+            return Ok(());
+        };
+        let fits = match slot {
+            ControlSlot::Control { .. } => matches!(
+                self.kind,
+                InputKind::Knob | InputKind::Fader | InputKind::Encoder
+            ),
+            ControlSlot::ModWheel => self.kind == InputKind::Wheel,
+            ControlSlot::Switch { .. } | ControlSlot::Step { .. } => {
+                matches!(self.kind, InputKind::Button | InputKind::Pad)
+            }
+        };
+        if !fits {
+            return Err(format!(
+                "input {:?}: a {:?} cannot fill slot {slot}",
+                self.id, self.kind
+            ));
+        }
+        if !matches!(
+            message,
+            InputMessage::ControlChange { .. } | InputMessage::Note { .. }
+        ) {
+            return Err(format!(
+                "input {:?}: slot {slot} needs a control change or a note",
+                self.id
+            ));
+        }
+        Ok(())
+    }
+
     /// The button report a button input uses, its own or the default.
     pub fn button_report(&self) -> ButtonReport {
         self.button.unwrap_or_default()
@@ -266,6 +332,7 @@ impl ControllerInput {
                 self.id
             ));
         }
+        self.validate_slot(message)?;
         Ok(message)
     }
 }
@@ -336,10 +403,19 @@ pub fn validate_inputs(
 ) -> Result<(), String> {
     let mut ids = BTreeSet::new();
     let mut messages = BTreeMap::new();
+    let mut slots = BTreeMap::new();
     for input in inputs {
         let message = input.validate()?;
         if !ids.insert(input.id.as_str()) {
             return Err(format!("duplicate input id {:?}", input.id));
+        }
+        if let Some(slot) = input.slot
+            && let Some(other) = slots.insert(slot, input.id.as_str())
+        {
+            return Err(format!(
+                "inputs {other:?} and {:?} fill the same slot {slot}",
+                input.id
+            ));
         }
         if let Some(other) = messages.insert(message, input.id.as_str()) {
             return Err(format!(
@@ -379,6 +455,13 @@ pub fn validate_inputs(
             .ok_or_else(|| format!("action names unknown input {:?}", action.input))?;
         action.target.validate()?;
         action_trigger(action.target, input)?;
+        // The host takes an action's button before any map hears it.
+        if let Some(slot) = input.slot {
+            return Err(format!(
+                "input {:?} has a host action and cannot also fill slot {slot}",
+                action.input
+            ));
+        }
         if !meanings.insert(action.input.as_str()) {
             return Err(format!(
                 "input {:?} has more than one meaning",
@@ -576,6 +659,7 @@ mod tests {
             },
             button: None,
             encoder: None,
+            slot: None,
         }
     }
 
@@ -640,7 +724,42 @@ mod tests {
             },
             button: None,
             encoder: None,
+            slot: None,
         }
+    }
+
+    fn slotted(mut input: ControllerInput, slot: &str) -> ControllerInput {
+        input.slot = Some(slot.parse().unwrap());
+        input
+    }
+
+    /// A knob fills a row, a button a switch or a step, and no two controls
+    /// fill one slot; a button the host takes for an action fills none.
+    #[test]
+    fn a_control_fills_a_slot_of_its_own_kind() {
+        let knob_row = slotted(knob("knob-1", 21), "control-1.1");
+        let switch = slotted(button("button-1", 40), "switch-1.1");
+        validate_inputs(&[knob_row.clone(), switch.clone()], &[], &[]).unwrap();
+
+        let knob_switch = slotted(knob("knob-2", 22), "switch-1.2");
+        assert!(validate_inputs(&[knob_switch], &[], &[]).is_err());
+        let button_row = slotted(button("button-2", 41), "control-1.2");
+        assert!(validate_inputs(&[button_row], &[], &[]).is_err());
+        let twice = slotted(knob("knob-3", 23), "control-1.1");
+        assert!(validate_inputs(&[knob_row.clone(), twice], &[], &[]).is_err());
+        let action = InputAction {
+            input: "button-1".into(),
+            target: HostActionTarget::TransportPlay,
+        };
+        assert!(validate_inputs(&[switch], &[], &[action]).is_err());
+
+        let slotted_input = knob_row.slotted_input().unwrap();
+        assert_eq!(slotted_input.slot.to_string(), "control-1.1");
+        assert_eq!(
+            slotted_input.input.message,
+            ParameterLinkMessage::ControlChange { controller: 21 }
+        );
+        assert!(knob("knob-4", 24).slotted_input().is_none());
     }
 
     /// A Launchkey MK4's Play and Stop send MIDI Start and Stop: they are

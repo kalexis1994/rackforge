@@ -3861,6 +3861,7 @@ version = "0.1.23"
 dependencies = [
  "rackforge-control-profile",
  "rackforge-controller-api",
+ "rackforge-midi-api",
  "semver",
  "serde",
  "serde_json",
@@ -3882,6 +3883,7 @@ dependencies = [
  "rackforge-audio-api",
  "rackforge-control-api",
  "rackforge-controller-api",
+ "rackforge-controller-catalog",
  "rackforge-controller-package",
  "rackforge-midi-api",
  "rackforge-performance-api",

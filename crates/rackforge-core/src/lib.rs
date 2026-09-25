@@ -6,6 +6,7 @@ pub mod audio_reliability;
 pub mod capture_route;
 #[cfg(target_os = "linux")]
 pub mod control;
+pub mod controller_layouts;
 pub mod controller_map_store;
 pub mod default_instrument;
 /// The handshake between the interface and the native shell holding it.

@@ -1151,6 +1151,8 @@ export function requestControllerMaps(): Promise<{
   controllers: RegisteredController[];
   maps: ControllerMap[];
   takeover: ControlTakeover;
+  /** Controllers whose map is still RackForge's factory map, as offered. */
+  factoryUntouched: string[];
 }> {
   return requestPresetOperation(
     { op: "controller_maps" },
@@ -1159,6 +1161,7 @@ export function requestControllerMaps(): Promise<{
       controllers: (message.controllers ?? []) as RegisteredController[],
       maps: (message.maps ?? []) as ControllerMap[],
       takeover: controlTakeover(message.takeover),
+      factoryUntouched: (message.factory_untouched ?? []) as string[],
     }),
   );
 }

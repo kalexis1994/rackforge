@@ -6,11 +6,12 @@
 //! the controller package, which RackForge replaces on update. Writes go to
 //! a temporary file renamed into place, so a map is never half written.
 //!
-//! RackForge ships a map for the controllers it bundles, made for its own
-//! instruments. It is offered once, into the player's store, and kept up to
-//! date only while the player leaves it as it came: the copy last offered
-//! sits in `controller-maps/factory/`, and a stored map that still equals it
-//! was never touched.
+//! Each controller that names slots is offered a map made from the plugins'
+//! control layouts (`controller_layouts`). It is offered into the player's
+//! store and kept up to date, plugin by plugin, while the player leaves
+//! that plugin's mappings as they came: the copy last offered sits in
+//! `controller-maps/factory/`, and mappings that still equal it were never
+//! touched.
 
 use anyhow::{Context, Result, bail};
 use rackforge_midi_api::ControlTakeover;
@@ -25,31 +26,6 @@ pub const CONTROLLER_MAP_DIRECTORY: &str = "controller-maps";
 const MAX_MAP_BYTES: u64 = 4 * 1024 * 1024;
 /// Where the factory map last offered for each controller is kept.
 const FACTORY_DIRECTORY: &str = "factory";
-
-/// The maps RackForge ships, as `.rfmap` documents.
-const FACTORY_MAP_FILES: &[&str] = &[include_str!(
-    "../../../hardware/controllers/arturia-keylab-essential-mk3/maps/rackforge-instruments.rfmap"
-)];
-
-/// The maps RackForge ships. One that does not read as a valid map is
-/// reported and left out; a test keeps that from ever shipping.
-pub fn factory_maps() -> Vec<ControllerMap> {
-    FACTORY_MAP_FILES
-        .iter()
-        .filter_map(|text| {
-            let parsed = serde_json::from_str::<RfMapFile>(text)
-                .map_err(anyhow::Error::from)
-                .and_then(|file| {
-                    file.validate()
-                        .map_err(|error| anyhow::anyhow!("invalid controller map: {error}"))?;
-                    Ok(file.map)
-                });
-            parsed
-                .map_err(|error| eprintln!("FACTORY_CONTROLLER_MAP_INVALID error={error:#}"))
-                .ok()
-        })
-        .collect()
-}
 
 #[derive(Clone, Debug)]
 pub struct ControllerMapStore {
@@ -171,22 +147,25 @@ impl ControllerMapStore {
         write_map(&directory.join(file_name(&map.controller_id)?), map)
     }
 
-    /// Offers every factory map, and names the controllers whose stored map
-    /// it wrote. Run before `load_all`.
-    pub fn seed_factory_maps(&self) -> Result<Vec<String>> {
+    /// Offers each factory map (see `controller_layouts::factory_maps`), and
+    /// names the controllers whose stored map it wrote. Run before
+    /// `load_all`.
+    pub fn seed_factory_maps(&self, factory: &[ControllerMap]) -> Result<Vec<String>> {
         let mut seeded = Vec::new();
-        for map in factory_maps() {
-            if self.seed(&map)? {
-                seeded.push(map.controller_id);
+        for map in factory {
+            if self.seed(map)? {
+                seeded.push(map.controller_id.clone());
             }
         }
         Ok(seeded)
     }
 
     /// Writes a factory map where the player has no map and was never
-    /// offered one, and over a map they kept exactly as it was last offered,
-    /// so an update to it reaches them. A map of their own -- made before,
-    /// edited since, or removed -- stays as they left it.
+    /// offered one. Over a map offered before, it goes plugin by plugin: a
+    /// plugin's mappings the player kept exactly as offered take the new
+    /// offer, a plugin new to the offer is added, and a plugin's mappings
+    /// the player changed stay theirs. A map of their own made before any
+    /// offer, or one they removed, stays as they left it.
     fn seed(&self, factory: &ControllerMap) -> Result<bool> {
         let Some(directory) = &self.directory else {
             return Ok(false);
@@ -206,16 +185,52 @@ impl ControllerMapStore {
             return Ok(false);
         }
         let path = directory.join(&name);
-        let write = match (offered, stored_map(&path)) {
-            (None, Stored::Missing) => true,
-            (Some(previous), Stored::Map(current)) => current == previous,
-            _ => false,
+        let current = match stored_map(&path) {
+            Stored::Map(map) => Some(map),
+            Stored::Missing => None,
+            // Neither the player's nor RackForge's to overwrite.
+            Stored::Unreadable => return Ok(false),
         };
-        if write {
-            write_map(&path, factory)?;
+        let next = match (&offered, &current) {
+            (None, None) => Some(factory.clone()),
+            (Some(previous), Some(current)) => Some(merge_offer(current, previous, factory)),
+            // Made before any offer, or removed since one: the player's.
+            _ => None,
+        };
+        let write = next.is_some() && next != current;
+        match next {
+            Some(next) if write && next.is_empty() => self.remove(&factory.controller_id)?,
+            Some(next) if write => write_map(&path, &next)?,
+            _ => {}
         }
         write_map(&offered_path, factory)?;
         Ok(write)
+    }
+
+    /// The controllers whose stored map is still the factory map as it was
+    /// last offered: RackForge's, not yet the player's. The Controllers page
+    /// does not list a catalog keyboard for such a map alone.
+    pub fn untouched_factory_maps(&self) -> Vec<String> {
+        let Some(directory) = &self.directory else {
+            return Vec::new();
+        };
+        let Ok(entries) = fs::read_dir(directory.join(FACTORY_DIRECTORY)) else {
+            return Vec::new();
+        };
+        entries
+            .filter_map(|entry| {
+                let name = entry.ok()?.file_name();
+                match (
+                    stored_map(&directory.join(&name)),
+                    stored_map(&directory.join(FACTORY_DIRECTORY).join(&name)),
+                ) {
+                    (Stored::Map(current), Stored::Map(offered)) if current == offered => {
+                        Some(current.controller_id)
+                    }
+                    _ => None,
+                }
+            })
+            .collect()
     }
 
     pub fn remove(&self, controller_id: &str) -> Result<()> {
@@ -229,6 +244,46 @@ impl ControllerMapStore {
             Err(error) => Err(error).with_context(|| format!("removing {}", path.display())),
         }
     }
+}
+
+/// The player's map with a new offer taken in, plugin by plugin: what they
+/// kept as `previous` offered it becomes what `factory` offers, and what
+/// they changed stays.
+fn merge_offer(
+    current: &ControllerMap,
+    previous: &ControllerMap,
+    factory: &ControllerMap,
+) -> ControllerMap {
+    let mut plugin_ids = factory
+        .plugins
+        .iter()
+        .map(|plugin| plugin.plugin_id.as_str())
+        .collect::<Vec<_>>();
+    for plugin in current.plugins.iter().chain(&previous.plugins) {
+        if !plugin_ids.contains(&plugin.plugin_id.as_str()) {
+            plugin_ids.push(&plugin.plugin_id);
+        }
+    }
+    let mut merged = ControllerMap::new(
+        factory.controller_id.clone(),
+        if current.controller_name == previous.controller_name {
+            factory.controller_name.clone()
+        } else {
+            current.controller_name.clone()
+        },
+    );
+    for plugin_id in plugin_ids {
+        let kept = current.plugin(plugin_id);
+        let chosen = if kept == previous.plugin(plugin_id) {
+            factory.plugin(plugin_id)
+        } else {
+            kept
+        };
+        if let Some(plugin) = chosen {
+            merged.plugins.push(plugin.clone());
+        }
+    }
+    merged
 }
 
 /// The `.rfmap` document for a map, and the name to save it under.
@@ -422,28 +477,9 @@ mod tests {
         assert_eq!(file_name("user.oxygen-49").unwrap(), "user.oxygen-49.json");
     }
 
-    #[test]
-    fn rackforge_ships_a_valid_keylab_map() {
-        let maps = factory_maps();
-        assert_eq!(
-            maps.len(),
-            FACTORY_MAP_FILES.len(),
-            "every factory map reads"
-        );
-        let keylab = maps
-            .iter()
-            .find(|map| map.controller_id == "org.rackforge.arturia-keylab-essential-mk3")
-            .expect("the KeyLab map ships");
-        for plugin in [
-            "org.rackforge.concert-grand",
-            "org.rackforge.organ",
-            "org.rackforge.rf-106",
-            "org.rackforge.rf-5",
-            "org.rackforge.rf7",
-            "org.rackforge.rftines",
-        ] {
-            assert!(keylab.plugin(plugin).is_some(), "{plugin} is mapped");
-        }
+    fn catalog_factory_maps() -> Vec<ControllerMap> {
+        use crate::controller_layouts::{bundled_layouts, factory_maps, slotted_controllers};
+        factory_maps(&slotted_controllers(None), &bundled_layouts())
     }
 
     /// A range's end, written out by a plugin in single precision, has to
@@ -457,13 +493,12 @@ mod tests {
         assert_eq!(written, "-24.082401275634766");
         let read: f64 = serde_json::from_str(&written).unwrap();
         assert_eq!(read.to_bits(), noise_floor.to_bits());
-        let grand = factory_maps()
+        let grand = crate::controller_layouts::bundled_layouts()
             .into_iter()
-            .flat_map(|map| map.plugins)
-            .find(|plugin| plugin.plugin_id == "org.rackforge.concert-grand")
+            .find(|layout| layout.plugin_id == "org.rackforge.concert-grand")
             .unwrap();
         let floors = grand
-            .mappings
+            .slots
             .iter()
             .flat_map(|mapping| mapping.mode.values())
             .filter(|value| *value < -24.0)
@@ -506,6 +541,67 @@ mod tests {
         fourth.plugins[0].plugin_name = "RF-Organ 4".into();
         assert!(!store.seed(&fourth).unwrap());
         assert!(store.load_all().unwrap().is_empty());
+    }
+
+    /// Every catalog keyboard gets its map on the first start; until the
+    /// player changes one, it is RackForge's, and says so.
+    #[test]
+    fn a_factory_map_is_untouched_until_the_player_changes_it() {
+        let root = root("factory-untouched");
+        let store = ControllerMapStore::new(Some(&root.0));
+        let factory = catalog_factory_maps();
+        let seeded = store.seed_factory_maps(&factory).unwrap();
+        assert_eq!(seeded.len(), factory.len());
+        let mut untouched = store.untouched_factory_maps();
+        untouched.sort();
+        let mut all = seeded.clone();
+        all.sort();
+        assert_eq!(untouched, all);
+
+        let mut edited =
+            store.load_all().unwrap()["org.rackforge.novation-launchkey-mk3-49"].clone();
+        edited.plugins[0].mappings.remove(0);
+        store.save(&edited).unwrap();
+        let untouched = store.untouched_factory_maps();
+        assert!(!untouched.contains(&"org.rackforge.novation-launchkey-mk3-49".to_string()));
+        assert_eq!(untouched.len(), all.len() - 1);
+    }
+
+    /// An offer reaches a map plugin by plugin: what the player changed in
+    /// one plugin stays, the others take the new offer, and a plugin new to
+    /// the offer is added.
+    #[test]
+    fn an_offer_updates_the_plugins_the_player_left_alone() {
+        let root = root("factory-per-plugin");
+        let store = ControllerMapStore::new(Some(&root.0));
+        let first = leslie_map();
+        store.seed(&first).unwrap();
+        let mut second_plugin = first.plugins[0].clone();
+        second_plugin.plugin_id = "org.rackforge.rf-106".into();
+        second_plugin.plugin_name = "RF-106".into();
+        second_plugin.mappings[0].id = ParameterLinkId::new("map.chorus").unwrap();
+        let mut both = first.clone();
+        both.plugins.push(second_plugin);
+        assert!(store.seed(&both).unwrap(), "a new plugin is added");
+        assert_eq!(store.load_all().unwrap()["user.oxygen-49"], both);
+
+        // The organ edited, the next offer changes both plugins.
+        let mut edited = both.clone();
+        edited.plugins[0].mappings[0].parameter_id = "drive".into();
+        store.save(&edited).unwrap();
+        let mut next = both.clone();
+        next.plugins[0].plugin_name = "RF-Organ 2".into();
+        next.plugins[1].plugin_name = "RF-106 2".into();
+        assert!(store.seed(&next).unwrap());
+        let stored = store.load_all().unwrap()["user.oxygen-49"].clone();
+        assert_eq!(stored.plugins[0], edited.plugins[0], "the player's organ");
+        assert_eq!(stored.plugins[1], next.plugins[1], "the new RF-106 offer");
+        assert!(
+            !store
+                .untouched_factory_maps()
+                .contains(&"user.oxygen-49".to_string()),
+            "a map with the player's changes is theirs"
+        );
     }
 
     #[test]

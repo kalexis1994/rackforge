@@ -3,6 +3,7 @@ import { AsyncActionLabel } from "../components/AsyncSpinner";
 import { AsyncNotice, AsyncStateBoundary } from "../components/AsyncStateBoundary";
 import { ModalDialog } from "../components/ModalDialog";
 import { PluginIcon } from "../components/PluginIcon";
+import { FadeImage } from "../components/FadeImage";
 import { PluginRuntimeStatus } from "../components/PluginRuntimeStatus";
 import { PluginSurfaceState } from "../components/PluginSurfaceState";
 import { dispatchCommandAwait, requestAudioInput } from "../gateway";
@@ -17,8 +18,6 @@ import { synchronizePluginEnvironment } from "../pluginLifecycle";
 import { formatPluginVersion } from "../pluginPresentation";
 import { type PluginInstance, type PluginWebDescriptor, type SessionSnapshot } from "../types";
 import { RfButton } from "../ui/RfButton";
-import { RfLoader } from "../components/RfLoader";
-import { useArtworkReveal } from "../hooks/useArtworkReveal";
 
 export function PluginPickerModal({
   active,
@@ -61,12 +60,6 @@ export function PluginPickerModal({
     ...sources.filter((plugin) => plugin.plugin_id === activePluginId),
     ...sources.filter((plugin) => plugin.plugin_id !== activePluginId),
   ];
-  // Every banner and icon on the list, decoded before the list is shown, so
-  // the cards arrive whole instead of their artwork landing afterwards.
-  const artwork = orderedPlugins.flatMap((plugin) =>
-    plugin.branding ? [plugin.branding.banner_url, plugin.branding.icon_url] : [],
-  );
-  const reveal = useArtworkReveal(artwork);
   const activate = async (
     plugin: PluginWebDescriptor,
     { discardDraft = false }: { discardDraft?: boolean } = {},
@@ -188,10 +181,7 @@ export function PluginPickerModal({
           errorDetail={catalogError ?? "RackForge could not load the plugin catalog."}
           onRetry={() => void invalidatePluginCatalog()}
         >
-          <div
-            className={`plugin-picker-stage${reveal.revealed ? " is-revealed" : ""}`}
-            aria-busy={!reveal.revealed}
-          >
+          <div className="plugin-picker-stage is-revealed">
           <div className="play-plugin-selector modal-list" role="list" aria-label="Playable plugins">
             {orderedPlugins.map((plugin, index) => {
               const selected = plugin.plugin_id === activePluginId;
@@ -215,7 +205,7 @@ export function PluginPickerModal({
                 >
                   {plugin.branding && (
                     <>
-                      <img className="plugin-picker-banner" src={plugin.branding.banner_url} alt="" />
+                      <FadeImage className="plugin-picker-banner" src={plugin.branding.banner_url} alt="" />
                       <span className="plugin-picker-shade" aria-hidden="true" />
                     </>
                   )}
@@ -242,14 +232,6 @@ export function PluginPickerModal({
               />
             ) : null}
           </div>
-          {reveal.loader === "shown" || reveal.loader === "leaving" ? (
-            <div
-              className={`plugin-picker-loader${reveal.loader === "leaving" ? " is-leaving" : ""}`}
-              aria-hidden={reveal.loader === "leaving" ? true : undefined}
-            >
-              <RfLoader label="Instruments" detail="Preparing the list…" size="medium" />
-            </div>
-          ) : null}
           </div>
         </AsyncStateBoundary>
       </ModalDialog>

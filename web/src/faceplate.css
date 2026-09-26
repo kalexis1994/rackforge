@@ -1677,6 +1677,23 @@
   background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
 }
 
+.plugin-surface-identity a {
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  box-shadow: var(--fp-lip) !important;
+  color: var(--ink) !important;
+  font-family: var(--display-font);
+}
+
+.plugin-surface-identity a:hover,
+.plugin-surface-identity a:focus-visible {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
 .plugin-surface-identity .card-kicker {
   color: var(--muted) !important;
 }
@@ -5433,6 +5450,64 @@
    control, the scene number is silkscreen, and the order controls become a
    butted key gang. */
 
+.song-editor-form:not(.immersive) > .editor-header,
+.song-editor-form:not(.immersive) > .editor-section > header {
+  background: var(--fp-panel);
+  border-color: var(--line);
+  box-shadow: var(--fp-lip);
+}
+
+.song-editor-form .editor-actions button,
+.song-editor-form .editor-section > header > button {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  font-family: var(--display-font);
+  font-weight: 700;
+}
+
+.song-editor-form .editor-actions .save-button {
+  background: var(--acid);
+  border-color: var(--acid);
+}
+
+.song-editor-form .editor-actions .danger-button,
+.song-editor-form .form-error {
+  color: var(--red);
+}
+
+.song-editor-form .basic-fields label {
+  color: var(--fp-rail-label);
+  font-family: var(--display-font);
+}
+
+.song-editor-form .basic-fields input:not([type="checkbox"]) {
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font-family: var(--display-font);
+}
+
+.song-editor-form .basic-fields input:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
+.song-editor-form .toggle-field i {
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  box-shadow: var(--fp-well);
+}
+
+.song-editor-form .form-error {
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
 .song-part-nav-item {
   gap: 0 !important;
   padding: 8px 10px !important;
@@ -5544,6 +5619,27 @@
   border: var(--fp-seam) !important;
   border-radius: var(--fp-radius) !important;
   box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.song-part-graph-header input,
+.song-part-graph-header strong {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-well);
+  font-family: var(--display-font);
+}
+
+.song-part-graph-header span {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--display-font) !important;
+  font-weight: 800;
+}
+
+.song-part-graph-header input:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
 }
 
 /* ------------------------------------------ the PERFORM browser, moulded ---
@@ -8572,21 +8668,11 @@
 }
 
 /* ------------------------------------------------ the picker's entrance ---
-   The PLAY picker used to open with every card already there and its
-   banners landing one by one after. Now the list waits, invisible but
-   holding its size, until its artwork has decoded (useArtworkReveal); a
-   wait long enough to notice shows the mark in its place. Then the cards
-   come up together, each a beat after the one above -- rising a few pixels
-   and coming into focus -- while the mark fades out behind them. Every
-   duration and delay is built from the vocabulary, so under reduced motion
-   the whole thing collapses to the list simply being there. */
+   Cards are usable as soon as the catalog is ready. Artwork fades in on its
+   own; a slow or broken image must never hold the selector behind a loader. */
 
 .plugin-picker-stage {
   position: relative;
-}
-
-.plugin-picker-stage:not(.is-revealed) .plugin-picker-card {
-  opacity: 0;
 }
 
 .plugin-picker-stage.is-revealed .plugin-picker-card {
@@ -8605,33 +8691,6 @@
     opacity: 1;
     filter: none;
     transform: none;
-  }
-}
-
-.plugin-picker-loader {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  pointer-events: none;
-  /* backwards, not both: a held final frame would override the fade out. */
-  animation: rf-picker-loader-in var(--rf-motion-standard) var(--rf-ease-standard) backwards;
-  transition:
-    opacity var(--rf-motion-emphasized) var(--rf-ease-exit),
-    filter var(--rf-motion-emphasized) var(--rf-ease-emphasized),
-    transform var(--rf-motion-emphasized) var(--rf-ease-emphasized);
-}
-
-.plugin-picker-loader.is-leaving {
-  opacity: 0;
-  filter: blur(3px);
-  transform: scale(1.04);
-}
-
-@keyframes rf-picker-loader-in {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
   }
 }
 

@@ -94,6 +94,9 @@ RackForge responds with `kind: "context"`, the requested surface, the plugin's
 own instance state, an optional matching program draft, an optional matching
 audition lease and limited host state. A fresh context is sent whenever the
 session revision changes, and whenever any value inside it changes.
+The optional `isolated` boolean is `true` for a Rack or Song Part's private
+plugin-state editor and `false` for the ordinary PLAY surface. Plugins that do
+not need to distinguish those contexts can ignore it.
 
 ### Host state
 

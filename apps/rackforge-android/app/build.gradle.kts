@@ -9,6 +9,8 @@ val generatedWebUi = layout.buildDirectory.dir("generated/web-ui")
 val rackforgeRevision = providers.environmentVariable("RACKFORGE_REVISION")
     .getOrElse("development")
     .replace("\"", "")
+val previewApp = providers.environmentVariable("RACKFORGE_ANDROID_PREVIEW")
+    .getOrElse("0") == "1"
 val copyThirdPartyNotices by tasks.registering(Copy::class) {
     from(rootProject.layout.projectDirectory.file("../../THIRD_PARTY_NOTICES.md"))
     into(generatedNotices)
@@ -25,6 +27,20 @@ android {
         versionCode = 26
         versionName = "0.1.24-preview"
         buildConfigField("String", "RACKFORGE_REVISION", "\"$rackforgeRevision\"")
+        manifestPlaceholders["rackforgeAppLabel"] = "RackForge"
+    }
+
+    buildTypes {
+        getByName("debug") {
+            if (previewApp) {
+                // CI uses a fresh debug key on every run. A separate package
+                // avoids a signature conflict with the user's installed app
+                // and leaves its presets and racks untouched.
+                applicationIdSuffix = ".preview"
+                versionNameSuffix = "-ci"
+                manifestPlaceholders["rackforgeAppLabel"] = "RackForge Preview"
+            }
+        }
     }
 
     sourceSets {

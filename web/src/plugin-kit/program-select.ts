@@ -12,7 +12,7 @@
  * Documented in docs/WEB_PLUGIN_API.md, "Program selector".
  */
 import { readContext, readResponse, readyMessage, selectRequest, type ProgramContext } from "./hostLink";
-import { bankName, searchPrograms, stepProgram, usedBanks, type Bank, type Program } from "./programs";
+import { bankName, sameBanks, samePrograms, searchPrograms, stepProgram, usedBanks, type Bank, type Program } from "./programs";
 
 /** More than this and the list asks for a narrower search: thousands of rows help no one. */
 const MAX_ROWS = 300;
@@ -207,6 +207,7 @@ export class RfProgramSelect extends HTMLElement {
   #value: string | null = null;
   #query = "";
   #bank: string | null = null;
+  #isolated = false;
   #active = 0;
   #rows: Program[] = [];
   #pending: { requestId: string; previous: string | null } | null = null;
@@ -290,7 +291,7 @@ export class RfProgramSelect extends HTMLElement {
     els.search.addEventListener("input", () => {
       this.#query = els.search.value;
       this.#active = 0;
-      this.#renderList();
+      this.#renderList(false);
     });
     els.dialog.addEventListener("keydown", (event) => this.#key(event));
     els.list.addEventListener("click", (event) => {
@@ -304,7 +305,7 @@ export class RfProgramSelect extends HTMLElement {
       this.#bank = bank === "" ? null : this.#bank === bank ? null : bank;
       this.#active = 0;
       this.#renderBanks();
-      this.#renderList();
+      this.#renderList(false);
     });
   }
 
@@ -361,19 +362,28 @@ export class RfProgramSelect extends HTMLElement {
     this.#moved = null;
     const dialog = this.#els.dialog;
     if (!moved || !dialog.open) return;
+    const finePointer = window.matchMedia?.("(hover: hover) and (pointer: fine)").matches ?? false;
+    const avoidKeyboard = this.#isolated && !finePointer;
+    this.#els.close.toggleAttribute("autofocus", avoidKeyboard);
     try {
       if (typeof dialog.showModal === "function" && !dialog.matches(":modal")) {
         // Removing the attribute rather than calling close() keeps the
         // `close` event, and the plugin's rf-program-close, from firing.
         dialog.removeAttribute("open");
+        this.#els.search.disabled = avoidKeyboard;
         dialog.showModal();
       }
     } catch {
       // An engine without :modal keeps the panel open, if not modal.
+    } finally {
+      this.#els.search.disabled = false;
     }
     this.#els.list.scrollTop = moved.scroll;
-    if (moved.searching) this.#els.search.focus({ preventScroll: true });
-    else this.#activeItem()?.focus({ preventScroll: true });
+    if (moved.searching && finePointer) {
+      this.#els.search.focus({ preventScroll: true });
+    } else if (finePointer || !this.#isolated) {
+      this.#activeItem()?.focus({ preventScroll: true });
+    }
   }
 
   attributeChangedCallback() {
@@ -388,6 +398,10 @@ export class RfProgramSelect extends HTMLElement {
   set programs(programs: Program[]) {
     this.#programs = Array.isArray(programs) ? programs : [];
     this.#render();
+    if (this.#els.dialog.open) {
+      this.#renderBanks();
+      this.#renderList();
+    }
   }
 
   get banks(): Bank[] {
@@ -396,6 +410,10 @@ export class RfProgramSelect extends HTMLElement {
   set banks(banks: Bank[]) {
     this.#banks = Array.isArray(banks) ? banks : [];
     this.#render();
+    if (this.#els.dialog.open) {
+      this.#renderBanks();
+      this.#renderList();
+    }
   }
 
   /** The chosen program's id. */
@@ -405,6 +423,7 @@ export class RfProgramSelect extends HTMLElement {
   set value(value: string | null) {
     this.#value = value;
     this.#render();
+    if (this.#els.dialog.open) this.#renderSelectedItems();
   }
 
   /** A plugin in the middle of something (saving a program, say) turns it off. */
@@ -430,14 +449,28 @@ export class RfProgramSelect extends HTMLElement {
     const at = this.#programs.findIndex((program) => program.id === this.#value);
     this.#active = Math.max(0, at);
     this.#renderBanks();
-    this.#renderList();
+    this.#renderList(false);
     const dialog = this.#els.dialog;
-    if (typeof dialog.showModal === "function") dialog.showModal();
-    else dialog.setAttribute("open", "");
+    const finePointer = window.matchMedia?.("(hover: hover) and (pointer: fine)").matches ?? false;
+    // showModal focuses the first input before open() can run its next line.
+    // Only Rack's isolated surface needs to suppress that mobile keyboard:
+    // PLAY keeps its established focus behavior.
+    const avoidKeyboard = this.#isolated && !finePointer;
+    this.#els.close.toggleAttribute("autofocus", avoidKeyboard);
+    this.#els.search.disabled = avoidKeyboard;
+    try {
+      if (typeof dialog.showModal === "function") dialog.showModal();
+      else dialog.setAttribute("open", "");
+    } finally {
+      this.#els.search.disabled = false;
+    }
     // A keyboard at hand gets the search; a touch screen does not have its
     // own keyboard thrown up over the list.
-    if (window.matchMedia?.("(pointer: fine)").matches) this.#els.search.focus();
-    else this.#activeItem()?.focus();
+    if (finePointer) {
+      this.#els.search.focus({ preventScroll: true });
+    } else if (!this.#isolated) {
+      this.#activeItem()?.focus({ preventScroll: true });
+    }
     this.#activeItem()?.scrollIntoView({ block: "center" });
     this.dispatchEvent(new CustomEvent("rf-program-open", { bubbles: true, composed: true }));
   }
@@ -455,19 +488,32 @@ export class RfProgramSelect extends HTMLElement {
   /** @internal A context from the host. */
   hostContext(context: ProgramContext) {
     if (this.#isManual()) return;
-    this.#programs = context.programs;
-    this.#banks = context.banks;
+    this.#isolated = context.isolated;
+    const programsChanged = !samePrograms(this.#programs, context.programs);
+    const banksChanged = !sameBanks(this.#banks, context.banks);
+    if (programsChanged) this.#programs = context.programs;
+    if (banksChanged) this.#banks = context.banks;
     // A choice on its way holds the name until the host has it: a context
     // sent meanwhile, for a parameter, still names the old program.
     if (this.#pending && context.selected !== this.#value) {
       this.#render();
-      if (this.#els.dialog.open) this.#renderList();
+      if (this.#els.dialog.open && (programsChanged || banksChanged)) {
+        this.#renderBanks();
+        this.#renderList();
+      }
       return;
     }
     this.#pending = null;
+    const selectionChanged = this.#value !== context.selected;
     this.#value = context.selected;
     this.#render();
-    if (this.#els.dialog.open) this.#renderList();
+    if (!this.#els.dialog.open) return;
+    if (programsChanged || banksChanged) {
+      this.#renderBanks();
+      this.#renderList();
+    } else if (selectionChanged) {
+      this.#renderSelectedItems();
+    }
   }
 
   /** @internal Any other message from the host. */
@@ -529,7 +575,7 @@ export class RfProgramSelect extends HTMLElement {
     const move = (to: number) => {
       if (rows.length === 0) return;
       this.#active = Math.max(0, Math.min(rows.length - 1, to));
-      this.#markActive();
+      this.#markActive(true);
       event.preventDefault();
     };
     switch (event.key) {
@@ -598,7 +644,10 @@ export class RfProgramSelect extends HTMLElement {
     els.name.disabled = off || this.#programs.length === 0;
     els.prev.disabled = off || this.#programs.length < 2;
     els.next.disabled = off || this.#programs.length < 2;
-    if (off) this.close();
+    // A Rack Slot can briefly disable its surface while the host publishes
+    // state. Closing here makes an open program list flicker or disappear on
+    // every such update. Keep the dialog open; #choose still rejects input
+    // while disabled, and an explicit close remains available.
     els.search.placeholder = this.getAttribute("placeholder") ?? "Search programs";
     els.search.setAttribute("aria-label", this.getAttribute("placeholder") ?? "Search programs");
   }
@@ -658,7 +707,8 @@ export class RfProgramSelect extends HTMLElement {
     for (const bank of banks) box.append(chip(bank.id, bank.name, this.#bank === bank.id));
   }
 
-  #renderList() {
+  #renderList(preserveScroll = true) {
+    const listHadFocus = this.#els.list.contains(this.#root.activeElement);
     const matches = searchPrograms(this.#programs, this.#banks, this.#query, this.#bank);
     const shown = matches.slice(0, MAX_ROWS);
     // A row names its bank only when there is more than one to tell apart
@@ -697,7 +747,9 @@ export class RfProgramSelect extends HTMLElement {
       item.append(number, name, detail);
       fragment.append(item);
     }
+    const scrollTop = this.#els.list.scrollTop;
     this.#els.list.replaceChildren(fragment);
+    if (preserveScroll) this.#els.list.scrollTop = scrollTop;
     const hidden = matches.length - shown.length;
     this.#els.note.textContent =
       matches.length === 0
@@ -705,14 +757,23 @@ export class RfProgramSelect extends HTMLElement {
         : hidden > 0
           ? `${hidden} more: keep typing to narrow`
           : "";
-    this.#markActive();
+    this.#markActive(false, listHadFocus);
+  }
+
+  #renderSelectedItems() {
+    for (const child of this.#els.list.children) {
+      const item = child as HTMLElement;
+      const selected = item.dataset.id === this.#value;
+      item.setAttribute("aria-selected", String(selected));
+      item.setAttribute("part", selected ? "item item-selected" : "item");
+    }
   }
 
   #activeItem(): HTMLElement | null {
     return this.#els.list.children[this.#active] as HTMLElement | null;
   }
 
-  #markActive() {
+  #markActive(scroll = false, focus = true) {
     for (const item of this.#els.list.children) (item as HTMLElement).removeAttribute("data-active");
     const item = this.#activeItem();
     if (!item) {
@@ -721,8 +782,8 @@ export class RfProgramSelect extends HTMLElement {
     }
     item.setAttribute("data-active", "");
     this.#els.search.setAttribute("aria-activedescendant", item.id);
-    item.scrollIntoView({ block: "nearest" });
-    if (this.#root.activeElement !== this.#els.search) item.focus({ preventScroll: true });
+    if (scroll) item.scrollIntoView({ block: "nearest" });
+    if (focus && this.#root.activeElement !== this.#els.search) item.focus({ preventScroll: true });
   }
 }
 

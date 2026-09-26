@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bankName, fold, fuzzyScore, searchPrograms, stepProgram, usedBanks, type Program } from "./programs";
+import { bankName, fold, fuzzyScore, sameBanks, samePrograms, searchPrograms, stepProgram, usedBanks, type Program } from "./programs";
 
 const programs: Program[] = [
   { id: "a", name: "Bright Grand", bank: "piano" },
@@ -53,6 +53,16 @@ describe("finding a program by a few letters", () => {
 });
 
 describe("banks and steps", () => {
+  it("recognizes unchanged catalogs cloned by the Rack editor iframe bridge", () => {
+    expect(samePrograms(programs, structuredClone(programs))).toBe(true);
+    expect(sameBanks(banks, structuredClone(banks))).toBe(true);
+    expect(samePrograms(programs, programs.map((entry) => entry.id === "b"
+      ? { ...entry, detail: "New detail" } : entry))).toBe(false);
+    expect(sameBanks(banks, banks.map((entry) => entry.id === "piano"
+      ? { ...entry, order: 9 } : entry))).toBe(false);
+    expect(samePrograms(programs, [...programs].reverse())).toBe(false);
+  });
+
   it("offers only the banks in use, in their order, and names unknown ones by id", () => {
     expect(usedBanks(programs, banks).map((bank) => bank.id)).toEqual(["piano", "keys", "pads"]);
     expect(usedBanks([{ id: "x", name: "X", bank: "user" }], banks)).toEqual([{ id: "user", name: "user" }]);

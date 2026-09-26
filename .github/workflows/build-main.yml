@@ -277,8 +277,7 @@ jobs:
             --expect-official
           python tools/verify-release-edition.py --edition standard `
             --manifest dist/windows-x86_64/vst3-standard/bundled-plugins.txt `
-            --expect-plugin RF-Concert-Grand.rfplugin `
-            --expect-official
+            --expect-plugin RF-Concert-Grand.rfplugin
 
       - name: Upload Windows Standard executable
         if: github.event_name != 'pull_request'

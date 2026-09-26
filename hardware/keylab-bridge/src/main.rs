@@ -69,6 +69,14 @@ const PART_CLEAR_HOLD_THRESHOLD: Duration = Duration::from_millis(1_500);
 const HOME_CHORD_SIMULTANEITY: Duration = Duration::from_millis(250);
 const HOST_CONTROL_HEADER_TIMEOUT: Duration = Duration::from_millis(1_500);
 const SPINNER_FRAME_INTERVAL: Duration = Duration::from_millis(125);
+/// After a bank change, Bank and the pads are put back in the player's
+/// colours at these delays: the firmware repaints them in its own a moment
+/// after the change.
+const BANK_REPAINT_DELAYS: [Duration; 3] = [
+    Duration::from_millis(150),
+    Duration::from_millis(500),
+    Duration::from_millis(1_000),
+];
 #[cfg(target_os = "linux")]
 const WEB_CONTROL_SOCKET_NAME: &str = "web-control.sock";
 #[cfg(target_os = "linux")]
@@ -394,6 +402,10 @@ struct KeyLabInput {
     /// A control change went on to the engine: its link may have moved a
     /// parameter the header should name.
     control_moved_receiver: Receiver<()>,
+    /// The keyboard announced a program other than DAW.
+    program_left_receiver: Receiver<u8>,
+    /// Bank's light must be put back in the player's colour for this bank.
+    bank_receiver: Receiver<keylab_protocol::PadBank>,
 }
 
 struct MidiForwarder {
@@ -1125,6 +1137,33 @@ impl KeyLabSession {
         Ok(())
     }
 
+    /// The footer and the four buttons' lights, which travel together: the
+    /// KeyLab redraws a button's light with its footer segment, so a footer
+    /// sent alone could leave a lit button dark while this side still
+    /// believed it lit. A footer that changes brings all four lights after
+    /// it; an unchanged one, only the lights that changed (when asked).
+    /// Nothing identical is re-sent: that makes the KeyLab visibly blink.
+    fn send_footer_and_button_leds(
+        &mut self,
+        messages: &MenuMessages,
+        include_changed_leds: bool,
+    ) -> Result<(), Box<dyn Error>> {
+        let footer_redrawn = self.last_footer.as_deref() != Some(messages.footer.as_slice());
+        if footer_redrawn {
+            self.send(&messages.footer)?;
+            self.last_footer = Some(messages.footer.clone());
+        }
+        if footer_redrawn || include_changed_leds {
+            for index in
+                button_leds_to_send(footer_redrawn, &self.last_button_leds, &messages.button_leds)
+            {
+                self.send(&messages.button_leds[index])?;
+                self.last_button_leds[index] = Some(messages.button_leds[index].clone());
+            }
+        }
+        Ok(())
+    }
+
     /// Sends a header and remembers it as the one on the display, so the
     /// menu's own repaints compare against what is really there.
     fn send_header(&mut self, message: &[u8]) -> Result<(), Box<dyn Error>> {
@@ -1396,6 +1435,15 @@ fn refresh_controller_settings(last_modified: &mut Option<std::time::SystemTime>
         println!("SETTINGS_APPLIED key-light-color={value}");
         changed = true;
     }
+    if let Some(value) = table
+        .get("bank-b-light-color")
+        .and_then(|value| value.as_str())
+        && let Some(rgb) = parse_hex_color(value)
+    {
+        keylab_protocol::set_bank_b_led_rgb([rgb[0] >> 1, rgb[1] >> 1, rgb[2] >> 1]);
+        println!("SETTINGS_APPLIED bank-b-light-color={value}");
+        changed = true;
+    }
     changed
 }
 
@@ -1551,6 +1599,9 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         }
 
         println!("OLED bajo control de RackForge: {port_name}");
+        // Programs announced before the keyboard was taken -- the previous
+        // session restoring the Arturia program -- are not the player's.
+        while input.program_left_receiver.try_recv().is_ok() {}
         let mut next_heartbeat = Instant::now() + Duration::from_secs(6);
         let mut missed_acks = 0_u8;
         let mut button_gestures = ButtonGestureTracker::default();
@@ -1565,6 +1616,10 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut touch_sequence = parameter_touch_start();
         let mut touch_poll_until: Option<Instant> = None;
         let mut next_touch_poll = Instant::now();
+        // The pad bank, as the input followed it; a new session starts on A.
+        let mut pad_bank = keylab_protocol::PadBank::A;
+        // When Bank and the pads are put back again after a bank change.
+        let mut bank_repaints: [Option<Instant>; 3] = [None; 3];
         'surface: loop {
             if shutdown_requested.load(Ordering::Acquire) {
                 eprintln!("Restaurando OLED, LEDs y preset Arturia antes de salir...");
@@ -1634,6 +1689,62 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     transport_clock.elapsed().as_secs_f64(),
                 );
             }
+            // Bank lit in the player's colour, not the one the firmware
+            // gives it when it changes bank.
+            while let Ok(bank) = input.bank_receiver.try_recv() {
+                pad_bank = bank;
+                if let Err(error) = send_bank_lights(&mut session, bank) {
+                    eprintln!("No se pudo pintar Bank y los pads: {error}");
+                    break 'surface;
+                }
+                // The firmware finishes its own bank change a moment later
+                // and repaints the pads in its colours (seen on the project
+                // keyboard, 2026-09-25): ours go back on top a few times
+                // over the next second, and only after a bank change.
+                let now = Instant::now();
+                bank_repaints = BANK_REPAINT_DELAYS.map(|delay| Some(now + delay));
+            }
+            let now = Instant::now();
+            if let Some(slot) = bank_repaints
+                .iter_mut()
+                .find(|slot| slot.is_some_and(|at| at <= now))
+            {
+                *slot = None;
+                if let Err(error) = send_bank_lights(&mut session, pad_bank) {
+                    eprintln!("No se pudo pintar Bank y los pads: {error}");
+                    break 'surface;
+                }
+            }
+            if let Ok(program) = input.program_left_receiver.try_recv() {
+                // Taken back within this session. Ending it would restore
+                // the Arturia program, which the keyboard announces in turn,
+                // and the next session would take that for the player
+                // leaving again.
+                eprintln!("El KeyLab pasó al programa {program}; retomando el modo DAW...");
+                match acquire_screen(
+                    &mut session,
+                    &messages,
+                    &input.ack_receiver,
+                    usb_generation.as_deref(),
+                ) {
+                    Ok(true) => {
+                        while input.program_left_receiver.try_recv().is_ok() {}
+                        missed_acks = 0;
+                        next_heartbeat = Instant::now() + Duration::from_secs(6);
+                        if pad_bank == keylab_protocol::PadBank::B
+                            && let Err(error) = send_bank_lights(&mut session, pad_bank)
+                        {
+                            eprintln!("No se pudo pintar Bank y los pads: {error}");
+                            break 'surface;
+                        }
+                    }
+                    Ok(false) => break 'surface,
+                    Err(error) => {
+                        eprintln!("No se pudo retomar el modo DAW: {error}");
+                        break 'surface;
+                    }
+                }
+            }
             if let Some(bridge) = transport_bridge.as_mut() {
                 while let Ok((target, phase)) = bridge.receiver.try_recv() {
                     apply_transport_action(
@@ -1659,23 +1770,16 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     match event.phase {
                         InputPhase::Press => {
                             if button_gestures.press(event.input, Instant::now()) {
-                                let previous_button_leds = messages.button_leds.clone();
                                 menu.set_button_pressed(event.input, true);
                                 messages = render_menu_messages(&menu)?;
-                                if let Err(error) = session.send(&messages.footer) {
-                                    eprintln!("No se pudo mostrar el botón presionado: {error}");
-                                    break;
-                                }
                                 // The frame on the screen and the light under
                                 // the finger are one gesture. Sending only the
                                 // footer drew the frame and left the LED in
                                 // the ambient, so a pressed button never lit.
-                                if let Err(error) = send_changed_button_leds(
-                                    &mut session,
-                                    &previous_button_leds,
-                                    &messages.button_leds,
-                                ) {
-                                    eprintln!("No se pudo encender el botón presionado: {error}");
+                                if let Err(error) =
+                                    session.send_footer_and_button_leds(&messages, true)
+                                {
+                                    eprintln!("No se pudo mostrar el botón presionado: {error}");
                                     break;
                                 }
                             } else {
@@ -1684,22 +1788,15 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                         }
                         InputPhase::Release => {
                             navigation_input = button_gestures.release(event.input, Instant::now());
-                            let previous_button_leds = messages.button_leds.clone();
                             if menu.set_button_pressed(event.input, false) {
                                 messages = render_menu_messages(&menu)?;
-                                if let Err(error) = session.send(&messages.footer) {
-                                    eprintln!("No se pudo restaurar el footer: {error}");
-                                    break;
-                                }
                                 // Back to the ambient, by the same path that
                                 // lit it: a button left bright after the
                                 // finger goes is the same bug upside down.
-                                if let Err(error) = send_changed_button_leds(
-                                    &mut session,
-                                    &previous_button_leds,
-                                    &messages.button_leds,
-                                ) {
-                                    eprintln!("No se pudo apagar el botón presionado: {error}");
+                                if let Err(error) =
+                                    session.send_footer_and_button_leds(&messages, true)
+                                {
+                                    eprintln!("No se pudo restaurar el footer: {error}");
                                     break;
                                 }
                             }
@@ -1845,6 +1942,15 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             break 'surface;
                         }
                     }
+                    session.last_button_leds = messages.button_leds.clone().map(Some);
+                    // The repaint lit Bank and the pads in the ambient: on
+                    // bank B, its colour goes back on top.
+                    if pad_bank == keylab_protocol::PadBank::B
+                        && let Err(error) = send_bank_lights(&mut session, pad_bank)
+                    {
+                        eprintln!("No se pudo pintar Bank y los pads: {error}");
+                        break 'surface;
+                    }
                 }
             }
             if now < next_heartbeat {
@@ -1865,25 +1971,16 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                         }
                     }
                     if wifi_task.is_none() {
-                        let previous_button_leds = messages.button_leds.clone();
                         if let Err(error) = refresh_live_catalog(&mut menu) {
                             eprintln!("No se pudo refrescar el catálogo LIVE: {error}");
                         } else {
                             messages = render_menu_messages(&menu)?;
-                            if let Err(error) = send_changed_button_leds(
-                                &mut session,
-                                &previous_button_leds,
-                                &messages.button_leds,
-                            ) {
-                                eprintln!("No se pudo actualizar los botones: {error}");
-                                break;
-                            }
                         }
                     }
                     // The physical delivery cache turns this into a no-op when the
                     // semantic screen is unchanged. Re-sending identical OLED or LED
                     // messages makes the KeyLab visibly blink every few seconds.
-                    if let Err(error) = send_menu_display_with_header_override(
+                    if let Err(error) = send_menu_with_header_override(
                         &mut session,
                         &messages,
                         transient_header.visible_message(Instant::now()),
@@ -3286,6 +3383,13 @@ fn acquire_screen(
         match ack_receiver.recv_timeout(Duration::from_secs(1)) {
             Ok(()) => {
                 println!("OLED_ACK recibido después de {attempt} pulso(s)");
+                // The DAW program has been chosen, and choosing it repaints
+                // the buttons under the screen dark: they are put back now
+                // that it has been handled.
+                for (index, message) in messages.button_leds.iter().enumerate() {
+                    session.send(message)?;
+                    session.last_button_leds[index] = Some(message.clone());
+                }
                 return Ok(true);
             }
             Err(RecvTimeoutError::Timeout) => {
@@ -3309,6 +3413,9 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     let (rackforge_parameter_sender, rackforge_parameter_receiver) = mpsc::channel();
     let (transport_sender, transport_receiver) = mpsc::channel();
     let (control_moved_sender, control_moved_receiver) = mpsc::channel();
+    let (program_left_sender, program_left_receiver) = mpsc::channel();
+    let (bank_sender, bank_receiver) = mpsc::channel();
+    let mut pad_bank = keylab_protocol::PadBankTracker::default();
     let semantic_profile = controller::package_profile().semantic_profile.clone();
     let host_actions = controller::package_profile().host_actions.clone();
     let midi_forwarder = MidiForwarder::from_environment(&port.name)?;
@@ -3320,9 +3427,17 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
         "rackforge KeyLab DAW ACK",
         move |_timestamp, message, _context| {
             let mut consumed_by_surface = false;
-            if is_daw_preset_ack(message) {
+            if is_daw_preset_ack(message) || keylab_protocol::is_identity_reply(message) {
                 let _ = ack_sender.send(());
                 consumed_by_surface = true;
+            } else if let Some(program) = keylab_protocol::announced_program(message) {
+                // The player left the DAW program with Prog: the keyboard
+                // says so itself, and the session takes it back.
+                let _ = program_left_sender.send(program);
+                consumed_by_surface = true;
+            }
+            if let Some(bank) = pad_bank.observe(message) {
+                let _ = bank_sender.send(bank);
             }
             if let Some(input) = parse_physical_input(message) {
                 let _ = input_sender.send(input);
@@ -3402,6 +3517,8 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
         transport_receiver,
         rackforge_parameter_receiver,
         control_moved_receiver,
+        program_left_receiver,
+        bank_receiver,
     })
 }
 
@@ -3507,14 +3624,6 @@ fn send_menu_with_header_override(
     send_menu_regions(session, messages, header_override, true)
 }
 
-fn send_menu_display_with_header_override(
-    session: &mut KeyLabSession,
-    messages: &MenuMessages,
-    header_override: Option<&[u8]>,
-) -> Result<(), Box<dyn Error>> {
-    send_menu_regions(session, messages, header_override, false)
-}
-
 fn send_menu_regions(
     session: &mut KeyLabSession,
     messages: &MenuMessages,
@@ -3532,38 +3641,30 @@ fn send_menu_regions(
         session.last_header = Some(visible_header.to_vec());
         thread::sleep(Duration::from_millis(20));
     }
-    if session.last_footer.as_deref() != Some(messages.footer.as_slice()) {
-        session.send(&messages.footer)?;
-        session.last_footer = Some(messages.footer.clone());
-    }
-    if include_button_leds {
-        for (index, message) in messages.button_leds.iter().enumerate() {
-            if session.last_button_leds[index].as_deref() != Some(message.as_slice()) {
-                session.send(message)?;
-                session.last_button_leds[index] = Some(message.clone());
-            }
-        }
-    }
-    Ok(())
+    session.send_footer_and_button_leds(messages, include_button_leds)
 }
 
-fn send_changed_button_leds(
+/// Bank and the eight pads in the colour of the bank that is on.
+fn send_bank_lights(
     session: &mut KeyLabSession,
-    previous: &[Vec<u8>; 4],
-    current: &[Vec<u8>; 4],
+    bank: keylab_protocol::PadBank,
 ) -> Result<(), Box<dyn Error>> {
-    for index in changed_button_led_indices(previous, current) {
-        session.send(&current[index])?;
-    }
-    Ok(())
+    session.send_messages(
+        keylab_protocol::bank_led_messages(bank)?
+            .into_iter()
+            .map(keylab_protocol::OutboundMessage::led),
+    )
 }
 
-fn changed_button_led_indices(previous: &[Vec<u8>; 4], current: &[Vec<u8>; 4]) -> Vec<usize> {
-    previous
-        .iter()
-        .zip(current)
-        .enumerate()
-        .filter_map(|(index, (previous, current))| (previous != current).then_some(index))
+/// Which of the four buttons' lights to send: all of them after a footer
+/// redraw, otherwise those that differ from what was last sent.
+fn button_leds_to_send(
+    footer_redrawn: bool,
+    sent: &[Option<Vec<u8>>; 4],
+    current: &[Vec<u8>; 4],
+) -> Vec<usize> {
+    (0..4)
+        .filter(|&index| footer_redrawn || sent[index].as_deref() != Some(current[index].as_slice()))
         .collect()
 }
 
@@ -3601,7 +3702,11 @@ fn verify_daw_ack(
     receiver: &Receiver<()>,
 ) -> Result<bool, Box<dyn Error>> {
     drain_acks(receiver);
-    session.send(&select_preset(1)?)?;
+    // Who are you, not which program: any Program message -- choosing the
+    // DAW program again, or only asking for it -- made the firmware repaint
+    // the buttons under the screen dark at every heartbeat. Leaving the DAW
+    // program is announced by the keyboard itself (`program_left_receiver`).
+    session.send(keylab_protocol::IDENTITY_REQUEST)?;
     match receiver.recv_timeout(Duration::from_millis(750)) {
         Ok(()) => Ok(true),
         Err(RecvTimeoutError::Timeout) => Ok(false),
@@ -3861,12 +3966,18 @@ mod tests {
     }
 
     #[test]
-    fn only_changed_button_leds_are_selected_for_refresh() {
-        let previous = [vec![0], vec![1], vec![2], vec![3]];
-        assert!(changed_button_led_indices(&previous, &previous).is_empty());
-
-        let current = [vec![0], vec![9], vec![2], vec![8]];
-        assert_eq!(changed_button_led_indices(&previous, &current), vec![1, 3]);
+    fn button_leds_follow_their_footer_and_are_otherwise_sent_when_they_change() {
+        let sent = [Some(vec![0]), Some(vec![1]), Some(vec![2]), Some(vec![3])];
+        let same = [vec![0], vec![1], vec![2], vec![3]];
+        // Nothing identical is re-sent: that makes the KeyLab blink.
+        assert!(button_leds_to_send(false, &sent, &same).is_empty());
+        let changed = [vec![0], vec![9], vec![2], vec![8]];
+        assert_eq!(button_leds_to_send(false, &sent, &changed), vec![1, 3]);
+        // A redrawn footer may have redrawn their lights: all four follow it.
+        assert_eq!(button_leds_to_send(true, &sent, &same), vec![0, 1, 2, 3]);
+        // After a new session nothing is known to be lit.
+        let unknown = std::array::from_fn(|_| None);
+        assert_eq!(button_leds_to_send(false, &unknown, &same), vec![0, 1, 2, 3]);
     }
 
     #[test]

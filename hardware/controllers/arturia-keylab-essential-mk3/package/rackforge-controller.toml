@@ -548,3 +548,13 @@ id = "key-light-color"
 name = "Key light color"
 kind = "color"
 default = "#145080"
+
+# Bank and the eight pads while the pads are on bank B. By default an amber
+# as bright as the key light's default blue -- its channels in another
+# order -- so bank B reads by colour, not by brightness. The 49, 61 and 88
+# share the panel, so it applies to all three.
+[[settings]]
+id = "bank-b-light-color"
+name = "Bank B light color"
+kind = "color"
+default = "#805014"

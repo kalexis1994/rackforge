@@ -6,6 +6,7 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeading } from "../components/PageHeading";
 import { PluginIcon } from "../components/PluginIcon";
 import { FadeImage } from "../components/FadeImage";
+import { ModalDialog } from "../components/ModalDialog";
 import { PluginRuntimeStatus } from "../components/PluginRuntimeStatus";
 import { RfLoader } from "../components/RfLoader";
 import { PluginRemovalDialog } from "../dialogs/PluginRemovalDialog";
@@ -14,7 +15,7 @@ import { hostJson } from "../host";
 import { ControllerSummary } from "../pages/ControllerPage";
 import { commitPlayPluginSelection, preflightPlayPluginSelection } from "../playPluginSelection";
 import { PLUGIN_KIND_ORDER, beginPluginOperation, canOpenInPlay, groupPluginsByKind, invalidatePluginCatalog, usePluginCatalog } from "../pluginCatalog";
-import { setInstalledPluginActive, synchronizePluginEnvironment } from "../pluginLifecycle";
+import { awaitPluginInstance, setInstalledPluginActive, synchronizePluginEnvironment } from "../pluginLifecycle";
 import { formatPluginVersion, pluginKindPresentation } from "../pluginPresentation";
 import { PluginRemovalOptions, PluginRemovalResult, pluginRemovalSummary } from "../pluginRemoval";
 import { type PluginWebDescriptor, type SessionSnapshot } from "../types";
@@ -76,6 +77,7 @@ export function PluginsPage({
     };
   }, [controllerRefreshRevision, showControllers]);
   const [pendingRemoval, setPendingRemoval] = useState<PluginWebDescriptor | null>(null);
+  const [pendingConfigLoad, setPendingConfigLoad] = useState<PluginWebDescriptor | null>(null);
   const [removing, setRemoving] = useState(false);
   const [changingPluginId, setChangingPluginId] = useState<string | null>(null);
   const [activationError, setActivationError] = useState<string | null>(null);
@@ -186,6 +188,48 @@ export function PluginsPage({
     } finally {
       finishOperation();
       setChangingPluginId(null);
+    }
+  };
+  const openConfig = async (plugin: PluginWebDescriptor) => {
+    if (!plugin.active || !plugin.surfaces.some((surface) => surface.kind === "config")) return;
+    const loadedInstance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
+    const finishOperation = beginPluginOperation(
+      plugin.plugin_id,
+      "open",
+      `Opening ${plugin.plugin_name} configuration…`,
+    );
+    setChangingPluginId(plugin.plugin_id);
+    setActivationError(null);
+    try {
+      let instance = loadedInstance;
+      if (!instance) {
+        // Some hosts unload instruments left behind in PLAY. Their CONFIG
+        // bridge needs a live instance, so load it and wait for the host's
+        // snapshot rather than guessing an instance ID or opening a dead URL.
+        await hostJson(`/api/v1/plugins/${encodeURIComponent(plugin.plugin_id)}/activate`, {
+          method: "POST",
+        });
+        ({ instance } = await awaitPluginInstance(plugin.plugin_id, undefined, 15_000));
+        if (!instance) {
+          throw new Error(`${plugin.plugin_name} was activated but its configuration instance did not become available.`);
+        }
+      }
+      navigate(`/plugins/${encodeURIComponent(instance.instance_id)}`);
+    } catch (error) {
+      setActivationError(
+        error instanceof Error ? error.message : "Could not open the plugin configuration.",
+      );
+    } finally {
+      finishOperation();
+      setChangingPluginId(null);
+    }
+  };
+  const requestConfig = (plugin: PluginWebDescriptor) => {
+    if (!plugin.active || !plugin.surfaces.some((surface) => surface.kind === "config")) return;
+    if (running.some((candidate) => candidate.plugin_id === plugin.plugin_id)) {
+      void openConfig(plugin);
+    } else {
+      setPendingConfigLoad(plugin);
     }
   };
 
@@ -313,6 +357,7 @@ export function PluginsPage({
           const instance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
           const busy = changingPluginId === plugin.plugin_id;
           const configAvailable = plugin.surfaces.some((surface) => surface.kind === "config");
+          const playAvailable = plugin.surfaces.some((surface) => surface.kind === "play");
           const kind = pluginKindPresentation(plugin.kind);
           return (
             <article
@@ -339,7 +384,13 @@ export function PluginsPage({
                 </span>
                 <h3>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</h3>
                 <PluginRuntimeStatus status={pluginCatalog.runtime[plugin.plugin_id]} />
-                <p>{plugin.surfaces.length === 0 ? "No Web interface" : "Web interface ready"}</p>
+                <p>{plugin.surfaces.length === 0
+                  ? "No Web interface"
+                  : configAvailable && playAvailable
+                    ? "PLAY and CONFIG interfaces ready"
+                    : configAvailable
+                      ? "CONFIG interface ready"
+                      : playAvailable ? "Controls available in PLAY" : "Web interface ready"}</p>
               </div>
               <div className="plugin-manager-card-actions" aria-label={`${plugin.plugin_name} actions`}>
                 <RfButton
@@ -365,13 +416,16 @@ export function PluginsPage({
                     Go to PLAY
                   </RfButton>
                 ) : null}
-                <RfButton
-                  variant="secondary"
-                  disabled={!plugin.active || !configAvailable || !instance || busy}
-                  onClick={() => navigate(`/plugins/${encodeURIComponent(instance!.instance_id)}`)}
-                >
-                  Config
-                </RfButton>
+                {configAvailable ? (
+                  <RfButton
+                    variant="secondary"
+                    disabled={!plugin.active || busy}
+                    title={instance ? undefined : "Loads this plugin into the audio runtime before opening CONFIG"}
+                    onClick={() => requestConfig(plugin)}
+                  >
+                    {instance ? "Config" : "Load & Config"}
+                  </RfButton>
+                ) : null}
                 <RfButton
                   variant="danger"
                   className="plugin-manager-remove"
@@ -438,6 +492,30 @@ export function PluginsPage({
         </section>
       )}
       </div>
+      {pendingConfigLoad ? (
+        <ModalDialog
+          eyebrow="Plugin configuration"
+          title={`Load ${pendingConfigLoad.plugin_name}?`}
+          role="alertdialog"
+          message="CONFIG needs a running plugin instance. Loading this plugin may change the current PLAY instrument; your presets and racks will remain intact."
+          onClose={() => setPendingConfigLoad(null)}
+          actions={
+            <>
+              <RfButton onClick={() => setPendingConfigLoad(null)}>Cancel</RfButton>
+              <RfButton
+                variant="primary"
+                onClick={() => {
+                  const plugin = pendingConfigLoad;
+                  setPendingConfigLoad(null);
+                  void openConfig(plugin);
+                }}
+              >
+                Load &amp; open CONFIG
+              </RfButton>
+            </>
+          }
+        />
+      ) : null}
       {pendingRemoval ? (
         <PluginRemovalDialog
           pluginName={pendingRemoval.plugin_name}

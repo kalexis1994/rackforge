@@ -144,13 +144,16 @@ jobs:
             -p rackforge-core \
             -p rackforge-browser \
             -p rackforge-web \
-            -p rackforge-concert-grand \
             -p rackforge-demo-synth \
             -p rackforge-parallel-demo-synth \
             -p rackforge-roland-scva \
             -p rackforge-gain \
             -p rackforge-gain-portable \
             -p rackforge-vst3
+          # Concert Grand tests share a process-global live knob registry.
+          # Run that crate's tests serially so a test cannot change a knob
+          # between the two renders of the exact-equivalence assertion.
+          cargo test --locked -p rackforge-concert-grand -- --test-threads=1
 
       # The two equivalence tests that hold a REAL packaged instrument to
       # its sequential fallback need their component built for wasm32, so

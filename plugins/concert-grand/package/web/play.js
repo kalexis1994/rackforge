@@ -443,7 +443,7 @@
         }
       }
 
-      function veilConfirm(text, confirmLabel = "Reemplazar") {
+      function veilConfirm(text, confirmLabel = "Replace") {
         return new Promise((resolve) => {
           const veil = document.getElementById("veil");
           document.getElementById("veiltext").textContent = text;
@@ -461,146 +461,57 @@
         });
       }
 
-      // The nameplate slides the way the arrow points: the name leaving goes
-      // out the far side, the one arriving comes in from the near one. The
-      // outgoing animation holds its end state, so it has to be cancelled once
-      // the incoming one has taken over -- otherwise the plate keeps the fade
-      // and the name never comes back.
-      const programLabel = document.getElementById("program");
-      let programToken = 0;
+      // The nameplate is RackForge's program selector, fed by this panel
+      // (`source="manual"`): the factory voicings are the host's programs, the
+      // player's own are applied here parameter by parameter, and the plate
+      // lists both in the shelf's order. Choosing on the plate -- an arrow, or
+      // the search it opens -- is choosing the card; the card's own click does
+      // the work, so there is one path however a voicing is picked. The plate
+      // shrinks a long name to fit (`fit`) and slides it the way the choice
+      // moved (`slide`), as the panel's own plate did.
+      const programSelector = document.getElementById("program-selector");
+      const BANKS = [
+        { id: "factory", name: "Factory", order: 0 },
+        { id: "user", name: "Saved", order: 1 },
+      ];
 
-      // A voicing's name is the plate's whole content, and what tells two of
-      // them apart tends to sit at the end -- "Concert 275 · Bright" against
-      // "Concert 275 · Warm". An ellipsis would cut off exactly the part that
-      // identifies it, so the lettering shrinks to fit instead; the ellipsis in
-      // the stylesheet stays as the floor's safety net, for a name so long that
-      // even the smallest engraving would not hold it. Letter-spacing is in em,
-      // so it follows the size down on its own.
-      // How far below the plate's own proportion a long name may be taken.
-      const PROGRAM_TYPE_FLOOR = 0.62;
-      function fitProgram() {
-        // The ideal comes from the stylesheet, which measures it against the
-        // plate; this only brings a name down until it fits. Clearing the
-        // inline size first is what lets the plate speak: the old routine
-        // started from a fixed 13px and so ignored how big the brass was.
-        programLabel.style.fontSize = "";
-        const ideal = parseFloat(getComputedStyle(programLabel).fontSize) || 13;
-        const floor = ideal * PROGRAM_TYPE_FLOOR;
-        let size = ideal;
-        while (size > floor && programLabel.scrollWidth > programLabel.clientWidth) {
-          size -= 0.5;
-          programLabel.style.fontSize = `${size}px`;
-        }
+      function feedSelector() {
+        programSelector.banks = BANKS;
+        programSelector.programs = [...voicing.querySelectorAll(".card")].map((card) => ({
+          id: card.dataset.programId,
+          name: card.querySelector(".title")?.textContent?.trim() ?? "",
+          bank: card.dataset.bank,
+          detail: card.title || undefined,
+        }));
+        programSelector.value = chosenCard?.dataset.programId ?? null;
       }
-      // The plate is sized against the panel, so anything that changes its
-      // width changes the field the name has to fit. Watching the plate rather
-      // than the window is what catches all of it: the host resizing the
-      // surface without the window moving, a dock opening beside it, the rail
-      // folding away. Measured, a window `resize` listener missed exactly
-      // those, and the name stayed at the size the wider plate had given it,
-      // running out over the screws. The plate's own width is explicit, so
-      // setting the lettering cannot feed back into what is being observed.
-      // Both triggers, because each one misses cases the other catches: the
-      // window event does not fire when the host resizes the surface alone,
-      // and an embedder can throttle observer delivery to a frame it is not
-      // showing. Whichever arrives does the work, and the debounce means two
-      // of them cost one fit. The observer is held rather than left anonymous,
-      // so nothing can collect it while it is still watching.
-      const plate = programLabel.parentElement;
-      let refit = 0;
-      const refitSoon = () => {
-        clearTimeout(refit);
-        refit = setTimeout(fitProgram, 120);
-      };
-      window.addEventListener("resize", refitSoon);
-      let plateObserver = null;
-      if (plate && typeof ResizeObserver === "function") {
-        plateObserver = new ResizeObserver(refitSoon);
-        plateObserver.observe(plate);
-      }
-      // And the name the plate carries before a program has been chosen -- the
-      // instrument's own, which is the longest of them -- has to be fitted
-      // too, once the fonts are in and the plate has a width to measure.
-      fitProgram();
-      if (document.fonts?.ready) {
-        void document.fonts.ready.then(fitProgram);
-      }
-      function showProgram(name, direction) {
-        if (!name || programLabel.textContent === name) return;
-        if (!direction || !programLabel.animate) {
-          programLabel.textContent = name;
-          fitProgram();
-          return;
-        }
-        const token = ++programToken;
-        const travel = 34 * direction;
-        const out = programLabel.animate(
-          [
-            { transform: "translateX(0)", opacity: 1 },
-            { transform: `translateX(${-travel}px)`, opacity: 0 },
-          ],
-          { duration: 120, easing: "ease-in", fill: "forwards" },
+
+      programSelector.addEventListener("rf-program-select", (event) => {
+        const card = [...voicing.querySelectorAll(".card")].find(
+          (candidate) => candidate.dataset.programId === event.detail.id,
         );
-        // The name must land even if the animation never finishes. A panel
-        // whose window is offscreen gets a frozen timeline: the animations
-        // queue up reporting currentTime 0 and `finished` never settles, so
-        // hanging the text change off it alone left the plate naming the
-        // voicing before last. Whichever arrives first does the work.
-        // hanging the text change off it alone left the plate naming the
-        // voicing before last, and animating the arrival on a frozen timeline
-        // left it stuck at zero opacity -- worse than stale. So the timer
-        // winning the race is itself the evidence that nothing is animating:
-        // it sets the name and skips the arrival.
-        let settled = false;
-        const settle = (animated) => {
-          if (settled || token !== programToken) return;
-          settled = true;
-          programLabel.textContent = name;
-          fitProgram();
-          out.cancel();
-          if (!animated) return;
-          programLabel.animate(
-            [
-              { transform: `translateX(${travel}px)`, opacity: 0 },
-              { transform: "translateX(0)", opacity: 1 },
-            ],
-            { duration: 160, easing: "ease-out" },
-          );
-        };
-        out.finished.then(
-          () => settle(true),
-          () => settle(false),
-        );
-        setTimeout(() => settle(false), 220);
-      }
+        if (card) card.click();
+        else event.preventDefault();
+      });
+
+      // A voicing of the player's own is not a host program, so the host's
+      // selection still names the factory voicing it started from. Remember
+      // which card it was, and on which host selection, so a rebuilt shelf
+      // keeps it -- until the host's selection moves, which means something
+      // else chose a program.
+      let userChoice = null;
 
       function chooseCard(card) {
-        // Which way the plate travels is read off the shelf rather than passed
-        // in, so an arrow and a click on a distant card animate alike.
-        const cards = [...voicing.querySelectorAll(".card")];
-        const from = cards.indexOf(chosenCard);
-        const to = cards.indexOf(card);
-        const direction = from < 0 || to < 0 || from === to ? 0 : Math.sign(to - from);
         chosenCard = card;
-        for (const other of cards) {
+        userChoice =
+          card?.dataset.bank === "user"
+            ? { programId: card.dataset.programId, soundId: selectedSoundId }
+            : null;
+        for (const other of voicing.querySelectorAll(".card")) {
           other.setAttribute("aria-pressed", String(other === card));
         }
-        showProgram(card?.querySelector(".title")?.textContent?.trim(), direction);
+        programSelector.value = card?.dataset.programId ?? null;
       }
-
-      function stepProgram(delta) {
-        const cards = [...voicing.querySelectorAll(".card")];
-        if (!cards.length) return;
-        const at = cards.indexOf(chosenCard);
-        const next = (((at < 0 ? 0 : at + delta) % cards.length) + cards.length) % cards.length;
-        cards[next].click();
-      }
-      document
-        .getElementById("programprev")
-        .addEventListener("click", () => stepProgram(-1));
-      document
-        .getElementById("programnext")
-        .addEventListener("click", () => stepProgram(1));
 
       function presetCard(name, onPick, extras) {
         const card = document.createElement("div");
@@ -648,25 +559,19 @@
           });
           card.title = preset.description ?? "";
           card.dataset.soundId = preset.id;
+          card.dataset.programId = preset.id;
+          card.dataset.bank = "factory";
           voicing.append(card);
         }
-        // The highlight follows the host's selection; a fresh panel with no
-        // word from the host yet falls back to the first factory card, which
-        // is the packaged default.
-        const chosen =
-          (selectedSoundId &&
-            voicing.querySelector(`.card[data-sound-id="${selectedSoundId}"]`)) ||
-          voicing.querySelector(".card");
-        if (chosen) chooseCard(chosen);
         for (const preset of userPresets()) {
           const tools = document.createElement("span");
           tools.className = "tools-inline";
           const save = document.createElement("button");
           save.type = "button";
           save.textContent = "\u{1F4BE}";
-          save.title = "Guardar los valores actuales en este preset";
+          save.title = "Save the current values into this preset";
           save.addEventListener("click", async () => {
-            if (!(await veilConfirm(`¿Reemplazar “${preset.name}” con los valores actuales?`))) {
+            if (!(await veilConfirm(`Replace “${preset.name}” with the current values?`))) {
               return;
             }
             try {
@@ -675,7 +580,7 @@
               const mine = list.find((p) => p.id === preset.id);
               if (mine) mine.values = values;
               saveUserPresets(list);
-              state.textContent = `Guardado · ${preset.name}`;
+              state.textContent = `Saved · ${preset.name}`;
             } catch (error) {
               state.textContent = error.message;
             }
@@ -683,9 +588,9 @@
           const trash = document.createElement("button");
           trash.type = "button";
           trash.textContent = "\u{1F5D1}";
-          trash.title = "Borrar este preset";
+          trash.title = "Delete this preset";
           trash.addEventListener("click", async () => {
-            if (!(await veilConfirm(`¿Borrar “${preset.name}”?`, "Borrar"))) return;
+            if (!(await veilConfirm(`Delete “${preset.name}”?`, "Delete"))) return;
             saveUserPresets(userPresets().filter((p) => p.id !== preset.id));
             await drawPresets();
           });
@@ -699,12 +604,27 @@
               state.textContent = error.message;
             }
           }, tools);
+          // The player's ids are made here and cannot meet a factory id.
+          card.dataset.programId = `user:${preset.id}`;
+          card.dataset.bank = "user";
           voicing.append(card);
         }
+        // The highlight follows the host's selection, or the player's own
+        // voicing applied on top of it; a fresh panel with no word from the
+        // host yet falls back to the first factory card, which is the
+        // packaged default.
+        const cards = [...voicing.querySelectorAll(".card")];
+        const chosen =
+          (userChoice?.soundId === selectedSoundId &&
+            cards.find((card) => card.dataset.programId === userChoice.programId)) ||
+          (selectedSoundId && cards.find((card) => card.dataset.soundId === selectedSoundId)) ||
+          cards[0];
+        if (chosen) chooseCard(chosen);
         // move the shelf furniture after the cards
         const add = document.getElementById("addpreset");
         const namer = document.getElementById("namer");
         add.parentElement.append(add, namer);
+        feedSelector();
       }
 
       {
@@ -725,7 +645,7 @@
             list.push({ id: `u-${Date.now()}`, name, values });
             saveUserPresets(list);
             namer.classList.remove("open");
-            state.textContent = `Guardado · ${name}`;
+            state.textContent = `Saved · ${name}`;
             await drawPresets();
             // The values on the faders ARE this preset: it shows as chosen.
             const cards = voicing.querySelectorAll(".card");
@@ -757,7 +677,7 @@
         tools.className = "tools";
         const button = document.createElement("button");
         button.type = "button";
-        button.textContent = "Copiar JSON";
+        button.textContent = "Copy JSON";
         const dump = document.createElement("textarea");
         dump.readOnly = true;
         tools.append(button);
@@ -794,10 +714,10 @@
           dump.select();
           try {
             await navigator.clipboard.writeText(text);
-            state.textContent = "Copiado al portapapeles ✓";
+            state.textContent = "Copied to the clipboard ✓";
           } catch {
             document.execCommand("copy");
-            state.textContent = "Seleccionado — Ctrl+C para copiar";
+            state.textContent = "Selected — press Ctrl+C to copy";
           }
         } catch (error) {
           state.textContent = error.message;

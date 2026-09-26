@@ -14,7 +14,7 @@ import { dispatchCommandAwait } from "../gateway";
 import { hostJson } from "../host";
 import { ControllerSummary } from "../pages/ControllerPage";
 import { commitPlayPluginSelection, preflightPlayPluginSelection } from "../playPluginSelection";
-import { PLUGIN_KIND_ORDER, beginPluginOperation, canOpenInPlay, groupPluginsByKind, invalidatePluginCatalog, usePluginCatalog } from "../pluginCatalog";
+import { PLUGIN_KIND_ORDER, beginPluginOperation, canOpenInPlay, declaresConfigSurface, groupPluginsByKind, invalidatePluginCatalog, usePluginCatalog } from "../pluginCatalog";
 import { awaitPluginInstance, setInstalledPluginActive, synchronizePluginEnvironment } from "../pluginLifecycle";
 import { formatPluginVersion, pluginKindPresentation } from "../pluginPresentation";
 import { PluginRemovalOptions, PluginRemovalResult, pluginRemovalSummary } from "../pluginRemoval";
@@ -191,7 +191,7 @@ export function PluginsPage({
     }
   };
   const openConfig = async (plugin: PluginWebDescriptor) => {
-    if (!plugin.active || !plugin.surfaces.some((surface) => surface.kind === "config")) return;
+    if (!plugin.active || !declaresConfigSurface(plugin)) return;
     const loadedInstance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
     const finishOperation = beginPluginOperation(
       plugin.plugin_id,
@@ -225,7 +225,7 @@ export function PluginsPage({
     }
   };
   const requestConfig = (plugin: PluginWebDescriptor) => {
-    if (!plugin.active || !plugin.surfaces.some((surface) => surface.kind === "config")) return;
+    if (!plugin.active || !declaresConfigSurface(plugin)) return;
     if (running.some((candidate) => candidate.plugin_id === plugin.plugin_id)) {
       void openConfig(plugin);
     } else {
@@ -356,7 +356,7 @@ export function PluginsPage({
         {group.plugins.map((plugin) => {
           const instance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
           const busy = changingPluginId === plugin.plugin_id;
-          const configAvailable = plugin.surfaces.some((surface) => surface.kind === "config");
+          const configAvailable = declaresConfigSurface(plugin);
           const playAvailable = plugin.surfaces.some((surface) => surface.kind === "play");
           const kind = pluginKindPresentation(plugin.kind);
           return (

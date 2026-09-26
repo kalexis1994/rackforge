@@ -309,7 +309,13 @@ fn a_slot_plays_at_its_level_and_pan() {
             &mut output,
         )
         .unwrap();
-    assert!(output.chunks_exact(2).all(|frame| frame == [0.0, 0.5]));
+    assert!(
+        output
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .all(|frame| *frame == [0.0, 0.5])
+    );
 }
 
 #[test]

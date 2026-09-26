@@ -1063,11 +1063,12 @@ impl DesktopApp {
             .expect("session lock poisoned")
             .active_mode
             == SurfaceMode::Live;
-        if starts_live && let Some(location) = restored_live_target {
-            if let Err(error) = app.activate_live_target(location, None) {
-                eprintln!("LIVE_RESTORE_FAILED reason={error}");
-                app.status = format!("The LIVE target could not be loaded again: {error}");
-            }
+        if starts_live
+            && let Some(location) = restored_live_target
+            && let Err(error) = app.activate_live_target(location, None)
+        {
+            eprintln!("LIVE_RESTORE_FAILED reason={error}");
+            app.status = format!("The LIVE target could not be loaded again: {error}");
         }
         // LITTLE opens on what is playing: the LIVE lists need the library
         // and the LIVE position before the screen can go there.
@@ -3741,10 +3742,11 @@ impl DesktopApp {
         );
         let known = self.midi_identities.insert(name.clone(), identity.clone());
         // A device that answered after the wait is attached again now.
-        if !self.pending_controller_connects.contains_key(&name) && known != Some(identity) {
-            if let Err(message) = self.reload_declarative_controllers() {
-                eprintln!("DECLARATIVE_CONTROLLER_NOT_ATTACHED error={message}");
-            }
+        if !self.pending_controller_connects.contains_key(&name)
+            && known != Some(identity)
+            && let Err(message) = self.reload_declarative_controllers()
+        {
+            eprintln!("DECLARATIVE_CONTROLLER_NOT_ATTACHED error={message}");
         }
     }
 

@@ -41,7 +41,7 @@ mod lab {
 
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use rackforge_concert_grand::{ConcertGrand, apply_tuning, dump_tuning};
-    use rackforge_plugin_sdk::{MidiEvent, Processor};
+    use rackforge_plugin_sdk::MidiEvent;
 
     const BLOCK: usize = 512;
 

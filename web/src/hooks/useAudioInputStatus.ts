@@ -64,7 +64,7 @@ export function useAudioInputStatus(intervalMs: number | null): {
 } {
   const [status, setStatus] = useState<AudioInputState | null>(null);
   const statusRef = useRef<AudioInputState | null>(null);
-  const feed = useMemo(createPeakFeed, []);
+  const feed = useMemo(() => createPeakFeed(), []);
   useEffect(() => {
     if (intervalMs === null) return;
     let active = true;

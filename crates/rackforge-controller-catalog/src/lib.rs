@@ -1159,9 +1159,18 @@ mod tests {
     fn a_keylab_mk3_is_read_on_its_daw_port_whatever_its_size() {
         let (_root, store) = installed_store("keylab-mk3");
         for (port, expected) in [
-            ("MIDIIN2 (KeyLab 49 mk3)", Some("org.rackforge.arturia-keylab-mk3")),
-            ("2- MIDIIN2 (KeyLab 88 mk3)", Some("org.rackforge.arturia-keylab-mk3")),
-            ("KeyLab 61 mk3 DAW", Some("org.rackforge.arturia-keylab-mk3")),
+            (
+                "MIDIIN2 (KeyLab 49 mk3)",
+                Some("org.rackforge.arturia-keylab-mk3"),
+            ),
+            (
+                "2- MIDIIN2 (KeyLab 88 mk3)",
+                Some("org.rackforge.arturia-keylab-mk3"),
+            ),
+            (
+                "KeyLab 61 mk3 DAW",
+                Some("org.rackforge.arturia-keylab-mk3"),
+            ),
             (
                 "KeyLab 61 mk3:KeyLab 61 mk3 DAW 16:1",
                 Some("org.rackforge.arturia-keylab-mk3"),
@@ -1199,7 +1208,10 @@ mod tests {
     fn an_sl_mkiii_is_read_on_its_incontrol_port() {
         let (_root, store) = installed_store("sl-mkiii");
         for (port, expected) in [
-            ("MIDIIN2 (Novation SL MkIII)", Some("org.rackforge.novation-sl-mkiii")),
+            (
+                "MIDIIN2 (Novation SL MkIII)",
+                Some("org.rackforge.novation-sl-mkiii"),
+            ),
             (
                 "Novation SL MkIII SL MkIII InControl",
                 Some("org.rackforge.novation-sl-mkiii"),
@@ -1257,14 +1269,20 @@ mod tests {
     fn the_community_packages_are_read_on_their_ports() {
         let (_root, store) = installed_store("community");
         for (port, expected) in [
-            ("Arturia MiniLab mkII", Some("org.rackforge.arturia-minilab-mkii")),
+            (
+                "Arturia MiniLab mkII",
+                Some("org.rackforge.arturia-minilab-mkii"),
+            ),
             (
                 "Arturia MiniLab mkII:Arturia MiniLab mkII MIDI 1 20:0",
                 Some("org.rackforge.arturia-minilab-mkii"),
             ),
             ("Arturia MiniLab", None),
             ("MPKmini2", Some("org.rackforge.akai-mpk-mini-mkii")),
-            ("MPKmini2:MPKmini2 MIDI 1 24:0", Some("org.rackforge.akai-mpk-mini-mkii")),
+            (
+                "MPKmini2:MPKmini2 MIDI 1 24:0",
+                Some("org.rackforge.akai-mpk-mini-mkii"),
+            ),
             ("MPK mini", None),
             ("V49", Some("org.rackforge.alesis-v")),
             ("V25:V25 MIDI 1 24:0", Some("org.rackforge.alesis-v")),
@@ -1275,7 +1293,10 @@ mod tests {
             ("LPD8", Some("org.rackforge.akai-lpd8")),
             ("LPD8:LPD8 MIDI 1 24:0", Some("org.rackforge.akai-lpd8")),
             ("LPD8 mk2", Some("org.rackforge.akai-lpd8-mk2")),
-            ("LPD8 mk2:LPD8 mk2 MIDI 1 24:0", Some("org.rackforge.akai-lpd8-mk2")),
+            (
+                "LPD8 mk2:LPD8 mk2 MIDI 1 24:0",
+                Some("org.rackforge.akai-lpd8-mk2"),
+            ),
             ("LPD8 Wireless", None),
         ] {
             assert_eq!(resolved(&store, port, None).as_deref(), expected, "{port}");

@@ -1299,7 +1299,7 @@ const GRAND_BLOCKS: usize = 200;
 /// sostenuto rod.
 fn piano_script(block: usize) -> Vec<MidiEventV1> {
     let mut midi = Vec::new();
-    if block % 3 == 0 {
+    if block.is_multiple_of(3) {
         midi.push(MidiEventV1 {
             frame: 0,
             length: 3,
@@ -1311,18 +1311,18 @@ fn piano_script(block: usize) -> Vec<MidiEventV1> {
             data: [0x90, 28 + (block * 7 % 60) as u8, 92],
         });
     }
-    if block % 7 == 0 {
+    if block.is_multiple_of(7) {
         midi.push(MidiEventV1 {
             frame: 40,
             length: 3,
             data: [0x80, 28 + (block.saturating_sub(21) * 7 % 60) as u8, 64],
         });
     }
-    if block % 41 == 0 {
+    if block.is_multiple_of(41) {
         midi.push(MidiEventV1 {
             frame: 63,
             length: 3,
-            data: [0xB0, 66, if block % 82 == 0 { 127 } else { 0 }],
+            data: [0xB0, 66, if block.is_multiple_of(82) { 127 } else { 0 }],
         });
     }
     midi

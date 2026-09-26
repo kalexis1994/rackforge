@@ -2116,6 +2116,7 @@ function RackEditor({
     draft?.id ?? null,
     describeRackChange,
   );
+  const skipRackStep = rackHistory.skipNext;
   // A graph with an error is not saved: the engine would refuse it, or the
   // Rack would not be heard (rackGraphProblems). Warnings do not block.
   const graphBlocking = useMemo(() => {
@@ -2156,7 +2157,7 @@ function RackEditor({
       const saved = snapshot.library.racks.find((item) => item.id === draft.id);
       if (saved) {
         // What the store kept is the same Rack, not a step.
-        rackHistory.skipNext();
+        skipRackStep();
         setDraft(clone(materializeRackGraph(saved)));
       }
       setBaseRevision(snapshot.revision);
@@ -2164,7 +2165,7 @@ function RackEditor({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Rack.");
     }
-  }, [baseRevision, draft, onSaved, rackHistory.skipNext, validate]);
+  }, [baseRevision, draft, onSaved, skipRackStep, validate]);
   useEffect(() => {
     if (!immersive) return;
     const saveWorkspace = () => void save();
@@ -2563,6 +2564,7 @@ function SongEditor({
     draft?.id ?? null,
     describeSongChange,
   );
+  const skipSongStep = songHistory.skipNext;
   // A Part whose graph has an error keeps the Song from being saved, as a
   // Rack's does (rackGraphProblems); the first one found is named.
   const graphBlocking = useMemo(() => {
@@ -2599,7 +2601,7 @@ function SongEditor({
       });
       const saved = snapshot.library.songs.find((item) => item.id === draft.id);
       if (saved) {
-        songHistory.skipNext();
+        skipSongStep();
         setDraft(clone(saved));
       }
       setBaseRevision(snapshot.revision);
@@ -2607,7 +2609,7 @@ function SongEditor({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Song.");
     }
-  }, [baseRevision, draft, graphBlocking, onSaved, songHistory.skipNext]);
+  }, [baseRevision, draft, graphBlocking, onSaved, skipSongStep]);
   const handleGraphOverlayChange = useCallback((open: boolean) => {
     window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
       detail: { open },

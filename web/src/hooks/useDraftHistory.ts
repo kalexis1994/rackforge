@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   emptyHistory,
   jumpSteps,
@@ -34,18 +34,26 @@ export function useDraftHistory<T>(
   describe: (before: T, after: T) => string,
 ): DraftHistory {
   const [history, setHistory] = useState<EditHistory<T>>(emptyHistory);
+  // A new identity starts a new history in the render that brings it, so no
+  // render shows the old Rack's steps against the new Rack's draft.
+  const [historyIdentity, setHistoryIdentity] = useState(identity);
+  if (historyIdentity !== identity) {
+    setHistoryIdentity(identity);
+    setHistory(emptyHistory());
+  }
   const previous = useRef<T | null>(draft);
   const applying = useRef(false);
   const skipping = useRef(false);
   const describeRef = useRef(describe);
-  describeRef.current = describe;
+  useLayoutEffect(() => {
+    describeRef.current = describe;
+  });
 
   useEffect(() => {
     previous.current = draft;
     applying.current = false;
     skipping.current = false;
-    setHistory(emptyHistory());
-    // Only a new identity restarts the history; the draft is read at that
+    // Only a new identity restarts the tracking; the draft is read at that
     // moment, not followed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity]);

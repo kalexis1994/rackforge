@@ -162,9 +162,7 @@ export function SequencerStrip({
   // so folding them away slides the whole body shut rather than dropping
   // the deck out of it first.
   const [deckMounted, setDeckMounted] = useState(!collapsed);
-  useEffect(() => {
-    if (!collapsed) setDeckMounted(true);
-  }, [collapsed]);
+  if (!collapsed && !deckMounted) setDeckMounted(true);
   const taps = useRef<number[]>([]);
 
   const toggleCollapsed = useCallback(() => {

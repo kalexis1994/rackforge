@@ -488,10 +488,10 @@ impl BudgetGovernor {
             return self.publish_if_credible(first, BudgetReason::Measured, now);
         };
 
-        if let Some(last) = self.last_window_at {
-            if now.saturating_sub(last) < PUBLISH_INTERVAL {
-                return None;
-            }
+        if let Some(last) = self.last_window_at
+            && now.saturating_sub(last) < PUBLISH_INTERVAL
+        {
+            return None;
         }
         // Past the interval: this window is being read, whatever comes of
         // it, so the next one starts here.

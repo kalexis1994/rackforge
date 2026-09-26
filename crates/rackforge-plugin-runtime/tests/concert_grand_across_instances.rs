@@ -38,7 +38,7 @@ const BLOCKS: usize = 200;
 /// made of.
 fn script(block: usize) -> Vec<MidiEvent> {
     let mut midi = Vec::new();
-    if block % 3 == 0 {
+    if block.is_multiple_of(3) {
         midi.push(MidiEvent {
             frame: 0,
             data: [0xB0, 64, ((block * 37) % 128) as u8],
@@ -50,17 +50,17 @@ fn script(block: usize) -> Vec<MidiEvent> {
             length: 3,
         });
     }
-    if block % 7 == 0 {
+    if block.is_multiple_of(7) {
         midi.push(MidiEvent {
             frame: 40,
             data: [0x80, 28 + (block.saturating_sub(21) * 7 % 60) as u8, 64],
             length: 3,
         });
     }
-    if block % 41 == 0 {
+    if block.is_multiple_of(41) {
         midi.push(MidiEvent {
             frame: 64,
-            data: [0xB0, 66, if block % 82 == 0 { 127 } else { 0 }],
+            data: [0xB0, 66, if block.is_multiple_of(82) { 127 } else { 0 }],
             length: 3,
         });
     }

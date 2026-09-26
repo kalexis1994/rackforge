@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAudioInputRoute, offeredInputCount } from "./RackAudioInputLinkEditor";
-import { meterLevel } from "./AudioInputMeter";
+import { meterLevel, normalizeAudioInputRoute, offeredInputCount } from "../audioInputRoute";
 import type { AudioInputState } from "../hooks/useAudioInputStatus";
 
 const scarlett: AudioInputState = {

@@ -398,9 +398,10 @@ fn parse_plugin_arguments(command: &str, arguments: &[String]) -> Result<PluginA
     Ok((PathBuf::from(package), binary, resources, preset, data_root))
 }
 
-fn parse_stress_arguments(
-    arguments: &[String],
-) -> Result<(PluginArguments, u8, u32, u32, Vec<(u32, f64)>)> {
+/// The plugin, voices, blocks, repeats and the program schedule of a stress run.
+type StressArguments = (PluginArguments, u8, u32, u32, Vec<(u32, f64)>);
+
+fn parse_stress_arguments(arguments: &[String]) -> Result<StressArguments> {
     let mut common = Vec::new();
     let mut voices = 28_u8;
     let mut blocks = 32_u32;

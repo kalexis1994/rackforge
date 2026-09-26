@@ -228,7 +228,8 @@ pub fn is_keylab_endpoint(name: &str) -> bool {
 /// sent them this one's DAW program, display and LEDs, and with two of them
 /// plugged in it found the choice ambiguous and drove neither.
 fn names_keylab_essential_mk3(folded: &str) -> bool {
-    (folded.contains("kl essential") || folded.contains("keylab essential")) && folded.contains("mk3")
+    (folded.contains("kl essential") || folded.contains("keylab essential"))
+        && folded.contains("mk3")
 }
 
 fn is_alsa_address(value: &str) -> bool {
@@ -287,7 +288,9 @@ mod tests {
     fn other_keylabs_are_never_driven_as_this_one() {
         // The product's own spelling, as the package names the device.
         assert!(is_main_midi_endpoint("KeyLab Essential 61 mk3 MIDI 28:0"));
-        assert!(is_main_midi_endpoint("KL Essential 49 mk3:KL Essential 49 mk3 MIDI 24:0"));
+        assert!(is_main_midi_endpoint(
+            "KL Essential 49 mk3:KL Essential 49 mk3 MIDI 24:0"
+        ));
         // Other KeyLabs' main ports end in MIDI too, and speak other
         // protocols: a KeyLab mkII or mk3, and the first KeyLab Essential.
         for name in [

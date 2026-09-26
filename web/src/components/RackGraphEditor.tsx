@@ -1512,17 +1512,15 @@ export default function RackGraphEditor({
   // A plugin or a cable edited is a modal over the canvas, centred on it: the
   // graph behind takes no pointer, key or focus until it is closed, and the
   // canvas's own popovers close under it. If what it edits goes -- an undo
-  // takes it away -- so does the modal.
-  useEffect(() => {
-    if (editorSlotId !== undefined && !editorSlot) setEditorSlotId(undefined);
-  }, [editorSlot, editorSlotId]);
+  // takes it away -- so does the modal, in the render that notices.
+  if (editorSlotId !== undefined && !editorSlot) setEditorSlotId(undefined);
   const editorNodeIdRef = useRef<string | undefined>(undefined);
-  editorNodeIdRef.current = editorNode?.id;
+  useLayoutEffect(() => {
+    editorNodeIdRef.current = editorNode?.id;
+  });
   const cableEdited = midiLinkEditor
     && materialized.graph!.edges.some((edge) => edge.id === midiLinkEditor.edgeId);
-  useEffect(() => {
-    if (midiLinkEditor && !cableEdited) setMidiLinkEditor(null);
-  }, [cableEdited, midiLinkEditor]);
+  if (midiLinkEditor && !cableEdited) setMidiLinkEditor(null);
   // What the modal is over, and what takes the focus back when it closes:
   // the node a plugin was opened from, or the key of the cable.
   const modalKey = editorSlotId !== undefined
@@ -2000,8 +1998,10 @@ export default function RackGraphEditor({
                   ...graph,
                   edges: graph.edges.map((candidate) => {
                     if (candidate.id !== midiEditorEdge.id) return candidate;
-                    const { audio_input_route: _previous, ...rest } = candidate;
-                    return audio_input_route ? { ...rest, audio_input_route } : rest;
+                    if (audio_input_route) return { ...candidate, audio_input_route };
+                    const rest = { ...candidate };
+                    delete rest.audio_input_route;
+                    return rest;
                   }),
                 }));
                 setMidiLinkEditor(null);

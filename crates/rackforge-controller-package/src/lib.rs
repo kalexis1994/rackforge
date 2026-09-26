@@ -355,7 +355,7 @@ pub fn setup_output_port(
         .filter(|output| matcher.matches(output))
         .map(|output| (shared(output), output))
         .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| right.0.cmp(&left.0));
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
     match candidates.as_slice() {
         [] => None,
         [(_, only)] => Some((*only).clone()),

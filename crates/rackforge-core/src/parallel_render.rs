@@ -455,6 +455,7 @@ impl RenderTelemetry {
     /// Records that a slot was handed a new real-time budget. Called from the
     /// audio loop; `reason` is a non-empty word, and the publisher clears it
     /// once it has been said.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_budget(
         &self,
         slot: usize,
@@ -649,6 +650,10 @@ fn budget_reason_code(reason: &str) -> u64 {
         .map_or(0, |index| index as u64 + 1)
 }
 
+/// One slot's budget as a snapshot reports it; the fields are listed where
+/// [`TelemetrySnapshot::budgets`] is.
+pub type BudgetRecord = (usize, u64, &'static str, u64, u64, u64, u64, u64, u64);
+
 pub struct TelemetrySnapshot {
     pub stages: Vec<[HistogramSnapshot; STAGE_COUNT]>,
     pub block: HistogramSnapshot,
@@ -658,7 +663,7 @@ pub struct TelemetrySnapshot {
     pub slot_faults: Vec<u64>,
     /// `(slot, fuel, reason, picoseconds per fuel, deadline ns)` for every
     /// slot that was handed a budget since the last snapshot.
-    pub budgets: Vec<(usize, u64, &'static str, u64, u64, u64, u64, u64, u64)>,
+    pub budgets: Vec<BudgetRecord>,
     pub unit_faults: Vec<u64>,
     pub worker_units: Vec<u64>,
     pub worker_busy_ns: Vec<u64>,

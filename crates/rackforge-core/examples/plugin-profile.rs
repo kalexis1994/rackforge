@@ -193,7 +193,6 @@ fn load_program(voice: &mut Voice, program: &str) {
 }
 
 /// A held chord, so the instrument has something to render.
-
 fn chord() -> Vec<MidiEventV1> {
     [48_u8, 55, 60, 64, 67]
         .iter()
@@ -244,7 +243,7 @@ fn measure(
     }
 
     // The three phases, run inline on this thread so each one can be timed.
-    let mut voices = vec![Voice::create(plugin, true)];
+    let mut voices = [Voice::create(plugin, true)];
     if let Some(program) = program {
         load_program(&mut voices[0], program);
     }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import {
   materializePluginState,
@@ -47,6 +47,23 @@ interface RackPluginEditorProps {
   }) => ReactNode;
 }
 
+type SurfaceOptions = Parameters<RackPluginEditorProps["renderSurface"]>[0];
+
+/**
+ * Draws the plugin's surface through the caller's renderer as a component of
+ * its own, so the editor hands its callbacks over as props rather than as
+ * arguments of a call made while the editor renders.
+ */
+function PluginSurface({
+  render,
+  options,
+}: {
+  render: RackPluginEditorProps["renderSurface"];
+  options: SurfaceOptions;
+}) {
+  return <>{render(options)}</>;
+}
+
 /**
  * A plugin in a Rack, edited: the plugin's own surface over the whole
  * editor, edged in its kind's colour, with its presets in theirs. It is a
@@ -62,8 +79,15 @@ export function RackPluginEditor({
   onClose,
   renderSurface,
 }: RackPluginEditorProps) {
-  const [presets, setPresets] = useState<PresetList>({ status: "loading" });
   const [presetsAttempt, setPresetsAttempt] = useState(0);
+  // The list is the answer to one question -- this plugin, this attempt --
+  // and until that question is answered the list is loading.
+  const presetsQuestion = `${slot.plugin_id}\n${presetsAttempt}`;
+  const [presetsAnswer, setPresetsAnswer] = useState<{ question: string; list: PresetList } | null>(
+    null,
+  );
+  const presets: PresetList =
+    presetsAnswer?.question === presetsQuestion ? presetsAnswer.list : { status: "loading" };
   const [presetId, setPresetId] = useState("");
   const [loadedPresetId, setLoadedPresetId] = useState<string>();
   const [busy, setBusy] = useState<"preset" | "sound" | null>(null);
@@ -86,7 +110,9 @@ export function RackPluginEditor({
   // late answer would be applied to is the one it was asked for.
   const mounted = useRef(true);
   const latestSlot = useRef(slot);
-  latestSlot.current = slot;
+  useLayoutEffect(() => {
+    latestSlot.current = slot;
+  });
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -96,23 +122,26 @@ export function RackPluginEditor({
 
   useEffect(() => {
     let active = true;
-    setPresets({ status: "loading" });
+    const question = presetsQuestion;
     requestPluginPresets(slot.plugin_id)
       .then((items) => {
-        if (active) setPresets({ status: "ready", items });
+        if (active) setPresetsAnswer({ question, list: { status: "ready", items } });
       })
       .catch((reason: unknown) => {
         if (active) {
-          setPresets({
-            status: "failed",
-            message: reason instanceof Error ? reason.message : "The presets could not be listed.",
+          setPresetsAnswer({
+            question,
+            list: {
+              status: "failed",
+              message: reason instanceof Error ? reason.message : "The presets could not be listed.",
+            },
           });
         }
       });
     return () => {
       active = false;
     };
-  }, [slot.plugin_id, presetsAttempt]);
+  }, [slot.plugin_id, presetsQuestion]);
 
   useEffect(() => {
     if (!needsCatalog) return;
@@ -295,13 +324,18 @@ export function RackPluginEditor({
               <AsyncSpinner label="Reading the programs…" size="medium" />
               <span>Reading the programs…</span>
             </div>
-          ) : editorInstance ? renderSurface({
-            instance: editorInstance,
-            state: slot.state,
-            onStateChange: updateState,
-            onSelectSound: selectSound,
-            parameterLinkInstanceId: slot.id,
-          }) : (
+          ) : editorInstance ? (
+            <PluginSurface
+              render={renderSurface}
+              options={{
+                instance: editorInstance,
+                state: slot.state,
+                onStateChange: updateState,
+                onSelectSound: selectSound,
+                parameterLinkInstanceId: slot.id,
+              }}
+            />
+          ) : (
             <p className="rack-plugin-editor-missing">
               This plugin is not running, so its editor cannot be shown. Check that it is
               installed in the Plugin Manager.

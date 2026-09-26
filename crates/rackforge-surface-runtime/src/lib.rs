@@ -1351,7 +1351,10 @@ impl Menu {
         let position = |plugins: &[PlayPlugin], id: Option<&str>| {
             id.and_then(|id| plugins.iter().position(|plugin| plugin.instance_id == id))
         };
-        let pending = position(&self.play_plugins, self.pending_plugin_instance_id.as_deref());
+        let pending = position(
+            &self.play_plugins,
+            self.pending_plugin_instance_id.as_deref(),
+        );
         let active = position(&self.play_plugins, active_instance_id);
         let browsed = if on_effects_row && !self.play_plugins.is_empty() {
             Some(self.play_plugins.len())

@@ -1228,7 +1228,11 @@ mod tests {
         let low_key = event(&[0x90, 48, 100]);
         let high_key = event(&[0x90, 72, 100]);
         assert_eq!(
-            note_of(route_through_stages(low_key, &[lower.clone()], None)),
+            note_of(route_through_stages(
+                low_key,
+                std::slice::from_ref(&lower),
+                None
+            )),
             Some(48)
         );
         assert_eq!(
@@ -1236,7 +1240,11 @@ mod tests {
             None
         );
         assert_eq!(
-            note_of(route_through_stages(low_key, &[upper.clone()], None)),
+            note_of(route_through_stages(
+                low_key,
+                std::slice::from_ref(&upper),
+                None
+            )),
             None
         );
         assert_eq!(
@@ -1256,7 +1264,7 @@ mod tests {
         assert_eq!(
             note_of(route_through_stages(
                 event(&[0x90, 60, 100]),
-                &[up_an_octave.clone()],
+                std::slice::from_ref(&up_an_octave),
                 None
             )),
             Some(72)

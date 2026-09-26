@@ -261,7 +261,7 @@ fn where_a_parallel_block_spends_its_time() {
         }
 
         // ---- B: the same units, inline, no threads -----------------------
-        let mut voices = vec![Voice::create(plugin, true)];
+        let mut voices = [Voice::create(plugin, true)];
         voices[0].events = first_block.clone();
         let (mut inline, mut begins, mut units_ran, mut finishes) = (
             Vec::with_capacity(BLOCKS),

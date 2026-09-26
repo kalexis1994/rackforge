@@ -169,8 +169,7 @@ impl ReservedMidiControls {
             if self.control_changes[usize::from(channel)][usize::from(controller)]
                 || self
                     .scoped_control_changes
-                    .iter()
-                    .any(|reserved| *reserved == (source, channel, controller))
+                    .contains(&(source, channel, controller))
             {
                 return true;
             }

@@ -131,7 +131,20 @@ pub const IDENTITY_REQUEST: &[u8] = &[0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7];
 pub fn is_identity_reply(message: &[u8]) -> bool {
     matches!(
         message,
-        [0xF0, 0x7E, _, 0x06, 0x02, 0x00, 0x20, 0x6B, 0x02, 0x00, 0x05, ..]
+        [
+            0xF0,
+            0x7E,
+            _,
+            0x06,
+            0x02,
+            0x00,
+            0x20,
+            0x6B,
+            0x02,
+            0x00,
+            0x05,
+            ..
+        ]
     ) && message.last() == Some(&0xF7)
 }
 
@@ -140,9 +153,21 @@ pub fn is_identity_reply(message: &[u8]) -> bool {
 /// program with Prog. The DAW program is 1.
 pub fn announced_program(message: &[u8]) -> Option<u8> {
     match message {
-        [0xF0, 0x00, 0x20, 0x6B, 0x7F, 0x42, 0x21, 0x11, 0x40, 0x02, 0x00, program, 0xF7] => {
-            Some(*program)
-        }
+        [
+            0xF0,
+            0x00,
+            0x20,
+            0x6B,
+            0x7F,
+            0x42,
+            0x21,
+            0x11,
+            0x40,
+            0x02,
+            0x00,
+            program,
+            0xF7,
+        ] => Some(*program),
         _ => None,
     }
 }
@@ -543,7 +568,9 @@ mod tests {
         let mut mk3 = reply;
         mk3[10] = 0x0A;
         assert!(!is_identity_reply(&mk3));
-        assert!(!is_identity_reply(&[0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x00, 0x20, 0x29, 0xF7]));
+        assert!(!is_identity_reply(&[
+            0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x00, 0x20, 0x29, 0xF7
+        ]));
     }
 
     #[test]
@@ -578,7 +605,10 @@ mod tests {
         let a = bank_led_messages(PadBank::A).unwrap();
         let b = bank_led_messages(PadBank::B).unwrap();
         let ids = |messages: &[Vec<u8>]| messages.iter().map(|m| m[9]).collect::<Vec<_>>();
-        assert_eq!(ids(&a), vec![0x01, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23]);
+        assert_eq!(
+            ids(&a),
+            vec![0x01, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23]
+        );
         assert_eq!(ids(&a), ids(&b));
         assert!(a.iter().all(|m| m[10..13] == ambient_led_rgb()));
         assert!(b.iter().all(|m| m[10..13] == bank_b_led_rgb()));

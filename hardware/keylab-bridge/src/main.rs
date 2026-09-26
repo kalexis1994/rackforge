@@ -1154,9 +1154,11 @@ impl KeyLabSession {
             self.last_footer = Some(messages.footer.clone());
         }
         if footer_redrawn || include_changed_leds {
-            for index in
-                button_leds_to_send(footer_redrawn, &self.last_button_leds, &messages.button_leds)
-            {
+            for index in button_leds_to_send(
+                footer_redrawn,
+                &self.last_button_leds,
+                &messages.button_leds,
+            ) {
                 self.send(&messages.button_leds[index])?;
                 self.last_button_leds[index] = Some(messages.button_leds[index].clone());
             }
@@ -3664,7 +3666,9 @@ fn button_leds_to_send(
     current: &[Vec<u8>; 4],
 ) -> Vec<usize> {
     (0..4)
-        .filter(|&index| footer_redrawn || sent[index].as_deref() != Some(current[index].as_slice()))
+        .filter(|&index| {
+            footer_redrawn || sent[index].as_deref() != Some(current[index].as_slice())
+        })
         .collect()
 }
 
@@ -3977,7 +3981,10 @@ mod tests {
         assert_eq!(button_leds_to_send(true, &sent, &same), vec![0, 1, 2, 3]);
         // After a new session nothing is known to be lit.
         let unknown = std::array::from_fn(|_| None);
-        assert_eq!(button_leds_to_send(false, &unknown, &same), vec![0, 1, 2, 3]);
+        assert_eq!(
+            button_leds_to_send(false, &unknown, &same),
+            vec![0, 1, 2, 3]
+        );
     }
 
     #[test]

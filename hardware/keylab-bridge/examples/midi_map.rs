@@ -426,16 +426,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         while receiver.try_recv().is_ok() {}
         print!("> {control}: ");
         std::io::stdout().flush()?;
-        let first = loop {
-            match receiver.recv() {
-                Ok(Event::Midi(heard)) => break Some(heard),
-                Ok(Event::Line(line)) if line.trim().eq_ignore_ascii_case("q") => {
-                    println!("(fin)");
-                    break 'controls;
-                }
-                Ok(Event::Line(_)) => break None,
-                Err(_) => break 'controls,
+        let first = match receiver.recv() {
+            Ok(Event::Midi(heard)) => Some(heard),
+            Ok(Event::Line(line)) if line.trim().eq_ignore_ascii_case("q") => {
+                println!("(fin)");
+                break 'controls;
             }
+            Ok(Event::Line(_)) => None,
+            Err(_) => break 'controls,
         };
         let Some(first) = first else {
             println!("(saltado)");

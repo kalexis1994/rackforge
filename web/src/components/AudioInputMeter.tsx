@@ -1,19 +1,11 @@
 import { useAudioInputPeaks, type AudioInputPeakFeed } from "../hooks/useAudioInputStatus";
+import { meterLevel } from "../audioInputRoute";
 
-/** The floor of the meter, in dBFS: below it a bar is empty. */
-const METER_FLOOR_DB = -60;
 /** A peak this close to full scale lights the clip mark. */
 const CLIP_PEAK = 0.99;
 /** Past this many inputs the bars stand side by side, a bank of them, so
  *  an eighteen-input interface is a strip and not a column. */
 const BANK_ABOVE = 4;
-
-/** Where a linear peak sits on the meter, 0 (floor) to 1 (0 dBFS). */
-export function meterLevel(peak: number): number {
-  if (!Number.isFinite(peak) || peak <= 0) return 0;
-  const db = 20 * Math.log10(peak);
-  return Math.max(0, Math.min(1, (db - METER_FLOOR_DB) / -METER_FLOOR_DB));
-}
 
 /**
  * Bars for captured inputs, as they arrive. `inputs` picks which physical

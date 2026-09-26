@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from "react";
 
 const FOCUSABLE = [
   "button:not([disabled])",
@@ -20,8 +20,12 @@ const FOCUSABLE = [
 export function useCanvasModal(onClose: () => void) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  // Escape calls whatever close the modal was last rendered with; the ref is
+  // brought up to date after each render, not during it.
   const closeLatest = useRef(onClose);
-  closeLatest.current = onClose;
+  useLayoutEffect(() => {
+    closeLatest.current = onClose;
+  });
 
   useEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;

@@ -90,7 +90,9 @@ pub(crate) mod probe {
 /// A probe that is a no-op unless the crate is being tested.
 macro_rules! phase {
     ($phase:expr, $mark:ident) => {
+        // The last probe in a function moves a mark nothing reads again.
         #[cfg(test)]
+        #[allow(unused_assignments)]
         {
             let now = std::time::Instant::now();
             probe::add($phase, now.duration_since($mark).as_nanos() as u64);
@@ -3891,16 +3893,16 @@ impl Default for StringUnit {
     }
 }
 
-/// Every voice slot, section by section -- the order a unit walks them.
-///
-/// The event handlers mutate each voice independently and write nothing to
-/// the instrument inside their loops, so this order and plain slot order
-/// give the same result. That is not an argument, it is a test: the four
-/// handlers below were switched to this order and the render fingerprint
-/// did not move.
-///
-/// The RENDER loop is a different matter and keeps slot order, because it
-/// sums into shared accumulators and the float order is the fingerprint.
+// Every voice slot, section by section -- the order a unit walks them.
+//
+// The event handlers mutate each voice independently and write nothing to
+// the instrument inside their loops, so this order and plain slot order
+// give the same result. That is not an argument, it is a test: the four
+// handlers below were switched to this order and the render fingerprint
+// did not move.
+//
+// The RENDER loop is a different matter and keeps slot order, because it
+// sums into shared accumulators and the float order is the fingerprint.
 
 /// What the stages after the strings need to know about the frame they are
 /// rendering, captured where the events for that frame have just landed.
@@ -6921,6 +6923,7 @@ impl StringEngine {
     }
 
     /// What a rail at a given position does to one string, note or halo.
+    #[allow(clippy::too_many_arguments)]
     fn seat_damper<const N: usize>(
         voice: &mut Voice<N>,
         pressure: f32,
@@ -7247,6 +7250,7 @@ impl StringUnit {
     /// `slot` decides the section, and the section decides which worker does
     /// this work: the recipe, the contact integration and the ladder are
     /// 42-47 %, 37 % and the rest of a note-on, and all of it happens here.
+    #[allow(clippy::too_many_arguments)]
     fn start_voice_unit(
         &mut self,
         channel: u8,
@@ -8902,6 +8906,7 @@ impl StringUnit {
     /// the damper serial, and a worker has the same tables. What a worker
     /// does NOT have is the coordinator's key tracking or its silent bank,
     /// so those writes stay on the other side.
+    #[allow(clippy::too_many_arguments)]
     fn release_voices(
         &mut self,
         channel: u8,
@@ -12409,6 +12414,7 @@ impl ConcertGrand {
         true
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn process(
         &mut self,
         input: &[f32],
@@ -12431,6 +12437,10 @@ impl ConcertGrand {
         );
     }
 
+    // The section loop indexes several per-frame plans by the same offset and
+    // sums in a fixed order that the render fingerprint pins; an iterator
+    // chain would read worse and prove nothing more.
+    #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
     pub fn process_wide(
         &mut self,
         _input: &[f32],
@@ -18520,7 +18530,7 @@ mod bench {
         const BLOCKS: usize = 240;
         let script = |block: usize| -> std::vec::Vec<MidiEvent> {
             let mut midi = std::vec::Vec::new();
-            if block % 3 == 0 {
+            if block.is_multiple_of(3) {
                 midi.push(MidiEvent {
                     frame: 0,
                     data: [0xB0, 64, ((block * 37) % 128) as u8],
@@ -18532,17 +18542,17 @@ mod bench {
                     length: 3,
                 });
             }
-            if block % 7 == 0 {
+            if block.is_multiple_of(7) {
                 midi.push(MidiEvent {
                     frame: 40,
                     data: [0x80, 28 + ((block.saturating_sub(21)) * 7 % 60) as u8, 64],
                     length: 3,
                 });
             }
-            if block % 41 == 0 {
+            if block.is_multiple_of(41) {
                 midi.push(MidiEvent {
                     frame: 64,
-                    data: [0xB0, 66, if block % 82 == 0 { 127 } else { 0 }],
+                    data: [0xB0, 66, if block.is_multiple_of(82) { 127 } else { 0 }],
                     length: 3,
                 });
             }
@@ -18844,8 +18854,10 @@ mod bench {
         const FRAMES: usize = 128;
         let raw = std::fs::read("./pedales-128.f32").expect("primero corre pedal_capture");
         let reference: std::vec::Vec<f32> = raw
-            .chunks_exact(4)
-            .map(|four| f32::from_le_bytes([four[0], four[1], four[2], four[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|four| f32::from_le_bytes(*four))
             .collect();
         let mine = play_pedal_script(300);
         assert_eq!(reference.len(), mine.len(), "capturas de distinto largo");
@@ -19290,8 +19302,10 @@ mod bench {
             return;
         };
         let before: std::vec::Vec<f32> = bytes
-            .chunks_exact(4)
-            .map(|four| f32::from_le_bytes([four[0], four[1], four[2], four[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|four| f32::from_le_bytes(*four))
             .collect();
         let (after, peak) = oracle_render();
         assert_eq!(before.len(), after.len(), "el render cambio de largo");

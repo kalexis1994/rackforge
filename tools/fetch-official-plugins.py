@@ -27,12 +27,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-106.rfplugin",
         "plugin_id": "org.rackforge.rf-106",
-        "version": "0.2.19",
+        "version": "0.2.20",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-106/"
-            "releases/download/v0.2.19/RF-106.rfplugin"
+            "releases/download/v0.2.20/RF-106.rfplugin"
         ),
-        "sha256": "6428a8240c5f982e34d231db68140ea760f4a912e2cd422ecee09327f5d0dbfd",
+        "sha256": "97f537b33128da70ab259f2cf9c0fd029309cc8b9fc70bbfa0e7da7fbc4d4295",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -50,12 +50,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-5.rfplugin",
         "plugin_id": "org.rackforge.rf-5",
-        "version": "0.1.15",
+        "version": "0.1.17",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-5/"
-            "releases/download/v0.1.15/RF-5.rfplugin"
+            "releases/download/v0.1.17/RF-5.rfplugin"
         ),
-        "sha256": "fc5d70134b76c8a136b5f41eb5bf996b203da8db8bc6518fa36acb008a366409",
+        "sha256": "d90e5252181b2da7a86a9a20aebd57d613068c99ac67fb6a40c7450a605622ba",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -76,9 +76,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-7.rfplugin",
         "plugin_id": "org.rackforge.rf7",
-        "version": "0.5.1",
-        "url": "https://github.com/kalexis1994/RF-7/releases/download/v0.5.1/RF-7.rfplugin",
-        "sha256": "d8cfdbce57004cdf2b1e2a7dbdce702e523717f481d0e6aa9642c5de7fead0ca",
+        "version": "0.5.2",
+        "url": (
+            "https://github.com/kalexis1994/RF-7/"
+            "releases/download/v0.5.2/RF-7.rfplugin"
+        ),
+        "sha256": "22b93d66777351e36c0596df4d76720fb250a19c101054d692b8956bbab2010a",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -100,12 +103,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Organ.rfplugin",
         "plugin_id": "org.rackforge.organ",
-        "version": "0.48.0",
+        "version": "0.50.0",
         "url": (
             "https://github.com/kalexis1994/RF-Organ/"
-            "releases/download/v0.48.0/RF-Organ.rfplugin"
+            "releases/download/v0.50.0/RF-Organ.rfplugin"
         ),
-        "sha256": "3f2a8b43ef7e9e1553074edf68cf7c2aa802c21957739ca2d8a7e643cdb0107c",
+        "sha256": "97579065874359892034f0f0bb2750892c7104465b6cc8199c93ac811111e73c",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -130,12 +133,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Tines.rfplugin",
         "plugin_id": "org.rackforge.rftines",
-        "version": "0.2.1",
+        "version": "0.2.8",
         "url": (
             "https://github.com/kalexis1994/RF-Tines/"
-            "releases/download/v0.2.1/RF-Tines.rfplugin"
+            "releases/download/v0.2.8/RF-Tines.rfplugin"
         ),
-        "sha256": "d18934ed597cc33edbd644cee32fb006f04416a357291e69f0112c34f3b4f748",
+        "sha256": "6660d6a276d29357f830b666e6a07526b46c83496740b9a0514b3b81f30eede5",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -442,12 +445,17 @@ def rewrite_pin(
         )
     else:
         wrapped = '"url": (\n' f'            "{url}"\n' "        )"
-    updated = re.sub(
-        r'"url": \(\s*\n(?:\s*"[^"]*"\s*\n)+\s*\)',
+    # The URL may be wrapped in parentheses or sit on one line; RF-7's did,
+    # and a pattern for the wrapped form alone moved its version and digest
+    # and left the URL on the old release.
+    updated, urls = re.subn(
+        r'"url": (?:\(\s*\n(?:\s*"[^"]*"\s*\n)+\s*\)|"[^"]*")',
         lambda _: wrapped,
         updated,
         count=1,
     )
+    if urls != 1:
+        raise RuntimeError(f"could not find the URL in the pin for {plugin['plugin_id']}")
     updated = re.sub(r'"sha256": "[^"]+"', f'"sha256": "{digest}"', updated, count=1)
     if updated == block:
         raise RuntimeError(f"could not rewrite the pin for {plugin['plugin_id']}")

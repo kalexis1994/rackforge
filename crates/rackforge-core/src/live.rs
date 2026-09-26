@@ -2733,6 +2733,19 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 AudioControlCommand::ReplaceParameterLinks { table, reply } => {
                     let mut links = table.links;
                     crate::parameter_link::carry_link_state(&mut links, &parameter_links);
+                    // How many links each input has, whenever the table
+                    // changes: a controller whose controls stop moving
+                    // anything shows here, at the moment its links went.
+                    // (2026-09-25: a KeyLab's links were gone until the
+                    // engine restarted, and nothing said when.)
+                    let mut by_source = BTreeMap::<u32, usize>::new();
+                    for link in &links {
+                        *by_source.entry(link.source_key.get()).or_default() += 1;
+                    }
+                    println!(
+                        "PARAMETER_LINKS_REPLACED links={} by_source={by_source:?}",
+                        links.len()
+                    );
                     parameter_links = links;
                     control_layers.replace(table.modifiers);
                     let _ = reply.send(Ok(()));
@@ -5163,3 +5176,4 @@ mod wide_velocity_tests {
         );
     }
 }
+

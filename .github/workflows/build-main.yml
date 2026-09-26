@@ -395,6 +395,9 @@ jobs:
     name: Android ARM64
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      RACKFORGE_ANDROID_PREVIEW: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+      RACKFORGE_REVISION: ${{ github.sha }}
     steps:
       - name: Check out RackForge
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -491,8 +494,22 @@ jobs:
             --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
 
+      - name: Verify Android application ID
+        shell: bash
+        run: |
+          expected="org.rackforge.android"
+          if [[ "$RACKFORGE_ANDROID_PREVIEW" == "1" ]]; then
+            expected="$expected.preview"
+          fi
+          actual="$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging \
+            dist/android/standard/RackForge-debug.apk \
+            | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          if [[ "$actual" != "$expected" ]]; then
+            printf 'Expected Android application ID %s, got %s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
+
       - name: Upload Android Standard APK
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-Android-arm64-${{ github.sha }}

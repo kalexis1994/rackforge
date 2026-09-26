@@ -26,6 +26,7 @@ import {
   ENGINE_PROCESSOR,
   engineFailureEvent,
   linkedPackageMutationEvents,
+  requestChangesStorage,
   writableStorageFiles,
   type EngineCommand,
   type EngineEvent,
@@ -86,21 +87,6 @@ interface HostExports {
  * Control requests that only read. Everything else may have written to
  * storage, so the page is told to file a fresh copy afterwards.
  */
-const READ_ONLY_OPERATIONS = new Set([
-  "snapshot",
-  "performance_snapshot",
-  "events",
-  "audio_snapshot",
-  "plugin_presets",
-  "plugin_preset",
-  "export_plugin_preset",
-  "inspect_plugin_preset",
-  "plugin_parameters",
-  "plugin_state_parameters",
-  // The Controllers editor asks for these many times a second.
-  "controller_maps",
-  "midi_activity",
-]);
 const READ_ONLY_PACKAGE_ACTIONS = new Set(["inspect", "catalog", "resource_status"]);
 const PACKAGE_ASSET_MUTATIONS = new Set(["install", "activate", "deactivate", "uninstall"]);
 
@@ -125,15 +111,6 @@ function seedDirectory(files: SeedFile[]): Map<string, Inode> {
     directory.set(name, new File(file.bytes));
   }
   return root;
-}
-
-/** Reads the operation name out of a control request without validating it. */
-function operationOf(request: string): string {
-  try {
-    return String((JSON.parse(request) as { op?: unknown }).op ?? "");
-  } catch {
-    return "";
-  }
 }
 
 /** Mutations whose success must mean their files are already durable. */
@@ -233,7 +210,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
         break;
       case "request": {
         const response = this.#request(command.request);
-        const mutatesStorage = !READ_ONLY_OPERATIONS.has(operationOf(command.request));
+        const mutatesStorage = requestChangesStorage(command.request);
         if (mutatesStorage) {
           const files = this.#storageFiles();
           if (files && requiresDurableStorage(command.request)) {

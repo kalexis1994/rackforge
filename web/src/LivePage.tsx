@@ -1119,6 +1119,7 @@ function PerformanceConfig({
   const [editorDirty, setEditorDirty] = useState(false);
   const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
   const [editorResetEpoch, setEditorResetEpoch] = useState(0);
+  const [rackEditorEpoch, setRackEditorEpoch] = useState(0);
   const [rackWorkspaceId, setRackWorkspaceId] = useState<string | null>(null);
   const [songPartWorkspace, setSongPartWorkspace] = useState<{ id: string; name: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingPerformanceDelete | null>(null);
@@ -1212,6 +1213,10 @@ function PerformanceConfig({
   const selectItem = (id: string) => {
     if (selectedId === id && kind === "setlist") return;
     proceed(() => {
+      // A new Rack gains its permanent id on Save. That is not a new editor:
+      // remounting it would tear down its live preview, whose Android cleanup
+      // changes host mode and navigates away from the Rack workspace.
+      if (kind === "rack") setRackEditorEpoch((current) => current + 1);
       setSelectedId(id);
       if (kind === "rack") setRackWorkspaceId(id);
       setSongPartWorkspace(null);
@@ -1426,7 +1431,7 @@ function PerformanceConfig({
       <main className="config-editor">
         {kind === "rack" && (
           <RackEditor
-            key={`rack:${activeSelectedId ?? "empty"}`}
+            key={`rack:${rackEditorEpoch}`}
             rack={
               activeSelectedId === "new"
                 ? newRack()
@@ -1442,7 +1447,7 @@ function PerformanceConfig({
             onDirtyChange={setEditorDirty}
             onSaved={(id) => {
               setSelectedId(id);
-              setRackWorkspaceId(id);
+              if (rackWorkspaceId !== null) setRackWorkspaceId(id);
             }}
             onDeleted={() => {
               setSelectedId(null);

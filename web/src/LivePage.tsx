@@ -2015,6 +2015,7 @@ function RackEditor({
   const [previewStatus, setPreviewStatus] = useState<"idle" | "applying" | "ready">("idle");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const previewId = draft?.id;
+  const rackNameError = draft ? validationName(draft.name) : null;
   // Keep an immutable payload for the debounced preview. Depending on a
   // hand-picked fingerprint and reading the latest value from a ref allowed
   // graph edits to be visually committed without publishing the new Rack to
@@ -2022,7 +2023,11 @@ function RackEditor({
   // the effect dependency and guarantees that the timer sends that exact
   // revision.
   const transportDraft = draft ? normalizeRackGraphGeometry(draft) : undefined;
-  const previewPayload = transportDraft ? JSON.stringify(transportDraft) : null;
+  // An unfinished name is an editing state, not a preview request. Sending
+  // it to Core produces a technical error while the user is still typing.
+  const previewPayload = transportDraft && !rackNameError
+    ? JSON.stringify(transportDraft)
+    : null;
   const previewVoiceCount = rackPreviewVoiceCount(
     transportDraft,
     performance.library.racks,
@@ -2035,7 +2040,7 @@ function RackEditor({
     isInstrumentSlot,
   );
   const visiblePreviewStatus = previewVoiceCount === 0 ? "idle" : previewStatus;
-  const visiblePreviewError = previewVoiceCount === 0 ? null : previewError;
+  const visiblePreviewError = previewVoiceCount === 0 || rackNameError ? null : previewError;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
   const isNew = !!draft && !performance.library.racks.some((item) => item.id === draft.id);
   useEffect(() => {
@@ -2060,8 +2065,9 @@ function RackEditor({
     };
   }, [previewId, previewSupported]);
   useEffect(() => {
-    if (!previewSupported || previewPayload === null) return;
+    if (!previewSupported) return;
     const sequence = ++previewSequenceRef.current;
+    if (previewPayload === null) return;
     if (previewVoiceCount === 0) {
       if (!previewEngagedRef.current || !previewModeLiveRef.current) return;
       previewModeLiveRef.current = false;
@@ -2161,6 +2167,14 @@ function RackEditor({
   }, [draft, graphBlocking, instances]);
   const save = useCallback(async () => {
     if (!draft) return;
+    // The workspace Save key is disabled for an empty name. A keyboard save
+    // arriving anyway must not replace the editing hint with a red banner;
+    // the standard (non-immersive) form still needs its normal validation.
+    const nameError = validationName(draft.name);
+    if (nameError) {
+      if (!immersive) setError(nameError);
+      return;
+    }
     const nextError = validate();
     setError(nextError);
     if (nextError) return;
@@ -2181,7 +2195,7 @@ function RackEditor({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Rack.");
     }
-  }, [baseRevision, draft, onSaved, skipRackStep, validate]);
+  }, [baseRevision, draft, immersive, onSaved, skipRackStep, validate]);
   useEffect(() => {
     if (!immersive) return;
     const saveWorkspace = () => void save();
@@ -2236,20 +2250,25 @@ function RackEditor({
   const exitWorkspace = () => {
     window.dispatchEvent(new Event("rackforge:close-graph-workspace"));
   };
+  const renameRack = (name: string) => {
+    setDraft((current) => current ? { ...current, name } : current);
+    setError(null);
+    setPreviewError(null);
+  };
   const workspaceHeader = (
     <GraphWorkspaceHeader
       title="Rack Editor"
       nameLabel="Rack name"
       name={draft.name}
-      onName={(name) => setDraft({ ...draft, name })}
+      onName={renameRack}
       previewStatus={visiblePreviewStatus}
       dirty={dirty}
       isNew={isNew}
       pending={pending}
-      saveBlocked={graphBlocking ? `Cannot be saved. ${graphBlocking}` : null}
+      saveBlocked={rackNameError ? "Enter a Rack name to save." : graphBlocking ? `Cannot be saved. ${graphBlocking}` : null}
       onSave={() => void save()}
       onExit={exitWorkspace}
-      className="entity-rack"
+      className={`entity-rack${rackNameError ? " name-missing" : ""}`}
     />
   );
 
@@ -2286,7 +2305,7 @@ function RackEditor({
       ) : null}
       <BasicFields
         name={draft.name}
-        onName={(name) => setDraft({ ...draft, name })}
+        onName={renameRack}
       />
       <EditorSection
         title="Rack graph"

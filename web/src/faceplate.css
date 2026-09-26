@@ -6570,6 +6570,23 @@
   gap: 3px;
 }
 
+/* Rack already has its name in the adjacent field. Keep the header's
+   accessible label, but give that width back to the name on small screens. */
+.graph-workspace-header.entity-rack .graph-workspace-title {
+  display: none;
+}
+
+/* An empty name is a normal editing state, not a graph failure. The Save
+   key remains disabled with an accessible reason, without a red alarm. */
+.graph-workspace-header.entity-rack.name-missing .graph-workspace-blocked,
+.graph-workspace-header.entity-rack.name-missing .graph-workspace-key.save.blocked::after {
+  display: none;
+}
+
+.graph-workspace-header.entity-rack.name-missing .graph-workspace-key.save.blocked svg {
+  color: inherit;
+}
+
 .graph-workspace-title .card-kicker {
   color: var(--ink);
   white-space: nowrap;

@@ -6,6 +6,7 @@ describe("what the program selector says to and hears from RackForge", () => {
     const context = readContext({
       protocol: PROTOCOL,
       kind: "context",
+      isolated: true,
       instance: {
         sounds: [
           { id: "a", name: "Bright", bank: "piano", detail: "Stage", editable: false },
@@ -23,6 +24,7 @@ describe("what the program selector says to and hears from RackForge", () => {
       ],
       banks: [{ id: "piano", name: "Pianos", order: 1 }],
       selected: "b",
+      isolated: true,
     });
   });
 
@@ -34,6 +36,7 @@ describe("what the program selector says to and hears from RackForge", () => {
       programs: [],
       banks: [],
       selected: null,
+      isolated: false,
     });
   });
 

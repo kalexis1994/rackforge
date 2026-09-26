@@ -511,6 +511,7 @@ export function PluginFrame({
       protocol: "rackforge.plugin.web@1",
       kind: "context",
       surface,
+      isolated,
       instance: contextInstance,
       program_draft:
         snapshot?.program_draft?.instance_id === instance.instance_id

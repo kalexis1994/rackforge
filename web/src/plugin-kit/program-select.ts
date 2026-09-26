@@ -290,7 +290,7 @@ export class RfProgramSelect extends HTMLElement {
     els.search.addEventListener("input", () => {
       this.#query = els.search.value;
       this.#active = 0;
-      this.#renderList();
+      this.#renderList(false);
     });
     els.dialog.addEventListener("keydown", (event) => this.#key(event));
     els.list.addEventListener("click", (event) => {
@@ -304,7 +304,7 @@ export class RfProgramSelect extends HTMLElement {
       this.#bank = bank === "" ? null : this.#bank === bank ? null : bank;
       this.#active = 0;
       this.#renderBanks();
-      this.#renderList();
+      this.#renderList(false);
     });
   }
 
@@ -372,8 +372,11 @@ export class RfProgramSelect extends HTMLElement {
       // An engine without :modal keeps the panel open, if not modal.
     }
     this.#els.list.scrollTop = moved.scroll;
-    if (moved.searching) this.#els.search.focus({ preventScroll: true });
-    else this.#activeItem()?.focus({ preventScroll: true });
+    if (moved.searching && window.matchMedia?.("(hover: hover) and (pointer: fine)").matches) {
+      this.#els.search.focus({ preventScroll: true });
+    } else {
+      this.#activeItem()?.focus({ preventScroll: true });
+    }
   }
 
   attributeChangedCallback() {
@@ -430,14 +433,17 @@ export class RfProgramSelect extends HTMLElement {
     const at = this.#programs.findIndex((program) => program.id === this.#value);
     this.#active = Math.max(0, at);
     this.#renderBanks();
-    this.#renderList();
+    this.#renderList(false);
     const dialog = this.#els.dialog;
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
     // A keyboard at hand gets the search; a touch screen does not have its
     // own keyboard thrown up over the list.
-    if (window.matchMedia?.("(pointer: fine)").matches) this.#els.search.focus();
-    else this.#activeItem()?.focus();
+    if (window.matchMedia?.("(hover: hover) and (pointer: fine)").matches) {
+      this.#els.search.focus({ preventScroll: true });
+    } else {
+      this.#activeItem()?.focus({ preventScroll: true });
+    }
     this.#activeItem()?.scrollIntoView({ block: "center" });
     this.dispatchEvent(new CustomEvent("rf-program-open", { bubbles: true, composed: true }));
   }
@@ -529,7 +535,7 @@ export class RfProgramSelect extends HTMLElement {
     const move = (to: number) => {
       if (rows.length === 0) return;
       this.#active = Math.max(0, Math.min(rows.length - 1, to));
-      this.#markActive();
+      this.#markActive(true);
       event.preventDefault();
     };
     switch (event.key) {
@@ -598,7 +604,10 @@ export class RfProgramSelect extends HTMLElement {
     els.name.disabled = off || this.#programs.length === 0;
     els.prev.disabled = off || this.#programs.length < 2;
     els.next.disabled = off || this.#programs.length < 2;
-    if (off) this.close();
+    // A Rack Slot can briefly disable its surface while the host publishes
+    // state. Closing here makes an open program list flicker or disappear on
+    // every such update. Keep the dialog open; #choose still rejects input
+    // while disabled, and an explicit close remains available.
     els.search.placeholder = this.getAttribute("placeholder") ?? "Search programs";
     els.search.setAttribute("aria-label", this.getAttribute("placeholder") ?? "Search programs");
   }
@@ -658,7 +667,7 @@ export class RfProgramSelect extends HTMLElement {
     for (const bank of banks) box.append(chip(bank.id, bank.name, this.#bank === bank.id));
   }
 
-  #renderList() {
+  #renderList(preserveScroll = true) {
     const matches = searchPrograms(this.#programs, this.#banks, this.#query, this.#bank);
     const shown = matches.slice(0, MAX_ROWS);
     // A row names its bank only when there is more than one to tell apart
@@ -697,7 +706,9 @@ export class RfProgramSelect extends HTMLElement {
       item.append(number, name, detail);
       fragment.append(item);
     }
+    const scrollTop = this.#els.list.scrollTop;
     this.#els.list.replaceChildren(fragment);
+    if (preserveScroll) this.#els.list.scrollTop = scrollTop;
     const hidden = matches.length - shown.length;
     this.#els.note.textContent =
       matches.length === 0
@@ -712,7 +723,7 @@ export class RfProgramSelect extends HTMLElement {
     return this.#els.list.children[this.#active] as HTMLElement | null;
   }
 
-  #markActive() {
+  #markActive(scroll = false) {
     for (const item of this.#els.list.children) (item as HTMLElement).removeAttribute("data-active");
     const item = this.#activeItem();
     if (!item) {
@@ -721,7 +732,7 @@ export class RfProgramSelect extends HTMLElement {
     }
     item.setAttribute("data-active", "");
     this.#els.search.setAttribute("aria-activedescendant", item.id);
-    item.scrollIntoView({ block: "nearest" });
+    if (scroll) item.scrollIntoView({ block: "nearest" });
     if (this.#root.activeElement !== this.#els.search) item.focus({ preventScroll: true });
   }
 }

@@ -27,10 +27,6 @@ import zipfile
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def edition_suffix(name: str) -> str:
-    return "-Minimal" if "-Minimal-" in name else ""
-
-
 def zip_dir(source: str, target: str, extra: dict[str, str]) -> None:
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
         for root, _dirs, files in os.walk(source):
@@ -136,16 +132,14 @@ def notes_header(pins: tuple, tag: str, commit: str) -> str:
         [
             f"RackForge {tag} Preview, built and verified by GitHub Actions from commit `{commit}`.",
             "",
-            "Standard carries Concert Grand and every officially pinned plugin; Minimal carries"
-            " none and is otherwise the same host. Both are published for all five platforms —"
-            " see `docs/RELEASE_EDITIONS.md`.",
+            "The release carries Concert Grand and every officially pinned plugin on"
+            " all five platforms — see `docs/RELEASE_EDITIONS.md`.",
             "",
             "Bundled in Standard: Concert Grand from this repository, "
             + ", ".join(bundled[:-1])
             + f" and {bundled[-1]}."
             " Each is pinned by version, URL and SHA-256 and verified inside the generated"
-            " Android, Linux and Raspberry Pi distributions. Every Minimal artifact was checked"
-            " to contain no plugin package at all.",
+            " Android, Linux and Raspberry Pi distributions.",
             "",
         ]
     )
@@ -165,22 +159,33 @@ def main() -> None:
     subprocess.run(["gh", "run", "download", run_id, "-D", downloads], check=True, cwd=REPO)
 
     notices = os.path.join(REPO, "THIRD_PARTY_NOTICES.md")
+    expected = {
+        "RackForge-VST3-Windows-x86_64",
+        "RackForge-Windows-x86_64",
+        "RackForge-Linux-x86_64",
+        "RackForge-RaspberryPi-arm64",
+        "RackForge-Android-arm64",
+    }
+    seen = set()
     for artifact in sorted(os.listdir(downloads)):
         folder = os.path.join(downloads, artifact)
-        suffix = edition_suffix(artifact)
-        if artifact.startswith("RackForge-VST3-Windows-x86_64"):
+        kind = artifact.rsplit("-", 1)[0]
+        if kind not in expected or kind in seen:
+            raise SystemExit(f"unexpected or duplicate release artifact: {artifact}")
+        seen.add(kind)
+        if kind == "RackForge-VST3-Windows-x86_64":
             # The bundle directory plus the loose files, with the notices, as before.
-            zip_dir(folder, os.path.join(assets, f"RackForge-VST3-Windows-x86_64{suffix}.zip"), {"THIRD_PARTY_NOTICES.md": notices})
-        elif artifact.startswith("RackForge-Windows-x86_64"):
-            shutil.copy2(os.path.join(folder, "rackforge.exe"), os.path.join(assets, f"RackForge-Windows-x86_64{suffix}.exe"))
-        elif artifact.startswith("RackForge-Linux-x86_64"):
-            shutil.copy2(os.path.join(folder, "RackForge-Linux-x86_64.tar.gz"), os.path.join(assets, f"RackForge-Linux-x86_64{suffix}.tar.gz"))
-        elif artifact.startswith("RackForge-RaspberryPi-arm64"):
-            shutil.copy2(os.path.join(folder, "RackForge-RaspberryPi-arm64.tar.gz"), os.path.join(assets, f"RackForge-RaspberryPi-arm64{suffix}.tar.gz"))
-        elif artifact.startswith("RackForge-Android-arm64"):
-            shutil.copy2(os.path.join(folder, "RackForge-debug.apk"), os.path.join(assets, f"RackForge-Android-arm64{suffix}.apk"))
-        else:
-            print("skipping unknown artifact", artifact)
+            zip_dir(folder, os.path.join(assets, "RackForge-VST3-Windows-x86_64.zip"), {"THIRD_PARTY_NOTICES.md": notices})
+        elif kind == "RackForge-Windows-x86_64":
+            shutil.copy2(os.path.join(folder, "rackforge.exe"), os.path.join(assets, "RackForge-Windows-x86_64.exe"))
+        elif kind == "RackForge-Linux-x86_64":
+            shutil.copy2(os.path.join(folder, "RackForge-Linux-x86_64.tar.gz"), os.path.join(assets, "RackForge-Linux-x86_64.tar.gz"))
+        elif kind == "RackForge-RaspberryPi-arm64":
+            shutil.copy2(os.path.join(folder, "RackForge-RaspberryPi-arm64.tar.gz"), os.path.join(assets, "RackForge-RaspberryPi-arm64.tar.gz"))
+        elif kind == "RackForge-Android-arm64":
+            shutil.copy2(os.path.join(folder, "RackForge-debug.apk"), os.path.join(assets, "RackForge-Android-arm64.apk"))
+    if seen != expected:
+        raise SystemExit("missing release artifacts: " + ", ".join(sorted(expected - seen)))
 
     shutil.copy2(notices, os.path.join(assets, "THIRD_PARTY_NOTICES.md"))
     with open(os.path.join(assets, "SHA256SUMS.txt"), "w", newline="\n") as sums:

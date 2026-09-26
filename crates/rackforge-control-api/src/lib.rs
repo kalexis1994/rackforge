@@ -1,8 +1,106 @@
-pub use rackforge_audio_api::OutputMeterSnapshot;
+pub use rackforge_audio_api::{AudioInputAvailability, AudioInputStatus, OutputMeterSnapshot};
+
+/// What the audio callback is costing and what it has lost.
+///
+/// `load_percent` is the callback's time over the time it had. `overruns`
+/// counts callbacks that took longer than their budget -- the host's own
+/// name for a dropout it caused. `stream_errors` counts the ones the driver
+/// reported instead, which is the distinction that matters when a glitch is
+/// heard and the load is low: the two rising together is a different fault
+/// from either rising alone.
+///
+/// `load_percent` and `peak_percent` cover the interval since the previous
+/// poll, not the life of the stream. A lifetime mean drifts for minutes
+/// after the thing that moved it stopped, which makes it useless for
+/// watching what a machine is doing right now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioHealthSnapshot {
+    pub load_percent: f64,
+    pub peak_percent: f64,
+    pub overruns: u64,
+    pub stream_errors: u64,
+    pub midi_dropped: u64,
+    /// Overruns inside the poll window alone. The cumulative count above can
+    /// only grow, so it says a fault happened but never when; this says
+    /// whether it is happening now, which is what a diagnosis needs.
+    pub recent_overruns: u64,
+    /// How large the overrunning callbacks were, as a percentage of their
+    /// own budget. A callback that is late because the core woke up slowly
+    /// overshoots by a roughly fixed amount; one that is late because the
+    /// render is too big overshoots in proportion. The two read differently
+    /// here.
+    pub overrun_average_percent: f64,
+    /// Block size of the overrunning callbacks, in frames, against
+    /// `block_frames` for every callback in the window. A driver that
+    /// occasionally hands over a short block gives it a short budget too,
+    /// and those callbacks overrun without anything being slow.
+    pub overrun_average_frames: f64,
+    pub block_frames: f64,
+    /// Callbacks the driver made more than half a period late, in total and
+    /// in the poll window. An overrun is a callback that took too long;
+    /// this is a buffer the device played while nothing had been asked to
+    /// fill it, which a low load and zero overruns cannot rule out.
+    pub late_callbacks: u64,
+    pub recent_late_callbacks: u64,
+    /// The widest gap between two callbacks in the poll window, as a
+    /// percentage of the block period. 100 is on time.
+    pub worst_gap_percent: f64,
+    /// Blocks sent to the device as silence in place of what was rendered,
+    /// because the render failed or produced something that was not a
+    /// number. Each one is heard as a click.
+    pub silenced_blocks: u64,
+    pub recent_silenced_blocks: u64,
+    /// Audio the ASIO driver says it lost on its own side, which no timing
+    /// of the callback can see: `kAsioOverload`, `kAsioResyncRequest`, and
+    /// sample positions that skipped a buffer. Totals since the process
+    /// started, and all three together in the poll window.
+    pub driver_overloads: u64,
+    pub driver_resyncs: u64,
+    pub driver_skipped_buffers: u64,
+    pub recent_driver_dropouts: u64,
+    /// Input capture that ran over or under its ring: an input device on a
+    /// clock of its own drifting against the output. Heard as a periodic
+    /// click on whatever is monitored through the input.
+    pub capture_glitches: u64,
+    pub recent_capture_glitches: u64,
+    /// MIDI that reached the engine late, split by who held it. `driver`:
+    /// the input driver stamped it and something in the operating system
+    /// kept it from this host's callback. `queue`: this host had it, and no
+    /// audio block took it for more than two periods. A note heard late, or
+    /// a key that seems to stick because its release was heard late, is one
+    /// or the other; the audio counters above see neither. Totals, the two
+    /// together in the poll window, and each stage's worst delay in it.
+    pub midi_late_driver: u64,
+    pub midi_late_queue: u64,
+    pub recent_midi_late: u64,
+    pub worst_midi_driver_delay_ms: f64,
+    pub worst_midi_queue_delay_ms: f64,
+}
+
+/// The settings window a host can show for the audio driver in use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioDriverPanel {
+    /// The ASIO driver's own window, drawn by the driver: ASIO4ALL's device
+    /// list, a Focusrite's control application. Only the driver that is
+    /// streaming can show it, since ASIO loads one driver at a time.
+    Asio,
+    /// The operating system's sound settings. WASAPI has no window of the
+    /// driver's own; this is where its shared-mode format is set.
+    SystemSound,
+}
+
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
+pub use rackforge_controller_package::UserControllerRequest;
 pub use rackforge_midi_api::{
-    MidiChannel, MidiSourceDescriptor, ParameterLink, ParameterLinkChannel, ParameterLinkId,
-    ParameterLinkMessage, ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
+    ControlTakeover, LinkValue, MidiChannel, MidiSourceDescriptor, MidiSourceId, ParameterLink,
+    ParameterLinkChannel, ParameterLinkId, ParameterLinkMessage, ParameterLinkMode,
+    ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform, StepDirection,
+    controller_map::{
+        ControlMapping, ControllerMap, MappedInput, PluginControlMap, RFMAP_FORMAT,
+        RFMAP_SCHEMA_VERSION, RfMapFile,
+    },
     velocity_curve::VelocityCurve,
 };
 pub use rackforge_performance_api::{
@@ -10,10 +108,42 @@ pub use rackforge_performance_api::{
     PerformanceSnapshot,
 };
 pub use rackforge_plugin_api::{
-    HostPreset, HostPresetSummary, ParameterSchema, PluginStateReference,
+    HostPreset, HostPresetSummary, ParameterDescriptor, ParameterSchema, PluginStateReference,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// Where a control stood against the parameter it moved.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterTouchPickup {
+    /// The control set the value.
+    Engaged,
+    /// The control has not reached the parameter: raise it to the value.
+    MoveUp,
+    /// As `MoveUp`, lowered.
+    MoveDown,
+}
+
+/// What a control last did to a plugin parameter, for a screen to name it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterTouchReport {
+    /// The PLAY instance or Rack Slot whose parameter moved.
+    pub instance_id: String,
+    pub parameter: ParameterDescriptor,
+    pub value: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_decimals: Option<u8>,
+    pub pickup: ParameterTouchPickup,
+    /// While the control is on its way to the parameter, the value it
+    /// stands at: what it would set if it took over now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<f64>,
+    /// Made through the controller's Fn layer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fn_layer: bool,
+}
 
 /// The sequencer wire shapes, recorded for the surfaces that build them.
 pub mod sequencer_wire;
@@ -25,7 +155,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 16;
+pub const CONTROL_SCHEMA_VERSION: u32 = 17;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 /// Sized for the largest documents the wire carries: a `.rfpreset` embeds
 /// one base64-encoded 1 MiB plugin state; a `.rflive` show embeds every
@@ -509,6 +639,47 @@ pub enum ControlRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         curve: Option<VelocityCurve>,
     },
+    /// The channel messages the host has received since `after`, from every
+    /// enabled input: what lights a control in the Controllers editor, and
+    /// what it learns a new controller's controls from. Answers the cursor
+    /// to ask from next time.
+    MidiActivity {
+        #[serde(default)]
+        after: u64,
+    },
+    /// What a control last did to a plugin parameter, if anything since
+    /// `after`: the header a screen shows while a fader moves. `after` zero
+    /// only learns the current sequence, so a screen starting up is not
+    /// shown an old touch.
+    ParameterTouch {
+        #[serde(default)]
+        after: u64,
+    },
+    /// The controllers the host knows and the player's map for each: what
+    /// every mapped input does in every plugin.
+    ControllerMaps,
+    /// Replaces one controller's whole map. An empty map removes it.
+    SaveControllerMap {
+        map: Box<ControllerMap>,
+    },
+    /// How every knob and fader takes over a parameter standing elsewhere:
+    /// the player's choice for the whole installation.
+    SetControllerTakeover {
+        takeover: ControlTakeover,
+    },
+    /// Makes -- or saves again -- a controller package for a keyboard
+    /// RackForge had none for, from the controls the player moved and named.
+    SaveUserController {
+        controller: Box<UserControllerRequest>,
+    },
+    /// Wraps one controller's map as a portable `.rfmap` document.
+    ExportControllerMap {
+        controller_id: String,
+    },
+    /// Replaces the map of the controller the file names with the file's.
+    ImportControllerMap {
+        file: Box<RfMapFile>,
+    },
     /// Arms a transient observer. No persisted link is changed by Learn.
     BeginMidiLearn {
         instance_id: String,
@@ -544,6 +715,30 @@ pub enum ControlRequest {
     /// Drains the post-master peaks accumulated since the previous request.
     /// This is transient telemetry and never advances the session revision.
     OutputMeter,
+    /// What the host captures -- which interface, which inputs, at what trim,
+    /// whether it could be opened -- and the peaks of those inputs since the
+    /// previous request. For the Rack editor's audio input and its cables;
+    /// transient like `OutputMeter`.
+    AudioInput,
+    /// How hard the audio callback is working, and what it has dropped.
+    ///
+    /// Polled beside `OutputMeter` for the same reason: a fault that appears
+    /// at random needs a witness that is always looking. The render's own
+    /// budget telemetry only ever reached stdout, and a windowed application
+    /// has no console, so nobody could see it while playing.
+    AudioHealth,
+    /// Shows the settings window of the audio driver in use.
+    ///
+    /// Answered before the window opens: an ASIO driver's window can be
+    /// modal, and a reply held until it closes would time out while the
+    /// user is still choosing a buffer size. What changes in that window
+    /// reaches the host as the driver's reset request, not through here.
+    OpenAudioDriverPanel,
+    /// Saves the host's flight recorder: the last seconds of exactly what
+    /// went to the audio device, and the MIDI that played them. For a click
+    /// heard once with every counter at zero, the only witness left is the
+    /// audio itself, and this keeps it.
+    SaveOutputCapture,
     ApplyAudioOutput {
         profile: AudioOutputProfile,
     },
@@ -690,6 +885,47 @@ pub enum ControlResponse {
         /// The reading for a keybed with none of its own.
         shared_curve: VelocityCurve,
     },
+    MidiActivity {
+        cursor: u64,
+        events: Vec<MidiActivityEvent>,
+    },
+    ParameterTouched {
+        /// What to ask from next time.
+        sequence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        touch: Option<Box<ParameterTouchReport>>,
+    },
+    ControllerMaps {
+        controllers: Vec<RegisteredController>,
+        maps: Vec<ControllerMap>,
+        /// Left out by a host that predates the setting: pickup.
+        #[serde(default)]
+        takeover: ControlTakeover,
+        /// The controllers whose map is still RackForge's factory map, as
+        /// offered: a catalog keyboard is not listed for such a map alone.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        factory_untouched: Vec<String>,
+        /// The controllers whose Fn layer is open now, held or latched.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        fn_open: Vec<String>,
+    },
+    ControllerMapSaved {
+        map: Box<ControllerMap>,
+    },
+    ControllerTakeoverSet {
+        takeover: ControlTakeover,
+    },
+    UserControllerSaved {
+        controller_id: String,
+        version: String,
+    },
+    ControllerMapExported {
+        file_name: String,
+        file: Box<RfMapFile>,
+    },
+    ControllerMapImported {
+        map: Box<ControllerMap>,
+    },
     MidiLearnStarted {
         learn_id: u64,
     },
@@ -712,8 +948,24 @@ pub enum ControlResponse {
     AudioSnapshot {
         snapshot: Box<AudioOutputState>,
     },
+    AudioHealth {
+        health: AudioHealthSnapshot,
+    },
+    AudioDriverPanelOpening {
+        panel: AudioDriverPanel,
+    },
+    /// Where the capture was saved, on the host, and what it holds. The
+    /// file is written after this answer, in a moment.
+    OutputCaptureSaved {
+        path: String,
+        seconds: f64,
+        midi_messages: u64,
+    },
     OutputMeter {
         meter: OutputMeterSnapshot,
+    },
+    AudioInput {
+        input: AudioInputStatus,
     },
     SequencerAccepted,
     SequencerStatus {
@@ -780,6 +1032,35 @@ pub struct MidiInputSetting {
 pub struct MidiSourceStatus {
     pub source: MidiSourceDescriptor,
     pub connected: bool,
+}
+
+/// One channel message a host received: which input it came from, and its
+/// bytes. Numbered in the order received, so a client asks only for what is
+/// newer than what it has seen.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiActivityEvent {
+    pub sequence: u64,
+    pub source: MidiSourceDescriptor,
+    pub status: u8,
+    pub data1: u8,
+    #[serde(default)]
+    pub data2: u8,
+}
+
+/// A controller package the host has attached to a MIDI input: the key its
+/// map is stored under, and the input it listens on.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisteredController {
+    pub controller_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<MidiSourceDescriptor>,
+    pub connected: bool,
+    /// The device answered the Identity Request with the package's identity,
+    /// rather than being matched by its port name alone.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub identified: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

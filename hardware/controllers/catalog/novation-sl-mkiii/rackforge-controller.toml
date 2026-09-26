@@ -1,0 +1,744 @@
+# Novation SL MkIII (49SL and 61SL), in its InControl view, read on its
+# InControl port. Every value below is sourced in SOURCES.md: [PR] is
+# Novation's SL MkIII Programmer's Reference Guide, which tables every
+# control; [BW] Bitwig's SL MkIII extension and [AB] Ableton Live 12's
+# SL_MkIII script read the same numbers.
+#
+# The player enters the InControl view with the keyboard's InControl button
+# [PR p3]. Novation documents no message that selects it, so RackForge sends
+# none. The screens stay as the keyboard leaves them: drawing on them takes
+# a driver.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-sl-mkiii"
+name = "SL MkIII"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "sl-mkiii"
+
+# The InControl port: "MIDIIN2 (Novation SL MkIII)" on Windows, "Novation SL
+# MkIII SL MkIII InControl" on a Mac, "Novation SL MkIII SL MkIII InCo" on
+# Linux [BW port names; AB the SCRIPT port second]. The keys play on the MIDI
+# port, as any keyboard's do [PR p15]. The ZeRO SL MkII and SL MkII never
+# carry "sl mkiii".
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["sl mkiii"]
+name_contains_any = ["inco", "midiin2"]
+
+# Everything on the InControl port is a control, none of it an instrument's:
+# every input has `plays = false` (catalog README). All of it is on channel
+# 16 [PR p3, p12].
+
+# Rotary knobs 1-8: CC 21-28, two's complement deltas [PR p12, p14; BW
+# 0x15 + i, createRelative2sComplement; AB]. The faders take the first row,
+# so the knobs take the second.
+
+[[inputs]]
+id = "knob-1"
+name = "Knob 1"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 15, cc = 21 }
+encoder = "relative_twos_complement"
+slot = "control-2.1"
+plays = false
+
+[[inputs]]
+id = "knob-2"
+name = "Knob 2"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 15, cc = 22 }
+encoder = "relative_twos_complement"
+slot = "control-2.2"
+plays = false
+
+[[inputs]]
+id = "knob-3"
+name = "Knob 3"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 15, cc = 23 }
+encoder = "relative_twos_complement"
+slot = "control-2.3"
+plays = false
+
+[[inputs]]
+id = "knob-4"
+name = "Knob 4"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 15, cc = 24 }
+encoder = "relative_twos_complement"
+slot = "control-2.4"
+plays = false
+
+[[inputs]]
+id = "knob-5"
+name = "Knob 5"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 15, cc = 25 }
+encoder = "relative_twos_complement"
+slot = "control-2.5"
+plays = false
+
+[[inputs]]
+id = "knob-6"
+name = "Knob 6"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 15, cc = 26 }
+encoder = "relative_twos_complement"
+slot = "control-2.6"
+plays = false
+
+[[inputs]]
+id = "knob-7"
+name = "Knob 7"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 15, cc = 27 }
+encoder = "relative_twos_complement"
+slot = "control-2.7"
+plays = false
+
+[[inputs]]
+id = "knob-8"
+name = "Knob 8"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 15, cc = 28 }
+encoder = "relative_twos_complement"
+slot = "control-2.8"
+plays = false
+
+# Faders 1-8: CC 41-48, 0-127 [PR p12, p14; BW 0x29 + i; AB 41 + index].
+
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 41 }
+slot = "control-1.1"
+plays = false
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 42 }
+slot = "control-1.2"
+plays = false
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 43 }
+slot = "control-1.3"
+plays = false
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 44 }
+slot = "control-1.4"
+plays = false
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 45 }
+slot = "control-1.5"
+plays = false
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 46 }
+slot = "control-1.6"
+plays = false
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 47 }
+slot = "control-1.7"
+plays = false
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 48 }
+slot = "control-1.8"
+plays = false
+
+# Soft buttons 1-24: CC 51-74, 127 pressed and 0 released [PR p12, p14; BW
+# 0x33 + i and 0x3B + i; AB 51 + index, 59 + index]. The keyboard has pads,
+# so no slot.
+
+[[inputs]]
+id = "soft-button-1"
+name = "Soft Button 1"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 51 }
+plays = false
+
+[[inputs]]
+id = "soft-button-2"
+name = "Soft Button 2"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 52 }
+plays = false
+
+[[inputs]]
+id = "soft-button-3"
+name = "Soft Button 3"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 53 }
+plays = false
+
+[[inputs]]
+id = "soft-button-4"
+name = "Soft Button 4"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 54 }
+plays = false
+
+[[inputs]]
+id = "soft-button-5"
+name = "Soft Button 5"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 55 }
+plays = false
+
+[[inputs]]
+id = "soft-button-6"
+name = "Soft Button 6"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 56 }
+plays = false
+
+[[inputs]]
+id = "soft-button-7"
+name = "Soft Button 7"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 57 }
+plays = false
+
+[[inputs]]
+id = "soft-button-8"
+name = "Soft Button 8"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 58 }
+plays = false
+
+[[inputs]]
+id = "soft-button-9"
+name = "Soft Button 9"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 59 }
+plays = false
+
+[[inputs]]
+id = "soft-button-10"
+name = "Soft Button 10"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 60 }
+plays = false
+
+[[inputs]]
+id = "soft-button-11"
+name = "Soft Button 11"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 61 }
+plays = false
+
+[[inputs]]
+id = "soft-button-12"
+name = "Soft Button 12"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 62 }
+plays = false
+
+[[inputs]]
+id = "soft-button-13"
+name = "Soft Button 13"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 63 }
+plays = false
+
+[[inputs]]
+id = "soft-button-14"
+name = "Soft Button 14"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 64 }
+plays = false
+
+[[inputs]]
+id = "soft-button-15"
+name = "Soft Button 15"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 65 }
+plays = false
+
+[[inputs]]
+id = "soft-button-16"
+name = "Soft Button 16"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 66 }
+plays = false
+
+[[inputs]]
+id = "soft-button-17"
+name = "Soft Button 17"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 67 }
+plays = false
+
+[[inputs]]
+id = "soft-button-18"
+name = "Soft Button 18"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 68 }
+plays = false
+
+[[inputs]]
+id = "soft-button-19"
+name = "Soft Button 19"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 69 }
+plays = false
+
+[[inputs]]
+id = "soft-button-20"
+name = "Soft Button 20"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 70 }
+plays = false
+
+[[inputs]]
+id = "soft-button-21"
+name = "Soft Button 21"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 71 }
+plays = false
+
+[[inputs]]
+id = "soft-button-22"
+name = "Soft Button 22"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 72 }
+plays = false
+
+[[inputs]]
+id = "soft-button-23"
+name = "Soft Button 23"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 73 }
+plays = false
+
+[[inputs]]
+id = "soft-button-24"
+name = "Soft Button 24"
+kind = "button"
+group = "Soft buttons"
+midi = { channel = 15, cc = 74 }
+plays = false
+
+# The other buttons, 127 pressed and 0 released [PR p14-15; BW CcAssignment;
+# AB]. Track left and right step the main selector, Pads up and down the
+# second. Shift is the keyboard's own modifier, so it is the Fn button of
+# the maps RackForge offers.
+
+[[inputs]]
+id = "screen-up"
+name = "Screen Up"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 81 }
+plays = false
+
+[[inputs]]
+id = "screen-down"
+name = "Screen Down"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 82 }
+plays = false
+
+[[inputs]]
+id = "scene-launch-top"
+name = "Scene Launch Top"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 83 }
+plays = false
+
+[[inputs]]
+id = "scene-launch-bottom"
+name = "Scene Launch Bottom"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 84 }
+plays = false
+
+[[inputs]]
+id = "pads-up"
+name = "Pads Up"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 85 }
+slot = "step-2.up"
+plays = false
+
+[[inputs]]
+id = "pads-down"
+name = "Pads Down"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 86 }
+slot = "step-2.down"
+plays = false
+
+[[inputs]]
+id = "soft-up"
+name = "Right Soft Buttons Up"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 87 }
+plays = false
+
+[[inputs]]
+id = "soft-down"
+name = "Right Soft Buttons Down"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 88 }
+plays = false
+
+[[inputs]]
+id = "grid"
+name = "Grid"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 89 }
+plays = false
+
+[[inputs]]
+id = "options"
+name = "Options"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 90 }
+plays = false
+
+[[inputs]]
+id = "shift"
+name = "Shift"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 91 }
+modifier = true
+plays = false
+
+[[inputs]]
+id = "duplicate"
+name = "Duplicate"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 92 }
+plays = false
+
+[[inputs]]
+id = "clear"
+name = "Clear"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 93 }
+plays = false
+
+[[inputs]]
+id = "track-left"
+name = "Track Left"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 102 }
+slot = "step.down"
+plays = false
+
+[[inputs]]
+id = "track-right"
+name = "Track Right"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 103 }
+slot = "step.up"
+plays = false
+
+[[inputs]]
+id = "rewind"
+name = "Rewind"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 112 }
+plays = false
+
+[[inputs]]
+id = "fast-forward"
+name = "Fast Forward"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 113 }
+plays = false
+
+[[inputs]]
+id = "stop"
+name = "Stop"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 114 }
+plays = false
+
+[[inputs]]
+id = "play"
+name = "Play"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 115 }
+plays = false
+
+[[inputs]]
+id = "loop"
+name = "Loop"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 116 }
+plays = false
+
+[[inputs]]
+id = "record"
+name = "Record"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 117 }
+plays = false
+
+# Pads 1-16: notes 96-103 (top row) and 112-119 (bottom row), velocity
+# sensitive, released with velocity 0 [PR p13, p15; BW 0x60 + row * 16 + i;
+# AB offsets 96 and 112]. They launch clips in a DAW, never notes an
+# instrument should hear. No slot: the catalog places pads by the notes
+# 36-51, and these send 96 and up.
+
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 96 }
+plays = false
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 97 }
+plays = false
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 98 }
+plays = false
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 99 }
+plays = false
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 100 }
+plays = false
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 101 }
+plays = false
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 102 }
+plays = false
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 103 }
+plays = false
+
+[[inputs]]
+id = "pad-9"
+name = "Pad 9"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 112 }
+plays = false
+
+[[inputs]]
+id = "pad-10"
+name = "Pad 10"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 113 }
+plays = false
+
+[[inputs]]
+id = "pad-11"
+name = "Pad 11"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 114 }
+plays = false
+
+[[inputs]]
+id = "pad-12"
+name = "Pad 12"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 115 }
+plays = false
+
+[[inputs]]
+id = "pad-13"
+name = "Pad 13"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 116 }
+plays = false
+
+[[inputs]]
+id = "pad-14"
+name = "Pad 14"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 117 }
+plays = false
+
+[[inputs]]
+id = "pad-15"
+name = "Pad 15"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 118 }
+plays = false
+
+[[inputs]]
+id = "pad-16"
+name = "Pad 16"
+kind = "pad"
+group = "Pads"
+midi = { channel = 15, note = 119 }
+plays = false
+
+# Faders 1-8 take the catalog's roles (catalog README, "Rows of knobs and
+# eight faders"): no master level. The knobs are relative, and roles read
+# absolute controls only.
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"
+
+# Play and Stop take the transport.
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop"
+target = "transport_stop"

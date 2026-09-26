@@ -1917,7 +1917,7 @@ ambiguous or the measurement said no, it did not, and the reason is here.
 | String tension | 850 N all notes | ~650 N plain strings, higher wound | Euphonics (Broadwood) | Kept: the model derives density from tension and a constant wave speed, and the bridge loss is calibrated on it; a change is a re-calibration, not a value. |
 | Unison detune | 0.9 .. 1.8 cents, capped to 2 Hz of beat | 1-2 cents maximum preferred | Kirk 1959 | The cap (UNISON_BEAT_CAP_HZ) removed the treble chirp; the per-partial jitter remains an open non-physical item. |
 | Soundboard loss factor | 2.3 % | 1-3 %, mean ~2 % | Ege & Boutillon | Matches (was 1.1 %). |
-| Soundboard modal density | 0.06 /Hz below 1477 Hz, thinning above | 0.05 -> 0.01 /Hz, ribs confine above 1.1 kHz | Ege & Boutillon | Matches. |
+| Soundboard modal density | 0.06 /Hz below 1477 Hz, thinning above | 0.05 -> 0.01 /Hz, ribs confine above 1.1 kHz | Ege & Boutillon | Matches, and the knee differs on purpose: their 1.1 kHz is measured on an **upright**, and the knee runs 1355 (Steinway D) to 1589 Hz (Hohner) across instruments. 1477 is the Steinway B's, and a sweep against the render puts the optimum inside that published range rather than beyond it. Revisited 2026-09-19 against the same authors' later mobility paper and left alone. |
 | Radiation transition | first-order drive fall below 60 Hz; loss channel bell 200 Hz .. 5 kHz | efficiency smooth, transition 1-1.6 kHz, no sharp coincidence | Suzuki 1986 | Consistent: no sharp coincidence is modelled. |
 | Microphones | ORTF 17 cm, +-55 deg, ~1.7 m | ORTF 17 cm, 110 deg; in the curve, a couple of feet away | DPA, ORTF | Matches. |
 | Air absorption | 0.0022 /m amplitude at 4 kHz | ~5 dB/km at 1 kHz, 160 at 10 kHz (20 C, 50 % RH) | ISO 9613-1 | Within a factor of two; kept. |
@@ -2626,6 +2626,103 @@ Stated so nobody mistakes silence for coverage:
 * **A measured soundboard.** The bank follows measured density and damping
   laws, but its mode frequencies come from those laws rather than from any
   particular instrument's response.
+
+  **Tried and not kept (2026-09-19): confining modes to rib bays.** What the
+  laws also do not carry is *where* on the board a mode lives. Ege
+  and Boutillon measure the soundboard as a homogeneous plate only up to
+  their knee; above it the ribs confine the waves into bays, the modal
+  density falls **and becomes location-dependent** -- two strings a few
+  bays apart stop sharing the modes they drive. This model's bank is global
+  at every frequency: each of the sixteen drive points projects onto every
+  mode. That is the missing half of "each note of one instrument has an
+  individual character", and it is the standing candidate for the
+  mid-treble's body (`PIANO_MIDRANGE.md`). The open-source MAESSTRO
+  framework (Acta Acustica 2022) computes exactly this from a board's
+  geometry and materials, and is the reference to measure any attempt
+  against.
+
+  It was built and measured. Above the rib knee each mode was given a bay of
+  the bridge -- a raised-cosine window, drawn per mode from its own seed --
+  read only the drive points inside it, and radiated only from it, with drive
+  and radiation normalised together so a confined mode keeps its energy
+  rather than losing four decibels to a smaller footprint. Swept at half
+  widths of 0.12, 0.18, 0.25 and 0.35 of the bridge:
+
+  | bay half-width | fit cost | bass | treble | relief 2-4 kHz |
+  | --- | --- | --- | --- | --- |
+  | off | **834.8** | **206.3** | **288.6** | 22.9 dB |
+  | 0.12 | 864.0 | 221.4 | 299.9 | **23.9 dB** |
+  | 0.18 | 862.7 | 217.0 | 303.9 | 23.8 dB |
+  | 0.35 | 846.3 | 207.9 | 305.7 | 23.4 dB |
+
+  Eleven to twenty-nine points of cost, a worse bass and a worse treble, for
+  one decibel of spectral relief -- the one measure that can see what the
+  change is for. Rendered and listened to, the player's verdict was "muy
+  sutil... casi que son iguales". Reverted; the render fingerprint is
+  unchanged.
+
+  **Why it did not work, for whoever tries again.** A string still meets
+  about fifty modes above the knee wherever it stands on the bridge, and the
+  statistics of fifty bays drawn at random are the same everywhere you
+  stand. Localising the modes is only half of what Ege and Boutillon
+  measure: the modal density falls above the knee **and becomes
+  location-dependent**, so the bays have to be few and shared -- a handful of
+  real rib bays, each with its own sparse set of modes -- rather than one
+  window per mode. That is a different arrangement of the same physics, and
+  it is the one worth building next.
+
+  One measurement to carry forward: with confinement on,
+  `the_top_octave_has_no_dampers` went from 0.75 to 2.0. E7 sits at the
+  treble end of the bridge and above the knee it stops sharing modes with the
+  sympathetic bed spread along the rest -- which is what confinement *means*,
+  so the test was left at its bound rather than loosened. Any future attempt
+  has to answer that ratio against recordings, not against the threshold.
+
+  **The density law was then checked against a computed board, and it
+  held (2026-09-19).** `tools/solve-soundboard-modes.py` solves the plate by
+  Rayleigh-Ritz and the bays above the knee as strips clamped between ribs,
+  to see whether `board_spacing` is drawing the right number of modes. The
+  first reading said it was badly wrong -- 0.036/Hz computed against 0.060
+  at the bottom, 0.064 against 0.030 above the knee. Both halves of that
+  were artefacts of the comparison, and both are worth stating because they
+  are easy to walk into again:
+
+  * **A density needs many modes in the band.** Between 45 and 100 Hz a
+    real board has one or two. The count comes out quantised in 1/width --
+    0.029, 0.057, 0.086 and nothing between -- so the "rise from 0.036 to
+    0.062" was rounding, not physics. Making the plate orthotropic to
+    explain the rise moved those bands between 0.029 and 0.057 with no
+    trend, which is what a quantised count does. The instrument's own tap
+    measurements (`BOARD_LOW_MODES`) have the same problem: two modes in
+    65-100 Hz "are" 0.057/Hz. Over a band wide enough to mean something,
+    45-1477 Hz, the computed board gives **0.056/Hz**, the taps give
+    **0.054/Hz** over 65-232 Hz, and the model uses 0.060. There is nothing
+    to correct there.
+  * **Above the knee the law is not a mode count at all**, so comparing a
+    mode count against it was meaningless. It is set by *modal overlap*:
+    60% at 3 kHz at a 2.3% loss factor gives spacing ~=0.038*f. Modes
+    closer than that are not separable, so drawing more of them buys
+    nothing and costs CPU -- and drawing too few is the failure already
+    recorded above this function, 11 dB of ripple through 500-1000 Hz.
+
+  The second point corrects a sentence in the paragraph above it. The total
+  modal density does **not** fall above the knee: n = (A/2)*sqrt(rho*h/D)
+  depends on the board's area and material, and cutting a plate into strips
+  does not change how many modes it has, only **where they live**. Computed,
+  the bays hold 0.085/Hz between them -- more than the plate below, since
+  their areas sum to more than the board. What falls is what one string
+  sees: one bay in ten, ~0.008/Hz, which is what the model's law already
+  draws up there to within a factor of two to four, on the generous side.
+
+  So the law survived and the solver's report was what needed fixing. The
+  gap this measurement does confirm is the one already named -- **locality,
+  not count**. Two bridge points 19 cm apart drive the computed bays with a
+  correlation of 0.00 and the plate below the knee with 0.16; in this
+  model's shared global bank, every pair of strings correlates 1.00 at
+  every frequency. The high bands of that solve are also not converged
+  (3-6 kHz reads 0.023, 0.042, 0.057 at 12, 18 and 24 terms and is still
+  climbing), so nobody should take a number above 3 kHz from it without
+  pushing the basis first.
 * **The broadband knock.** The impacts of the action and the keys — everything
   in a piano's sound that does not come from the strings — are not modelled.
   It is most exposed in the extreme treble, where the tonal fundamental sits

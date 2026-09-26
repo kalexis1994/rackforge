@@ -152,6 +152,36 @@ jobs:
             -p rackforge-gain-portable \
             -p rackforge-vst3
 
+      # The two equivalence tests that hold a REAL packaged instrument to
+      # its sequential fallback need their component built for wasm32, so
+      # they are `#[ignore]`d: a test that cannot find its plugin has to
+      # fail loudly when asked, never pass quietly. Nothing was asking, so
+      # neither had ever run here -- and the width bug they exist to catch
+      # reached an appliance twice, found by ear both times.
+      - name: Test packaged instruments across the render paths
+        shell: bash
+        env:
+          RUST_MIN_STACK: "16777216"
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build --locked --release --target wasm32-unknown-unknown             -p rackforge-concert-grand             -p rackforge-parallel-demo-synth
+          # `--ignored` runs ONLY these, which is the whole point of the step.
+          cargo test --locked -p rackforge-core --test parallel_render -- --ignored
+
+      # The instrument's two render fingerprints: every sample of a fixed
+      # scenario folded into one number, asserted against what it has always
+      # been. They are `#[ignore]`d because the model's knobs are
+      # process-wide atomics that eighteen other tests write, so they cannot
+      # share a parallel harness -- which is why this is their own
+      # invocation, single threaded. The number is stable across debug,
+      # release, x86 and the appliance's aarch64; all four were checked.
+      - name: Test the instrument's render fingerprints
+        shell: bash
+        env:
+          RUST_MIN_STACK: "16777216"
+        run: |
+          cargo test --locked --release -p rackforge-concert-grand --             --ignored --test-threads=1 render_fingerprint
+
       # Keep the native driver harness in its own Cargo graph. On Windows GNU,
       # feature unification with the full plugin-validation graph can produce
       # an invalid test executable before the harness starts; the driver itself

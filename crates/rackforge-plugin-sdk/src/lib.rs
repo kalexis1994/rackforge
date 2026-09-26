@@ -12,6 +12,27 @@
 //! [`export_processor!`]. The SDK owns the raw WebAssembly ABI and its linear
 //! memory buffers so plugin code does not handle pointers or host platforms.
 
+// A plugin component is built with SIMD, or not at all. Every host that runs
+// one executes it -- wasmtime on desktop, Raspberry Pi and Android, and every
+// browser since 2021 -- so the flag costs nothing, and without it LLVM cannot
+// vectorise anything: on the Concert Grand that is 58 per cent of native
+// speed against 74 (plugins/concert-grand/examples/wasm-tax.rs). A plugin
+// with nothing to vectorise loses nothing by having it. Only the plugin
+// target is held to this; the browser host builds for wasm32-wasip1 and is
+// not a plugin.
+#[cfg(all(
+    target_arch = "wasm32",
+    target_os = "unknown",
+    not(target_feature = "simd128")
+))]
+compile_error!(
+    "RackForge plugins are built with SIMD. Add to the plugin repository's \
+     .cargo/config.toml:\n\n\
+     [target.wasm32-unknown-unknown]\n\
+     rustflags = [\"-C\", \"target-feature=+simd128\"]\n\n\
+     (see docs/PLUGIN_DEVELOPMENT.md, \"Building a fast component\")"
+);
+
 pub const ABI_VERSION_V1_1: u32 = 0x0001_0001;
 pub const ABI_VERSION_V1_2: u32 = 0x0001_0002;
 pub const ABI_VERSION_V1: u32 = 0x0001_0003;
@@ -158,6 +179,28 @@ pub trait Processor: Default {
         0
     }
 
+    /// Tells the processor how much fuel one real-time call may spend on the
+    /// machine it is running on, and returns whether it used the number.
+    ///
+    /// Fuel is the sandbox's instruction counter, so the same work costs the
+    /// same fuel everywhere and a budget means the same thing on a phone, a
+    /// Raspberry Pi and a desktop. The host measures the one thing a processor
+    /// cannot -- how long that fuel takes here -- and keeps adjusting the
+    /// number until the render fits the period, so an approximate cost model
+    /// is fine and an exact one is not required.
+    ///
+    /// Returning `false`, which is the default, means this processor does not
+    /// scale itself. The host stops asking and leaves it exactly as shipped;
+    /// nothing else changes, and the sandbox's hard fuel cap still applies.
+    ///
+    /// Called between blocks and rarely -- at most every couple of seconds --
+    /// so rebuilding coefficients here is allowed. It must not allocate or
+    /// block, and a processor that needs a long rebuild should record the
+    /// number and do the work as its blocks come.
+    fn set_realtime_budget(&mut self, _fuel_per_call: u64) -> bool {
+        false
+    }
+
     fn reset(&mut self) {}
 
     /// Starts delivery of one manifest-declared resource on the control thread.
@@ -298,6 +341,137 @@ pub struct BlockContext<'a> {
     pub output_channels: u32,
 }
 
+/// A unit's timed work for one block, written into its dispatch payload.
+///
+/// [`PlanWriter::activate`] takes bytes, which is the right primitive and the
+/// wrong place to stop: every plugin that dispatches EVENTS then invents its
+/// own encoding for "this, at this frame", and gets to make its own mistakes
+/// about bounds and about frames that fall outside the block. An instrument
+/// needs one per unit every block -- a note struck at frame 5, a damper
+/// released at frame 37 -- because a unit renders a whole span at once and
+/// cannot be told anything halfway through.
+///
+/// So: fixed records of `{frame: u16, length: u16, bytes}`, four-byte
+/// aligned, written in ascending frame order and read back the same way. The
+/// payload stays opaque to the host, which is the contract's own rule.
+///
+/// ```ignore
+/// // begin_block, on the coordinator:
+/// let mut work = UnitWork::new(&mut buffer);
+/// work.push(5, &strike.to_bytes());
+/// work.push(37, &release.to_bytes());
+/// plan.activate(section, work.finish());
+///
+/// // render_unit, in the worker:
+/// for (frame, bytes) in UnitWork::read(payload) {
+///     // apply at `frame`, which is where it belongs
+/// }
+/// ```
+pub struct UnitWork<'a> {
+    buffer: &'a mut [u8],
+    written: usize,
+    last_frame: Option<u16>,
+}
+
+impl<'a> UnitWork<'a> {
+    pub fn new(buffer: &'a mut [u8]) -> Self {
+        Self {
+            buffer,
+            written: 0,
+            last_frame: None,
+        }
+    }
+
+    /// Adds one record. Returns `false` and writes nothing when the payload
+    /// is full, the record is longer than a `u16`, or the frame goes
+    /// backwards -- reading back in the order it was written is the point,
+    /// and a unit that has to sort its own work has been handed a puzzle
+    /// rather than a plan.
+    pub fn push(&mut self, frame: u16, bytes: &[u8]) -> bool {
+        if bytes.len() > u16::MAX as usize {
+            return false;
+        }
+        if self.last_frame.is_some_and(|previous| frame < previous) {
+            return false;
+        }
+        let record = 4 + bytes.len();
+        let padded = (record + 3) & !3;
+        if self.written + padded > self.buffer.len() {
+            return false;
+        }
+        let at = self.written;
+        self.buffer[at..at + 2].copy_from_slice(&frame.to_le_bytes());
+        self.buffer[at + 2..at + 4].copy_from_slice(&(bytes.len() as u16).to_le_bytes());
+        self.buffer[at + 4..at + 4 + bytes.len()].copy_from_slice(bytes);
+        for filler in &mut self.buffer[at + record..at + padded] {
+            *filler = 0;
+        }
+        self.written += padded;
+        self.last_frame = Some(frame);
+        true
+    }
+
+    /// Picks a part-written payload back up.
+    ///
+    /// A coordinator builds a unit's work while it walks the block's events,
+    /// which is many calls rather than one, so it needs to put the buffer
+    /// down and take it up again. `written` is what the last `finish`
+    /// returned; anything longer than the buffer starts over rather than
+    /// index past the end.
+    pub fn resume(buffer: &'a mut [u8], written: usize) -> Self {
+        let written = if written > buffer.len() { 0 } else { written };
+        let last_frame = UnitWork::read(&buffer[..written]).last().map(|(at, _)| at);
+        Self {
+            buffer,
+            written,
+            last_frame,
+        }
+    }
+
+    /// How many bytes are written so far, to hand back to [`Self::resume`].
+    pub fn written(&self) -> usize {
+        self.written
+    }
+
+    /// The bytes to hand [`PlanWriter::activate`].
+    pub fn finish(self) -> &'a [u8] {
+        &self.buffer[..self.written]
+    }
+
+    /// The records a unit was given, in the order they were written.
+    pub fn read(payload: &[u8]) -> UnitWorkIter<'_> {
+        UnitWorkIter { payload, at: 0 }
+    }
+}
+
+/// Walks the records [`UnitWork`] wrote. A malformed payload ends the walk
+/// rather than panicking: a unit is on the audio thread.
+pub struct UnitWorkIter<'a> {
+    payload: &'a [u8],
+    at: usize,
+}
+
+impl<'a> Iterator for UnitWorkIter<'a> {
+    type Item = (u16, &'a [u8]);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.at + 4 > self.payload.len() {
+            return None;
+        }
+        let frame = u16::from_le_bytes([self.payload[self.at], self.payload[self.at + 1]]);
+        let length =
+            u16::from_le_bytes([self.payload[self.at + 2], self.payload[self.at + 3]]) as usize;
+        let start = self.at + 4;
+        if start + length > self.payload.len() {
+            return None;
+        }
+        // The next record starts on the next four-byte boundary, which is
+        // where `push` left it.
+        self.at = (start + length + 3) & !3;
+        Some((frame, &self.payload[start..start + length]))
+    }
+}
+
 /// Collects the block plan inside `begin_block`: which units render this
 /// block and the dispatch payload each receives. Units must be activated in
 /// ascending order, which is also the deterministic combine order.
@@ -393,6 +567,8 @@ pub struct UnitContext<'a> {
 /// Slots are addressed by unit index, never by completion order, and a unit
 /// the host had to silence reads as zeros.
 pub struct UnitMix<'a> {
+    reports: &'a [u8],
+    report_stride: usize,
     mix: &'a [f32],
     slot_samples: usize,
     plan: &'a [u32],
@@ -408,6 +584,8 @@ impl<'a> UnitMix<'a> {
         plan: &'a [u32],
         count: usize,
         samples: usize,
+        reports: &'a [u8],
+        report_stride: usize,
     ) -> Self {
         Self {
             mix,
@@ -415,12 +593,24 @@ impl<'a> UnitMix<'a> {
             plan,
             count,
             samples,
+            reports,
+            report_stride,
         }
     }
 
     /// Units activated by this block's `begin_block`, in ascending order.
     pub fn active_units(&self) -> impl Iterator<Item = u32> + '_ {
         (0..self.count).map(|index| self.plan[index * 2])
+    }
+
+    /// What one unit had to say about itself this block.
+    ///
+    /// Empty when the plugin declared no `REPORT_BYTES`, and empty for a
+    /// unit the host had to silence -- which reads the same way its slot
+    /// does, as a unit that did nothing.
+    pub fn report(&self, unit: u32) -> &[u8] {
+        let at = unit as usize * self.report_stride;
+        self.reports.get(at..at + self.report_stride).unwrap_or(&[])
     }
 
     /// This block's samples for one unit slot.
@@ -449,6 +639,46 @@ impl<'a> UnitMix<'a> {
 pub trait ParallelProcessor: Default {
     type Unit: Default;
 
+    /// How many floats a unit writes per frame into its slot.
+    ///
+    /// Zero, the default, means the plugin's output channel count, which is
+    /// right whenever a unit produces audio -- one voice of a synthesiser,
+    /// say. The mix is then a sum of finished signals.
+    ///
+    /// It is not right for every decomposition. An instrument with one
+    /// resonating body has units that produce an INTERMEDIATE signal: the
+    /// Concert Grand's string sections hand over a bridge force, sixteen
+    /// bridge drive points and two keybed contributions -- nineteen floats a
+    /// frame -- and a shared serial stage turns those into sound. Two
+    /// channels cannot carry that, and truncating it silently is worse than
+    /// refusing it.
+    ///
+    /// The region a unit writes is sized `max_frames * max_output_channels`,
+    /// so a plugin that widens this must keep `frames * UNIT_CHANNELS`
+    /// inside that. The generated `render_unit` checks it and refuses the
+    /// block rather than writing past the end.
+    const UNIT_CHANNELS: u32 = 0;
+
+    /// How many bytes a unit may write back to the coordinator each block.
+    ///
+    /// Zero, the default, means a unit reports nothing, which is right when
+    /// a unit is a voice: it renders what it was told and the coordinator
+    /// already knows everything about it.
+    ///
+    /// It is not right for an instrument whose units are SECTIONS of one
+    /// keyboard. The coordinator there is the only thing that chooses which
+    /// string a note takes, and choosing means knowing which strings are
+    /// busy and which is quietest -- facts that only exist after the unit
+    /// has rendered, inside memory the coordinator cannot read. Without a
+    /// way back it allocates from a picture nobody is painting.
+    ///
+    /// The audio slot is not that way. It is sized from frames, so anything
+    /// smuggled through it works at one block size and overruns at another.
+    /// This region is sized per BLOCK, not per frame, because what a unit
+    /// has to say about its own state is one thing per block however long
+    /// the block is.
+    const REPORT_BYTES: u32 = 0;
+
     fn prepare(
         &mut self,
         _sample_rate: f64,
@@ -468,6 +698,24 @@ pub trait ParallelProcessor: Default {
     /// Processing latency introduced by the complete parallel processor.
     fn latency_frames(&self) -> u32 {
         0
+    }
+
+    /// The host's fuel budget for one call, as on [`Processor`].
+    ///
+    /// It reaches the coordinator and nothing else, which is where it
+    /// belongs: what a budget buys is decided once for the instrument and
+    /// handed to the units with the rest of the block. A processor that
+    /// answers `false` is one the host stops metering, so the default is
+    /// the same refusal `Processor` gives.
+    ///
+    /// This was missing, and missing quietly: the derived `Processor` for
+    /// the parallel export forwarded every other control call and let this
+    /// one fall through to the default. A plugin whose quality is driven by
+    /// a closed loop -- the Concert Grand's partial budget is -- would have
+    /// been switched to the parallel path and simply stopped hearing from
+    /// the governor.
+    fn set_realtime_budget(&mut self, _fuel_per_call: u64) -> bool {
+        false
     }
 
     /// Resets coordinator state. Unit state is reset separately through
@@ -550,6 +798,7 @@ pub trait ParallelProcessor: Default {
         payload: &[u8],
         context: &UnitContext<'_>,
         output: &mut [f32],
+        report: &mut [u8],
     );
 
     /// Serial post-stage: combine the unit slots in ascending unit order and
@@ -733,6 +982,22 @@ macro_rules! export_processor {
                 }
                 let processor = &*core::ptr::addr_of!(RF_PROCESSOR).cast::<$processor>();
                 processor.get_parameter(index as u32).unwrap_or(f64::NAN)
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_set_realtime_budget(fuel_per_call: i64) -> i32 {
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                if fuel_per_call < 0 {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                }
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                // 1 taken, 0 declined. Every processor exports this; only the
+                // ones that answer 1 are ever asked again.
+                i32::from(processor.set_realtime_budget(fuel_per_call as u64))
             }
         }
 
@@ -1359,7 +1624,44 @@ macro_rules! export_parallel_processor {
         const RF_PARALLEL_MAX_UNITS: usize = $max_units;
         const RF_PARALLEL_DISPATCH_STRIDE: usize = $dispatch_stride;
         const RF_PARALLEL_SHARED_CAPACITY: usize = $shared_capacity;
+        /// What a unit writes per frame: its own declared width, or the
+        /// plugin's output channels when it declares none. See
+        /// `ParallelProcessor::UNIT_CHANNELS`.
+        const RF_PARALLEL_UNIT_CHANNELS: usize = {
+            let declared = <$processor as $crate::ParallelProcessor>::UNIT_CHANNELS as usize;
+            if declared == 0 { $max_output_channels } else { declared }
+        };
         const RF_PARALLEL_MIX_SLOT_SAMPLES: usize = $max_frames * $max_output_channels;
+
+        /// What the host copies across this plugin's boundary for ONE block
+        /// at `max_frames`, in bytes.
+        ///
+        /// Arithmetic over numbers the plugin itself declared, not a
+        /// measurement: the block-shared payload is read out of the
+        /// coordinator and written into EVERY unit, each unit's audio is
+        /// read back out and written into the coordinator's mix, and each
+        /// unit's report comes home. The multiplier by unit count is the
+        /// part that surprises people -- a payload that looks small next to
+        /// one unit is not small next to eight.
+        ///
+        /// The number is a ceiling, at the longest block the plugin accepts;
+        /// a host running shorter blocks moves proportionally less. It is
+        /// exposed rather than enforced because a compile-time assertion
+        /// could only carry a fixed message, and what matters is not a
+        /// threshold but whether this figure is large next to the DSP it
+        /// serves. `cargo run -p rackforge-core --example plugin-profile`
+        /// puts the two side by side, with real block lengths.
+        pub const RF_PARALLEL_BLOCK_TRAFFIC_BYTES: usize = {
+            let shared = RF_PARALLEL_SHARED_CAPACITY * (RF_PARALLEL_MAX_UNITS + 1);
+            let audio = $max_frames
+                * RF_PARALLEL_UNIT_CHANNELS
+                * core::mem::size_of::<f32>()
+                * RF_PARALLEL_MAX_UNITS
+                * 2;
+            let reports = <$processor as $crate::ParallelProcessor>::REPORT_BYTES as usize
+                * RF_PARALLEL_MAX_UNITS;
+            shared + audio + reports
+        };
 
         /// The host requires an 8-aligned dispatch region.
         #[repr(C, align(8))]
@@ -1376,6 +1678,21 @@ macro_rules! export_parallel_processor {
 
         static mut RF_SHARED: RackForgeSharedBuffer =
             RackForgeSharedBuffer([0; RF_PARALLEL_SHARED_CAPACITY]);
+
+        /// What the units write back, one fixed region each. Sized per
+        /// BLOCK rather than per frame: what a unit has to say about its own
+        /// state is one thing per block however long the block is.
+        const RF_PARALLEL_REPORT_STRIDE: usize =
+            <$processor as $crate::ParallelProcessor>::REPORT_BYTES as usize;
+
+        /// The host requires an 8-aligned report region.
+        #[repr(C, align(8))]
+        pub struct RackForgeReportBuffer(
+            [u8; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_REPORT_STRIDE],
+        );
+
+        static mut RF_REPORTS: RackForgeReportBuffer =
+            RackForgeReportBuffer([0; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_REPORT_STRIDE]);
         /// Header (shared_bytes, reserved) followed by the plan entries.
         static mut RF_PLAN: [u32; 2 + RF_PARALLEL_MAX_UNITS * 2] =
             [0; 2 + RF_PARALLEL_MAX_UNITS * 2];
@@ -1554,7 +1871,9 @@ macro_rules! export_parallel_processor {
                         RF_PARALLEL_MIX_SLOT_SAMPLES,
                         &plan_region[2..],
                         RF_PLAN_COUNT,
-                        frames as usize * output_channels as usize,
+                        frames as usize * RF_PARALLEL_UNIT_CHANNELS,
+                        &(*core::ptr::addr_of!(RF_REPORTS)).0,
+                        RF_PARALLEL_REPORT_STRIDE,
                     );
                     $crate::ParallelProcessor::end_block(
                         &mut self.inner,
@@ -1589,6 +1908,10 @@ macro_rules! export_parallel_processor {
                     input_channels,
                     output_channels,
                 )
+            }
+
+            fn set_realtime_budget(&mut self, fuel_per_call: u64) -> bool {
+                $crate::ParallelProcessor::set_realtime_budget(&mut self.inner, fuel_per_call)
             }
 
             fn set_parameter(&mut self, index: u32, value: f64) -> bool {
@@ -1713,7 +2036,15 @@ macro_rules! export_parallel_processor {
                     input_channels,
                     output_channels,
                 );
-                let samples = frames as usize * output_channels as usize;
+                // A unit writes its OWN width, and the derived sequential
+                // path has to hand it a slot that size. Sized by the
+                // plugin's output channels it is the wrong buffer for a
+                // widened unit, and a unit that writes twenty floats a frame
+                // into room for two does not misbehave quietly -- it panics
+                // inside the component, which takes the block down. The
+                // final mix is still the plugin's channels; only what a unit
+                // hands over is its own width.
+                let samples = frames as usize * RF_PARALLEL_UNIT_CHANNELS;
                 for index in 0..count {
                     // SAFETY: single-threaded component; the plan was just
                     // written by `rf_begin` and stays untouched until the
@@ -1738,18 +2069,29 @@ macro_rules! export_parallel_processor {
                             input,
                             shared,
                             frames,
-                            output_channels,
+                            output_channels: RF_PARALLEL_UNIT_CHANNELS as u32,
                         };
+                        let reports = &mut (*core::ptr::addr_of_mut!(RF_REPORTS)).0;
+                        let report = &mut reports[unit as usize * RF_PARALLEL_REPORT_STRIDE..]
+                            [..RF_PARALLEL_REPORT_STRIDE];
+                        // Straight into the unit's own slot. It used to
+                        // render into `output` and copy, which works only
+                        // while a unit is exactly as wide as the plugin's
+                        // channels: `output` is the instrument's stereo
+                        // block, and a section that writes twenty floats a
+                        // frame into room for two panicked inside the
+                        // component and took the block with it.
+                        let mix = &mut *core::ptr::addr_of_mut!(RF_MIX);
+                        let slot = &mut mix[unit as usize * RF_PARALLEL_MIX_SLOT_SAMPLES..]
+                            [..samples];
                         <$processor as $crate::ParallelProcessor>::render_unit(
                             unit,
                             &mut self.units[unit as usize],
                             payload,
                             &context,
-                            &mut output[..samples],
+                            slot,
+                            report,
                         );
-                        let mix = &mut *core::ptr::addr_of_mut!(RF_MIX);
-                        mix[unit as usize * RF_PARALLEL_MIX_SLOT_SAMPLES..][..samples]
-                            .copy_from_slice(&output[..samples]);
                     }
                 }
                 self.rf_end(output, frames, output_channels);
@@ -1781,9 +2123,30 @@ macro_rules! export_parallel_processor {
             core::ptr::addr_of_mut!(RF_PLAN).cast::<u32>() as usize as i32
         }
 
+        /// How many floats a unit writes per frame. A host that does not
+        /// know this export copies `frames * output_channels`, which is
+        /// what every plugin wanted before it existed.
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_unit_channels() -> i32 {
+            RF_PARALLEL_UNIT_CHANNELS as i32
+        }
+
         #[unsafe(no_mangle)]
         pub extern "C" fn rackforge_parallel_mix_ptr() -> i32 {
             core::ptr::addr_of_mut!(RF_MIX).cast::<f32>() as usize as i32
+        }
+
+        /// Bytes each unit may report per block; zero when the plugin
+        /// declared none, which is every plugin built before this existed.
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_report_stride() -> i32 {
+            RF_PARALLEL_REPORT_STRIDE as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_report_ptr() -> i32 {
+            // SAFETY: a stable address in the component's own memory.
+            unsafe { core::ptr::addr_of!(RF_REPORTS) as i32 }
         }
 
         #[unsafe(no_mangle)]
@@ -1838,7 +2201,13 @@ macro_rules! export_parallel_processor {
             {
                 return $crate::STATUS_INVALID_ARGUMENT;
             }
-            let Some(samples) = (frames as usize).checked_mul(output_channels as usize) else {
+            // A unit writes its OWN width, which is the plugin's output
+            // channels unless it declared otherwise. The region it writes is
+            // sized for the plugin's channels at `max_frames`, so a widened
+            // unit has to stay inside that -- refused here rather than
+            // written past the end.
+            let _ = output_channels;
+            let Some(samples) = (frames as usize).checked_mul(RF_PARALLEL_UNIT_CHANNELS) else {
                 return $crate::STATUS_INVALID_ARGUMENT;
             };
             if samples > RF_MAX_OUTPUT_SAMPLES {
@@ -1877,12 +2246,16 @@ macro_rules! export_parallel_processor {
                     frames: frames as u32,
                     output_channels: output_channels as u32,
                 };
+                let reports = &mut (*core::ptr::addr_of_mut!(RF_REPORTS)).0;
+                let report = &mut reports[unit as usize * RF_PARALLEL_REPORT_STRIDE..]
+                    [..RF_PARALLEL_REPORT_STRIDE];
                 <$processor as $crate::ParallelProcessor>::render_unit(
                     unit as u32,
                     &mut processor.units[unit as usize],
                     payload,
                     &context,
                     output,
+                    report,
                 );
                 $crate::STATUS_OK
             }
@@ -1915,4 +2288,83 @@ macro_rules! export_parallel_processor {
             }
         }
     };
+}
+
+#[cfg(test)]
+mod unit_work_tests {
+    use super::UnitWork;
+
+    #[test]
+    fn records_read_back_in_the_order_they_were_written() {
+        let mut buffer = [0u8; 256];
+        let mut work = UnitWork::new(&mut buffer);
+        assert!(work.push(5, &[1, 2, 3]));
+        assert!(work.push(5, &[]));
+        assert!(work.push(37, &[9]));
+        assert!(work.push(127, &[4; 17]));
+        let payload = work.finish();
+        let mut read = UnitWork::read(payload);
+        assert_eq!(read.next(), Some((5, &[1, 2, 3][..])));
+        assert_eq!(read.next(), Some((5, &[][..])));
+        assert_eq!(read.next(), Some((37, &[9][..])));
+        let last = read.next().expect("the fourth record");
+        assert_eq!(last.0, 127);
+        assert_eq!(last.1.len(), 17);
+        assert_eq!(read.next(), None);
+    }
+
+    #[test]
+    fn a_payload_can_be_put_down_and_taken_up_again() {
+        // A coordinator writes a unit's work while it walks the block's
+        // events, which is many calls and not one.
+        let mut buffer = [0u8; 128];
+        let written = {
+            let mut work = UnitWork::new(&mut buffer);
+            assert!(work.push(3, &[1]));
+            work.written()
+        };
+        let written = {
+            let mut work = UnitWork::resume(&mut buffer, written);
+            assert!(work.push(9, &[2, 3]));
+            // And the frame order still holds across the seam.
+            assert!(!work.push(8, &[4]));
+            work.written()
+        };
+        let mut read = UnitWork::read(&buffer[..written]);
+        assert_eq!(read.next(), Some((3, &[1][..])));
+        assert_eq!(read.next(), Some((9, &[2, 3][..])));
+        assert_eq!(read.next(), None);
+    }
+
+    #[test]
+    fn a_frame_that_goes_backwards_is_refused() {
+        // A unit reads in the order it was given; one that has to sort its
+        // own work has been handed a puzzle rather than a plan.
+        let mut buffer = [0u8; 64];
+        let mut work = UnitWork::new(&mut buffer);
+        assert!(work.push(10, &[1]));
+        assert!(!work.push(9, &[2]));
+        assert!(work.push(10, &[3]));
+        assert_eq!(UnitWork::read(work.finish()).count(), 2);
+    }
+
+    #[test]
+    fn a_full_payload_refuses_rather_than_truncating() {
+        let mut buffer = [0u8; 16];
+        let mut work = UnitWork::new(&mut buffer);
+        assert!(work.push(0, &[1, 2, 3, 4]));
+        assert!(work.push(1, &[5, 6, 7, 8]));
+        assert!(!work.push(2, &[9]));
+        let payload = work.finish();
+        assert_eq!(payload.len(), 16);
+        assert_eq!(UnitWork::read(payload).count(), 2);
+    }
+
+    #[test]
+    fn a_malformed_payload_ends_the_walk_instead_of_panicking() {
+        // A unit is on the audio thread. Whatever it is handed, it returns.
+        assert_eq!(UnitWork::read(&[1, 2, 3]).count(), 0);
+        assert_eq!(UnitWork::read(&[0, 0, 200, 0, 1]).count(), 0);
+        assert_eq!(UnitWork::read(&[]).count(), 0);
+    }
 }

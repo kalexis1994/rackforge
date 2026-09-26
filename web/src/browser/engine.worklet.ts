@@ -97,6 +97,9 @@ const READ_ONLY_OPERATIONS = new Set([
   "inspect_plugin_preset",
   "plugin_parameters",
   "plugin_state_parameters",
+  // The Controllers editor asks for these many times a second.
+  "controller_maps",
+  "midi_activity",
 ]);
 const READ_ONLY_PACKAGE_ACTIONS = new Set(["inspect", "catalog", "resource_status"]);
 const PACKAGE_ASSET_MUTATIONS = new Set(["install", "activate", "deactivate", "uninstall"]);

@@ -49,6 +49,9 @@ pub fn ambient_repaint_messages() -> Result<Vec<OutboundMessage>, String> {
         .map(|bytes| OutboundMessage::new(bytes, LED_SETTLE_MS))
         .collect())
 }
+/// Addressable RGB controls. The device answers to `0x00`..`0x23` -- see
+/// LED-MAP.md beside the package -- and accepts `0x24`..`0x2B` without
+/// lighting anything, so a full repaint spends eight messages on nothing.
 const RGB_LED_COUNT: u8 = 0x2C;
 pub const PRESET_SETTLE_MS: u16 = 350;
 pub const CONNECT_SETTLE_MS: u16 = 150;
@@ -62,6 +65,11 @@ pub struct OutboundMessage {
 }
 
 impl OutboundMessage {
+    /// An LED message, with the settle every LED message takes.
+    pub fn led(bytes: Vec<u8>) -> Self {
+        Self::new(bytes, LED_SETTLE_MS)
+    }
+
     fn new(bytes: Vec<u8>, settle_after_ms: u16) -> Self {
         Self {
             bytes,
@@ -107,6 +115,159 @@ pub fn parse_input(message: &[u8]) -> Option<ControllerEvent> {
         _ => None,
     };
     surface.map(|(input, phase)| ControllerEvent::Surface { input, phase })
+}
+
+/// The universal Device Inquiry: the heartbeat. Any Program message --
+/// selecting the DAW program, or only asking which program is on -- makes
+/// the firmware repaint the four buttons under the screen dark (seen on the
+/// project keyboard, 2026-09-25: they lit when touched and went out at the
+/// next heartbeat). The inquiry touches nothing.
+pub const IDENTITY_REQUEST: &[u8] = &[0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7];
+
+/// The KeyLab Essential mk3's answer to the Device Inquiry: Arturia
+/// (`00 20 6B`), family `02 00`, member `05` -- the bytes Ableton's
+/// KeyLab_Essential_mk3 script identifies it by
+/// (`identity_response_id_bytes = (0, 32, 107, 2, 0, 5)`).
+pub fn is_identity_reply(message: &[u8]) -> bool {
+    matches!(
+        message,
+        [
+            0xF0,
+            0x7E,
+            _,
+            0x06,
+            0x02,
+            0x00,
+            0x20,
+            0x6B,
+            0x02,
+            0x00,
+            0x05,
+            ..
+        ]
+    ) && message.last() == Some(&0xF7)
+}
+
+/// The program the keyboard announces, `21 11 40 02 00 <program>`: the echo
+/// of a selection, or the keyboard's own message when the player changes
+/// program with Prog. The DAW program is 1.
+pub fn announced_program(message: &[u8]) -> Option<u8> {
+    match message {
+        [
+            0xF0,
+            0x00,
+            0x20,
+            0x6B,
+            0x7F,
+            0x42,
+            0x21,
+            0x11,
+            0x40,
+            0x02,
+            0x00,
+            program,
+            0xF7,
+        ] => Some(*program),
+        _ => None,
+    }
+}
+
+/// The two pad banks. The keyboard lights Bank in a colour of its own when
+/// it changes bank; the driver keeps Bank and the eight pads in the
+/// player's: the ambient on bank A, the bank B colour on bank B.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PadBank {
+    #[default]
+    A,
+    B,
+}
+
+/// Bank B's colour by default: an amber as bright as the default ambient,
+/// its channels the ambient's in another order, so bank B reads by colour
+/// and not by brightness.
+pub const DEFAULT_BANK_B_LED_RGB: [u8; 3] = [64, 40, 10];
+/// Bank B's colour, runtime-configurable as the package's
+/// `bank-b-light-color` setting. Packed and 7-bit, as the ambient.
+static BANK_B_LED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(
+    ((DEFAULT_BANK_B_LED_RGB[0] as u32) << 16)
+        | ((DEFAULT_BANK_B_LED_RGB[1] as u32) << 8)
+        | (DEFAULT_BANK_B_LED_RGB[2] as u32),
+);
+
+pub fn bank_b_led_rgb() -> [u8; 3] {
+    let packed = BANK_B_LED.load(core::sync::atomic::Ordering::Relaxed);
+    [
+        ((packed >> 16) & 0x7F) as u8,
+        ((packed >> 8) & 0x7F) as u8,
+        (packed & 0x7F) as u8,
+    ]
+}
+
+/// Sets bank B's colour; each channel is clamped to the SysEx 7-bit range.
+pub fn set_bank_b_led_rgb(rgb: [u8; 3]) {
+    let packed = ((rgb[0].min(0x7F) as u32) << 16)
+        | ((rgb[1].min(0x7F) as u32) << 8)
+        | (rgb[2].min(0x7F) as u32);
+    BANK_B_LED.store(packed, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// The Bank button's LED and the eight pads' (LED-MAP.md): one panel on the
+/// 49, 61 and 88.
+const BANK_LED: u8 = 0x01;
+const PAD_LEDS: core::ops::RangeInclusive<u8> = 0x1C..=0x23;
+
+/// Bank and the pads in the colour of the bank that is on.
+pub fn bank_led_messages(bank: PadBank) -> Result<Vec<Vec<u8>>, String> {
+    let rgb = match bank {
+        PadBank::A => ambient_led_rgb(),
+        PadBank::B => bank_b_led_rgb(),
+    };
+    std::iter::once(BANK_LED)
+        .chain(PAD_LEDS)
+        .map(|control_id| rgb_led_message(control_id, rgb))
+        .collect()
+}
+
+/// Follows which pad bank is on, from what the keyboard sends: Bank (CC 118,
+/// channel 1) toggles it on each press, and a pad's note says it for certain
+/// (bank A notes 36-43, bank B 44-51, channel 11; MIDI-MAP.md). Returns the
+/// bank whenever Bank's light must be put back: after each press and
+/// release, which the firmware repaints, and when a pad corrects the count.
+#[derive(Debug, Default)]
+pub struct PadBankTracker {
+    bank: PadBank,
+}
+
+impl PadBankTracker {
+    pub fn bank(&self) -> PadBank {
+        self.bank
+    }
+
+    pub fn observe(&mut self, message: &[u8]) -> Option<PadBank> {
+        match *message {
+            [0xB0, 118, value] => {
+                if value > 0 {
+                    self.bank = match self.bank {
+                        PadBank::A => PadBank::B,
+                        PadBank::B => PadBank::A,
+                    };
+                }
+                Some(self.bank)
+            }
+            [0x9A, note, velocity] if velocity > 0 => {
+                let bank = match note {
+                    36..=43 => PadBank::A,
+                    44..=51 => PadBank::B,
+                    _ => return None,
+                };
+                (bank != self.bank).then(|| {
+                    self.bank = bank;
+                    bank
+                })
+            }
+            _ => None,
+        }
+    }
 }
 
 pub fn select_preset(index: u8) -> Result<Vec<u8>, String> {
@@ -260,6 +421,12 @@ pub fn all_rgb_led_messages(rgb: [u8; 3]) -> Result<Vec<Vec<u8>>, String> {
         .collect()
 }
 
+/// The four buttons under the screen, at `0x18`..`0x1B`.
+///
+/// Read off the hardware one ID at a time rather than assumed; the whole map
+/// is in hardware/controllers/arturia-keylab-essential-mk3/LED-MAP.md. They
+/// light when addressed on their own, so an ID that reaches nothing is not
+/// why they are dark in normal use.
 pub fn button_led_message(index: usize, rgb: [u8; 3]) -> Result<Vec<u8>, String> {
     if index >= 4 {
         return Err("KeyLab context-button LED index must be between 0 and 3".into());
@@ -388,6 +555,69 @@ mod tests {
                 ],
             ]
         );
+    }
+
+    #[test]
+    fn the_heartbeat_is_answered_by_this_keyboard_alone() {
+        let reply = [
+            0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x00, 0x20, 0x6B, 0x02, 0x00, 0x05, 0x48, 0x01, 0x02,
+            0x01, 0x00, 0xF7,
+        ];
+        assert!(is_identity_reply(&reply));
+        // A KeyLab mk3 (member 0A) or another maker is not this keyboard.
+        let mut mk3 = reply;
+        mk3[10] = 0x0A;
+        assert!(!is_identity_reply(&mk3));
+        assert!(!is_identity_reply(&[
+            0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x00, 0x20, 0x29, 0xF7
+        ]));
+    }
+
+    #[test]
+    fn the_keyboard_announces_its_program() {
+        assert_eq!(announced_program(&select_preset(1).unwrap()), Some(1));
+        // Prog pressed on the keyboard (MIDI-MAP.md).
+        assert_eq!(
+            announced_program(&[
+                0xF0, 0x00, 0x20, 0x6B, 0x7F, 0x42, 0x21, 0x11, 0x40, 0x02, 0x00, 0x02, 0xF7
+            ]),
+            Some(2)
+        );
+        assert_eq!(announced_program(IDENTITY_REQUEST), None);
+    }
+
+    #[test]
+    fn bank_is_followed_and_its_light_kept_in_the_players_colour() {
+        let mut tracker = PadBankTracker::default();
+        assert_eq!(tracker.observe(&[0xB0, 118, 127]), Some(PadBank::B));
+        // The release puts the light back too: the firmware repaints it.
+        assert_eq!(tracker.observe(&[0xB0, 118, 0]), Some(PadBank::B));
+        assert_eq!(tracker.observe(&[0xB0, 118, 127]), Some(PadBank::A));
+        // A pad says which bank is on for certain, and corrects the count.
+        assert_eq!(tracker.observe(&[0x9A, 46, 90]), Some(PadBank::B));
+        assert_eq!(tracker.observe(&[0x9A, 46, 90]), None);
+        assert_eq!(tracker.observe(&[0x9A, 40, 0]), None);
+        assert_eq!(tracker.observe(&[0x90, 40, 90]), None);
+        assert_eq!(tracker.bank(), PadBank::B);
+
+        // Bank and the eight pads, in the ambient on A and bank B's colour
+        // on B.
+        let a = bank_led_messages(PadBank::A).unwrap();
+        let b = bank_led_messages(PadBank::B).unwrap();
+        let ids = |messages: &[Vec<u8>]| messages.iter().map(|m| m[9]).collect::<Vec<_>>();
+        assert_eq!(
+            ids(&a),
+            vec![0x01, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23]
+        );
+        assert_eq!(ids(&a), ids(&b));
+        assert!(a.iter().all(|m| m[10..13] == ambient_led_rgb()));
+        assert!(b.iter().all(|m| m[10..13] == bank_b_led_rgb()));
+        // As bright as the ambient by default: the same channels, reordered.
+        let mut ambient = DEFAULT_AMBIENT_LED_RGB;
+        let mut bank_b = DEFAULT_BANK_B_LED_RGB;
+        ambient.sort_unstable();
+        bank_b.sort_unstable();
+        assert_eq!(ambient, bank_b);
     }
 
     #[test]

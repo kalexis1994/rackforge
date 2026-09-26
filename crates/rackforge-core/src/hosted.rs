@@ -1017,6 +1017,36 @@ impl PluginInstance<'_> {
 
     /// Deposits one finished unit's audio in the coordinator's mix region.
     #[cfg(not(target_arch = "wasm32"))]
+    /// Reads what a worker had to say about one unit this block.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_read_report(&self, unit: u32, report: &mut [u8]) -> Result<()> {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_read_report(unit, report)
+            }
+        }
+    }
+
+    /// Deposits one unit's report into the coordinator, beside its audio.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_write_report(&mut self, unit: u32, report: &[u8]) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_write_report(unit, report)
+            }
+        }
+    }
+
+    /// Deposits one unit's audio into its mix slot on the coordinator. Units
+    /// are distributed only on hosts with worker threads; the browser engine
+    /// renders every instrument whole.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn parallel_write_mix_slot(&mut self, unit: u32, samples: &[f32]) -> Result<()> {
         match &mut self.backend {
             PluginInstanceBackend::Native(_) => {
@@ -1044,14 +1074,50 @@ impl PluginInstance<'_> {
         }
     }
 
+    /// Whether this plugin scales itself to the machine it was given.
+    pub fn accepts_realtime_budget(&self) -> bool {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => false,
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.accepts_realtime_budget()
+            }
+        }
+    }
+
+    /// Hands the plugin the fuel it may spend on one real-time call.
+    ///
+    /// Native plugins are outside the sandbox that meters fuel, so there is no
+    /// budget to state in units they share; they are told nothing and keep
+    /// what their author calibrated.
+    pub fn set_realtime_budget(&mut self, fuel: u64) -> Result<bool> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => Ok(false),
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.set_realtime_budget(fuel)
+            }
+        }
+    }
+
     /// Reports the fuel consumed by the most recent portable process call.
     /// Native plugins are not metered by the WebAssembly sandbox.
+    /// Adds fuel burned outside this instance to this block's total.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn add_realtime_fuel(&mut self, fuel: u64) {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {}
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.add_realtime_fuel(fuel);
+            }
+        }
+    }
+
     pub fn last_realtime_fuel_consumed(&self) -> Option<u64> {
         match &self.backend {
             PluginInstanceBackend::Native(_) => None,
-            PluginInstanceBackend::Portable(instance) => {
+            PluginInstanceBackend::Portable(instance) if instance.instance.is_metered() => {
                 Some(instance.instance.last_realtime_fuel_consumed())
             }
+            PluginInstanceBackend::Portable(_) => None,
         }
     }
 }

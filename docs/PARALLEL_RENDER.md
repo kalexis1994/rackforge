@@ -78,6 +78,7 @@ rackforge_parallel_shared_ptr() -> i32        ;; shared_capacity bytes, 8-aligne
 rackforge_parallel_shared_capacity() -> i32   ;; positive multiple of 8
 rackforge_parallel_plan_ptr() -> i32          ;; header + max_units entries, 4-aligned
 rackforge_parallel_mix_ptr() -> i32           ;; max_units × capacity_output_samples f32
+rackforge_parallel_unit_channels() -> i32     ;; OPTIONAL; f32 a unit writes per frame
 
 rackforge_parallel_begin_block(frames, input_channels, output_channels,
                                midi_count, parameter_count) -> i32
@@ -107,6 +108,38 @@ reserved: u32}` followed by one `{unit: u32, payload_bytes: u32}` entry per
 active unit, with strictly increasing unit indices. The host validates all
 of it: duplicate or out-of-range units, payloads beyond the stride and
 shared sizes beyond the capacity are rejected and quarantine the Slot.
+
+### A unit does not always produce audio
+
+`rackforge_parallel_unit_channels` says how many floats a unit writes per
+frame. A component that does not export it, or exports zero, means the
+plugin's output channel count -- what every component meant before the
+export existed, and what is right whenever a unit produces finished audio.
+The host then copies `frames × output_channels` out of each unit, as it
+always did.
+
+It is not right for every decomposition, and the case that forced this is
+worth stating. An instrument with ONE resonating body has units that produce
+an **intermediate** signal: the Concert Grand's four string sections each
+hand over a bridge force, sixteen bridge drive points and two keybed
+contributions -- nineteen floats a frame -- and one shared serial stage
+turns those into sound. The board cannot be divided with them, because its
+modes are driven by bridge points that depend on every section, and reading
+those a block late was rendered and rejected by ear ("pierde una pizca de
+ataque"). Two channels cannot carry nineteen floats, and truncating them in
+silence is worse than refusing them.
+
+So a unit declares its own width, through `ParallelProcessor::UNIT_CHANNELS`
+in the SDK. Two rules come with it:
+
+* The region a unit writes is sized `max_frames × max_output_channels`, so a
+  widened unit must keep `frames × UNIT_CHANNELS` inside that -- it borrows
+  the headroom a short block leaves rather than growing the static. The
+  generated `render_unit` checks and returns `STATUS_INVALID_ARGUMENT`
+  rather than writing past the end.
+* `UnitMix::unit()` hands `end_block` `frames × UNIT_CHANNELS`, so the
+  combine reads what the units actually wrote. For an audio decomposition
+  that is unchanged.
 
 `render_unit` reads its dispatch slot and the shared region (the host wrote
 both into the worker instance) and writes the standard output region.
@@ -234,6 +267,39 @@ instances. This is the deliberate price of isolation; plugins with very
 large resident resources (multi-hundred-megabyte sample banks) should weigh
 it before declaring the capability. The sequential fallback is always legal
 for a host under memory pressure.
+
+### Timed work for a unit
+
+`PlanWriter::activate` takes bytes, which is the right primitive and the
+wrong place to stop. A unit renders a whole span at once and cannot be told
+anything halfway through, so an instrument needs to hand it a LIST: a note
+struck at frame 5, a damper released at frame 37. Without a shared shape for
+that, every plugin invents one and makes its own mistakes about bounds and
+about frames outside the block.
+
+`UnitWork` is that shape. Records of `{frame: u16, length: u16, bytes}`,
+four-byte aligned, pushed in ascending frame order and read back the same
+way:
+
+```rust
+// begin_block, on the coordinator
+let mut work = UnitWork::new(plan.dispatch_buffer(unit));
+work.push(5, &strike.to_bytes());
+work.push(37, &release.to_bytes());
+plan.activate(unit, work.finish());
+
+// render_unit, in the worker
+for (frame, bytes) in UnitWork::read(payload) {
+    // apply it where it belongs
+}
+```
+
+The bytes inside a record stay the plugin's own business -- the host never
+looks at a payload. What the shape buys is the three refusals: a record
+longer than a `u16`, a frame that goes backwards, and a payload that is
+full are all refused at the push rather than truncated at the read. And a
+malformed payload ends the walk instead of panicking, because a unit is on
+the audio thread.
 
 ## Determinism rules (normative)
 
@@ -385,3 +451,208 @@ Scope: the browser pool parallelises the units of the active instrument, the
 dominant browser-host case. Cabled-rack parallelism across plugin instances
 stays native-only — it rides on the core `RenderPool`, which needs threads
 the wasm host does not have.
+
+## What it bought, on real hardware
+
+The Concert Grand is the first instrument to declare the extension: four
+string sections, one unit each, twenty floats a frame per unit folded down to
+stereo by `end_block`. Measured on the Raspberry Pi 4 appliance, 128-frame
+blocks against a 2666 µs deadline, the densest thirty seconds of La
+Campanella, the same binary and the same component both ways:
+
+| | mean | p99 | deadline misses | governor |
+| --- | --- | --- | --- | --- |
+| sequential (`RACKFORGE_AUDIO_WORKERS=0`) | 1430 µs | 2883 µs | 54 | tightened, `late_pct=23.4` |
+| four cores (auto, three workers) | 1112 µs | 2359 µs | 5 | no cuts |
+
+The gap is wider than the means suggest: the sequential figure is what the
+instrument costs *after* the governor cut quality to survive, while the
+parallel one never had to give ground.
+
+`tests/parallel_overhead.rs` splits the cost three ways — one instance
+rendering a whole block, the same units run inline on one thread, and the
+same units across the real pool — which is the only split that separates
+transport from threading. On the appliance the transport costs 30 µs a block
+idle and 111 µs under a chord, and the threading 58 µs idle and *minus*
+214 µs under a chord: once there is real work the pool finishes ahead of a
+single instance. An earlier claim in this project that the transport cost
+~450 µs was wrong, and it was wrong in the usual way — two numbers compared
+across different states, one of them measured while every unit was being
+refused.
+
+### The floor, which is where the remaining work is
+
+The same measurement says an idle block costs 1039 µs before a single note
+sounds, and about 900 µs of that is the global stage: the soundboard, the
+sympathetic bank and the room, which run every block whether or not anything
+is ringing. A third of the deadline, paid identically in both render paths.
+
+That is why the notes barely show. La Campanella's densest passage means
+1112 µs and the idle floor is 1039: the string work is spread across cores
+and disappears into the space the global stage was not using. Nothing in the
+scheduler moves this, because Amdahl charges for it either way.
+
+So any further gain has to come from the global stage itself, and the only
+obvious lever — not running it, or running it cheaper, when no string holds
+energy — is exactly the mechanism that cuts a decaying tail and silences the
+sympathetic bloom under a chord that is still breathing. That would be an
+ear-level decision, not a profiling one — and the measurement below says to
+exhaust the arrangements of the bank first, because none of those requires a
+decision about how the instrument sounds.
+
+### What the global stage is made of
+
+Priced by ablation — building the instrument with one group of banks given
+an empty range, so everything downstream still runs on the zeros those loops
+would have left. Each figure is therefore a floor on what that group costs,
+never an overstatement. Measured on a developer machine, so read the
+proportions and not the microseconds; the appliance puts the whole stage at
+about three and a half times these numbers.
+
+| | idle | a held chord | share |
+| --- | --- | --- | --- |
+| the soundboard's modal bank | 137 µs | 202 µs | **~69 %** |
+| the sympathetic banks (open, undamped, silent keys, bed) | 90 µs | 113 µs | ~39 % |
+| the room (early reflections and the chamber) | 0 µs | 17 µs | ~6 % |
+
+The room is very nearly free and is not worth touching. The soundboard's
+256-mode bank is the bill.
+
+Two things about that bank were measured rather than assumed, and the
+measurements disagree with each other depending on where they are taken.
+
+It is an array of 56-byte structs. `simd128` is on for every wasm build in
+this workspace, and consecutive modes' state is 56 bytes apart, so a
+four-wide load would need gathers — it looks like a textbook failure to
+vectorise. Laying the bank out as one array per field is bit-for-bit
+identical, and:
+
+| | x86 | the appliance's ARM cores, natively |
+| --- | --- | --- |
+| array of structs, as it is | 1.00× | 1.00× |
+| one array per field | 0.93× | **1.41×** |
+| one array per field, sum split four ways | 1.28× | 0.99× |
+| only the sum split, layout untouched | 0.78× | 0.89× |
+
+Neither loop vectorises on either machine: adding 256 results into one
+accumulator is a float reduction, which a compiler may not reassociate on
+its own, so what moves on ARM is how the bank is walked rather than how wide
+it is walked. Built for `wasm32` with `simd128` the loop emits no v128
+instructions in either layout — and the version with the sum split four ways
+emits them, which looked like the one arrangement that would arrive on the
+appliance vectorised.
+
+**All of it evaporates in the real thing.** The bank was rewritten as one
+array per field, held to the render fingerprints (identical, both of them),
+built as wasm and measured on the appliance against the arrangement it
+ships with, three rounds each, with a third build adding the split sum:
+
+| whole block, one instance | idle | a held chord |
+| --- | --- | --- |
+| array of structs, as it ships | 1060 / 1054 / 1043 µs | 1553 / 1540 / 1565 µs |
+| one array per field | 1048 / 1035 / 1073 µs | 1531 / 1613 / 1575 µs |
+| + the sum split four ways | 1107 / 1018 / 1046 µs | 1568 / 1533 / 1506 µs |
+
+The spread within one arrangement is larger than any difference between
+them. Whatever the layout is worth on ARM directly, wasmtime's addressing
+and codegen level it, and the rewrite was discarded rather than landed: a
+large diff in the instrument's hottest structure for a change that measures
+as noise is churn, and the 1.41× that justified it did not survive contact
+with the target.
+
+So the soundboard's bank is 69 % of the global stage and there is no
+arrangement of it that helps. What is left there genuinely is an ear-level
+decision — fewer modes, or a cheaper mode — and that is a different kind of
+question from this one.
+
+## Finding out what a block costs
+
+A plugin author's own profiler measures the whole render, which is the
+natural thing to measure and the wrong shape for this host. A block is three
+phases and they land in different places: `begin_block` and `end_block` run
+on the coordinator, one after the other, and the units run on worker cores.
+Splitting five voices across four cores does nothing whatever about the
+serial two, so a fat `begin_block` is the one cost no number of cores can
+help with -- and it is invisible in a figure that adds all three together.
+
+```text
+cargo run --release -p rackforge-core --example plugin-profile -- <package-directory>
+```
+
+It renders a deployed package twice, with nothing playing and under a held
+chord, and reports each phase against the deadline plus how much of it is
+FIXED. That second column is the diagnosis. A serial phase that costs the
+same either way is control-rate work running at sample rate, paid on every
+block forever, and it reads the same on a laptop as on an appliance --
+unlike the microseconds, which do not transfer at all.
+
+This is how RF-5's `begin_block` was found: 100 % fixed, and a third of the
+appliance's deadline before a single voice rendered. The cause was four
+read-only methods taking a kilobyte of sample-and-hold cells by value, which
+a native build elides and wasm does not, so it was invisible to every
+measurement taken on a developer machine.
+
+### What crosses the boundary
+
+The tool also prints what the host carries, which is arithmetic over numbers
+the plugin declared rather than a measurement. `export_parallel_processor!`
+computes the same figure as `RF_PARALLEL_BLOCK_TRAFFIC_BYTES`, and the host
+says it once when it stands a plugin up:
+
+```text
+AUDIO_PARALLEL_TRAFFIC units=5 shared_bytes=671760 unit_channels=2 per_block_kib=3946.1
+```
+
+The multiplier by unit count is the part that surprises people: the shared
+payload is read out of the coordinator and written into EVERY unit, so a
+payload that looks small beside one unit is not small beside eight. RF-5
+carries 3946 KiB a block against the Concert Grand's 427, and the Concert
+Grand is much the larger instrument -- the difference is that RF-5's payload
+is per FRAME.
+
+It is exposed rather than enforced. A compile-time assertion could only
+carry a fixed message and a fixed threshold, and the question is never
+whether this figure crosses a line: it is whether it is large next to the
+DSP it serves, which needs both numbers side by side. Rust also cannot emit
+a compile-time warning carrying a computed value, so a macro that "warns you
+about your wire format" is not a thing that can be built -- only a const
+that anyone can read, a host that says it out loud, and a profiler that puts
+it next to the work.
+
+## What is not covered
+
+**The browser pool refuses an instrument that reports.** A plugin whose
+coordinator decides things from what its units did — which string is busy,
+which is quietest — has no way home for that on the web: the worker arena
+carries audio and nothing else. Such a block takes the sequential fallback,
+which is the same component rendering the same audio on one thread. The
+Concert Grand is exactly that kind of plugin, so on the web it is currently
+single-threaded. Closing this needs a report region in the arena, a copy on
+the worker side and an `rf_par_report_read`.
+
+**Nothing exercises the browser transport the way the native one is now
+exercised.** `tests/parallel_render.rs` holds the native path to its
+sequential fallback with a fixture whose units are deliberately wider than
+its instrument, and holds the packaged Concert Grand to the same standard
+through the real `ParallelUnits` and `RenderPool`. `browser.rs` is
+`#[cfg(target_arch = "wasm32")]` and calls into the embedder, so nothing in
+this workspace can run it at all. The one rule it used to get wrong on its
+own now lives on `ParallelLayout::unit_width`, which every host asks and
+which has a test that compiles on every target — but that is a rule with a
+guard, not a transport with a guard.
+
+**`live.rs` is invisible to a host build on Windows.** It is behind
+`#[cfg(target_os = "linux")]`, so cargo reports success for a crate whose
+changed file it never compiled — a commit once shipped with five
+constructors missing a field that way. `tools/cross-build-raspberry-pi.ps1`
+is the only build on a Windows machine that compiles it, and any change
+there has to go through it.
+
+**The two packaged equivalence tests are `#[ignore]`d** because they need a
+`wasm32` build of their component. CI builds the components and runs them in
+their own step; a developer has to ask for them:
+
+```bash
+cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+cargo test -p rackforge-core --test parallel_render -- --ignored
+```

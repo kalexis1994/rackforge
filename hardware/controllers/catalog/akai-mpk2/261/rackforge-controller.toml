@@ -1,0 +1,505 @@
+# Akai Professional MPK261, on its Preset 1, "LiveLite". Every value below is
+# sourced in ../SOURCES.md; [UG] is the MPK261 User Guide v1.0, [AB] Ableton
+# Live 12's MPK261 remote script, which reads that preset, [AKB] Akai's own
+# Bitwig scripts for the MPK2 Series v1.0.8, [KB] Akai's article "MPK2
+# Series | Setup in Ableton Live". [AB] is the only source for the preset's
+# messages: see ../SOURCES.md.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.akai-mpk261"
+name = "MPK261"
+vendor = "Akai Professional"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "mpk261"
+
+# Port A, its first USB port, where the preset's controls speak: "MPK261"
+# on Windows, "MPK261 Port A" on a Mac, "MPK261 MIDI 1" on Linux [AKB port
+# names]. Port B ("MIDIIN2", "Port B", "MIDI 2"), the 5-pin MIDI port and
+# the Remote port ("MIDIIN4", "Remote", "MIDI 4") are not the keyboard's
+# controls. One endpoint per system, so no system's other ports are taken.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["mpk261 port a"]
+
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["mpk261 midi 1"]
+
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["mpk261"]
+exclude_contains = ["port", "midi", "remote"]
+
+# Knobs 1-8, control bank A: CC 22-29, absolute, channel 1 [AB Encoders,
+# make_encoder: MapMode.absolute]. They turn endlessly [UG item 11].
+# Above the faders, they are the second row.
+[[inputs]]
+id = "knob-1"
+name = "Knob 1"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 22 }
+slot = "control-2.1"
+
+[[inputs]]
+id = "knob-2"
+name = "Knob 2"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 23 }
+slot = "control-2.2"
+
+[[inputs]]
+id = "knob-3"
+name = "Knob 3"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 24 }
+slot = "control-2.3"
+
+[[inputs]]
+id = "knob-4"
+name = "Knob 4"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 25 }
+slot = "control-2.4"
+
+[[inputs]]
+id = "knob-5"
+name = "Knob 5"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 26 }
+slot = "control-2.5"
+
+[[inputs]]
+id = "knob-6"
+name = "Knob 6"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 27 }
+slot = "control-2.6"
+
+[[inputs]]
+id = "knob-7"
+name = "Knob 7"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 28 }
+slot = "control-2.7"
+
+[[inputs]]
+id = "knob-8"
+name = "Knob 8"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 29 }
+slot = "control-2.8"
+
+# Faders 1-8, control bank A: CC 12-19, channel 1 [AB Sliders].
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 12 }
+slot = "control-1.1"
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 13 }
+slot = "control-1.2"
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 14 }
+slot = "control-1.3"
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 15 }
+slot = "control-1.4"
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 16 }
+slot = "control-1.5"
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 17 }
+slot = "control-1.6"
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 18 }
+slot = "control-1.7"
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 19 }
+slot = "control-1.8"
+
+# Switches 1-8, control bank A: CC 32-39, channel 1, momentary [AB
+# Arm_Buttons, make_button]. No slot: the pads hold the switches.
+[[inputs]]
+id = "switch-1"
+name = "Switch 1"
+kind = "button"
+group = "Switches"
+midi = { channel = 0, cc = 32 }
+
+[[inputs]]
+id = "switch-2"
+name = "Switch 2"
+kind = "button"
+group = "Switches"
+midi = { channel = 0, cc = 33 }
+
+[[inputs]]
+id = "switch-3"
+name = "Switch 3"
+kind = "button"
+group = "Switches"
+midi = { channel = 0, cc = 34 }
+
+[[inputs]]
+id = "switch-4"
+name = "Switch 4"
+kind = "button"
+group = "Switches"
+midi = { channel = 0, cc = 35 }
+
+[[inputs]]
+id = "switch-5"
+name = "Switch 5"
+kind = "button"
+group = "Switches"
+midi = { channel = 0, cc = 36 }
+
+[[inputs]]
+id = "switch-6"
+name = "Switch 6"
+kind = "button"
+group = "Switches"
+midi = { channel = 0, cc = 37 }
+
+[[inputs]]
+id = "switch-7"
+name = "Switch 7"
+kind = "button"
+group = "Switches"
+midi = { channel = 0, cc = 38 }
+
+[[inputs]]
+id = "switch-8"
+name = "Switch 8"
+kind = "button"
+group = "Switches"
+midi = { channel = 0, cc = 39 }
+
+# Pads, bank A: notes on channel 2, white keys up from middle C, 60 to
+# 86 [AB Drum_Pads, channel 1 zero-based]. Pads 1-4 are the bottom row
+# and 13-16 the top one [AB, top row first]. The other pad banks are not in
+# [AB]. A pad takes the slot of the pad in its place on a 36-51 grid, so it
+# does what the pads in that place on every other keyboard do.
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 60 }
+slot = "switch-1.5"
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 62 }
+slot = "switch-1.6"
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 64 }
+slot = "switch-1.7"
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 65 }
+slot = "switch-1.8"
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 67 }
+slot = "switch-1.1"
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 69 }
+slot = "switch-1.2"
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 71 }
+slot = "switch-1.3"
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 72 }
+slot = "switch-1.4"
+
+[[inputs]]
+id = "pad-9"
+name = "Pad 9"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 74 }
+slot = "switch-2.5"
+
+[[inputs]]
+id = "pad-10"
+name = "Pad 10"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 76 }
+slot = "switch-2.6"
+
+[[inputs]]
+id = "pad-11"
+name = "Pad 11"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 77 }
+slot = "switch-2.7"
+
+[[inputs]]
+id = "pad-12"
+name = "Pad 12"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 79 }
+slot = "switch-2.8"
+
+[[inputs]]
+id = "pad-13"
+name = "Pad 13"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 81 }
+slot = "switch-2.1"
+
+[[inputs]]
+id = "pad-14"
+name = "Pad 14"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 83 }
+slot = "switch-2.2"
+
+[[inputs]]
+id = "pad-15"
+name = "Pad 15"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 84 }
+slot = "switch-2.3"
+
+[[inputs]]
+id = "pad-16"
+name = "Pad 16"
+kind = "pad"
+group = "Pads, bank A"
+midi = { channel = 1, note = 86 }
+slot = "switch-2.4"
+
+# The wheels and the sustain pedal, on the keyboard's channel: pitch bend,
+# and modulation CC 1 [UG items 3-4]; sustain CC 64 [UG rear panel, the
+# MIDI standard].
+[[inputs]]
+id = "pitch-bend"
+name = "Pitch-bend wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, pitch_bend = true }
+
+[[inputs]]
+id = "modulation"
+name = "Modulation wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, cc = 1 }
+slot = "mod-wheel"
+
+[[inputs]]
+id = "sustain"
+name = "Sustain pedal"
+kind = "pedal"
+group = "Pedals"
+midi = { channel = 0, cc = 64 }
+
+# Transport, CC on channel 1 in this preset [AB: Loop 114, Rewind 115,
+# Fast-forward 116, Stop 117, Play 118, Record 119; UG: the five transport
+# buttons send "pre-assigned MIDI CC values" among other types, and Loop is
+# set per preset]. Rewind and fast-forward step the main selector.
+[[inputs]]
+id = "loop"
+name = "Loop"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 114 }
+
+[[inputs]]
+id = "rewind"
+name = "Rewind"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 115 }
+slot = "step.down"
+
+[[inputs]]
+id = "fast-forward"
+name = "Fast-forward"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 116 }
+slot = "step.up"
+
+[[inputs]]
+id = "stop"
+name = "Stop"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 117 }
+
+[[inputs]]
+id = "play"
+name = "Play"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 118 }
+
+[[inputs]]
+id = "record"
+name = "Record"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 119 }
+
+# RackForge's default meanings for eight knobs and eight faders, without a
+# master fader.
+[[roles]]
+input = "knob-1"
+role = "synth.oscillator.pulse_width"
+
+[[roles]]
+input = "knob-2"
+role = "synth.oscillator.sub.level"
+
+[[roles]]
+input = "knob-3"
+role = "synth.oscillator.noise.level"
+
+[[roles]]
+input = "knob-4"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-5"
+role = "synth.filter.lfo.amount"
+
+[[roles]]
+input = "knob-6"
+role = "synth.filter.key_tracking"
+
+[[roles]]
+input = "knob-7"
+role = "synth.lfo.delay"
+
+[[roles]]
+input = "knob-8"
+role = "synth.amplifier.level"
+
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"
+
+# Play and Stop take the transport.
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop"
+target = "transport_stop"

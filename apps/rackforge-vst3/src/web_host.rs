@@ -515,6 +515,30 @@ fn handle_session_command(
             "plugin_id": model.plugin_id,
             "presets": [],
         })]),
+        // The DAW maps its controllers to the plug-in's parameters itself.
+        "controller_maps" => Ok(vec![json!({
+            "status": "controller_maps",
+            "controllers": [],
+            "maps": [],
+        })]),
+        "midi_activity" => Ok(vec![json!({
+            "status": "midi_activity",
+            "cursor": 0,
+            "events": [],
+        })]),
+        // The DAW owns the inputs; the plug-in captures none of its own.
+        "audio_input" => Ok(vec![json!({
+            "status": "audio_input",
+            "input": {
+                "availability": "unsupported",
+                "device_channels": 0,
+                "captured": [],
+                "gain_db": 0.0,
+                "cable_routing": false,
+                "peaks": [],
+                "reason": "the DAW routes audio into the plug-in",
+            },
+        })]),
         "dispatch" => dispatch(command, shared),
         unsupported => Err(format!(
             "RackForge VST3 session does not support {unsupported} yet"

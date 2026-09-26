@@ -389,6 +389,23 @@ pub struct RenderTelemetry {
     deadline_misses: AtomicU64,
     miss_attribution: Box<[[AtomicU64; STAGE_COUNT]]>,
     slot_faults: Box<[AtomicU64]>,
+    /// The budget each slot was last handed, why, and the machine speed it
+    /// was derived from. Written by the audio loop as two relaxed stores and
+    /// read by the publisher, because a render thread must not format a
+    /// string: `budget_reason` is zero until there is something new to say.
+    budget_fuel: Box<[AtomicU64]>,
+    budget_reason: Box<[AtomicU64]>,
+    budget_picoseconds_per_fuel: Box<[AtomicU64]>,
+    budget_deadline_ns: Box<[AtomicU64]>,
+    /// What the decision was made on, in per-mille: the share of the
+    /// window's blocks that ran late, and the render average against the
+    /// allowance.
+    budget_over_permille: Box<[AtomicU64]>,
+    budget_blocks: Box<[AtomicU64]>,
+    budget_late_blocks: Box<[AtomicU64]>,
+    budget_load_permille: Box<[AtomicU64]>,
+    /// Publisher-side only: which plugin each slot holds, for the store.
+    budget_plugins: Mutex<Vec<String>>,
     unit_faults: Box<[AtomicU64]>,
     worker_units: Box<[AtomicU64]>,
     worker_busy_ns: Box<[AtomicU64]>,
@@ -409,6 +426,15 @@ impl RenderTelemetry {
                 .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
                 .collect(),
             slot_faults: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_fuel: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_reason: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_picoseconds_per_fuel: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_deadline_ns: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_over_permille: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_blocks: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_late_blocks: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_load_permille: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            budget_plugins: Mutex::new(Vec::new()),
             unit_faults: (0..MAX_RENDER_SLOTS).map(|_| AtomicU64::new(0)).collect(),
             worker_units: (0..worker_capacity.max(1))
                 .map(|_| AtomicU64::new(0))
@@ -423,6 +449,47 @@ impl RenderTelemetry {
     fn record_stage(&self, slot: usize, stage: usize, ns: u64) {
         if let Some(stages) = self.stages.get(slot) {
             stages[stage].record(ns);
+        }
+    }
+
+    /// Records that a slot was handed a new real-time budget. Called from the
+    /// audio loop; `reason` is a non-empty word, and the publisher clears it
+    /// once it has been said.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_budget(
+        &self,
+        slot: usize,
+        fuel: u64,
+        reason: &'static str,
+        rate_ns: f64,
+        deadline_ns: u64,
+        window: (f64, f64),
+        counts: (u32, u32),
+    ) {
+        let Some(slot_fuel) = self.budget_fuel.get(slot) else {
+            return;
+        };
+        slot_fuel.store(fuel, Ordering::Relaxed);
+        if let Some(deadline) = self.budget_deadline_ns.get(slot) {
+            deadline.store(deadline_ns, Ordering::Relaxed);
+        }
+        if let Some(over) = self.budget_over_permille.get(slot) {
+            over.store((window.0 * 1_000.0) as u64, Ordering::Relaxed);
+        }
+        if let Some(load) = self.budget_load_permille.get(slot) {
+            load.store((window.1 * 1_000.0) as u64, Ordering::Relaxed);
+        }
+        if let Some(blocks) = self.budget_blocks.get(slot) {
+            blocks.store(u64::from(counts.0), Ordering::Relaxed);
+        }
+        if let Some(late) = self.budget_late_blocks.get(slot) {
+            late.store(u64::from(counts.1), Ordering::Relaxed);
+        }
+        if let Some(rate) = self.budget_picoseconds_per_fuel.get(slot) {
+            rate.store((rate_ns * 1_000.0) as u64, Ordering::Relaxed);
+        }
+        if let Some(code) = self.budget_reason.get(slot) {
+            code.store(budget_reason_code(reason), Ordering::Relaxed);
         }
     }
 
@@ -462,6 +529,32 @@ impl RenderTelemetry {
         }
     }
 
+    /// Which plugin each Slot holds, so a settled budget can be remembered
+    /// under its name. Called from control paths, and from the audio loop on
+    /// the few blocks per session that report a budget in PLAY mode.
+    pub fn set_slot_plugins(&self, plugins: Vec<String>) {
+        if let Ok(mut guard) = self.budget_plugins.lock() {
+            *guard = plugins;
+        }
+    }
+
+    /// Writes every budget that settled since the last snapshot into the
+    /// store. Publisher thread only: this touches the filesystem.
+    pub fn persist_settled(&self, snapshot: &TelemetrySnapshot) {
+        let plugins = match self.budget_plugins.lock() {
+            Ok(guard) => guard.clone(),
+            Err(_) => return,
+        };
+        for (slot, fuel, reason, _, deadline_ns, _, _, _, _) in &snapshot.budgets {
+            if *reason != "settled" {
+                continue;
+            }
+            if let Some(plugin) = plugins.get(*slot) {
+                crate::realtime_budget::remember(plugin, *deadline_ns, *fuel);
+            }
+        }
+    }
+
     /// Publisher-side naming of Slot indices. Called from control paths.
     pub fn set_slot_labels(&self, labels: Vec<String>) {
         if let Ok(mut guard) = self.labels.lock() {
@@ -495,6 +588,26 @@ impl RenderTelemetry {
                 .iter()
                 .map(|counter| counter.swap(0, Ordering::Relaxed))
                 .collect(),
+            budgets: self
+                .budget_reason
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, code)| {
+                    let code = code.swap(0, Ordering::Relaxed);
+                    let reason = BUDGET_REASONS.get(code.checked_sub(1)? as usize)?;
+                    Some((
+                        slot,
+                        self.budget_fuel[slot].load(Ordering::Relaxed),
+                        *reason,
+                        self.budget_picoseconds_per_fuel[slot].load(Ordering::Relaxed),
+                        self.budget_deadline_ns[slot].load(Ordering::Relaxed),
+                        self.budget_over_permille[slot].load(Ordering::Relaxed),
+                        self.budget_load_permille[slot].load(Ordering::Relaxed),
+                        self.budget_blocks[slot].load(Ordering::Relaxed),
+                        self.budget_late_blocks[slot].load(Ordering::Relaxed),
+                    ))
+                })
+                .collect(),
             unit_faults: self
                 .unit_faults
                 .iter()
@@ -515,6 +628,32 @@ impl RenderTelemetry {
     }
 }
 
+/// The reasons, as the one place that knows both spellings.
+///
+/// A reason missing from this list is a decision that never reaches a log:
+/// `budget_reason_code` returns zero for it, which the snapshot reads as
+/// "nothing new to say". That is exactly what happened to `exhausted` -- the
+/// governor gave up on a Raspberry Pi and said so, four times, silently.
+const BUDGET_REASONS: [&str; 6] = [
+    "measured",
+    "tightened",
+    "relaxed",
+    "exhausted",
+    "seeded",
+    "settled",
+];
+
+fn budget_reason_code(reason: &str) -> u64 {
+    BUDGET_REASONS
+        .iter()
+        .position(|known| *known == reason)
+        .map_or(0, |index| index as u64 + 1)
+}
+
+/// One slot's budget as a snapshot reports it; the fields are listed where
+/// [`TelemetrySnapshot::budgets`] is.
+pub type BudgetRecord = (usize, u64, &'static str, u64, u64, u64, u64, u64, u64);
+
 pub struct TelemetrySnapshot {
     pub stages: Vec<[HistogramSnapshot; STAGE_COUNT]>,
     pub block: HistogramSnapshot,
@@ -522,6 +661,9 @@ pub struct TelemetrySnapshot {
     pub deadline_misses: u64,
     pub miss_attribution: Vec<[u64; STAGE_COUNT]>,
     pub slot_faults: Vec<u64>,
+    /// `(slot, fuel, reason, picoseconds per fuel, deadline ns)` for every
+    /// slot that was handed a budget since the last snapshot.
+    pub budgets: Vec<BudgetRecord>,
     pub unit_faults: Vec<u64>,
     pub worker_units: Vec<u64>,
     pub worker_busy_ns: Vec<u64>,
@@ -585,6 +727,19 @@ impl TelemetrySnapshot {
                 }
             }
         }
+        for (slot, fuel, reason, picoseconds, deadline_ns, over, load, blocks, late) in
+            &self.budgets
+        {
+            lines.push(format!(
+                "AUDIO_QUALITY_BUDGET slot={} fuel={fuel} reason={reason} ns_per_fuel={:.3} \
+                 deadline_us={} late_pct={:.1} load={:.2} blocks={blocks} late={late}",
+                self.label(*slot),
+                *picoseconds as f64 / 1_000.0,
+                deadline_ns / 1_000,
+                *over as f64 / 10.0,
+                *load as f64 / 1_000.0,
+            ));
+        }
         for (slot, count) in self.slot_faults.iter().enumerate() {
             if *count > 0 {
                 lines.push(format!(
@@ -640,9 +795,11 @@ pub fn spawn_telemetry_publisher(telemetry: &Arc<RenderTelemetry>, interval: Dur
                 };
                 let elapsed = last.elapsed();
                 last = Instant::now();
-                for line in telemetry.snapshot_and_reset().render_lines(elapsed) {
+                let snapshot = telemetry.snapshot_and_reset();
+                for line in snapshot.render_lines(elapsed) {
                     println!("{line}");
                 }
+                telemetry.persist_settled(&snapshot);
             }
         });
 }
@@ -1395,6 +1552,13 @@ struct UnitCell<'plugin> {
     input_ptr: *const f32,
     input_len: usize,
     output_samples: usize,
+    /// What this unit writes per frame, from the plugin's own declaration.
+    /// Falls back to the output channels when it declares none.
+    unit_channels: usize,
+    /// What the unit had to say about itself this block, staged here on the
+    /// way from the worker instance to the coordinator's. Empty for a
+    /// plugin that reports nothing.
+    report: Box<[u8]>,
 }
 
 /// Runs one unit inside its worker instance.
@@ -1438,7 +1602,8 @@ unsafe fn run_unit_cell(context: *mut (), _unit: u32, _frames: u32, _channels: u
         return false;
     }
     let output_samples = cell.output_samples;
-    cell.instance
+    if cell
+        .instance
         .parallel_render_unit(
             unit,
             payload_len,
@@ -1447,6 +1612,18 @@ unsafe fn run_unit_cell(context: *mut (), _unit: u32, _frames: u32, _channels: u
             &mut cell.output[..output_samples],
             frames,
         )
+        .is_err()
+    {
+        return false;
+    }
+    // And what it had to say, read here in the worker thread rather than
+    // after the join: it is this unit's own memory and nobody else's, which
+    // is the same reason its audio is read here.
+    if cell.report.is_empty() {
+        return true;
+    }
+    cell.instance
+        .parallel_read_report(unit, &mut cell.report)
         .is_ok()
 }
 
@@ -1463,6 +1640,9 @@ pub struct ParallelUnits<'plugin> {
     /// Host staging buffer for the coordinator's block-shared payload.
     shared: Box<[u8]>,
     shared_len: usize,
+    /// What planning this block cost the coordinator, kept because
+    /// `end_block` overwrites the counter it was recorded in.
+    begin_fuel: u64,
     plan_mask: u32,
     sched_mask: u32,
     quarantined_units: u32,
@@ -1507,7 +1687,27 @@ impl<'plugin> ParallelUnits<'plugin> {
         let Some(layout) = plugin.parallel_layout() else {
             return Ok(None);
         };
-        let samples = maximum_frames as usize * output_channels as usize;
+        // A unit's buffer is as wide as the unit writes, which is the
+        // output channels unless the plugin declared otherwise.
+        let unit_channels = layout.unit_width(output_channels as usize);
+        let samples = maximum_frames as usize * unit_channels;
+        // What this plugin will cost the host to carry, once, where an
+        // author can see it. A per-frame shared payload looks small beside
+        // one unit and is not small beside eight, and nothing else in the
+        // pipeline ever says the number out loud: the macro computes it at
+        // compile time but a const is only visible to whoever goes looking,
+        // and a plug-in author debugging deadline misses is looking at their
+        // own DSP.
+        println!(
+            "AUDIO_PARALLEL_TRAFFIC units={} shared_bytes={} unit_channels={} per_block_kib={:.1}",
+            layout.max_units,
+            layout.shared_capacity,
+            unit_channels,
+            (layout.shared_capacity * (layout.max_units + 1)
+                + maximum_frames as usize * unit_channels * size_of::<f32>() * layout.max_units * 2
+                + layout.report_stride * layout.max_units) as f64
+                / 1024.0
+        );
         let mut cells = Vec::with_capacity(layout.max_units);
         for unit in 0..layout.max_units {
             let mut instance = if resource_overrides.is_empty() {
@@ -1530,6 +1730,8 @@ impl<'plugin> ParallelUnits<'plugin> {
                 input_ptr: std::ptr::null(),
                 input_len: 0,
                 output_samples: 0,
+                unit_channels,
+                report: vec![0_u8; layout.report_stride].into_boxed_slice(),
             }));
         }
         Ok(Some(Self {
@@ -1538,6 +1740,7 @@ impl<'plugin> ParallelUnits<'plugin> {
             plan: vec![ParallelPlanEntry::default(); MAX_PARALLEL_UNITS].into_boxed_slice(),
             shared: vec![0_u8; layout.shared_capacity].into_boxed_slice(),
             shared_len: 0,
+            begin_fuel: 0,
             plan_mask: 0,
             sched_mask: 0,
             quarantined_units: 0,
@@ -1573,13 +1776,19 @@ impl<'plugin> ParallelUnits<'plugin> {
         input_channels: u32,
         output_channels: u32,
     ) -> anyhow::Result<()> {
-        let samples = maximum_frames as usize * output_channels as usize;
+        // As wide as a unit writes, as at creation: sized by the output
+        // channels, a buffer made for 128 frames of a twenty-float section
+        // looked big enough for 256 frames of stereo, and the first 256-frame
+        // block ran off its end and quarantined the instrument.
+        let unit_channels = self.layout.unit_width(output_channels as usize);
+        let samples = maximum_frames as usize * unit_channels;
         for cell in &mut self.cells {
             cell.instance
                 .activate(sample_rate, maximum_frames, input_channels, output_channels)?;
             if cell.output.len() < samples {
                 cell.output = vec![0.0_f32; samples].into_boxed_slice();
             }
+            cell.unit_channels = unit_channels;
         }
         self.maximum_frames = maximum_frames;
         self.input_channels = input_channels;
@@ -1610,6 +1819,9 @@ impl<'plugin> ParallelUnits<'plugin> {
             parameter_events,
             &mut self.plan,
         )?;
+        // What planning the block cost, before `end_block` overwrites the
+        // coordinator's counter with its own.
+        self.begin_fuel = coordinator.last_realtime_fuel_consumed().unwrap_or(0);
         self.shared_len = block.shared_bytes;
         coordinator.parallel_read_shared(&mut self.shared[..block.shared_bytes])?;
         // The staging buffer's heap storage never moves, so the pointer the
@@ -1636,10 +1848,29 @@ impl<'plugin> ParallelUnits<'plugin> {
     /// Publishes the pointer table for one unit. The input slice must stay
     /// untouched until the block retires.
     pub fn unit_job(&mut self, unit: u32, input: &[f32], frames: u32, channels: u32) -> UnitJob {
+        // What `finish` will size this unit's slot by, computed from the
+        // block's channels rather than the cell's. The two are the same
+        // number as long as blocks arrive at the width the units were
+        // created for; a cell's buffer was allocated for that width, so a
+        // block at any other one would truncate here and be read back at a
+        // different stride there -- silently, in the direction that has
+        // already cost this project three bugs.
+        let expected = self.unit_width(channels);
         let cell = &mut self.cells[unit as usize];
         cell.input_ptr = input.as_ptr();
         cell.input_len = input.len();
-        cell.output_samples = frames as usize * channels as usize;
+        // What this unit WRITES, which is not always what the plugin
+        // outputs. A unit that produces finished audio writes the output
+        // channels; one that produces an intermediate signal -- a string
+        // section handing a shared soundboard its bridge forces -- declares
+        // its own width through `rackforge_parallel_unit_channels`, and
+        // copying only the output channels would truncate it in silence.
+        let width = cell.unit_channels.max(1);
+        debug_assert_eq!(
+            width, expected,
+            "unit {unit} was created {width} wide and this block is {expected}"
+        );
+        cell.output_samples = frames as usize * width;
         UnitJob {
             context: (&mut **cell as *mut UnitCell<'plugin>).cast(),
             unit,
@@ -1660,7 +1891,14 @@ impl<'plugin> ParallelUnits<'plugin> {
         channels: u32,
         completed: u32,
     ) -> anyhow::Result<()> {
-        let samples = frames as usize * channels as usize;
+        // What a unit WROTE, which is its own width and not the
+        // instrument's channels. Sized by the channels, a section that hands
+        // over twenty floats a frame had thirteen frames of its block copied
+        // into the mix and the rest left as whatever was there before -- an
+        // instrument that plays the first half-millisecond of every block
+        // and garbage after it. That is the fourth place this same
+        // assumption was written down, and the third that shipped.
+        let samples = frames as usize * self.unit_width(channels);
         self.quarantined_units |= self.sched_mask & !completed;
         let mut pending = self.plan_mask;
         while pending != 0 {
@@ -1670,10 +1908,60 @@ impl<'plugin> ParallelUnits<'plugin> {
             let cell = &mut self.cells[unit as usize];
             if completed & bit == 0 {
                 cell.output[..samples].fill(0.0);
+                // A unit that did not finish says nothing, which reads the
+                // same way its silent slot does.
+                cell.report.fill(0);
             }
             coordinator.parallel_write_mix_slot(unit, &cell.output[..samples])?;
+            if !cell.report.is_empty() {
+                coordinator.parallel_write_report(unit, &cell.report)?;
+            }
         }
-        coordinator.parallel_end_block(output, frames)
+        let spent_elsewhere = self.begin_fuel.saturating_add(self.units_fuel());
+        let finished = coordinator.parallel_end_block(output, frames);
+        // After `end_block`, so its own fuel is already recorded and this
+        // adds to it rather than being overwritten by it.
+        coordinator.add_realtime_fuel(spent_elsewhere);
+        finished
+    }
+
+    /// What the units spent this block, gathered from their own instances.
+    fn units_fuel(&self) -> u64 {
+        let mut pending = self.plan_mask;
+        let mut total = 0_u64;
+        while pending != 0 {
+            let bit = pending.isolate_lowest_one();
+            pending &= !bit;
+            let unit = bit.trailing_zeros() as usize;
+            total = total.saturating_add(
+                self.cells[unit]
+                    .instance
+                    .last_realtime_fuel_consumed()
+                    .unwrap_or(0),
+            );
+        }
+        total
+    }
+
+    /// How many floats one unit writes per frame: what it declared, or the
+    /// instrument's channels when it declared nothing.
+    ///
+    /// Public so a test can state which of the two a fixture is exercising.
+    /// The distinction is invisible in audio whenever the two numbers agree,
+    /// which is how three separate places came to use the wrong one.
+    pub fn unit_width(&self, channels: u32) -> usize {
+        self.layout.unit_width(channels as usize)
+    }
+
+    /// Bytes of block-shared payload the coordinator committed for the last
+    /// block, which is what the host copies into EVERY unit.
+    ///
+    /// Not the declared capacity, which is sized for the longest block the
+    /// plugin accepts: a profiler that reports the capacity reports a number
+    /// thirty-two times too large on a 128-frame block, and the difference
+    /// between those two is exactly the thing an author needs to see.
+    pub fn shared_len(&self) -> usize {
+        self.shared_len
     }
 
     /// Units silenced by earlier faults; diagnostic only.

@@ -1,0 +1,826 @@
+# Akai Professional APC mini mk2, its control port, with the grid in
+# Session mode. Every value below is sourced in SOURCES.md; [CP] is Akai's APC
+# mini mk2 Communication Protocol v1.0, [UG] its User Guide v1.7, [AB] Ableton
+# Live 12's APC_mini_mk2 script, [BW] Bitwig's APC mini mk2 extension. [CP] is
+# the maker's own table of every message.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.akai-apc-mini-mk2"
+name = "APC mini mk2"
+vendor = "Akai Professional"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "apc-mini-mk2"
+
+# The faders, grid and buttons speak on port 0 [CP]: "APC mini mk2 Control"
+# on a Mac and Linux, "APC mini mk2" on Windows [BW port names]. The other
+# port, "... Notes" or "MIDIIN2 (APC mini mk2)", carries Note mode [CP; BW].
+# "mk2" keeps the first APC mini out, which sends other messages.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["apc mini mk2 control"]
+
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["apc mini mk2"]
+exclude_contains = ["control", "notes", "midiin"]
+
+# The APC mini mk2's control port has no keys: none of its controls ever
+# plays. Its grid and buttons send notes, its faders CC 48-56.
+
+# Faders 1-8: CC 48-55; the master fader, 9: CC 56; channel 1, "the absolute
+# position of the Fader" [CP; AB Faders, Master_Fader]. Faders 1-8 take the
+# first row; the master keeps RackForge's master level.
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 48 }
+slot = "control-1.1"
+plays = false
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 49 }
+slot = "control-1.2"
+plays = false
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 50 }
+slot = "control-1.3"
+plays = false
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 51 }
+slot = "control-1.4"
+plays = false
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 52 }
+slot = "control-1.5"
+plays = false
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 53 }
+slot = "control-1.6"
+plays = false
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 54 }
+slot = "control-1.7"
+plays = false
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 55 }
+slot = "control-1.8"
+plays = false
+
+[[inputs]]
+id = "fader-9"
+name = "Master fader"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 56 }
+plays = false
+
+# The clip grid, 8 by 8: notes 0-63 on channel 1 in Session mode, numbered
+# from the bottom left [CP "Clip Launch Button 0-63"; AB
+# create_matrix_identifiers(0, 64, width=8, flip_rows=True)]. Its two bottom
+# rows take the switches as a Launchkey's two rows of pads do: the left half
+# switch bank 1, the right half bank 2.
+[[inputs]]
+id = "clip-1"
+name = "Clip 1.1"
+kind = "pad"
+group = "Clip grid, row 1"
+midi = { channel = 0, note = 0 }
+slot = "switch-1.5"
+plays = false
+
+[[inputs]]
+id = "clip-2"
+name = "Clip 1.2"
+kind = "pad"
+group = "Clip grid, row 1"
+midi = { channel = 0, note = 1 }
+slot = "switch-1.6"
+plays = false
+
+[[inputs]]
+id = "clip-3"
+name = "Clip 1.3"
+kind = "pad"
+group = "Clip grid, row 1"
+midi = { channel = 0, note = 2 }
+slot = "switch-1.7"
+plays = false
+
+[[inputs]]
+id = "clip-4"
+name = "Clip 1.4"
+kind = "pad"
+group = "Clip grid, row 1"
+midi = { channel = 0, note = 3 }
+slot = "switch-1.8"
+plays = false
+
+[[inputs]]
+id = "clip-5"
+name = "Clip 1.5"
+kind = "pad"
+group = "Clip grid, row 1"
+midi = { channel = 0, note = 4 }
+slot = "switch-2.5"
+plays = false
+
+[[inputs]]
+id = "clip-6"
+name = "Clip 1.6"
+kind = "pad"
+group = "Clip grid, row 1"
+midi = { channel = 0, note = 5 }
+slot = "switch-2.6"
+plays = false
+
+[[inputs]]
+id = "clip-7"
+name = "Clip 1.7"
+kind = "pad"
+group = "Clip grid, row 1"
+midi = { channel = 0, note = 6 }
+slot = "switch-2.7"
+plays = false
+
+[[inputs]]
+id = "clip-8"
+name = "Clip 1.8"
+kind = "pad"
+group = "Clip grid, row 1"
+midi = { channel = 0, note = 7 }
+slot = "switch-2.8"
+plays = false
+
+[[inputs]]
+id = "clip-9"
+name = "Clip 2.1"
+kind = "pad"
+group = "Clip grid, row 2"
+midi = { channel = 0, note = 8 }
+slot = "switch-1.1"
+plays = false
+
+[[inputs]]
+id = "clip-10"
+name = "Clip 2.2"
+kind = "pad"
+group = "Clip grid, row 2"
+midi = { channel = 0, note = 9 }
+slot = "switch-1.2"
+plays = false
+
+[[inputs]]
+id = "clip-11"
+name = "Clip 2.3"
+kind = "pad"
+group = "Clip grid, row 2"
+midi = { channel = 0, note = 10 }
+slot = "switch-1.3"
+plays = false
+
+[[inputs]]
+id = "clip-12"
+name = "Clip 2.4"
+kind = "pad"
+group = "Clip grid, row 2"
+midi = { channel = 0, note = 11 }
+slot = "switch-1.4"
+plays = false
+
+[[inputs]]
+id = "clip-13"
+name = "Clip 2.5"
+kind = "pad"
+group = "Clip grid, row 2"
+midi = { channel = 0, note = 12 }
+slot = "switch-2.1"
+plays = false
+
+[[inputs]]
+id = "clip-14"
+name = "Clip 2.6"
+kind = "pad"
+group = "Clip grid, row 2"
+midi = { channel = 0, note = 13 }
+slot = "switch-2.2"
+plays = false
+
+[[inputs]]
+id = "clip-15"
+name = "Clip 2.7"
+kind = "pad"
+group = "Clip grid, row 2"
+midi = { channel = 0, note = 14 }
+slot = "switch-2.3"
+plays = false
+
+[[inputs]]
+id = "clip-16"
+name = "Clip 2.8"
+kind = "pad"
+group = "Clip grid, row 2"
+midi = { channel = 0, note = 15 }
+slot = "switch-2.4"
+plays = false
+
+[[inputs]]
+id = "clip-17"
+name = "Clip 3.1"
+kind = "pad"
+group = "Clip grid, row 3"
+midi = { channel = 0, note = 16 }
+plays = false
+
+[[inputs]]
+id = "clip-18"
+name = "Clip 3.2"
+kind = "pad"
+group = "Clip grid, row 3"
+midi = { channel = 0, note = 17 }
+plays = false
+
+[[inputs]]
+id = "clip-19"
+name = "Clip 3.3"
+kind = "pad"
+group = "Clip grid, row 3"
+midi = { channel = 0, note = 18 }
+plays = false
+
+[[inputs]]
+id = "clip-20"
+name = "Clip 3.4"
+kind = "pad"
+group = "Clip grid, row 3"
+midi = { channel = 0, note = 19 }
+plays = false
+
+[[inputs]]
+id = "clip-21"
+name = "Clip 3.5"
+kind = "pad"
+group = "Clip grid, row 3"
+midi = { channel = 0, note = 20 }
+plays = false
+
+[[inputs]]
+id = "clip-22"
+name = "Clip 3.6"
+kind = "pad"
+group = "Clip grid, row 3"
+midi = { channel = 0, note = 21 }
+plays = false
+
+[[inputs]]
+id = "clip-23"
+name = "Clip 3.7"
+kind = "pad"
+group = "Clip grid, row 3"
+midi = { channel = 0, note = 22 }
+plays = false
+
+[[inputs]]
+id = "clip-24"
+name = "Clip 3.8"
+kind = "pad"
+group = "Clip grid, row 3"
+midi = { channel = 0, note = 23 }
+plays = false
+
+[[inputs]]
+id = "clip-25"
+name = "Clip 4.1"
+kind = "pad"
+group = "Clip grid, row 4"
+midi = { channel = 0, note = 24 }
+plays = false
+
+[[inputs]]
+id = "clip-26"
+name = "Clip 4.2"
+kind = "pad"
+group = "Clip grid, row 4"
+midi = { channel = 0, note = 25 }
+plays = false
+
+[[inputs]]
+id = "clip-27"
+name = "Clip 4.3"
+kind = "pad"
+group = "Clip grid, row 4"
+midi = { channel = 0, note = 26 }
+plays = false
+
+[[inputs]]
+id = "clip-28"
+name = "Clip 4.4"
+kind = "pad"
+group = "Clip grid, row 4"
+midi = { channel = 0, note = 27 }
+plays = false
+
+[[inputs]]
+id = "clip-29"
+name = "Clip 4.5"
+kind = "pad"
+group = "Clip grid, row 4"
+midi = { channel = 0, note = 28 }
+plays = false
+
+[[inputs]]
+id = "clip-30"
+name = "Clip 4.6"
+kind = "pad"
+group = "Clip grid, row 4"
+midi = { channel = 0, note = 29 }
+plays = false
+
+[[inputs]]
+id = "clip-31"
+name = "Clip 4.7"
+kind = "pad"
+group = "Clip grid, row 4"
+midi = { channel = 0, note = 30 }
+plays = false
+
+[[inputs]]
+id = "clip-32"
+name = "Clip 4.8"
+kind = "pad"
+group = "Clip grid, row 4"
+midi = { channel = 0, note = 31 }
+plays = false
+
+[[inputs]]
+id = "clip-33"
+name = "Clip 5.1"
+kind = "pad"
+group = "Clip grid, row 5"
+midi = { channel = 0, note = 32 }
+plays = false
+
+[[inputs]]
+id = "clip-34"
+name = "Clip 5.2"
+kind = "pad"
+group = "Clip grid, row 5"
+midi = { channel = 0, note = 33 }
+plays = false
+
+[[inputs]]
+id = "clip-35"
+name = "Clip 5.3"
+kind = "pad"
+group = "Clip grid, row 5"
+midi = { channel = 0, note = 34 }
+plays = false
+
+[[inputs]]
+id = "clip-36"
+name = "Clip 5.4"
+kind = "pad"
+group = "Clip grid, row 5"
+midi = { channel = 0, note = 35 }
+plays = false
+
+[[inputs]]
+id = "clip-37"
+name = "Clip 5.5"
+kind = "pad"
+group = "Clip grid, row 5"
+midi = { channel = 0, note = 36 }
+plays = false
+
+[[inputs]]
+id = "clip-38"
+name = "Clip 5.6"
+kind = "pad"
+group = "Clip grid, row 5"
+midi = { channel = 0, note = 37 }
+plays = false
+
+[[inputs]]
+id = "clip-39"
+name = "Clip 5.7"
+kind = "pad"
+group = "Clip grid, row 5"
+midi = { channel = 0, note = 38 }
+plays = false
+
+[[inputs]]
+id = "clip-40"
+name = "Clip 5.8"
+kind = "pad"
+group = "Clip grid, row 5"
+midi = { channel = 0, note = 39 }
+plays = false
+
+[[inputs]]
+id = "clip-41"
+name = "Clip 6.1"
+kind = "pad"
+group = "Clip grid, row 6"
+midi = { channel = 0, note = 40 }
+plays = false
+
+[[inputs]]
+id = "clip-42"
+name = "Clip 6.2"
+kind = "pad"
+group = "Clip grid, row 6"
+midi = { channel = 0, note = 41 }
+plays = false
+
+[[inputs]]
+id = "clip-43"
+name = "Clip 6.3"
+kind = "pad"
+group = "Clip grid, row 6"
+midi = { channel = 0, note = 42 }
+plays = false
+
+[[inputs]]
+id = "clip-44"
+name = "Clip 6.4"
+kind = "pad"
+group = "Clip grid, row 6"
+midi = { channel = 0, note = 43 }
+plays = false
+
+[[inputs]]
+id = "clip-45"
+name = "Clip 6.5"
+kind = "pad"
+group = "Clip grid, row 6"
+midi = { channel = 0, note = 44 }
+plays = false
+
+[[inputs]]
+id = "clip-46"
+name = "Clip 6.6"
+kind = "pad"
+group = "Clip grid, row 6"
+midi = { channel = 0, note = 45 }
+plays = false
+
+[[inputs]]
+id = "clip-47"
+name = "Clip 6.7"
+kind = "pad"
+group = "Clip grid, row 6"
+midi = { channel = 0, note = 46 }
+plays = false
+
+[[inputs]]
+id = "clip-48"
+name = "Clip 6.8"
+kind = "pad"
+group = "Clip grid, row 6"
+midi = { channel = 0, note = 47 }
+plays = false
+
+[[inputs]]
+id = "clip-49"
+name = "Clip 7.1"
+kind = "pad"
+group = "Clip grid, row 7"
+midi = { channel = 0, note = 48 }
+plays = false
+
+[[inputs]]
+id = "clip-50"
+name = "Clip 7.2"
+kind = "pad"
+group = "Clip grid, row 7"
+midi = { channel = 0, note = 49 }
+plays = false
+
+[[inputs]]
+id = "clip-51"
+name = "Clip 7.3"
+kind = "pad"
+group = "Clip grid, row 7"
+midi = { channel = 0, note = 50 }
+plays = false
+
+[[inputs]]
+id = "clip-52"
+name = "Clip 7.4"
+kind = "pad"
+group = "Clip grid, row 7"
+midi = { channel = 0, note = 51 }
+plays = false
+
+[[inputs]]
+id = "clip-53"
+name = "Clip 7.5"
+kind = "pad"
+group = "Clip grid, row 7"
+midi = { channel = 0, note = 52 }
+plays = false
+
+[[inputs]]
+id = "clip-54"
+name = "Clip 7.6"
+kind = "pad"
+group = "Clip grid, row 7"
+midi = { channel = 0, note = 53 }
+plays = false
+
+[[inputs]]
+id = "clip-55"
+name = "Clip 7.7"
+kind = "pad"
+group = "Clip grid, row 7"
+midi = { channel = 0, note = 54 }
+plays = false
+
+[[inputs]]
+id = "clip-56"
+name = "Clip 7.8"
+kind = "pad"
+group = "Clip grid, row 7"
+midi = { channel = 0, note = 55 }
+plays = false
+
+[[inputs]]
+id = "clip-57"
+name = "Clip 8.1"
+kind = "pad"
+group = "Clip grid, row 8"
+midi = { channel = 0, note = 56 }
+plays = false
+
+[[inputs]]
+id = "clip-58"
+name = "Clip 8.2"
+kind = "pad"
+group = "Clip grid, row 8"
+midi = { channel = 0, note = 57 }
+plays = false
+
+[[inputs]]
+id = "clip-59"
+name = "Clip 8.3"
+kind = "pad"
+group = "Clip grid, row 8"
+midi = { channel = 0, note = 58 }
+plays = false
+
+[[inputs]]
+id = "clip-60"
+name = "Clip 8.4"
+kind = "pad"
+group = "Clip grid, row 8"
+midi = { channel = 0, note = 59 }
+plays = false
+
+[[inputs]]
+id = "clip-61"
+name = "Clip 8.5"
+kind = "pad"
+group = "Clip grid, row 8"
+midi = { channel = 0, note = 60 }
+plays = false
+
+[[inputs]]
+id = "clip-62"
+name = "Clip 8.6"
+kind = "pad"
+group = "Clip grid, row 8"
+midi = { channel = 0, note = 61 }
+plays = false
+
+[[inputs]]
+id = "clip-63"
+name = "Clip 8.7"
+kind = "pad"
+group = "Clip grid, row 8"
+midi = { channel = 0, note = 62 }
+plays = false
+
+[[inputs]]
+id = "clip-64"
+name = "Clip 8.8"
+kind = "pad"
+group = "Clip grid, row 8"
+midi = { channel = 0, note = 63 }
+plays = false
+
+# Track buttons 1-8: notes 100-107; Scene Launch 1-8: notes 112-119;
+# channel 1 [CP; AB]. No slot: the grid holds the switches.
+[[inputs]]
+id = "track-1"
+name = "Track 1"
+kind = "button"
+group = "Track buttons"
+midi = { channel = 0, note = 100 }
+plays = false
+
+[[inputs]]
+id = "track-2"
+name = "Track 2"
+kind = "button"
+group = "Track buttons"
+midi = { channel = 0, note = 101 }
+plays = false
+
+[[inputs]]
+id = "track-3"
+name = "Track 3"
+kind = "button"
+group = "Track buttons"
+midi = { channel = 0, note = 102 }
+plays = false
+
+[[inputs]]
+id = "track-4"
+name = "Track 4"
+kind = "button"
+group = "Track buttons"
+midi = { channel = 0, note = 103 }
+plays = false
+
+[[inputs]]
+id = "track-5"
+name = "Track 5"
+kind = "button"
+group = "Track buttons"
+midi = { channel = 0, note = 104 }
+plays = false
+
+[[inputs]]
+id = "track-6"
+name = "Track 6"
+kind = "button"
+group = "Track buttons"
+midi = { channel = 0, note = 105 }
+plays = false
+
+[[inputs]]
+id = "track-7"
+name = "Track 7"
+kind = "button"
+group = "Track buttons"
+midi = { channel = 0, note = 106 }
+plays = false
+
+[[inputs]]
+id = "track-8"
+name = "Track 8"
+kind = "button"
+group = "Track buttons"
+midi = { channel = 0, note = 107 }
+plays = false
+
+[[inputs]]
+id = "scene-1"
+name = "Scene 1"
+kind = "button"
+group = "Scene buttons"
+midi = { channel = 0, note = 112 }
+plays = false
+
+[[inputs]]
+id = "scene-2"
+name = "Scene 2"
+kind = "button"
+group = "Scene buttons"
+midi = { channel = 0, note = 113 }
+plays = false
+
+[[inputs]]
+id = "scene-3"
+name = "Scene 3"
+kind = "button"
+group = "Scene buttons"
+midi = { channel = 0, note = 114 }
+plays = false
+
+[[inputs]]
+id = "scene-4"
+name = "Scene 4"
+kind = "button"
+group = "Scene buttons"
+midi = { channel = 0, note = 115 }
+plays = false
+
+[[inputs]]
+id = "scene-5"
+name = "Scene 5"
+kind = "button"
+group = "Scene buttons"
+midi = { channel = 0, note = 116 }
+plays = false
+
+[[inputs]]
+id = "scene-6"
+name = "Scene 6"
+kind = "button"
+group = "Scene buttons"
+midi = { channel = 0, note = 117 }
+plays = false
+
+[[inputs]]
+id = "scene-7"
+name = "Scene 7"
+kind = "button"
+group = "Scene buttons"
+midi = { channel = 0, note = 118 }
+plays = false
+
+[[inputs]]
+id = "scene-8"
+name = "Scene 8"
+kind = "button"
+group = "Scene buttons"
+midi = { channel = 0, note = 119 }
+plays = false
+
+# Shift: note 122 on channel 1 [CP; AB add_modifier_button]. The device's
+# own modifier: here, the Fn button.
+[[inputs]]
+id = "shift"
+name = "Shift"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 122 }
+modifier = true
+plays = false
+
+# RackForge's default meanings for eight faders and a master: the amp
+# envelope, then cutoff, resonance, LFO rate and depth; the master level.
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"
+
+[[roles]]
+input = "fader-9"
+role = "rackforge.master.level"

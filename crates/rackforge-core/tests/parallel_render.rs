@@ -982,3 +982,550 @@ fn a_package_may_not_claim_the_capability_without_the_extension() {
     };
     assert!(format!("{error:#}").contains("does not export the extension"));
 }
+
+/// A parallel instrument whose units are SIX floats a frame against a
+/// stereo output.
+///
+/// Every other fixture in this file renders units exactly as wide as the
+/// instrument, so the host can size a unit's slot by either number and be
+/// right either way. Real instruments are not like that: the Concert
+/// Grand's string sections hand over twenty floats a frame -- a bridge
+/// force, sixteen drive points and two keybed contributions -- which
+/// `end_block` folds down to two. Three separate places in the host sized
+/// those slots by the instrument's two channels instead, and all three
+/// shipped, because nothing here could tell the two numbers apart.
+///
+/// Six against two is the smallest arrangement where they cannot be
+/// confused. The per-channel content is distinct as well, so a slot read at
+/// the wrong stride does not merely truncate -- it folds the wrong channels
+/// together and the sums come out visibly wrong.
+const WIDE_UNIT_SYNTH: &str = r#"
+    (module
+      (memory (export "memory") 4)
+      ;; Takes the budget, which is what asks the host to meter it. Without
+      ;; this the plugin is compiled into the engine guarded by the epoch
+      ;; instead, where there is no fuel figure to aggregate and nothing
+      ;; for this fixture to be about.
+      (func (export "rackforge_set_realtime_budget") (param i64) (result i32) i32.const 1)
+      (global $lfo (mut f32) (f32.const 0))
+      (global $active (mut i32) (i32.const 3))
+      (global $last_active (mut i32) (i32.const 0))
+      (func (export "rackforge_abi_version") (result i32) i32.const 65538)
+      (func (export "rackforge_input_ptr") (result i32) i32.const 0)
+      (func (export "rackforge_output_ptr") (result i32) i32.const 4096)
+      (func (export "rackforge_capacity_input_samples") (result i32) i32.const 256)
+      ;; Room for one unit's SIX-wide block, which is also the mix slot
+      ;; stride the host derives from this very number.
+      (func (export "rackforge_capacity_output_samples") (result i32) i32.const 512)
+      (func (export "rackforge_midi_ptr") (result i32) i32.const 8192)
+      (func (export "rackforge_capacity_midi_events") (result i32) i32.const 64)
+      (func (export "rackforge_parameter_ptr") (result i32) i32.const 12288)
+      (func (export "rackforge_capacity_parameter_events") (result i32) i32.const 64)
+      (func (export "rackforge_transfer_ptr") (result i32) i32.const 16384)
+      (func (export "rackforge_capacity_transfer_bytes") (result i32) i32.const 1024)
+      (func (export "rackforge_parallel_abi_version") (result i32) i32.const 65536)
+      (func (export "rackforge_parallel_max_units") (result i32) i32.const 4)
+      (func (export "rackforge_parallel_unit_channels") (result i32) i32.const 6)
+      (func (export "rackforge_parallel_dispatch_stride") (result i32) i32.const 16)
+      (func (export "rackforge_parallel_plan_ptr") (result i32) i32.const 20480)
+      (func (export "rackforge_parallel_dispatch_ptr") (result i32) i32.const 20736)
+      (func (export "rackforge_parallel_mix_ptr") (result i32) i32.const 24576)
+      (func (export "rackforge_parallel_shared_ptr") (result i32) i32.const 36864)
+      (func (export "rackforge_parallel_shared_capacity") (result i32) i32.const 256)
+      (func (export "rackforge_initialize") (result i32) i32.const 0)
+      (func (export "rackforge_prepare") (param f64 i32 i32 i32) (result i32) i32.const 0)
+      (func (export "rackforge_set_parameter") (param $index i32) (param $value f64) (result i32)
+        local.get $index i32.const 0 i32.eq
+        if
+          local.get $value i32.trunc_f64_s global.set $active
+          i32.const 0 return
+        end
+        i32.const -3)
+      (func (export "rackforge_get_parameter") (param $index i32) (result f64)
+        global.get $active f64.convert_i32_s)
+      (func (export "rackforge_reset") (result i32)
+        f32.const 0 global.set $lfo
+        i32.const 40960 i64.const 0 i64.store
+        i32.const 40968 i64.const 0 i64.store
+        i32.const 0)
+      (func (export "rackforge_resource_begin") (param i32 i64) (result i32) i32.const -3)
+      (func (export "rackforge_resource_write") (param i64 i32) (result i32) i32.const -3)
+      (func (export "rackforge_resource_end") (result i32) i32.const -3)
+      (func (export "rackforge_load_preset") (param i32) (result i32)
+        i32.const 3 global.set $active
+        i32.const 0)
+      (func (export "rackforge_save_state") (result i32)
+        i32.const 16384 global.get $active i32.store
+        i32.const 4)
+      (func (export "rackforge_load_state") (param $length i32) (result i32)
+        local.get $length i32.const 4 i32.ne
+        if i32.const -1 return end
+        i32.const 16384 i32.load global.set $active
+        i32.const 0)
+      (func $begin (param $frames i32) (param $midi i32) (param $parameters i32) (result i32)
+        (local $count i32) (local $i i32)
+        global.get $lfo f32.const 1 f32.add global.set $lfo
+        local.get $parameters i32.const 0 i32.gt_s
+        if
+          i32.const 12296 f64.load i32.trunc_f64_s global.set $active
+        end
+        local.get $midi i32.const 0 i32.gt_s
+        if (result i32)
+          i32.const 4
+        else
+          global.get $active
+        end
+        local.set $count
+        local.get $count global.set $last_active
+        i32.const 20480 i32.const 4 i32.store
+        i32.const 20484 i32.const 0 i32.store
+        i32.const 36864 global.get $lfo f32.store
+        (block $done
+          (loop $units
+            local.get $i local.get $count i32.ge_s br_if $done
+            i32.const 20488 local.get $i i32.const 8 i32.mul i32.add
+            local.get $i i32.store
+            i32.const 20492 local.get $i i32.const 8 i32.mul i32.add
+            i32.const 8 i32.store
+            i32.const 20736 local.get $i i32.const 16 i32.mul i32.add
+            global.get $lfo f32.store
+            i32.const 20740 local.get $i i32.const 16 i32.mul i32.add
+            local.get $i i32.const 1 i32.add f32.convert_i32_s f32.store
+            local.get $i i32.const 1 i32.add local.set $i
+            br $units))
+        local.get $count)
+      (func $render (param $unit i32) (param $payload i32) (param $shared i32) (param $frames i32) (param $channels i32) (result i32)
+        (local $lfo f32) (local $scale f32) (local $phase f32)
+        (local $base f32) (local $f i32) (local $c i32)
+        i32.const 36864 f32.load local.set $lfo
+        i32.const 20740 local.get $unit i32.const 16 i32.mul i32.add f32.load local.set $scale
+        i32.const 40960 local.get $unit i32.const 4 i32.mul i32.add
+        i32.const 40960 local.get $unit i32.const 4 i32.mul i32.add f32.load
+        f32.const 1 f32.add local.tee $phase
+        f32.store
+        local.get $lfo f32.const 1000 f32.mul
+        local.get $scale f32.const 100 f32.mul f32.add
+        local.get $phase f32.add local.set $base
+        (block $frames_done
+          (loop $per_frame
+            local.get $f local.get $frames i32.ge_s br_if $frames_done
+            i32.const 0 local.set $c
+            (block $channels_done
+              (loop $per_channel
+                local.get $c i32.const 6 i32.ge_s br_if $channels_done
+                i32.const 4096
+                local.get $f i32.const 6 i32.mul local.get $c i32.add
+                i32.const 4 i32.mul i32.add
+                local.get $base
+                local.get $c i32.const 7 i32.mul f32.convert_i32_s f32.add
+                local.get $f f32.convert_i32_s f32.add
+                f32.store
+                local.get $c i32.const 1 i32.add local.set $c
+                br $per_channel))
+            local.get $f i32.const 1 i32.add local.set $f
+            br $per_frame))
+        i32.const 0)
+      (func $end (param $frames i32) (param $channels i32) (result i32)
+        (local $f i32) (local $u i32) (local $slot i32)
+        (local $left f32) (local $right f32)
+        (block $done
+          (loop $per_frame
+            local.get $f local.get $frames i32.ge_s br_if $done
+            f32.const 0 local.set $left
+            f32.const 0 local.set $right
+            i32.const 0 local.set $u
+            (block $mixed
+              (loop $mix
+                local.get $u global.get $last_active i32.ge_s br_if $mixed
+                i32.const 24576 local.get $u i32.const 2048 i32.mul i32.add
+                local.get $f i32.const 24 i32.mul i32.add local.set $slot
+                local.get $left
+                local.get $slot f32.load f32.add
+                local.get $slot i32.const 4 i32.add f32.load f32.add
+                local.get $slot i32.const 8 i32.add f32.load f32.add
+                local.set $left
+                local.get $right
+                local.get $slot i32.const 12 i32.add f32.load f32.add
+                local.get $slot i32.const 16 i32.add f32.load f32.add
+                local.get $slot i32.const 20 i32.add f32.load f32.add
+                local.set $right
+                local.get $u i32.const 1 i32.add local.set $u
+                br $mix))
+            i32.const 4096 local.get $f i32.const 8 i32.mul i32.add
+            local.get $left f32.const 0.5 f32.mul global.get $lfo f32.add
+            f32.store
+            i32.const 4100 local.get $f i32.const 8 i32.mul i32.add
+            local.get $right f32.const 0.5 f32.mul global.get $lfo f32.add
+            f32.store
+            local.get $f i32.const 1 i32.add local.set $f
+            br $per_frame))
+        i32.const 0)
+      (func (export "rackforge_parallel_begin_block") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (result i32)
+        local.get $frames local.get $midi local.get $parameters call $begin)
+      (func (export "rackforge_parallel_render_unit") (param $unit i32) (param $payload i32) (param $shared i32) (param $frames i32) (param $channels i32) (result i32)
+        local.get $unit local.get $payload local.get $shared local.get $frames local.get $channels call $render)
+      (func (export "rackforge_parallel_end_block") (param $frames i32) (param $channels i32) (result i32)
+        local.get $frames local.get $channels call $end)
+      (func (export "rackforge_process") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (result i32)
+        (local $count i32) (local $u i32) (local $status i32)
+        local.get $frames local.get $midi local.get $parameters call $begin
+        local.set $count
+        (block $done
+          (loop $units
+            local.get $u local.get $count i32.ge_s br_if $done
+            local.get $u i32.const 20736 i32.const 36864 local.get $frames local.get $out call $render
+            local.tee $status i32.const 0 i32.ne
+            if local.get $status return end
+            i32.const 24576 local.get $u i32.const 2048 i32.mul i32.add
+            i32.const 4096
+            local.get $frames i32.const 24 i32.mul
+            memory.copy
+            local.get $u i32.const 1 i32.add local.set $u
+            br $units))
+        local.get $frames local.get $out call $end)
+    )
+"#;
+
+/// The transport carries a unit at the width the UNIT declared, not the
+/// width of the instrument it belongs to.
+///
+/// This is the case the rest of this file cannot see. Every fixture above
+/// renders two floats a frame into a two-channel instrument, so a host that
+/// sized a unit's slot by the instrument was indistinguishable from one
+/// that sized it by the unit -- and the host did exactly that, in the
+/// native unit call, in the SDK's derived render and in
+/// `ParallelUnits::finish`. All three reached an appliance. The first was
+/// caught by someone saying the piano had gone silent, the third by the
+/// same person saying it had gone silent again.
+///
+/// So this drives the real orchestrator -- `begin`, real `unit_job`s across
+/// real pool workers, real `finish` -- rather than a stand-in for it,
+/// because a test that reimplements the transport agrees with whatever the
+/// transport gets wrong.
+#[test]
+fn a_unit_wider_than_its_instrument_survives_the_transport() {
+    let plugin = build_package_from(WIDE_UNIT_SYNTH);
+
+    // If the fixture ever stops declaring its width, everything below
+    // silently goes back to proving nothing.
+    let probe = ParallelUnits::create(plugin, 48_000.0, FRAMES, 0, CHANNELS)
+        .unwrap()
+        .expect("the fixture declares parallel_render_v1");
+    assert_eq!(
+        probe.unit_width(CHANNELS),
+        6,
+        "the fixture must stay wider than its instrument"
+    );
+    drop(probe);
+
+    let telemetry = RenderTelemetry::new(1);
+    let mut reference_voices = vec![TestVoice::create(plugin, false)];
+    let reference = render_scripted(&mut reference_voices, PROGRAM, |voices| {
+        process_slots_sequential(voices, FRAMES, CHANNELS, &telemetry);
+    });
+    assert!(reference.iter().flatten().any(|sample| *sample != 0.0));
+
+    let telemetry = RenderTelemetry::new(1);
+    let mut voices = vec![TestVoice::create(plugin, true)];
+    let sequential = render_scripted(&mut voices, PROGRAM, |voices| {
+        process_slots_sequential(voices, FRAMES, CHANNELS, &telemetry);
+    });
+    assert_eq!(reference, sequential, "sequential unit graph diverged");
+
+    for workers in [2_usize, 3, 4] {
+        let telemetry = RenderTelemetry::new(workers);
+        let mut pool = RenderPool::with_workers(workers, telemetry);
+        if pool.worker_count() < 2 {
+            continue;
+        }
+        let mut voices = vec![TestVoice::create(plugin, true)];
+        let produced = render_scripted(&mut voices, PROGRAM, |voices| {
+            assert!(pool.process(voices, FRAMES, CHANNELS, 1_000_000_000));
+        });
+        assert_eq!(reference, produced, "workers={workers} diverged");
+        assert_eq!(
+            reference_voices[0].instance.save_state().unwrap(),
+            voices[0].instance.save_state().unwrap(),
+            "workers={workers} state diverged"
+        );
+    }
+}
+
+/// Units made for a short block and reconfigured for a longer one render the
+/// longer one whole.
+///
+/// The player changing the buffer from 128 samples to 256 on the appliance
+/// did exactly this, and `reconfigure` sized the unit buffers by the
+/// instrument's two channels: a buffer made for 128 frames of the Concert
+/// Grand's twenty-float sections looked big enough for 256 frames of stereo,
+/// the first 256-frame block ran off its end, and the piano was quarantined
+/// into silence.
+#[test]
+fn units_reconfigured_for_a_longer_block_render_it_whole() {
+    let plugin = build_package_from(WIDE_UNIT_SYNTH);
+    let telemetry = RenderTelemetry::new(1);
+    let mut reference_voices = vec![TestVoice::create(plugin, false)];
+    let reference = render_scripted(&mut reference_voices, PROGRAM, |voices| {
+        process_slots_sequential(voices, FRAMES, CHANNELS, &telemetry);
+    });
+
+    for workers in [2_usize, 3, 4] {
+        let telemetry = RenderTelemetry::new(workers);
+        let mut pool = RenderPool::with_workers(workers, telemetry);
+        if pool.worker_count() < 2 {
+            continue;
+        }
+        let mut voice = TestVoice::create(plugin, false);
+        let mut units = ParallelUnits::create(plugin, 48_000.0, FRAMES / 2, 0, CHANNELS)
+            .unwrap()
+            .expect("the fixture declares parallel_render_v1");
+        units.reconfigure(48_000.0, FRAMES, 0, CHANNELS).unwrap();
+        voice.parallel = Some(units);
+        let mut voices = vec![voice];
+        let produced = render_scripted(&mut voices, PROGRAM, |voices| {
+            assert!(pool.process(voices, FRAMES, CHANNELS, 1_000_000_000));
+        });
+        assert_eq!(reference, produced, "workers={workers} diverged");
+    }
+}
+
+/// How many blocks the Concert Grand is held to below. Long enough for
+/// strikes to decay into the sympathetic bank and for the pedal to move
+/// under sounding notes, which is where per-voice state crosses the
+/// boundary.
+const GRAND_BLOCKS: usize = 200;
+
+/// A pedalled passage: strikes, releases, a moving sustain pedal and the
+/// sostenuto rod.
+fn piano_script(block: usize) -> Vec<MidiEventV1> {
+    let mut midi = Vec::new();
+    if block.is_multiple_of(3) {
+        midi.push(MidiEventV1 {
+            frame: 0,
+            length: 3,
+            data: [0xB0, 64, ((block * 37) % 128) as u8],
+        });
+        midi.push(MidiEventV1 {
+            frame: 0,
+            length: 3,
+            data: [0x90, 28 + (block * 7 % 60) as u8, 92],
+        });
+    }
+    if block.is_multiple_of(7) {
+        midi.push(MidiEventV1 {
+            frame: 40,
+            length: 3,
+            data: [0x80, 28 + (block.saturating_sub(21) * 7 % 60) as u8, 64],
+        });
+    }
+    if block.is_multiple_of(41) {
+        midi.push(MidiEventV1 {
+            frame: 63,
+            length: 3,
+            data: [0xB0, 66, if block.is_multiple_of(82) { 127 } else { 0 }],
+        });
+    }
+    midi
+}
+
+/// Renders `GRAND_BLOCKS` of the passage and keeps every block's samples.
+fn render_piano(
+    voices: &mut [TestVoice],
+    mut render: impl FnMut(&mut [TestVoice]),
+) -> Vec<Vec<f32>> {
+    let mut blocks = Vec::with_capacity(GRAND_BLOCKS);
+    for block in 0..GRAND_BLOCKS {
+        for voice in voices.iter_mut() {
+            voice.events = piano_script(block);
+            voice.parameter_events.clear();
+        }
+        render(voices);
+        blocks.push(voices[0].output.clone());
+    }
+    blocks
+}
+
+/// Copies a package source tree, directories and all.
+fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// Assembles a package around a plugin's source manifest and a built
+/// component, the way the demo-synth case above does.
+fn load_packaged(plugin_directory: &str, component: &str) -> &'static LoadedPlugin {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap()
+        .to_path_buf();
+    let package_source = workspace.join(plugin_directory);
+    let root = std::env::temp_dir().join(format!(
+        "rackforge-packaged-{}-{}",
+        std::process::id(),
+        SERIAL.fetch_add(1, Ordering::Relaxed)
+    ));
+    // The whole source tree, because a shipping package carries more than
+    // its metadata -- the Concert Grand's manifest names branding assets and
+    // loading refuses the package without them.
+    copy_tree(&package_source, &root);
+    fs::copy(
+        workspace
+            .join("target/wasm32-unknown-unknown/release")
+            .join(component),
+        root.join("component.wasm"),
+    )
+    .unwrap();
+    let package = PluginPackage::open(&root).unwrap();
+    // SAFETY: portable wasm-v1 packages execute inside the sandbox.
+    let loaded = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), None) }.unwrap();
+    Box::leak(Box::new(loaded))
+}
+
+/// The instrument that actually ships, through the orchestrator that
+/// actually ships.
+///
+/// Two tests already stand near this one and neither covers it. The
+/// plugin's own equivalence test drives the three phases by hand inside a
+/// single instance, so nothing crosses an instance boundary. The runtime's
+/// four-instance test does cross it, but carries the bytes with a transport
+/// written for that test -- and a transport written for a test agrees with
+/// whatever the real one gets wrong, which is precisely how a slot sized by
+/// the wrong width shipped twice.
+///
+/// This one uses `ParallelUnits` and `RenderPool`: the same `begin`, the
+/// same jobs on the same worker threads, the same `finish` the appliance
+/// runs. A real instrument's per-unit state lives in four separate wasm
+/// instances here, and every byte it needs has to survive the round trip.
+#[test]
+#[ignore = "requires the wasm32 build of rackforge-concert-grand"]
+fn the_packaged_concert_grand_matches_its_sequential_fallback() {
+    let plugin = load_packaged(
+        "plugins/concert-grand/package",
+        "rackforge_concert_grand.wasm",
+    );
+    let layout = plugin
+        .parallel_layout()
+        .expect("the Concert Grand is parallel");
+    assert_eq!(layout.max_units, 4, "one unit per string section");
+    // The property this whole file exists to hold: a section hands over
+    // twenty floats a frame -- a bridge force, sixteen drive points and two
+    // keybed contributions -- into a stereo instrument.
+    assert_eq!(
+        layout.unit_channels, 20,
+        "a section is wider than the piano"
+    );
+
+    let telemetry = RenderTelemetry::new(1);
+    let mut classic_voices = vec![TestVoice::create(plugin, false)];
+    let reference = render_piano(&mut classic_voices, |voices| {
+        process_slots_sequential(voices, FRAMES, CHANNELS, &telemetry);
+    });
+    assert!(
+        reference.iter().flatten().any(|sample| *sample != 0.0),
+        "the reference render is silent, so nothing below proves anything"
+    );
+
+    for workers in [2_usize, 3, 4] {
+        let telemetry = RenderTelemetry::new(workers);
+        let mut pool = RenderPool::with_workers(workers, telemetry);
+        if pool.worker_count() < 2 {
+            continue;
+        }
+        let mut voices = vec![TestVoice::create(plugin, true)];
+        let produced = render_piano(&mut voices, |voices| {
+            assert!(pool.process(voices, FRAMES, CHANNELS, 1_000_000_000));
+        });
+        for (block, (expected, actual)) in reference.iter().zip(&produced).enumerate() {
+            assert_eq!(
+                expected, actual,
+                "workers={workers} diverged at block {block}"
+            );
+        }
+        assert_eq!(
+            classic_voices[0].instance.save_state().unwrap(),
+            voices[0].instance.save_state().unwrap(),
+            "workers={workers} state diverged"
+        );
+    }
+}
+
+/// The number the budget governor reads is the whole block's, not the last
+/// stage of it.
+///
+/// A parallel block is spent in five instances: the coordinator's
+/// `begin_block` and `end_block`, and one `render_unit` in each worker. The
+/// governor reads one instance, and what that instance last recorded is
+/// `end_block` alone. An instrument split across cores therefore looked
+/// cheap no matter how late it ran -- it went 2280 blocks past the deadline
+/// during one performance without ever giving ground, because nothing it
+/// could see said it was late.
+///
+/// Nothing tested the gathering that fixes it, which is the same shape of
+/// gap that let three width bugs reach an appliance: host code written,
+/// confirmed by reading one log line on the appliance, and then trusted.
+#[test]
+fn a_parallel_block_reports_the_fuel_the_whole_block_spent() {
+    let plugin = build_package_from(WIDE_UNIT_SYNTH);
+    let note = MidiEventV1 {
+        frame: 1,
+        length: 3,
+        data: [0x90, 60, 100],
+    };
+
+    // One instance renders begin, every unit and end, so its counter is the
+    // whole block's by construction. That is the yardstick.
+    let telemetry = RenderTelemetry::new(1);
+    let mut classic = vec![TestVoice::create(plugin, false)];
+    classic[0].events = vec![note];
+    process_slots_sequential(&mut classic, FRAMES, CHANNELS, &telemetry);
+    let whole_block = classic[0]
+        .instance
+        .last_realtime_fuel_consumed()
+        .expect("portable instances are metered");
+    assert!(
+        whole_block > 0,
+        "the fixture burns no measurable fuel, so nothing below means anything"
+    );
+
+    // The same block, the same work, split across workers.
+    let telemetry = RenderTelemetry::new(3);
+    let mut pool = RenderPool::with_workers(3, telemetry);
+    assert!(
+        pool.worker_count() >= 2,
+        "this machine cannot schedule units"
+    );
+    let mut voices = vec![TestVoice::create(plugin, true)];
+    voices[0].events = vec![note];
+    assert!(pool.process(&mut voices, FRAMES, CHANNELS, 1_000_000_000));
+    let reported = voices[0]
+        .instance
+        .last_realtime_fuel_consumed()
+        .expect("portable instances are metered");
+
+    // Same work either way, so the two numbers differ only by the entry
+    // overheads of four extra calls. Three quarters is loose enough not to
+    // be brittle and far tighter than the failure it guards: `end_block`
+    // alone is a small fraction of a block.
+    assert!(
+        reported * 4 >= whole_block * 3,
+        "a parallel block reported {reported} fuel for work the same block \
+         costs {whole_block} sequentially -- the units' share is missing, \
+         which is exactly what the governor was blind to"
+    );
+    // And it must not double-count: begin's fuel is gathered before
+    // `end_block` overwrites the counter, then added back after.
+    assert!(
+        reported <= whole_block * 2,
+        "a parallel block reported {reported} fuel against {whole_block}, \
+         which is more work than the block contains"
+    );
+}

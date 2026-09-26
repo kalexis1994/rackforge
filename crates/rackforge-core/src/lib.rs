@@ -1,8 +1,13 @@
 #[cfg(target_os = "linux")]
 pub mod audio;
+#[cfg(target_os = "linux")]
+pub mod audio_hotplug;
 pub mod audio_reliability;
+pub mod capture_route;
 #[cfg(target_os = "linux")]
 pub mod control;
+pub mod controller_layouts;
+pub mod controller_map_store;
 pub mod default_instrument;
 /// The handshake between the interface and the native shell holding it.
 /// Outside every platform gate: Android and the VST3 editor both stamp it,
@@ -24,15 +29,23 @@ pub mod loader;
 #[path = "loader_unavailable.rs"]
 pub mod loader;
 pub mod midi2;
+pub mod midi_activity;
 pub mod midi_hotplug;
 pub mod midi_trace;
 pub mod package;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod parallel_render;
 pub mod parameter_link;
+/// The parameter a control last moved, for LITTLE's header on every host.
+pub mod parameter_touch;
 pub mod performance;
 pub mod rack_graph;
+/// A LIVE Rack's Slots and their mix, for every host with a render pool:
+/// the appliance's loop and Android's render worker play a Rack through it.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod rack_voice;
 pub mod realtime;
+pub mod realtime_budget;
 pub mod session;
 pub mod session_checkpoint;
 /// Deliberately outside every platform gate: these are the numbers the Web
@@ -71,8 +84,8 @@ pub use live_parameter_state::{
 };
 pub use package::{PluginPackage, platform_key};
 pub use parameter_link::{
-    CompiledParameterLink, ParameterLinkOutput, SemanticParameterLinkContext,
-    compile_semantic_parameter_links,
+    CompiledControllerMap, CompiledParameterLink, ControllerMapLinkContext, ParameterLinkOutput,
+    SemanticParameterLinkContext, compile_controller_map_links, compile_semantic_parameter_links,
 };
 pub use sequencer::{CompiledPattern, SequencerEngine, SequencerLane};
 pub use state_store::{MAX_PLUGIN_STATE_BYTES, PluginStateStore};

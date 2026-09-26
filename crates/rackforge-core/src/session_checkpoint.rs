@@ -342,8 +342,17 @@ mod tests {
             },
             channel: ParameterLinkChannel::Omni,
             message: ParameterLinkMessage::ControlChange { controller: 74 },
-            transform: ParameterLinkTransform { invert: true },
+            transform: ParameterLinkTransform {
+                invert: true,
+                relative: None,
+            },
             pass_through: ParameterLinkPassThrough::PassThrough,
+            // A mode is session state like the rest of the link.
+            mode: rackforge_midi_api::ParameterLinkMode::Toggle {
+                first: rackforge_midi_api::LinkValue::new(1.0).unwrap(),
+                second: rackforge_midi_api::LinkValue::new(2.0).unwrap(),
+            },
+            layer: rackforge_midi_api::MapLayer::Base,
         });
 
         store.save(&state).unwrap();

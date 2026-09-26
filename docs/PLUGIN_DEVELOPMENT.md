@@ -35,6 +35,54 @@ Plugin API minor revision. Existing plugins declaring an older minor remain
 loadable. New packages declare the first host minor that provides every contract
 they use.
 
+## Building a fast component
+
+A component runs as portable WebAssembly, and portable code is slower than
+the same code built natively. How much slower is partly the host's doing and
+partly the plugin's. On the Concert Grand, played through
+`plugins/concert-grand/examples/wasm-tax.rs` with the audio checked identical
+on every path (x86_64, native = 100):
+
+| Component | Speed |
+| --- | --- |
+| built as below, as RackForge runs it | 71 |
+| the same, before RackForge optimises it | 67 |
+| without `+simd128` | 58 |
+| with `lto = "fat"` and `codegen-units = 1` | 62 |
+
+The host does its part without being asked: every native host passes each
+component through binaryen's `wasm-opt -O3` before compiling it, once per
+plugin version, and `rackforge-store pack-wasm` does the same while packing,
+so the browser gets it too. What is left is the plugin's.
+
+**Build with SIMD.** It is required: the SDK refuses to compile for
+`wasm32-unknown-unknown` without it, and every RackForge host executes it.
+Together with a larger shadow stack -- a processor with a voice pool is
+built by value, and the default 1 MiB runs out -- the plugin repository's
+`.cargo/config.toml` carries:
+
+```toml
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128", "-C", "link-arg=-zstack-size=8388608"]
+```
+
+**Give the compiler work it can vectorise.** The flag only lets LLVM use
+four-wide instructions; it uses them where the code has four independent
+things to do at once. Keep what is independent -- voices, partials, filter
+stages, oscillators -- in arrays of plain numbers and process them in loops
+without branches that depend on the data. The Concert Grand's strings are
+thousands of independent phasor rotations per sample, and that shape is
+worth sixteen points above. An algorithm that is sequential by nature -- a
+Newton iteration per sample, a feedback path one sample long -- will not
+vectorise, and no flag changes that. `rackforge-store pack` and `pack-wasm`
+warn when a component contains no SIMD instruction at all.
+
+**Do not reach for LTO.** It is the usual advice for native code and it
+makes the component slower here: LLVM inlines into very large functions,
+and Cranelift, which compiles the component on the host, handles those
+worse. Keep the default release profile (`opt-level = 3`, no LTO) unless a
+measurement with the bench above says otherwise.
+
 ## Package contract
 
 A development package is a directory with the following contents. For
@@ -126,10 +174,27 @@ preset = "Clean"
 ```
 
 The PLAY effects drawer offers each suggested plugin the player has installed
-and names the ones they have not. The field is instruments-only, each entry
-names another plugin once, and `preset` is optional. Because manifests deny
-unknown fields, a host older than the field refuses a package that carries it:
-add it once every host you ship to reads it (RackForge 0.1.18 and later).
+and names the ones they have not. The field is for instruments and PLAY
+sources (below), each entry names another plugin once, and `preset` is
+optional. Because manifests deny unknown fields, a host older than the field
+refuses a package that carries it: add it once every host you ship to reads it
+(RackForge 0.1.18 and later).
+
+An effect that is played on its own, from the audio input -- a guitar
+pedalboard, as against a compressor that belongs after something -- says so:
+
+```toml
+kind = "effect"
+play_source = true
+```
+
+PLAY then offers it beside the instruments, fed by the hardware input, so a
+guitarist plays through it without building a Rack; it may suggest what
+follows it, and it stays an ordinary effect everywhere else (in a Rack, and in
+another source's chain, though never after itself). Only an effect with an
+audio input may declare it. Like every field, it is refused by hosts older
+than it, so add it once every host you ship to reads it (the release after
+0.1.23).
 
 Schema 1 remains loadable so already published plugins do not break. RackForge
 uses its generic plugin identity for those packages; adding any branding field

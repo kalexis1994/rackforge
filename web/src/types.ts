@@ -70,6 +70,17 @@ export interface HostAudioSettings {
   midi_source_keys?: Record<string, number>;
   runtime?: HostAudioRuntimeStatus;
   runtime_status: string;
+  /** The settings window of the driver in use, when the host can show one.
+      Absent on hosts that have none. */
+  driver_panel?: HostAudioDriverPanel | null;
+}
+
+export interface HostAudioDriverPanel {
+  /** `asio`: the driver's own window. `system_sound`: the OS sound settings. */
+  kind: "asio" | "system_sound";
+  available: boolean;
+  /** Why it cannot open, when it cannot. */
+  detail?: string | null;
 }
 
 export interface SoundSummary {
@@ -80,12 +91,20 @@ export interface SoundSummary {
   editable: boolean;
 }
 
+export interface BankSummary {
+  id: string;
+  name: string;
+  order: number;
+}
+
 export interface PluginInstance {
   instance_id: string;
   plugin_id: string;
   plugin_name: string;
   ui_layouts: string[];
   config_available: boolean;
+  /** The banks the sounds are filed under, where the plugin has them. */
+  banks?: BankSummary[];
   sounds: SoundSummary[];
   selected_sound_id?: string;
 }
@@ -132,6 +151,44 @@ export interface OutputMeterMessage {
   meter: OutputMeterSnapshot;
 }
 
+export interface AudioHealthSnapshot {
+  /** Since the previous poll, not since the stream opened. */
+  load_percent: number;
+  peak_percent: number;
+  overruns: number;
+  stream_errors: number;
+  midi_dropped: number;
+  recent_overruns: number;
+  overrun_average_percent: number;
+  overrun_average_frames: number;
+  block_frames: number;
+  late_callbacks: number;
+  recent_late_callbacks: number;
+  /** Widest gap between two callbacks in the window; 100 is on time. */
+  worst_gap_percent: number;
+  silenced_blocks: number;
+  recent_silenced_blocks: number;
+  /** What the ASIO driver itself reports losing; zero on WASAPI. */
+  driver_overloads: number;
+  driver_resyncs: number;
+  driver_skipped_buffers: number;
+  recent_driver_dropouts: number;
+  capture_glitches: number;
+  recent_capture_glitches: number;
+  /** MIDI held by the operating system before it reached the host. */
+  midi_late_driver: number;
+  /** MIDI the host had and no audio block took in time. */
+  midi_late_queue: number;
+  recent_midi_late: number;
+  worst_midi_driver_delay_ms: number;
+  worst_midi_queue_delay_ms: number;
+}
+
+export interface AudioHealthMessage {
+  status: "audio_health";
+  health: AudioHealthSnapshot;
+}
+
 export interface MidiSourceDescriptor {
   id: string;
   name: string;
@@ -160,6 +217,95 @@ export interface ParameterLink {
   message: ParameterLinkMessage;
   transform: { invert: boolean };
   pass_through: "pass_through" | "consume";
+  /** Left out, the control drives the parameter across its whole range. */
+  mode?: ParameterLinkMode;
+  /** Left out, the base layer. */
+  layer?: MapLayer;
+}
+
+/**
+ * A layer of a controller's mappings: the base one, or the one its Fn button
+ * opens while held or latched. A control with nothing in the Fn layer keeps
+ * its base mapping.
+ */
+export type MapLayer = "base" | "fn";
+
+/** How a controller's Fn button opens its Fn layer. */
+export type ModifierMode = "hold" | "toggle" | "hold_or_double_tap";
+
+/**
+ * What a control does to its parameter. Values are in the parameter's own
+ * units: a choice's value, a boolean's 0 or 1, a float within its range.
+ * Knobs and faders use direct, range or zones; buttons and pads the rest.
+ */
+export type ParameterLinkMode =
+  | { kind: "direct" }
+  | { kind: "range"; min: number; max: number }
+  | { kind: "zones"; values: number[] }
+  | { kind: "set"; value: number }
+  | { kind: "toggle"; first: number; second: number }
+  | { kind: "cycle"; values: number[] }
+  | { kind: "hold"; pressed: number; released: number }
+  | { kind: "step"; direction: "up" | "down"; wrap?: boolean }
+  | { kind: "trigger" };
+
+/** One input of a controller driving one plugin parameter, by its id. */
+export type RelativeEncoding = "twos_complement" | "binary_offset" | "sign_magnitude";
+
+export interface ControlMapping {
+  id: string;
+  input: {
+    id: string;
+    name: string;
+    channel: ParameterLink["channel"];
+    message: ParameterLinkMessage;
+    /** An endless encoder that sends how far it turned, not where it is. */
+    relative?: RelativeEncoding;
+  };
+  parameter_id: string;
+  mode?: ParameterLinkMode;
+  invert?: boolean;
+  /** Left out, a button consumes its message and a knob passes it on. */
+  pass_through?: "pass_through" | "consume";
+  /** Left out, the base layer. */
+  layer?: MapLayer;
+}
+
+/** Every mapping a player made for one controller, plugin by plugin. */
+export interface ControllerMap {
+  schema_version: 1;
+  controller_id: string;
+  controller_name: string;
+  /** The button that opens the Fn layer, if the controller has one. */
+  modifier?: { input: ControlMapping["input"]; mode?: ModifierMode };
+  plugins: { plugin_id: string; plugin_name: string; mappings: ControlMapping[] }[];
+}
+
+/** One channel message the host received, numbered in arrival order. */
+export interface MidiActivityEvent {
+  sequence: number;
+  source: MidiSourceDescriptor;
+  status: number;
+  data1: number;
+  data2: number;
+}
+
+/** A controller package the host attached to a MIDI input. */
+export interface RegisteredController {
+  controller_id: string;
+  source?: MidiSourceDescriptor;
+  connected: boolean;
+  /** The device's Identity Reply chose the package, not its port name alone. */
+  identified?: boolean;
+}
+
+/** The portable `.rfmap` document. */
+export interface RfMapFile {
+  format: "org.rackforge.map";
+  schema_version: 1;
+  exported_by: string;
+  exported_unix_ms: number;
+  map: ControllerMap;
 }
 
 export interface MidiLearnCandidate {
@@ -345,6 +491,39 @@ export interface RackGraphEdge {
   source: RackGraphEndpoint;
   target: RackGraphEndpoint;
   midi_transform?: RackMidiTransform;
+  /** On a cable from the audio input only: which inputs it carries and at
+   *  what trim. Absent, it carries everything the host captures. */
+  audio_input_route?: RackAudioInputRoute;
+}
+
+/** A cable's share of the hardware audio input. */
+export interface RackAudioInputRoute {
+  /** Physical inputs, one-based. Empty or absent: every captured input. One:
+   *  a mono source, on both sides of a stereo plugin. Two: a stereo pair,
+   *  left then right. */
+  channels?: number[];
+  /** Trim on this cable, in dB, -60 to +24, after the host's input trim. */
+  gain_db?: number;
+}
+
+/** Whether the host is listening to an audio input. */
+export type AudioInputAvailability = "open" | "disabled" | "absent" | "unsupported";
+
+/** What the host captures, for the Rack editor. `peaks` is drained by each
+ *  request. */
+export interface AudioInputStatus {
+  availability: AudioInputAvailability;
+  device_name?: string;
+  /** Inputs the interface has, numbered from 1; 0 when unknown. */
+  device_channels: number;
+  /** Inputs captured, one-based, in capture order. */
+  captured: number[];
+  gain_db: number;
+  /** Whether the host honours each cable's own inputs and trim. */
+  cable_routing: boolean;
+  /** Linear peaks since the previous request, one per captured input. */
+  peaks: number[];
+  reason?: string;
 }
 
 export interface RackMidiTransform {
@@ -665,6 +844,9 @@ export interface PluginWebDescriptor {
   resources: PluginResourceRequirement[];
   /** The effects the instrument suggests after itself in the PLAY chain. */
   suggested_chain?: Array<{ plugin: string; preset?: string | null }>;
+  /** An effect played on its own from the audio input (a pedalboard): PLAY
+   *  offers it beside the instruments. */
+  play_source?: boolean;
   /**
    * The host builds this effect's voice on demand, out of the store, so the
    * chain can take it without the session having loaded it first. Hosts that

@@ -46,6 +46,31 @@ DISCONNECT  02 0F 40 5A 00
 DAW PROGRAM 21 11 40 02 00 01
 ```
 
+### Heartbeat
+
+**Any Program message repaints the four buttons under the screen dark**
+(hardware confirmed, 2026-09-25): selecting the DAW program, and also only
+asking for it (`01 11 40 02`, Ableton's `REQUEST_PROGRAM_MESSAGE`). With a
+heartbeat every 6 s the buttons lit when touched and went out by themselves;
+with the heartbeat spaced to 60 s they stayed lit.
+
+So the heartbeat is the universal Device Inquiry, `F0 7E 7F 06 01 F7`, which
+touches nothing. The keyboard answers `F0 7E <id> 06 02 00 20 6B 02 00 05 …`
+(Ableton's `identity_response_id_bytes = (0, 32, 107, 2, 0, 5)`). Leaving the
+DAW program is not polled: the keyboard announces it itself, sending the
+Program message with the new program when Prog is pressed (MIDI-MAP.md), and
+the driver re-acquires. Acquisition still selects the DAW program, and puts
+the four buttons' lights back once the keyboard has echoed it.
+
+### Bank
+
+Bank (CC 118) switches the pads between bank A (notes 36–43) and B (44–51),
+and the firmware lights it in a colour of its own. The driver follows the
+bank from the button and from the pads' notes, and lights Bank and the eight
+pads (LEDs `0x1C`–`0x23`) in the player's key light colour on A and in the
+package's `bank-b-light-color` setting on B (default `#805014`, as bright as
+the default key light). The 49, 61 and 88 share the panel.
+
 The keyboard echoes the DAW Program SysEx exactly. RackForge treats that echo
 as the acquisition/heartbeat acknowledgement; a successful MIDI write alone
 does not prove that the surface is healthy.

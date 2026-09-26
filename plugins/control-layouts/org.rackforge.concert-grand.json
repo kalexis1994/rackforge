@@ -1,0 +1,356 @@
+{
+  "format": "org.rackforge.control-layout",
+  "schema_version": 1,
+  "plugin_id": "org.rackforge.concert-grand",
+  "plugin_name": "RF - Concert Grand",
+  "slots": [
+    {
+      "slot": "control-1.1",
+      "parameter_id": "brightness",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-1.2",
+      "parameter_id": "dynamics",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-1.3",
+      "parameter_id": "decay",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-1.4",
+      "parameter_id": "unison",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-1.5",
+      "parameter_id": "lab_air",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-1.6",
+      "parameter_id": "room_size",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-1.7",
+      "parameter_id": "mic_distance",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-1.8",
+      "parameter_id": "width",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-2.1",
+      "parameter_id": "lab_hammer_hard",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-2.2",
+      "parameter_id": "lab_hammer_mass",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-2.3",
+      "parameter_id": "lab_detune",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-2.4",
+      "parameter_id": "lab_sympathy",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-2.5",
+      "parameter_id": "lab_treble_life",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-2.6",
+      "parameter_id": "lid",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-2.7",
+      "parameter_id": "room_hardness",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-2.8",
+      "parameter_id": "mic_pattern",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "switch-1.1",
+      "parameter_id": "action",
+      "mode": {
+        "kind": "toggle",
+        "first": 1,
+        "second": 0
+      }
+    },
+    {
+      "slot": "switch-1.2",
+      "parameter_id": "room_size",
+      "mode": {
+        "kind": "cycle",
+        "values": [
+          100.0,
+          311.3,
+          3000.0,
+          15000.0
+        ]
+      }
+    },
+    {
+      "slot": "switch-1.3",
+      "parameter_id": "mic_distance",
+      "mode": {
+        "kind": "cycle",
+        "values": [
+          0.6598,
+          2.0,
+          6.0
+        ]
+      }
+    },
+    {
+      "slot": "switch-1.4",
+      "parameter_id": "lid",
+      "mode": {
+        "kind": "cycle",
+        "values": [
+          24.35,
+          12.0,
+          2.8647890090942383
+        ]
+      }
+    },
+    {
+      "slot": "switch-1.5",
+      "parameter_id": "action_noise",
+      "mode": {
+        "kind": "toggle",
+        "first": -24.082401275634766,
+        "second": -5.298128128051758
+      }
+    },
+    {
+      "slot": "switch-1.6",
+      "parameter_id": "release_noise",
+      "mode": {
+        "kind": "toggle",
+        "first": -24.082401275634766,
+        "second": -9.632960319519043
+      }
+    },
+    {
+      "slot": "switch-1.7",
+      "parameter_id": "pedal_noise",
+      "mode": {
+        "kind": "toggle",
+        "first": -24.082401275634766,
+        "second": 0.0
+      }
+    },
+    {
+      "slot": "switch-1.8",
+      "parameter_id": "width",
+      "mode": {
+        "kind": "toggle",
+        "first": 0.0,
+        "second": 0.35
+      }
+    },
+    {
+      "slot": "switch-2.1",
+      "parameter_id": "brightness",
+      "mode": {
+        "kind": "cycle",
+        "values": [
+          0.3,
+          0.44,
+          0.6,
+          0.75
+        ]
+      }
+    },
+    {
+      "slot": "switch-2.2",
+      "parameter_id": "dynamics",
+      "mode": {
+        "kind": "cycle",
+        "values": [
+          0.25,
+          0.45,
+          0.7
+        ]
+      }
+    },
+    {
+      "slot": "switch-2.3",
+      "parameter_id": "lab_detune",
+      "mode": {
+        "kind": "toggle",
+        "first": 0.9,
+        "second": 0.5
+      }
+    },
+    {
+      "slot": "switch-2.4",
+      "parameter_id": "lab_air",
+      "mode": {
+        "kind": "toggle",
+        "first": 0.0,
+        "second": 0.5
+      }
+    },
+    {
+      "slot": "switch-2.5",
+      "parameter_id": "room_hardness",
+      "mode": {
+        "kind": "cycle",
+        "values": [
+          0.1,
+          0.35,
+          0.7
+        ]
+      }
+    },
+    {
+      "slot": "switch-2.6",
+      "parameter_id": "mic_pattern",
+      "mode": {
+        "kind": "cycle",
+        "values": [
+          0.0,
+          0.6,
+          1.0
+        ]
+      }
+    },
+    {
+      "slot": "switch-2.7",
+      "parameter_id": "decay",
+      "mode": {
+        "kind": "cycle",
+        "values": [
+          0.2,
+          0.35,
+          0.6
+        ]
+      }
+    },
+    {
+      "slot": "switch-2.8",
+      "parameter_id": "lab_sympathy",
+      "mode": {
+        "kind": "cycle",
+        "values": [
+          0.0,
+          0.5,
+          1.0
+        ]
+      }
+    },
+    {
+      "slot": "mod-wheel",
+      "parameter_id": "lab_air",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-3.1",
+      "parameter_id": "lab_felt_corner",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-3.2",
+      "parameter_id": "lab_bloom",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-3.3",
+      "parameter_id": "lab_clang",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-3.4",
+      "parameter_id": "lab_phantoms",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-3.5",
+      "parameter_id": "lab_prompt_decay",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-3.6",
+      "parameter_id": "lab_tail",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-3.7",
+      "parameter_id": "lab_board",
+      "mode": {
+        "kind": "direct"
+      }
+    },
+    {
+      "slot": "control-3.8",
+      "parameter_id": "lab_thump",
+      "mode": {
+        "kind": "direct"
+      }
+    }
+  ]
+}

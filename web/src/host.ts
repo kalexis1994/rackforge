@@ -99,8 +99,27 @@ export function isVstHost() {
   return window.__RACKFORGE_HOST_SHELL__ === "vst3";
 }
 
+/**
+ * Whether this host keeps the player's controller maps: the Pi, the desktop
+ * and Android do. The browser demo and the VST3 edition, whose DAW owns the
+ * MIDI, only show a controller's controls.
+ */
+export function hostKeepsControllerMaps() {
+  return !IS_BROWSER_HOST && !isVstHost();
+}
+
 export function isRemoteWebClient() {
   return !isNativeHost() && !isDesktopHost() && !isVstHost() && !IS_BROWSER_HOST;
+}
+
+/**
+ * Whether the host plays a Rack being edited (PreviewRack). A capability, not
+ * a UI default: an editor must not greet every added instrument with an error
+ * banner for asking. Every host with LIVE does -- the appliance, Android, the
+ * desktop and the in-page host; the VST3 editor has no LIVE.
+ */
+export function hostPreviewsRacks() {
+  return !isVstHost();
 }
 
 function installNativeListener() {

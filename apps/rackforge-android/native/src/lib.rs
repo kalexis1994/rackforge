@@ -1,27 +1,31 @@
 use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use jni::JNIEnv;
-use jni::objects::{JClass, JString};
+use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use keylab_essential_mk3::protocol as keylab_protocol;
 use rackforge_audio_api::OutputMeter;
 use rackforge_control_api::{
-    ControlResponse, PluginParameterControlCommand, PresetImportConflictPolicy, RfPresetFile,
-    parse_plugin_parameter_control_command,
+    ControlErrorCode, ControlRequest, ControlResponse, ControllerMap, ParameterTouchPickup,
+    ParameterTouchReport, PluginParameterControlCommand, PresetImportConflictPolicy,
+    RegisteredController, RfPresetFile, parse_plugin_parameter_control_command,
 };
+use rackforge_core::controller_map_store::{ControllerMapStore, export_rfmap};
+use rackforge_core::midi_activity::MidiActivityLog;
 use rackforge_core::midi2::Midi2Event;
 use rackforge_core::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
     process_slots_sequential, spawn_telemetry_publisher,
 };
+use rackforge_core::rack_voice::{self, RackEngine};
 use rackforge_core::{
-    CompiledParameterLink, LiveParameterStateStore, LiveParameterTarget, LiveParameterWriter,
-    LiveParameterWriterHandle, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
-    PluginStorage, SemanticParameterLinkContext,
+    CompiledParameterLink, ControllerMapLinkContext, LiveParameterStateStore, LiveParameterTarget,
+    LiveParameterWriter, LiveParameterWriterHandle, LoadedPlugin, PluginInstance, PluginPackage,
+    PluginStateStore, PluginStorage, SemanticParameterLinkContext,
     audio_reliability::{
         AudioStreamHealth, AudioStreamRecovery, StereoDropoutRecovery, StereoRenderQueue,
     },
-    compile_semantic_parameter_links,
+    compile_controller_map_links, compile_semantic_parameter_links,
     isolated_state::{IsolatedPluginStateEditor, validate_state_reference},
     midi_hotplug::{PanicScope, panic_packets},
     performance::PerformanceRepository,
@@ -29,8 +33,8 @@ use rackforge_core::{
 };
 use rackforge_dsp::output_ceiling;
 use rackforge_midi_api::{
-    IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
-    MidiSourceRegistry, ParameterLink, ParameterLinkPassThrough,
+    ControlTakeover, IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId,
+    MidiSourceKey, MidiSourceRegistry, ParameterLink, ParameterLinkPassThrough,
 };
 use rackforge_performance_api::{
     LivePerformanceState, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot,
@@ -47,10 +51,10 @@ use rackforge_repository::{
     set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
-    InstanceId, MAX_PLAY_CHAIN_EFFECTS, MasterLevel, MasterPan, PlayChainEffect, ProgramDraftState,
-    RackForgeParameterMapper, RackForgeParameterValue, SemanticControlInput,
-    SemanticControlProfile, rackforge_parameter_input, semantic_control_input,
-    semantic_control_little_header,
+    ButtonPhase, HostActionBinding, HostControlBinding, HostControlTarget, InstanceId,
+    MAX_PLAY_CHAIN_EFFECTS, MasterLevel, MasterPan, PlayChainEffect, ProgramDraftState,
+    RackForgeParameterMapper, RackForgeParameterValue, SemanticControlProfile,
+    rackforge_parameter_input, semantic_control_input,
 };
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayChainEffectItem,
@@ -85,11 +89,13 @@ static AUDIO: OnceLock<Mutex<Option<NativeAudioOutput>>> = OnceLock::new();
 static OUTPUT_METER: OutputMeter = OutputMeter::new();
 static MIDI_QUEUE: OnceLock<Mutex<VecDeque<AndroidMidiIngress>>> = OnceLock::new();
 static MIDI_SOURCES: OnceLock<Mutex<MidiSourceRegistry>> = OnceLock::new();
-/// Associates Android's runtime-assigned source identity with the signed
-/// semantic profile supplied by the matching `.rfcontroller` package.
-static MIDI_SEMANTIC_PROFILES: OnceLock<
-    Mutex<BTreeMap<MidiSourceId, (String, SemanticControlProfile)>>,
-> = OnceLock::new();
+/// Associates Android's runtime-assigned source identity with the
+/// `.rfcontroller` package that describes the device behind it.
+static MIDI_CONTROLLERS: OnceLock<Mutex<BTreeMap<MidiSourceId, AndroidMidiController>>> =
+    OnceLock::new();
+/// The player's controller maps, loaded from the data root once Java names it.
+static CONTROLLER_MAPS: OnceLock<Mutex<AndroidControllerMaps>> = OnceLock::new();
+static MIDI_ACTIVITY: OnceLock<Mutex<MidiActivityLog>> = OnceLock::new();
 static CONTROLLER_STORE_ROOT: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 static NEXT_MIDI_SOURCE_KEY: AtomicU32 = AtomicU32::new(1);
 static CONTROLLER_MENU: OnceLock<Mutex<AndroidControllerMenu>> = OnceLock::new();
@@ -141,6 +147,133 @@ const VIRTUAL_MIDI_SOURCE_KEY: MidiSourceKey = MidiSourceKey::new(u32::MAX);
 struct AndroidMidiIngress {
     source: MidiSourceKey,
     event: MidiEventV1,
+    /// A control its controller keeps from the instruments: links read it,
+    /// and nothing plays it.
+    held: bool,
+}
+
+/// One connected MIDI source and the package resolved for it: by the port's
+/// name first, and again when the device answers the Identity Request.
+struct AndroidMidiController {
+    /// The package Java recognised the device as (the KeyLab), or empty.
+    hint: String,
+    endpoint_name: String,
+    identity: Option<rackforge_controller_package::IdentityReply>,
+    controller_id: Option<String>,
+    identified: bool,
+    profile: Option<SemanticControlProfile>,
+    /// The package's reserved controls and buttons: the host's, never an
+    /// instrument's, as on every other host.
+    host_controls: Vec<HostControlBinding>,
+    host_actions: Vec<HostActionBinding>,
+    /// The controls it keeps from the instruments (`plays = false`).
+    held_controls: Vec<rackforge_session_api::HeldControl>,
+    on_connect: Vec<Vec<u8>>,
+    /// What goes to the device's setup output -- a DAW port -- and how that
+    /// port is found among the device's.
+    setup_output: Option<rackforge_controller_package::EndpointMatcher>,
+    setup_messages: Vec<Vec<u8>>,
+    on_connect_sent: bool,
+}
+
+impl AndroidMidiController {
+    fn new(hint: String, endpoint_name: String) -> Self {
+        let mut controller = Self {
+            hint,
+            endpoint_name,
+            identity: None,
+            controller_id: None,
+            identified: false,
+            profile: None,
+            host_controls: Vec::new(),
+            host_actions: Vec::new(),
+            held_controls: Vec::new(),
+            on_connect: Vec::new(),
+            setup_output: None,
+            setup_messages: Vec::new(),
+            on_connect_sent: false,
+        };
+        controller.resolve();
+        controller
+    }
+
+    fn resolve(&mut self) {
+        let keylab = keylab_essential_mk3::controller::package_profile();
+        if keylab.driver_id == self.hint {
+            // The in-process driver speaks for the KeyLab, and sends its own
+            // messages.
+            self.controller_id = Some(keylab.driver_id.clone());
+            self.identified = false;
+            self.profile = keylab.semantic_profile.clone();
+            // The in-process driver reads its own buttons.
+            self.host_controls.clear();
+            self.host_actions.clear();
+            self.held_controls.clear();
+            self.on_connect.clear();
+            self.setup_output = None;
+            self.setup_messages.clear();
+            return;
+        }
+        let binding = controller_store_root().and_then(|root| {
+            rackforge_controller_package::PackageStore::new(root)
+                .resolve_identified_input(&self.endpoint_name, self.identity.as_ref())
+                .map_err(|error| {
+                    eprintln!(
+                        "ANDROID_DECLARATIVE_CONTROLLER_SKIPPED endpoint={:?} error={error}",
+                        self.endpoint_name
+                    );
+                })
+                .ok()
+                .flatten()
+        });
+        self.controller_id = binding
+            .as_ref()
+            .map(|binding| binding.controller_id.clone());
+        self.identified = binding.as_ref().is_some_and(|binding| binding.identified);
+        let previous = (self.on_connect.clone(), self.setup_messages.clone());
+        self.on_connect = binding
+            .as_ref()
+            .map(|binding| binding.on_connect.clone())
+            .unwrap_or_default();
+        self.host_controls = binding
+            .as_ref()
+            .map(|binding| binding.host_controls.clone())
+            .unwrap_or_default();
+        self.host_actions = binding
+            .as_ref()
+            .map(|binding| binding.host_actions.clone())
+            .unwrap_or_default();
+        self.held_controls = binding
+            .as_ref()
+            .map(|binding| binding.held_controls.clone())
+            .unwrap_or_default();
+        self.setup_output = binding
+            .as_ref()
+            .and_then(|binding| binding.setup_output.clone());
+        self.setup_messages = binding
+            .as_ref()
+            .map(|binding| binding.setup_messages.clone())
+            .unwrap_or_default();
+        // An Identity Reply that chose another package, or an output the
+        // player just allowed: its messages have not gone out yet.
+        if (self.on_connect.clone(), self.setup_messages.clone()) != previous {
+            self.on_connect_sent = false;
+        }
+        self.profile = binding.and_then(|binding| binding.semantic_profile);
+    }
+}
+
+#[derive(Default)]
+struct AndroidControllerMaps {
+    store: Option<ControllerMapStore>,
+    data_root: Option<PathBuf>,
+    /// Where the plugins and the controller packages are installed: the
+    /// maps offered are made from what is there.
+    plugin_store_root: Option<PathBuf>,
+    controller_store_root: Option<PathBuf>,
+    maps: BTreeMap<String, ControllerMap>,
+    /// How knobs and faders take a parameter over, as stored.
+    takeover: ControlTakeover,
 }
 
 #[derive(Default)]
@@ -184,29 +317,19 @@ impl AndroidControllerMenu {
     }
 
     fn render_rackforge_parameter(&mut self, parameter: RackForgeParameterValue) -> Result<String> {
-        let header = parameter.little_header();
-        self.compositor
-            .publish(self.menu.render(), SurfaceUpdatePriority::Background);
-        self.compositor
-            .invalidate(ScreenRegions::header(), SurfaceUpdatePriority::Immediate);
-        Ok(serde_json::json!({
-            "plan": controller_plan_value(keylab_protocol::transient_header_messages(&header))?,
-            "command": null,
-            "restore_header_after_ms": HOST_CONTROL_HEADER_MS,
-        })
-        .to_string())
+        self.render_transient_header(&parameter.little_header())
     }
 
-    fn render_semantic_control(&mut self, input: &SemanticControlInput) -> Result<String> {
-        let header = semantic_control_little_header(input);
+    /// A header shown for a moment over the screen -- what a control just
+    /// did -- after which Java restores the screen.
+    fn render_transient_header(&mut self, header: &str) -> Result<String> {
         self.compositor
             .publish(self.menu.render(), SurfaceUpdatePriority::Background);
         self.compositor
             .invalidate(ScreenRegions::header(), SurfaceUpdatePriority::Immediate);
         Ok(serde_json::json!({
-            "plan": controller_plan_value(keylab_protocol::transient_header_messages(&header))?,
+            "plan": controller_plan_value(keylab_protocol::transient_header_messages(header))?,
             "command": null,
-            "consume": false,
             "restore_header_after_ms": HOST_CONTROL_HEADER_MS,
         })
         .to_string())
@@ -273,48 +396,19 @@ impl AndroidControllerMenu {
                 }
                 None
             }
-            MenuCommand::ActivateLiveTarget { location } => {
-                let outcome = (|| -> Result<(PerformanceSnapshot, Option<String>)> {
-                    let mut guard = performance()
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
-                    let state = guard
-                        .as_mut()
-                        .context("the performance library is not ready yet")?;
-                    let rack = state
-                        .repository
-                        .library()
-                        .resolve_playable(&location)
-                        .map_err(|error| anyhow::anyhow!("{error}"))?;
-                    state.live.activate(location, rack.id.clone());
-                    let plugin_id = rack
-                        .slots
-                        .iter()
-                        .find(|slot| slot.enabled)
-                        .map(|slot| slot.plugin_id.clone());
-                    Ok((performance_snapshot(state), plugin_id))
-                })();
-                match outcome {
-                    Ok((snapshot, plugin_id)) => {
-                        self.menu.sync_performance_snapshot(snapshot);
-                        // Android hosts ONE plugin instance, so LIVE plays the
-                        // Rack's first enabled slot; the switch itself rides
-                        // the existing select_plugin path through Java.
-                        plugin_id
-                            .filter(|id| self.plugins.contains_key(id))
-                            .and_then(|id| {
-                                self.command_json(MenuCommand::SelectPlugin { instance_id: id })
-                            })
-                    }
-                    Err(error) => {
-                        eprintln!("LIVE_TARGET_FAILED {error:#}");
-                        None
-                    }
-                }
-            }
+            // The web and LITTLE load a Rack the same way: through the
+            // Activity, which switches the one voice to the Rack's instrument
+            // with its saved sound and commits the location once it sounds.
+            MenuCommand::ActivateLiveTarget { location } => Some(serde_json::json!({
+                "type": "activate_live",
+                "location": location,
+            })),
             // Previewing a DRAFT Rack needs a rack engine Android does not
             // have yet; saving and activating are the honest paths.
-            MenuCommand::PreviewRack { .. } => None,
+            MenuCommand::PreviewRack { rack } => Some(serde_json::json!({
+                "type": "preview_rack",
+                "rack": rack,
+            })),
             MenuCommand::LoadPluginPreset { preset_id } => {
                 let result = engine_call(|engine| {
                     engine.plugin_state_command(
@@ -788,6 +882,9 @@ struct AndroidEngine {
     wide: Vec<Midi2Event>,
     parameter_events: Vec<ParameterEventV1>,
     parameter_links: Vec<CompiledParameterLink>,
+    /// Which controllers' Fn layers are open, beside the links they choose
+    /// between, the Rack's included: a layer change recompiles nothing.
+    control_layers: rackforge_core::parameter_link::ControlLayers,
     persisted_parameter_links: Vec<ParameterLink>,
     plugin_id: String,
     plugin_name: String,
@@ -805,7 +902,28 @@ struct AndroidEngine {
     next_program_draft_id: u64,
     _live_parameter_writer: LiveParameterWriter,
     live_parameter_writer_handle: LiveParameterWriterHandle,
+    /// The LIVE Rack, while one is loaded. It plays in place of PLAY's
+    /// voice and chain, which stay built and untouched for the way back.
+    rack: Option<AndroidRack>,
 }
+
+/// A LIVE Rack on Android: every Slot, through the same Rack code the
+/// appliance plays it with.
+struct AndroidRack {
+    rack_id: String,
+    engine: RackEngine<'static>,
+}
+
+// SAFETY: Android admits only portable wasm-v1 plugins, so every Slot's
+// instance and unit instances live in the sandbox. The Rack is owned by the
+// engine behind ENGINE's mutex, and the render pool enters a Slot only under
+// its epoch protocol, as it does the PLAY voice.
+unsafe impl Send for AndroidRack {}
+
+/// Set by a panic: the next block resets every Slot of a loaded Rack. The
+/// panic's all-notes-off messages also go through the queue, but a Slot
+/// whose stages take notes only would never hear them.
+static RACK_RESET_PENDING: AtomicBool = AtomicBool::new(false);
 
 struct SendablePluginInstance(PluginInstance<'static>);
 
@@ -923,9 +1041,30 @@ struct SendableLoadedPlugin(&'static LoadedPlugin);
 
 #[derive(Clone)]
 struct AndroidIsolatedStateContext {
-    runtime: SendableLoadedPlugin,
+    /// The active plugin's runtime, when a plugin is active: a Slot holding
+    /// that plugin shares it. Any other plugin is loaded from its package.
+    runtime: Option<SendableLoadedPlugin>,
     resource_overrides: BTreeMap<String, PathBuf>,
     data_root: PathBuf,
+}
+
+impl AndroidIsolatedStateContext {
+    /// No plugin is active: every Slot's plugin comes from its package.
+    fn without_engine(data_root: &Path) -> Self {
+        Self {
+            runtime: None,
+            resource_overrides: BTreeMap::new(),
+            data_root: data_root.to_path_buf(),
+        }
+    }
+
+    /// The active plugin's runtime, when it is the one asked for.
+    fn active(&self, plugin_id: &str, version: Option<&str>) -> Option<SendableLoadedPlugin> {
+        self.runtime.filter(|runtime| {
+            let manifest = runtime.0.manifest();
+            manifest.id == plugin_id && version.is_none_or(|version| manifest.version == version)
+        })
+    }
 }
 
 // SAFETY: access to the plugin instance is serialized by ENGINE's mutex. The
@@ -1213,6 +1352,7 @@ impl AndroidEngine {
             wide: Vec::with_capacity(256),
             parameter_events: Vec::with_capacity(256),
             parameter_links: Vec::new(),
+            control_layers: Default::default(),
             persisted_parameter_links: Vec::new(),
             plugin_id,
             plugin_name,
@@ -1230,6 +1370,7 @@ impl AndroidEngine {
             next_program_draft_id: 1,
             _live_parameter_writer: live_parameter_writer,
             live_parameter_writer_handle,
+            rack: None,
         })
     }
 
@@ -1554,7 +1695,17 @@ impl AndroidEngine {
         for (parameter_index, value) in
             store.restored_values(&self.plugin_id, self.runtime.0.parameters())
         {
-            set_plugin_parameter(self.runtime.0, &mut self.instance.0, parameter_index, value)?;
+            // A value the plugin refuses costs that one parameter, never the
+            // sound.
+            if let Err(error) =
+                set_plugin_parameter(self.runtime.0, &mut self.instance.0, parameter_index, value)
+            {
+                eprintln!(
+                    "LIVE_PARAMETER_NOT_RESTORED plugin={} parameter={parameter_index} value={value} error={error:#}",
+                    self.plugin_id
+                );
+                continue;
+            }
             if let Some(parallel) = self.parallel.as_mut() {
                 parallel
                     .0
@@ -1668,7 +1819,7 @@ impl AndroidEngine {
     ) -> Result<serde_json::Value> {
         if matches!(
             method,
-            "materialize" | "plugin_state_parameters" | "set_plugin_state_parameter"
+            "materialize" | "catalog" | "plugin_state_parameters" | "set_plugin_state_parameter"
         ) {
             return isolated_plugin_state_command(&self.isolated_state_context(), method, params);
         }
@@ -1722,6 +1873,8 @@ impl AndroidEngine {
                 }
                 Ok(serde_json::to_value(preset)?)
             }
+            // A Rack Slot's saved sound, loaded into the one voice Android
+            // plays: LIVE loads a Rack this way.
             "rename_preset" => {
                 let preset_id = params
                     .get("preset_id")
@@ -1799,7 +1952,7 @@ impl AndroidEngine {
 
     fn isolated_state_context(&self) -> AndroidIsolatedStateContext {
         AndroidIsolatedStateContext {
-            runtime: self.runtime,
+            runtime: Some(self.runtime),
             resource_overrides: self.resource_overrides.clone(),
             data_root: self.data_root.clone(),
         }
@@ -2141,6 +2294,53 @@ impl AndroidEngine {
         if output.len() != frames as usize * 2 {
             bail!("invalid Android stereo output buffer");
         }
+        let reset_rack = RACK_RESET_PENDING.swap(false, Ordering::AcqRel);
+        if let Some(rack) = self.rack.as_mut() {
+            // LIVE: the Rack plays in place of PLAY's voice and chain. Every
+            // Slot hears the keyboard through its own stages, and links to
+            // a Slot's parameters move that Slot.
+            if reset_rack {
+                rack.engine.reset();
+            }
+            if let Ok(mut queue) = midi_queue().try_lock() {
+                for ingress in queue.drain(..) {
+                    let event = IngressMidiEvent {
+                        source: ingress.source,
+                        packet: MidiPacket {
+                            frame: ingress.event.frame,
+                            length: ingress.event.length,
+                            data: ingress.event.data,
+                            wide: None,
+                        },
+                    };
+                    // A controller's Fn button opens its Fn layer, and does
+                    // nothing else.
+                    if self.control_layers.observe(event, Instant::now()) {
+                        continue;
+                    }
+                    if ingress.held {
+                        rack.engine.route_held(event, &mut self.control_layers);
+                    } else {
+                        rack.engine.route(event, None, &mut self.control_layers);
+                    }
+                }
+            }
+            let dropped = rack.engine.take_dropped_events();
+            if dropped > 0 {
+                MIDI_DROPPED_EVENTS.fetch_add(dropped, Ordering::Relaxed);
+            }
+            let deadline_ns = u64::from(frames) * 1_000_000_000 / SAMPLE_RATE as u64;
+            // Android opens no audio input, so a Slot cabled to the input
+            // hears silence.
+            return rack.engine.render(
+                &mut self.render_pool,
+                &self.render_telemetry,
+                frames,
+                deadline_ns,
+                None,
+                output,
+            );
+        }
         if let Ok(mut queue) = midi_queue().try_lock() {
             for ingress in queue.drain(..) {
                 let packet = MidiPacket {
@@ -2153,14 +2353,27 @@ impl AndroidEngine {
                     source: ingress.source,
                     packet,
                 };
+                // A controller's Fn button opens its Fn layer, and does
+                // nothing else.
+                if self.control_layers.observe(ingress_event, Instant::now()) {
+                    continue;
+                }
+                let layer =
+                    self.control_layers
+                        .layer_for(ingress_event, &self.parameter_links, |link| {
+                            link.link.instance_id == ANDROID_INSTANCE_ID
+                        });
                 let mut consume = false;
                 for link in &mut self.parameter_links {
-                    if link.link.instance_id != ANDROID_INSTANCE_ID {
+                    if link.link.instance_id != ANDROID_INSTANCE_ID || link.layer() != layer {
                         continue;
                     }
-                    // The appliance cannot yet say where a parameter stands
-                    // from here, so a control takes over at once, as before.
-                    if let Some(output) = link.apply(ingress_event, |_| None) {
+                    // Where the parameter stands: a knob picks it up there,
+                    // and lets go when a pad or the screen moves it.
+                    let instance = &mut self.instance.0;
+                    if let Some(output) =
+                        link.apply(ingress_event, |index| instance.get_parameter(index).ok())
+                    {
                         if self.parameter_events.len() < MAX_PENDING_MIDI_EVENTS {
                             self.parameter_events.push(output.event);
                             self.live_parameter_writer_handle.try_record(
@@ -2172,7 +2385,7 @@ impl AndroidEngine {
                         consume |= output.pass_through == ParameterLinkPassThrough::Consume;
                     }
                 }
-                if !consume {
+                if !consume && !ingress.held {
                     self.midi.push(ingress.event);
                 }
             }
@@ -2241,17 +2454,56 @@ impl AndroidEngine {
                 compiled.push(candidate);
             }
         }
-        let semantic_profiles = midi_semantic_profiles()
+        let controllers = midi_controllers()
             .lock()
-            .map_err(|_| anyhow::anyhow!("semantic MIDI profile lock poisoned"))?;
-        for (source_id, (controller_id, profile)) in semantic_profiles.iter() {
+            .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+        let maps = controller_maps()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+        let mut modifiers = Vec::new();
+        for (source_id, controller) in controllers.iter() {
+            let Some(controller_id) = controller.controller_id.as_deref() else {
+                continue;
+            };
             let Some(source_key) = sources.resolve_optional(source_id) else {
                 continue;
             };
+            // The player's Fn button for this controller, on its port.
+            if let Some(modifier) = maps.maps.get(controller_id).and_then(|map| {
+                rackforge_core::parameter_link::CompiledModifier::from_map(map, source_key)
+            }) {
+                modifiers.push(modifier);
+            }
             let display_name = sources
                 .descriptor(source_key)
                 .map(|descriptor| descriptor.name.as_str())
                 .unwrap_or(controller_id);
+            // The player's map for this controller and plugin sits between
+            // the session's own links and the package's defaults.
+            let mut explicit_links = links.clone();
+            if let Some(map) = maps.maps.get(controller_id) {
+                let mapped = compile_controller_map_links(ControllerMapLinkContext {
+                    map,
+                    plugin_id: &self.plugin_id,
+                    runtime_source_id: source_id,
+                    source_name: display_name,
+                    source_key,
+                    instance_id: ANDROID_INSTANCE_ID,
+                    schema: self.runtime.0.parameters(),
+                    explicit_links: &links,
+                });
+                for (mapping, reason) in &mapped.pending {
+                    eprintln!(
+                        "CONTROLLER_MAPPING_PENDING controller={controller_id} plugin={} mapping={mapping} reason={reason:?}",
+                        self.plugin_id
+                    );
+                }
+                explicit_links.extend(mapped.links.iter().map(|link| link.link.clone()));
+                compiled.extend(mapped.links);
+            }
+            let Some(profile) = &controller.profile else {
+                continue;
+            };
             compiled.extend(compile_semantic_parameter_links(
                 SemanticParameterLinkContext {
                     controller_id,
@@ -2261,18 +2513,297 @@ impl AndroidEngine {
                     source_key,
                     instance_id: ANDROID_INSTANCE_ID,
                     schema: self.runtime.0.parameters(),
-                    explicit_links: &links,
+                    explicit_links: &explicit_links,
                 },
             )?);
         }
+        // Links to a Rack's Slots move them while the Rack is loaded; the
+        // rest wait, as they always did.
+        if let Some(rack) = self.rack.as_mut() {
+            let rack_links =
+                compile_rack_parameter_links(&rack.engine, &links, &sources, &controllers, &maps);
+            rack.engine.set_parameter_links(rack_links);
+        }
+        // Every link takes a parameter over the way the player chose.
+        for link in &mut compiled {
+            link.set_takeover(maps.takeover);
+        }
+        rackforge_core::parameter_link::carry_link_state(&mut compiled, &self.parameter_links);
         self.persisted_parameter_links = links;
         self.parameter_links = compiled;
+        self.control_layers.replace(modifiers);
         Ok(())
+    }
+
+    /// What a touch did, named, when it names PLAY's instrument, one of its
+    /// effects or a Slot of the Rack on stage: LITTLE's header and the web's
+    /// window are both made from it.
+    fn parameter_touch_report(
+        &self,
+        touch: &rackforge_core::parameter_touch::ParameterTouch,
+    ) -> Option<ParameterTouchReport> {
+        use rackforge_core::parameter_touch::{TouchPickup, touch_names};
+        let (instance_id, runtime) = if touch_names(touch, ANDROID_INSTANCE_ID) {
+            Some((ANDROID_INSTANCE_ID.to_owned(), self.runtime.0))
+        } else if let Some(effect) = self
+            .chain
+            .iter()
+            .find(|effect| touch_names(touch, &effect.instance_id))
+        {
+            Some((effect.instance_id.clone(), effect.runtime.0))
+        } else {
+            self.rack
+                .as_ref()
+                .and_then(|rack| rack.engine.touched_slot(touch))
+                .map(|(slot_id, plugin)| (slot_id.to_owned(), plugin))
+        }?;
+        let schema = runtime.parameters();
+        let parameter = schema
+            .parameters
+            .iter()
+            .find(|parameter| parameter.index == touch.parameter_index)?
+            .clone();
+        Some(ParameterTouchReport {
+            instance_id,
+            parameter,
+            value: touch.value,
+            display_decimals: schema.display_decimals,
+            pickup: match touch.pickup {
+                TouchPickup::Engaged => ParameterTouchPickup::Engaged,
+                TouchPickup::MoveUp => ParameterTouchPickup::MoveUp,
+                TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
+            },
+            control: (touch.pickup != TouchPickup::Engaged).then_some(touch.control),
+            fn_layer: touch.fn_layer,
+        })
+    }
+
+    /// LITTLE's header for a touch: the parameter's own name and value.
+    fn parameter_touch_header(
+        &self,
+        touch: &rackforge_core::parameter_touch::ParameterTouch,
+    ) -> Option<String> {
+        let report = self.parameter_touch_report(touch)?;
+        let arrow = match report.pickup {
+            ParameterTouchPickup::Engaged => None,
+            ParameterTouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
+            ParameterTouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
+        };
+        Some(rackforge_surface_runtime::fn_layer_header(
+            rackforge_surface_runtime::parameter_touch_header(
+                &report.parameter,
+                report.value,
+                report.display_decimals,
+                arrow,
+                report.control,
+            ),
+            report.fn_layer,
+        ))
+    }
+
+    /// Puts a built Rack on stage, with its Slots' links compiled; the Rack
+    /// it replaces is handed back, to be let go outside the engine's lock.
+    fn install_rack(&mut self, mut rack: AndroidRack) -> Result<Option<AndroidRack>> {
+        let sources = midi_sources()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?;
+        let controllers = midi_controllers()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+        let maps = controller_maps()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+        let links = compile_rack_parameter_links(
+            &rack.engine,
+            &self.persisted_parameter_links,
+            &sources,
+            &controllers,
+            &maps,
+        );
+        rack.engine.set_parameter_links(links);
+        Ok(self.rack.replace(rack))
     }
 
     fn recompile_parameter_links(&mut self) -> Result<()> {
         self.replace_parameter_links(self.persisted_parameter_links.clone())
     }
+}
+
+/// The session's links that name one of this Rack's Slots, compiled against
+/// that Slot's plugin, then each connected controller's map for the plugin
+/// every Slot runs, as the Pi and the desktop play a Rack. A link from a
+/// controller that is not connected waits.
+fn compile_rack_parameter_links(
+    rack: &RackEngine<'static>,
+    links: &[ParameterLink],
+    sources: &MidiSourceRegistry,
+    controllers: &BTreeMap<MidiSourceId, AndroidMidiController>,
+    maps: &AndroidControllerMaps,
+) -> Vec<CompiledParameterLink> {
+    let mut compiled: Vec<CompiledParameterLink> = links
+        .iter()
+        .filter_map(|link| {
+            let plugin = rack.link_target_plugin(&link.instance_id)?;
+            let source_key = sources.resolve_optional(&link.source.source_id)?;
+            CompiledParameterLink::new(link.clone(), source_key, plugin.parameters())
+                .map_err(|error| {
+                    eprintln!(
+                        "PARAMETER_LINK_PENDING link={} instance={} reason={error:#}",
+                        link.id, link.instance_id
+                    );
+                })
+                .ok()
+        })
+        .collect();
+    for (source_id, controller) in controllers {
+        let Some(map) = controller
+            .controller_id
+            .as_deref()
+            .and_then(|controller_id| maps.maps.get(controller_id))
+        else {
+            continue;
+        };
+        let Some(source_key) = sources.resolve_optional(source_id) else {
+            continue;
+        };
+        let source_name = sources
+            .descriptor(source_key)
+            .map(|descriptor| descriptor.name.as_str())
+            .unwrap_or(source_id.as_str());
+        for (voice_id, plugin_id) in rack.slots() {
+            let Some(plugin) = rack.link_target_plugin(voice_id) else {
+                continue;
+            };
+            // A map's link names the Slot, as a link made in the Rack
+            // editor does, so the session's own link to it wins.
+            let slot_id = voice_id.rsplit_once('/').map_or(voice_id, |(_, slot)| slot);
+            compiled.extend(
+                compile_controller_map_links(ControllerMapLinkContext {
+                    map,
+                    plugin_id,
+                    runtime_source_id: source_id,
+                    source_name,
+                    source_key,
+                    instance_id: slot_id,
+                    schema: plugin.parameters(),
+                    explicit_links: links,
+                })
+                .links,
+            );
+        }
+    }
+    for link in &mut compiled {
+        link.set_takeover(maps.takeover);
+    }
+    compiled
+}
+
+/// Builds the Rack a LIVE location names: its graph compiled, each Slot's
+/// plugin loaded from its installed package and its sound from the store,
+/// every Slot activated. Nothing is locked while the plugins load.
+fn build_android_rack(
+    data_root: &Path,
+    location: &rackforge_performance_api::LiveLocation,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<(AndroidRack, serde_json::Value)> {
+    let (library, rack) = {
+        let guard = performance()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+        let state = guard.as_ref().context("the LIVE library is not loaded")?;
+        let library = state.repository.library().clone();
+        let rack = library
+            .resolve_playable(location)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        (library, rack)
+    };
+    build_android_rack_from(data_root, &library, &rack, package_roots)
+}
+
+/// A Rack the editor has not saved, built to be heard: the library as it
+/// stands, with the draft in place of the Rack it edits.
+fn build_android_preview_rack(
+    data_root: &Path,
+    draft: rackforge_performance_api::RackDefinition,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<(AndroidRack, serde_json::Value)> {
+    let mut library = {
+        let guard = performance()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+        guard
+            .as_ref()
+            .context("the LIVE library is not loaded")?
+            .repository
+            .library()
+            .clone()
+    };
+    match library.racks.iter_mut().find(|rack| rack.id == draft.id) {
+        Some(saved) => *saved = draft.clone(),
+        None => library.racks.push(draft.clone()),
+    }
+    build_android_rack_from(data_root, &library, &draft, package_roots)
+}
+
+fn build_android_rack_from(
+    data_root: &Path,
+    library: &rackforge_performance_api::PerformanceLibrary,
+    rack: &rackforge_performance_api::RackDefinition,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<(AndroidRack, serde_json::Value)> {
+    let store = PluginStateStore::new(Some(data_root))?;
+    let specs = rack_voice::rack_runtime_specs(library, rack, &store)?;
+    let mut plugins = BTreeMap::new();
+    for spec in &specs {
+        if plugins.contains_key(&spec.plugin_id) {
+            continue;
+        }
+        let package_root = package_roots.get(&spec.plugin_id).with_context(|| {
+            format!(
+                "{} needs {}, which is not installed on this device",
+                rack.name, spec.plugin_id
+            )
+        })?;
+        let package = PluginPackage::open(Path::new(package_root))
+            .with_context(|| format!("opening {}", spec.plugin_id))?;
+        ensure_rack_slot_plugin(&package)?;
+        let runtime = cached_isolated_plugin_runtime(&package, data_root)?;
+        plugins.insert(spec.plugin_id.clone(), runtime.0);
+    }
+    let engine = RackEngine::build(&plugins, &specs, SAMPLE_RATE as u32, MAX_FRAMES, 2)
+        .with_context(|| format!("building {}", rack.name))?;
+    let summary = serde_json::json!({
+        "rack_id": rack.id,
+        "rack_name": rack.name,
+        "slots": engine
+            .slots()
+            .map(|(slot_id, plugin_id)| serde_json::json!({
+                "slot_id": slot_id,
+                "plugin_id": plugin_id,
+            }))
+            .collect::<Vec<_>>(),
+    });
+    Ok((
+        AndroidRack {
+            rack_id: rack.id.as_str().to_owned(),
+            engine,
+        },
+        summary,
+    ))
+}
+
+/// Takes the Rack off the stage: PLAY's voice plays again. The Rack is let
+/// go outside the engine's lock.
+fn drop_android_rack() -> Result<()> {
+    let retired = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+        .as_mut()
+        .and_then(|engine| engine.rack.take());
+    if let Some(rack) = retired {
+        println!("LIVE_RACK_RELEASED rack={}", rack.rack_id);
+    }
+    Ok(())
 }
 
 fn isolated_plugin_state_command(
@@ -2282,6 +2813,9 @@ fn isolated_plugin_state_command(
 ) -> Result<serde_json::Value> {
     if method == "materialize" {
         return materialize_isolated_plugin_state(context, params);
+    }
+    if method == "catalog" {
+        return isolated_plugin_catalog(context, params);
     }
     let state: PluginStateReference = serde_json::from_value(
         params
@@ -2342,6 +2876,80 @@ fn isolated_plugin_state_command(
     }
 }
 
+/// The programs of a plugin a Rack Slot holds, for the Rack editor: Android
+/// runs one plugin at a time, so the session carries the programs of that one
+/// alone, and a Slot holding any other would otherwise show none.
+fn isolated_plugin_catalog(
+    context: &AndroidIsolatedStateContext,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let plugin_id = params
+        .get("plugin_id")
+        .and_then(serde_json::Value::as_str)
+        .context("plugin catalog command is missing plugin_id")?;
+    let (runtime, resource_overrides) = rack_slot_runtime(context, params, plugin_id)?;
+    let catalog = runtime
+        .0
+        .create_instance_with_resource_overrides(&resource_overrides)?
+        .preset_catalog()?;
+    Ok(serde_json::json!({
+        "plugin_id": plugin_id,
+        "banks": catalog.banks.iter().map(|bank| serde_json::json!({
+            "id": bank.id,
+            "name": bank.name,
+            "order": bank.order,
+        })).collect::<Vec<_>>(),
+        "sounds": catalog.presets.iter().map(|preset| serde_json::json!({
+            "id": preset.id,
+            "name": preset.name,
+            "bank": preset.bank,
+            "detail": preset.description.clone().or_else(|| preset.category.clone()),
+            "editable": preset.editable,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// The runtime a Rack Slot's plugin runs in: the active plugin's own, or the
+/// installed package's, loaded once and kept.
+fn rack_slot_runtime(
+    context: &AndroidIsolatedStateContext,
+    params: &serde_json::Value,
+    plugin_id: &str,
+) -> Result<(SendableLoadedPlugin, BTreeMap<String, PathBuf>)> {
+    if let Some(runtime) = context.active(plugin_id, None) {
+        return Ok((runtime, context.resource_overrides.clone()));
+    }
+    let package_root = PathBuf::from(
+        params
+            .get("package_root")
+            .and_then(serde_json::Value::as_str)
+            .context("Rack Slot plugin command is missing package_root")?,
+    );
+    let package = PluginPackage::open(&package_root)
+        .with_context(|| format!("opening Rack Slot plugin {}", package_root.display()))?;
+    if package.manifest().id != plugin_id {
+        bail!("Rack Slot plugin package identity does not match the requested plugin");
+    }
+    ensure_rack_slot_plugin(&package)?;
+    Ok((
+        cached_isolated_plugin_runtime(&package, &context.data_root)?,
+        BTreeMap::new(),
+    ))
+}
+
+/// What a Rack Slot may hold on Android: an instrument or an effect -- the
+/// Rack editor offers both -- with a portable runtime to run it in.
+fn ensure_rack_slot_plugin(package: &PluginPackage) -> Result<()> {
+    let manifest = package.manifest();
+    if manifest.portable_component().is_none() {
+        bail!("{} has no portable wasm-v1 runtime", manifest.name);
+    }
+    if !matches!(manifest.kind, PluginKind::Instrument | PluginKind::Effect) {
+        bail!("{} is neither an instrument nor an effect", manifest.name);
+    }
+    Ok(())
+}
+
 fn materialize_isolated_plugin_state(
     context: &AndroidIsolatedStateContext,
     params: &serde_json::Value,
@@ -2350,31 +2958,7 @@ fn materialize_isolated_plugin_state(
         .get("plugin_id")
         .and_then(serde_json::Value::as_str)
         .context("materialize plugin state command is missing plugin_id")?;
-    let active_manifest = context.runtime.0.manifest();
-    let (runtime, resource_overrides) = if active_manifest.id == plugin_id {
-        (context.runtime, context.resource_overrides.clone())
-    } else {
-        let package_root = PathBuf::from(
-            params
-                .get("package_root")
-                .and_then(serde_json::Value::as_str)
-                .context("materialize plugin state command is missing package_root")?,
-        );
-        let package = PluginPackage::open(&package_root)
-            .with_context(|| format!("opening Rack Slot plugin {}", package_root.display()))?;
-        if package.manifest().id != plugin_id {
-            bail!("Rack Slot plugin package identity does not match the requested plugin");
-        }
-        if package.manifest().kind != PluginKind::Instrument
-            || package.manifest().portable_component().is_none()
-        {
-            bail!("Rack Slot plugin must provide a portable wasm-v1 instrument runtime");
-        }
-        (
-            cached_isolated_plugin_runtime(&package, &context.data_root)?,
-            BTreeMap::new(),
-        )
-    };
+    let (runtime, resource_overrides) = rack_slot_runtime(context, params, plugin_id)?;
 
     let requested_sound_id = params
         .get("sound_id")
@@ -2414,9 +2998,8 @@ fn isolated_plugin_runtime(
     params: &serde_json::Value,
     state: &PluginStateReference,
 ) -> Result<(SendableLoadedPlugin, BTreeMap<String, PathBuf>)> {
-    let active_manifest = context.runtime.0.manifest();
-    if active_manifest.id == state.plugin_id && active_manifest.version == state.plugin_version {
-        return Ok((context.runtime, context.resource_overrides.clone()));
+    if let Some(runtime) = context.active(&state.plugin_id, Some(&state.plugin_version)) {
+        return Ok((runtime, context.resource_overrides.clone()));
     }
 
     let store_root = PathBuf::from(
@@ -2435,9 +3018,7 @@ fn isolated_plugin_runtime(
     if manifest.id != state.plugin_id || manifest.version != state.plugin_version {
         bail!("Rack Slot plugin package identity does not match its state reference");
     }
-    if manifest.kind != PluginKind::Instrument || manifest.portable_component().is_none() {
-        bail!("Rack Slot plugin must provide a portable wasm-v1 instrument runtime");
-    }
+    ensure_rack_slot_plugin(&package)?;
 
     Ok((
         cached_isolated_plugin_runtime(&package, &context.data_root)?,
@@ -2487,40 +3068,144 @@ fn midi_sources() -> &'static Mutex<MidiSourceRegistry> {
     MIDI_SOURCES.get_or_init(|| Mutex::new(MidiSourceRegistry::default()))
 }
 
-fn midi_semantic_profiles()
--> &'static Mutex<BTreeMap<MidiSourceId, (String, SemanticControlProfile)>> {
-    MIDI_SEMANTIC_PROFILES.get_or_init(|| Mutex::new(BTreeMap::new()))
+fn midi_controllers() -> &'static Mutex<BTreeMap<MidiSourceId, AndroidMidiController>> {
+    MIDI_CONTROLLERS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn installed_semantic_profile(
-    controller_id: &str,
-    endpoint_name: &str,
-) -> Option<(String, SemanticControlProfile)> {
-    let profile = keylab_essential_mk3::controller::package_profile();
-    if profile.driver_id == controller_id {
-        return profile
-            .semantic_profile
-            .clone()
-            .map(|semantic| (profile.driver_id.clone(), semantic));
-    }
-    let root = CONTROLLER_STORE_ROOT
+fn controller_maps() -> &'static Mutex<AndroidControllerMaps> {
+    CONTROLLER_MAPS.get_or_init(|| Mutex::new(AndroidControllerMaps::default()))
+}
+
+fn midi_activity() -> &'static Mutex<MidiActivityLog> {
+    MIDI_ACTIVITY.get_or_init(|| Mutex::new(MidiActivityLog::default()))
+}
+
+fn controller_store_root() -> Option<PathBuf> {
+    CONTROLLER_STORE_ROOT
         .get_or_init(|| Mutex::new(None))
         .lock()
         .ok()?
-        .clone()?;
-    let store = rackforge_controller_package::PackageStore::new(root);
-    let binding = match store.resolve_declarative_input(endpoint_name) {
-        Ok(binding) => binding?,
-        Err(error) => {
-            eprintln!(
-                "ANDROID_DECLARATIVE_CONTROLLER_SKIPPED endpoint={endpoint_name:?} error={error}"
-            );
-            return None;
+        .clone()
+}
+
+/// Loads the player's maps from `data_root`, once: Java names the root with
+/// every controller request, and the first one loads them.
+fn ensure_controller_maps(data_root: &Path) -> Result<bool> {
+    let mut maps = controller_maps()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+    if maps.data_root.as_deref() == Some(data_root) {
+        return Ok(false);
+    }
+    let store = ControllerMapStore::new(Some(data_root));
+    offer_android_factory_maps(&store, &maps);
+    maps.maps = store
+        .load_all()
+        .map_err(|error| anyhow::anyhow!("loading controller maps: {error:#}"))?;
+    maps.takeover = store.takeover();
+    maps.store = Some(store);
+    maps.data_root = Some(data_root.to_path_buf());
+    Ok(true)
+}
+
+/// Offers each keyboard the map made from the installed plugins' control
+/// layouts. An offer that fails costs the player nothing they had: their
+/// maps still load.
+fn offer_android_factory_maps(store: &ControllerMapStore, maps: &AndroidControllerMaps) {
+    use rackforge_core::controller_layouts::{control_layouts, factory_maps, slotted_controllers};
+    let packages = maps
+        .plugin_store_root
+        .as_deref()
+        .map(installed_plugin_packages)
+        .unwrap_or_default();
+    let layouts = control_layouts(
+        packages
+            .iter()
+            .map(|package| (package.manifest().id.as_str(), package.root())),
+    );
+    let controllers = slotted_controllers(maps.controller_store_root.as_deref());
+    match store.seed_factory_maps(&factory_maps(&controllers, &layouts)) {
+        Ok(seeded) if !seeded.is_empty() => {
+            println!("FACTORY_CONTROLLER_MAPS_SEEDED controllers={seeded:?}");
         }
+        Ok(_) => {}
+        Err(error) => eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}"),
+    }
+}
+
+/// After a plugin is installed or removed: what each keyboard is offered
+/// changes, the stored maps take it in, and the links follow them.
+fn reoffer_android_factory_maps() -> Result<()> {
+    {
+        let mut maps = controller_maps()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+        let Some(store) = maps.store.clone() else {
+            return Ok(());
+        };
+        offer_android_factory_maps(&store, &maps);
+        maps.maps = store
+            .load_all()
+            .map_err(|error| anyhow::anyhow!("loading controller maps: {error:#}"))?;
+    }
+    recompile_engine_parameter_links()
+}
+
+/// The newest enabled package of every installed plugin.
+fn installed_plugin_packages(store_root: &Path) -> Vec<PluginPackage> {
+    let Ok(entries) = std::fs::read_dir(store_root.join("packages")) else {
+        return Vec::new();
     };
-    binding
-        .semantic_profile
-        .map(|semantic| (binding.controller_id, semantic))
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let plugin_id = entry.file_name().into_string().ok()?;
+            installed_package(store_root, &plugin_id).ok()
+        })
+        .collect()
+}
+
+/// Stores how knobs and faders take a parameter over and applies it at once.
+fn set_android_controller_takeover(takeover: ControlTakeover) -> Result<()> {
+    {
+        let mut maps = controller_maps()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+        maps.store
+            .as_ref()
+            .context("controller maps are not loaded")?
+            .set_takeover(takeover)
+            .map_err(|error| {
+                anyhow::anyhow!("Could not store the controller takeover: {error:#}")
+            })?;
+        maps.takeover = takeover;
+    }
+    recompile_engine_parameter_links()
+}
+
+fn recompile_engine_parameter_links() -> Result<()> {
+    if let Some(engine) = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+        .as_mut()
+    {
+        engine.recompile_parameter_links()?;
+    }
+    Ok(())
+}
+
+/// Resolves every connected source's package again: after the player made or
+/// allowed one.
+fn reresolve_midi_controllers() -> Result<()> {
+    {
+        let mut controllers = midi_controllers()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+        for controller in controllers.values_mut() {
+            controller.resolve();
+        }
+    }
+    recompile_engine_parameter_links()
 }
 
 fn controller_menu() -> &'static Mutex<AndroidControllerMenu> {
@@ -2556,7 +3241,7 @@ fn smooth_master_sample(current: &mut f32, target: f32) {
     };
 }
 
-fn enqueue_midi(source: MidiSourceKey, bytes: &[u8]) {
+fn enqueue_midi(source: MidiSourceKey, bytes: &[u8], held: bool) {
     if bytes.is_empty() || bytes.len() > 3 {
         return;
     }
@@ -2574,6 +3259,7 @@ fn enqueue_midi(source: MidiSourceKey, bytes: &[u8]) {
                 length: bytes.len() as u8,
                 data,
             },
+            held,
         });
     }
 }
@@ -2588,10 +3274,11 @@ fn apply_declarative_rackforge_parameter(source: MidiSourceKey, message: &[u8]) 
                 .map(|descriptor| descriptor.id.clone())
         })
         .and_then(|source_id| {
-            midi_semantic_profiles()
-                .lock()
-                .ok()
-                .and_then(|profiles| profiles.get(&source_id).map(|(_, profile)| profile.clone()))
+            midi_controllers().lock().ok().and_then(|controllers| {
+                controllers
+                    .get(&source_id)
+                    .and_then(|controller| controller.profile.clone())
+            })
         });
     let Some(input) = profile
         .as_ref()
@@ -2631,10 +3318,12 @@ fn release_all_midi_notes() {
                     length: packet.length,
                     data: packet.data,
                 },
+                held: false,
             });
         }
         MIDI_PANIC_COUNT.fetch_add(1, Ordering::Relaxed);
     }
+    RACK_RESET_PENDING.store(true, Ordering::Release);
 }
 
 fn aaudio_error(operation: &str, result: i32) -> anyhow::Error {
@@ -3165,7 +3854,10 @@ fn ensure_performance_menu(data_root: &Path) -> Result<()> {
             .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
         if guard.is_none() {
             let repository = PerformanceRepository::load_or_empty(Some(data_root))?;
-            let live = repository.initial_live_state();
+            // Android loads a Rack only when asked, so none is active at start:
+            // the library must never say a Rack sounds that does not.
+            let mut live = repository.initial_live_state();
+            live.deactivate();
             *guard = Some(AndroidPerformance { repository, live });
         }
         guard
@@ -3443,6 +4135,8 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabAcquirePlan
             .lock()
             .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?;
         let mut messages = keylab_protocol::acquire_messages().map_err(anyhow::Error::msg)?;
+        // LITTLE opens on what is playing each time the KeyLab is taken.
+        controller.menu.show_active_mode();
         let screen = controller.menu.render();
         controller
             .compositor
@@ -3512,6 +4206,9 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_ensureBundledCont
             .lock()
             .map_err(|_| anyhow::anyhow!("controller store root lock poisoned"))? =
             Some(store_root.clone());
+        // The controllers RackForge describes from their makers'
+        // documentation, installed as its own beside the KeyLab.
+        rackforge_controller_catalog::install_bundled_and_report(&store_root);
         let store = rackforge_controller_package::PackageStore::new(&store_root);
         let manifest = rackforge_controller_package::stamp_bundled_manifest(
             keylab_essential_mk3::controller::PACKAGE_MANIFEST,
@@ -3637,9 +4334,13 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerCatalog
                         })
                     })
                     .collect();
+                // The controls themselves, for the Controllers editor.
+                let editor = manifest.editor_inputs();
                 serde_json::json!({
                     "id": controller.record.id,
                     "name": manifest.name,
+                    "vendor": manifest.vendor,
+                    "schema_version": manifest.schema_version,
                     "version": controller.record.version,
                     "enabled": controller.record.enabled,
                     "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
@@ -3650,6 +4351,10 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerCatalog
                     },
                     "devices": manifest.devices.len(),
                     "settings": settings,
+                    "inputs": editor.inputs,
+                    "roles": editor.roles,
+                    "actions": editor.actions,
+                    "output": controller.output_summary(),
                 })
             })
             .collect();
@@ -3792,6 +4497,262 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_ensurePerformance
     }
 }
 
+/// LIVE's library requests -- the snapshot, and an edit -- answered from the
+/// repository in the data root, as the Pi and the desktop answer them.
+/// Returns the response's JSON; a refused edit is an `error` response, never
+/// an exception, so the surface waiting on it hears why.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_performanceCommand(
+    mut env: JNIEnv,
+    _class: JClass,
+    data_root: JString,
+    request_json: JString,
+    package_roots_json: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        let request_json = java_string(&mut env, request_json)?;
+        let package_roots: BTreeMap<String, String> =
+            serde_json::from_str(&java_string(&mut env, package_roots_json)?).unwrap_or_default();
+        let response = android_performance_command(&data_root, &request_json, &package_roots)
+            .unwrap_or_else(|error| ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("{error:#}"),
+                current_revision: None,
+            });
+        Ok(serde_json::to_string(&response)?)
+    })();
+    result_string(&mut env, result)
+}
+
+fn android_performance_command(
+    data_root: &Path,
+    request_json: &str,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<ControlResponse> {
+    ensure_performance_menu(data_root)?;
+    let request: ControlRequest =
+        serde_json::from_str(request_json).context("reading the LIVE library request")?;
+    match request {
+        ControlRequest::PerformanceSnapshot => {
+            let guard = performance()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+            let state = guard.as_ref().context("the LIVE library is not loaded")?;
+            Ok(ControlResponse::PerformanceSnapshot {
+                snapshot: Box::new(performance_snapshot(state)),
+            })
+        }
+        ControlRequest::EditPerformance {
+            expected_revision,
+            edit,
+        } => {
+            expected_revision.validate()?;
+            // Plugin work happens before the library is locked.
+            let edit = materialize_rack_edit(edit, data_root, package_roots)?;
+            let snapshot = {
+                let mut guard = performance()
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+                let state = guard.as_mut().context("the LIVE library is not loaded")?;
+                state
+                    .repository
+                    .apply_edit(&expected_revision, edit, &mut state.live)?;
+                performance_snapshot(state)
+            };
+            controller_menu()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?
+                .menu
+                .sync_performance_snapshot(snapshot.clone());
+            Ok(ControlResponse::PerformanceEdited {
+                snapshot: Box::new(snapshot),
+            })
+        }
+        _ => bail!("not a LIVE library request"),
+    }
+}
+
+/// LIVE's navigation on Android, which plays one voice: the Activity asks
+/// for a plan (the Rack a location resolves to and its Slots), switches the
+/// voice to the Rack's instrument, and commits only once it sounds -- so the
+/// library never says a Rack is loaded that is not.
+///
+/// `{"kind": "plan", "location"}` -> `{rack_id, rack_name, slots: [...]}`
+/// `{"kind": "commit", "location"}` -> the performance snapshot
+/// `{"kind": "browse", "mode"}` / `{"kind": "deactivate"}` -> the snapshot
+/// `{"kind": "state"}` -> the LIVE state the session snapshot carries
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_liveCommand(
+    mut env: JNIEnv,
+    _class: JClass,
+    data_root: JString,
+    command_json: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        let command: serde_json::Value =
+            serde_json::from_str(&java_string(&mut env, command_json)?)
+                .context("reading the LIVE command")?;
+        Ok(android_live_command(&data_root, &command)?.to_string())
+    })();
+    result_string(&mut env, result)
+}
+
+fn android_live_command(
+    data_root: &Path,
+    command: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    ensure_performance_menu(data_root)?;
+    let location = || -> Result<rackforge_performance_api::LiveLocation> {
+        serde_json::from_value(
+            command
+                .get("location")
+                .cloned()
+                .context("the LIVE command names no location")?,
+        )
+        .context("reading the LIVE location")
+    };
+    let kind = command
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .context("the LIVE command has no kind")?;
+    // A Rack is built before anything is locked: its plugins load and
+    // activate, which takes a moment, and audio keeps playing meanwhile.
+    let package_roots = || -> Result<BTreeMap<String, String>> {
+        serde_json::from_value(
+            command
+                .get("package_roots")
+                .cloned()
+                .context("the LIVE command names no installed packages")?,
+        )
+        .context("reading the installed packages")
+    };
+    let put_on_stage = |rack: AndroidRack| -> Result<()> {
+        let retired = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_mut()
+            .context("RackForge's audio engine is not running")?
+            .install_rack(rack)?;
+        drop(retired);
+        Ok(())
+    };
+    let mut loaded = None;
+    match kind {
+        "load" => {
+            let (rack, summary) = build_android_rack(data_root, &location()?, &package_roots()?)?;
+            put_on_stage(rack)?;
+            println!("LIVE_RACK_LOADED summary={summary}");
+            loaded = Some(summary);
+        }
+        // A Rack being edited, heard as it stands. It is not the loaded
+        // Rack: LIVE's record is left as it was, and leaving the editor
+        // loads what was playing again.
+        "preview" => {
+            let draft: rackforge_performance_api::RackDefinition = serde_json::from_value(
+                command
+                    .get("rack")
+                    .cloned()
+                    .context("the preview names no Rack")?,
+            )
+            .context("reading the Rack to preview")?;
+            let (rack, summary) = build_android_preview_rack(data_root, draft, &package_roots()?)?;
+            put_on_stage(rack)?;
+            println!("LIVE_RACK_PREVIEWED summary={summary}");
+            return Ok(summary);
+        }
+        "deactivate" => drop_android_rack()?,
+        _ => {}
+    }
+    let mut guard = performance()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+    let state = guard.as_mut().context("the LIVE library is not loaded")?;
+    let snapshot = match kind {
+        "state" => return Ok(serde_json::to_value(&state.live)?),
+        // The Rack is on stage; LIVE records it only now, so a Rack that
+        // did not build is never shown as playing.
+        "load" => {
+            let location = location()?;
+            let rack = state
+                .repository
+                .library()
+                .resolve_playable(&location)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            state.live.activate(location, rack.id.clone());
+            performance_snapshot(state)
+        }
+        "browse" => {
+            state.live.mode = serde_json::from_value(
+                command
+                    .get("mode")
+                    .cloned()
+                    .context("the browse command names no mode")?,
+            )
+            .context("reading the LIVE browse mode")?;
+            performance_snapshot(state)
+        }
+        "deactivate" => {
+            state.live.deactivate();
+            performance_snapshot(state)
+        }
+        other => bail!("unknown LIVE command {other:?}"),
+    };
+    drop(guard);
+    controller_menu()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?
+        .menu
+        .sync_performance_snapshot(snapshot.clone());
+    if let Some(summary) = loaded {
+        return Ok(summary);
+    }
+    Ok(serde_json::to_value(snapshot)?)
+}
+
+/// A Rack saved with a Slot that has no state yet gets one made from its
+/// plugin's package -- its first program, or the program the Slot names --
+/// as the Pi makes it from the running instance.
+fn materialize_rack_edit(
+    edit: rackforge_performance_api::PerformanceEdit,
+    data_root: &Path,
+    package_roots: &BTreeMap<String, String>,
+) -> Result<rackforge_performance_api::PerformanceEdit> {
+    let rackforge_performance_api::PerformanceEdit::PutRack { mut rack } = edit else {
+        return Ok(edit);
+    };
+    if rack.slots.iter().all(|slot| slot.state.is_some()) {
+        return Ok(rackforge_performance_api::PerformanceEdit::PutRack { rack });
+    }
+    // The active plugin's runtime when there is one; a Rack is saved just
+    // the same with no plugin active.
+    let context = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+        .as_ref()
+        .map_or_else(
+            || AndroidIsolatedStateContext::without_engine(data_root),
+            AndroidEngine::isolated_state_context,
+        );
+    for slot in rack.slots.iter_mut().filter(|slot| slot.state.is_none()) {
+        let package_root = package_roots
+            .get(&slot.plugin_id)
+            .with_context(|| format!("plugin {} is not installed", slot.plugin_id))?;
+        let state = materialize_isolated_plugin_state(
+            &context,
+            &serde_json::json!({
+                "plugin_id": slot.plugin_id,
+                "package_root": package_root,
+                "sound_id": slot.legacy_program_id,
+            }),
+        )
+        .with_context(|| format!("making the state of Rack Slot {}", slot.id))?;
+        slot.state = Some(serde_json::from_value(state)?);
+    }
+    Ok(rackforge_performance_api::PerformanceEdit::PutRack { rack })
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabSyncPlugins(
     mut env: JNIEnv,
@@ -3891,6 +4852,38 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabRestorePlan
     )
 }
 
+/// The last parameter touch the KeyLab's header showed.
+static PARAMETER_TOUCH_SEEN: AtomicU64 = AtomicU64::new(0);
+
+/// The header for what a control last did to a parameter, if anything new:
+/// its name and value in its own units, or where it stands and which way to
+/// move while the control has not picked it up. Java asks just after it
+/// forwards a control change, once the render thread has applied the link.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabParameterTouch(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let mut seen = PARAMETER_TOUCH_SEEN.load(Ordering::Relaxed);
+    let Some(touch) = rackforge_core::parameter_touch::PARAMETER_TOUCHES.latest(&mut seen) else {
+        return ptr::null_mut();
+    };
+    PARAMETER_TOUCH_SEEN.store(seen, Ordering::Relaxed);
+    let header = engine().lock().ok().and_then(|guard| {
+        guard
+            .as_ref()
+            .and_then(|engine| engine.parameter_touch_header(&touch))
+    });
+    let Some(header) = header else {
+        return ptr::null_mut();
+    };
+    let result = controller_menu()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
+        .and_then(|mut controller| controller.render_transient_header(&header));
+    result_string(&mut env, result)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
     mut env: JNIEnv,
@@ -3929,16 +4922,18 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
             });
         return result_string(&mut env, result);
     }
-    if let Some(input) = profile
+    // A default-mapped control plays on to its link; the header names the
+    // parameter it moved once the link has run (keyLabParameterTouch), not
+    // the role's fixed label and the raw CC.
+    // Nothing to draw and nothing consumed, so no answer at all: an empty
+    // one would still cancel the pending restore of a header on screen.
+    if profile
         .semantic_profile
         .as_ref()
         .and_then(|profile| semantic_control_input(profile, &message))
+        .is_some()
     {
-        let result = controller_menu()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
-            .and_then(|mut controller| controller.render_semantic_control(&input));
-        return result_string(&mut env, result);
+        return ptr::null_mut();
     }
     let Some(event) = keylab_protocol::parse_input(&message) else {
         return ptr::null_mut();
@@ -4028,6 +5023,10 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installPluginFile
         let package = PluginPackage::open(&installed.path)
             .with_context(|| format!("opening installed plugin {}", installed.path.display()))?;
         let mut descriptor = package_descriptor(&package, false);
+        // A layout the new package carries reaches the keyboards' maps.
+        if let Err(error) = reoffer_android_factory_maps() {
+            eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}");
+        }
         descriptor["already_installed"] = installed.already_installed.into();
         descriptor["artifact_sha256"] = installed.record.artifact_sha256.into();
         Ok(descriptor.to_string())
@@ -4077,6 +5076,9 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_uninstallPlugin(
             .is_some_and(|active| active.plugin_id == plugin_id);
         let removed = uninstall_plugin(&store_root, &plugin_id)
             .context("removing the managed plugin package")?;
+        if let Err(error) = reoffer_android_factory_maps() {
+            eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}");
+        }
         if is_active {
             midi_queue()
                 .lock()
@@ -4182,6 +5184,9 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_setInstalledPlugi
         let plugin_id = java_string(&mut env, plugin_id)?;
         let store_root = PathBuf::from(java_string(&mut env, store_root)?);
         set_plugin_enabled(&store_root, &plugin_id, enabled == JNI_TRUE)?;
+        if let Err(error) = reoffer_android_factory_maps() {
+            eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}");
+        }
         Ok(())
     })();
     match result {
@@ -4240,7 +5245,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessage(
 ) {
     let bytes = [status as u8, data_1 as u8, data_2 as u8];
     if (1..=3).contains(&length) {
-        enqueue_midi(VIRTUAL_MIDI_SOURCE_KEY, &bytes[..length as usize]);
+        enqueue_midi(VIRTUAL_MIDI_SOURCE_KEY, &bytes[..length as usize], false);
     }
 }
 
@@ -4257,8 +5262,102 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessageFr
     let bytes = [status as u8, data_1 as u8, data_2 as u8];
     if source_key > 0 && (1..=3).contains(&length) {
         let source = MidiSourceKey::new(source_key as u32);
-        apply_declarative_rackforge_parameter(source, &bytes[..length as usize]);
-        enqueue_midi(source, &bytes[..length as usize]);
+        let message = &bytes[..length as usize];
+        record_midi_activity(source, message);
+        if apply_reserved_host_input(source, message) {
+            return;
+        }
+        apply_declarative_rackforge_parameter(source, message);
+        // MIDI Start, Continue and Stop are a controller's buttons, never an
+        // instrument's input.
+        if MidiPacket::transport_realtime(0, message).is_some() {
+            return;
+        }
+        enqueue_midi(source, message, held_by_controller(source, message));
+    }
+}
+
+/// Whether a declarative controller keeps this control from the
+/// instruments: its links still read it.
+fn held_by_controller(source: MidiSourceKey, message: &[u8]) -> bool {
+    let Some(source_id) = midi_sources().lock().ok().and_then(|sources| {
+        sources
+            .descriptor(source)
+            .map(|descriptor| descriptor.id.clone())
+    }) else {
+        return false;
+    };
+    midi_controllers().lock().is_ok_and(|controllers| {
+        controllers.get(&source_id).is_some_and(|controller| {
+            controller
+                .held_controls
+                .iter()
+                .any(|control| control.matches(message))
+        })
+    })
+}
+
+/// A declarative controller's reserved controls and buttons, as the other
+/// hosts read them: the master level and pan move, and neither they nor a
+/// host action's button reach an instrument. Android has no sequencer yet,
+/// so a transport or lane button is taken and said so, not played as a note.
+fn apply_reserved_host_input(source: MidiSourceKey, message: &[u8]) -> bool {
+    let Some(source_id) = midi_sources().lock().ok().and_then(|sources| {
+        sources
+            .descriptor(source)
+            .map(|descriptor| descriptor.id.clone())
+    }) else {
+        return false;
+    };
+    let (control, action) = {
+        let Ok(controllers) = midi_controllers().lock() else {
+            return false;
+        };
+        let Some(controller) = controllers.get(&source_id) else {
+            return false;
+        };
+        (
+            controller
+                .host_controls
+                .iter()
+                .find_map(|binding| Some((binding.target, binding.midi_cc.value(message)?))),
+            controller
+                .host_actions
+                .iter()
+                .find_map(|binding| Some((binding.target, binding.phase(message)?))),
+        )
+    };
+    if let Some((target, value)) = control {
+        apply_rackforge_parameter(match target {
+            HostControlTarget::MasterLevel => {
+                RackForgeParameterValue::MasterLevel(MasterLevel::from_midi(value))
+            }
+            HostControlTarget::MasterPan => {
+                RackForgeParameterValue::MasterPan(MasterPan::from_midi_with_center_snap(value))
+            }
+        });
+        return true;
+    }
+    if let Some((target, phase)) = action {
+        if phase == ButtonPhase::Press {
+            eprintln!("ANDROID_HOST_ACTION_UNAVAILABLE target={target:?} reason=no-sequencer");
+        }
+        return true;
+    }
+    false
+}
+
+/// What came in, for the Controllers section's lit inputs.
+fn record_midi_activity(source: MidiSourceKey, message: &[u8]) {
+    let Some(descriptor) = midi_sources()
+        .lock()
+        .ok()
+        .and_then(|sources| sources.descriptor(source).cloned())
+    else {
+        return;
+    };
+    if let Ok(mut activity) = midi_activity().lock() {
+        activity.record(&descriptor, message);
     }
 }
 
@@ -4272,19 +5371,12 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_resetMidiSources(
             .lock()
             .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))? =
             MidiSourceRegistry::default();
-        midi_semantic_profiles()
+        midi_controllers()
             .lock()
-            .map_err(|_| anyhow::anyhow!("semantic MIDI profile lock poisoned"))?
+            .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?
             .clear();
         NEXT_MIDI_SOURCE_KEY.store(1, Ordering::Relaxed);
-        if let Some(engine) = engine()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
-            .as_mut()
-        {
-            engine.recompile_parameter_links()?;
-        }
-        Ok(())
+        recompile_engine_parameter_links()
     })();
     if let Err(error) = result {
         report(&mut env, error);
@@ -4321,25 +5413,23 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_registerMidiSourc
         };
         drop(sources);
         {
-            let mut profiles = midi_semantic_profiles()
+            let mut controllers = midi_controllers()
                 .lock()
-                .map_err(|_| anyhow::anyhow!("semantic MIDI profile lock poisoned"))?;
-            match installed_semantic_profile(&controller_id, &endpoint_name) {
-                Some((resolved_controller_id, profile)) => {
-                    profiles.insert(source_id, (resolved_controller_id, profile));
-                }
-                None => {
-                    profiles.remove(&source_id);
-                }
+                .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+            // Registered again while connected: what the device said and
+            // what was sent to it still hold.
+            if let Some(existing) = controllers.get_mut(&source_id) {
+                existing.hint = controller_id;
+                existing.endpoint_name = endpoint_name;
+                existing.resolve();
+            } else {
+                controllers.insert(
+                    source_id,
+                    AndroidMidiController::new(controller_id, endpoint_name),
+                );
             }
         }
-        if let Some(engine) = engine()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
-            .as_mut()
-        {
-            engine.recompile_parameter_links()?;
-        }
+        recompile_engine_parameter_links()?;
         Ok(key.get())
     })();
     match result {
@@ -4375,6 +5465,441 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_replaceParameterL
             JNI_FALSE
         }
     }
+}
+
+/// The session's controller requests -- the player's maps, the inputs that
+/// came in, and the controllers the player makes -- answered as the desktop
+/// and the Pi answer them. Returns the response's JSON; a refused request is
+/// an `error` response, never an exception, so the UI hears every answer.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerSessionCommand(
+    mut env: JNIEnv,
+    _class: JClass,
+    data_root: JString,
+    request_json: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        let request_json = java_string(&mut env, request_json)?;
+        let response = match controller_session_command(&data_root, &request_json) {
+            Ok(response) => response,
+            Err(error) => ControlResponse::Error {
+                code: ControlErrorCode::InvalidRequest,
+                message: format!("{error:#}"),
+                current_revision: None,
+            },
+        };
+        Ok(serde_json::to_string(&response)?)
+    })();
+    result_string(&mut env, result)
+}
+
+/// Loads the player's controller maps before the first plugin compiles its
+/// links, so a mapped control works from the first note.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_loadControllerMaps(
+    mut env: JNIEnv,
+    _class: JClass,
+    data_root: JString,
+    plugin_store_root: JString,
+    controller_store_root: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        {
+            let mut maps = controller_maps()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+            maps.plugin_store_root = Some(PathBuf::from(java_string(&mut env, plugin_store_root)?));
+            maps.controller_store_root =
+                Some(PathBuf::from(java_string(&mut env, controller_store_root)?));
+        }
+        if ensure_controller_maps(&data_root)? {
+            recompile_engine_parameter_links()?;
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+fn controller_session_command(data_root: &Path, request_json: &str) -> Result<ControlResponse> {
+    if ensure_controller_maps(data_root)? {
+        recompile_engine_parameter_links()?;
+    }
+    let request: ControlRequest =
+        serde_json::from_str(request_json).context("reading the controller request")?;
+    Ok(match request {
+        ControlRequest::ControllerMaps => android_controller_maps_response()?,
+        ControlRequest::MidiActivity { after } => {
+            let (cursor, events) = midi_activity()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("MIDI activity lock poisoned"))?
+                .since(after);
+            ControlResponse::MidiActivity { cursor, events }
+        }
+        ControlRequest::SaveControllerMap { map } => {
+            let map = save_android_controller_map(*map)?;
+            ControlResponse::ControllerMapSaved { map: Box::new(map) }
+        }
+        ControlRequest::SetControllerTakeover { takeover } => {
+            set_android_controller_takeover(takeover)?;
+            ControlResponse::ControllerTakeoverSet { takeover }
+        }
+        // What a control last moved, for the window at the top of the page:
+        // `after` zero only learns where the touches stand.
+        ControlRequest::ParameterTouch { after } => {
+            use rackforge_core::parameter_touch::PARAMETER_TOUCHES;
+            let mut sequence = after;
+            let touch = if after == 0 {
+                sequence = PARAMETER_TOUCHES.current_sequence();
+                None
+            } else {
+                PARAMETER_TOUCHES.latest(&mut sequence).and_then(|touch| {
+                    engine()
+                        .lock()
+                        .ok()?
+                        .as_ref()?
+                        .parameter_touch_report(&touch)
+                })
+            };
+            ControlResponse::ParameterTouched {
+                sequence,
+                touch: touch.map(Box::new),
+            }
+        }
+        ControlRequest::ImportControllerMap { file } => {
+            file.validate()?;
+            let map = save_android_controller_map(file.map)?;
+            ControlResponse::ControllerMapImported { map: Box::new(map) }
+        }
+        ControlRequest::ExportControllerMap { controller_id } => {
+            let maps = controller_maps()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+            let map = maps
+                .maps
+                .get(&controller_id)
+                .with_context(|| format!("no map is stored for controller {controller_id}"))?;
+            let exported_unix_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_millis() as u64);
+            let (file_name, file) = export_rfmap(
+                map,
+                &format!("RackForge for Android {}", env!("CARGO_PKG_VERSION")),
+                exported_unix_ms,
+            );
+            ControlResponse::ControllerMapExported {
+                file_name,
+                file: Box::new(file),
+            }
+        }
+        ControlRequest::SaveUserController { controller } => {
+            let root = controller_store_root().context("the controller store is not ready")?;
+            let installed = rackforge_controller_package::PackageStore::new(root)
+                .save_user_controller(&controller)
+                .map_err(|error| anyhow::anyhow!("Could not save the controller: {error}"))?;
+            // Attached at once to the input it was made on.
+            reresolve_midi_controllers()?;
+            ControlResponse::UserControllerSaved {
+                controller_id: installed.record.id,
+                version: installed.record.version,
+            }
+        }
+        _ => bail!("not a controller request"),
+    })
+}
+
+/// The controllers on connected inputs, and every stored map.
+fn android_controller_maps_response() -> Result<ControlResponse> {
+    let sources = midi_sources()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?;
+    let controllers = midi_controllers()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+    let mut registered = BTreeMap::<String, RegisteredController>::new();
+    for (source_id, controller) in controllers.iter() {
+        let Some(controller_id) = &controller.controller_id else {
+            continue;
+        };
+        let source = sources
+            .resolve_optional(source_id)
+            .and_then(|key| sources.descriptor(key).cloned());
+        // One entry per controller: a device with several ports lists the
+        // first, as the desktop does.
+        registered
+            .entry(controller_id.clone())
+            .or_insert(RegisteredController {
+                controller_id: controller_id.clone(),
+                connected: source.is_some(),
+                source,
+                identified: controller.identified,
+            });
+    }
+    let maps = controller_maps()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+    Ok(ControlResponse::ControllerMaps {
+        controllers: registered.into_values().collect(),
+        maps: maps.maps.values().cloned().collect(),
+        takeover: maps.takeover,
+        factory_untouched: maps
+            .store
+            .as_ref()
+            .map(ControllerMapStore::untouched_factory_maps)
+            .unwrap_or_default(),
+        fn_open: controllers
+            .iter()
+            .filter_map(|(source_id, controller)| {
+                let key = sources.resolve_optional(source_id)?;
+                rackforge_core::parameter_link::fn_layer_open(key)
+                    .then(|| controller.controller_id.clone())
+                    .flatten()
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    })
+}
+
+/// Stores a controller's whole map and applies it at once, as a learnt link
+/// is. An empty map removes it.
+fn save_android_controller_map(map: ControllerMap) -> Result<ControllerMap> {
+    map.validate()?;
+    {
+        let mut maps = controller_maps()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller map lock poisoned"))?;
+        maps.store
+            .as_ref()
+            .context("controller maps are not loaded")?
+            .save(&map)
+            .map_err(|error| anyhow::anyhow!("Could not store the controller map: {error:#}"))?;
+        if map.is_empty() {
+            maps.maps.remove(&map.controller_id);
+        } else {
+            maps.maps.insert(map.controller_id.clone(), map.clone());
+        }
+    }
+    recompile_engine_parameter_links()?;
+    Ok(map)
+}
+
+/// A device answered the Identity Request on this source: the package is
+/// resolved again with its answer. Returns whether the source's package
+/// changed.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_identifyMidiSource(
+    mut env: JNIEnv,
+    _class: JClass,
+    source_key: jint,
+    reply: JByteArray,
+) -> jboolean {
+    let result = (|| -> Result<bool> {
+        let bytes = env.convert_byte_array(&reply)?;
+        let Some(identity) = rackforge_controller_package::IdentityReply::parse(&bytes) else {
+            return Ok(false);
+        };
+        let Some(source_id) = midi_sources()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?
+            .descriptor(MidiSourceKey::new(source_key as u32))
+            .map(|descriptor| descriptor.id.clone())
+        else {
+            return Ok(false);
+        };
+        let changed = {
+            let mut controllers = midi_controllers()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+            let Some(controller) = controllers.get_mut(&source_id) else {
+                return Ok(false);
+            };
+            eprintln!(
+                "ANDROID_MIDI_IDENTITY source={source_id} manufacturer={:02X?} family={:#06x} model={:#06x}",
+                identity.manufacturer, identity.family, identity.model
+            );
+            controller.identity = Some(identity);
+            let before = controller.controller_id.clone();
+            controller.resolve();
+            before != controller.controller_id
+        };
+        if changed {
+            recompile_engine_parameter_links()?;
+        }
+        Ok(changed)
+    })();
+    match result {
+        Ok(true) => JNI_TRUE,
+        Ok(false) => JNI_FALSE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+/// The messages the source's package sends when its controller connects, as
+/// a controller plan, once per connection: empty when there are none, the
+/// player has not allowed them, or they were sent.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_midiSourceConnectPlan(
+    mut env: JNIEnv,
+    _class: JClass,
+    source_key: jint,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let source_id = midi_sources()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?
+            .descriptor(MidiSourceKey::new(source_key as u32))
+            .map(|descriptor| descriptor.id.clone());
+        let mut controllers = midi_controllers()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+        let Some(controller) = source_id.and_then(|id| controllers.get_mut(&id)) else {
+            return Ok("[]".into());
+        };
+        if controller.on_connect_sent
+            || (controller.on_connect.is_empty() && controller.setup_messages.is_empty())
+        {
+            return Ok("[]".into());
+        }
+        controller.on_connect_sent = true;
+        // The controller's own port first, then its setup output: the DAW
+        // port some controllers change mode through. Java finds that port
+        // with `midiSetupPort`.
+        let plan = controller
+            .on_connect
+            .iter()
+            .map(|bytes| (bytes, "input"))
+            .chain(
+                controller
+                    .setup_messages
+                    .iter()
+                    .map(|bytes| (bytes, "setup")),
+            )
+            .map(|(bytes, port)| {
+                serde_json::json!({
+                    "bytes": bytes,
+                    "port": port,
+                    // A device may need a moment between mode changes.
+                    "settle_after_ms": 20,
+                })
+            })
+            .collect::<Vec<_>>();
+        eprintln!(
+            "ANDROID_CONTROLLER_ON_CONNECT controller={:?} messages={}",
+            controller.controller_id,
+            plan.len()
+        );
+        Ok(serde_json::Value::Array(plan).to_string())
+    })();
+    result_string(&mut env, result)
+}
+
+/// Which of a device's MIDI inputs is the setup output of the controller on
+/// `source_key`, among the names Java lists them by: the index, or -1 when
+/// the package names none or no single port matches. The same choice the
+/// other hosts make, by the package's `setup_output` endpoint.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_midiSetupPort(
+    mut env: JNIEnv,
+    _class: JClass,
+    source_key: jint,
+    port_names_json: JString,
+) -> jint {
+    let result = (|| -> Result<i32> {
+        let names: Vec<String> = serde_json::from_str(&java_string(&mut env, port_names_json)?)?;
+        let source_id = midi_sources()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?
+            .descriptor(MidiSourceKey::new(source_key as u32))
+            .map(|descriptor| descriptor.id.clone());
+        let controllers = midi_controllers()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI controller lock poisoned"))?;
+        let Some(controller) = source_id.and_then(|id| controllers.get(&id)) else {
+            return Ok(-1);
+        };
+        let Some(matcher) = &controller.setup_output else {
+            return Ok(-1);
+        };
+        let chosen = rackforge_controller_package::setup_output_port(
+            matcher,
+            &controller.endpoint_name,
+            &names,
+        );
+        Ok(chosen
+            .and_then(|name| names.iter().position(|candidate| *candidate == name))
+            .map_or(-1, |index| index as i32))
+    })();
+    match result {
+        Ok(index) => index,
+        Err(error) => {
+            report(&mut env, error);
+            -1
+        }
+    }
+}
+
+/// A device unplugged: what its controller was sent goes again when it
+/// comes back, as a new connection.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_midiSourceDisconnected(
+    _env: JNIEnv,
+    _class: JClass,
+    source_key: jint,
+) {
+    let source_id = midi_sources().lock().ok().and_then(|sources| {
+        sources
+            .descriptor(MidiSourceKey::new(source_key as u32))
+            .map(|descriptor| descriptor.id.clone())
+    });
+    if let Some(source_id) = source_id
+        && let Ok(mut controllers) = midi_controllers().lock()
+        && let Some(controller) = controllers.get_mut(&source_id)
+    {
+        controller.on_connect_sent = false;
+        // The device may come back as another model's firmware, or answer
+        // the Identity Request differently: it is asked again.
+        controller.identity = None;
+        controller.resolve();
+    }
+}
+
+/// Records whether the player lets a package send its on_connect messages,
+/// and resolves the connected sources again so an allowed package's
+/// messages go out with the next connect plan.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerAllowOutput(
+    mut env: JNIEnv,
+    _class: JClass,
+    store_root: JString,
+    controller_id: JString,
+    allow: jboolean,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        let controller_id = java_string(&mut env, controller_id)?;
+        let installed = rackforge_controller_package::PackageStore::new(store_root)
+            .allow_output(&controller_id, allow == JNI_TRUE)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        reresolve_midi_controllers()?;
+        Ok(serde_json::json!({
+            "status": "ok",
+            "id": installed.record.id,
+            "output": installed.output_summary(),
+        })
+        .to_string())
+    })();
+    result_string(&mut env, result)
 }
 
 #[unsafe(no_mangle)]
@@ -4643,19 +6168,25 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginStateComman
             .context("parsing plugin state command parameters")?;
         if matches!(
             method.as_str(),
-            "materialize" | "plugin_state_parameters" | "set_plugin_state_parameter"
+            "materialize" | "catalog" | "plugin_state_parameters" | "set_plugin_state_parameter"
         ) {
             // State inspection creates a separate portable instance. Copy its immutable
             // context while holding ENGINE, then release the audio lock before Wasm
-            // instantiation, state loading and hashing.
+            // instantiation, state loading and hashing. With no plugin active a
+            // Slot's plugin still comes from its package, given the data root.
             let context = {
                 let guard = engine()
                     .lock()
                     .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
-                guard
-                    .as_ref()
-                    .context("RackForge engine is not initialized")?
-                    .isolated_state_context()
+                match guard.as_ref() {
+                    Some(engine) => engine.isolated_state_context(),
+                    None => AndroidIsolatedStateContext::without_engine(Path::new(
+                        params
+                            .get("data_root")
+                            .and_then(serde_json::Value::as_str)
+                            .context("RackForge engine is not initialized")?,
+                    )),
+                }
             };
             return Ok(isolated_plugin_state_command(&context, &method, &params)?.to_string());
         }

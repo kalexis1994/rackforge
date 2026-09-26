@@ -1,4 +1,5 @@
-import { useState, type CSSProperties } from "react";
+import { useId, useState } from "react";
+import { useCanvasModal } from "../hooks/useCanvasModal";
 import type { RackGraphEdge, RackMidiTransform } from "../types";
 import { ScrubNumberField } from "./ScrubNumberField";
 
@@ -6,7 +7,6 @@ interface RackMidiLinkEditorProps {
   edge: RackGraphEdge;
   fallback?: RackMidiTransform;
   targetLabel?: string;
-  style?: CSSProperties;
   onApply: (transform: RackMidiTransform) => void;
   onClose: () => void;
 }
@@ -110,10 +110,11 @@ export function RackMidiLinkEditor({
   edge,
   fallback,
   targetLabel = "Instrument",
-  style,
   onApply,
   onClose,
 }: RackMidiLinkEditorProps) {
+  const { sectionRef, closeRef, onKeyDown } = useCanvasModal(onClose);
+  const titleId = useId();
   const [draft, setDraft] = useState<RackMidiTransform>(
     edge.midi_transform ?? fallback ?? identityTransform,
   );
@@ -128,18 +129,23 @@ export function RackMidiLinkEditor({
   const curveY2 = 100 - (draft.velocity_output_high / 127) * 100;
 
   return (
+    <>
+    <div className="rack-link-editor-scrim" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} />
     <section
+      ref={sectionRef}
       className="rack-midi-link-editor"
-      style={style}
-      aria-label="MIDI connection settings"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onKeyDown={onKeyDown}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <header>
         <div>
           <span>MIDI CONNECTION</span>
-          <strong>Input → {targetLabel}</strong>
+          <strong id={titleId}>Input → {targetLabel}</strong>
         </div>
-        <button type="button" className="rack-midi-close" aria-label="Close" onClick={onClose}>×</button>
+        <button ref={closeRef} type="button" className="rack-midi-close" aria-label="Close" title="Close (Esc)" onClick={onClose}>×</button>
       </header>
       <div className="rack-midi-link-scroll">
         <section className="rack-midi-section">
@@ -192,5 +198,6 @@ export function RackMidiLinkEditor({
         <button type="button" className="primary" disabled={!valid} onClick={() => onApply(draft)}>Apply</button>
       </footer>
     </section>
+    </>
   );
 }

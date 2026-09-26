@@ -50,6 +50,187 @@ pub enum MemoryState {
     Unsupported,
 }
 
+/// Outcome of asking Windows not to throttle this process in the background.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ThrottlingState {
+    /// The process is exempt: its execution speed is not reduced when it
+    /// stops being the foreground window.
+    Exempt,
+    /// The request failed. The process stays subject to whatever the power
+    /// manager decides, which on a laptop in the background means a lower
+    /// clock and the efficiency cores.
+    Failed { errno: i32 },
+    /// Not applicable on this platform.
+    Unsupported,
+}
+
+/// Outcome of asking the FPU to treat subnormal floats as zero on the
+/// calling thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubnormalState {
+    /// Subnormal results are flushed to zero and subnormal operands read as
+    /// zero, on this thread, for as long as nothing changes the register.
+    Flushed,
+    /// Not applicable on this architecture.
+    Unsupported,
+}
+
+/// Makes the calling thread treat subnormal floats as zero.
+///
+/// A recursive filter left to decay heads for zero exponentially and never
+/// arrives. Below about 1.2e-38 its state turns subnormal, and x86 does
+/// arithmetic on subnormals in microcode, tens of times slower than on
+/// normal floats. Nothing audible is happening -- the signal is 750 dB down --
+/// but the block gets several times more expensive the moment the keys
+/// are released, stays that way for as long as nobody plays, and recovers
+/// the instant someone does. Measured with `examples/tail-cost.rs`: RF-Organ
+/// settles on an output of 2.2e-43, every sample subnormal, forever, and
+/// its block costs three times what it did while playing. With the flags set,
+/// the same tail costs what silence costs.
+///
+/// Plugins cannot be relied on to guard their own state, and the ones that
+/// run inside wasmtime could not set the flags if they wanted to: the
+/// register belongs to the host thread and compiled wasm inherits it. So the
+/// host sets it on every thread that runs DSP. This is what every DAW does.
+///
+/// The flags change only results below the smallest normal float, and they
+/// change them to zero.
+pub fn flush_subnormals() -> SubnormalState {
+    flush_subnormals_on_this_thread()
+}
+
+#[cfg(target_arch = "x86_64")]
+fn flush_subnormals_on_this_thread() -> SubnormalState {
+    /// MXCSR flush-to-zero (bit 15) and denormals-are-zero (bit 6).
+    const FTZ_DAZ: u32 = 0x8040;
+    let mut control = 0_u32;
+    // SAFETY: MXCSR is per-thread state. Reading it and setting two flag
+    // bits touches nothing but this thread's SSE rounding behaviour, and
+    // the write is skipped when the bits are already there, so a caller on
+    // every block pays one store-to-memory.
+    unsafe {
+        core::arch::asm!(
+            "stmxcsr [{}]",
+            in(reg) &raw mut control,
+            options(nostack, preserves_flags),
+        );
+        if control & FTZ_DAZ != FTZ_DAZ {
+            control |= FTZ_DAZ;
+            core::arch::asm!(
+                "ldmxcsr [{}]",
+                in(reg) &raw const control,
+                options(nostack, preserves_flags, readonly),
+            );
+        }
+    }
+    SubnormalState::Flushed
+}
+
+#[cfg(target_arch = "aarch64")]
+fn flush_subnormals_on_this_thread() -> SubnormalState {
+    /// FPCR.FZ: flush subnormal inputs and results to zero.
+    const FZ: u64 = 1 << 24;
+    let control: u64;
+    // SAFETY: FPCR is per-thread state and FZ changes only how subnormal
+    // floats are treated on this thread.
+    unsafe {
+        core::arch::asm!(
+            "mrs {}, fpcr",
+            out(reg) control,
+            options(nomem, nostack, preserves_flags),
+        );
+        if control & FZ == 0 {
+            core::arch::asm!(
+                "msr fpcr, {}",
+                in(reg) control | FZ,
+                options(nomem, nostack, preserves_flags),
+            );
+        }
+    }
+    SubnormalState::Flushed
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn flush_subnormals_on_this_thread() -> SubnormalState {
+    SubnormalState::Unsupported
+}
+
+/// Asks the platform not to slow this process down when it loses focus.
+///
+/// This is a *process* property, unlike [`engage`], which is a per-thread
+/// one, and the two do not substitute for each other. Windows 11 applies
+/// EcoQoS to a process whose windows are all in the background: the clock
+/// drops and work moves to the efficiency cores. A thread promoted to MMCSS
+/// "Pro Audio" is still inside that process and still runs slower, which is
+/// heard as a burst of xruns the moment another window is clicked and as
+/// nothing at all while RackForge is in front -- the shape of the fault that
+/// prompted this.
+///
+/// Idempotent and safe to call from anywhere; the request is made once per
+/// process. It never fails fatally, because a host that cannot obtain the
+/// exemption still plays.
+pub fn exempt_process_from_throttling() -> ThrottlingState {
+    static ONCE: std::sync::OnceLock<ThrottlingState> = std::sync::OnceLock::new();
+    ONCE.get_or_init(request_throttling_exemption).clone()
+}
+
+#[cfg(target_os = "windows")]
+fn request_throttling_exemption() -> ThrottlingState {
+    #[repr(C)]
+    struct ProcessPowerThrottlingState {
+        version: u32,
+        control_mask: u32,
+        state_mask: u32,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> *mut core::ffi::c_void;
+        fn SetProcessInformation(
+            process: *mut core::ffi::c_void,
+            information_class: i32,
+            information: *mut core::ffi::c_void,
+            size: u32,
+        ) -> i32;
+        fn GetLastError() -> u32;
+    }
+    /// `ProcessPowerThrottling` in `PROCESS_INFORMATION_CLASS`.
+    const PROCESS_POWER_THROTTLING: i32 = 4;
+    const PROCESS_POWER_THROTTLING_CURRENT_VERSION: u32 = 1;
+    const PROCESS_POWER_THROTTLING_EXECUTION_SPEED: u32 = 0x1;
+
+    // Naming the control bit and leaving its state bit clear is how the API
+    // spells "manage this explicitly, and the answer is no". Passing a zero
+    // control mask would instead mean "go back to whatever the system wants",
+    // which is the behaviour being turned off.
+    let mut state = ProcessPowerThrottlingState {
+        version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        control_mask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        state_mask: 0,
+    };
+    // SAFETY: a correctly sized, fully initialised state block for the class
+    // being set, with the pseudo-handle for the current process.
+    let ok = unsafe {
+        SetProcessInformation(
+            GetCurrentProcess(),
+            PROCESS_POWER_THROTTLING,
+            (&raw mut state).cast(),
+            u32::try_from(size_of::<ProcessPowerThrottlingState>()).unwrap_or(0),
+        )
+    };
+    if ok != 0 {
+        return ThrottlingState::Exempt;
+    }
+    ThrottlingState::Failed {
+        // SAFETY: plain thread-local error read.
+        errno: unsafe { GetLastError() } as i32,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn request_throttling_exemption() -> ThrottlingState {
+    ThrottlingState::Unsupported
+}
+
 /// Combined real-time posture of the audio path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeStatus {
@@ -125,17 +306,28 @@ impl fmt::Display for RealtimeStatus {
     }
 }
 
-/// Requests real-time scheduling and memory residency for the calling thread.
+/// Requests real-time scheduling and memory residency for the calling thread,
+/// and makes it treat subnormal floats as zero.
 ///
 /// Must be called *on the thread that runs the audio loop*: `SCHED_FIFO` is a
 /// per-thread property, so engaging it from a supervisor thread protects the
-/// wrong thread and produces a status that lies.
+/// wrong thread and produces a status that lies. The subnormal flags are
+/// per-thread too, which is why they are set here: every thread that runs
+/// DSP already calls this -- the audio callback, the appliance's audio loop
+/// and each render pool worker -- and one that forgot would render its share
+/// of a block at microcode speed. See [`flush_subnormals`].
 ///
 /// The requested priority is clamped to the platform ceiling rather than
 /// rejected, so a conservative default keeps working on kernels whose maximum
 /// is lower than expected.
-#[cfg(target_os = "linux")]
 pub fn engage(priority: i32) -> RealtimeStatus {
+    flush_subnormals();
+    engage_platform(priority)
+}
+
+/// Linux: `SCHED_FIFO` and locked memory, each against its own limit.
+#[cfg(target_os = "linux")]
+fn engage_platform(priority: i32) -> RealtimeStatus {
     RealtimeStatus {
         scheduling: engage_scheduling(priority),
         memory: engage_memory_residency(),
@@ -147,7 +339,7 @@ pub fn engage(priority: i32) -> RealtimeStatus {
 /// with plain `TIME_CRITICAL` as the fallback. Memory locking has no
 /// equivalent grant to request, so it reports as not applicable.
 #[cfg(target_os = "windows")]
-pub fn engage(priority: i32) -> RealtimeStatus {
+fn engage_platform(priority: i32) -> RealtimeStatus {
     RealtimeStatus {
         scheduling: engage_mmcss(priority),
         memory: MemoryState::Unsupported,
@@ -202,7 +394,7 @@ fn engage_mmcss(requested: i32) -> SchedulingState {
 /// from being starved under the system-boosted AAudio callback. Memory
 /// locking has no meaningful grant inside an app sandbox.
 #[cfg(target_os = "android")]
-pub fn engage(priority: i32) -> RealtimeStatus {
+fn engage_platform(priority: i32) -> RealtimeStatus {
     RealtimeStatus {
         scheduling: engage_android(priority),
         memory: MemoryState::Unsupported,
@@ -237,7 +429,7 @@ fn engage_android(requested: i32) -> SchedulingState {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "android")))]
-pub fn engage(_priority: i32) -> RealtimeStatus {
+fn engage_platform(_priority: i32) -> RealtimeStatus {
     RealtimeStatus {
         scheduling: SchedulingState::Unsupported,
         memory: MemoryState::Unsupported,
@@ -455,6 +647,61 @@ mod tests {
         assert!(!status.is_fully_engaged());
         assert!(status.remedy().is_some());
         assert!(status.to_string().starts_with("REALTIME_DEGRADED"));
+    }
+
+    #[test]
+    fn the_throttling_exemption_is_decided_once_and_reports_the_same_answer() {
+        // Asked for from every audio start and every worker; the answer has
+        // to be stable, because a second call that returned something else
+        // would mean the process changed posture behind the caller's back.
+        let first = exempt_process_from_throttling();
+        let second = exempt_process_from_throttling();
+        assert_eq!(first, second);
+        // A request that fails leaves the host playable, so what matters is
+        // that the answer belongs to the platform: only Windows has the
+        // exemption to ask for, and only Windows may report having asked.
+        let asked = matches!(
+            first,
+            ThrottlingState::Exempt | ThrottlingState::Failed { .. }
+        );
+        assert_eq!(asked, cfg!(target_os = "windows"));
+    }
+
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[test]
+    fn a_flushed_thread_computes_zero_where_it_would_have_produced_a_subnormal() {
+        // On a thread of its own: the flags are per-thread, and a test that
+        // set them on the harness's thread would change every test that ran
+        // on it afterwards.
+        std::thread::spawn(|| {
+            let smallest_normal = std::hint::black_box(f32::MIN_POSITIVE);
+            let divisor = std::hint::black_box(4.0_f32);
+            assert!(
+                (smallest_normal / divisor).is_subnormal(),
+                "a fresh thread must start with IEEE subnormals, or this proves nothing"
+            );
+            assert_eq!(flush_subnormals(), SubnormalState::Flushed);
+            assert_eq!(std::hint::black_box(smallest_normal) / divisor, 0.0);
+            // Idempotent: asking again changes nothing and still reports it.
+            assert_eq!(flush_subnormals(), SubnormalState::Flushed);
+            assert_eq!(std::hint::black_box(smallest_normal) / divisor, 0.0);
+        })
+        .join()
+        .expect("the flushed thread panicked");
+    }
+
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[test]
+    fn engaging_a_thread_flushes_its_subnormals() {
+        // Every DSP thread reaches the flags through `engage`, so that is
+        // the path that has to set them, whatever the scheduler answered.
+        std::thread::spawn(|| {
+            let _ = engage(DEFAULT_AUDIO_PRIORITY);
+            let smallest_normal = std::hint::black_box(f32::MIN_POSITIVE);
+            assert_eq!(smallest_normal / std::hint::black_box(4.0_f32), 0.0);
+        })
+        .join()
+        .expect("the engaged thread panicked");
     }
 
     #[test]

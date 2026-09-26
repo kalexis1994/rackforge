@@ -1,0 +1,484 @@
+# Novation Launchkey 25, 49 and 61 [MK2], in Extended (InControl) mode, which
+# RackForge puts it in on connect. Every value below is sourced in SOURCES.md;
+# [PR] is the Launchkey MK2 Programmer's Reference Guide 1.01, [AB] Ableton Live
+# 12's Launchkey_MK2 script, [BW] Bitwig's Launchkey MK2 extension.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-launchkey-mk2"
+name = "Launchkey [MK2]"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "launchkey-mk2"
+
+# In Extended mode the pots, sliders and buttons send on the InControl port
+# [PR p4]: "MIDIIN2 (Launchkey MIDI)" on Windows, "Launchkey MIDI MIDI 2" on
+# Linux [BW port names], "LaunchKey InControl" on a Mac [PR p4]. No name
+# carries the size, and the three have the same controls but the 25's
+# missing sliders and buttons: one package reads them all. The keys, wheels
+# and pads stay on the MIDI port and play. The first Launchkey names its size
+# ("Launchkey 49"), the Minis and later models themselves otherwise.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["launchkey"]
+name_contains_any = ["midiin2 (launchkey midi)", "launchkey midi midi 2", "incontrol"]
+exclude_contains = ["launchkey mini", "launchkey 25", "launchkey 49", "launchkey 61", "mk3", "mk4"]
+
+# Where the mode messages go: the InControl port, as an output [PR p3].
+[[devices.endpoints]]
+role = "setup_output"
+name_contains = ["launchkey"]
+name_contains_any = ["midiout2 (launchkey midi)", "launchkey midi midi 2", "incontrol"]
+exclude_contains = ["launchkey mini", "launchkey 25", "launchkey 49", "launchkey 61", "mk3", "mk4"]
+
+# On connect: Extended mode on (9F 0C 7F), the pots' and sliders' sections to
+# InControl (9F 0D 7F, 9F 0E 7F), and the drum pads' back to basic (9F 0F 00),
+# so the pads keep playing on the MIDI port [PR p4-5; BW and AB send the first
+# three].
+[permissions]
+midi_input = true
+midi_output = true
+
+[[on_connect]]
+message = "9F 0C 7F"
+to = "setup_output"
+
+[[on_connect]]
+message = "9F 0D 7F"
+to = "setup_output"
+
+[[on_connect]]
+message = "9F 0E 7F"
+to = "setup_output"
+
+[[on_connect]]
+message = "9F 0F 00"
+to = "setup_output"
+
+# Pots 1-8: CC 21-28 on channel 16, absolute [PR p14; AB make_encoder, range(21,
+# 29) on channel 16, absolute; BW]. They take the second row, below the
+# sliders; on the 25, which has none, the first row stays empty.
+
+[[inputs]]
+id = "knob-1"
+name = "Pot 1"
+kind = "knob"
+group = "Pots"
+midi = { channel = 15, cc = 21 }
+slot = "control-2.1"
+plays = false
+
+[[inputs]]
+id = "knob-2"
+name = "Pot 2"
+kind = "knob"
+group = "Pots"
+midi = { channel = 15, cc = 22 }
+slot = "control-2.2"
+plays = false
+
+[[inputs]]
+id = "knob-3"
+name = "Pot 3"
+kind = "knob"
+group = "Pots"
+midi = { channel = 15, cc = 23 }
+slot = "control-2.3"
+plays = false
+
+[[inputs]]
+id = "knob-4"
+name = "Pot 4"
+kind = "knob"
+group = "Pots"
+midi = { channel = 15, cc = 24 }
+slot = "control-2.4"
+plays = false
+
+[[inputs]]
+id = "knob-5"
+name = "Pot 5"
+kind = "knob"
+group = "Pots"
+midi = { channel = 15, cc = 25 }
+slot = "control-2.5"
+plays = false
+
+[[inputs]]
+id = "knob-6"
+name = "Pot 6"
+kind = "knob"
+group = "Pots"
+midi = { channel = 15, cc = 26 }
+slot = "control-2.6"
+plays = false
+
+[[inputs]]
+id = "knob-7"
+name = "Pot 7"
+kind = "knob"
+group = "Pots"
+midi = { channel = 15, cc = 27 }
+slot = "control-2.7"
+plays = false
+
+[[inputs]]
+id = "knob-8"
+name = "Pot 8"
+kind = "knob"
+group = "Pots"
+midi = { channel = 15, cc = 28 }
+slot = "control-2.8"
+plays = false
+
+# Sliders 1-8 (49 and 61): CC 41-48 on channel 16, the ninth, the master, CC 7
+# [PR p14; AB make_slider range(41, 49) and 7 on channel 16]. Sliders 1-8 take
+# the first row; the master slider no slot.
+
+[[inputs]]
+id = "fader-1"
+name = "Slider 1"
+kind = "fader"
+group = "Sliders"
+midi = { channel = 15, cc = 41 }
+slot = "control-1.1"
+plays = false
+
+[[inputs]]
+id = "fader-2"
+name = "Slider 2"
+kind = "fader"
+group = "Sliders"
+midi = { channel = 15, cc = 42 }
+slot = "control-1.2"
+plays = false
+
+[[inputs]]
+id = "fader-3"
+name = "Slider 3"
+kind = "fader"
+group = "Sliders"
+midi = { channel = 15, cc = 43 }
+slot = "control-1.3"
+plays = false
+
+[[inputs]]
+id = "fader-4"
+name = "Slider 4"
+kind = "fader"
+group = "Sliders"
+midi = { channel = 15, cc = 44 }
+slot = "control-1.4"
+plays = false
+
+[[inputs]]
+id = "fader-5"
+name = "Slider 5"
+kind = "fader"
+group = "Sliders"
+midi = { channel = 15, cc = 45 }
+slot = "control-1.5"
+plays = false
+
+[[inputs]]
+id = "fader-6"
+name = "Slider 6"
+kind = "fader"
+group = "Sliders"
+midi = { channel = 15, cc = 46 }
+slot = "control-1.6"
+plays = false
+
+[[inputs]]
+id = "fader-7"
+name = "Slider 7"
+kind = "fader"
+group = "Sliders"
+midi = { channel = 15, cc = 47 }
+slot = "control-1.7"
+plays = false
+
+[[inputs]]
+id = "fader-8"
+name = "Slider 8"
+kind = "fader"
+group = "Sliders"
+midi = { channel = 15, cc = 48 }
+slot = "control-1.8"
+plays = false
+
+[[inputs]]
+id = "fader-9"
+name = "Master slider"
+kind = "fader"
+group = "Sliders"
+midi = { channel = 15, cc = 7 }
+plays = false
+
+# The buttons below the sliders (49 and 61): CC 51-58, the ninth CC 59, 127 on
+# press and 0 on release [PR p15; AB Mute_Button_n range(51, 59), Master_Button
+# 59]. Fader buttons on a keyboard with pads: no slot.
+
+[[inputs]]
+id = "fader-button-1"
+name = "Button 1"
+kind = "button"
+group = "Slider buttons"
+midi = { channel = 15, cc = 51 }
+plays = false
+
+[[inputs]]
+id = "fader-button-2"
+name = "Button 2"
+kind = "button"
+group = "Slider buttons"
+midi = { channel = 15, cc = 52 }
+plays = false
+
+[[inputs]]
+id = "fader-button-3"
+name = "Button 3"
+kind = "button"
+group = "Slider buttons"
+midi = { channel = 15, cc = 53 }
+plays = false
+
+[[inputs]]
+id = "fader-button-4"
+name = "Button 4"
+kind = "button"
+group = "Slider buttons"
+midi = { channel = 15, cc = 54 }
+plays = false
+
+[[inputs]]
+id = "fader-button-5"
+name = "Button 5"
+kind = "button"
+group = "Slider buttons"
+midi = { channel = 15, cc = 55 }
+plays = false
+
+[[inputs]]
+id = "fader-button-6"
+name = "Button 6"
+kind = "button"
+group = "Slider buttons"
+midi = { channel = 15, cc = 56 }
+plays = false
+
+[[inputs]]
+id = "fader-button-7"
+name = "Button 7"
+kind = "button"
+group = "Slider buttons"
+midi = { channel = 15, cc = 57 }
+plays = false
+
+[[inputs]]
+id = "fader-button-8"
+name = "Button 8"
+kind = "button"
+group = "Slider buttons"
+midi = { channel = 15, cc = 58 }
+plays = false
+
+[[inputs]]
+id = "fader-button-9"
+name = "Master button"
+kind = "button"
+group = "Slider buttons"
+midi = { channel = 15, cc = 59 }
+plays = false
+
+# Track < >: CC 102 and 103 [AB Track_Left_Button 102, Track_Right_Button 103; BW
+# 102 previous track, 103 next; PR p15 lists them the other way round, which
+# the two scripts contradict]. They step the main selector.
+
+[[inputs]]
+id = "track-previous"
+name = "Track <"
+kind = "button"
+group = "Navigation"
+midi = { channel = 15, cc = 102 }
+slot = "step.down"
+plays = false
+
+[[inputs]]
+id = "track-next"
+name = "Track >"
+kind = "button"
+group = "Navigation"
+midi = { channel = 15, cc = 103 }
+slot = "step.up"
+plays = false
+
+# Transport: Rewind 112, Fast Forward 113, Stop 114, Play 115, Loop 116, Record
+# 117, 127 on press [PR p15; AB Stop 114, Play 115, Loop 116, Record 117; BW
+# the same]. Rewind and Fast Forward step the second selector.
+
+[[inputs]]
+id = "rewind"
+name = "Rewind"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 112 }
+slot = "step-2.down"
+plays = false
+
+[[inputs]]
+id = "fast-forward"
+name = "Fast Forward"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 113 }
+slot = "step-2.up"
+plays = false
+
+[[inputs]]
+id = "stop"
+name = "Stop"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 114 }
+plays = false
+
+[[inputs]]
+id = "play"
+name = "Play"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 115 }
+plays = false
+
+[[inputs]]
+id = "loop"
+name = "Loop"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 116 }
+plays = false
+
+[[inputs]]
+id = "record"
+name = "Record"
+kind = "button"
+group = "Transport"
+midi = { channel = 15, cc = 117 }
+plays = false
+
+# The Launchkey answers each mode message with the same note on the InControl
+# port, and its InControl buttons send them when pressed: notes 12-15 on
+# channel 16 [PR p4-5]. They are the keyboard's state, never notes to play.
+
+[[inputs]]
+id = "extended-mode"
+name = "Extended mode (echo)"
+kind = "button"
+group = "InControl"
+midi = { channel = 15, note = 12 }
+plays = false
+
+[[inputs]]
+id = "incontrol-pots"
+name = "InControl: pots"
+kind = "button"
+group = "InControl"
+midi = { channel = 15, note = 13 }
+plays = false
+
+[[inputs]]
+id = "incontrol-sliders"
+name = "InControl: sliders"
+kind = "button"
+group = "InControl"
+midi = { channel = 15, note = 14 }
+plays = false
+
+[[inputs]]
+id = "incontrol-pads"
+name = "InControl: pads"
+kind = "button"
+group = "InControl"
+midi = { channel = 15, note = 15 }
+plays = false
+
+# RackForge's default meanings for eight knobs and nine faders.
+[[roles]]
+input = "knob-1"
+role = "synth.oscillator.pulse_width"
+
+[[roles]]
+input = "knob-2"
+role = "synth.oscillator.sub.level"
+
+[[roles]]
+input = "knob-3"
+role = "synth.oscillator.noise.level"
+
+[[roles]]
+input = "knob-4"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-5"
+role = "synth.filter.lfo.amount"
+
+[[roles]]
+input = "knob-6"
+role = "synth.filter.key_tracking"
+
+[[roles]]
+input = "knob-7"
+role = "synth.lfo.delay"
+
+[[roles]]
+input = "knob-8"
+role = "synth.amplifier.level"
+
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"
+
+[[roles]]
+input = "fader-9"
+role = "rackforge.master.level"
+
+# Play and Stop take the transport.
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop"
+target = "transport_stop"

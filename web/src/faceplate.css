@@ -109,6 +109,45 @@
   background: var(--chassis);
 }
 
+/* A section scrolls inside itself, under a bar that stays where it is: the
+   page is the scroller, not the shell around the bar and the page. It is the
+   arrangement the surfaces and the controller dock already had; About,
+   Controllers and the rest scrolled the bar away with them. */
+.app-shell.section-page-active {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.section-page-active .workspace {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.section-page-active .workspace > .topbar,
+.section-page-active .workspace > .error-banner {
+  flex: 0 0 auto;
+}
+
+.section-page-active .workspace > .page {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  /* The shell is the fixed inset rectangle here; its height is that. */
+  .app-shell.section-page-active {
+    height: auto;
+    overflow: hidden;
+  }
+}
+
 /* --------------------------------------------------------------- rail ---- */
 
 .topbar {
@@ -179,6 +218,75 @@
   width: 164px !important;
 }
 
+/* What RackForge is, centred under the mark, a size above the card copy. */
+.about-synopsis {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+/* Try RackForge Web: the page's one lit key, painted like Save, under what
+   RackForge is -- play it before reading on. */
+.about-web-key {
+  min-height: 56px;
+  padding: 10px 22px 10px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--acid-ink);
+  text-decoration: none;
+  background: var(--acid);
+  border: 1px solid color-mix(in srgb, var(--acid) 70%, var(--line));
+  border-radius: var(--fp-radius-key);
+  box-shadow:
+    var(--fp-lip),
+    var(--fp-drop),
+    0 0 22px color-mix(in srgb, var(--acid) 35%, transparent);
+  transition:
+    filter var(--rf-motion-instant) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
+}
+
+.about-web-key:hover {
+  filter: brightness(1.08);
+}
+
+.about-web-key:active {
+  box-shadow: var(--fp-well);
+}
+
+.about-web-key:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.about-web-key > svg {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  fill: currentColor;
+}
+
+.about-web-key > span {
+  display: grid;
+  gap: 3px;
+}
+
+.about-web-key strong {
+  font: 700 14px/1.1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.about-web-key small {
+  font: 500 11px/1 var(--mono-font);
+  opacity: 0.8;
+}
+
 .pairing-brand .brand-mark {
   width: 118px !important;
 }
@@ -192,6 +300,14 @@
 
   .brand-lockup {
     align-items: center;
+  }
+
+  /* Down to their icons, the section keys are square: the rail sets their
+     width, and the desktop padding, kept for a label that is gone, made
+     them 5 px taller than wide. The icon sits in the middle of the cap. */
+  .rail .nav-item {
+    aspect-ratio: 1;
+    padding: 0;
   }
 }
 
@@ -235,7 +351,7 @@
 .nav-tint-home { --nav-tint: var(--nav-home); }
 .nav-tint-live { --nav-tint: var(--nav-live); }
 .nav-tint-play { --nav-tint: var(--nav-play); }
-.nav-tint-controller { --nav-tint: var(--nav-controller); }
+.nav-tint-controller { --nav-tint: var(--rf-color-input); }
 .nav-tint-diagnostics { --nav-tint: var(--nav-diagnostics); }
 .nav-tint-system { --nav-tint: var(--nav-system); }
 
@@ -375,13 +491,384 @@
   max-width: 100%;
 }
 
-/* Below the compact breakpoint the bar needs the room back. */
+/* ------------------------------------------------------- the narrow bar ---
+   Narrow -- upright on a phone, or on its side -- the bar is as tall as its
+   menu key and no taller: the key is 42 px square, and the Now Playing
+   window and the meter beside it are 42 px tall to match, with the same
+   8 px between everything and the bar's edges on all four sides. The bar
+   used to stand 72 px upright and 58 on its side, around a taller window.
+
+   42 px holds two lines, not three: the mode and the plugin share the small
+   top line with a lit dot between them, and the program has the large one
+   under it -- mode, plugin, program, the same order as everywhere else. */
 @media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  /* `.app-shell` in front: PLAY's surface sets the bar's height and basis
+     on a two-class selector of its own. */
+  .app-shell .topbar {
+    min-height: 0;
+    flex-basis: auto;
+    padding: 8px;
+  }
+
+  .topbar .mobile-menu-button {
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
+  }
+
   .now-playing {
     flex: 1 1 auto !important;
     width: auto !important;
   }
+
+  /* `.topbar` in front: the legibility pass further down sets the desktop
+     padding and type with !important too, and would otherwise win on
+     source order. The window fills the bar's content box; its two lines
+     sit centred, 6.7 px from the glass above and below, and 7 px at the
+     sides to match. */
+  .topbar .now-playing {
+    align-self: stretch;
+    align-content: center !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    column-gap: 8px !important;
+    padding: 4px 7px !important;
+  }
+
+  .topbar .now-playing .eyebrow {
+    display: block !important;
+    grid-column: 1 !important;
+    grid-row: 1;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+  }
+
+  .topbar .now-playing .muted-inline {
+    grid-column: 2 !important;
+    grid-row: 1;
+    display: block !important;
+    font-size: 0.6rem !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Between the mode and the plugin, one lit pixel of the display itself:
+     a 3 px dot in the window's dim phosphor with its bloom, 8 px of air on
+     either side. It sits inside the plugin's line so a long name still
+     ends in an ellipsis. */
+  .topbar .now-playing .muted-inline::before {
+    content: "";
+    display: inline-block;
+    width: 3px;
+    height: 3px;
+    margin-right: 8px;
+    vertical-align: 0.2em;
+    background: var(--lcd-phos-dim);
+    box-shadow: 0 0 4px var(--lcd-bloom);
+  }
+
+  .topbar .now-playing strong {
+    grid-column: 1 / -1 !important;
+    grid-row: 2;
+    font-size: 15px !important;
+  }
+
+  /* The meter stands as tall as the window beside it; its bars give up
+     what it no longer has. */
+  .topbar.has-mixer-toggle .master-output-meter {
+    align-self: stretch;
+    min-height: 0;
+  }
+
+  .topbar.has-mixer-toggle .master-output-meter-bars {
+    min-height: 0;
+  }
 }
+
+/* The same space inside the bar at its ends as above and below what it
+   holds: the bar's own 14 px, where it kept up to 64 at the ends. */
+.topbar {
+  padding-inline: 14px;
+}
+
+/* Between the compact layout and a wide screen -- about 760 to 1000 px --
+   the window, pan, volume and the meter did not fit the bar, and the meter
+   ran off its end, out of sight. The controls give way instead, the rails
+   narrowing before anything leaves the bar. */
+.top-controls {
+  flex: 0 1 auto;
+  min-width: 0;
+  align-self: stretch;
+}
+
+/* The meter stands the full height of the bar's content, top to bottom
+   like the window at the other end, where it was a 51 px stub centred in
+   68: its bars take whatever the label and L R leave them. The faders
+   stay centred beside it. */
+.top-controls .master-output-meter {
+  align-self: stretch;
+}
+
+.top-controls .master-output-meter-bars {
+  height: auto;
+}
+
+/* The master faders, at every size: the value above, the rail across the
+   whole width, the name below, all centred -- where a name and a value
+   beside the rail left it a third of the room. The cap keeps its full
+   20 px, a size a thumb finds; the air goes around it: 10 px of value,
+   6 of air, the 20 px rail, 6 of air, 10 px of name. The markup is name,
+   rail, value; the rows place them. */
+.top-controls .compact-control {
+  min-width: 0;
+  grid-template-columns: minmax(96px, 160px);
+  grid-template-rows: auto auto auto;
+  align-content: center;
+  justify-items: center;
+  row-gap: 6px;
+}
+
+.top-controls .compact-control > output {
+  grid-row: 1;
+  line-height: 1;
+  text-align: center;
+}
+
+.top-controls .compact-control > .compact-fader {
+  grid-row: 2;
+  width: 100%;
+  height: 20px;
+  min-height: 0;
+}
+
+.top-controls .compact-control > .compact-control-label {
+  grid-row: 3;
+  display: block;
+  line-height: 1;
+  text-align: center;
+}
+
+.top-controls .compact-fader input[type="range"] {
+  height: 20px;
+}
+
+
+/* ------------------------------------------------ OUT, the bar's switch ---
+   Narrow, the bar cannot hold the Now Playing window and the master volume
+   and pan side by side without each squeezing the other. So it shows one
+   face at a time: what is playing, by default, or -- after a touch on OUT --
+   volume and pan across the bar, until OUT is touched again. The meter keeps
+   metering either way. Wide, everything fits: the switch is not there. */
+
+.master-output-meter {
+  position: relative;
+}
+
+.master-output-meter-toggle {
+  display: none;
+}
+
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  /* A switch, the meter is dressed as one: the menu key's face and size at
+     the bar's other end, the bars and L R behind its glass. The button over
+     it is clear and follows its corners exactly, so focus rings the key
+     itself, 2 px out like every other key's, and a tap on a phone does not
+     flash the browser's own highlight over it. */
+  .topbar.has-mixer-toggle .master-output-meter {
+    width: 42px;
+    flex-basis: 42px;
+    padding: 5px 0 4px;
+    background: linear-gradient(180deg, var(--glass), var(--paper));
+    border: var(--fp-seam);
+    border-radius: var(--fp-radius-key);
+    box-shadow: var(--fp-lip), var(--fp-drop);
+    transition:
+      background var(--rf-motion-instant) var(--rf-ease-standard),
+      box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
+  }
+
+  .master-output-meter-toggle {
+    display: block;
+    position: absolute;
+    inset: -1px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: var(--fp-radius-key);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .master-output-meter-toggle:focus {
+    outline: none;
+  }
+
+  .master-output-meter-toggle:focus-visible {
+    outline: 2px solid var(--acid);
+    outline-offset: 2px;
+  }
+
+  /* Narrow, the meter goes without its OUT stamp: the bars and L R say
+     what it is, and the room goes to the bars. */
+  .topbar.has-mixer-toggle .master-output-meter-label {
+    display: none !important;
+  }
+
+  /* Nor its L R: in a 42 px key the letters pressed the bars against the
+     key's edges. The bars alone fill the glass, with the same 7 px of it
+     showing on every side. */
+  .topbar.has-mixer-toggle .master-output-meter-channels {
+    display: none;
+  }
+
+  .topbar.has-mixer-toggle .master-output-meter {
+    grid-template-rows: minmax(0, 1fr) !important;
+    gap: 0;
+    padding: 7px;
+  }
+
+  /* The plinth under the bars went with the L R it divided them from. */
+  .topbar.has-mixer-toggle .master-output-meter-bars {
+    height: auto;
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+
+  /* Pressed, or open, the key sits down in the panel, as PLAY's header keys
+     do when they are on. */
+  .topbar.has-mixer-toggle .master-output-meter:has(.master-output-meter-toggle:active),
+  .topbar.has-mixer-toggle.mixer-open .master-output-meter {
+    background: var(--panel-inset);
+    box-shadow: var(--fp-well);
+  }
+
+  /* The health readout's own key stays above the switch. */
+  .master-output-meter .audio-health-readout {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* The two faces share one place, between the menu and OUT, and cross
+     over there rather than one vanishing before the other appears. The
+     controls' wrapper steps out of the layout so pan, volume and the meter
+     sit in the bar's own grid: the window spans the middle, pan and volume
+     split it, and the meter keeps its own column at the end. */
+  /* One row the height of the menu key, whatever else is in it: the meter
+     is taller than that and would otherwise size the row. */
+  /* Grid at the specificity of a plain `.topbar`, so it outranks the base
+     flex layout but not a page that hides the bar on purpose -- the touch
+     controller, the rack editor, LIVE -- which it did with !important. */
+  .topbar:where(.has-mixer-toggle) {
+    display: grid;
+  }
+
+  .topbar.has-mixer-toggle {
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-rows: 42px;
+    align-items: center;
+  }
+
+  .topbar.has-mixer-toggle .top-controls {
+    display: contents;
+  }
+
+  .topbar.has-mixer-toggle .mobile-menu-button {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .topbar.has-mixer-toggle .now-playing {
+    grid-column: 2 / 4;
+    grid-row: 1;
+  }
+
+  .topbar.has-mixer-toggle .top-controls .compact-control.pan-control {
+    grid-column: 2;
+  }
+
+  .topbar.has-mixer-toggle .top-controls .compact-control:not(.pan-control) {
+    grid-column: 3;
+  }
+
+  /* Each fader stacks as it does everywhere (see "The master faders"),
+     across a column of the bar's grid. */
+  .topbar.has-mixer-toggle .top-controls .compact-control {
+    grid-row: 1;
+    height: 100%;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 3px;
+  }
+
+  /* The bar is the menu key's 42 px tall, and the cap keeps its 20: the
+     value and the name go down to 8 px so 3 px of air still stands between
+     them and the cap, where there was 1 -- and 9 between them and the rail
+     itself. */
+  .topbar.has-mixer-toggle .top-controls .compact-control > output,
+  .topbar.has-mixer-toggle .top-controls .compact-control > .compact-control-label {
+    font-size: 8px;
+  }
+
+  .topbar.has-mixer-toggle .top-controls .compact-control > .compact-control-label {
+    display: block !important;
+  }
+
+  .topbar.has-mixer-toggle .master-output-meter {
+    grid-column: 4;
+    grid-row: 1;
+  }
+
+  /* A face going away fades, sinks a little and softens, at the exit
+     step; the one arriving waits an instant, then rises into focus at the
+     emphasized step. Hidden, a face is also out of reach and out of the
+     accessibility tree: visibility follows the fade, switching only once
+     the fade has finished going out, and at once coming in. */
+  .topbar.has-mixer-toggle .now-playing,
+  .topbar.has-mixer-toggle .top-controls .compact-control {
+    transition:
+      opacity var(--rf-motion-emphasized) var(--rf-ease-emphasized) var(--rf-motion-instant),
+      transform var(--rf-motion-emphasized) var(--rf-ease-emphasized) var(--rf-motion-instant),
+      filter var(--rf-motion-emphasized) var(--rf-ease-emphasized) var(--rf-motion-instant),
+      visibility 0s linear 0s;
+  }
+
+  .topbar.has-mixer-toggle.mixer-open .now-playing,
+  .topbar.has-mixer-toggle:not(.mixer-open) .top-controls .compact-control {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    filter: blur(2px);
+    transform: translateY(4px) scale(0.98);
+    transition:
+      opacity var(--rf-motion-exit) var(--rf-ease-exit),
+      transform var(--rf-motion-exit) var(--rf-ease-exit),
+      filter var(--rf-motion-exit) var(--rf-ease-exit),
+      visibility 0s linear var(--rf-motion-exit);
+  }
+}
+
+/* PLAY on a wide, short screen. */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  /* PLAY on a wide, short screen used to hide the top bar and run a thin
+     strip in its place -- mode, program and plugin in a line. The top bar
+     now stays, and its window says all of that, so the strip is gone. */
+  /* Plain, not !important: the faceplate loads after styles.css, so the
+     same selector here already has the last word. */
+  .performance-surface-active .play-plugin-toolbar {
+    display: none;
+  }
+
+  /* PLAY and LIVE keep the top bar here: its window names the mode, the
+     plugin and the program, and the menu key is in it. The floating key that
+     once stood in for the bar is gone. */
+  .performance-surface-active .topbar.has-mixer-toggle {
+    display: grid !important;
+  }
+}
+
+
+
+
 
 .now-playing .eyebrow {
   grid-column: auto !important;
@@ -412,6 +899,55 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A control moving a parameter takes the window's whole first line, as
+   LITTLE's header does: the mode goes, and on the narrow bar the plugin that
+   shares that line goes with it. The line keeps its place and its size, lit
+   rather than dim, the name at the left and the value at the right. */
+.topbar .now-playing.touching .eyebrow {
+  display: none !important;
+}
+
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .topbar .now-playing.touching .muted-inline {
+    display: none !important;
+  }
+
+  .topbar .now-playing .now-playing-touch {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+}
+
+.now-playing .now-playing-touch {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  color: var(--lcd-phos) !important;
+  font-family: var(--mono-font);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  line-height: 1 !important;
+  margin: 0 !important;
+  text-shadow: 0 0 4px var(--lcd-bloom);
+  white-space: nowrap;
+}
+
+/* The name in capitals, as LITTLE shows it; the value keeps its units' own
+   case -- m³, not M³. */
+.now-playing .now-playing-touch-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.now-playing .now-playing-touch-value {
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ------------------------------------------------------------- panels --- */
@@ -494,6 +1030,29 @@
   box-shadow: var(--fp-well) !important;
 }
 
+/* A key with nothing to press: flat, no depth in either direction.
+
+   It has to force the fill back. The rule above forces red on every
+   `.primary-button`, and an `!important` outranks the more specific
+   `:disabled` selector in styles.css that tried to grey it -- so the PIN
+   screen showed "Set PIN" as a fully armed key while the PIN was still
+   incomplete, and the only cue that it did nothing was the cursor.
+
+   The dead touch keys reach this state through `opacity: 0.42`, which is
+   not right for a key that stands alone on a panel: at that alpha the fill
+   lands 1.07:1 against the panel behind it and the key stops having a
+   shape, taking its label down to 3.23:1 with it. Naming the inert tokens
+   instead keeps the label at 5.95:1 and gives the key the same 1.78:1 edge
+   the fields above it have, which is how this panel already draws the
+   boundary of something you type into rather than press. */
+.primary-button:disabled {
+  color: var(--muted) !important;
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+  cursor: not-allowed;
+}
+
 .text-button {
   border-radius: var(--fp-radius-key) !important;
   border: var(--fp-seam) !important;
@@ -531,32 +1090,24 @@
   pointer-events: none;
   border-radius: inherit;
   box-shadow:
-    inset 0 0 0 1px var(--entity-instrument),
-    inset 0 0 12px -3px var(--entity-instrument);
+    inset 0 0 0 1px var(--tile-colour),
+    inset 0 0 12px -3px var(--tile-colour);
 }
 
-.plugin-tile.tile-0::before {
-  box-shadow:
-    inset 0 0 0 1px var(--blue),
-    inset 0 0 12px -3px var(--blue);
+/* The colour is the plugin's kind in the colour code (design/tokens.css),
+   where it used to be the tile's place in the list -- blue, red, amber,
+   ember in turn -- which said nothing about the plugin. */
+.plugin-tile {
+  --tile-colour: var(--rf-color-instrument);
 }
 
-.plugin-tile.tile-1::before {
-  box-shadow:
-    inset 0 0 0 1px var(--red),
-    inset 0 0 12px -3px var(--red);
+.plugin-tile.effect {
+  --tile-colour: var(--rf-color-sound);
 }
 
-.plugin-tile.tile-2::before {
-  box-shadow:
-    inset 0 0 0 1px var(--amber),
-    inset 0 0 12px -3px var(--amber);
-}
-
-.plugin-tile.tile-3::before {
-  box-shadow:
-    inset 0 0 0 1px var(--ember),
-    inset 0 0 12px -3px var(--ember);
+.plugin-tile.midi-processor,
+.plugin-tile.controller-tile {
+  --tile-colour: var(--rf-color-input);
 }
 
 .plugin-icon {
@@ -569,11 +1120,27 @@
 /* --------------------------------------------------- wells and meters --- */
 
 .compact-fader-rail,
+/* Each channel is a slot rounded at both ends. At the keys' 2 px, less
+   the 1 px seam, the level lit inside it kept a 1 px corner: the top of an
+   empty slot read round and its lit bottom square. 3 px on a 6 px slot
+   rounds both ends fully, and the level follows the slot's inside. */
 .master-output-meter-track {
-  border-radius: var(--fp-radius-key) !important;
+  border-radius: 3px !important;
   background: var(--panel-inset) !important;
   box-shadow: var(--fp-well) !important;
   border: var(--fp-seam) !important;
+}
+
+.master-output-meter-track b {
+  border-radius: 2px;
+}
+
+/* The peak line stays inside the slot, the ends of a lit segment, rather
+   than a bar laid across it. */
+.master-output-meter-track em {
+  right: 0;
+  left: 0;
+  border-radius: 1px;
 }
 
 .compact-fader-fill {
@@ -583,6 +1150,28 @@
 
 .master-output-meter-bars {
   gap: 2px;
+}
+
+/* Each channel's letter stands under its own slot: a column the slot's
+   width, the slots' gap between them, where "L R" set as one word put the
+   L a pixel and more to the side of its slot. */
+.master-output-meter-channels {
+  display: flex;
+  gap: 2px;
+  word-spacing: 0;
+}
+
+.master-output-meter-channels > span {
+  width: 6px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+/* Tracked type ends in a letter's worth of space after its last letter,
+   which centring counts as part of the word: OUT stood a pixel left of the
+   slots under it. The same space before the first letter evens it out. */
+.master-output-meter-label {
+  padding-left: var(--fp-track);
 }
 
 /* --------------------------------------------------------------- data --- */
@@ -1102,8 +1691,9 @@
    contrast against the glass.
    ========================================================================== */
 
+/* The same space inside the glass on all four sides. */
 .now-playing {
-  padding: 12px 16px !important;
+  padding: 12px !important;
 }
 
 .now-playing::after {
@@ -1131,6 +1721,25 @@
   font-family: var(--mono-font);
   font-size: 0.74rem;
   letter-spacing: 0.04em;
+}
+
+/* One step between the window's lines, the same between mode and plugin as
+   between plugin and program, and the lines centred in the glass so the
+   space above them matches the space below. The lines had three leadings
+   and two stray margins between them -- 1.2 on the small ones, 1.15 on the
+   program, 3 px over it and 1 px under -- which set the program apart by
+   more than the others were from each other. Each line's box is now its
+   own type size, so the step between boxes is the step the eye sees. */
+.topbar .now-playing {
+  row-gap: 4px !important;
+  align-content: center !important;
+}
+
+.topbar .now-playing .eyebrow,
+.topbar .now-playing .muted-inline,
+.topbar .now-playing strong {
+  margin: 0 !important;
+  line-height: 1 !important;
 }
 
 /* ==========================================================================
@@ -1297,9 +1906,9 @@
 
 /* Struck pads go down into the panel rather than lighting up like a lamp. */
 .touch-pad.active {
-  color: var(--red-ink) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--acid) 88%, #000), var(--acid)) !important;
-  border-color: var(--acid) !important;
+  color: var(--rf-color-on-code) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--rf-color-input) 88%, #000), var(--rf-color-input)) !important;
+  border-color: var(--rf-color-input) !important;
   box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.34) !important;
   transform: translateY(1px) scale(0.996) !important;
 }
@@ -1380,7 +1989,8 @@
 }
 
 .touch-controller-dockbar > button,
-.touch-controller-dockbar .touch-mode-switch button {
+.touch-controller-dockbar .touch-mode-switch button,
+.touch-keyboard-navigator-actions button {
   color: var(--ink) !important;
   background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
   border: var(--fp-seam) !important;
@@ -1396,13 +2006,14 @@
 /* Engaged means pushed in: the lip goes, the well arrives, and the position
    is painted on its edge — the same gesture as the rail keys. */
 .touch-controller-dockbar > button.active,
-.touch-controller-dockbar .touch-mode-switch button.active {
+.touch-controller-dockbar .touch-mode-switch button.active,
+.touch-keyboard-navigator-actions button.active {
   color: var(--ink) !important;
   background: var(--panel-inset) !important;
   border-color: var(--line) !important;
   box-shadow:
     inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.28),
-    inset 3px 0 0 var(--acid) !important;
+    inset 3px 0 0 var(--rf-color-input) !important;
 }
 
 .touch-controller-dockbar > button:disabled {
@@ -1454,7 +2065,7 @@
 /* The window is a moulded cursor sliding in its slot, not a neon selection. */
 .touch-keyboard-navigator-window {
   background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
-  border: 1px solid var(--acid) !important;
+  border: 1px solid var(--rf-color-input) !important;
   border-radius: var(--fp-radius-key) !important;
   box-shadow:
     inset 0 1px 0 rgba(var(--edge-light-rgb), 0.8),
@@ -1462,7 +2073,7 @@
 }
 
 .touch-keyboard-navigator-window button {
-  color: var(--acid) !important;
+  color: var(--rf-color-input) !important;
 }
 
 /* ------------------------------------------------------- the menu button --- */
@@ -1572,7 +2183,7 @@
 .touch-controller-menu .touch-mode-switch button.active {
   color: var(--ink) !important;
   background: var(--panel-inset) !important;
-  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--rf-color-input) !important;
 }
 
 .touch-controller-menu .touch-mode-switch button:active {
@@ -1684,7 +2295,7 @@
   border-color: var(--line) !important;
   box-shadow:
     inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.28),
-    inset 3px 0 0 var(--acid) !important;
+    inset 3px 0 0 var(--rf-color-input) !important;
 }
 
 /* -- the pad matrix picker: a grid of cut cells -- */
@@ -1704,12 +2315,12 @@
 }
 
 .touch-pad-matrix-picker button.selected {
-  background: color-mix(in srgb, var(--acid) 34%, var(--paper)) !important;
-  border-color: var(--acid) !important;
+  background: color-mix(in srgb, var(--rf-color-input) 34%, var(--paper)) !important;
+  border-color: var(--rf-color-input) !important;
 }
 
 .touch-pad-matrix-picker button[aria-selected="true"] {
-  background: var(--acid) !important;
+  background: var(--rf-color-input) !important;
   box-shadow: none !important;
 }
 
@@ -1737,12 +2348,14 @@
   background: var(--panel-inset) !important;
   box-shadow:
     inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.28),
-    inset 3px 0 0 var(--acid) !important;
+    inset 3px 0 0 var(--rf-color-input) !important;
 }
 
 /* Panic is the one red block on this surface: it stops every note, and it is
    the only control here you press because something has gone wrong. */
-.touch-performance-actions .touch-panic {
+.touch-performance-actions .touch-panic,
+.touch-controller-dockbar > button.touch-panic,
+.touch-keyboard-navigator-actions button.touch-panic {
   color: var(--red-ink) !important;
   background: var(--red) !important;
   border-color: var(--red) !important;
@@ -1860,6 +2473,7 @@
 .nav-item:active,
 .touch-controller-dockbar > button:not(:disabled):active,
 .touch-controller-dockbar .touch-mode-switch button:active,
+.touch-keyboard-navigator-actions button:not(:disabled):active,
 .touch-controller-menu > header > button:active,
 .touch-performance-actions button:not(:disabled):active,
 .touch-octave-control button:not(:disabled):active,
@@ -1874,13 +2488,16 @@
 
 /* Panic keeps its block while pressed — the colour is the point of it — so it
    sinks by losing its lit lip and gaining the recess instead. */
-.touch-performance-actions .touch-panic:not(:disabled):active {
+.touch-performance-actions .touch-panic:not(:disabled):active,
+.touch-controller-dockbar > button.touch-panic:not(:disabled):active,
+.touch-keyboard-navigator-actions button.touch-panic:not(:disabled):active {
   background: var(--red) !important;
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.4) !important;
 }
 
 /* Disabled is flat: nothing to press, so no depth in either direction. */
 .touch-controller-dockbar > button:disabled,
+.touch-keyboard-navigator-actions button:disabled,
 .touch-performance-actions button:disabled,
 .touch-octave-control button:disabled {
   opacity: 0.42 !important;
@@ -2014,7 +2631,11 @@
   --boot-glow: 0.15;
 }
 
-.pairing-shell {
+/* The boot curtain wears the same ground, so the connecting screen and the
+   curtain that follows it read as one: the mark does not move and the light
+   does not change between them. */
+.pairing-shell,
+.boot-curtain {
   position: relative;
   color: var(--ink) !important;
   background:
@@ -2036,7 +2657,8 @@
 }
 
 /* The dither plate: the shell is not an app shell, so it carries its own. */
-.pairing-shell::after {
+.pairing-shell::after,
+.boot-curtain::after {
   content: "";
   position: fixed;
   inset: 0;
@@ -2048,13 +2670,15 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .pairing-shell::after {
+  :root:not([data-theme="light"]) .pairing-shell::after,
+  :root:not([data-theme="light"]) .boot-curtain::after {
     opacity: 0.07;
     mix-blend-mode: screen;
   }
 }
 
-:root[data-theme="dark"] .pairing-shell::after {
+:root[data-theme="dark"] .pairing-shell::after,
+:root[data-theme="dark"] .boot-curtain::after {
   opacity: 0.07;
   mix-blend-mode: screen;
 }
@@ -2179,53 +2803,139 @@
   accent-color: var(--acid) !important;
 }
 
-/* About's fact rows: the same inset wells the runtime readout uses, so a
-   version reads as something stamped on the chassis rather than body copy. */
-.about-facts {
+/* About's included plugins: a name, its kind in the colour code, and a line
+   on what it is -- two columns where there is room. */
+.about-plugin-list {
   margin: 14px 0 0;
+  padding: 0;
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+  list-style: none;
+}
+
+.about-plugin-list > li {
+  padding: 10px 12px;
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+}
+
+.about-plugin-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.about-facts > div {
-  padding: 9px 11px;
+.about-plugin-name strong {
+  font: 700 13px/1.2 var(--display-font);
+}
+
+.about-plugin-name .plugin-kind-tag {
+  margin-left: 0;
+}
+
+.about-plugin-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* About's downloads: one key per platform, its mark and its name, big
+   enough to hit at once. Raised and seamed like every key on the panel,
+   sunk while pressed. */
+.about-download-keys {
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  list-style: none;
+}
+
+.about-download-key {
+  min-height: 56px;
+  padding: 10px 12px;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
-  background: var(--panel-inset);
+  align-items: center;
+  gap: 12px;
+  color: var(--ink);
+  text-decoration: none;
+  background: linear-gradient(180deg, var(--glass), var(--paper));
   border: var(--fp-seam);
   border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  transition:
+    background var(--rf-motion-instant) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
+}
+
+.about-download-key:hover {
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.about-download-key:active {
+  background: var(--panel-inset);
   box-shadow: var(--fp-well);
 }
 
-.about-facts dt {
-  color: var(--muted);
-  font-family: var(--display-font);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: var(--fp-track);
-  text-transform: uppercase;
+.about-download-key:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
 }
 
-.about-facts dd {
-  margin: 0;
+.about-download-key > svg {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  fill: currentColor;
+}
+
+/* Lucide's plug is a stroke, not a fill. */
+.about-download-key > svg.lucide {
+  fill: none;
+}
+
+.about-download-key > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.about-download-key strong {
+  font: 700 13px/1.2 var(--display-font);
+}
+
+.about-download-key small {
+  color: var(--fp-rail-label);
+  font: 500 11px/1 var(--mono-font);
+}
+
+/* The project's address, and a link that reads as one. */
+.about-project-link {
+  margin-top: 10px;
+  display: inline-block;
   color: var(--ink);
-  font-family: var(--mono-font);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  font: 600 13px/1.4 var(--mono-font);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--ink) 40%, transparent);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
 }
 
-/* A disagreement is worth an edge, not a shout. */
-.about-drift {
-  margin: 12px 0 0;
-  padding: 9px 11px;
-  background: var(--panel-inset);
-  border: var(--fp-seam);
+.about-project-link:hover {
+  text-decoration-color: currentColor;
+}
+
+.about-project-link:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 3px;
   border-radius: var(--fp-radius-key);
-  box-shadow: var(--fp-well), inset 3px 0 0 var(--red);
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .rf-button--ghost {
@@ -2278,11 +2988,15 @@
    know how many columns `auto-fit` produced, so per-key borders would put a
    seam on the outside of a wrapped row. Gaps are right whichever way it lands.
 
-   Horizontally the gang spans the card and the four keys share the width
-   evenly, so the bank reads as one strip mounted across the panel. */
+   Horizontally the gang spans the card and its keys share the width
+   evenly, so the bank reads as one strip mounted across the panel. How many
+   keys there are is the card's business -- an effect has no Go to PLAY --
+   so the gang makes a column per key rather than four columns and a hole. */
 .plugin-manager-card-actions {
   gap: 1px !important;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  grid-template-columns: none !important;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   background: var(--line);
   border: var(--fp-seam);
   border-radius: var(--fp-radius-key);
@@ -2297,6 +3011,64 @@
    The card is the thing being measured, so it is the container. */
 .plugin-manager-card {
   container-type: inline-size;
+}
+
+/* A branded card carries its plugin's banner as its ground, the way the
+   PLAY picker's rows do: the artwork across the whole card, and over it a
+   shade of the panel's own paper, dense where the copy reads and thinning
+   toward the right, so the text holds its contrast in either theme and the
+   banner still shows. The keys at the foot are solid and need none. */
+.plugin-manager-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.plugin-manager-card-banner,
+.plugin-manager-card-shade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.plugin-manager-card-banner {
+  object-fit: cover;
+}
+
+.plugin-manager-card-shade {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--paper) 94%, transparent) 0%,
+    color-mix(in srgb, var(--paper) 86%, transparent) 50%,
+    color-mix(in srgb, var(--paper) 52%, transparent) 100%
+  );
+}
+
+.plugin-manager-card > :not(.plugin-manager-card-banner, .plugin-manager-card-shade) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Inactive, the banner goes grey with the rest of the card. */
+.plugin-manager-card.inactive .plugin-manager-card-banner {
+  filter: grayscale(1);
+  opacity: 0.58;
+}
+
+/* Artwork appears when it is whole (FadeImage): out of sight while it
+   arrives, then faded in, so a banner never paints in strips and an icon
+   never pops. After the inactive rule above, whose opacity it must win
+   until the image has loaded. The motion token is instant under reduced
+   motion. */
+.rf-fade-image {
+  transition: opacity var(--rf-motion-emphasized) var(--rf-ease-standard);
+}
+
+.rf-fade-image:not(.is-loaded) {
+  opacity: 0;
 }
 
 /* Only a genuinely narrow card — a phone, one column — reaches this. The grid
@@ -2314,6 +3086,7 @@
     width: 92px;
     max-width: none;
     grid-template-columns: minmax(0, 1fr) !important;
+    grid-auto-flow: row;
     align-self: stretch;
   }
 
@@ -2373,8 +3146,10 @@
    silkscreened on it rather than lit.
    ========================================================================== */
 
+/* The same space around the keys on every side: the bar kept 8 px above
+   and below them and up to 26 at the ends. */
 .play-plugin-toolbar {
-  padding: 8px clamp(12px, 2.5vw, 26px) !important;
+  padding: 8px !important;
   color: var(--ink) !important;
   background:
     repeating-linear-gradient(
@@ -2428,10 +3203,29 @@
   letter-spacing: var(--fp-track) !important;
 }
 
-/* The glyph plate is inset into the key, the way a legend plate is. */
+/* The glyph plate is inset into the key, the way a legend plate is. Each
+   key's plate is its subject's colour in the colour code (design/
+   tokens.css), so the three read apart at a glance rather than as one
+   blue repeated: instruments blue, sound amber, presets green. */
+.play-header-button {
+  --key-plate: var(--acid);
+}
+
+.play-header-button.back {
+  --key-plate: var(--rf-color-instrument);
+}
+
+.play-header-button.chain {
+  --key-plate: var(--rf-color-sound);
+}
+
+.play-header-button.presets {
+  --key-plate: var(--rf-color-preset);
+}
+
 .play-header-button > span {
   color: var(--acid-ink) !important;
-  background: var(--acid) !important;
+  background: var(--key-plate) !important;
   border-radius: 1px !important;
   font-family: var(--mono-font) !important;
 }
@@ -2444,7 +3238,7 @@
   }
 
   .play-header-button:hover > span {
-    background: var(--acid) !important;
+    background: var(--key-plate) !important;
   }
 }
 
@@ -2462,7 +3256,7 @@
 
 .play-header-button.active > span,
 .play-header-button:active > span {
-  background: var(--acid) !important;
+  background: var(--key-plate) !important;
 }
 
 .play-header-button:focus-visible {
@@ -2494,7 +3288,6 @@
 /* ---------------------------------------------------------- as panels --- */
 
 .settings-card,
-.active-performance-card,
 .live-browser,
 .live-empty,
 .live-loading,
@@ -2547,6 +3340,41 @@
 .web-server-settings-form input[type="number"]:focus-visible {
   outline: 2px solid var(--acid) !important;
   outline-offset: 1px;
+}
+
+/* The Controllers pages' fields are Settings' fields: the same well, the same
+   seam, the same height. They were left to the browser -- 23 px tall,
+   unpadded, square -- beside keys drawn to the house style. */
+.controllers-workspace select,
+.controllers-workspace input[type="text"],
+.controllers-workspace input[type="number"],
+.controllers-workspace input:not([type]),
+.controller-settings input[type="text"] {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 40px;
+  padding: 11px 12px;
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-well) !important;
+  font: 11px/1.3 var(--mono-font) !important;
+}
+
+.controllers-workspace select:focus-visible,
+.controllers-workspace input[type="text"]:focus-visible,
+.controllers-workspace input[type="number"]:focus-visible,
+.controllers-workspace input:not([type]):focus-visible,
+.controller-settings input[type="text"]:focus-visible {
+  outline: 2px solid var(--acid) !important;
+  outline-offset: 1px;
+}
+
+.controllers-workspace select:disabled,
+.controllers-workspace input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* ------------------------------------------------------------ as keys --- */
@@ -2633,6 +3461,65 @@
   font-family: var(--display-font);
   font-weight: 700;
   letter-spacing: var(--fp-track);
+}
+
+/* A tag is its kind's colour in the colour code (design/tokens.css):
+   instruments blue, effects amber, MIDI processors and controllers violet
+   -- where they were cyan, violet, green and peach, a palette of their own
+   that meant nothing anywhere else. */
+.plugin-kind-tag.instrument {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-instrument);
+}
+
+.plugin-kind-tag.effect {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-sound);
+}
+
+.plugin-kind-tag.midi-processor,
+.plugin-kind-tag.controller {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-input);
+}
+
+/* The Plugin Manager keeps one kind of plugin per tab -- the Settings
+   strip of keys -- and each tab is its kind's colour in the code: a lamp of
+   it beside the name, and the engaged key's lit edge in it rather than the
+   house accent. The count is data, so it is set in the mono face. */
+.plugin-kind-tabs button {
+  --kind-colour: var(--rf-color-instrument);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plugin-kind-tabs button.effect {
+  --kind-colour: var(--rf-color-sound);
+}
+
+.plugin-kind-tabs button.midi-processor,
+.plugin-kind-tabs button.controller {
+  --kind-colour: var(--rf-color-input);
+}
+
+.plugin-kind-lamp {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  background: var(--kind-colour);
+  border-radius: 1px;
+  box-shadow: inset 0 0 0 1px rgba(var(--edge-dark-rgb), 0.18);
+}
+
+.plugin-kind-tabs button > small {
+  color: var(--muted);
+  font: 600 10px/1 var(--mono-font);
+  letter-spacing: 0;
+}
+
+.plugin-kind-tabs button.active {
+  box-shadow: var(--fp-well), inset 0 -3px 0 var(--kind-colour) !important;
 }
 
 /* --------------------------------------------------- the create key ----- */
@@ -2749,6 +3636,135 @@
 
 .plugin-picker-card.inactive .play-plugin-status {
   color: var(--muted);
+}
+
+/* The rack editor's picker asks for an instrument or an effect, and says
+   which in its colour from the code (design/tokens.css): the eyebrow, each
+   row's painted edge and its ADD are the instruments' blue or the effects'
+   amber. */
+.rack-instrument-picker-dialog {
+  --pick-colour: var(--rf-color-instrument);
+}
+
+.rack-instrument-picker-dialog.effect {
+  --pick-colour: var(--rf-color-sound);
+}
+
+.rack-instrument-picker-dialog .modal-dialog-heading > .eyebrow,
+.rack-instrument-picker-dialog .play-plugin-status {
+  color: var(--pick-colour) !important;
+}
+
+.rack-instrument-picker-dialog .plugin-picker-card::before {
+  background: var(--pick-colour);
+}
+
+/* ------------------------------------------------ the plugin picker ---
+   Choosing what a new node owns is an edit of the Rack like the others, so
+   it is their modal: centred on the canvas over the same scrim, the graph
+   behind inert, the plate of the cable editors. It asks in its role's
+   colour -- the kicker and each row's edge and ADD (see above). */
+.rack-plugin-picker {
+  position: absolute;
+  z-index: 48;
+  inset: 0;
+  margin: auto;
+  width: min(620px, calc(100% - 24px));
+  height: fit-content;
+  max-height: calc(100% - 24px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip), 0 14px 36px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  animation: rack-plugin-editor-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
+}
+
+.rack-plugin-picker > header {
+  min-height: 56px;
+  padding: 8px 8px 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--fp-panel);
+  border-bottom: var(--fp-seam);
+}
+
+.rack-plugin-picker > header > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.rack-plugin-picker > header span {
+  color: var(--pick-colour);
+  font: 700 10px/1.2 var(--mono-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.rack-plugin-picker > header strong {
+  font: 700 15px/1.2 var(--display-font);
+}
+
+.rack-plugin-picker-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.rack-plugin-picker > footer {
+  padding: 8px;
+  display: flex;
+  justify-content: flex-end;
+  background: var(--fp-panel);
+  border-top: var(--fp-seam);
+}
+
+.rack-plugin-picker-cancel {
+  min-height: 34px;
+  padding: 0 14px;
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  font: 700 11px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.rack-plugin-picker-cancel:hover {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.rack-plugin-picker-cancel:active {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.rack-plugin-picker-cancel:focus-visible {
+  outline: 2px solid var(--pick-colour);
+  outline-offset: 2px;
+}
+
+/* On a phone the picker is the canvas, edge to edge, as the others are. */
+@media (max-width: 700px), (max-height: 600px) {
+  .rack-plugin-picker {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
 }
 
 /* ==========================================================================
@@ -3175,10 +4191,10 @@
 }
 
 /* A controller is hardware, so its tile mark is a legend plate like any other,
-   in the palette's amber rather than a hardcoded one. */
+   in the input's violet from the colour code. */
 .controller-tile-mark {
-  color: var(--amber-ink) !important;
-  background: color-mix(in srgb, var(--amber) 14%, transparent) !important;
+  color: var(--rf-color-input) !important;
+  background: color-mix(in srgb, var(--rf-color-input) 14%, transparent) !important;
   border: var(--fp-seam) !important;
   border-radius: var(--fp-radius-key) !important;
 }
@@ -3222,17 +4238,17 @@
   height: 8px;
   flex: 0 0 auto;
   border-radius: 1px;
-  background: color-mix(in srgb, var(--nav-controller) 20%, var(--panel-inset));
+  background: color-mix(in srgb, var(--rf-color-input) 20%, var(--panel-inset));
   box-shadow:
     inset 0 1px 2px rgba(var(--edge-dark-rgb), 0.55),
     0 1px 0 rgba(var(--edge-light-rgb), 0.55);
 }
 
 .controller-dock-toggle.open::before {
-  background: var(--nav-controller);
+  background: var(--rf-color-input);
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--nav-controller) 60%, #fff),
-    0 0 7px color-mix(in srgb, var(--nav-controller) 72%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--rf-color-input) 60%, #fff),
+    0 0 7px color-mix(in srgb, var(--rf-color-input) 72%, transparent);
 }
 
 /* The pictogram is the fallback legend, so it is hidden while the words fit. */
@@ -3600,26 +4616,6 @@
 
 /* ----------------------------------------- the floating hamburger key ----- */
 
-/* It is dragged around the surface, so it is a key that has been unscrewed and
-   set down on the glass: same material as the rest, a heavier drop because it
-   is sitting on top of something rather than mounted in it. */
-.performance-menu-button {
-  color: var(--ink) !important;
-  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
-  border: var(--fp-seam) !important;
-  border-radius: var(--fp-radius-key) !important;
-  box-shadow:
-    var(--fp-lip),
-    0 4px 12px rgba(var(--edge-dark-rgb), 0.4) !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}
-
-.performance-menu-button:active {
-  background: var(--panel-inset) !important;
-  box-shadow: var(--fp-well) !important;
-}
-
 /* ======================================================== the sequencer ===
    The transport strip is the machine's clock made visible: a gang of keys, a
    dark LCD, and one lamp that breathes on the beat. The workshop below it is
@@ -3640,19 +4636,19 @@
 }
 
 .sequencer-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 9px 12px;
+}
+
+.seq-strip-controls {
+  min-width: 0;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px 14px;
-  padding: 9px 12px;
-}
-
-.seq-legend {
-  color: var(--fp-rail-label);
-  font-family: var(--display-font);
-  font-weight: 800;
-  font-size: var(--fp-label);
-  letter-spacing: var(--fp-track);
 }
 
 .seq-keys {
@@ -3690,8 +4686,7 @@
   border-radius: 0 var(--fp-radius-key) var(--fp-radius-key) 0;
 }
 
-.seq-keys > .seq-key:only-child,
-.seq-open-key {
+.seq-keys > .seq-key:only-child {
   border-radius: var(--fp-radius-key);
   border-left-width: 1px;
 }
@@ -3731,23 +4726,33 @@
    Animated as grid rows rather than a max-height guess, so the motion is
    exactly the height the content asks for however many lanes it has. */
 .seq-fold-key {
-  margin-left: auto;
   min-width: 40px;
   justify-content: center;
-  padding-inline: 10px;
+  padding-inline: 12px;
 }
 
+/* The arrow turns about its own centre. It was two borders of an 8px box,
+   whose drawn corner sat off the box's middle, nudged up 2px to look
+   centred -- so turning it about the box swung it up and down. The icon's
+   stroke is centred in its box, and the box is what turns. */
 .seq-chevron {
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: translateY(-2px) rotate(-135deg);
+  width: 16px;
+  height: 16px;
+  flex: none;
+  transform-origin: 50% 50%;
+  transform: rotate(180deg);
   transition: transform var(--rf-motion-fast) var(--rf-ease-standard);
 }
 
 .sequencer-shell.collapsed .seq-chevron {
-  transform: translateY(-2px) rotate(45deg);
+  transform: rotate(0deg);
+}
+
+/* Folded, the strip is one line: play, panic and fill, where the transport
+   is and at what tempo, and the fold to open the rest. Stop, the tempo keys,
+   sync and the deck key come back with the pads when it unfolds. */
+.sequencer-shell.collapsed .seq-extended {
+  display: none;
 }
 
 /* The deck key keeps its lamp and no arrow: one arrow on the strip, and it
@@ -3804,26 +4809,13 @@
     0 0 7px color-mix(in srgb, var(--acid) 72%, transparent);
 }
 
-/* The SHOW FILE plate: the library's luggage. An engraved outline like
-   the PERFORMANCE zone, sized as a footer under the library grid. */
+/* The SHOW FILE plate: the library's luggage, a labelled frame like the
+   PERFORMANCE zone (see "labelled frames"), sized as a footer under the
+   library grid. */
 .show-transfer {
   position: relative;
   margin: 18px 0 4px;
   padding: 18px 14px 14px;
-  border: 1px solid var(--fp-seam);
-  border-radius: var(--fp-radius);
-  background: var(--fp-panel);
-}
-
-.show-transfer-legend {
-  position: absolute;
-  top: -8px;
-  left: 12px;
-  padding: 0 6px;
-  background: var(--fp-panel);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: var(--fp-rail-label);
 }
 
 .show-transfer-note {
@@ -3958,21 +4950,17 @@
     0 0 7px color-mix(in srgb, var(--red) 78%, transparent);
 }
 
-/* The LCD: mono data set into the panel, the strip's only glass. */
-/* An LCD sitting inside a key group belongs to that group: it takes the
-   keys' height so the row reads as one machined block instead of a
-   readout floating between two switches. */
-.seq-keys > .seq-lcd {
-  min-height: 34px;
-  padding-top: 9px;
-  padding-bottom: 10px;
-}
-
+/* The LCD: mono data set into the panel, the strip's only glass. It takes
+   the keys' height wherever it stands -- in a key group or on its own, as
+   the transport position and the tempo do -- so a row of keys and readouts
+   reads as one machined block, not readouts floating shorter between the
+   switches. */
 .seq-lcd {
   display: inline-flex;
   align-items: baseline;
   gap: 9px;
-  padding: 7px 11px;
+  min-height: 34px;
+  padding: 9px 11px 10px;
   background: var(--panel-inset);
   border: var(--fp-seam);
   border-radius: var(--fp-radius-key);
@@ -4013,10 +5001,6 @@
   display: flex;
   align-items: stretch;
   gap: 6px;
-}
-
-.seq-open-key {
-  margin-left: auto;
 }
 
 /* ------------------------------------------------------- the workshop --- */
@@ -4239,10 +5223,6 @@
 
   .seq-library ul {
     max-height: 140px;
-  }
-
-  .seq-open-key {
-    margin-left: 0;
   }
 }
 
@@ -4677,6 +5657,42 @@
   color: var(--red) !important;
 }
 
+/* ------------------------------------------------------ the LOAD key ---
+   Loading a target is the one thing a player reaches for on stage, and it
+   was a word with nothing around it. It is a key now, and a big one: raised
+   and seamed like every key on the panel, sunk while pressed, and sunk for
+   good -- its word in the stage's red -- while its target is playing. The
+   word keeps its silkscreen. */
+.live-shell .activate-button {
+  min-width: 120px;
+  min-height: 52px;
+  padding: 10px 18px;
+  display: inline-grid;
+  place-items: center;
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  transition:
+    background var(--rf-motion-instant) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
+}
+
+.live-shell .activate-button:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.live-shell .activate-button:active:not(:disabled),
+.live-shell .activate-button.active {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.live-shell .activate-button:focus-visible {
+  outline: 2px solid var(--entity-color, var(--acid));
+  outline-offset: 2px;
+}
+
 /* -------------------------------------------- config card actions, keys ---
    EDIT and DELETE were the last pill buttons on the library cards. Keys
    now: raised, momentary sink, and DELETE wears the red ink the way the
@@ -4754,6 +5770,526 @@
   background: linear-gradient(180deg, #202225, #17191c) !important;
 }
 
+/* A node's colour is what it is, from the colour code's lit set -- the
+   canvas is dark in both modes: an instrument blue, an effect amber, a
+   MIDI processor violet, a rack grey (a container, neither); the ins and
+   outs are their signal, MIDI violet and audio amber. It shows on the
+   node's edge when selected, and in the minimap. */
+.rack-flow-node,
+.rack-flow-node.plugin {
+  --node-color: var(--rf-lit-instrument);
+}
+
+.rack-flow-node.plugin.effect,
+.rack-flow-node.audio_input,
+.rack-flow-node.audio_output {
+  --node-color: var(--rf-lit-sound);
+}
+
+.rack-flow-node.plugin.midi-processor,
+.rack-flow-node.midi_input,
+.rack-flow-node.midi_output {
+  --node-color: var(--rf-lit-input);
+}
+
+.rack-flow-node.rack {
+  --node-color: var(--rf-lit-rack);
+}
+
+/* A plugin node is edged in its kind's colour, always: an instrument blue,
+   an effect amber, a MIDI processor violet -- what it is, read from across
+   the canvas. A problem's edge, below, takes precedence. */
+.rack-flow-node.plugin {
+  border-color: color-mix(in srgb, var(--node-color) 70%, transparent) !important;
+}
+
+/* A node with a problem says how bad it is on its edge: an error -- the
+   engine refuses the graph, or the Rack is not heard -- in the attention
+   red, solid, with its painted edge; a warning -- it plays, but this node
+   will do nothing -- in a dashed amber, dashed because amber alone is the
+   colour of sound on this canvas. The strip under the canvas says what. */
+.rack-flow-node.has-error {
+  border-color: var(--red) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 3px 0 0 var(--red),
+    0 6px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+.rack-flow-node.has-warning {
+  border: 1px dashed var(--rf-lit-sound) !important;
+}
+
+.rack-graph-problems {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 12px;
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  background: color-mix(in srgb, var(--amber) 8%, var(--paper));
+  border-top: 1px solid color-mix(in srgb, var(--amber) 38%, var(--line));
+  font: 600 12px/1.4 var(--display-font);
+}
+
+.rack-graph-problems.has-errors {
+  background: color-mix(in srgb, var(--red) 7%, var(--paper));
+  border-top-color: color-mix(in srgb, var(--red) 38%, var(--line));
+}
+
+.rack-graph-problems-summary {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.rack-graph-problems ul {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  list-style: none;
+}
+
+.rack-graph-problems li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.rack-graph-problems li.error {
+  color: var(--red);
+}
+
+.rack-graph-problems li.warning {
+  color: var(--amber-ink);
+}
+
+.rack-graph-problems strong {
+  color: var(--ink);
+}
+
+.rack-graph-problem-severity {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  color: var(--paper);
+  border-radius: var(--fp-radius-key);
+  font-size: 9px;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.rack-graph-problems li.error .rack-graph-problem-severity {
+  background: var(--red);
+}
+
+.rack-graph-problems li.warning .rack-graph-problem-severity {
+  background: var(--amber-ink);
+}
+
+/* A plugin with artwork wears it: its banner across the node under a shade
+   of the canvas, dense on the left where the name reads and thinning to the
+   right, and its icon in the mark where other nodes show a word. */
+.rack-flow-node {
+  position: relative;
+}
+
+.rack-flow-node-art {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* Banners are 4:1 and a node is squarer. The banner is shown whole --
+   fitted to the node's width, centred -- and dissolves into the node at its
+   top, bottom and left, so no edge of it is ever seen cut; under the name
+   it is only a tint. */
+.rack-flow-node-art img {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: auto;
+  translate: 0 -50%;
+  opacity: 0.5;
+  -webkit-mask-image:
+    linear-gradient(90deg, transparent 0%, #000 55%),
+    linear-gradient(180deg, transparent 0%, #000 30%, #000 70%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(90deg, transparent 0%, #000 55%),
+    linear-gradient(180deg, transparent 0%, #000 30%, #000 70%, transparent 100%);
+  mask-composite: intersect;
+}
+
+.rack-flow-node-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(22, 23, 26, 0.94) 0%,
+    rgba(22, 23, 26, 0.8) 50%,
+    rgba(22, 23, 26, 0.35) 100%
+  );
+}
+
+.rack-flow-node.branded > :not(.rack-flow-node-art):not(.react-flow__handle) {
+  position: relative;
+  z-index: 1;
+}
+
+/* A node's icon key is a square box (styles.css), and a plugin's art
+   fills it edge to edge -- a 40 by 34 key left the square art hanging
+   off-centre past its bottom. */
+.rack-flow-node-icon.has-art {
+  padding: 0;
+  display: block;
+  overflow: hidden;
+  background: transparent !important;
+}
+
+.rack-flow-node-icon.has-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* A port is a jack in its signal's colour -- MIDI violet, audio amber --
+   drawn as a ring while nothing is plugged into it and filled once a cable
+   is. While a cable is being drawn (RackPort), a port that would take it
+   beats gently and grows as the cable comes within reach, --reach running
+   0 to 1; one that would refuse it dims. `scale`, not transform: React Flow
+   places the handle with its transform. */
+.rack-flow-node .react-flow__handle {
+  --port-colour: var(--rf-lit-sound);
+  --reach: 0;
+  width: 11px;
+  height: 11px;
+  background: #17181b;
+  border: 2px solid var(--port-colour);
+  transition:
+    scale var(--rf-motion-fast) var(--rf-ease-standard),
+    background var(--rf-motion-fast) var(--rf-ease-standard),
+    opacity var(--rf-motion-fast) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.rack-flow-node .midi-handle {
+  --port-colour: var(--rf-lit-input);
+}
+
+/* A port grows about its own centre. React Flow centres it on the node's
+   edge with a transform (translate(-50%, -50%) on the left, (50%, -50%) on
+   the right), and `scale` is applied before that transform, so scaling about
+   the box's own middle pushed the dot away as it grew. The origin that stays
+   put is the box point the transform lands on the edge: its top-left corner
+   on the left, its top-right corner on the right. */
+.rack-flow-node .react-flow__handle-left {
+  transform-origin: 0 0;
+}
+
+.rack-flow-node .react-flow__handle-right {
+  transform-origin: 100% 0;
+}
+
+.rack-flow-node .react-flow__handle.is-connected {
+  background: var(--port-colour);
+}
+
+.rack-flow-node .react-flow__handle.is-accepting {
+  scale: calc(1.2 + var(--reach) * 0.9);
+  background: color-mix(in srgb, var(--port-colour) calc(35% + var(--reach) * 65%), #17181b);
+  animation: rack-port-beat calc(var(--rf-motion-emphasized) * 3) var(--rf-ease-standard) infinite;
+}
+
+.rack-flow-node .react-flow__handle.is-refusing {
+  opacity: 0.25;
+}
+
+@keyframes rack-port-beat {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--port-colour) 45%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--port-colour) 0%, transparent);
+  }
+}
+
+/* A port is a small dot and a finger is not: the reach around it is wider
+   than what is drawn, so a cable lands without aiming for the pixel. */
+.rack-flow-node .react-flow__handle::after {
+  content: "";
+  position: absolute;
+  inset: -12px;
+}
+
+/* MIDI cables are dashed and audio cables solid, still: the running dashes
+   React Flow animates repainted the canvas every frame. */
+.rack-graph-canvas .rack-flow-edge-path.midi {
+  stroke-dasharray: 5 4;
+}
+
+/* The cable a new one is about to replace fades back and breaks up while the
+   new one is drawn, so re-patching an output is never a surprise. */
+.rack-graph-canvas .rack-flow-edge-path {
+  transition: opacity var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.rack-graph-canvas .rack-flow-edge-path.is-replaced {
+  opacity: 0.3;
+  stroke-dasharray: 2 5;
+}
+
+/* Undo, redo and the history sit with the zoom keys: the canvas's own
+   controls, reachable on a phone. An unavailable one is unlit. */
+.rack-graph-canvas .react-flow__controls-button.rack-history-key:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.rack-graph-canvas .react-flow__controls-button.rack-history-key.active {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.rack-graph-canvas .react-flow__controls-button.rack-history-key svg {
+  width: 14px;
+  height: 14px;
+  max-width: none;
+  max-height: none;
+  fill: none;
+}
+
+/* The history: every state the draft has been in, newest on top, the one
+   it is in now marked with the house accent's edge; steps undone below it
+   are faint until something new replaces them. A click returns there. */
+.rack-history-list {
+  position: absolute;
+  top: 56px;
+  right: var(--rack-float-inset, 14px);
+  z-index: 7;
+  width: min(280px, calc(100% - 28px));
+  max-height: min(360px, calc(100% - 80px));
+  display: flex;
+  flex-direction: column;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip), 0 12px 32px rgba(0, 0, 0, 0.45);
+  animation: rack-refusal-in var(--rf-motion-standard) var(--rf-ease-emphasized) backwards;
+}
+
+.rack-history-list > header {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: var(--fp-seam);
+  color: var(--fp-rail-label);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.rack-history-list > header button {
+  width: 24px;
+  height: 24px;
+  color: var(--fp-rail-label);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.rack-history-list ol {
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.rack-history-list li button {
+  width: 100%;
+  padding: 7px 8px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--fp-radius-key);
+  text-align: left;
+  cursor: pointer;
+  font: 600 12px/1.3 var(--display-font);
+}
+
+.rack-history-list li button:hover {
+  background: rgba(var(--ink-rgb), 0.06);
+}
+
+.rack-history-list li button.current {
+  background: var(--panel-inset);
+  box-shadow: inset 3px 0 0 var(--acid);
+}
+
+.rack-history-list li button.undone {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* The keys and gestures, listed on request: the key on the left, what it
+   does beside it. */
+.rack-shortcuts dl {
+  margin: 0;
+  padding: 6px 10px 10px;
+  display: grid;
+  gap: 7px;
+  overflow-y: auto;
+}
+
+.rack-shortcuts dl > div {
+  display: grid;
+  gap: 2px;
+}
+
+.rack-shortcuts dt {
+  color: var(--ink);
+  font: 700 11px/1.3 var(--display-font);
+}
+
+.rack-shortcuts dd {
+  margin: 0;
+  color: var(--muted);
+  font: 500 11px/1.35 var(--display-font);
+}
+
+/* A free node held over an audio cable: the cable it would go into widens
+   and brightens, so the drop is aimed. */
+.rack-graph-canvas .react-flow__edge.is-drop-target .rack-flow-edge-path {
+  stroke-width: 5 !important;
+  filter: drop-shadow(0 0 5px var(--rf-lit-sound));
+}
+
+/* ------------------------------------------ what the pointer is on ---
+   Everything on the canvas answers the pointer: a node brightens and
+   lifts a hair, a port grows a ring, a cable thickens and glows in its
+   signal's colour. A node whose menu is open is ringed and haloed in its
+   kind's colour, so the menu reads as that node's; a selected node wears
+   a finer ring. Outline and filter, not box-shadow: the node's shadow
+   already says whether it has a problem. */
+.rack-flow-node {
+  transition:
+    filter var(--rf-motion-fast) var(--rf-ease-standard),
+    translate var(--rf-motion-fast) var(--rf-ease-standard),
+    outline-color var(--rf-motion-fast) var(--rf-ease-standard);
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+}
+
+.rack-flow-node:hover {
+  filter: brightness(1.14);
+  translate: 0 -1px;
+}
+
+.rack-flow-node.selected {
+  outline: 1px solid color-mix(in srgb, var(--node-color) 70%, transparent);
+}
+
+.rack-flow-node.menu-open {
+  outline: 2px solid var(--node-color);
+  filter: brightness(1.12) drop-shadow(0 0 10px color-mix(in srgb, var(--node-color) 55%, transparent));
+}
+
+.rack-flow-node .react-flow__handle:hover {
+  scale: 1.35;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--port-colour) 35%, transparent);
+}
+
+.rack-graph-canvas .rack-flow-edge-path {
+  transition:
+    opacity var(--rf-motion-fast) var(--rf-ease-standard),
+    stroke-width var(--rf-motion-fast) var(--rf-ease-standard),
+    filter var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.rack-graph-canvas .react-flow__edge:hover .rack-flow-edge-path,
+.rack-graph-canvas .react-flow__edge.selected .rack-flow-edge-path {
+  stroke-width: 3.5 !important;
+}
+
+.rack-graph-canvas .react-flow__edge:hover .rack-flow-edge-path.audio,
+.rack-graph-canvas .react-flow__edge.selected .rack-flow-edge-path.audio {
+  filter: drop-shadow(0 0 4px var(--rf-lit-sound));
+}
+
+.rack-graph-canvas .react-flow__edge:hover .rack-flow-edge-path.midi,
+.rack-graph-canvas .react-flow__edge.selected .rack-flow-edge-path.midi {
+  filter: drop-shadow(0 0 4px var(--rf-lit-input));
+}
+
+/* Why a cable was refused, for a moment, over the canvas. */
+.rack-graph-refusal {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 6;
+  max-width: min(420px, calc(100% - 28px));
+  margin: 0;
+  padding: 8px 12px;
+  translate: -50% 0;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--fp-seam);
+  border-left: 3px solid var(--red);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), 0 8px 22px rgba(0, 0, 0, 0.4);
+  font: 600 12px/1.4 var(--display-font);
+  pointer-events: none;
+  animation: rack-refusal-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
+}
+
+@keyframes rack-refusal-in {
+  from {
+    opacity: 0;
+    translate: -50% 6px;
+  }
+}
+
+/* A module arrives in place: it fades up from a little smaller, and a new
+   cable fades in along with it, at the emphasized step -- no slide, so a
+   node never appears to come from somewhere it was not. A node the editor
+   moves for you (the output stepping aside for an inserted effect) does not
+   glide: its cables are drawn from where it is going, not where it is
+   on the way, so a gliding node would leave them hanging for the length of
+   the glide. Nodes move at once and stay plugged in. */
+.rack-flow-node,
+.rack-flow-label {
+  animation: rack-node-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
+}
+
+.rack-graph-canvas .react-flow__edge {
+  animation: rack-cable-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
+}
+
+@keyframes rack-node-in {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+}
+
+@keyframes rack-cable-in {
+  from {
+    opacity: 0;
+  }
+}
+
 .rack-flow-node.selected {
   border-color: var(--node-color) !important;
   box-shadow:
@@ -4816,6 +6352,63 @@
   border-radius: var(--fp-radius-key);
 }
 
+/* A node's menu is edged in the node's colour from the code, like the
+   node it opened from -- an instrument's blue, an effect's amber, MIDI's
+   violet, a child Rack's grey -- and its kicker names the kind in it. */
+.rack-node-menu.kind-instrument { --menu-colour: var(--rf-color-instrument); }
+.rack-node-menu.kind-effect,
+.rack-node-menu.kind-sound { --menu-colour: var(--rf-color-sound); }
+.rack-node-menu.kind-midi-processor,
+.rack-node-menu.kind-input { --menu-colour: var(--rf-color-input); }
+.rack-node-menu.kind-rack { --menu-colour: var(--rf-color-rack); }
+
+.rack-node-menu[class*="kind-"] {
+  border-color: var(--menu-colour) !important;
+  box-shadow:
+    var(--fp-lip),
+    0 0 0 1px color-mix(in srgb, var(--menu-colour) 45%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.35) !important;
+}
+
+.rack-node-menu[class*="kind-"] > header > span {
+  color: var(--menu-colour);
+}
+
+/* The Child Rack picker in the canvas menu kept the old glass -- a near-
+   black field ringed in cyan -- inside a paper menu. It is the panel's
+   field now: sunk into the plate, a seam around it, its name silkscreened
+   above like every other field's. */
+.rack-pane-child-picker {
+  border-top: var(--fp-seam);
+}
+
+.rack-pane-child-picker span {
+  color: var(--fp-rail-label);
+  font: 700 9px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.rack-pane-child-picker select {
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 600 12px/1 var(--display-font);
+}
+
+.rack-pane-child-picker select:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+.rack-pane-child-picker select:disabled {
+  color: var(--muted);
+}
+
 .rack-node-menu button:hover:not(:disabled) {
   background: var(--glass);
 }
@@ -4837,7 +6430,264 @@
   color: var(--acid) !important;
 }
 
-/* The floating details panel: a plate, not smoked glass. */
+/* A word that changes in place (StableLabel): every word it can show shares
+   one cell, the spare ones invisible, so the cell keeps the longest one's
+   width and nothing beside it moves. */
+.stable-label {
+  display: inline-grid;
+}
+
+.stable-label > * {
+  grid-area: 1 / 1;
+}
+
+.stable-label > [aria-hidden="true"] {
+  visibility: hidden;
+}
+
+/* ------------------------------------------------ the editor's header ---
+   Across the top of the node editor while it is open, where the thin bar
+   and the details dialog used to be: what is edited and whether it is
+   saved, its name, Available in LIVE, the preview, and Exit and Save --
+   Save the one painted key, off while the graph has an error. It wraps to
+   a second row before anything is cut. */
+.graph-workspace-header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  padding: 10px 14px;
+  color: var(--ink);
+  background: var(--fp-panel);
+  border-bottom: var(--fp-seam);
+  box-shadow: var(--fp-lip);
+}
+
+/* Two lines and nothing else: what is edited, and whether it is saved --
+   the same on every screen. The state is set so its longer word, UNSAVED
+   CHANGES, runs as wide as RACK EDITOR above it: the two lines make one
+   block, and the name starts where both end. */
+.graph-workspace-title {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 3px;
+}
+
+.graph-workspace-title .card-kicker {
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.graph-workspace-state {
+  color: var(--muted);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.graph-workspace-name {
+  flex: 1 1 160px;
+  max-width: 340px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.graph-workspace-name input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 600 13px/1 var(--display-font);
+}
+
+.graph-workspace-name input:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+
+.graph-workspace-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Save carries why it is off at its foot: the key grows a line, its label
+   stays centred above. */
+.graph-workspace-save-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.graph-workspace-key.save.blocked {
+  display: inline-grid;
+  grid-template-rows: 1fr auto;
+  justify-items: center;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.graph-workspace-blocked {
+  align-self: end;
+  color: var(--red);
+  text-align: center;
+  font: 700 8px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.graph-workspace-key,
+.graph-workspace-key .async-action-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.graph-workspace-key {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: var(--fp-radius-key);
+  font: 700 var(--fp-label)/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.graph-workspace-key svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.graph-workspace-key.exit {
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.graph-workspace-key.exit:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.graph-workspace-key.save {
+  min-width: 92px;
+  color: var(--acid-ink);
+  background: var(--acid);
+  border: 1px solid color-mix(in srgb, var(--acid) 70%, var(--line));
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.graph-workspace-key:active:not(:disabled) {
+  box-shadow: var(--fp-well);
+}
+
+.graph-workspace-key:disabled {
+  opacity: 0.42;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* Off because the graph has an error: an unlit key sunk in the panel, not a
+   faded one, so the red reason on it reads at full strength. */
+.graph-workspace-key.save.blocked:disabled {
+  opacity: 1;
+  color: var(--muted);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  box-shadow: var(--fp-well);
+}
+
+/* Narrow, the rail is hidden and the navigation opens from the header's
+   own menu key, first in its row; "Cannot be saved" gives way to room, as
+   Save is off and the strip under the canvas says why. */
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .graph-workspace-header {
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .graph-workspace-name {
+    min-width: 72px;
+  }
+}
+
+/* On a phone held upright the header stays one row: Exit and Save give up
+   their words for their icons -- the words stay for a screen reader -- and
+   the name takes what is left. */
+@media (max-width: 560px) {
+  /* Save keeps Exit's size: no words on it, only red -- its icon in the
+     attention colour and a lamp in its corner. The strip under the canvas
+     says why, and so does the key to a screen reader. */
+  .graph-workspace-key.save.blocked {
+    position: relative;
+    display: inline-flex;
+    padding: 0 10px;
+  }
+
+  .graph-workspace-key.save.blocked svg {
+    color: var(--red);
+  }
+
+  .graph-workspace-key.save.blocked::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    background: var(--red);
+    border-radius: 1px;
+    box-shadow: 0 0 5px color-mix(in srgb, var(--red) 60%, transparent);
+  }
+
+  .graph-workspace-blocked {
+    display: none;
+  }
+
+  .graph-workspace-name {
+    min-width: 96px;
+  }
+
+  .graph-workspace-key {
+    min-width: 38px;
+    padding: 0 10px;
+  }
+
+  .graph-workspace-key.save {
+    min-width: 38px;
+  }
+
+  .graph-workspace-save-label > span:not(.async-action-label),
+  .graph-workspace-key.exit > span,
+  .graph-workspace-key .async-action-label > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* The details plate: a plate, not smoked glass. */
 .rack-workspace-details {
   color: var(--ink) !important;
   background: var(--paper) !important;
@@ -5043,7 +6893,7 @@
 }
 
 .rack-midi-check input {
-  accent-color: var(--red) !important;
+  accent-color: var(--rf-color-input) !important;
 }
 
 .rack-midi-curve {
@@ -5058,7 +6908,11 @@
 }
 
 .rack-midi-curve polyline {
-  stroke: var(--ink) !important;
+  stroke: var(--rf-color-input) !important;
+}
+
+.rack-midi-section h3 {
+  color: var(--rf-color-input) !important;
 }
 
 .rack-midi-link-editor > footer {
@@ -5066,14 +6920,1003 @@
   border-top: var(--fp-seam) !important;
 }
 
-/* Apply is the one lit key on the panel, the same red every primary wears. */
+/* Apply is the one lit key on the panel, in the input's violet: a MIDI
+   link is input (see the colour code in design/tokens.css). */
 .rack-midi-link-editor > footer .primary,
 .rack-midi-link-editor > footer .primary:hover:not(:disabled),
 .rack-midi-link-editor > footer .primary:focus-visible {
-  color: var(--red-ink) !important;
-  background: var(--red) !important;
-  border-color: var(--red) !important;
+  color: var(--rf-color-on-code) !important;
+  background: var(--rf-color-input) !important;
+  border-color: var(--rf-color-input) !important;
   box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+/* ------------------------------------------- the audio input's cables ---
+   A cable from the audio input carries some of the interface's inputs --
+   all of them, one as a mono source, or a pair -- so its key says which,
+   "In 1" in the audio's amber, where a MIDI cable's key is a plain dot. Its
+   editor is the MIDI cable editor's plate with the audio's colour: the
+   section titles and the one lit key amber (see the colour code in
+   design/tokens.css). */
+.rack-edge-control.audio.has-route {
+  width: auto;
+  min-width: 30px;
+  height: 20px;
+  padding: 0 6px;
+}
+
+.rack-edge-control > em {
+  color: var(--rf-color-sound);
+  font: 700 9px/1 var(--mono-font);
+  font-style: normal;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.rack-midi-link-editor.rack-audio-link-editor .rack-midi-section h3 {
+  color: var(--rf-color-sound) !important;
+}
+
+.rack-midi-link-editor.rack-audio-link-editor button.active {
+  color: var(--rf-color-sound) !important;
+}
+
+.rack-midi-link-editor.rack-audio-link-editor > footer .primary,
+.rack-midi-link-editor.rack-audio-link-editor > footer .primary:hover:not(:disabled),
+.rack-midi-link-editor.rack-audio-link-editor > footer .primary:focus-visible {
+  color: var(--rf-color-on-code) !important;
+  background: var(--rf-color-sound) !important;
+  border-color: var(--rf-color-sound) !important;
+}
+
+.rack-audio-input-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rack-audio-input-picker legend {
+  margin-bottom: 6px;
+}
+
+.rack-audio-input-picker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rack-audio-input-picker button {
+  min-width: 42px;
+  min-height: 32px;
+  padding: 0 9px;
+  font-family: var(--mono-font);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.rack-audio-input-picker button.rack-audio-swap {
+  font-family: var(--display-font);
+  font-size: 10px;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+/* An input the host does not capture can still be chosen -- the Rack may be
+   for another machine -- but it reads as unavailable here. */
+.rack-audio-input-picker button.is-not-captured:not(.active) {
+  color: var(--fp-rail-label) !important;
+  text-decoration: line-through;
+}
+
+.rack-audio-link-status {
+  margin: 0;
+  color: var(--fp-rail-label);
+  font: 500 12px/1.45 var(--display-font);
+}
+
+.rack-audio-link-status.warning {
+  color: var(--red);
+}
+
+.rack-audio-level {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+}
+
+@media (max-width: 520px) {
+  .rack-audio-level {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* -- the input meter: a track drawn green to red, and over its unreached
+   part a cover that moves; a colour stays where its level is -- */
+.audio-input-meter {
+  --meter-cover: var(--panel-inset);
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.audio-input-meter-bar {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.audio-input-meter .audio-input-meter-bar > small {
+  margin: 0;
+  color: var(--fp-rail-label);
+  font: 700 9px/1 var(--mono-font);
+  text-align: right;
+}
+
+.audio-input-meter-bar > span {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: linear-gradient(90deg,
+    var(--rf-lit-preset) 0 72%,
+    var(--rf-lit-sound) 72% 90%,
+    var(--red) 90%);
+  box-shadow: var(--fp-well);
+}
+
+.audio-input-meter-bar > span > i {
+  position: absolute;
+  inset: 0 0 0 auto;
+  background: var(--meter-cover);
+  transition: width var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+/* Many inputs -- an eighteen-channel interface -- stand side by side as a
+   bank of upright bars, filling from the bottom, the number under each. */
+.audio-input-meter.is-bank {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 2px;
+}
+
+.audio-input-meter.is-bank .audio-input-meter-bar {
+  height: 52px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  gap: 3px;
+}
+
+.audio-input-meter.is-bank .audio-input-meter-bar > span {
+  order: 1;
+  width: 100%;
+  max-width: 9px;
+  height: 100%;
+  background: linear-gradient(0deg,
+    var(--rf-lit-preset) 0 72%,
+    var(--rf-lit-sound) 72% 90%,
+    var(--red) 90%);
+}
+
+.audio-input-meter.is-bank .audio-input-meter-bar > span > i {
+  inset: 0 0 auto 0;
+  transition: height var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.audio-input-meter.is-bank .audio-input-meter-bar > small {
+  order: 2;
+  font-size: 7px;
+  text-align: center;
+}
+
+.audio-input-meter-bar.is-clipping > small {
+  color: var(--red);
+}
+
+.audio-input-meter-bar.is-clipping > span {
+  outline: 1px solid var(--red);
+}
+
+.audio-input-meter-bar.is-missing > small {
+  text-decoration: line-through;
+}
+
+.audio-input-meter-bar.is-missing > span {
+  opacity: 0.35;
+}
+
+/* On the node, on the always-dark canvas: thinner, covered in the canvas's
+   own dark rather than the panel's, and as wide as the node's text column,
+   never past the node's edge and its port. */
+.rack-flow-node-meter {
+  --meter-cover: #101417;
+  width: 100%;
+  margin-top: 6px;
+  gap: 3px;
+}
+
+.rack-flow-node-meter .audio-input-meter-bar > span {
+  height: 5px;
+  box-shadow: none;
+}
+
+.rack-flow-node-meter .audio-input-meter-bar > small {
+  color: #8a949b;
+}
+
+/* On the node a bank is a strip: short, and without its numbers, which the
+   cable editor shows. */
+.rack-flow-node-meter.is-bank .audio-input-meter-bar {
+  height: 18px;
+  gap: 0;
+}
+
+.rack-flow-node-meter.is-bank .audio-input-meter-bar > small {
+  display: none;
+}
+
+.rack-flow-node small.is-off {
+  color: var(--rf-lit-sound);
+}
+
+/* --------------------------------------- PLAY's plugin-area dialogs ---
+   Choosing PLAY's instrument, or one of its presets, is a matter of the
+   plugin area, so those dialogs cover that area -- the plugin's header and
+   its surface -- and nothing else: the global header, with the master and
+   the menu key, and the sidebar stay in reach. Their ground is the area's,
+   not the window's. */
+.plugin-surface-shell > .modal-dialog-backdrop.plugin-area-backdrop {
+  position: absolute;
+  inset: 0;
+}
+
+/* ----------------------------------------------------------- the FX drawer ---
+   The effects drawer was the last of PLAY on the old material: a navy band,
+   cyan-washed nodes, and the suggestions a wrapped strip of chips under a
+   heading. It is a plate now, divided into three framed sections -- CHAIN,
+   SUGGESTED and PANEL, the last two only when there is something in them --
+   each with its name silkscreened across the top of its frame, as the RF-5
+   labels its sections.
+
+   The frames take the keys' own slight rounding. `--fx-section-radius` is
+   the one place their corners are set, so a squarer or rounder frame is
+   one value away. */
+
+.play-chain-drawer {
+  --fx-section-radius: var(--fp-radius-key);
+}
+
+.play-chain-panel {
+  color: var(--ink);
+  background: var(--paper);
+  border-top: var(--fp-seam);
+}
+
+/* ------------------------------------------------- labelled frames ---
+   Every named, framed section is one kind of frame, the effects drawer's:
+   a hairline in its colour from the code, mixed a little toward the seam so
+   it sits in the plate rather than glowing on it; the keys' slight rounding;
+   the faintest wash of the colour inside; and its name silkscreened across
+   the top of the line. PERFORMANCE and SHOW FILE were engraved outlines of
+   their own -- a heavier seam, a rounder corner, a 9px label -- and read as
+   another instrument's panel. A frame says its colour in --frame-colour:
+   the drawer's are the effects' amber; the neutral ones the rack's grey. */
+.play-chain-section,
+.live-zone,
+.show-transfer {
+  --frame-colour: var(--rf-color-rack);
+  border: 1px solid color-mix(in srgb, var(--frame-colour) 62%, var(--line));
+  border-radius: var(--fp-radius-key);
+  background: color-mix(in srgb, var(--frame-colour) 5%, transparent);
+}
+
+.play-chain-section {
+  --frame-colour: var(--rf-color-sound);
+  border-radius: var(--fx-section-radius);
+}
+
+.play-chain-section > legend,
+.live-zone-legend,
+.show-transfer-legend {
+  color: var(--frame-colour);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+/* A fieldset's legend breaks its line by itself; these frames are plain
+   boxes, so their name is set on the line and covers it with the ground
+   the frame stands on. */
+.live-zone-legend,
+.show-transfer-legend {
+  position: absolute;
+  z-index: 1;
+  top: -5px;
+  left: 10px;
+  padding: 0 6px;
+  background: var(--chassis);
+}
+
+/* What the section is about, after its name: the instrument that suggests,
+   the effect whose panel it is. Data, so not silkscreen. */
+.play-chain-section > legend > span {
+  margin-left: 4px;
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+/* -- the chain -- */
+
+/* The strip fades out at an end where there are more nodes past it, and
+   only there: a light that says "more this way" instead of a node cut off
+   at the frame. The widths are registered so the fade eases in and out as
+   the strip reaches an end, rather than switching. */
+@property --fx-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fx-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.play-chain-nodes {
+  --fx-fade-start: 0px;
+  --fx-fade-end: 0px;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fx-fade-start),
+    #000 calc(100% - var(--fx-fade-end)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fx-fade-start),
+    #000 calc(100% - var(--fx-fade-end)),
+    transparent 100%
+  );
+  transition:
+    --fx-fade-start var(--rf-motion-standard) var(--rf-ease-standard),
+    --fx-fade-end var(--rf-motion-standard) var(--rf-ease-standard);
+}
+
+.play-chain-nodes[data-fade-start] {
+  --fx-fade-start: 40px;
+}
+
+.play-chain-nodes[data-fade-end] {
+  --fx-fade-end: 40px;
+}
+
+.play-chain-node {
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip);
+}
+
+/* The instrument's node keeps the instrument's blue, the one colour in
+   the drawer that is not the effects'. */
+.play-chain-node.instrument {
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--rf-color-instrument);
+}
+
+.play-chain-node.effect.open {
+  border-color: var(--line);
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--rf-color-sound);
+}
+
+/* An effect's own keys speak its colour: ON, and PANEL while its panel is
+   open, are lit in the effects' amber, and a key under the pointer or the
+   keyboard is edged in it. The instrument keeps its blue edge. */
+.play-chain-tools button:not(:disabled):hover,
+.play-chain-tools button:focus-visible {
+  border-color: var(--rf-color-sound);
+}
+
+.play-chain-tools button.on {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-sound);
+  border-color: var(--rf-color-sound);
+}
+
+/* Add effect: its + plate is the effects' amber, and so is the dashed
+   outline of its node under the pointer and while its list is open. */
+.play-chain-add > span {
+  background: var(--rf-color-sound);
+}
+
+.play-chain-node.add:hover,
+.play-chain-node.add:focus-within,
+.play-chain-node.add.active {
+  border-color: var(--rf-color-sound);
+}
+
+.play-chain-picker button {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.play-chain-picker button:hover,
+.play-chain-picker button:focus-visible {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+  outline: none;
+}
+
+/* -- suggested -- */
+
+.play-chain-suggestion {
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip);
+}
+
+.play-chain-suggestion.missing {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.play-chain-suggestion-copy strong {
+  font: 700 12px/1.2 var(--display-font);
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.play-chain-suggestion-copy em {
+  color: var(--fp-rail-label);
+  font: 500 11px/1.2 var(--mono-font);
+  font-style: normal;
+}
+
+/* Add is a key, the one lit thing in a row that can take it. */
+.play-chain-suggestion-add {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-sound);
+  border: 1px solid color-mix(in srgb, var(--rf-color-sound) 70%, #000);
+  border-radius: var(--fp-radius-key);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.play-chain-suggestion-add:hover {
+  background: color-mix(in srgb, var(--rf-color-sound) 88%, #fff);
+}
+
+.play-chain-suggestion-add:active {
+  box-shadow: var(--fp-well);
+}
+
+/* In chain and Not installed: stamped labels the size of the key, so a row
+   that is done reads as settled rather than as missing its button. Nothing
+   on the faceplate is a pill. */
+.play-chain-tag {
+  color: var(--fp-rail-label);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.play-chain-tag.missing {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.play-chain-suggest-all {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--rf-color-sound);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.play-chain-suggest-all:hover {
+  background: var(--panel-inset);
+}
+
+/* -- the open effect's panel -- */
+
+.play-chain-effect-panel {
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+}
+
+/* ------------------------------------------------ changing instrument ---
+   Switching instrument used to be a cut in two places. The header's name
+   and icon were retyped in place, and the plugin's splash -- its photograph
+   and the mark that fills from the bottom -- snapped over the old surface,
+   each image landing whenever it finished. Now the new name and icon fade up
+   out of a slight blur, the splash plate fades in over what was there, and
+   its photograph and mark each wait for their image and then arrive: the
+   photograph settling out of a slight zoom, the mark rising just after. */
+
+.play-plugin-identity .play-plugin-icon,
+.play-plugin-identity .performance-info-right .performance-info-copy {
+  animation: rf-identity-in calc(var(--rf-motion-emphasized) * 1.5) var(--rf-ease-emphasized) backwards;
+}
+
+.play-plugin-identity .performance-info-right .performance-info-copy {
+  animation-delay: var(--rf-motion-instant);
+}
+
+@keyframes rf-identity-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(4px);
+  }
+}
+
+/* backwards, not both: a held first frame would fight the fade out. */
+.plugin-brand-splash {
+  animation: rf-splash-plate-in var(--rf-motion-standard) var(--rf-ease-standard) backwards;
+}
+
+@keyframes rf-splash-plate-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.plugin-brand-splash .splash-bg {
+  opacity: 0;
+  transform: scale(1.05);
+  transition:
+    opacity calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized),
+    transform calc(var(--rf-motion-emphasized) * 4) var(--rf-ease-emphasized);
+}
+
+.plugin-brand-splash .splash-bg.is-loaded {
+  opacity: 1;
+  transform: none;
+}
+
+.plugin-brand-splash .splash-icon {
+  opacity: 0;
+  transform: translateY(12px) scale(0.94);
+  transition:
+    opacity calc(var(--rf-motion-emphasized) * 1.5) var(--rf-ease-emphasized) var(--rf-motion-fast),
+    transform calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized) var(--rf-motion-fast);
+}
+
+.plugin-brand-splash .splash-icon.is-loaded {
+  opacity: 1;
+  transform: none;
+}
+
+/* --------------------------------------------------------- the presets ---
+   Only the dialog's shell and its empty state had been ported. The toolbar
+   keys, the New Preset form, every row and the import review were still the
+   old instrument: cyan seams on navy glass, acid fills on anything primary.
+   Now the rows are module plates like the plugin picker's, the keys are
+   stamped keys, New and Save wear the red every primary wears, the form is
+   an inset well with silkscreen labels, and delete confirms on a red-tinted
+   plate like every other error. */
+
+.preset-modal-toolbar {
+  border-bottom: var(--fp-seam);
+}
+
+.preset-modal-toolbar p {
+  color: var(--fp-rail-label);
+  font: 600 11px/1.4 var(--display-font);
+  letter-spacing: 0.02em;
+}
+
+/* -- keys -- */
+
+.preset-create-button,
+.preset-import-button,
+.preset-create-form button,
+.preset-rename-form button,
+.preset-row-actions button,
+.preset-delete-confirm button {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  transition:
+    background-color var(--rf-motion-fast) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.preset-create-button:hover:not(:disabled),
+.preset-import-button:hover:not(:disabled),
+.preset-create-form button:hover:not(:disabled),
+.preset-rename-form button:hover:not(:disabled),
+.preset-row-actions button:hover:not(:disabled),
+.preset-delete-confirm button:hover:not(:disabled),
+.preset-create-button:active:not(:disabled),
+.preset-import-button:active:not(:disabled),
+.preset-create-form button:active:not(:disabled),
+.preset-rename-form button:active:not(:disabled),
+.preset-row-actions button:active:not(:disabled),
+.preset-delete-confirm button:active:not(:disabled) {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+/* New, Save and Rename's confirm are the lit keys, in the presets' green
+   from the colour code (design/tokens.css). Delete keeps its red. */
+.preset-create-button,
+.preset-create-form button[type="submit"],
+.preset-rename-form button[type="submit"] {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-preset);
+  border: 1px solid color-mix(in srgb, var(--rf-color-preset) 70%, #000);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+}
+
+.preset-create-button:hover:not(:disabled),
+.preset-create-form button[type="submit"]:hover:not(:disabled),
+.preset-rename-form button[type="submit"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--rf-color-preset) 88%, #fff);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+}
+
+.preset-create-button:active:not(:disabled),
+.preset-create-form button[type="submit"]:active:not(:disabled),
+.preset-rename-form button[type="submit"]:active:not(:disabled) {
+  background: var(--rf-color-preset);
+  box-shadow: var(--fp-well);
+}
+
+.preset-row-actions .danger,
+.preset-delete-confirm .danger {
+  color: var(--red);
+}
+
+/* -- the New Preset form -- */
+
+.preset-create-form {
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-well);
+}
+
+.preset-create-form label > span {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.preset-create-form input,
+.preset-rename-form input {
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 500 13px/1.2 var(--mono-font);
+}
+
+.preset-create-form input:focus-visible,
+.preset-rename-form input:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+.preset-message {
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-well);
+  font: 600 12px/1.4 var(--display-font);
+}
+
+/* -- rows -- */
+
+.preset-row {
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip);
+}
+
+.preset-load-target:hover:not(:disabled),
+.preset-load-target:focus-visible {
+  background: rgba(var(--ink-rgb), 0.04);
+}
+
+.preset-load-target small {
+  color: var(--fp-rail-label);
+  font: 600 10px/1.3 var(--mono-font);
+}
+
+.preset-load-target i {
+  color: var(--red);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.preset-row-actions {
+  border-left: var(--fp-seam);
+}
+
+.preset-delete-confirm {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--paper));
+  border-top: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+  font: 600 12px/1.4 var(--display-font);
+}
+
+@media (max-width: 720px) {
+  .preset-row-actions {
+    border-top: var(--fp-seam);
+    border-left: 0;
+  }
+}
+
+/* -- importing a preset -- */
+
+.preset-import-stage-header span {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.3 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.preset-import-stage-header h3 {
+  color: var(--ink);
+  font: 700 clamp(19px, 4vw, 27px)/1.05 var(--display-font);
+}
+
+.preset-import-summary dl {
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  background: var(--line);
+}
+
+.preset-import-summary dl > div {
+  background: var(--panel-inset);
+}
+
+.preset-import-summary dt {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.4 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.preset-import-summary dd {
+  color: var(--ink);
+  font: 500 12px/1.4 var(--mono-font);
+}
+
+.preset-import-conflict,
+.preset-import-warning {
+  border-radius: var(--fp-radius);
+  font: 600 12px/1.45 var(--display-font);
+}
+
+.preset-import-conflict {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--amber) 38%, var(--line));
+}
+
+.preset-import-warning {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+}
+
+/* ----------------------------------------------------- the MIDI link ---
+   Right-click (or long-press) a control in a plugin and RackForge offers to
+   link it to MIDI. The menu and the dialog it opens had never been ported:
+   smoked navy glass with cyan seams over a cream panel. The menu is now a
+   small plate of keys, the dialog's fields are the same inset wells as the
+   audio settings, and Learn is a key that lights amber while it listens. */
+
+.parameter-link-context-menu {
+  color: var(--ink);
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip), 0 12px 32px rgba(var(--edge-dark-rgb), 0.34);
+}
+
+.parameter-link-context-menu button {
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--fp-radius-key);
+  font: 700 11px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  transition:
+    background-color var(--rf-motion-fast) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+/* Hovering a row presses it into the panel, as the keys elsewhere do. */
+.parameter-link-context-menu button:hover:not(:disabled),
+.parameter-link-context-menu button:focus-visible {
+  background: var(--panel-inset);
+  border-color: var(--line);
+  box-shadow: var(--fp-well);
+  outline: none;
+}
+
+/* Removing a link is the one destructive row: the red as ink, set apart. */
+.parameter-link-context-menu button.danger {
+  margin-top: 2px;
+  color: var(--red);
+  border-top-color: var(--line);
+  border-radius: 0 0 var(--fp-radius-key) var(--fp-radius-key);
+}
+
+.parameter-link-context-menu button:disabled {
+  opacity: 0.55;
+}
+
+.parameter-link-context-error {
+  color: var(--red);
+  font: 600 11px/1.35 var(--display-font);
+}
+
+/* -- the dialog -- */
+
+.parameter-link-form label {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.parameter-link-form select,
+.parameter-link-form input[type="number"] {
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 500 13px/1 var(--mono-font);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.parameter-link-form select:focus-visible,
+.parameter-link-form input[type="number"]:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+.parameter-link-options input[type="checkbox"] {
+  accent-color: var(--rf-color-input);
+}
+
+/* Where a learnt control is kept, and what it does: the controller's map
+   or this session, and the mode, as the Controllers section offers them. */
+.parameter-link-destination,
+.parameter-link-mode {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  border: 0;
+}
+
+.parameter-link-destination legend,
+.parameter-link-mode legend {
+  margin-bottom: 4px;
+  color: var(--fp-rail-label);
+  font: 700 10px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.parameter-link-form .parameter-link-destination label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--ink);
+  font: 500 13px/1.4 var(--display-font);
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.parameter-link-destination input[type="radio"] {
+  margin-top: 3px;
+  accent-color: var(--rf-color-input);
+}
+
+.parameter-link-kind {
+  display: grid;
+  gap: 4px;
+}
+
+/* The MIDI inputs chosen in Settings are input too. */
+.host-audio-form fieldset.midi-ports input[type="checkbox"] {
+  accent-color: var(--rf-color-input);
+}
+
+.midi-learn-button {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  font: 700 12px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.midi-learn-button:hover:not(:disabled),
+.midi-learn-button:focus-visible {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+/* Listening: held down, its edge lit like a lamp behind the key, in the
+   input's violet -- it is waiting for MIDI. */
+.midi-learn-button.learning {
+  background: var(--panel-inset);
+  border-color: var(--rf-color-input);
+  box-shadow:
+    var(--fp-well),
+    inset 0 0 0 1px var(--rf-color-input),
+    inset 0 0 14px -4px var(--rf-color-input);
+}
+
+.parameter-link-error {
+  padding: 10px 12px;
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+  border-radius: var(--fp-radius);
+  font: 600 12px/1.5 var(--display-font);
+}
+
+.parameter-link-pending {
+  color: var(--rf-color-input);
+  font: 600 12px/1.5 var(--display-font);
+}
+
+.parameter-link-help {
+  color: var(--fp-rail-label);
+  font-size: 12px;
 }
 
 /* ------------------------------------------------- the error plate ---
@@ -5095,92 +7938,376 @@
   overflow-y: auto;
 }
 
-/* -------------------------------------------- the slot instrument popover ---
-   The floating instrument editor inside the node screen was still smoked
-   cyan glass. Chrome becomes a plate — silkscreen header, inset preset well,
-   keys for Detach and close — while the surface inside stays dark: that part
-   belongs to the plugin's own screen. */
+/* ------------------------------------------------ the plugin editor ---
+   A plugin in a Rack, edited, takes the whole canvas: the graph behind is
+   inert while it is open, so it is a modal and not a window to move. Its
+   edge is the panel's plain seam; the kind is told once, in the header --
+   the kicker names it and the icon is ringed in its colour from the code
+   (design/tokens.css): an instrument's blue, an effect's amber, a MIDI
+   processor's violet. Its presets are the presets' green.
+   The plugin's surface inside stays dark: that is the plugin's own screen. */
 
-.rack-slot-popover {
-  color: var(--ink) !important;
-  background: var(--paper) !important;
-  border: var(--fp-seam) !important;
-  border-radius: var(--fp-radius) !important;
-  box-shadow: var(--fp-lip), 0 18px 48px rgba(0, 0, 0, 0.45) !important;
+.rack-plugin-editor { --editor-colour: var(--rf-color-instrument); }
+.rack-plugin-editor.kind-effect { --editor-colour: var(--rf-color-sound); }
+.rack-plugin-editor.kind-midi-processor { --editor-colour: var(--rf-color-input); }
+
+.rack-plugin-editor-scrim,
+.rack-link-editor-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 43;
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  animation: rack-plugin-editor-scrim-in var(--rf-motion-standard) var(--rf-ease-standard) backwards;
 }
 
-.rack-slot-popover-tail {
-  background: var(--paper) !important;
-  border-color: var(--line) !important;
+.rack-plugin-editor {
+  position: absolute;
+  inset: 8px;
+  z-index: 44;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip), 0 18px 48px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  animation: rack-plugin-editor-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
 }
 
-.rack-slot-popover-header {
-  border-bottom: var(--fp-seam) !important;
-  border-radius: var(--fp-radius) var(--fp-radius) 0 0 !important;
-  background: var(--fp-panel) !important;
+@keyframes rack-plugin-editor-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
 }
 
-.rack-slot-popover-header .card-kicker {
-  color: var(--fp-rail-label) !important;
-  letter-spacing: var(--fp-track);
+@keyframes rack-plugin-editor-scrim-in {
+  from { opacity: 0; }
 }
 
-.rack-slot-popover select {
-  color: var(--ink) !important;
-  background: var(--panel-inset) !important;
-  border: var(--fp-seam) !important;
-  border-radius: var(--fp-radius-key) !important;
-  box-shadow: var(--fp-well);
-  font-family: var(--display-font) !important;
-  font-size: 11px !important;
+/* -- the header: the plugin, its presets, close -- */
+.rack-plugin-editor-header {
+  min-width: 0;
+  min-height: 56px;
+  padding: 8px 8px 8px 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: var(--fp-seam);
+  background: var(--fp-panel);
 }
 
-.rack-slot-popover button {
-  color: var(--fp-rail-label) !important;
-  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
-  border: var(--fp-seam) !important;
-  border-radius: var(--fp-radius-key) !important;
-  box-shadow: var(--fp-lip);
-  font-family: var(--display-font) !important;
-  font-weight: 700 !important;
-  font-size: 10px !important;
+.rack-plugin-editor-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rack-plugin-editor-title > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.rack-plugin-editor-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  object-fit: cover;
+  border: 1px solid var(--editor-colour);
+  border-radius: var(--fp-radius-key);
+  background: var(--panel-inset);
+}
+
+.rack-plugin-editor-kind {
+  color: var(--editor-colour);
+  font: 700 10px/1.2 var(--mono-font);
   letter-spacing: var(--fp-track);
   text-transform: uppercase;
 }
 
-.rack-slot-popover button:hover:not(:disabled),
-.rack-slot-popover button:focus-visible {
-  color: var(--ink) !important;
-  border-color: var(--line) !important;
-  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+.rack-plugin-editor-title strong {
+  min-width: 0;
+  overflow: hidden;
+  font: 700 15px/1.2 var(--display-font);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.rack-slot-popover button:active:not(:disabled) {
-  background: var(--panel-inset) !important;
+.rack-plugin-editor-title strong small {
+  margin-left: 7px;
+  color: var(--fp-rail-label);
+  font: 500 10px/1 var(--mono-font);
+}
+
+/* -- presets, in their green: a sunk well with its name, the list and a
+   lit Load key, like the preset sheet's -- */
+.rack-plugin-editor-presets {
+  min-width: 0;
+  padding: 4px 4px 4px 10px;
+  display: grid;
+  grid-template-columns: auto minmax(150px, 260px) auto;
+  align-items: center;
+  gap: 8px;
+  background: color-mix(in srgb, var(--rf-color-preset) 8%, var(--panel-inset));
+  border: 1px solid color-mix(in srgb, var(--rf-color-preset) 50%, var(--line));
+  border-radius: var(--fp-radius-key);
   box-shadow: var(--fp-well);
 }
 
-.rack-slot-popover button:disabled {
+.rack-plugin-editor-presets > label {
+  color: var(--rf-color-preset);
+  font: 700 10px/1 var(--mono-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.rack-plugin-editor-presets select {
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid color-mix(in srgb, var(--rf-color-preset) 40%, var(--line));
+  border-radius: var(--fp-radius-key);
+  font: 600 12px/1 var(--display-font);
+}
+
+.rack-plugin-editor-presets select:focus-visible {
+  outline: 2px solid var(--rf-color-preset);
+  outline-offset: 1px;
+}
+
+.rack-plugin-editor-presets select:disabled {
+  color: var(--fp-rail-label);
+  opacity: 0.8;
+}
+
+.rack-plugin-editor-load {
+  height: 32px;
+  min-width: 64px;
+  padding: 0 14px;
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-preset);
+  border: 1px solid color-mix(in srgb, var(--rf-color-preset) 70%, #000);
+  border-radius: var(--fp-radius-key);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  font: 700 11px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.rack-plugin-editor-load:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--rf-color-preset) 88%, #fff);
+}
+
+.rack-plugin-editor-load:active:not(:disabled) {
+  box-shadow: var(--fp-well);
+}
+
+.rack-plugin-editor-load:disabled {
   opacity: 0.42;
   box-shadow: none;
+  cursor: default;
 }
 
-.rack-slot-popover-error {
-  color: var(--red) !important;
-  background: color-mix(in srgb, var(--red) 7%, var(--paper)) !important;
-  border-bottom: 1px solid color-mix(in srgb, var(--red) 38%, var(--line)) !important;
-  font: 600 11px/1.45 var(--display-font) !important;
+.rack-plugin-editor-presets-note {
+  grid-column: 2 / -1;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--red);
+  font: 600 11px/1.3 var(--display-font);
 }
 
-.rack-slot-popover footer {
-  border-top: var(--fp-seam) !important;
-  background: var(--fp-panel) !important;
+.rack-plugin-editor-presets-note button,
+.rack-plugin-editor-error button,
+.rack-plugin-editor-close {
+  display: inline-grid;
+  place-items: center;
   color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  cursor: pointer;
 }
 
-.rack-slot-resize-handle::before,
-.rack-slot-resize-handle::after {
-  background: var(--fp-rail-label) !important;
+.rack-plugin-editor-presets-note button {
+  height: 28px;
+  padding: 0 10px;
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.rack-plugin-editor-close {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+}
+
+.rack-plugin-editor-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rack-plugin-editor-presets-note button:hover,
+.rack-plugin-editor-error button:hover,
+.rack-plugin-editor-close:hover {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.rack-plugin-editor-presets-note button:active,
+.rack-plugin-editor-error button:active,
+.rack-plugin-editor-close:active {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.rack-plugin-editor-close:focus-visible,
+.rack-plugin-editor-presets-note button:focus-visible,
+.rack-plugin-editor-error button:focus-visible,
+.rack-plugin-editor-load:focus-visible {
+  outline: 2px solid var(--editor-colour);
+  outline-offset: 2px;
+}
+
+/* -- what went wrong, above the surface, until dismissed -- */
+.rack-plugin-editor-error {
+  padding: 6px 8px 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--paper));
+  border-bottom: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+  font: 600 12px/1.4 var(--display-font);
+}
+
+.rack-plugin-editor-error button {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+}
+
+.rack-plugin-editor-error button svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* -- the plugin's own screen -- */
+.rack-plugin-editor-surface {
+  position: relative;
+  grid-row: 3;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  background: #02080c;
+}
+
+.rack-plugin-editor-surface > *,
+.rack-plugin-editor-surface .plugin-frame-stage,
+.rack-plugin-editor-surface .plugin-frame {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+.rack-plugin-editor-surface > .rack-plugin-editor-missing {
+  align-self: center;
+  max-width: 44ch;
+  height: auto;
+  margin: auto;
+  padding: 24px;
+  color: #c9d2d8;
+  font: 500 13px/1.5 var(--display-font);
+  text-align: center;
+}
+
+.rack-plugin-editor-surface > .rack-plugin-editor-busy {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #e9eef1;
+  background: rgba(3, 8, 12, 0.72);
+  backdrop-filter: blur(3px);
+  font: 700 12px/1 var(--display-font);
+  letter-spacing: 0.05em;
+}
+
+.rack-plugin-editor-footer {
+  grid-row: 4;
+  min-height: 24px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--fp-rail-label);
+  background: var(--fp-panel);
+  border-top: var(--fp-seam);
+  font: 500 10px/1 var(--mono-font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* On a phone the editor is the canvas, edge to edge; the presets take a
+   row of their own under the name. */
+@media (max-width: 700px), (max-height: 600px) {
+  .rack-plugin-editor {
+    inset: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .rack-plugin-editor-header {
+    min-height: 0;
+    padding: 6px 6px 6px 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 8px;
+  }
+
+  .rack-plugin-editor-presets {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .rack-plugin-editor-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .rack-plugin-editor-title strong {
+    font-size: 14px;
+  }
+
+  .rack-plugin-editor-footer {
+    display: none;
+  }
 }
 
 /* ----------------------------------------- the immersive info strip ---
@@ -5224,21 +8351,40 @@
    minimap gets a bezel — a seam around a dark inset, because what it shows
    is the screen itself. */
 
+/* The keys over the canvas come in groups by what they do -- editing, the
+   layout, the view, help -- each group one small plate of butted keys, a
+   short gap between plates. Each key says where its group starts and ends
+   (group-start, group-end). */
 .rack-graph-canvas .react-flow__controls {
-  border: var(--fp-seam) !important;
-  border-radius: var(--fp-radius) !important;
-  background: var(--paper) !important;
-  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none !important;
 }
 
 .rack-graph-canvas .react-flow__controls-button {
   color: var(--fp-rail-label) !important;
   background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
-  border-bottom: var(--fp-seam) !important;
+  border: var(--fp-seam) !important;
+  border-left-width: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: var(--fp-lip), var(--fp-drop);
 }
 
-.rack-graph-canvas .react-flow__controls-button:last-child {
-  border-bottom: 0 !important;
+.rack-graph-canvas .react-flow__controls-button.group-start {
+  margin-left: 6px;
+  border-left-width: 1px !important;
+  border-top-left-radius: var(--fp-radius) !important;
+  border-bottom-left-radius: var(--fp-radius) !important;
+}
+
+.rack-graph-canvas .react-flow__controls-button.group-start:first-child {
+  margin-left: 0;
+}
+
+.rack-graph-canvas .react-flow__controls-button.group-end {
+  border-top-right-radius: var(--fp-radius) !important;
+  border-bottom-right-radius: var(--fp-radius) !important;
 }
 
 .rack-graph-canvas .react-flow__controls-button:hover {
@@ -5280,12 +8426,8 @@
 .rack-graph-canvas .react-flow__minimap {
   border: var(--fp-seam) !important;
   border-radius: var(--fp-radius) !important;
-  background: #101113 !important;
+  background: #1c1e22 !important;
   box-shadow: var(--fp-well), 0 2px 6px rgba(0, 0, 0, 0.35) !important;
-}
-
-.rack-graph-canvas .react-flow__minimap-mask {
-  fill: rgba(8, 9, 10, 0.72) !important;
 }
 
 /* The strip's label and value sit on one baseline, like every other block. */
@@ -5386,6 +8528,229 @@
   line-height: 1.55;
 }
 
+/* ------------------------------------------------------ the boot curtain ---
+   The mark, full screen and centred, while RackForge gets ready, on the
+   connecting screen's own ground (see .pairing-shell). It lifts once there
+   is something to play -- the curtain fading while the mark swells a little
+   and goes out of focus, so the instrument appears behind it rather than
+   being cut to. */
+
+.boot-curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding:
+    var(--rackforge-safe-top, 0)
+    var(--rackforge-safe-right, 0)
+    var(--rackforge-safe-bottom, 0)
+    var(--rackforge-safe-left, 0);
+  opacity: 1;
+  /* Twice the emphasized step: a curtain is the largest thing that moves,
+     and still collapses with the rest of the vocabulary under reduced
+     motion. */
+  transition: opacity calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized);
+}
+
+.boot-curtain > .rf-async-loader {
+  transition:
+    transform calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized),
+    filter calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized),
+    opacity var(--rf-motion-emphasized) var(--rf-ease-exit);
+}
+
+.boot-curtain--leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-curtain--leaving > .rf-async-loader {
+  opacity: 0;
+  filter: blur(3px);
+  transform: scale(1.06);
+}
+
+/* ------------------------------------------------ the picker's entrance ---
+   The PLAY picker used to open with every card already there and its
+   banners landing one by one after. Now the list waits, invisible but
+   holding its size, until its artwork has decoded (useArtworkReveal); a
+   wait long enough to notice shows the mark in its place. Then the cards
+   come up together, each a beat after the one above -- rising a few pixels
+   and coming into focus -- while the mark fades out behind them. Every
+   duration and delay is built from the vocabulary, so under reduced motion
+   the whole thing collapses to the list simply being there. */
+
+.plugin-picker-stage {
+  position: relative;
+}
+
+.plugin-picker-stage:not(.is-revealed) .plugin-picker-card {
+  opacity: 0;
+}
+
+.plugin-picker-stage.is-revealed .plugin-picker-card {
+  animation: rf-picker-card-in calc(var(--rf-motion-emphasized) * 2) var(--rf-ease-emphasized) both;
+  /* A beat per card, capped: a long list must not keep the last one waiting. */
+  animation-delay: calc(min(var(--reveal-index, 0), 8) * var(--rf-motion-instant) * 0.6);
+}
+
+@keyframes rf-picker-card-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+.plugin-picker-loader {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  /* backwards, not both: a held final frame would override the fade out. */
+  animation: rf-picker-loader-in var(--rf-motion-standard) var(--rf-ease-standard) backwards;
+  transition:
+    opacity var(--rf-motion-emphasized) var(--rf-ease-exit),
+    filter var(--rf-motion-emphasized) var(--rf-ease-emphasized),
+    transform var(--rf-motion-emphasized) var(--rf-ease-emphasized);
+}
+
+.plugin-picker-loader.is-leaving {
+  opacity: 0;
+  filter: blur(3px);
+  transform: scale(1.04);
+}
+
+@keyframes rf-picker-loader-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* ------------------------------------------------- the plugin installer ---
+   The dialog shell had been brought onto the faceplate and everything inside
+   it had not: the package card was still the old navy glass with a blue
+   wash, its labels were pills, and its title was set in panel ink on that
+   dark card -- unreadable in daylight. The card is a panel now: the
+   package's own banner, or the mark on the inset where it has none, over
+   the copy and a row of stamped labels with room under them. (The source
+   cards before it are migrated further down, with the other wide keys.) */
+
+.plugin-install-preview {
+  gap: 0 !important;
+  color: var(--ink);
+  background: var(--paper) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+.plugin-install-preview-banner {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border-bottom: var(--fp-seam) !important;
+  box-shadow: var(--fp-well);
+}
+
+.plugin-install-preview-banner .brand-mark {
+  width: min(30%, 200px) !important;
+}
+
+.plugin-install-preview-copy {
+  padding: 16px 20px 20px !important;
+}
+
+.plugin-install-preview-copy .eyebrow {
+  color: var(--muted);
+}
+
+/* Set like the dialog's own title: a name at this size wants no silkscreen
+   tracking, which is for the small stamped labels. */
+.plugin-install-preview-copy h3 {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.plugin-install-preview-copy h3 small {
+  color: var(--preview-accent);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.plugin-install-preview-copy p {
+  color: rgba(var(--ink-rgb), 0.78) !important;
+}
+
+.plugin-install-preview-meta {
+  gap: 6px !important;
+  margin-top: 14px !important;
+}
+
+/* Stamped labels, like the plugin kind tag: square-cornered, in the
+   display face, not lozenges. */
+.plugin-install-preview-meta span {
+  padding: 5px 8px 4px !important;
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  font-family: var(--display-font);
+  font-size: 0.66rem !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase !important;
+}
+
+/* The faceplate's loader, with room to breathe around it: while a package
+   installs the dialog has no footer, so the loader is its last line. */
+.install-plugin-loader {
+  margin: 22px 24px;
+}
+
+.install-plugin-error,
+.install-plugin-success,
+.install-plugin-cancelled {
+  border-radius: var(--fp-radius-key) !important;
+}
+
+.install-plugin-error {
+  color: var(--red) !important;
+  background: color-mix(in srgb, var(--red) 9%, var(--paper)) !important;
+  border: 1px solid color-mix(in srgb, var(--red) 38%, var(--line));
+}
+
+.install-plugin-success {
+  color: var(--green) !important;
+  background: color-mix(in srgb, var(--green) 9%, var(--paper)) !important;
+  border: 1px solid color-mix(in srgb, var(--green) 38%, var(--line));
+}
+
+.install-plugin-success strong {
+  font-family: var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.install-plugin-cancelled {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+}
+
+.install-plugin-next-step {
+  color: var(--muted) !important;
+}
+
 /* ------------------------------------------------------ modal dialogs ---
    The dialog shell was the old navy glass and its close glyph floated
    naked. The shell is a plate, the header a panel strip with a seam, and
@@ -5407,8 +8772,7 @@
 }
 
 .preset-modal-close,
-.modal-dialog-close,
-.rack-slot-close-button {
+.modal-dialog-close {
   width: 36px;
   height: 36px;
   display: inline-grid;
@@ -5807,24 +9171,7 @@
 .live-zone {
   position: relative;
   padding: 16px 12px 12px;
-  border: var(--fp-seam);
-  border-radius: var(--fp-radius);
   margin-bottom: 12px;
-}
-
-.live-zone-legend {
-  position: absolute;
-  top: -7px;
-  left: 12px;
-  padding: 0 7px;
-  color: var(--fp-rail-label);
-  background: var(--chassis);
-  font-family: var(--display-font);
-  font-weight: 800;
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  line-height: 13px;
-  z-index: 1;
 }
 
 /* The sequencer is docked: the page sheds its padding and the plate fuses
@@ -5941,7 +9288,7 @@
      whatever `height: auto` says, and a visible overflow spills the column
      past the bottom edge with nothing able to reach it -- html and body are
      both clipped. It is the scroller; everything inside it is a block. */
-  .app-shell.live-surface-active:not(.graph-workspace-active) {
+  .app-shell.live-surface-active:not(.graph-workspace-active):not(.controller-dock-active) {
     height: auto !important;
     min-height: 0 !important;
     overflow-x: hidden !important;
@@ -5949,19 +9296,37 @@
     overscroll-behavior: contain;
   }
 
-  .live-surface-active:not(.graph-workspace-active) .workspace,
-  .live-surface-active:not(.graph-workspace-active) .page.live-host-page,
+  .live-surface-active:not(.graph-workspace-active):not(.controller-dock-active) .workspace,
+  .live-surface-active:not(.graph-workspace-active):not(.controller-dock-active)
+    .page.live-host-page,
   .live-surface-active:not(.graph-workspace-active) .live-shell {
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
   }
 
+  /* With the Touch Controller docked, the screen is divided after all: the
+     dock takes the height it is dragged to and the list scrolls in what is
+     left, as PLAY does. Growing the whole shell to fit the list instead left
+     the dock at the list's foot, a strip of nothing under the keys, and a
+     drag that resized the keys inside a dock that could not grow. */
+  .app-shell.live-surface-active.controller-dock-active:not(.graph-workspace-active)
+    .page.live-host-page {
+    display: block !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    flex: 1 1 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+  }
+
   /* Blocks keep the height their content needs; nothing here is a pane to be
      divided between. The page was `flex: 1 1 0`, and a basis of zero inside a
      container that now sizes to its content collapses the whole column to
      nothing — height alone does not undo that. */
-  .live-surface-active:not(.graph-workspace-active) .page.live-host-page,
+  .live-surface-active:not(.graph-workspace-active):not(.controller-dock-active)
+    .page.live-host-page,
   .live-surface-active:not(.graph-workspace-active) .live-zone,
   .live-surface-active:not(.graph-workspace-active) .sequencer-shell {
     flex: 0 0 auto !important;
@@ -6021,32 +9386,6 @@
     display: none !important;
   }
 
-  /* The menu key floats over the top-left corner. The information bar leaves
-     58px for it; the sequencer's legend did not, so the key landed on the
-     word SEQ. Fixed rather than absolute, because a menu that scrolls away
-     is not a menu on a surface a player works from standing up.
-
-     Going fixed costs it the shell's frame. `.app-shell` is inset by the
-     safe areas, so an absolutely placed child is already clear of the status
-     bar; a fixed one is measured from the viewport and is not. Its inline
-     top and left carry only the float inset, which put a 44px key 34px up
-     inside a 48px status bar -- it read as hanging off the top of the screen.
-     Margins add the inset here rather than in the anchor arithmetic, because
-     this is the one rule that takes the key out of the inset frame, and
-     wherever it stays absolute the shell has already paid for it. */
-  .live-surface-active .performance-menu-button {
-    position: fixed !important;
-    margin-top: var(--rackforge-safe-top);
-    margin-left: var(--rackforge-safe-left);
-  }
-
-  /* Only the first row sits under the key, so only the first item steps
-     aside. Padding the whole strip pushed every wrapped row inward and cost
-     a line of height for nothing. */
-  .live-surface-active .sequencer-strip > .seq-legend:first-child {
-    margin-left: 46px;
-  }
-
   /* The lane pads stacked their three lines, which on a phone spent a third
      of the screen on eight lanes that are mostly empty. Laid on one line they
      say the same things — which lane, what is on it, what it is doing — in
@@ -6083,14 +9422,897 @@
     min-height: 0;
     flex: 0 0 auto;
   }
+}
 
-  /* The strip wraps to three rows on a phone, and the fold key landed alone
-     at the end of a fourth — a stray button, and a row spent on it. Spanning
-     the row instead, it reads as what it is: the drawer's handle, and the
-     widest target on the panel. */
-  .seq-fold-key {
-    flex: 1 1 100%;
-    min-height: 28px;
+/* ------------------------------------------------------ Controllers ---
+   A controller and its controls. The list on the left lights a control
+   while it moves -- violet, the colour code's MIDI -- and marks the ones
+   the player mapped, fuller when a mapping applies to the plugin playing.
+   The panel on the right says what the chosen control does, plugin by
+   plugin. On a phone the two take turns. */
+.controllers-workspace {
+  display: grid;
+  /* Cards keep their own height: a tall page must not stretch them. */
+  align-content: start;
+  gap: 12px;
+}
+
+/* A settings card's floor suits the Settings grid, not a one-line card
+   above a controller's controls (the Fn button, a check). */
+.controllers-workspace > .settings-card {
+  min-height: 0;
+  padding: 14px 16px;
+}
+
+/* Text beside its buttons, which wrap below it on a narrow screen. A
+   settings card lays out in a column, where the text's flex basis would be
+   a height. */
+.controllers-workspace > .controller-fn-card,
+.controllers-workspace > .controller-check {
+  flex-direction: row;
+}
+
+.controllers-notices {
+  margin-bottom: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.controllers-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px 16px;
+  padding: 12px 14px;
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+}
+
+.controllers-device {
+  flex: 1 1 240px;
+  max-width: 380px;
+  display: grid;
+  gap: 4px;
+}
+
+.controllers-device > span,
+.controller-mapping-editor label > span,
+.controller-mode-picker legend,
+.controller-mode-sequence-hint {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.controllers-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: var(--muted);
+  font: 600 12px/1.3 var(--display-font);
+}
+
+.controllers-status > i {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+.controllers-status.connected > i {
+  background: var(--green);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--green) 70%, transparent);
+}
+
+.controllers-actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.controllers-stray {
+  margin: 0;
+  color: var(--muted);
+  font: 500 12px/1.4 var(--mono-font);
+}
+
+/* Describing a controller's controls: what to do, and the name to save
+   them under, above the list that fills as controls move. */
+.controllers-describe {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+  gap: 12px 20px;
+  padding: 14px 16px;
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--rf-color-input);
+}
+
+.controllers-describe-copy h2 {
+  margin: 0 0 6px;
+  font: 700 18px/1.25 var(--display-font);
+}
+
+.controllers-describe-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* A package's messages to its controller: asked for, the answer waits on
+   the player (amber); allowed, a quiet line with the messages at hand. */
+.controllers-output {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px 20px;
+  padding: 12px 16px;
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--rf-color-input);
+}
+
+.controllers-output.asked {
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--amber-ink);
+}
+
+.controllers-output > button {
+  justify-self: start;
+}
+
+.controllers-output-copy h2 {
+  margin: 0 0 4px;
+  font: 700 15px/1.3 var(--display-font);
+}
+
+.controllers-output-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.controllers-output-copy details {
+  margin-top: 6px;
+}
+
+.controllers-output-copy summary {
+  width: fit-content;
+  color: var(--muted);
+  font: 600 11px/1.6 var(--mono-font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.controllers-output-copy ol {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
+.controllers-output-copy code {
+  font: 500 12px/1.4 var(--mono-font);
+  overflow-wrap: anywhere;
+}
+
+.controllers-save-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 10px;
+}
+
+.controllers-save-form label {
+  display: grid;
+  gap: 4px;
+}
+
+.controllers-save-form label > span {
+  color: var(--fp-rail-label);
+  font: 700 10px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.controllers-save-form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.controllers-save-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.controllers-save-form .controller-mapping-problem {
+  grid-column: 1 / -1;
+}
+
+.controllers-panes {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.controller-input-list {
+  max-height: calc(100vh - 250px);
+  overflow: auto;
+  display: grid;
+  gap: 14px;
+  padding: 12px;
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+}
+
+.controller-input-group h3 {
+  margin: 0 0 6px;
+  color: var(--fp-rail-label);
+  font: 700 10px/1.2 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.controller-input-group ul {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  list-style: none;
+}
+
+/* One control: its LED, its name and what it does, and the key that opens
+   it. Moving the control lights the LED; it never opens the control. */
+.controller-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 6px 6px 6px 10px;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  transition:
+    background var(--rf-motion-fast) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.controller-input.selected {
+  background: color-mix(in srgb, var(--rf-color-input) 13%, var(--panel-inset));
+  box-shadow: inset 3px 0 0 var(--rf-color-input);
+}
+
+/* An LED set in the panel: dark in its bezel at rest, lit with a halo while
+   its control moves. */
+.controller-input-lamp {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--muted) 35%, var(--panel-inset));
+  box-shadow:
+    inset 0 1px 2px color-mix(in srgb, black 45%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--muted) 18%, transparent);
+  transition:
+    background var(--rf-motion-instant) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
+}
+
+.controller-input.lit .controller-input-lamp {
+  background: radial-gradient(circle at 35% 35%, white 0 12%, var(--rf-color-input) 55%);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--rf-color-input) 35%, transparent),
+    0 0 12px 2px var(--rf-color-input);
+}
+
+.controller-input.lit {
+  background: color-mix(in srgb, var(--rf-color-input) 9%, var(--panel-inset));
+  box-shadow: inset 0 0 0 1px var(--rf-color-input);
+}
+
+.controller-input-edit {
+  min-height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background var(--rf-motion-fast) var(--rf-ease-standard),
+    color var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.controller-input-edit:hover {
+  background: color-mix(in srgb, var(--rf-color-input) 10%, var(--fp-panel));
+}
+
+.controller-input-edit:focus-visible {
+  outline: 2px solid var(--rf-color-input);
+  outline-offset: 1px;
+}
+
+.controller-input-edit[aria-pressed="true"] {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-input);
+}
+
+.controller-input.selected.lit {
+  box-shadow: inset 3px 0 0 var(--rf-color-input), inset 0 0 0 1px var(--rf-color-input);
+}
+
+.controller-input-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.controller-input-copy strong {
+  overflow: hidden;
+  font: 600 13px/1.25 var(--display-font);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controller-input-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controller-input-mark {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--rf-color-on-code);
+  background: color-mix(in srgb, var(--rf-color-input) 45%, var(--muted));
+  border-radius: 10px;
+  font: 700 11px/1 var(--mono-font);
+}
+
+.controller-input.playing .controller-input-mark {
+  background: var(--rf-color-input);
+}
+
+.controller-input-detail {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+}
+
+.controller-input-detail h2 {
+  margin: 2px 0;
+  font: 700 20px/1.2 var(--display-font);
+}
+
+.controller-input-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.controller-input-detail-header p {
+  margin: 0;
+  color: var(--muted);
+  font: 500 12px/1.4 var(--mono-font);
+}
+
+.controller-input-hint p,
+.controller-input-empty,
+.controller-mapping-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.controller-input-standard {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--ink);
+  background: var(--panel-inset);
+  border-radius: var(--fp-radius-key);
+  font-size: 12px;
+}
+
+.controller-input-standard > span {
+  margin-right: 6px;
+  color: var(--fp-rail-label);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.controller-assignment-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  list-style: none;
+}
+
+.controller-assignment {
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+}
+
+.controller-assignment.playing {
+  box-shadow: inset 3px 0 0 var(--rf-color-input);
+}
+
+.controller-assignment.pending .controller-assignment-copy {
+  opacity: 0.7;
+}
+
+.controller-assignment-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.controller-assignment-copy strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 13px/1.3 var(--display-font);
+}
+
+.controller-assignment-copy small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.controller-assignment-live {
+  padding: 1px 6px;
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-input);
+  border-radius: var(--fp-radius-key);
+  font: 700 9px/1.4 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.controller-assignment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.controller-assign-button {
+  justify-self: start;
+}
+
+.controller-assign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.controller-assignment-layer {
+  margin: 4px 0 0;
+  color: var(--fp-rail-label);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.controller-assignment-fn,
+.controller-fn-open {
+  padding: 1px 6px;
+  color: var(--rf-color-input);
+  border: 1px solid var(--rf-color-input);
+  border-radius: var(--fp-radius-key);
+  font: 700 9px/1.4 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.controller-fn-open {
+  color: var(--rf-color-on-code);
+  background: var(--rf-color-input);
+}
+
+/* Listening for the button to use as Fn: the card's LED is lit, steady --
+   a blink would need a guard of its own under reduced motion. */
+.controller-fn-card.listening {
+  box-shadow: var(--fp-lip), inset 3px 0 0 var(--rf-color-input);
+}
+
+.controller-fn-listening {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, white 0 12%, var(--rf-color-input) 55%);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--rf-color-input) 35%, transparent),
+    0 0 12px 2px var(--rf-color-input);
+}
+
+.controller-fn-problem {
+  color: var(--amber-ink);
+}
+
+/* Checking a controller against its package: the count above the list, the
+   list's LEDs steady green once a control is heard, amber when its values
+   say something the package does not. */
+.controller-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.controller-check-copy {
+  min-width: 0;
+  flex: 1 1 320px;
+  display: grid;
+  gap: 6px;
+}
+
+.controller-check-copy h2 {
+  margin: 0;
+}
+
+.controller-check-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.controller-check-copy .controller-check-count {
+  color: var(--ink);
+  font: 500 12px/1.4 var(--mono-font);
+}
+
+.controller-check-meter {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--green);
+}
+
+.controller-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.controller-check-strays {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+  list-style: none;
+}
+
+.controller-check-strays li {
+  min-width: 0;
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+  background: var(--panel-inset);
+  border-radius: var(--fp-radius-key);
+  box-shadow: inset 3px 0 0 var(--amber);
+  font: 500 11px/1.4 var(--mono-font);
+}
+
+.controller-check-strays strong {
+  font-size: 12px;
+}
+
+.controller-check-strays span,
+.controller-check-strays small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controller-check-strays .controller-check-more {
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.controller-input.checked:not(.lit) .controller-input-lamp {
+  background: var(--green);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 30%, transparent);
+}
+
+.controller-input.checked.doubtful:not(.lit) .controller-input-lamp {
+  background: var(--amber);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 30%, transparent);
+}
+
+.controller-input.checked .controller-input-copy small {
+  font-family: var(--mono-font);
+}
+
+.controller-fn-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.controller-fn-copy {
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.controller-fn-copy h2 {
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controller-fn-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.controller-fn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.controller-fn-actions label {
+  display: grid;
+  gap: 4px;
+}
+
+.controller-mapping-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.controller-mapping-editor label {
+  display: grid;
+  gap: 4px;
+}
+
+.controller-mapping-editor select,
+.controller-mapping-editor input[type="search"],
+.controller-mapping-editor input[type="number"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.controller-mode-picker {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  border: 0;
+}
+
+.controller-mode-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.controller-mode-keys button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  font: 700 var(--fp-label)/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color var(--rf-motion-fast) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-fast) var(--rf-ease-standard);
+}
+
+.controller-mode-keys button.active {
+  color: var(--ink);
+  box-shadow: var(--fp-lip), inset 0 -3px 0 var(--rf-color-input);
+}
+
+.controller-mode-keys button:active:not(:disabled) {
+  box-shadow: var(--fp-well);
+}
+
+.controller-mode-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.controller-mode-fields.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.controller-mapping-editor .controller-mode-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controller-mapping-editor .controller-mode-check > span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.controller-mode-sequence {
+  display: grid;
+  gap: 8px;
+}
+
+.controller-mode-sequence ol {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  counter-reset: controller-sequence;
+}
+
+.controller-mode-sequence li {
+  padding: 4px 6px 4px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, 30px);
+  align-items: center;
+  gap: 4px;
+  background: var(--panel-inset);
+  border-radius: var(--fp-radius-key);
+  counter-increment: controller-sequence;
+}
+
+.controller-mode-sequence li > span::before {
+  content: counter(controller-sequence) ".";
+  margin-right: 8px;
+  color: var(--muted);
+  font-family: var(--mono-font);
+}
+
+.controller-mode-sequence li button {
+  height: 28px;
+  color: var(--ink);
+  background: transparent;
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  cursor: pointer;
+}
+
+.controller-mode-sequence li button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.controller-mapping-advanced summary {
+  color: var(--muted);
+  font: 600 12px/1.4 var(--display-font);
+  cursor: pointer;
+}
+
+.controller-mapping-advanced[open] {
+  display: grid;
+  gap: 10px;
+}
+
+.controller-mapping-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
+}
+
+.controller-mapping-problem {
+  margin: 0;
+  color: var(--amber-ink);
+  font-size: 12px;
+}
+
+.controller-mapping-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.controller-empty {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.controller-empty p {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* On a phone the list and the panel take turns: the list until a control is
+   chosen, then the panel with its way back. */
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .controllers-panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .controllers-panes > .controller-input-detail {
+    display: none;
+  }
+
+  .controllers-panes.detail > .controller-input-detail {
+    display: grid;
+  }
+
+  .controllers-panes.detail > .controller-input-list {
+    display: none;
+  }
+
+  .controller-input-list {
+    max-height: none;
+  }
+
+  .controllers-actions {
     margin-left: 0;
+  }
+
+  .controller-mode-fields.two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .controllers-describe,
+  .controllers-output,
+  .controllers-save-form {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

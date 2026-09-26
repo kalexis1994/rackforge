@@ -1,0 +1,332 @@
+# M-Audio Oxygen Pro Mini, in the DAW mode RackForge puts it in on connect.
+# Every value below is sourced in SOURCES.md; [MUG] is the Oxygen Pro Mini
+# User Guide v1.2, [AB] Ableton Live 12's Oxygen Pro Mini remote script (the
+# Oxygen Pro script, four controls wide), [BW] Bitwig's Oxygen Pro extension
+# (its Mini definition). Both are official software, and agree value for
+# value.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.m-audio-oxygen-pro-mini"
+name = "Oxygen Pro Mini"
+vendor = "M-Audio"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "oxygen-pro-mini"
+
+# The controls speak on the third port pair: "MIDIIN3 (Oxygen Pro Mini)" /
+# "MIDIOUT3 (Oxygen Pro Mini)" on Windows, "Oxygen Pro Mini Mackie/HUI" on a
+# Mac and on Linux [BW port names; Linux seen with aconnect, see SOURCES.md].
+# The keys, wheels and pedal stay on the first port and play as any keyboard
+# does.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["oxygen pro mini"]
+name_contains_any = ["midiin3", "mackie"]
+
+# Where the mode messages go: the same third port, as an output.
+[[devices.endpoints]]
+role = "setup_output"
+name_contains = ["oxygen pro mini"]
+name_contains_any = ["midiout3", "mackie"]
+
+# On connect, the Oxygen Pro's messages, which both scripts send the Mini
+# unchanged [AB Oxygen_Pro midi.py; BW MidiProcessor]: 6D 02 (Live firmware
+# mode), 6E 02 and 6E 07 (record, then device control mode). The LED ones are
+# left to the keyboard, as for the Oxygen Pro.
+[permissions]
+midi_input = true
+midi_output = true
+sysex = true
+
+[[on_connect]]
+message = "F0 00 01 05 7F 00 00 6D 00 01 02 F7"
+to = "setup_output"
+
+[[on_connect]]
+message = "F0 00 01 05 7F 00 00 6E 00 01 02 F7"
+to = "setup_output"
+
+[[on_connect]]
+message = "F0 00 01 05 7F 00 00 6E 00 01 07 F7"
+to = "setup_output"
+
+# Faders 1-4: CC 12-15, channel 1 [AB session_width = 4, Fader_n = 12 + n; BW
+# OxyConfig(4, ...), SLIDER_1 = 0x0C].
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 12 }
+slot = "control-1.1"
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 13 }
+slot = "control-1.2"
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 14 }
+slot = "control-1.3"
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, cc = 15 }
+slot = "control-1.4"
+
+# Knobs 1-4: CC 22-25, absolute, channel 1 [AB Knob_n = 22 + n; BW KNOB_1 =
+# 0x16].
+[[inputs]]
+id = "knob-1"
+name = "Knob 1"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 22 }
+slot = "control-2.1"
+
+[[inputs]]
+id = "knob-2"
+name = "Knob 2"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 23 }
+slot = "control-2.2"
+
+[[inputs]]
+id = "knob-3"
+name = "Knob 3"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 24 }
+slot = "control-2.3"
+
+[[inputs]]
+id = "knob-4"
+name = "Knob 4"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 25 }
+slot = "control-2.4"
+
+# Function buttons 1-4: CC 32-35, 127 on press and 0 on release [BW TRACK_1
+# = 0x20, CcButton]. No slot: the pads hold the switches.
+[[inputs]]
+id = "button-1"
+name = "Function button 1"
+kind = "button"
+group = "Function buttons"
+midi = { channel = 0, cc = 32 }
+
+[[inputs]]
+id = "button-2"
+name = "Function button 2"
+kind = "button"
+group = "Function buttons"
+midi = { channel = 0, cc = 33 }
+
+[[inputs]]
+id = "button-3"
+name = "Function button 3"
+kind = "button"
+group = "Function buttons"
+midi = { channel = 0, cc = 34 }
+
+[[inputs]]
+id = "button-4"
+name = "Function button 4"
+kind = "button"
+group = "Function buttons"
+midi = { channel = 0, cc = 35 }
+
+# Pads: notes on channel 1, 40-43 and 48-51 [AB pad_ids = ((40, 41, 42, 43),
+# (48, 49, 50, 51)); BW the first eight of PAD_NOTE_NR]. A pad sends the same
+# note as the KeyLab's pad that does the same thing.
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 40 }
+slot = "switch-1.1"
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 41 }
+slot = "switch-1.2"
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 42 }
+slot = "switch-1.3"
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 43 }
+slot = "switch-1.4"
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 48 }
+slot = "switch-2.1"
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 49 }
+slot = "switch-2.2"
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 50 }
+slot = "switch-2.3"
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads"
+midi = { channel = 0, note = 51 }
+slot = "switch-2.4"
+
+# Transport and navigation, channel 1 [MUG p9 names them; AB elements.py; BW
+# OxygenCcAssignments]: Loop 114, << 115, >> 116, Stop 117, Play 118, Record
+# 119, Bank < 110, Bank > 111, Back 104. << and >> step the main selector,
+# the bank buttons the second.
+[[inputs]]
+id = "loop"
+name = "Loop"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 114 }
+
+[[inputs]]
+id = "rewind"
+name = "<<"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 115 }
+slot = "step.down"
+
+[[inputs]]
+id = "fast-forward"
+name = ">>"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 116 }
+slot = "step.up"
+
+[[inputs]]
+id = "stop"
+name = "Stop"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 117 }
+
+[[inputs]]
+id = "play"
+name = "Play"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 118 }
+
+[[inputs]]
+id = "record"
+name = "Record"
+kind = "button"
+group = "Transport"
+midi = { channel = 0, cc = 119 }
+
+[[inputs]]
+id = "bank-left"
+name = "Bank <"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 110 }
+slot = "step-2.down"
+
+[[inputs]]
+id = "bank-right"
+name = "Bank >"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 111 }
+slot = "step-2.up"
+
+[[inputs]]
+id = "back"
+name = "Back"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 104 }
+
+# RackForge's default meanings for four knobs and four faders: tone on the
+# knobs, the amp envelope on the faders.
+[[roles]]
+input = "knob-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "knob-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "knob-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+# Play and Stop take the transport.
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop"
+target = "transport_stop"

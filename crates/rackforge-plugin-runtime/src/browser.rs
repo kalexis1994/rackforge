@@ -80,6 +80,15 @@ pub mod export {
     pub const PARALLEL_RENDER_UNIT: i32 = 41;
     pub const PARALLEL_END_BLOCK: i32 = 42;
     pub const LATENCY_FRAMES: i32 = 43;
+    /// How many f32 a unit writes per frame. Optional: a component built
+    /// before it existed does not export it, and the host then uses the
+    /// output channels.
+    pub const PARALLEL_UNIT_CHANNELS: i32 = 44;
+    /// How many bytes a unit writes BACK per block, and where those bytes
+    /// live. Optional in the same way: a component that reports nothing
+    /// does not export either, and the host then copies nothing back.
+    pub const PARALLEL_REPORT_STRIDE: i32 = 45;
+    pub const PARALLEL_REPORT_PTR: i32 = 46;
 }
 
 /// Raw imports the embedding page must supply.
@@ -394,6 +403,22 @@ impl PortableModule {
                 raw.call_0(export::PARALLEL_DISPATCH_PTR, "parallel_dispatch_ptr")?;
             let plan_offset = raw.call_0(export::PARALLEL_PLAN_PTR, "parallel_plan_ptr")?;
             let mix_offset = raw.call_0(export::PARALLEL_MIX_PTR, "parallel_mix_ptr")?;
+            // Optional, as on the native host: zero means the output channels.
+            let unit_channels = raw
+                .call_0(export::PARALLEL_UNIT_CHANNELS, "parallel_unit_channels")
+                .unwrap_or(0)
+                .max(0);
+            // Optional, as on the native host: zero means a unit has
+            // nothing to say and there is nothing to bring back.
+            let report_stride = raw
+                .call_0(export::PARALLEL_REPORT_STRIDE, "parallel_report_stride")
+                .unwrap_or(0)
+                .max(0);
+            let report_offset = if report_stride > 0 {
+                raw.call_0(export::PARALLEL_REPORT_PTR, "parallel_report_ptr")?
+            } else {
+                0
+            };
             let shared_offset = raw.call_0(export::PARALLEL_SHARED_PTR, "parallel_shared_ptr")?;
             let shared_capacity =
                 raw.call_0(export::PARALLEL_SHARED_CAPACITY, "parallel_shared_capacity")?;
@@ -448,12 +473,15 @@ impl PortableModule {
                     max_units,
                     dispatch_stride,
                     mix_slot_samples: output_capacity as usize,
+                    unit_channels: unit_channels as usize,
+                    report_stride: report_stride as usize,
                     shared_capacity,
                 },
                 dispatch_offset,
                 plan_offset,
                 mix_offset,
                 shared_offset,
+                report_offset,
             })
         } else {
             None
@@ -502,6 +530,12 @@ struct PortableParallelApi {
     dispatch_offset: i32,
     plan_offset: i32,
     mix_offset: i32,
+    /// Where the component keeps what its units wrote back. Read from the
+    /// component and kept here, but nothing uses it yet: the worker arena
+    /// carries audio only, so a plugin that reports takes the sequential
+    /// fallback. This is the half of the wiring that is already done.
+    #[allow(dead_code)]
+    report_offset: i32,
     shared_offset: i32,
 }
 
@@ -1011,7 +1045,18 @@ impl PortableInstance {
         // the parallel path is taken only while a worker pool is actually
         // standing by. Everything serial about the block happens on this
         // thread either way.
-        if self.parallel_api.is_some() {
+        // A plugin that reports is one whose coordinator decides things from
+        // what its units did -- which string is busy, which is quietest --
+        // and the pool has no way home for that yet: the worker arena
+        // carries audio and nothing else. Running it there would leave the
+        // coordinator allocating from a picture nobody is painting, so the
+        // whole block goes through the sequential fallback instead, which is
+        // the same component rendering the same audio on one thread.
+        let carries_reports = self
+            .parallel_api
+            .as_ref()
+            .is_some_and(|api| api.layout.report_stride > 0);
+        if self.parallel_api.is_some() && !carries_reports {
             // SAFETY: no arguments; reports pool readiness.
             let workers = unsafe { host::rf_par_ready() };
             if workers > 0 {
@@ -1161,7 +1206,11 @@ impl PortableInstance {
         // SAFETY: no arguments; reads the completion bitmask.
         let finished_mask = unsafe { host::rf_par_unit_mask() } as u32;
 
-        let mix_samples = checked_samples(frames, self.prepared_output_channels)?;
+        // The same width a unit actually writes, not the instrument's
+        // channels -- see the native host, where reading two channels of a
+        // twenty-channel unit silenced every section.
+        let unit_width = layout.unit_width(self.prepared_output_channels as usize) as u32;
+        let mix_samples = checked_samples(frames, unit_width)?;
         for entry in &plan[..active] {
             let slot_offset =
                 mix_offset + (entry.unit as usize * layout.mix_slot_samples * 4) as i32;
@@ -1201,6 +1250,26 @@ impl PortableInstance {
         let rendered = self.raw.read(self.output_offset, mix_samples * 4)?;
         read_f32(&rendered, 0..mix_samples * 4, output);
         Ok(())
+    }
+
+    /// Always false. A budget is denominated in fuel, and this engine does not
+    /// meter fuel, so there is no honest number to hand over here -- a plugin
+    /// running in a browser keeps whatever quality its author calibrated.
+    pub const fn accepts_realtime_budget(&self) -> bool {
+        false
+    }
+
+    /// Always `Ok(false)`, for the same reason. The host asks every backend
+    /// the same question rather than branching on which one it has.
+    pub const fn set_realtime_budget(&mut self, _fuel: u64) -> Result<bool> {
+        Ok(false)
+    }
+
+    /// Always false: the browser engine does not meter guest execution, so
+    /// there is no fuel figure to report and the governor is told so rather
+    /// than handed a zero it would read as a free block.
+    pub const fn is_metered(&self) -> bool {
+        false
     }
 
     /// Always `0`: the browser engine does not meter guest execution, so no

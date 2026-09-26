@@ -45,6 +45,19 @@ RackForge VST3 uses the `vst3` Rust bindings generated from the VST 3 API.
 
 Copyright (c) the vst3-rs contributors.
 
+RackForge for Windows reaches ASIO drivers through a modified copy of
+`asio-sys`, kept at `vendor/asio-sys`.
+
+## asio-sys (modified)
+
+- Project: <https://github.com/RustAudio/cpal/tree/master/asio-sys>
+- Version: 0.2.6, modified by the RackForge project as `0.2.6+rackforge.1`
+- License: Apache-2.0
+
+Copyright (c) Tom Gowan and the cpal contributors. The modification counts
+the ASIO driver's own reports of lost audio. `vendor/asio-sys/FORK.md` says
+what changed, and the full license is at `vendor/asio-sys/LICENSE`.
+
 RackForge's Web resource explorer includes the SVAR React File Manager and its
 SVAR UI support packages.
 
@@ -73,3 +86,15 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Every native RackForge host, and `rackforge-store` when it packs a component,
+optimises plugin components with Binaryen through the `wasm-opt` bindings.
+
+## Binaryen and wasm-opt-rs
+
+- Project: <https://github.com/WebAssembly/binaryen>, compiled into the host by
+  <https://github.com/brson/wasm-opt-rs>
+- Version: `wasm-opt` 0.116.1 (Binaryen version 116)
+- License: Binaryen Apache-2.0; `wasm-opt-rs` MIT OR Apache-2.0
+
+Copyright (c) the Binaryen contributors and the wasm-opt-rs contributors.

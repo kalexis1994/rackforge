@@ -74,6 +74,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -132,16 +133,46 @@ public final class MainActivity extends Activity {
                 thread.setDaemon(true);
                 return thread;
             });
+    /** Rack previews, one after another in the order the editor sent them:
+     *  the last sound chosen is the one left playing. */
+    private final ExecutorService rackPreviewExecutor =
+            Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "rackforge-rack-preview");
+                thread.setDaemon(true);
+                return thread;
+            });
     private final List<AudioOutputChoice> audioOutputChoices = new ArrayList<>();
     private final List<MidiDevice> openMidiDevices = new ArrayList<>();
     private final List<MidiOutputPort> openMidiPorts = new ArrayList<>();
     private final List<MidiInputPort> openMidiDestinations = new ArrayList<>();
     private final Map<MidiInputPort, Integer> openKeyLabDestinations = new LinkedHashMap<>();
+    /** Where each source's package messages go: the device's own MIDI in. */
+    private final Map<Integer, MidiInputPort> openControllerDestinations = new LinkedHashMap<>();
+    /** Where each source's setup messages go, once its setup output is open. */
+    private final Map<Integer, MidiInputPort> openSetupDestinations = new LinkedHashMap<>();
+    /** The device each controller source belongs to, to find its setup output. */
+    private final Map<Integer, OpenMidiDevice> controllerDevices = new LinkedHashMap<>();
+    /**
+     * Each device opened or being opened, by its MidiDeviceInfo id: a device
+     * plugged in is opened alone and one pulled out is closed alone, so the
+     * other keyboards keep playing, as on the other hosts.
+     */
+    private final Map<Integer, OpenMidiDevice> midiDevicesById = new LinkedHashMap<>();
+    /** How many sources this connection registered: the first is primary. */
+    private final AtomicInteger registeredMidiSources = new AtomicInteger();
     private AudioDeviceCallback audioDeviceCallback;
     private MidiManager.DeviceCallback midiDeviceCallback;
     private volatile int midiGeneration;
     private volatile long midiReconnectAttempts;
     private final AtomicInteger keyLabHeaderGeneration = new AtomicInteger();
+    /** A header ask is pending: the moves until it runs share it. */
+    private final AtomicBoolean parameterTouchScheduled = new AtomicBoolean();
+    /** Long enough for the render thread to apply the link, short enough to
+     *  follow a fader as it moves. */
+    private static final long PARAMETER_TOUCH_HEADER_DELAY_MS = 40;
+    /** Asks for a header after one move: about a third of a second, as the
+     *  appliance's driver does. */
+    private static final int PARAMETER_TOUCH_HEADER_ATTEMPTS = 8;
     private volatile boolean audioRecoveryInProgress;
     private ThermalMonitor thermalMonitor;
     private int thermalStatus = PowerManager.THERMAL_STATUS_NONE;
@@ -274,6 +305,18 @@ public final class MainActivity extends Activity {
     private static native int registerMidiSource(
             String sourceId, String displayName, boolean primary, String controllerId);
     private static native boolean replaceParameterLinks(String linksJson);
+    private static native String controllerSessionCommand(String dataRoot, String requestJson);
+    private static native String performanceCommand(String dataRoot, String requestJson,
+            String packageRootsJson);
+    private static native String liveCommand(String dataRoot, String commandJson);
+    private static native boolean loadControllerMaps(String dataRoot, String pluginStoreRoot,
+            String controllerStoreRoot);
+    private static native boolean identifyMidiSource(int sourceKey, byte[] reply);
+    private static native String midiSourceConnectPlan(int sourceKey);
+    private static native int midiSetupPort(int sourceKey, String portNamesJson);
+    private static native void midiSourceDisconnected(int sourceKey);
+    private static native String controllerAllowOutput(String storeRoot, String controllerId,
+            boolean allow);
     private static native void releaseMidiNotes();
     private static native String keyLabAcquirePlan();
     private static native String keyLabRestorePlan();
@@ -281,6 +324,7 @@ public final class MainActivity extends Activity {
     private static native boolean keyLabMatchesProductName(String name);
     private static native boolean keyLabMatchesEndpointName(String name);
     private static native String keyLabHandleMidi(int status, int data1, int data2);
+    private static native String keyLabParameterTouch();
     private static native String keyLabPollLongPress();
     private static native boolean keyLabSyncPlugins(String storeRoot);
     private static native boolean ensurePerformanceLibrary(String dataRoot);
@@ -319,7 +363,9 @@ public final class MainActivity extends Activity {
 
     private final Runnable midiReconnect = () -> {
         if (!audioRunning || engineStarting) return;
-        closeMidi();
+        // Only what changed: a device gone is closed, a new one opened, and
+        // the keyboards still there keep playing.
+        closeVanishedMidiDevices();
         openMidiInputs();
         midiReconnectAttempts++;
         if ("live".equals(currentPage)) showLive();
@@ -336,8 +382,9 @@ public final class MainActivity extends Activity {
                 ? "live" : "play";
         currentSharedRoute = "live".equals(currentPage) ? "/live" : "/play";
         selectedAudioDeviceKey = preferences.getString("audio.output", "default");
-        // Balanced keeps a render-ahead queue for measured portable WASM CPU
-        // spikes. Users can still opt into the more aggressive Low profile.
+        // 256 samples, RackForge's buffer on every platform: its render-ahead
+        // queue absorbs measured portable WASM CPU spikes. 128 is the tighter
+        // choice, 512 the safer.
         latencyMode = preferences.getInt("audio.latency", 1);
         outputGainDb = preferences.getInt("audio.gain_db", 0);
         if (!setNativeMasterLevel(preferences.getInt("session.master_level", 1000))) {
@@ -556,11 +603,15 @@ public final class MainActivity extends Activity {
                     if (path.startsWith("/rackforge/")) {
                         return applicationAsset(path.substring(1));
                     }
-                    if (path.startsWith("/assets/") || path.startsWith("/brand/")) {
+                    // The plugin kit and the scrollbar sheet are injected
+                    // into plugin frames from the Web UI's root.
+                    if (path.startsWith("/assets/") || path.startsWith("/brand/")
+                            || path.startsWith("/rackforge-plugin-kit/")) {
                         return applicationAsset("rackforge" + path);
                     }
                     if (path.equals("/favicon.svg") || path.equals("/favicon.ico")
-                            || path.equals("/site.webmanifest")) {
+                            || path.equals("/site.webmanifest")
+                            || path.equals("/rackforge-scrollbars.css")) {
                         return applicationAsset("rackforge" + path);
                     }
                     if (path.startsWith("/plugin-assets/")) {
@@ -701,19 +752,73 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * Where each installed plugin's package lives, for serving its Web assets.
+     *
+     * Every banner, icon, script and sample a plugin page asks for is resolved
+     * here. Reading the catalogue opens every installed package -- manifest,
+     * and each branding image read and validated -- so doing it per request
+     * made opening the plugin list or a plugin's page wait on dozens of full
+     * store scans. The map is kept until an install or uninstall changes which
+     * directory a plugin lives in; a root that has since disappeared is read
+     * again rather than trusted.
+     */
+    private final Object pluginRootsLock = new Object();
+    private Map<String, File> pluginRoots;
+
     private File installedPluginRoot(String pluginId) throws Exception {
+        synchronized (pluginRootsLock) {
+            boolean fresh = false;
+            if (pluginRoots == null) {
+                pluginRoots = readPluginRoots();
+                fresh = true;
+            }
+            File root = pluginRoots.get(pluginId);
+            if (!fresh && (root == null || !root.isDirectory())) {
+                pluginRoots = readPluginRoots();
+                root = pluginRoots.get(pluginId);
+            }
+            return root;
+        }
+    }
+
+    private Map<String, File> readPluginRoots() throws Exception {
         JSONArray installed = new JSONObject(
                 installedPlugins(pluginStoreRoot().getAbsolutePath()))
                 .getJSONArray("plugins");
+        Map<String, File> roots = new java.util.HashMap<>();
         for (int index = 0; index < installed.length(); index++) {
             JSONObject plugin = installed.getJSONObject(index);
-            if (pluginId.equals(plugin.optString("plugin_id"))
-                    && usableOnAndroid(plugin)) {
-                String packageRoot = plugin.optString("package_root", "");
-                return packageRoot.isBlank() ? null : new File(packageRoot);
+            String packageRoot = plugin.optString("package_root", "");
+            if (usableOnAndroid(plugin) && !packageRoot.isBlank()) {
+                roots.put(plugin.optString("plugin_id"), new File(packageRoot));
             }
         }
-        return null;
+        return roots;
+    }
+
+    private void forgetPluginRoots() {
+        synchronized (pluginRootsLock) {
+            pluginRoots = null;
+        }
+    }
+
+    /** Installs a package; the plugin may now live in a different directory. */
+    private String installPluginPackage(String archivePath, String storeRoot) {
+        try {
+            return installPluginFile(archivePath, storeRoot);
+        } finally {
+            forgetPluginRoots();
+        }
+    }
+
+    private String uninstallPluginPackage(String pluginId, String storeRoot, String dataRoot,
+            boolean deletePresets, boolean deletePluginData) {
+        try {
+            return uninstallPlugin(pluginId, storeRoot, dataRoot, deletePresets, deletePluginData);
+        } finally {
+            forgetPluginRoots();
+        }
     }
 
     private static WebResourceResponse pluginAsset(File packageRoot, String relative) {
@@ -1082,6 +1187,18 @@ public final class MainActivity extends Activity {
                         sendControllerPlanToKeyLab(repaint.toString(), midiGeneration);
                     }
                     result = new JSONObject().put("status", "ok");
+                } else if ("PUT".equals(method) && path.startsWith("/api/v1/controllers/")
+                        && path.endsWith("/output")) {
+                    // The player allows -- or stops -- a package's messages
+                    // to its controller.
+                    String controllerId = java.net.URLDecoder.decode(
+                            path.substring("/api/v1/controllers/".length(),
+                                    path.length() - "/output".length()),
+                            "UTF-8");
+                    JSONObject body = new JSONObject(params.optString("body", "{}"));
+                    result = new JSONObject(controllerAllowOutput(
+                            controllerStoreRoot(), controllerId, body.getBoolean("allow")));
+                    mainHandler.post(this::sendControllerConnectPlans);
                 } else if ("POST".equals(method)
                         && "/api/v1/plugins/inspect".equals(path)) {
                     JSONObject body = new JSONObject(params.optString("body", "{}"));
@@ -1266,6 +1383,22 @@ public final class MainActivity extends Activity {
         return null;
     }
 
+    /** Where each usable installed plugin lives, by id: a Rack Slot saved
+     *  without a state has one made from its plugin's package. */
+    private JSONObject installedPackageRoots() throws Exception {
+        JSONArray installed = new JSONObject(
+                installedPlugins(pluginStoreRoot().getAbsolutePath()))
+                .getJSONArray("plugins");
+        JSONObject roots = new JSONObject();
+        for (int index = 0; index < installed.length(); index++) {
+            JSONObject plugin = installed.getJSONObject(index);
+            if (usableOnAndroid(plugin) && plugin.has("package_root")) {
+                roots.put(plugin.getString("plugin_id"), plugin.getString("package_root"));
+            }
+        }
+        return roots;
+    }
+
     private JSONObject sharedPluginDescriptor(JSONObject plugin) throws Exception {
         String pluginId = plugin.getString("plugin_id");
         String assetVersion = "?v=" + Uri.encode(plugin.getString("version"));
@@ -1341,7 +1474,7 @@ public final class MainActivity extends Activity {
                 stopNativeAudio();
                 stopService(new Intent(this, AudioEngineService.class));
             }
-            String payload = uninstallPlugin(
+            String payload = uninstallPluginPackage(
                     pluginId,
                     pluginStoreRoot().getAbsolutePath(),
                     pluginDataRoot().getAbsolutePath(),
@@ -1602,7 +1735,7 @@ public final class MainActivity extends Activity {
         MidiManager midiManager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
         if (midiManager == null) return inputs;
         for (MidiDeviceInfo info : midiManager.getDevices()) {
-            if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
+            if (!isPlayableMidiDevice(info)) continue;
             boolean hasOutput = false;
             for (MidiDeviceInfo.PortInfo port : info.getPorts()) {
                 if (port.getType() == MidiDeviceInfo.PortInfo.TYPE_OUTPUT) {
@@ -1727,6 +1860,17 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** What LIVE has loaded, as the native library records it. */
+    private JSONObject sharedLiveState() throws Exception {
+        try {
+            return new JSONObject(liveCommand(pluginDataRoot().getAbsolutePath(),
+                    new JSONObject().put("kind", "state").toString()));
+        } catch (Throwable error) {
+            Log.w("RackForge", "LIVE state unavailable", error);
+            return new JSONObject().put("mode", "rack");
+        }
+    }
+
     private JSONObject sharedSessionSnapshot() throws Exception {
         nativeSessionRevision++;
         JSONArray instances = new JSONArray();
@@ -1749,7 +1893,7 @@ public final class MainActivity extends Activity {
                 .put("active_mode", mode)
                 .put("master_level", nativeMasterLevel())
                 .put("master_pan", nativeMasterPan())
-                .put("live", new JSONObject().put("mode", "rack"))
+                .put("live", sharedLiveState())
                 .put("parameter_links", parameterLinks());
         // The chain is the player's; the instances are the effects the engine
         // could build out of it, and each is what a panel opens on.
@@ -1799,22 +1943,26 @@ public final class MainActivity extends Activity {
                 releaseVirtualMidi(request.getString("client_id"));
                 return;
             }
+            // LIVE's library -- Racks, Songs, Setlists -- kept by the native
+            // engine in the data root, as the Pi and the desktop keep it. An
+            // edit is answered once it is stored; left unanswered, Save waited
+            // for ever.
             if ("performance_snapshot".equals(operation)) {
-                JSONObject live = new JSONObject().put("mode", "rack");
-                JSONObject library = new JSONObject()
-                        .put("schema_version", 1)
-                        .put("racks", new JSONArray())
-                        .put("songs", new JSONArray())
-                        .put("setlists", new JSONArray());
-                JSONObject snapshot = new JSONObject()
-                        .put("schema_version", 1)
-                        .put("revision", "android-0")
-                        .put("library", library)
-                        .put("live", live);
-                emitNativeSessionEvent("message", new JSONObject()
-                        .put("status", "performance_snapshot")
-                        .put("snapshot", snapshot)
-                        .toString());
+                emitNativeSessionEvent("message", performanceCommand(
+                        pluginDataRoot().getAbsolutePath(), request.toString(), "{}"));
+                return;
+            }
+            if ("edit_performance".equals(operation)) {
+                pluginParameterExecutor.execute(() -> {
+                    try {
+                        emitNativeSessionEvent("message", performanceCommand(
+                                pluginDataRoot().getAbsolutePath(), request.toString(),
+                                installedPackageRoots().toString()));
+                    } catch (Throwable error) {
+                        Log.e("RackForge", "Saving to the LIVE library failed", error);
+                        emitSharedSessionError(error);
+                    }
+                });
                 return;
             }
             if ("plugin_presets".equals(operation)) {
@@ -1925,6 +2073,10 @@ public final class MainActivity extends Activity {
                 handleMaterializePluginStateSessionRequest(request);
                 return;
             }
+            if ("plugin_catalog".equals(operation)) {
+                handlePluginCatalogSessionRequest(request);
+                return;
+            }
             if ("plugin_parameters".equals(operation)
                     || "set_plugin_parameter".equals(operation)
                     || "plugin_state_parameters".equals(operation)
@@ -1936,6 +2088,24 @@ public final class MainActivity extends Activity {
                 emitNativeSessionEvent("message", new JSONObject()
                         .put("status", "midi_sources")
                         .put("sources", midiSourceStatuses())
+                        .toString());
+                return;
+            }
+            // Android captures no audio. It says so, as the browser and the
+            // desktop do: left unanswered, the request held the UI's request
+            // queue for its whole 30-second timeout, and a plugin opened
+            // meanwhile waited that long for its parameters.
+            if ("audio_input".equals(operation)) {
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "audio_input")
+                        .put("input", new JSONObject()
+                                .put("availability", "unsupported")
+                                .put("device_channels", 0)
+                                .put("captured", new JSONArray())
+                                .put("gain_db", 0)
+                                .put("cable_routing", false)
+                                .put("peaks", new JSONArray())
+                                .put("reason", "RackForge for Android does not capture audio"))
                         .toString());
                 return;
             }
@@ -1984,7 +2154,29 @@ public final class MainActivity extends Activity {
                         .toString());
                 return;
             }
-            if (!"dispatch".equals(operation)) return;
+            // The player's controller maps, the inputs that came in, and the
+            // controllers they make: kept and answered by the native engine,
+            // as the desktop and the Pi do.
+            if ("controller_maps".equals(operation)
+                    || "midi_activity".equals(operation)
+                    || "save_controller_map".equals(operation)
+                    || "set_controller_takeover".equals(operation)
+                    || "parameter_touch".equals(operation)
+                    || "export_controller_map".equals(operation)
+                    || "import_controller_map".equals(operation)
+                    || "save_user_controller".equals(operation)) {
+                emitNativeSessionEvent("message",
+                        controllerSessionCommand(pluginDataRoot().getAbsolutePath(),
+                                request.toString()));
+                return;
+            }
+            if (!"dispatch".equals(operation)) {
+                // Unanswered on purpose for now (LIVE, the sequencer, audio
+                // health), but never silently: a request the UI waits on and
+                // this host drops shows here first.
+                Log.w("RackForge", "Shared UI session operation not handled on Android: " + operation);
+                return;
+            }
             JSONObject envelope = request.getJSONObject("envelope");
             JSONObject command = envelope.getJSONObject("command");
             String type = command.optString("type");
@@ -2000,9 +2192,9 @@ public final class MainActivity extends Activity {
                 case "select_sound" -> {
                     String target = command.optString("instance_id", "");
                     if (target.contains(CHAIN_INSTANCE_MARK)) {
-                        selectChainProgram(target, command.optString("sound_id"));
+                        selectChainProgram(envelope, target, command.optString("sound_id"));
                     } else {
-                        selectControllerSound(command.optString("sound_id"));
+                        selectControllerSound(command.optString("sound_id"), envelope);
                     }
                 }
                 case "set_play_chain" -> applySharedPlayChain(envelope, command);
@@ -2014,7 +2206,18 @@ public final class MainActivity extends Activity {
                     removeParameterLink(command.getString("link_id"));
                     confirmSharedCommand(envelope);
                 }
-                default -> Log.d("RackForge", "Shared UI command pending on Android: " + type);
+                case "activate_live_target" ->
+                        activateLiveTarget(envelope, command.getJSONObject("location"));
+                case "set_live_browse_mode" -> runConfirmedSharedCommand(envelope, () ->
+                        liveCommand(pluginDataRoot().getAbsolutePath(), new JSONObject()
+                                .put("kind", "browse")
+                                .put("mode", command.getString("mode"))
+                                .toString()));
+                // Answered, never dropped: a command the surface waits on and
+                // this host cannot perform is refused out loud.
+                case "preview_rack" -> previewRack(envelope, command.getJSONObject("rack"));
+                default -> throw new UnsupportedOperationException(
+                        "RackForge for Android cannot " + type.replace('_', ' ') + " yet");
             }
         } catch (Throwable error) {
             Log.e("RackForge", "Could not handle shared UI session request", error);
@@ -2119,16 +2322,24 @@ public final class MainActivity extends Activity {
     /**
      * One effect of the chain takes its program. The chain remembers which:
      * the same effect twice is two settings.
+     *
+     * The command is confirmed once the program is in, like every other
+     * shared command. It used not to be: the program loaded and the session
+     * moved on, but the panel that asked waited out its timeout and told the
+     * plugin the change had failed.
      */
-    private void selectChainProgram(String instanceId, String soundId) {
-        if (soundId == null || soundId.isBlank()) return;
+    private void selectChainProgram(JSONObject envelope, String instanceId, String soundId) {
+        if (soundId == null || soundId.isBlank()) {
+            emitSharedSessionError(new IllegalArgumentException("No program was named."));
+            return;
+        }
         pluginParameterExecutor.execute(() -> {
             try {
                 if (!selectChainSound(instanceId, soundId)) {
                     throw new IllegalStateException("The effect rejected program " + soundId);
                 }
                 rememberChainProgram(instanceId, soundId);
-                runOnUiThread(this::emitSessionSnapshot);
+                runOnUiThread(() -> runConfirmedSharedCommand(envelope, () -> { }));
             } catch (Throwable error) {
                 Log.e("RackForge", "Could not select the effect program " + soundId, error);
                 emitSharedSessionError(error);
@@ -2415,7 +2626,8 @@ public final class MainActivity extends Activity {
                 }
                 JSONObject params = new JSONObject()
                         .put("plugin_id", pluginId)
-                        .put("package_root", plugin.getString("package_root"));
+                        .put("package_root", plugin.getString("package_root"))
+                        .put("data_root", pluginDataRoot().getAbsolutePath());
                 if (request.has("sound_id")) {
                     params.put("sound_id", request.getString("sound_id"));
                 }
@@ -2427,6 +2639,35 @@ public final class MainActivity extends Activity {
                         .toString());
             } catch (Throwable error) {
                 Log.e("RackForge", "Materializing Rack Slot plugin state failed", error);
+                emitSharedSessionError(error);
+            }
+        });
+    }
+
+    /**
+     * The programs of a plugin a Rack Slot holds. The session carries the
+     * programs of the one plugin running; a Slot holding another asks here.
+     */
+    private void handlePluginCatalogSessionRequest(JSONObject request) {
+        pluginParameterExecutor.execute(() -> {
+            try {
+                String pluginId = request.getString("plugin_id");
+                JSONObject plugin = installedPluginRecord(pluginId);
+                if (plugin == null) {
+                    throw new IllegalArgumentException(
+                            "Rack Slot plugin is not installed: " + pluginId);
+                }
+                JSONObject params = new JSONObject()
+                        .put("plugin_id", pluginId)
+                        .put("package_root", plugin.getString("package_root"))
+                        .put("data_root", pluginDataRoot().getAbsolutePath());
+                JSONObject catalog = new JSONObject(
+                        pluginStateCommand("catalog", params.toString()));
+                emitNativeSessionEvent("message", catalog
+                        .put("status", "plugin_catalog")
+                        .toString());
+            } catch (Throwable error) {
+                Log.e("RackForge", "Reading a Rack Slot plugin's programs failed", error);
                 emitSharedSessionError(error);
             }
         });
@@ -3526,7 +3767,7 @@ public final class MainActivity extends Activity {
             File temporary = null;
             try {
                 temporary = copyPluginToPrivateCache(uri);
-                String descriptorText = installPluginFile(
+                String descriptorText = installPluginPackage(
                         temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath());
                 JSONObject descriptor = new JSONObject(descriptorText);
                 String installedName = descriptor.getString("plugin_name");
@@ -3567,7 +3808,7 @@ public final class MainActivity extends Activity {
                 throw new IllegalArgumentException(
                         "The plugin exceeds the 512 MB package limit.");
             }
-            String descriptorText = installPluginFile(
+            String descriptorText = installPluginPackage(
                     selection.file.getAbsolutePath(), pluginStoreRoot().getAbsolutePath());
             JSONObject descriptor = new JSONObject(descriptorText);
             keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
@@ -3774,7 +4015,7 @@ public final class MainActivity extends Activity {
                 while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
             }
             try {
-                JSONObject descriptor = new JSONObject(installPluginFile(
+                JSONObject descriptor = new JSONObject(installPluginPackage(
                         temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
                 String pluginId = descriptor.getString("plugin_id");
                 boolean known = knownPlugins.contains(pluginId);
@@ -3808,7 +4049,7 @@ public final class MainActivity extends Activity {
         for (java.io.File entry : entries) {
             try {
                 if (entry.isFile() && entry.getName().endsWith(".rfplugin")) {
-                    JSONObject descriptor = new JSONObject(installPluginFile(
+                    JSONObject descriptor = new JSONObject(installPluginPackage(
                             entry.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
                     Log.i("RackForge", "Inbox plugin installed: "
                             + descriptor.optString("plugin_name") + " "
@@ -4236,6 +4477,9 @@ public final class MainActivity extends Activity {
             return;
         }
         engineStarting = true;
+        // Choosing PLAY's plugin ends LIVE: the Rack comes off the stage
+        // before the engine it plays in is replaced.
+        if ("live".equals(currentPage)) leaveLive();
         currentPage = "play";
         pluginWebSurface = "play";
         // PLAY owns plugin replacement. Navigating through the generic engine-state page would
@@ -4316,6 +4560,97 @@ public final class MainActivity extends Activity {
                 });
             }
         }, "rackforge-plugin-activate").start();
+    }
+
+    /**
+     * Loads a LIVE location -- a Rack, a Song Part, a Setlist entry -- with
+     * every Slot: the native engine builds the whole Rack beside PLAY's
+     * voice and plays it in its place. The library records the Rack as
+     * loaded only once it is on stage; a load that fails leaves what was
+     * playing and says why. The web and LITTLE both come here; `envelope`
+     * is null for LITTLE, which is told through a toast.
+     */
+    private void activateLiveTarget(JSONObject envelope, JSONObject location) {
+        if (engineStarting) {
+            failLiveTarget(envelope, new IllegalStateException(
+                    "RackForge is still changing plugins; try again in a moment"));
+            return;
+        }
+        engineStarting = true;
+        new Thread(() -> {
+            try {
+                JSONObject loaded = new JSONObject(liveCommand(
+                        pluginDataRoot().getAbsolutePath(), new JSONObject()
+                                .put("kind", "load")
+                                .put("location", location)
+                                .put("package_roots", installedPackageRoots())
+                                .toString()));
+                Log.i("RackForge", "LIVE_RACK_LOADED rack=" + loaded.optString("rack_id")
+                        + " slots=" + loaded.optJSONArray("slots"));
+                runOnUiThread(() -> {
+                    currentPage = "live";
+                    syncControllerActiveMode("live", true);
+                    updateModeButtons();
+                    refreshKeyLabDisplay();
+                });
+                if (envelope != null) confirmSharedCommand(envelope);
+                else emitSessionSnapshot();
+            } catch (Throwable error) {
+                Log.e("RackForge", "Loading the LIVE target failed", error);
+                failLiveTarget(envelope, error);
+            } finally {
+                engineStarting = false;
+            }
+        }, "rackforge-live-load").start();
+    }
+
+    /**
+     * A Rack being edited, heard as it stands: every Slot, on stage in place
+     * of what was playing, without being recorded as the loaded Rack. The
+     * editor puts back what was playing when it closes.
+     */
+    private void previewRack(JSONObject envelope, JSONObject rack) {
+        rackPreviewExecutor.execute(() -> {
+            if (engineStarting) {
+                failLiveTarget(envelope, new IllegalStateException(
+                        "RackForge is still changing plugins; try again in a moment"));
+                return;
+            }
+            try {
+                liveCommand(pluginDataRoot().getAbsolutePath(), new JSONObject()
+                        .put("kind", "preview")
+                        .put("rack", rack)
+                        .put("package_roots", installedPackageRoots())
+                        .toString());
+                if (envelope != null) confirmSharedCommand(envelope);
+            } catch (Throwable error) {
+                Log.e("RackForge", "Previewing the Rack failed", error);
+                failLiveTarget(envelope, error);
+            }
+        });
+    }
+
+    private void failLiveTarget(JSONObject envelope, Throwable error) {
+        if (envelope != null) {
+            emitSharedSessionError(error);
+            return;
+        }
+        String message = error.getMessage() == null ? error.toString() : error.getMessage();
+        runOnUiThread(() -> Toast.makeText(this, "Could not load: " + message,
+                Toast.LENGTH_LONG).show());
+    }
+
+    /**
+     * Leaving LIVE: the Rack comes off the stage and PLAY's voice, which the
+     * Rack played beside and never touched, is what sounds again.
+     */
+    private void leaveLive() {
+        try {
+            liveCommand(pluginDataRoot().getAbsolutePath(),
+                    new JSONObject().put("kind", "deactivate").toString());
+        } catch (Throwable error) {
+            Log.w("RackForge", "Could not take the LIVE Rack off the stage", error);
+        }
     }
 
     private void deactivatePlugin(String pluginId) {
@@ -4479,6 +4814,8 @@ public final class MainActivity extends Activity {
     }
 
     private void showPlay() {
+        boolean fromLive = "live".equals(currentPage);
+        if (fromLive) leaveLive();
         currentPage = "play";
         pluginWebSurface = "play";
         syncControllerActiveMode("play", true);
@@ -4498,6 +4835,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showIdle() {
+        if ("live".equals(currentPage)) leaveLive();
         currentPage = "idle";
         syncControllerActiveMode("idle", false);
         updateModeButtons();
@@ -4572,9 +4910,9 @@ public final class MainActivity extends Activity {
 
         Spinner latency = new Spinner(this);
         latency.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
-                new String[] {"Low latency", "Balanced", "Safe"}));
+                new String[] {latencyLabel(0), latencyLabel(1), latencyLabel(2)}));
         latency.setSelection(latencyMode);
-        audioCard.addView(settingsControl("Latency mode", latency));
+        audioCard.addView(settingsControl("Buffer", latency));
         try {
             JSONObject status = new JSONObject(nativeAudioStatus());
             int actualRate = status.optInt("sample_rate", SAMPLE_RATE);
@@ -4744,11 +5082,12 @@ public final class MainActivity extends Activity {
         return row;
     }
 
+    /** The buffer a mode runs, in samples: the latency follows from it. */
     private static String latencyLabel(int mode) {
         return switch (mode) {
-            case 1 -> "Balanced";
-            case 2 -> "Safe";
-            default -> "Low latency";
+            case 1 -> "256 samples";
+            case 2 -> "512 samples";
+            default -> "128 samples";
         };
     }
 
@@ -4980,6 +5319,14 @@ public final class MainActivity extends Activity {
         lastObservedRenderErrors = -1;
         lastObservedMidiDroppedEvents = -1;
         lastObservedMaximumCallbackUs = -1;
+        try {
+            // Before the links compile: a mapped control works from the
+            // first note.
+            loadControllerMaps(pluginDataRoot().getAbsolutePath(),
+                    pluginStoreRoot().getAbsolutePath(), controllerStoreRoot());
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not load the controller maps", error);
+        }
         syncParameterLinksToRuntime();
         if (!startNativeAudio(selectedAudioDeviceId, latencyMode)) {
             throw new IllegalStateException("Native low-latency audio rejected the selected output");
@@ -5180,12 +5527,12 @@ public final class MainActivity extends Activity {
         if (manager == null) return;
         midiDeviceCallback = new MidiManager.DeviceCallback() {
             @Override public void onDeviceAdded(MidiDeviceInfo device) {
-                if (device.getType() == MidiDeviceInfo.TYPE_USB) scheduleMidiReconnect();
+                if (isPlayableMidiDevice(device)) scheduleMidiReconnect();
             }
 
             @Override public void onDeviceRemoved(MidiDeviceInfo device) {
-                if (device.getType() != MidiDeviceInfo.TYPE_USB) return;
-                if (audioRunning) {
+                if (!isPlayableMidiDevice(device)) return;
+                if (closeMidiDevice(device.getId()) && audioRunning) {
                     releaseMidiNotes();
                     Log.i("RackForge", "MIDI device removed; sustain and active notes released");
                     Toast.makeText(MainActivity.this,
@@ -5279,6 +5626,10 @@ public final class MainActivity extends Activity {
         private int dataCount;
         private final byte[] messageData = new byte[2];
         private boolean inSysEx;
+        // SysEx is dropped, except an Identity Reply: at most 17 bytes, read
+        // whole and handed to the native side, which knows the packages.
+        private final byte[] sysEx = new byte[20];
+        private int sysExLength;
 
         MidiStreamDecoder(boolean keyLabSurface, boolean forwardMidi, int generation,
                 int sourceKey, MidiSourceIdentity source) {
@@ -5293,7 +5644,15 @@ public final class MainActivity extends Activity {
             int end = Math.min(bytes.length, offset + count);
             for (int index = Math.max(0, offset); index < end; index++) {
                 int value = bytes[index] & 0xFF;
-                if (value >= 0xF8) continue;
+                if (value >= 0xF8) {
+                    // MIDI Start, Continue and Stop may be a controller's
+                    // transport buttons; the native side takes them as its
+                    // package says. Clock and Active Sensing are not read.
+                    if (value >= 0xFA && value <= 0xFC && forwardMidi && audioRunning) {
+                        sendMidiMessageFromSource(sourceKey, value, 0, 0, 1);
+                    }
+                    continue;
+                }
                 if ((value & 0x80) != 0) {
                     acceptStatus(value);
                 } else {
@@ -5305,15 +5664,27 @@ public final class MainActivity extends Activity {
         private void acceptStatus(int status) {
             if (status == 0xF0) {
                 inSysEx = true;
+                sysEx[0] = (byte) 0xF0;
+                sysExLength = 1;
                 resetMessage();
                 runningStatus = -1;
                 return;
             }
             if (status == 0xF7) {
+                if (inSysEx && sysExLength > 0 && sysExLength < sysEx.length) {
+                    sysEx[sysExLength++] = (byte) 0xF7;
+                    acceptSysEx();
+                }
                 inSysEx = false;
+                sysExLength = 0;
                 resetMessage();
                 runningStatus = -1;
                 return;
+            }
+            // Any other status ends a SysEx message cut short.
+            if (inSysEx) {
+                inSysEx = false;
+                sysExLength = 0;
             }
             if (inSysEx) return;
             if (status >= 0x80 && status <= 0xEF) {
@@ -5327,8 +5698,32 @@ public final class MainActivity extends Activity {
             }
         }
 
+        private void acceptSysEx() {
+            boolean identityReply = sysExLength >= 15 && (sysEx[1] & 0xFF) == 0x7E
+                    && (sysEx[3] & 0xFF) == 0x06 && (sysEx[4] & 0xFF) == 0x02;
+            if (!identityReply || !forwardMidi || sourceKey <= 0) return;
+            byte[] reply = java.util.Arrays.copyOf(sysEx, sysExLength);
+            try {
+                if (identifyMidiSource(sourceKey, reply)) {
+                    // A package the name alone could not choose: its messages
+                    // may go out now.
+                    mainHandler.post(() -> sendControllerConnectPlan(sourceKey, generation));
+                }
+            } catch (Throwable error) {
+                Log.w("RackForge", "Could not read an Identity Reply from " + source.name, error);
+            }
+        }
+
         private void acceptData(byte value) {
-            if (inSysEx) return;
+            if (inSysEx) {
+                // Longer than any Identity Reply: not one, so not kept.
+                if (sysExLength > 0 && sysExLength < sysEx.length - 1) {
+                    sysEx[sysExLength++] = value;
+                } else {
+                    sysExLength = 0;
+                }
+                return;
+            }
             if (messageStatus < 0) {
                 if (runningStatus < 0) return;
                 messageStatus = runningStatus;
@@ -5359,6 +5754,12 @@ public final class MainActivity extends Activity {
             if (!consumed && forwardMidi && audioRunning) {
                 sendMidiMessageFromSource(
                         sourceKey, messageStatus, data1, data2, expectedDataBytes + 1);
+                // A pad is a note, a wheel a bend: any of them may be
+                // mapped. A key that moves nothing leaves no touch to show.
+                int kind = messageStatus & 0xF0;
+                if (kind == 0xB0 || kind == 0x90 || kind == 0x80 || kind == 0xE0) {
+                    scheduleParameterTouchHeader(generation);
+                }
             }
             messageStatus = runningStatus;
             dataCount = 0;
@@ -5374,6 +5775,37 @@ public final class MainActivity extends Activity {
             int command = status & 0xF0;
             return command == 0xC0 || command == 0xD0 ? 1 : 2;
         }
+    }
+
+    /**
+     * After a control change reaches the engine, LITTLE's header names the
+     * parameter its link moved -- the player's map, a learnt link or the
+     * controller's defaults -- with its value. Asked once the render thread
+     * has had a block to apply the link, and again a few times while nothing
+     * has shown up, so a block that ran late does not lose the header; moves
+     * in between share the asks.
+     */
+    private void scheduleParameterTouchHeader(int generation) {
+        if (!parameterTouchScheduled.compareAndSet(false, true)) return;
+        askParameterTouchHeader(generation, PARAMETER_TOUCH_HEADER_ATTEMPTS);
+    }
+
+    private void askParameterTouchHeader(int generation, int attemptsLeft) {
+        mainHandler.postDelayed(() -> {
+            if (generation != midiGeneration) {
+                parameterTouchScheduled.set(false);
+                return;
+            }
+            String response = keyLabParameterTouch();
+            if (response != null) {
+                parameterTouchScheduled.set(false);
+                handleKeyLabResponse(response, generation);
+            } else if (attemptsLeft > 1) {
+                askParameterTouchHeader(generation, attemptsLeft - 1);
+            } else {
+                parameterTouchScheduled.set(false);
+            }
+        }, PARAMETER_TOUCH_HEADER_DELAY_MS);
     }
 
     private void handleKeyLabResponse(String json, int generation) {
@@ -5411,6 +5843,14 @@ public final class MainActivity extends Activity {
             case "select_plugin" -> mainHandler.post(() -> activatePlugin(
                     command.optString("root"), command.optString("name"),
                     command.optString("version")));
+            case "activate_live" -> {
+                JSONObject location = command.optJSONObject("location");
+                if (location != null) activateLiveTarget(null, location);
+            }
+            case "preview_rack" -> {
+                JSONObject rack = command.optJSONObject("rack");
+                if (rack != null) previewRack(null, rack);
+            }
             case "select_sound" -> selectControllerSound(command.optString("sound_id"));
             case "return_mode" -> {
                 String soundId = command.optString("sound_id");
@@ -5445,13 +5885,31 @@ public final class MainActivity extends Activity {
     }
 
     private void selectControllerSound(String soundId) {
-        if (soundId == null || soundId.isBlank()) return;
+        selectControllerSound(soundId, null);
+    }
+
+    /**
+     * Selects the instrument's program. `envelope` is the shared command that
+     * asked, when one did: it is confirmed once the program is in, or answered
+     * with the error, so the surface that sent it is not left waiting.
+     */
+    private void selectControllerSound(String soundId, JSONObject envelope) {
+        if (soundId == null || soundId.isBlank()) {
+            if (envelope != null) {
+                emitSharedSessionError(new IllegalArgumentException("No program was named."));
+            }
+            return;
+        }
         new Thread(() -> {
             try {
                 applyPluginSound(soundId);
-                runOnUiThread(this::publishSelectedPluginSound);
+                runOnUiThread(() -> {
+                    publishSelectedPluginSound();
+                    if (envelope != null) runConfirmedSharedCommand(envelope, () -> { });
+                });
             } catch (Throwable error) {
                 Log.w("RackForge", "Could not select sound " + soundId, error);
+                if (envelope != null) emitSharedSessionError(error);
             }
         }, "rackforge-keylab-sound").start();
     }
@@ -5508,34 +5966,54 @@ public final class MainActivity extends Activity {
     private void openMidiInputs() {
         MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
         if (manager == null) return;
+        // LITTLE opens on the mode the app is in, so it hears the mode before
+        // the KeyLab is taken.
+        syncControllerActiveMode("live".equals(currentPage) ? "live"
+                : "idle".equals(currentPage) ? "idle" : "play", false);
         int generation = midiGeneration;
-        AtomicInteger registeredSources = new AtomicInteger();
         Set<String> enabledInputs = preferences.getStringSet("midi.inputs", null);
         for (MidiDeviceInfo info : manager.getDevices()) {
-            if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
+            if (!isPlayableMidiDevice(info)) continue;
+            synchronized (midiDevicesById) {
+                // Already open, or being opened: it keeps playing as it is.
+                if (midiDevicesById.containsKey(info.getId())) continue;
+            }
             String deviceName = midiDeviceName(info);
             boolean performanceEnabled = enabledInputs == null || enabledInputs.contains(deviceName);
             boolean keyLab = isKeyLabDevice(info, manager);
             // A RackForge controller is a control-plane device even when the user
             // has disabled it as a musical input. LITTLE must still be acquired.
             if (!performanceEnabled && !keyLab) continue;
+            OpenMidiDevice record = new OpenMidiDevice(info);
+            synchronized (midiDevicesById) { midiDevicesById.put(info.getId(), record); }
             manager.openDevice(info, device -> {
-                if (device == null) return;
-                if (!audioRunning || generation != midiGeneration) {
-                    try { device.close(); } catch (Exception ignored) { }
+                if (device == null) {
+                    // Not opened: the next look at the devices tries again.
+                    synchronized (midiDevicesById) { midiDevicesById.remove(info.getId(), record); }
                     return;
                 }
+                synchronized (midiDevicesById) {
+                    if (record.closed || !audioRunning || generation != midiGeneration) {
+                        try { device.close(); } catch (Exception ignored) { }
+                        return;
+                    }
+                    record.device = device;
+                }
                 synchronized (openMidiDevices) { openMidiDevices.add(device); }
-                if (keyLab) openKeyLabDestinations(device, info, generation);
+                if (keyLab) openKeyLabDestinations(record, generation);
+                List<Integer> deviceSources = new ArrayList<>();
                 for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
                     if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_OUTPUT) continue;
                     boolean keyLabPrimary = keyLab && isPrimaryKeyLabPort(portInfo);
                     boolean forwardMidi = performanceEnabled && (!keyLab || keyLabPrimary);
                     MidiOutputPort port = device.openOutputPort(portInfo.getPortNumber());
                     if (port == null) continue;
-                    if (!audioRunning || generation != midiGeneration) {
-                        try { port.close(); } catch (Exception ignored) { }
-                        continue;
+                    synchronized (midiDevicesById) {
+                        if (record.closed || !audioRunning || generation != midiGeneration) {
+                            try { port.close(); } catch (Exception ignored) { }
+                            continue;
+                        }
+                        record.outputs.add(port);
                     }
                     if (keyLab) {
                         Log.i("RackForge", "KeyLab source port " + portInfo.getPortNumber()
@@ -5548,7 +6026,7 @@ public final class MainActivity extends Activity {
                             sourceKey = registerMidiSource(
                                     source.id,
                                     source.name,
-                                    registeredSources.getAndIncrement() == 0,
+                                    registeredMidiSources.getAndIncrement() == 0,
                                     keyLabPrimary
                                             ? "org.rackforge.arturia-keylab-essential-mk3"
                                             : "");
@@ -5570,13 +6048,275 @@ public final class MainActivity extends Activity {
                         }
                     });
                     synchronized (openMidiPorts) { openMidiPorts.add(port); }
+                    if (sourceKey > 0) deviceSources.add(sourceKey);
+                }
+                synchronized (midiDevicesById) { record.sourceKeys.addAll(deviceSources); }
+                // The KeyLab's in-process driver talks to it; any other
+                // device is asked which model it is, and hears its package's
+                // messages once the player allows them.
+                if (!keyLab && !deviceSources.isEmpty()) {
+                    synchronized (controllerDevices) {
+                        for (int sourceKey : deviceSources) controllerDevices.put(sourceKey, record);
+                    }
+                    openControllerDestination(record, generation, deviceSources);
                 }
             }, null);
         }
     }
 
-    private void openKeyLabDestinations(MidiDevice device, MidiDeviceInfo info,
-            int generation) {
+    /**
+     * A device Android offers as MIDI plays, whatever carries it: USB,
+     * Bluetooth or another app's virtual device, as every port does on the
+     * other hosts.
+     */
+    private static boolean isPlayableMidiDevice(MidiDeviceInfo info) {
+        int type = info.getType();
+        return type == MidiDeviceInfo.TYPE_USB || type == MidiDeviceInfo.TYPE_BLUETOOTH
+                || type == MidiDeviceInfo.TYPE_VIRTUAL;
+    }
+
+    /** One device RackForge opened, with every port it opened on it. */
+    private static final class OpenMidiDevice {
+        final MidiDeviceInfo info;
+        /** Set once Android hands the device over. */
+        MidiDevice device;
+        /** Set when the device is let go: a late open closes what it gets. */
+        boolean closed;
+        final List<MidiOutputPort> outputs = new ArrayList<>();
+        /** Its MIDI ins by port number: a port opens once, whoever asks. */
+        final Map<Integer, MidiInputPort> inputs = new LinkedHashMap<>();
+        final List<Integer> sourceKeys = new ArrayList<>();
+
+        OpenMidiDevice(MidiDeviceInfo info) {
+            this.info = info;
+        }
+    }
+
+    /** A MIDI in of an open device, opened once and shared. */
+    private MidiInputPort openDeviceInput(OpenMidiDevice record, int portNumber) {
+        synchronized (midiDevicesById) {
+            if (record.closed || record.device == null) return null;
+            MidiInputPort open = record.inputs.get(portNumber);
+            if (open != null) return open;
+            MidiInputPort port = record.device.openInputPort(portNumber);
+            if (port == null) return null;
+            record.inputs.put(portNumber, port);
+            synchronized (openMidiDestinations) { openMidiDestinations.add(port); }
+            return port;
+        }
+    }
+
+    /** The devices no longer offered, closed: what a missed removal left. */
+    private void closeVanishedMidiDevices() {
+        MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
+        if (manager == null) return;
+        Set<Integer> present = new java.util.HashSet<>();
+        for (MidiDeviceInfo info : manager.getDevices()) present.add(info.getId());
+        List<Integer> vanished = new ArrayList<>();
+        synchronized (midiDevicesById) {
+            for (int deviceId : midiDevicesById.keySet()) {
+                if (!present.contains(deviceId)) vanished.add(deviceId);
+            }
+        }
+        for (int deviceId : vanished) closeMidiDevice(deviceId);
+    }
+
+    /**
+     * Closes one device and every port opened on it, and tells the native
+     * side its sources went away; the other devices are not touched. Its
+     * sources stay registered, so a replug plays and links as before.
+     * Whether it was open.
+     */
+    private boolean closeMidiDevice(int deviceId) {
+        OpenMidiDevice record;
+        List<MidiOutputPort> outputs;
+        List<MidiInputPort> inputs;
+        List<Integer> sourceKeys;
+        synchronized (midiDevicesById) {
+            record = midiDevicesById.remove(deviceId);
+            if (record == null) return false;
+            record.closed = true;
+            outputs = new ArrayList<>(record.outputs);
+            inputs = new ArrayList<>(record.inputs.values());
+            sourceKeys = new ArrayList<>(record.sourceKeys);
+        }
+        for (MidiOutputPort port : outputs) {
+            synchronized (openMidiPorts) { openMidiPorts.remove(port); }
+            try { port.close(); } catch (Exception ignored) { }
+        }
+        for (MidiInputPort port : inputs) {
+            synchronized (openKeyLabDestinations) { openKeyLabDestinations.remove(port); }
+            synchronized (openMidiDestinations) { openMidiDestinations.remove(port); }
+            try { port.close(); } catch (Exception ignored) { }
+        }
+        for (int sourceKey : sourceKeys) {
+            synchronized (openControllerDestinations) { openControllerDestinations.remove(sourceKey); }
+            synchronized (openSetupDestinations) { openSetupDestinations.remove(sourceKey); }
+            synchronized (controllerDevices) { controllerDevices.remove(sourceKey); }
+            try {
+                midiSourceDisconnected(sourceKey);
+            } catch (Throwable error) {
+                Log.w("RackForge", "Could not forget MIDI source " + sourceKey, error);
+            }
+        }
+        if (record.device != null) {
+            synchronized (openMidiDevices) { openMidiDevices.remove(record.device); }
+            try { record.device.close(); } catch (Exception ignored) { }
+        }
+        Log.i("RackForge", "MIDI device closed: " + midiDeviceName(record.info)
+                + " sources=" + sourceKeys);
+        return true;
+    }
+
+    /** Universal Non-Realtime Identity Request, to every device on the cable. */
+    private static final byte[] MIDI_IDENTITY_REQUEST = {
+            (byte) 0xF0, 0x7E, 0x7F, 0x06, 0x01, (byte) 0xF7 };
+    /** How long a device has to answer before its package's messages go out. */
+    private static final long MIDI_IDENTITY_WINDOW_MS = 400;
+
+    private void openControllerDestination(OpenMidiDevice record, int generation,
+            List<Integer> sourceKeys) {
+        MidiDeviceInfo info = record.info;
+        // A device's first MIDI in is the one its own controls answer on.
+        MidiDeviceInfo.PortInfo target = null;
+        for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
+            if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_INPUT) continue;
+            if (target == null || portInfo.getPortNumber() < target.getPortNumber()) {
+                target = portInfo;
+            }
+        }
+        if (target == null) return;
+        if (!audioRunning || generation != midiGeneration) return;
+        MidiInputPort port = openDeviceInput(record, target.getPortNumber());
+        if (port == null) {
+            Log.w("RackForge", "Could not open the MIDI in of " + midiDeviceName(info));
+            return;
+        }
+        synchronized (openControllerDestinations) {
+            for (int sourceKey : sourceKeys) openControllerDestinations.put(sourceKey, port);
+        }
+        try {
+            port.send(MIDI_IDENTITY_REQUEST, 0, MIDI_IDENTITY_REQUEST.length);
+        } catch (Exception error) {
+            Log.w("RackForge", "Could not ask " + midiDeviceName(info) + " which model it is",
+                    error);
+        }
+        mainHandler.postDelayed(() -> {
+            for (int sourceKey : sourceKeys) sendControllerConnectPlan(sourceKey, generation);
+        }, MIDI_IDENTITY_WINDOW_MS);
+    }
+
+    /**
+     * Sends a source's package messages to its device, once per connection:
+     * the native side answers an empty plan when there are none, they are not
+     * allowed, or they were sent.
+     */
+    private void sendControllerConnectPlan(int sourceKey, int generation) {
+        if (generation != midiGeneration) return;
+        MidiInputPort port;
+        synchronized (openControllerDestinations) {
+            port = openControllerDestinations.get(sourceKey);
+        }
+        if (port == null) return;
+        String json;
+        try {
+            json = midiSourceConnectPlan(sourceKey);
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not read the controller's connect messages", error);
+            return;
+        }
+        try {
+            JSONArray plan = new JSONArray(json);
+            long delayMs = 0;
+            for (int index = 0; index < plan.length(); index++) {
+                JSONObject step = plan.getJSONObject(index);
+                JSONArray values = step.getJSONArray("bytes");
+                byte[] message = new byte[values.length()];
+                for (int byteIndex = 0; byteIndex < values.length(); byteIndex++) {
+                    message[byteIndex] = (byte) values.getInt(byteIndex);
+                }
+                // A setup message goes to the port the package names for
+                // it, such as the DAW port a controller changes mode on.
+                MidiInputPort target = "setup".equals(step.optString("port", "input"))
+                        ? setupDestination(sourceKey) : port;
+                if (target == null) {
+                    Log.w("RackForge", "No setup output for source " + sourceKey
+                            + ": a setup message was not sent");
+                    continue;
+                }
+                mainHandler.postDelayed(() -> {
+                    if (generation != midiGeneration) return;
+                    synchronized (openMidiDestinations) {
+                        if (!openMidiDestinations.contains(target)) return;
+                    }
+                    try {
+                        target.send(message, 0, message.length);
+                    } catch (Exception error) {
+                        Log.w("RackForge", "A controller connect message was not sent", error);
+                    }
+                }, delayMs);
+                delayMs += step.optLong("settle_after_ms", 0);
+            }
+            if (plan.length() > 0) {
+                Log.i("RackForge", "Controller connect messages scheduled for source "
+                        + sourceKey + " steps=" + plan.length());
+            }
+        } catch (Exception error) {
+            Log.e("RackForge", "Invalid controller connect plan", error);
+        }
+    }
+
+    /**
+     * The setup output of the controller on a source: among its device's MIDI
+     * ins, named as its sources are, the one the package's setup_output
+     * endpoint picks, the same choice the other hosts make. Opened once.
+     */
+    private MidiInputPort setupDestination(int sourceKey) {
+        synchronized (openSetupDestinations) {
+            MidiInputPort open = openSetupDestinations.get(sourceKey);
+            if (open != null) return open;
+        }
+        OpenMidiDevice record;
+        synchronized (controllerDevices) { record = controllerDevices.get(sourceKey); }
+        if (record == null) return null;
+        List<MidiDeviceInfo.PortInfo> inputs = new ArrayList<>();
+        JSONArray names = new JSONArray();
+        for (MidiDeviceInfo.PortInfo portInfo : record.info.getPorts()) {
+            if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_INPUT) continue;
+            inputs.add(portInfo);
+            names.put(midiSourceIdentity(record.info, portInfo).name);
+        }
+        int index;
+        try {
+            index = midiSetupPort(sourceKey, names.toString());
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not choose the setup output", error);
+            return null;
+        }
+        if (index < 0 || index >= inputs.size()) {
+            Log.w("RackForge", "No single setup output among " + names);
+            return null;
+        }
+        MidiInputPort port = openDeviceInput(record, inputs.get(index).getPortNumber());
+        if (port == null) return null;
+        synchronized (openSetupDestinations) { openSetupDestinations.put(sourceKey, port); }
+        Log.i("RackForge", "Setup output for source " + sourceKey + ": "
+                + names.optString(index));
+        return port;
+    }
+
+    /** After the player allowed a package: what it sends goes out now. */
+    private void sendControllerConnectPlans() {
+        List<Integer> sourceKeys;
+        synchronized (openControllerDestinations) {
+            sourceKeys = new ArrayList<>(openControllerDestinations.keySet());
+        }
+        int generation = midiGeneration;
+        for (int sourceKey : sourceKeys) sendControllerConnectPlan(sourceKey, generation);
+    }
+
+    private void openKeyLabDestinations(OpenMidiDevice record, int generation) {
+        MidiDeviceInfo info = record.info;
         List<MidiDeviceInfo.PortInfo> inputs = new ArrayList<>();
         List<MidiDeviceInfo.PortInfo> namedMatches = new ArrayList<>();
         for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
@@ -5600,17 +6340,13 @@ public final class MainActivity extends Activity {
         String acquirePlan = keyLabAcquirePlan();
         int opened = 0;
         for (MidiDeviceInfo.PortInfo target : targets) {
-            MidiInputPort port = device.openInputPort(target.getPortNumber());
+            if (!audioRunning || generation != midiGeneration) break;
+            MidiInputPort port = openDeviceInput(record, target.getPortNumber());
             if (port == null) {
                 Log.w("RackForge", "Could not open KeyLab destination port "
                         + target.getPortNumber());
                 continue;
             }
-            if (!audioRunning || generation != midiGeneration) {
-                try { port.close(); } catch (Exception ignored) { }
-                continue;
-            }
-            synchronized (openMidiDestinations) { openMidiDestinations.add(port); }
             synchronized (openKeyLabDestinations) {
                 openKeyLabDestinations.put(port, target.getPortNumber());
             }
@@ -5715,6 +6451,12 @@ public final class MainActivity extends Activity {
         String name = properties.getString(MidiDeviceInfo.PROPERTY_NAME, "");
         if (keyLabMatchesProductName(product) || keyLabMatchesProductName(name)) return true;
 
+        // A USB MIDI service names the USB device behind it: its vendor and
+        // product ids answer for this device alone, whatever else is plugged.
+        UsbDevice usb = midiUsbDevice(properties);
+        if (usb != null) return keyLabMatchesUsbDevice(usb.getVendorId(), usb.getProductId());
+        if (info.getType() != MidiDeviceInfo.TYPE_USB) return false;
+
         boolean physicalMatch = hasSupportedKeyLabUsbDevice();
         if (!physicalMatch) return false;
         if (keyLabMatchesEndpointName(product) || keyLabMatchesEndpointName(name)) return true;
@@ -5729,6 +6471,15 @@ public final class MainActivity extends Activity {
             if (candidate.getType() == MidiDeviceInfo.TYPE_USB) usbMidiDevices++;
         }
         return usbMidiDevices == 1;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static UsbDevice midiUsbDevice(Bundle properties) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return properties.getParcelable(MidiDeviceInfo.PROPERTY_USB_DEVICE, UsbDevice.class);
+        }
+        Object usb = properties.getParcelable(MidiDeviceInfo.PROPERTY_USB_DEVICE);
+        return usb instanceof UsbDevice device ? device : null;
     }
 
     private boolean hasSupportedKeyLabUsbDevice() {
@@ -5820,7 +6571,7 @@ public final class MainActivity extends Activity {
         MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
         if (manager != null) {
             for (MidiDeviceInfo info : manager.getDevices()) {
-                if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
+                if (!isPlayableMidiDevice(info)) continue;
                 String deviceName = midiDeviceName(info);
                 if (enabledInputs != null && !enabledInputs.contains(deviceName)) continue;
                 boolean keyLab = isKeyLabDevice(info, manager);
@@ -5854,6 +6605,14 @@ public final class MainActivity extends Activity {
             for (MidiOutputPort port : openMidiPorts) try { port.close(); } catch (Exception ignored) { }
             openMidiPorts.clear();
         }
+        synchronized (openControllerDestinations) { openControllerDestinations.clear(); }
+        synchronized (openSetupDestinations) { openSetupDestinations.clear(); }
+        synchronized (controllerDevices) { controllerDevices.clear(); }
+        synchronized (midiDevicesById) {
+            for (OpenMidiDevice record : midiDevicesById.values()) record.closed = true;
+            midiDevicesById.clear();
+        }
+        registeredMidiSources.set(0);
         synchronized (openMidiDestinations) {
             for (MidiInputPort port : openMidiDestinations) {
                 try { port.close(); } catch (Exception ignored) { }

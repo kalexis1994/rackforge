@@ -1,0 +1,314 @@
+# Novation Launchkey Mini, the first and the MK2, in Basic Mapping mode: what
+# it sends without a DAW's InControl. Every value below is sourced in
+# SOURCES.md; [UG] is the Launchkey Mini User Guide (2015, for both versions),
+# [BW] Bitwig's Launchkey Mini extension.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-launchkey-mini-mk2"
+name = "Launchkey Mini [MK2]"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "launchkey-mini-mk2"
+
+# Its MIDI port: "Launchkey Mini" on Windows, "Launchkey Mini LK Mini MIDI" on
+# a Mac, "Launchkey Mini MIDI 1" on Linux [BW port names]. The other port,
+# InControl ("MIDIIN2 (...)", "... InControl", "... MIDI 2"), is the DAW's, as
+# is the Mini MK3's "Launchkey Mini MIDI IN2". The Launchkey Mini MK3 and MK4
+# name their mark.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["launchkey mini"]
+exclude_contains = ["midiin2", "in2", "incontrol", "midi 2", "mk3", "mk4"]
+
+# Rotary controls 1-8: CC 21-28 on the keyboard's MIDI channel, channel 1 at
+# power-on [UG p10 "ALWAYS defaults to MIDI channel 01", p11, MIDI Messages
+# Table]. No faders: they take the first row.
+
+[[inputs]]
+id = "knob-1"
+name = "Rotary 1"
+kind = "knob"
+group = "Rotaries"
+midi = { channel = 0, cc = 21 }
+slot = "control-1.1"
+
+[[inputs]]
+id = "knob-2"
+name = "Rotary 2"
+kind = "knob"
+group = "Rotaries"
+midi = { channel = 0, cc = 22 }
+slot = "control-1.2"
+
+[[inputs]]
+id = "knob-3"
+name = "Rotary 3"
+kind = "knob"
+group = "Rotaries"
+midi = { channel = 0, cc = 23 }
+slot = "control-1.3"
+
+[[inputs]]
+id = "knob-4"
+name = "Rotary 4"
+kind = "knob"
+group = "Rotaries"
+midi = { channel = 0, cc = 24 }
+slot = "control-1.4"
+
+[[inputs]]
+id = "knob-5"
+name = "Rotary 5"
+kind = "knob"
+group = "Rotaries"
+midi = { channel = 0, cc = 25 }
+slot = "control-1.5"
+
+[[inputs]]
+id = "knob-6"
+name = "Rotary 6"
+kind = "knob"
+group = "Rotaries"
+midi = { channel = 0, cc = 26 }
+slot = "control-1.6"
+
+[[inputs]]
+id = "knob-7"
+name = "Rotary 7"
+kind = "knob"
+group = "Rotaries"
+midi = { channel = 0, cc = 27 }
+slot = "control-1.7"
+
+[[inputs]]
+id = "knob-8"
+name = "Rotary 8"
+kind = "knob"
+group = "Rotaries"
+midi = { channel = 0, cc = 28 }
+slot = "control-1.8"
+
+# Pads: notes on channel 10, always, in Basic Mapping mode [UG p10-11]: top row
+# 40-43 48-51, bottom row 36-39 44-47 [UG MIDI Messages Table]. The
+# Launchkey's layout: each pad takes the slot of the note it sends.
+
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 40 }
+slot = "switch-1.1"
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 41 }
+slot = "switch-1.2"
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 42 }
+slot = "switch-1.3"
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 43 }
+slot = "switch-1.4"
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 48 }
+slot = "switch-2.1"
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 49 }
+slot = "switch-2.2"
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 50 }
+slot = "switch-2.3"
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 51 }
+slot = "switch-2.4"
+
+[[inputs]]
+id = "pad-9"
+name = "Pad 9"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 36 }
+slot = "switch-1.5"
+
+[[inputs]]
+id = "pad-10"
+name = "Pad 10"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 37 }
+slot = "switch-1.6"
+
+[[inputs]]
+id = "pad-11"
+name = "Pad 11"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 38 }
+slot = "switch-1.7"
+
+[[inputs]]
+id = "pad-12"
+name = "Pad 12"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 39 }
+slot = "switch-1.8"
+
+[[inputs]]
+id = "pad-13"
+name = "Pad 13"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 44 }
+slot = "switch-2.5"
+
+[[inputs]]
+id = "pad-14"
+name = "Pad 14"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 45 }
+slot = "switch-2.6"
+
+[[inputs]]
+id = "pad-15"
+name = "Pad 15"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 46 }
+slot = "switch-2.7"
+
+[[inputs]]
+id = "pad-16"
+name = "Pad 16"
+kind = "pad"
+group = "Pads"
+midi = { channel = 9, note = 47 }
+slot = "switch-2.8"
+
+# The buttons, CC on the keyboard's channel, 127 and 0 [UG MIDI Messages
+# Table]: the round buttons 108 and 109, the arrows up and down 104 and 105,
+# Track < > 106 and 107. They are the keyboard's navigation, never notes or
+# controls to play. Track < > step the main selector, the arrows the second.
+
+[[inputs]]
+id = "round-top"
+name = "Round button, top"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 108 }
+plays = false
+
+[[inputs]]
+id = "round-bottom"
+name = "Round button, bottom"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 109 }
+plays = false
+
+[[inputs]]
+id = "arrow-up"
+name = "Arrow up"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 104 }
+slot = "step-2.up"
+plays = false
+
+[[inputs]]
+id = "arrow-down"
+name = "Arrow down"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 105 }
+slot = "step-2.down"
+plays = false
+
+[[inputs]]
+id = "track-previous"
+name = "Track <"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 106 }
+slot = "step.down"
+plays = false
+
+[[inputs]]
+id = "track-next"
+name = "Track >"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, cc = 107 }
+slot = "step.up"
+plays = false
+
+# RackForge's default meanings for eight knobs and no faders.
+[[roles]]
+input = "knob-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "knob-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "knob-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "knob-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "knob-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "knob-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "knob-8"
+role = "synth.envelope.amp.release"

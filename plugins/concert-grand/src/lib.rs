@@ -25,11 +25,87 @@
 
 mod math;
 
-use math::{expf, log2f, powf, roundf, sincosf, sqrtf};
+use math::{exp2f, expf, log2f, powf, roundf, sincosf, sqrtf};
+
+/// Where a note-on's time goes, by phase.
+///
+/// A sampling profiler is the wrong tool here: `start_voice_unit` is one
+/// very large function and everything in it inlines, so the samples land on
+/// one symbol. These are explicit probes instead -- exact attribution, no
+/// tooling on the machine, and they compile away entirely outside tests.
+#[cfg(test)]
+pub(crate) mod probe {
+    use core::sync::atomic::{AtomicU64, Ordering};
+    pub const PHASES: [&str; 7] = [
+        "receta: el lazo de frecuencias",
+        "el fieltro y el contacto (antes de la simulacion)",
+        "escalera (el lazo de parciales)",
+        "fantasmas, ruido y la mezcla",
+        "asignacion de la voz",
+        "halo (la voz sombra)",
+        "la simulacion del golpe en si",
+    ];
+    pub static NANOS: [AtomicU64; 7] = [
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+        AtomicU64::new(0),
+    ];
+    pub fn add(phase: usize, nanos: u64) {
+        NANOS[phase].fetch_add(nanos, Ordering::Relaxed);
+    }
+    pub fn reset() {
+        for slot in NANOS.iter() {
+            slot.store(0, Ordering::Relaxed);
+        }
+    }
+    pub fn report(label: &str) {
+        let total: u64 = NANOS.iter().map(|s| s.load(Ordering::Relaxed)).sum();
+        std::println!(
+            "
+=== {label} ===   total {:.0} us",
+            total as f64 / 1000.0
+        );
+        for (phase, name) in PHASES.iter().enumerate() {
+            let nanos = NANOS[phase].load(Ordering::Relaxed);
+            let share = if total > 0 {
+                100.0 * nanos as f64 / total as f64
+            } else {
+                0.0
+            };
+            std::println!(
+                "  {:>38}  {:>8.0} us  {:>5.1} %  {}",
+                name,
+                nanos as f64 / 1000.0,
+                share,
+                "#".repeat((share / 2.0) as usize)
+            );
+        }
+    }
+}
+
+/// A probe that is a no-op unless the crate is being tested.
+macro_rules! phase {
+    ($phase:expr, $mark:ident) => {
+        // The last probe in a function moves a mark nothing reads again.
+        #[cfg(test)]
+        #[allow(unused_assignments)]
+        {
+            let now = std::time::Instant::now();
+            probe::add($phase, now.duration_since($mark).as_nanos() as u64);
+            $mark = now;
+        }
+    };
+}
+
 use rackforge_plugin_sdk::{
-    MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_FLAG_RELEASE_MEASURED,
-    MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF, MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2,
-    ParameterEvent, Processor, export_processor,
+    BlockContext, MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT,
+    MIDI2_FLAG_RELEASE_MEASURED, MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF,
+    MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2, ParallelProcessor, ParameterEvent, PlanWriter,
+    UnitContext, UnitMix, UnitWork, export_parallel_processor,
 };
 
 /// A tunable constant of the model: it ships with the value the constant had,
@@ -217,7 +293,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 156;
+pub const KNOB_COUNT: usize = 157;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -880,6 +956,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         &MERGE_RAMP_CONTACT,
         "How much of the blow's own contact time a re-strike's momentum is spread over: 1 the contact itself, 0 off.",
     ),
+    (
+        "WIRE_LOSS_TOP",
+        &WIRE_LOSS_TOP,
+        "Multiplier on the wire's viscoelastic loss reached at C8, log-linear from about C3; 1 = the fitted rate everywhere.",
+    ),
 ];
 
 /// Applies `NAME = value` lines (blank lines and `#` comments ignored;
@@ -973,6 +1054,90 @@ const NOTE_COUNT: usize = 88;
 /// build keeps the temporaries and the harness's 2 MiB thread overflowed.
 /// Locally, `cargo test --release` fits; a debug run wants the variable.
 const MAX_VOICES: usize = 32;
+/// What the instrument costs the sandbox, per frame of audio, in wasmtime
+/// fuel. This is how a budget handed down by the host (`realtime_budget` in
+/// `rackforge-core`) becomes a decision about how much instrument to build.
+///
+/// Measured through `rackforge-core stress --parameter 32=<density>` at 128
+/// frames, which is the appliance's period. Sweeping Board Density from its
+/// floor to its ceiling moved the bank from 106 modes to 256 and the steady
+/// fuel from 11,546,535 to 14,292,135 -- 18,304 fuel a block per mode, and
+/// exactly that for every step in between, so the bank is linear in its modes
+/// to the fuel. The split between the parts that are not the soundboard comes
+/// from the ablation in `RELIABILITY.md`, measured on a Raspberry Pi 4 by
+/// building the plugin with each bank taken out.
+///
+/// **None of these has to be right.** The host watches what the render
+/// actually does with the period and keeps moving the budget until it fits,
+/// so an estimate off by a factor still lands; it just takes a few seconds
+/// longer. They are here to make the first jump land near the answer instead
+/// of walking to it.
+///
+/// What no budget can take away: the bridge projection, the damped bed, the
+/// open top octave, the halo, the rim, the lid and the room. These are the
+/// parts with nothing left to give up that would still leave a piano.
+const UNAVOIDABLE_FUEL: f32 = 14_219.0;
+/// The soundboard bank at the voicing it ships with -- 169 modes, not its 256
+/// slots, because the shipped Density control does not fill them.
+const BOARD_AT_FULL_FUEL: f32 = 24_167.0;
+/// The undamped top register's sympathetic partials at full count. 393 us of
+/// a Raspberry Pi's 1321 us of silence, which is the largest single thing in
+/// the instrument after the soundboard itself.
+const UNDAMPED_AT_FULL_FUEL: f32 = 13_125.0;
+/// One sounding voice. Freshly struck notes cost about three times what a
+/// note a Raspberry Pi has been holding for twelve seconds costs, because the
+/// partial cull thins them; this is the expensive end, since that is the end
+/// where deadlines are missed.
+const VOICE_FUEL: f32 = 9_688.0;
+/// How much polyphony the instrument keeps room for before it spends anything
+/// on the parts of itself it could do without. A piano that fits its body by
+/// refusing to play a chord has the priority backwards.
+const RESERVED_VOICES: f32 = 6.0;
+/// And the same floor said in the units the bank is actually built from. The
+/// builder stops at a ceiling frequency rather than at a count, so a spacing
+/// asked to deliver a count it cannot reach would keep being asked for more;
+/// this is where that stops.
+const MAXIMUM_BUDGET_SPACING: f32 = 3.0;
+/// The least instrument this will build. Below this the losses stop being a
+/// smaller piano and start being a broken one, and the honest report is that
+/// the machine cannot run it -- which the host says for itself, in the log,
+/// once its cuts stop buying anything.
+const MINIMUM_QUALITY: f32 = 0.2;
+/// Floors for the two banks the quality scalar thins, in their own units.
+const MINIMUM_UNDAMPED_PARTIALS: usize = 2;
+/// How long the body banks take to fade out before a budget rebuild, and
+/// back in after it: forty milliseconds at 48 kHz, short enough to read as
+/// the body breathing rather than dropping out, long enough that nothing
+/// steps.
+const BANK_FADE_SAMPLES: f32 = 1920.0;
+const MINIMUM_PARTIAL_BUDGET: usize = 300;
+/// How many independently renderable sections the strings are defined in.
+///
+/// A power of two so a voice's section is its slot index masked, with no
+/// division in the per-sample loop, and four because that is the shape a
+/// `parallel_render_v1` decomposition would take on the machines this has to
+/// hold up on -- a Raspberry Pi 4 has four cores and RackForge uses one.
+///
+/// Sections are not a musical division. Voices land in them by slot, so a
+/// chord's notes are spread across all four rather than gathered in one.
+const STRING_SECTIONS: usize = 4;
+/// How many voice slots a section owns. `MAX_VOICES` is a multiple of
+/// `STRING_SECTIONS`, so a slot's section is a mask and its place inside
+/// that section is a shift -- no division in the per-sample loop.
+const VOICES_PER_SECTION: usize = MAX_VOICES / STRING_SECTIONS;
+/// `slot >> SECTION_SHIFT` is a slot's index inside its section.
+const SECTION_SHIFT: u32 = STRING_SECTIONS.trailing_zeros();
+
+/// How many samples of drive-point history the board may read through.
+const BOARD_FEED_HISTORY: usize = 256;
+
+/// The longest coupling delay the model can be defined with: the largest
+/// block a host may hand this plugin. A delay shorter than the block cannot
+/// be honoured by units that render a whole block in isolation, and a delay
+/// that changed with the host's period would make the instrument sound
+/// different at 128 frames than at 512 -- which is the one thing the parallel
+/// contract forbids.
+const MAX_SECTION_DELAY: usize = 512;
 /// How many strikes have had to steal a sounding voice, natively: the lab
 /// reports it after a render, since a steal is a step in the output.
 #[cfg(not(target_arch = "wasm32"))]
@@ -980,6 +1145,20 @@ pub static STEALS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32
 /// Room for the full transverse ladder of the lowest notes plus their
 /// nonlinear extras — A0 alone fills ~120 slots with real partials.
 const MAX_PARTIALS: usize = 144;
+
+/// A halo's ladder never holds more than the struck note's first two dozen
+/// partials, so it does not need a struck note's room.
+const HALO_PARTIALS: usize = 24;
+
+/// How many halos one section can ring at once.
+///
+/// Sized from what a pedalled performance actually reaches rather than
+/// from the slot count: `halo_share` measured fifteen halos sounding at the
+/// peak of a script that plays the pool over-subscribed throughout, so four
+/// per section is that peak with a halo to spare. One per slot was the
+/// first shape and it cost 96 KB, which put the instrument over the
+/// megabyte of stack it is built on before it is boxed.
+const HALOS_PER_SECTION: usize = 4;
 /// Ceiling on simultaneously active partials across all voices, so a pedalled
 /// fortissimo run degrades new notes' partial counts instead of the callback.
 ///
@@ -1780,6 +1959,31 @@ fn hash01(mut seed: u32) -> f32 {
 /// `≈ 1 / ((1-r)·2·sin ω0)`, so the drive is normalised by that whole factor
 /// — normalising by `1 - r` alone leaves a residual `1/sin ω0 ∝ 1/f` that
 /// turns the low modes into a bass boost of tens of times.
+/// A resonator is swept whole, every sample, so what it WEIGHS is not a
+/// bookkeeping detail: it is the cost.
+///
+/// These banks are arrays of structs and the per-sample loops walk every
+/// element of them. One struct holding every bank's needs came to 88 bytes,
+/// and the banks together to 65 KB against a Cortex-A72's 32 KB of L1 --
+/// so every sample streamed twice the cache it had, and half of each line
+/// fetched was fields that loop never reads (the board's shape on a
+/// sympathetic string, a sympathetic string's pan on a board mode).
+///
+/// Measured on the appliance with a standalone sweep -- same arithmetic,
+/// same count, same order, only the stride changed:
+///
+/// | bytes per mode | bank | ns per mode per sample |
+/// | --- | --- | --- |
+/// | 32 | 23.7 KB | 4.57 |
+/// | 56 | 41.5 KB | 5.11 |
+/// | 88 | 65.1 KB | 6.82 |
+/// | 152 | 112.5 KB | 9.82 |
+///
+/// It tracks the stride, not the flops, and it does not flatten the way the
+/// same sweep does on a desktop (1.2x there against 2.15x here). So the
+/// banks are split by what their loop actually reads: this one for the
+/// sympathetic strings, which tick to a pan, and `BoardMode` for the
+/// soundboard, which tick to a pair of capsules through a shape.
 #[derive(Clone, Copy, Default)]
 struct BodyMode {
     y1: f32,
@@ -1795,22 +1999,34 @@ struct BodyMode {
     velocity: f32,
     pan_left: f32,
     pan_right: f32,
+}
+
+/// One mode of the soundboard bank: the same resonator, read through a
+/// shape at the bridge and spoken through two capsules.
+///
+/// Everything here is touched every sample. What is only touched when the
+/// bank is built lives in `BoardCold`, which is a parallel array for the
+/// reason in `BodyMode`'s note.
+#[derive(Clone, Copy, Default)]
+struct BoardMode {
+    y1: f32,
+    y2: f32,
+    a1: f32,
+    a2: f32,
+    drive: f32,
+    /// See `BodyMode::velocity`.
+    velocity: f32,
     /// The mode's shape along the bridge, read from the drive points'
     /// transforms: `shape_a` on the plain sum (the mono bridge),
     /// `shape_b` on the cosine at `shape_q`, `shape_c` on the sine.
-    shape_q: usize,
+    ///
+    /// `shape_q` indexes a row of a sixteen-point transform, so it is a
+    /// `u16` rather than a `usize`: eight bytes for a number that never
+    /// exceeds fifteen is six bytes of every mode's cache line.
+    shape_q: u16,
     shape_a: f32,
     shape_b: f32,
     shape_c: f32,
-    /// The shape's phase along the bridge, kept for the pair's integral.
-    shape_theta: f32,
-    /// The shape across the board's width, for the pair's integral: a
-    /// plate mode is a cosine in both directions, `k^2 = kx^2 + ky^2`, and
-    /// the split between them is drawn per mode. Half-waves over the width
-    /// and the phase there.
-    shape_qy: f32,
-    shape_theta_y: f32,
-    omega: f32,
     /// The output to each capsule as coefficients on the mode's last two
     /// VELOCITY samples: `out_m = v * out_y[m] + v1 * out_y1[m]`. A
     /// sinusoid's two consecutive samples span its plane, so any level and
@@ -1821,6 +2037,27 @@ struct BodyMode {
     out_y: [f32; 2],
     out_y1: [f32; 2],
     v1: f32,
+}
+
+/// What a board mode needs to be BUILT, and never to be rendered.
+///
+/// `tune_pair` reads these a handful of modes per block while the bank is
+/// being completed; the per-sample loop never touches them. Parallel to
+/// `board`, and out of `BoardMode` so that the sixty bytes the render
+/// thread streams per mode are sixty bytes it uses.
+#[derive(Clone, Copy, Default)]
+struct BoardCold {
+    /// The shape's phase along the bridge, kept for the pair's integral.
+    shape_theta: f32,
+    /// The shape across the board's width, for the pair's integral: a
+    /// plate mode is a cosine in both directions, `k^2 = kx^2 + ky^2`, and
+    /// the split between them is drawn per mode. Half-waves over the width
+    /// and the phase there.
+    shape_qy: f32,
+    shape_theta_y: f32,
+    omega: f32,
+    pan_left: f32,
+    pan_right: f32,
 }
 
 impl BodyMode {
@@ -1838,61 +2075,7 @@ impl BodyMode {
             velocity,
             pan_left: 1.0 - pan,
             pan_right: pan,
-            shape_q: 0,
-            shape_a: 1.0,
-            shape_b: 0.0,
-            shape_c: 0.0,
-            shape_theta: 0.0,
-            shape_qy: 0.0,
-            shape_theta_y: 0.0,
-            omega,
-            out_y: [1.0 - pan, pan],
-            out_y1: [0.0, 0.0],
-            v1: 0.0,
         }
-    }
-
-    /// One sample into the pair: the mode's state advances and each
-    /// capsule reads its own level and phase of it.
-    #[inline(always)]
-    fn tick_pair(&mut self, input: f32) -> (f32, f32) {
-        let y = self.a1 * self.y1 + self.a2 * self.y2 + self.drive * input;
-        let v = (y - self.y1) * self.velocity;
-        let left = v * self.out_y[0] + self.v1 * self.out_y1[0];
-        let right = v * self.out_y[1] + self.v1 * self.out_y1[1];
-        self.y2 = self.y1;
-        self.y1 = y;
-        self.v1 = v;
-        (left, right)
-    }
-
-    /// Sets the capsule outputs from complex gains: `gain` is what the
-    /// capsule hears of the mode's unit velocity at the mode's frequency.
-    fn set_pair(&mut self, gains: [(f32, f32); 2]) {
-        let (sin_w, cos_w) = sincosf(self.omega);
-        let sin_w = if sin_w.abs() < 1e-4 { 1e-4 } else { sin_w };
-        for (m, (re, im)) in gains.iter().copied().enumerate() {
-            let magnitude = sqrtf(re * re + im * im);
-            let (sin_psi, cos_psi) = if magnitude > 0.0 {
-                (im / magnitude, re / magnitude)
-            } else {
-                (0.0, 1.0)
-            };
-            self.out_y[m] = magnitude * (cos_psi - sin_psi * cos_w / sin_w);
-            self.out_y1[m] = magnitude * sin_psi / sin_w;
-        }
-    }
-
-    /// The excitation this mode takes from the drive points' transforms.
-    #[inline(always)]
-    fn excitation(
-        &self,
-        cos_t: &[f32; BOARD_DRIVE_POINTS],
-        sin_t: &[f32; BOARD_DRIVE_POINTS],
-    ) -> f32 {
-        self.shape_a * cos_t[0]
-            + self.shape_b * cos_t[self.shape_q]
-            + self.shape_c * sin_t[self.shape_q]
     }
 
     #[inline(always)]
@@ -1911,6 +2094,98 @@ impl BodyMode {
     fn damp(&mut self, factor: f32) {
         self.a1 *= factor;
         self.a2 *= factor * factor;
+    }
+}
+
+impl BoardMode {
+    /// The same resonator as `BodyMode::tune`, plus the build-time half the
+    /// render thread never reads. The capsule outputs start at the pan, which
+    /// is what `BOARD_PAIR` at zero leaves them as and what `tune_pair`
+    /// replaces a few modes per block.
+    fn tune(frequency: f32, t60: f32, pan: f32, sample_rate: f32) -> (Self, BoardCold) {
+        let r = expf(-6.907_755 / (t60 * sample_rate));
+        let omega = core::f32::consts::TAU * frequency / sample_rate;
+        let (sin, cos) = sincosf(omega);
+        let velocity = 1.0 / (2.0 * sincosf(0.5 * omega).0).max(1e-6_f32);
+        (
+            Self {
+                y1: 0.0,
+                y2: 0.0,
+                a1: 2.0 * r * cos,
+                a2: -r * r,
+                drive: (1.0 - r) * 2.0 * sin,
+                velocity,
+                shape_q: 0,
+                shape_a: 1.0,
+                shape_b: 0.0,
+                shape_c: 0.0,
+                out_y: [1.0 - pan, pan],
+                out_y1: [0.0, 0.0],
+                v1: 0.0,
+            },
+            BoardCold {
+                shape_theta: 0.0,
+                shape_qy: 0.0,
+                shape_theta_y: 0.0,
+                omega,
+                pan_left: 1.0 - pan,
+                pan_right: pan,
+            },
+        )
+    }
+
+    /// One sample into the pair: the mode's state advances and each
+    /// capsule reads its own level and phase of it.
+    #[inline(always)]
+    fn tick_pair(&mut self, input: f32) -> (f32, f32) {
+        let y = self.a1 * self.y1 + self.a2 * self.y2 + self.drive * input;
+        let v = (y - self.y1) * self.velocity;
+        let left = v * self.out_y[0] + self.v1 * self.out_y1[0];
+        let right = v * self.out_y[1] + self.v1 * self.out_y1[1];
+        self.y2 = self.y1;
+        self.y1 = y;
+        self.v1 = v;
+        (left, right)
+    }
+
+    /// Sets the capsule outputs from complex gains: `gain` is what the
+    /// capsule hears of the mode's unit velocity at the mode's frequency.
+    /// `omega` comes from `BoardCold`, which is where it lives now.
+    fn set_pair(&mut self, gains: [(f32, f32); 2], omega: f32) {
+        let (sin_w, cos_w) = sincosf(omega);
+        let sin_w = if sin_w.abs() < 1e-4 { 1e-4 } else { sin_w };
+        for (m, (re, im)) in gains.iter().copied().enumerate() {
+            let magnitude = sqrtf(re * re + im * im);
+            let (sin_psi, cos_psi) = if magnitude > 0.0 {
+                (im / magnitude, re / magnitude)
+            } else {
+                (0.0, 1.0)
+            };
+            self.out_y[m] = magnitude * (cos_psi - sin_psi * cos_w / sin_w);
+            self.out_y1[m] = magnitude * sin_psi / sin_w;
+        }
+    }
+
+    /// The bank driven mono, for tests that compare it against a
+    /// reference sum rather than through the capsules.
+    #[cfg(test)]
+    fn tick(&mut self, input: f32) -> f32 {
+        let y = self.a1 * self.y1 + self.a2 * self.y2 + self.drive * input;
+        let out = (y - self.y1) * self.velocity;
+        self.y2 = self.y1;
+        self.y1 = y;
+        out
+    }
+
+    /// The excitation this mode takes from the drive points' transforms.
+    #[inline(always)]
+    fn excitation(
+        &self,
+        cos_t: &[f32; BOARD_DRIVE_POINTS],
+        sin_t: &[f32; BOARD_DRIVE_POINTS],
+    ) -> f32 {
+        let q = self.shape_q as usize;
+        self.shape_a * cos_t[0] + self.shape_b * cos_t[q] + self.shape_c * sin_t[q]
     }
 }
 
@@ -2541,6 +2816,35 @@ const TOP_INCOHERENT_EXTRA: f32 = 0.6;
 /// integrated rather than drawn. Four leaves everything above G#6 to the
 /// recipe; one strikes every note.
 pub static SIM_MIN_MODES: Knob = Knob::new(4.0);
+/// The contact integrator's timestep, in seconds.
+///
+/// Deliberately NOT in the knob registry: that table is full -- the knobs
+/// occupy parameter indices 42..199 and the preamplifier owns 200 -- so
+/// adding one shifts every index after it and three tests say so at once.
+/// This exists for `contact_convergence` to sweep, not for a fader.
+///
+/// The scheme is symplectic Euler -- `v += a dt; q += v dt` -- which is
+/// first order, so this is an accuracy choice and not only a stability one.
+/// Stability alone would allow far more: the highest mode integrated sits
+/// near 10 kHz, and `omega*dt` at four microseconds is 0.25 against a bound
+/// of 2.
+pub static SIM_DT_S: Knob = Knob::new(4.0e-6);
+
+/// How late the board hears the strings, in samples. Ships at zero.
+///
+/// Splitting the STRINGS across cores costs one block of delay between
+/// sections, which the ear has been asked about and passed. Splitting the
+/// BOARD as well would cost a second one, here: the board's modes are
+/// independent oscillators and would divide four ways happily, but they are
+/// driven by bridge points that depend on every section, so a board unit
+/// could only read them a block old.
+///
+/// That is a different approximation from the first, and a more exposed
+/// one -- string to board is the direct path, where section to section is
+/// sympathetic. `board_feed_delay_render` puts it where the ear can reach
+/// it. Not in the knob registry; that table is full.
+pub static BOARD_FEED_DELAY: Knob = Knob::new(0.0);
+
 /// Whether a re-strike merges into the living voice (1) or eases it out and
 /// strikes fresh (0) -- a switch for the ear, not a voicing.
 ///
@@ -2633,6 +2937,16 @@ pub static BOARD_SIGN_TOP_HZ: Knob = Knob::new(700.0);
 ///
 /// This knob is the depth: 0 is the mono bridge as it was, 1 the shape.
 pub static BOARD_SHAPE: Knob = Knob::new(1.0);
+/// Where the board stops being a plate and becomes a set of waveguides.
+///
+/// Ege and Boutillon measure the soundboard as a homogeneous plate only up
+/// to a knee -- 1.1 kHz on their upright, 1355 to 1589 Hz across grands.
+/// Above it the ribs confine the waves between them: a mode no longer spans
+/// the board, the modal density falls, and -- the part this models -- the
+/// mobility becomes **location-dependent**. Two strings a few bays apart
+/// stop sharing the modes they drive, which is where an instrument's
+/// note-to-note character comes from up there.
+///
 const BOARD_DRIVE_POINTS: usize = 16;
 const BOARD_SHAPE_TOP_HZ: f32 = 8000.0;
 /// Below this the board breathes as a whole: its first modes have no
@@ -2883,6 +3197,30 @@ pub static BOARD_BOTTOM_HZ: Knob = Knob::new(45.0);
 /// bandwidth — overlap 0.6 where the measurement says 1.0 — and the bank came
 /// out with 11 dB of ripple through 500-1000 Hz where the over-damped bank it
 /// replaced had 1.3 dB.
+///
+/// Checked against a computed board and kept unchanged (2026-09-19).
+/// `tools/solve-soundboard-modes.py` solves the plate and the rib bays and
+/// compares them with this law. Below the knee, over a band wide enough for
+/// a density to mean anything (45-1477 Hz), it computes 0.056/Hz and the
+/// instrument's own taps give 0.054/Hz against the 0.060 used here -- inside
+/// the scatter, and the solver's asymptote is calibrated to 0.06 anyway, so
+/// it is not independent evidence. Narrower bands cannot be read at all: at
+/// 45-100 Hz a board has one or two modes and the count quantises to 0.029
+/// or 0.057 with nothing between.
+///
+/// Above the knee the comparison does not apply, and that is the part worth
+/// remembering. This is an *overlap* law, not a mode count. The total modal
+/// density does not fall above the knee -- n = (A/2)sqrt(rho h/D) is set by
+/// area and material, and confining waves into bays moves modes rather than
+/// removing them -- so a computed total of 0.085/Hz up there is not evidence
+/// against the 0.030 here. What falls is what one string sees, about one bay
+/// in ten, and this law sits two to four times above that, on the generous
+/// side, which is the safe direction given the ripple above.
+///
+/// The gap the solver does confirm is locality, not count: two bridge points
+/// 19 cm apart drive the computed bays with a correlation of 0.00, while
+/// every pair of strings in this shared bank correlates 1.00. See
+/// `PIANO_MODEL.md`, "A measured soundboard".
 fn board_spacing(frequency: f32, density: f32) -> f32 {
     const KNEE_HZ: f32 = 1477.0;
     const FLAT: f32 = 1.0 / 0.06;
@@ -3223,8 +3561,411 @@ const ROOM_BUFFER: usize = 4096;
 /// Wet level of the chamber against the direct sound.
 pub static ROOM_MIX: Knob = Knob::new(0.09);
 
+/// How many frames render in one span. The appliance's period.
+const RENDER_SPAN: usize = 128;
+
+/// The largest block the plugin accepts, and so the length of the plan the
+/// coordinator writes down for it.
+///
+/// It matches the export's `max_frames`. The plan has to live on the
+/// coordinator rather than on a stack, because `begin_block` and
+/// `end_block` are two calls with four workers in between -- eighty-eight
+/// bytes a frame, which is 352 KB at the full block and the reason the
+/// parallel path does not have to cap the block size.
+const MAX_BLOCK_FRAMES: usize = 4096;
+
+/// The most per-voice records one frame can carry across all four sections.
+///
+/// A broadcast record lands in every section, so one release, one pedal
+/// motion, one sostenuto and one all-notes-off are four of these each.
+/// Sixty-four is what a section's block can hold at all, so a frame can
+/// never be the thing that drops work.
+const MAX_VOICE_WORK_PER_FRAME: usize = 64;
+/// Dispatch bytes per section per block: sixty-four records, each behind a
+/// four-byte header.
+const VOICE_WORK_BYTES: usize = 64 * (4 + VoiceRecord::BYTES);
+
+/// What a coordinator tells a section to do to its own voices.
+///
+/// One record type and one queue for every per-voice event, because a
+/// frame's work has to be done in the order it arrived: each strike sizes
+/// its partial ladder from what the one before it left, and a release that
+/// overtook a strike would damp a note that had not sounded.
+///
+/// A strike goes to ONE section -- the coordinator chose the slot, and the
+/// slot is the section. A release goes to all four, because which of them
+/// carries a note is a thing only a unit knows about its own voices.
 #[derive(Clone, Copy)]
-struct Voice {
+struct VoiceRecord {
+    kind: u8,
+    /// Where this sat in the block's event order.
+    seq: u8,
+    slot: u8,
+    channel: u8,
+    note: u8,
+    /// A release velocity plus one, so zero can mean "not measured".
+    release: u8,
+    /// The coordinator-side state this work depends on, which a unit cannot
+    /// read for itself once the two are different instances -- and which,
+    /// even in one instance, a later event in the same frame may already
+    /// have moved by the time the work runs.
+    flags: u8,
+    velocity: f32,
+    serial: u32,
+    /// The una corda's position when this was planned. A strike needs it
+    /// after the blow as well as during it: the shifted hammer meets one
+    /// string fewer.
+    soft: f32,
+    /// How far the key had come back when it was pressed again, which the
+    /// coordinator alone can know -- it is the one that tracks the keys.
+    returned: f32,
+}
+
+impl VoiceRecord {
+    /// The wire width of one record.
+    const BYTES: usize = 24;
+
+    const STRIKE: u8 = 0;
+    const RELEASE: u8 = 1;
+    const PEDAL: u8 = 2;
+    const SOSTENUTO: u8 = 3;
+    const ALL_OFF: u8 = 4;
+    /// A key pressed again below the repetition point: the jack has not
+    /// reset, so no hammer flies. The key lifts its damper and that is all.
+    const CATCH: u8 = 5;
+    /// A key struck again while a string of that note is still sounding but
+    /// NOT free to be re-struck -- under a damper, and so with its decay
+    /// rates already scaled. The old string is eased out over thirty
+    /// milliseconds and the new blow goes somewhere else. Every section
+    /// hears it, because any of them may be holding one.
+    const EASE: u8 = 6;
+
+    /// The sustain pedal is down. A strike carries it because the
+    /// sympathetic halo it places is sustained by it; a sostenuto release
+    /// carries it because a caught note falls into whatever CC64 is doing.
+    const FLAG_PEDAL: u8 = 1 << 0;
+    /// The rail is coming UP this event, so the felts still travelling are
+    /// caught. `PEDAL` only.
+    const FLAG_RAIL_LIFTED: u8 = 1 << 1;
+    /// The sostenuto rod is down: for `PEDAL`, the notes it holds are not
+    /// the sustain pedal's to damp; for `SOSTENUTO`, it is the transition.
+    const FLAG_SOSTENUTO: u8 = 1 << 2;
+
+    const EMPTY: Self = Self {
+        kind: Self::STRIKE,
+        seq: 0,
+        slot: 0,
+        channel: 0,
+        note: 0,
+        release: 0,
+        flags: 0,
+        velocity: 0.0,
+        serial: 0,
+        soft: 0.0,
+        returned: 0.0,
+    };
+
+    fn has(self, flag: u8) -> bool {
+        self.flags & flag != 0
+    }
+
+    fn to_bytes(self) -> [u8; Self::BYTES] {
+        let mut bytes = [0u8; Self::BYTES];
+        bytes[0] = self.kind;
+        bytes[1] = self.seq;
+        bytes[2] = self.slot;
+        bytes[3] = self.channel;
+        bytes[4] = self.note;
+        bytes[5] = self.release;
+        bytes[6] = self.flags;
+        bytes[8..12].copy_from_slice(&self.velocity.to_le_bytes());
+        bytes[12..16].copy_from_slice(&self.serial.to_le_bytes());
+        bytes[16..20].copy_from_slice(&self.soft.to_le_bytes());
+        bytes[20..24].copy_from_slice(&self.returned.to_le_bytes());
+        bytes
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < Self::BYTES {
+            return None;
+        }
+        Some(Self {
+            kind: bytes[0],
+            seq: bytes[1],
+            slot: bytes[2],
+            channel: bytes[3],
+            note: bytes[4],
+            release: bytes[5],
+            flags: bytes[6],
+            velocity: f32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
+            serial: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
+            soft: f32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]),
+            returned: f32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
+        })
+    }
+}
+
+/// What one section's strings made in one frame: everything the stages
+/// after them need, and nothing else.
+///
+/// This is the unit's output, and its width is the plugin's
+/// `UNIT_CHANNELS`. A section does not produce sound -- it produces the
+/// force on the bridge, where on the bridge that force lands, and what the
+/// keybed under it heard -- and a serial stage turns the four sections'
+/// worth of that into a piano.
+#[derive(Clone, Copy, Default)]
+struct SectionFrame {
+    /// The section's own string sound, which is what the next block's
+    /// sympathetic coupling hears from it.
+    sample: f32,
+    force: f32,
+    drive_points: [f32; BOARD_DRIVE_POINTS],
+    keybed_left: f32,
+    keybed_right: f32,
+}
+
+/// What the coordinator knows about a voice it does not own.
+///
+/// Once the sections are `parallel_render_v1` units the voices live inside
+/// them, and the coordinator cannot read one: a unit is another wasm
+/// instance with its own memory. But the coordinator is the one that has
+/// to choose which slot the next note takes, and choosing means knowing
+/// which slots are busy and which is the quietest.
+///
+/// So the units report and the coordinator remembers. Four numbers per
+/// voice, which is what every decision on this side actually reads.
+///
+/// Two halves, kept honestly apart. What a note IS -- busy, which note,
+/// which channel -- the coordinator writes itself the moment it plans the
+/// strike, because it is the one that decided. What a note has BECOME --
+/// its energy, and whether it has died since -- only rendering knows, and
+/// rendering happens after. So that half is a block old, always, by
+/// construction rather than by accident.
+#[derive(Clone, Copy, Default)]
+struct VoiceSummary {
+    active: bool,
+    note: u8,
+    channel: u8,
+    /// As of the end of the last block. Nothing here can be fresher.
+    energy: f32,
+    /// Held by the key or by a pedal, and so still ringing with its damper
+    /// clear -- which is the one condition under which a second blow on
+    /// the same key merges into this string instead of starting a stranger
+    /// beside it. The coordinator needs it to send the blow to the RIGHT
+    /// section, since a string is only reachable from the one that owns it.
+    ringing_free: bool,
+}
+
+/// What one unit tells the coordinator at the end of a block.
+///
+/// Nothing here is something the coordinator already knows. A note it
+/// planned is busy from the moment it planned it; what only the unit knows
+/// is what rendering DID -- which strings died, how loud the rest are, and
+/// how many partials the unit is left carrying. Those are the facts the
+/// next block's choices are made from, and without a way back they would
+/// be made from a picture nobody is painting.
+///
+/// Eight bytes a string and four for the purse: a hundred bytes, once per
+/// block, against a unit that renders thirty thousand samples in it.
+#[derive(Clone, Copy, Default)]
+struct UnitReport {
+    partials: u32,
+    voices: [VoiceSummary; VOICES_PER_SECTION],
+    halos: [VoiceSummary; HALOS_PER_SECTION],
+}
+
+/// How many bytes one of those takes on the wire.
+const UNIT_REPORT_BYTES: usize = 4 + (VOICES_PER_SECTION + HALOS_PER_SECTION) * 8;
+
+impl VoiceSummary {
+    const FLAG_ACTIVE: u8 = 1 << 0;
+    const FLAG_RINGING_FREE: u8 = 1 << 1;
+
+    fn of<const N: usize>(voice: &Voice<N>) -> Self {
+        Self {
+            active: voice.active,
+            note: voice.note,
+            channel: voice.channel,
+            energy: voice.energy,
+            ringing_free: voice.held || voice.sustained,
+        }
+    }
+
+    fn write(self, into: &mut [u8]) {
+        into[0] = self.note;
+        into[1] = self.channel;
+        into[2] = u8::from(self.active) * Self::FLAG_ACTIVE
+            + u8::from(self.ringing_free) * Self::FLAG_RINGING_FREE;
+        into[3] = 0;
+        into[4..8].copy_from_slice(&self.energy.to_le_bytes());
+    }
+
+    fn read(from: &[u8]) -> Self {
+        Self {
+            active: from[2] & Self::FLAG_ACTIVE != 0,
+            note: from[0],
+            channel: from[1],
+            energy: f32::from_le_bytes([from[4], from[5], from[6], from[7]]),
+            ringing_free: from[2] & Self::FLAG_RINGING_FREE != 0,
+        }
+    }
+}
+
+impl UnitReport {
+    fn write(self, into: &mut [u8]) {
+        if into.len() < UNIT_REPORT_BYTES {
+            debug_assert!(false, "el reporte no entra");
+            return;
+        }
+        into[..4].copy_from_slice(&self.partials.to_le_bytes());
+        for (index, voice) in self.voices.iter().enumerate() {
+            voice.write(&mut into[4 + index * 8..]);
+        }
+        let halos = 4 + VOICES_PER_SECTION * 8;
+        for (index, halo) in self.halos.iter().enumerate() {
+            halo.write(&mut into[halos + index * 8..]);
+        }
+    }
+
+    fn read(from: &[u8]) -> Self {
+        if from.len() < UNIT_REPORT_BYTES {
+            // A unit the host had to silence says nothing, which reads as a
+            // unit with nothing sounding -- the same as its silent slot.
+            return Self::default();
+        }
+        let halos = 4 + VOICES_PER_SECTION * 8;
+        Self {
+            partials: u32::from_le_bytes([from[0], from[1], from[2], from[3]]),
+            voices: core::array::from_fn(|index| VoiceSummary::read(&from[4 + index * 8..])),
+            halos: core::array::from_fn(|index| VoiceSummary::read(&from[halos + index * 8..])),
+        }
+    }
+}
+
+/// One section's voices and everything else it owns.
+///
+/// This is `Self::Unit`: what a `parallel_render_v1` worker holds between
+/// blocks and what nothing else may touch. The engine travels with it
+/// because a unit is handed no `&self` and has to be able to answer its
+/// own questions about the instrument.
+///
+/// A voice's section is its slot masked, so the eight slots a section holds
+/// are `section`, `section + 4`, `section + 8` ... This is the type that
+/// becomes `ParallelProcessor::Unit`, and it exists as a named struct rather
+/// than a bare array because the trait wants `Default` and because a unit is
+/// a thing, not an anonymous row.
+#[derive(Clone, Copy)]
+pub struct StringUnit {
+    voices: [Voice; VOICES_PER_SECTION],
+    /// The sympathetic halo of each of this section's voices.
+    ///
+    /// One per slot, beside the note that casts it, rather than a voice of
+    /// its own taken from the shared pool. Three things follow. A halo
+    /// never takes a slot a note wanted, in a pool that plays
+    /// over-subscribed. A halo is built by the section that struck the
+    /// note, so nothing reaches across sections -- which is what a
+    /// `parallel_render_v1` unit will need. And a halo holding
+    /// twenty-four partials stops occupying room for a hundred and
+    /// forty-four.
+    halos: [Voice<HALO_PARTIALS>; HALOS_PER_SECTION],
+    /// Everything about the instrument a string needs. A copy per unit,
+    /// because in four instances there is no other way to have it.
+    engine: StringEngine,
+    /// How many partials this unit is carrying, and what it may spend this
+    /// block. Its own purse; see `share_the_budget`.
+    partials: usize,
+    allowance: usize,
+    /// Its own string sum from the previous frame, which is the half of the
+    /// sympathetic feed that is not a block old.
+    previous: f32,
+}
+
+impl Default for StringUnit {
+    fn default() -> Self {
+        Self {
+            voices: [Voice::default(); VOICES_PER_SECTION],
+            halos: [Voice::default(); HALOS_PER_SECTION],
+            engine: StringEngine::default(),
+            partials: 0,
+            allowance: PARTIAL_BUDGET / STRING_SECTIONS,
+            previous: 0.0,
+        }
+    }
+}
+
+// Every voice slot, section by section -- the order a unit walks them.
+//
+// The event handlers mutate each voice independently and write nothing to
+// the instrument inside their loops, so this order and plain slot order
+// give the same result. That is not an argument, it is a test: the four
+// handlers below were switched to this order and the render fingerprint
+// did not move.
+//
+// The RENDER loop is a different matter and keeps slot order, because it
+// sums into shared accumulators and the float order is the fingerprint.
+
+/// What the stages after the strings need to know about the frame they are
+/// rendering, captured where the events for that frame have just landed.
+///
+/// Once the sections are `parallel_render_v1` units the voices and the
+/// stages after them run in separate passes, and a stage reading `self` in
+/// the second pass would see the state the LAST event of the block left
+/// rather than the state at its own frame. These are the only values where
+/// that differs, and they are measured rather than guessed: the fields an
+/// event handler can touch, intersected with the fields the stages after
+/// the strings read. There are four of them, not the fifty-six that
+/// counting the downstream's own buffers suggests.
+#[derive(Clone, Copy)]
+struct FrameState {
+    /// `lab(14)`, `lab(15)` and `lab(16)`: the only lab knobs those stages
+    /// read, and a parameter event can move one mid-block.
+    lab: [f32; 3],
+    pedal_noise_amp: f32,
+    silent_state: [u8; SILENT_SLOTS],
+    silent_note: [u8; SILENT_SLOTS],
+    /// Which bed strings are busy this frame.
+    ///
+    /// Declared OUTSIDE the frame loop, so a scan of the `let` bindings
+    /// inside it -- which found the other five -- could not see it. Left
+    /// behind, the bed bank read what the LAST event of the span left and
+    /// applied it to every frame including those before the event; the bank
+    /// is resonant, so one wrong frame never washes out. Measured, adding it
+    /// here took the oracle from -75.2 dB to -96.7.
+    bed_busy: [bool; BED_COUNT],
+}
+
+impl Default for FrameState {
+    fn default() -> Self {
+        Self {
+            lab: [0.0; 3],
+            pedal_noise_amp: 0.0,
+            silent_state: [0; SILENT_SLOTS],
+            silent_note: [0; SILENT_SLOTS],
+            bed_busy: [false; BED_COUNT],
+        }
+    }
+}
+
+/// What one voice puts into a frame.
+///
+/// Exactly what a `parallel_render_v1` unit can hand back: the voice's own
+/// sample, what it leaves on the bridge, and what its cull returned. The
+/// caller does the summing, in slot order, so this carries no accumulator
+/// and reaches nothing outside the voice -- which is the point. A unit is
+/// given its voices and a context, never `&self`.
+struct VoiceFrame {
+    sample: f32,
+    keybed_left: f32,
+    keybed_right: f32,
+    force: f32,
+    drive_index: usize,
+    drive_frac: f32,
+    culled: usize,
+}
+
+#[derive(Clone, Copy)]
+
+struct Voice<const PARTIALS: usize = MAX_PARTIALS> {
     active: bool,
     note: u8,
     channel: u8,
@@ -3241,9 +3982,6 @@ struct Voice {
     /// far, so a moving pedal presses or relieves only the DIFFERENCE. A
     /// relieved damper stops removing energy; it never gives any back.
     damper_applied: f32,
-    /// A sympathetic halo shadow, not a struck note: never a re-strike
-    /// target.
-    halo: bool,
     /// The contact's ramp: a fresh voice fades in over ATTACK_RAMP_S from
     /// nothing, because the string is at rest when the hammer arrives and
     /// only reaches the state the integration hands over at the END of the
@@ -3259,7 +3997,7 @@ struct Voice {
     /// The largest pole radius this voice's phasors may be left holding,
     /// from the rate it was struck at. See `POLE_CEILING_T60_S`.
     pole_ceiling: f32,
-    partials: [Partial; MAX_PARTIALS],
+    partials: [Partial; PARTIALS],
     partial_count: usize,
     /// Hammer/soundboard thump: a decaying low-passed noise burst whose
     /// bandwidth contracts as it fades, like a tapped soundboard's.
@@ -3379,7 +4117,7 @@ struct Voice {
     clang_feed_decay: f32,
 }
 
-impl Default for Voice {
+impl<const PARTIALS: usize> Default for Voice<PARTIALS> {
     fn default() -> Self {
         Self {
             active: false,
@@ -3390,12 +4128,11 @@ impl Default for Voice {
             undamped: false,
             sostenuto: false,
             damper_applied: 0.0,
-            halo: false,
             onset: 1.0,
             onset_step: 0.0,
             firmness: 1.0,
             pole_ceiling: pole_ceiling(48_000.0),
-            partials: [Partial::default(); MAX_PARTIALS],
+            partials: [Partial::default(); PARTIALS],
             partial_count: 0,
             noise_amp: 0.0,
             noise_decay: 0.0,
@@ -3466,7 +4203,7 @@ impl Default for Voice {
     }
 }
 
-impl Voice {
+impl<const PARTIALS: usize> Voice<PARTIALS> {
     /// Renders one mono sample and advances every live component.
     #[inline(always)]
     fn tick(&mut self, sympathy: f32) -> f32 {
@@ -3713,6 +4450,83 @@ impl Voice {
                 partial.rs[lane] = (partial.rs[lane] + partial.rc[lane] * step) * scale;
                 partial.rc[lane] = rc;
             }
+        }
+    }
+
+    /// One frame of this voice, and everything it needs to make one.
+    ///
+    /// `feed` is what this voice's SECTION hears of the rest of the
+    /// instrument; `sostenuto` is the middle pedal. That is the whole of it,
+    /// and the render fingerprint is the proof that the boundary is drawn in
+    /// the right place: extracting this changed no arithmetic and no order,
+    /// so 0x0c396512799eb435 held.
+    #[inline(always)]
+    fn render_frame(&mut self, feed: f32, sympathy_rate: f32, sostenuto: bool) -> VoiceFrame {
+        let mut culled = 0usize;
+        // Everyone but me, gated by the damper: a seated or
+        // pressed damper takes a string out of the conversation
+        // exactly as far as it is pressed.
+        let free = if self.held {
+            1.0
+        } else if self.sustained {
+            1.0 - self.damper_applied
+        } else {
+            0.0
+        };
+        let sympathy = (feed - self.last_out) * sympathy_rate * free;
+        let sample = self.tick(sympathy);
+        self.last_out = sample;
+        let keybed_left = self.keybed_out * self.pan_left;
+        let keybed_right = self.keybed_out * self.pan_right;
+        // What drives the BODY is the bridge. The strings used to
+        // pass through a per-voice "spaced pair" -- one write read at
+        // two delays, panned, then summed -- and that sum was this
+        // excitation. Summing two arrival times is a comb, and since
+        // NOTHING else ever read the pair's left and right (the
+        // output mix is built from the board, the lid and the room
+        // alone), the pair never made stereo: its entire audible
+        // output was that comb, deterministic per note. For B3 the
+        // first notch landed at ~2.7 kHz, on its eleventh partial --
+        // measured 5-8 dB of absolute loss across the upper ladder,
+        // and every note got its own notch pattern: the ragged,
+        // bell-like mid-register the ear reported as metallic. The
+        // machinery is gone; the pan weight stays so each string
+        // drives the board at the level the calibration expects.
+        let force = sample * (self.pan_left + self.pan_right);
+
+        if self.damper_phase != 0 {
+            self.damper_in -= 1;
+            if self.damper_in == 0 {
+                if sostenuto && self.sostenuto {
+                    // The middle pedal caught this key while its
+                    // felt was still up: it stays up.
+                    self.cancel_damper();
+                    self.held = false;
+                    self.sustained = true;
+                    self.damper_applied = 0.0;
+                } else {
+                    self.advance_damper();
+                }
+            }
+        }
+        self.tension_in -= 1;
+        if self.tension_in == 0 {
+            self.tension_in = TENSION_INTERVAL;
+            self.tension_step();
+        }
+        self.cull_in -= 1;
+        if self.cull_in == 0 {
+            self.cull_in = CULL_INTERVAL;
+            culled = self.cull();
+        }
+        VoiceFrame {
+            sample,
+            keybed_left,
+            keybed_right,
+            force,
+            drive_index: self.drive_index,
+            drive_frac: self.drive_frac,
+            culled,
         }
     }
 
@@ -4457,13 +5271,30 @@ const CAL_PARAMS: usize = 9;
 // felt, floor, thump, chiff, decay, clang, phantoms, level, treble life
 
 pub struct ConcertGrand {
-    controls: Controls,
-    sample_rate: f32,
-    /// Fundamental of each note after the derived octave stretch.
-    fundamental: [f32; NOTE_COUNT],
-    /// Fletcher inharmonicity coefficient per note.
-    inharmonicity: [f32; NOTE_COUNT],
-    voices: [Voice; MAX_VOICES],
+    /// What a string needs and a section cannot reach.
+    engine: StringEngine,
+    /// What each frame of this block looks like to the stages after the
+    /// strings, written by `plan_span` and read by `serial_stages`.
+    plan_states: [FrameState; MAX_BLOCK_FRAMES],
+    /// And what each unit will hear of the OTHERS at that frame, plus
+    /// whether the sostenuto rod was down. These reach the units: in one
+    /// instance straight from here, in four through the block-shared
+    /// payload.
+    plan_others: [[f32; STRING_SECTIONS]; MAX_BLOCK_FRAMES],
+    plan_sostenuto: [bool; MAX_BLOCK_FRAMES],
+    /// The voices, grouped by the section that renders them.
+    ///
+    /// A voice's section is its slot masked, which is what spreads a chord
+    /// across all four rather than gathering it in one. Grouping the STORAGE
+    /// the same way is what lets a section be a `parallel_render_v1` unit: a
+    /// unit owns its own array and can reach no other, which is the whole of
+    /// the contract (`PARALLEL_RENDER.md`).
+    ///
+    /// Every access goes through `voice_at!`, and every loop still walks
+    /// slots 0, 1, 2 ... in order, so the float summation order -- and the
+    /// render fingerprint with it -- is unchanged. This moves bytes, not
+    /// sound.
+    sections: [StringUnit; STRING_SECTIONS],
     pedal: bool,
     /// Una corda (CC 67): the shifted hammer strikes two of the three
     /// strings, softer and darker, and the free third string feeds the
@@ -4478,13 +5309,74 @@ pub struct ConcertGrand {
     /// `>= 64` test threw every one of them away and snapped between nothing
     /// and everything at the halfway mark.
     soft: f32,
-    /// Live count of active partials, the budget the callback answers to.
-    active_partials: usize,
-    /// Whether a re-strike merges into the living voice, read from
-    /// RESTRIKE_MERGE at prepare and at every retune -- a field and not a
-    /// live knob read, so a test can set it without racing the knob
-    /// registry the round-trip test writes.
-    restrike_merge: bool,
+    /// Each section's per-frame string sum for the last `MAX_SECTION_DELAY`
+    /// frames, as a ring. Read by the sections that did not write it.
+    section_history: [[f32; MAX_SECTION_DELAY]; STRING_SECTIONS],
+    section_cursor: usize,
+    /// The previous frame's sum, per section: what a section hears of itself,
+    /// which is never delayed.
+    /// The bridge's drive points for the last `BOARD_FEED_HISTORY` frames,
+    /// so `BOARD_FEED_DELAY` can hand the board a stale copy. Only written
+    /// when that delay is non-zero, so the shipped path does not pay for it.
+    board_feed_history: [[f32; BOARD_DRIVE_POINTS]; BOARD_FEED_HISTORY],
+    /// The same delay for what the SYMPATHETIC banks hear. The board is the
+    /// through path and the banks are beside it, so delaying one without the
+    /// other leaves two copies of the strike a block apart and they comb --
+    /// which is what the ear reported as the attack losing a pinch. Delayed
+    /// together, the whole downstream chain is simply late, which is latency
+    /// and not colour.
+    bridge_feed_history: [f32; BOARD_FEED_HISTORY],
+    /// And the keybed with them. It is the action's knock -- percussive, and
+    /// exactly at the attack -- so leaving it on time while the tone arrives
+    /// a block later separates the two, which is what "pierde una pizca de
+    /// ataque" was. Everything a unit could not reach moves together or the
+    /// delay is not a delay, it is a smear.
+    keybed_feed_history: [[f32; 2]; BOARD_FEED_HISTORY],
+    board_feed_cursor: usize,
+    /// Silent-bank work an event asked for, done in the pass that TICKS the
+    /// bank. `(offset, slot, factor)`, a factor of zero meaning clear.
+    silent_work: [(u16, u8, f32); 64],
+    silent_work_len: usize,
+    span_offset: u16,
+    /// Which frame the events being handled belong to, so the coordinator
+    /// can write a strike into the frame it happened in.
+    event_frame: u16,
+    /// Per-section strike dispatch, written while the block's events are
+    /// walked and read back at the frame each strike was written for.
+    voice_work: [[u8; VOICE_WORK_BYTES]; STRING_SECTIONS],
+    voice_work_len: [usize; STRING_SECTIONS],
+    /// Event order within the block, so a frame's strikes keep theirs.
+    voice_work_seq: u8,
+    /// What the coordinator knows about each voice. See `VoiceSummary`.
+    summary: [VoiceSummary; MAX_VOICES],
+    /// The same for the halos, which the coordinator needs for one thing:
+    /// a halo outlives the note that cast it, and while it rings its
+    /// string's damper is off the bed. A halo placed this block needs no
+    /// entry -- the note that cast it is in `summary` already, and they
+    /// share a bed.
+    halo_summary: [VoiceSummary; STRING_SECTIONS * HALOS_PER_SECTION],
+    /// Slots this block has already promised to a strike that has not
+    /// happened yet. One bit per slot; `MAX_VOICES` is 32.
+    voice_claimed: u32,
+    /// Samples of delay on the sympathetic coupling BETWEEN sections.
+    ///
+    /// `0` couples every string to every other with the one sample of
+    /// latency the bridge has always had. That is what the instrument
+    /// shipped with, and it is also what makes the four sections a single
+    /// serial computation: a section cannot render its next sample until
+    /// every other section has produced the one before it.
+    ///
+    /// A block's worth of delay breaks that, and it is the whole reason the
+    /// sections can be rendered at the same time. A section then hears the
+    /// others as they were at the start of the block and itself as it was a
+    /// sample ago -- which is a sympathetic path, not the direct one, and
+    /// 2.7 ms on a coupling that takes seconds to matter. It was rendered
+    /// against zero and judged by ear before it was shipped: "son iguales".
+    ///
+    /// `prepare` sets it to the host's block, because that is the smallest
+    /// delay that makes the block's sections independent. A test may set it
+    /// afterwards, which is how `section_delay_audibility` renders both.
+    section_delay: usize,
     /// Delay line feeding the lid/rim early reflections.
     /// Tap offsets in samples and gains, per side.
     /// The lid's image of the board, per capsule: delay, gain, and the
@@ -4492,15 +5384,6 @@ pub struct ConcertGrand {
     lid_tap: [[(usize, f32); 4]; 2],
     lid_damp: f32,
     lid_lp: [f32; 2],
-    /// Full hammer simulations left in this callback. The strike ODE is the
-    /// most expensive thing the model does and it runs on the audio thread,
-    /// so a dense chord or a fast run cannot be allowed to spend the whole
-    /// buffer on it: past the budget a strike falls back to the calibrated
-    /// recipe, which is what the model sounded like before the simulation
-    /// existed. Losing a little attack detail beats losing the stream.
-    strike_budget: u32,
-    /// Per-note calibration table: [anchor][param] multipliers.
-    cal: [[f32; CAL_PARAMS]; 10],
     /// The soundboard: one dense modal bank the ENTIRE string sum radiates
     /// through — no partial reaches the air unfiltered. Mode spacing and
     /// damping both follow the measured plate, so the bank is continuous
@@ -4509,7 +5392,9 @@ pub struct ConcertGrand {
     /// It replaced a pair of banks — a sparse parallel "body" and a serial
     /// through path — which between them held 45 resonators against the
     /// 200-500 a modelled board needs, and damped them like rubber.
-    board: [BodyMode; BOARD_MODES],
+    board: [BoardMode; BOARD_MODES],
+    /// Parallel to `board`, read only while the bank is being built.
+    board_cold: [BoardCold; BOARD_MODES],
     /// `cos(pi q x_j)` and `sin(pi q x_j)` over the drive points `x_j = j / (J - 1)`:
     /// the transforms every board mode reads its excitation from.
     drive_basis_cos: [[f32; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
@@ -4529,6 +5414,9 @@ pub struct ConcertGrand {
     /// decibels at 0.4 s.
     undamped_note: [u8; UNDAMPED_COUNT],
     note_sounding: [bool; NOTE_COUNT],
+    /// Which undamped lengths are muted for this block because the note that
+    /// owns them is being played. Decided once, from `note_sounding`.
+    undamped_muted: [bool; UNDAMPED_COUNT],
     /// Which keys are down right now, struck or not. A key that is down
     /// has its damper up whatever else is true of its string.
     key_down: [bool; NOTE_COUNT],
@@ -4584,9 +5472,6 @@ pub struct ConcertGrand {
     /// and whether the sostenuto rod is engaged.
     pedal_pressure: f32,
     sostenuto: bool,
-    /// Last sample's total string signal, carried across block boundaries
-    /// for the sympathetic feed.
-    bridge_feed: f32,
     pedal_noise_lp: f32,
     pedal_noise_lp2: f32,
     pedal_noise_floor: f32,
@@ -4618,6 +5503,54 @@ pub struct ConcertGrand {
     /// The board is a rebuild, not a per-sample read: its two controls set
     /// this and `process` retunes the bank at the next block boundary.
     board_dirty: bool,
+    /// What the host says one real-time call may spend here, in sandbox fuel.
+    /// Zero until a host says -- which is every host built before this
+    /// existed, and every host that does not meter fuel.
+    budget_fuel_per_call: u64,
+    /// Set when a new budget arrives and cleared by the block that spends it.
+    ///
+    /// Without this the spacing was recomputed every block from the bank that
+    /// the previous block built, and when the bank could not reach the mode
+    /// count being asked for -- the builder stops at a ceiling frequency, not
+    /// at a count -- the correction oscillated and marked the board dirty
+    /// every block. Measured on a Raspberry Pi: the soundboard rebuilding at
+    /// the block rate took the render from 1050 us to 3598 us and missed
+    /// every deadline in the window, which the host then read as a plugin
+    /// that needed a smaller budget, and cut, and so on down.
+    budget_pending: bool,
+    /// What that budget does to the soundboard: a multiplier on the spacing
+    /// between its modes, so 1.0 is the bank as voiced and 2.0 is half of it.
+    /// Never below 1.0 -- a budget may take quality away, never add some the
+    /// player did not ask for.
+    board_budget_spacing: f32,
+    /// How much instrument the budget affords, from 1.0 (as voiced) down to
+    /// `MINIMUM_QUALITY`. One scalar drives all three axes, so the losses
+    /// arrive together instead of the body going dry while the sympathy stays
+    /// lavish.
+    quality: f32,
+    /// Partials per undamped string, thinned from the top down: the highest
+    /// are the quietest and the first the ear lets go of.
+    undamped_partials: usize,
+    /// How many of the undamped bank's resonators were actually built, and so
+    /// how many are worth ticking.
+    undamped_active: usize,
+    /// The ceiling on partials sounding across all voices. `PARTIAL_BUDGET` is
+    /// what the instrument ships with; a budget scales it, and the existing
+    /// machinery then thins new notes instead of missing the callback.
+    partial_budget: usize,
+    undamped_dirty: bool,
+    /// A budget-driven rebuild does not happen on the block the budget lands
+    /// in. Swapping a bank under a sounding note is a step in the output --
+    /// seventy-three modes that were ringing gone in one sample, measured as
+    /// a seam 3.5x the note's own largest step, the tick the player heard --
+    /// and carrying each slot's state across did nothing for it. So the body
+    /// banks fade to nothing over `BANK_FADE_SAMPLES`, rebuild while they
+    /// are silent, and fade back. One multiply a sample; no block is rendered
+    /// twice.
+    body_gain: f32,
+    body_target: f32,
+    rebuild_board_after_fade: bool,
+    rebuild_undamped_after_fade: bool,
     scale_dirty: bool,
     room_index: [usize; ROOM_LINES],
 }
@@ -4625,15 +5558,42 @@ pub struct ConcertGrand {
 impl Default for ConcertGrand {
     fn default() -> Self {
         let mut piano = Self {
-            controls: Controls::default(),
-            sample_rate: 48_000.0,
-            fundamental: [0.0; NOTE_COUNT],
-            inharmonicity: [0.0; NOTE_COUNT],
-            voices: [Voice::default(); MAX_VOICES],
+            engine: StringEngine::default(),
+            plan_states: [FrameState::default(); MAX_BLOCK_FRAMES],
+            plan_others: [[0.0; STRING_SECTIONS]; MAX_BLOCK_FRAMES],
+            plan_sostenuto: [false; MAX_BLOCK_FRAMES],
+            sections: [StringUnit::default(); STRING_SECTIONS],
             pedal: false,
             soft: 0.0,
-            active_partials: 0,
-            restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
+            section_history: [[0.0; MAX_SECTION_DELAY]; STRING_SECTIONS],
+            section_cursor: 0,
+            board_feed_history: [[0.0; BOARD_DRIVE_POINTS]; BOARD_FEED_HISTORY],
+            bridge_feed_history: [0.0; BOARD_FEED_HISTORY],
+            keybed_feed_history: [[0.0; 2]; BOARD_FEED_HISTORY],
+            board_feed_cursor: 0,
+            silent_work: [(0, 0, 0.0); 64],
+            silent_work_len: 0,
+            span_offset: 0,
+            event_frame: 0,
+            voice_work: [[0; VOICE_WORK_BYTES]; STRING_SECTIONS],
+            voice_work_len: [0; STRING_SECTIONS],
+            voice_work_seq: 0,
+            summary: [VoiceSummary {
+                active: false,
+                note: 0,
+                channel: 0,
+                energy: 0.0,
+                ringing_free: false,
+            }; MAX_VOICES],
+            halo_summary: [VoiceSummary {
+                active: false,
+                note: 0,
+                channel: 0,
+                energy: 0.0,
+                ringing_free: false,
+            }; STRING_SECTIONS * HALOS_PER_SECTION],
+            voice_claimed: 0,
+            section_delay: RENDER_SPAN,
             // Per-note calibration fitted against the YDP samples: ten
             // anchors from A0 to C8, nine multipliers each (felt, HF floor,
             // thump, chiff, decay, clang, phantoms, level, treble life).
@@ -4660,40 +5620,8 @@ impl Default for ConcertGrand {
             // the notes measured 10-20 dB short of the reference in 30-1200
             // Hz, where a real piano carries the broadband knock of its
             // action. No multiplier can scale a source that is not there.
-            strike_budget: 0,
-            cal: [
-                [
-                    0.7665, 2.3440, 0.5097, 0.3392, 1.0000, 0.9236, 1.6842, 1.0000, 1.0000,
-                ],
-                [
-                    1.0310, 2.7660, 0.2500, 0.3392, 1.0000, 0.4180, 0.4024, 1.0000, 1.0000,
-                ],
-                [
-                    0.3580, 2.2532, 0.3922, 0.3079, 1.0000, 0.5434, 0.8348, 1.0000, 1.0000,
-                ],
-                [
-                    0.2500, 1.4688, 0.3194, 0.4434, 1.0000, 0.4932, 0.2500, 1.0000, 1.0000,
-                ],
-                [
-                    1.2536, 2.4650, 0.9850, 0.2565, 1.0000, 0.3269, 1.3111, 1.0000, 1.0000,
-                ],
-                [
-                    2.7366, 2.1321, 1.5657, 2.6568, 1.0000, 0.4731, 0.2952, 1.0000, 1.0000,
-                ],
-                [
-                    4.0000, 0.6556, 1.8725, 1.0000, 1.0000, 0.7958, 0.2500, 1.0000, 1.0000,
-                ],
-                [
-                    0.9443, 0.9026, 4.0000, 3.9996, 1.0000, 1.0000, 1.9942, 1.0000, 1.5000,
-                ],
-                [
-                    0.4820, 0.2500, 4.0000, 4.0000, 1.0000, 1.1800, 0.3836, 1.0000, 2.0000,
-                ],
-                [
-                    1.0345, 0.4249, 4.0000, 4.0000, 1.0000, 1.0000, 1.0000, 1.0000, 2.0000,
-                ],
-            ],
-            board: [BodyMode::default(); BOARD_MODES],
+            board: [BoardMode::default(); BOARD_MODES],
+            board_cold: [BoardCold::default(); BOARD_MODES],
             drive_basis_cos: [[0.0; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
             drive_basis_sin: [[0.0; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
             pair_next: 0,
@@ -4702,6 +5630,7 @@ impl Default for ConcertGrand {
             undamped: [BodyMode::default(); UNDAMPED_COUNT],
             undamped_note: [0; UNDAMPED_COUNT],
             note_sounding: [false; NOTE_COUNT],
+            undamped_muted: [false; UNDAMPED_COUNT],
             key_down: [false; NOTE_COUNT],
             silent: [BodyMode::default(); SILENT_MODES],
             silent_note: [0; SILENT_SLOTS],
@@ -4731,7 +5660,6 @@ impl Default for ConcertGrand {
             pedal_noise_amp: 0.0,
             pedal_pressure: 1.0,
             sostenuto: false,
-            bridge_feed: 0.0,
             pedal_noise_lp: 0.0,
             pedal_noise_lp2: 0.0,
             pedal_noise_floor: 0.0,
@@ -4754,6 +5682,18 @@ impl Default for ConcertGrand {
             proximity: [0.0; 2],
             room_dirty: false,
             board_dirty: false,
+            budget_fuel_per_call: 0,
+            budget_pending: false,
+            board_budget_spacing: 1.0,
+            quality: 1.0,
+            undamped_partials: FREE_STRING_PARTIALS,
+            undamped_active: UNDAMPED_COUNT,
+            partial_budget: PARTIAL_BUDGET,
+            undamped_dirty: false,
+            body_gain: 1.0,
+            body_target: 1.0,
+            rebuild_board_after_fade: false,
+            rebuild_undamped_after_fade: false,
             scale_dirty: false,
             room_index: [0; ROOM_LINES],
         };
@@ -4881,6 +5821,25 @@ pub static STULOV_EPSILON: Knob = Knob::new(0.5);
 pub static STULOV_TAU_S: Knob = Knob::new(2.0e-4);
 /// The wire's viscoelastic loss rate at 4.4 kHz, in 1/s; grows with f^2.
 pub static STRING_HF_LOSS: Knob = Knob::new(5.0);
+/// The same loss is not one number for the whole compass. Bensa et al. (JASA
+/// 114, 2003) give it per string as sigma = b1 + b3*omega^2, and b3 is a
+/// property of the wire: the rate above was fitted on 122 partials across
+/// eleven notes that were mostly bass, where it is right, and measured on
+/// the YDP mid register it is a factor of three to six short -- the
+/// instrument loses 10-27 dB of 4-8 kHz in the first second where the model
+/// loses 2-12. Doubling the global rate halved that gap and cost the bass
+/// nine points of fit, so the growth is placed where the wire is plain and
+/// thin: from `WIRE_LOSS_FROM` along the compass (0 = A0, 1 = C8) the rate
+/// climbs log-linearly to `WIRE_LOSS_TOP` times itself at C8. 1.0 at the top
+/// is the fitted rate everywhere, bit for bit.
+const WIRE_LOSS_FROM: f32 = 0.31;
+/// Six at C8 puts C7 at about 4.4x, which is where Chaigne and Askenfelt's
+/// treble b3 sits against their C4 value; the fit cost kept falling past
+/// this (8: 825, 12: 813 against 835) but it was the treble cost doing the
+/// falling, in the register whose reference is dominated by a knock the
+/// model does not have -- a fit that likes an over-damped treble because
+/// the alternative source is missing. The literature's number, and the ear.
+pub static WIRE_LOSS_TOP: Knob = Knob::new(6.0);
 /// The board's loss factor at 50 Hz; log-linear to BOARD_LOSS_FACTOR at 300 Hz.
 pub static BOARD_LOW_LOSS: Knob = Knob::new(0.05);
 /// Cap on the Skudrzyk boost of a sparse region's peaks: the lowest, sparsest modes must not tower over the mean.
@@ -5238,7 +6197,10 @@ fn simulate_strike(
         stulov_tau,
         comb_floor,
     } = configuration;
-    let dt = 4.0e-6_f32;
+    // Four microseconds, and whether that is finer than it needs to be is a
+    // convergence question rather than a taste one -- see `contact_convergence`.
+    // A knob so the sweep can ask.
+    let dt = SIM_DT_S.get().max(1.0e-7);
     // The contact ends when the string throws the hammer off, and not
     // before. This loop used to be CUT at a contact time drawn from a
     // formula -- 2 ms at the bottom tapering to 0.4, swung linearly by the
@@ -5355,13 +6317,13 @@ fn simulate_strike(
         }
         hammer_v -= force / mass * dt;
         hammer_y += hammer_v * dt;
+        // Modal force projection for a pinned string: modal mass is half
+        // the string's, so the force enters as 2F/(mu*L). With the string's
+        // mass physical, the coupling no longer depends on how many modes we
+        // chose to integrate -- the old build divided the hammer mass by
+        // (sim_modes/SIM_MODES) to undo exactly that artefact, and the
+        // correction is retired with the cause.
         for n in 0..modes {
-            // Modal force projection for a pinned string: modal mass is half
-            // the string's, so the force enters as 2F/(mu*L). With the
-            // string's mass physical, the coupling no longer depends on how
-            // many modes we chose to integrate -- the old build divided the
-            // hammer mass by (sim_modes/SIM_MODES) to undo exactly that
-            // artefact, and the correction is retired with the cause.
             v[n] += (-omega[n] * omega[n] * q[n] + (2.0 / string_mass) * shape[n] * force) * dt;
             q[n] += v[n] * dt;
         }
@@ -5375,28 +6337,202 @@ fn simulate_strike(
     (q, over_omega)
 }
 
-impl ConcertGrand {
-    /// The lid's angle in radians, from the degrees the player set.
-    fn lid_radians(&self) -> f32 {
-        clamp_between(
-            self.controls.lid * DEGREES_TO_RADIANS,
-            LID_CLOSED_RAD.get(),
-            LID_OPEN_RAD.get(),
-        )
+/// Everything a string needs to know that is not a string.
+///
+/// The seven numbers and tables a section reads and never writes -- the
+/// controls, the rate it runs at, the calibration, the two tuning tables,
+/// whether a second blow merges into a ringing string, and how many
+/// partials one may cost -- and the arithmetic derived from them, which is
+/// most of what a note-on does before it touches a voice.
+///
+/// It is its own thing because a `parallel_render_v1` unit is handed no
+/// `&self`: what a section needs has to travel to it, and the smaller and
+/// more closed that is, the less there is to be wrong about. Nine things
+/// reach a section from outside. Seven are in here; the other two are the
+/// section's own purse.
+///
+/// Its size is the reason it exists at all. A unit carrying a whole
+/// `ConcertGrand` would carry a soundboard and a room it never renders,
+/// and five of those is four and a half megabytes built by value on an
+/// eight megabyte stack -- which does not fit, twice over.
+#[derive(Clone, Copy)]
+struct StringEngine {
+    /// Per-note calibration table: [anchor][param] multipliers.
+    cal: [[f32; CAL_PARAMS]; 10],
+    controls: Controls,
+    /// Fundamental of each note after the derived octave stretch.
+    fundamental: [f32; NOTE_COUNT],
+    /// Fletcher inharmonicity coefficient per note.
+    inharmonicity: [f32; NOTE_COUNT],
+    /// Whether a re-strike merges into the living voice, read from
+    /// RESTRIKE_MERGE at prepare and at every retune -- a field and not a
+    /// live knob read, so a test can set it without racing the knob
+    /// registry the round-trip test writes.
+    restrike_merge: bool,
+    sample_rate: f32,
+    /// Full hammer simulations left in this callback. The strike ODE is the
+    /// most expensive thing the model does and it runs on the audio thread,
+    /// so a dense chord or a fast run cannot be allowed to spend the whole
+    /// buffer on it: past the budget a strike falls back to the calibrated
+    /// recipe, which is what the model sounded like before the simulation
+    /// existed. Losing a little attack detail beats losing the stream.
+    strike_budget: u32,
+}
+
+impl Default for StringEngine {
+    fn default() -> Self {
+        Self {
+            cal: [
+                [
+                    0.7665, 2.3440, 0.5097, 0.3392, 1.0000, 0.9236, 1.6842, 1.0000, 1.0000,
+                ],
+                [
+                    1.0310, 2.7660, 0.2500, 0.3392, 1.0000, 0.4180, 0.4024, 1.0000, 1.0000,
+                ],
+                [
+                    0.3580, 2.2532, 0.3922, 0.3079, 1.0000, 0.5434, 0.8348, 1.0000, 1.0000,
+                ],
+                [
+                    0.2500, 1.4688, 0.3194, 0.4434, 1.0000, 0.4932, 0.2500, 1.0000, 1.0000,
+                ],
+                [
+                    1.2536, 2.4650, 0.9850, 0.2565, 1.0000, 0.3269, 1.3111, 1.0000, 1.0000,
+                ],
+                [
+                    2.7366, 2.1321, 1.5657, 2.6568, 1.0000, 0.4731, 0.2952, 1.0000, 1.0000,
+                ],
+                [
+                    4.0000, 0.6556, 1.8725, 1.0000, 1.0000, 0.7958, 0.2500, 1.0000, 1.0000,
+                ],
+                [
+                    0.9443, 0.9026, 4.0000, 3.9996, 1.0000, 1.0000, 1.9942, 1.0000, 1.5000,
+                ],
+                [
+                    0.4820, 0.2500, 4.0000, 4.0000, 1.0000, 1.1800, 0.3836, 1.0000, 2.0000,
+                ],
+                [
+                    1.0345, 0.4249, 4.0000, 4.0000, 1.0000, 1.0000, 1.0000, 1.0000, 2.0000,
+                ],
+            ],
+            controls: Controls::default(),
+            fundamental: [0.0; NOTE_COUNT],
+            inharmonicity: [0.0; NOTE_COUNT],
+            restrike_merge: RESTRIKE_FRESH.compiled() < 0.5,
+            sample_rate: 48_000.0,
+            strike_budget: 0,
+        }
+    }
+}
+
+impl StringEngine {
+    /// What the action makes of a blow before any string is touched: what
+    /// the una corda leaves of it, how much of the hammer's travel the
+    /// shift took, the back-check scaling from the key's return, and
+    /// whether the hammer reaches the string at all.
+    ///
+    /// Pure, and asked twice. The coordinator asks to decide whether a
+    /// voice is taken and whether the key is held silent instead -- the
+    /// silent bank and the slots are its own state, and a section cannot
+    /// write either. The section asks again to make the blow. Two callers
+    /// of one function rather than two copies of one formula, because the
+    /// two answers have to agree exactly.
+    fn action_blow(&self, velocity: f32, soft: f32, returned: f32) -> (f32, f32, f32, f32) {
+        // A grand's shift takes 22% of the blow because the felt it lands
+        // on is softer, and it takes strings away as well; an upright's
+        // rail only shortens the travel. See the note at the strike.
+        let shift = soft * (1.0 - self.controls.action);
+        let half_blow = soft * self.controls.action;
+        let struck = velocity * (1.0 - 0.22 * shift - 0.15 * half_blow);
+        let point = KEY_REPETITION_POINT.get().clamp(0.0, 0.99);
+        let from_check = REPETITION_FROM_CHECK.get().clamp(0.1, 1.0);
+        let repetition = from_check + (1.0 - from_check) * (returned - point) / (1.0 - point);
+        let (_, at_string) = self.hammer_speeds_at(repetition, struck);
+        (struck, shift, repetition, at_string)
     }
 
-    /// How far open the lid is, nought shut to one wide.
+    /// The soundboard as the filter it is. Measured bridge mobility is ragged
+    /// — peaks and dips of ±10 dB and more across the whole compass (Giordano,
+    /// "Simple model of a piano soundboard", *JASA* 102, 1997) — and every
+    /// partial of every note samples the same fixed curve. Returned as an
+    /// amplitude multiplier (~±5 dB) and a decay multiplier: where the board
+    /// takes energy readily the partial speaks louder and dies faster.
     ///
-    /// The angle is what the player sets and what the geometry uses; the leak
-    /// and the cutoff were written against a fraction, so it is derived here
-    /// once rather than separately in each of them.
-    fn lid_fraction(&self) -> f32 {
-        let closed = LID_CLOSED_RAD.get();
-        let open = LID_OPEN_RAD.get();
-        if open <= closed {
-            return 0.0;
-        }
-        ((self.lid_radians() - closed) / (open - closed)).clamp(0.0, 1.0)
+    /// Three incommensurate sines in log-frequency stand in for the measured
+    /// curve: fixed, smooth at the scale of one partial, uncorrelated at the
+    /// scale of a semitone — synthetic, and stated as such.
+    fn board_response(frequency: f32) -> (f32, f32) {
+        let l = log2f(frequency.max(1.0));
+        // Fine scatter, not a few broad humps. Three slow sines across the
+        // audio range put a bump every octave or so, and a fixed bump an
+        // octave wide is a FORMANT: every note samples the same one, so the
+        // instrument speaks with one fixed colour. Measured by averaging every
+        // note's spectrum on a log grid -- structure belonging to the note
+        // averages away, structure fixed in frequency survives -- the model
+        // carried 8.2 dB rms and 47 dB peak to peak of it against the real
+        // instrument's 4.7 and 25.
+        //
+        // It is worst in the bass, and that is the tell: a low note spreads
+        // partials across the whole range and so samples the entire pattern,
+        // while a treble note touches one small piece of it and sounds fine.
+        //
+        // A real soundboard's mobility above its ribbed-plate transition
+        // (~1.1 kHz, Ege and Boutillon) has high modal density and heavy modal
+        // overlap: its raggedness is fine-grained scatter, statistically flat
+        // at the scale of an octave. These rates are ten times faster and the
+        // depth is halved, which is scatter rather than colour.
+        let ragged = sincosf(17.3 * l + 1.3).0
+            + sincosf(28.7 * l + 4.1).0
+            + sincosf(43.1 * l + 2.2).0
+            + sincosf(67.9 * l + 5.7).0
+            + sincosf(103.9 * l + 0.4).0;
+        let normalized = ragged * (1.0 / 5.0);
+        // ±9 dB of level (YDP spectra swing ±15 dB between neighbours; the
+        // per-note irregularity supplies the rest), and up to ~×1.5 / ÷1.4 of
+        // decay rate, in opposition: a mobile board radiates more and damps
+        // the string more.
+        // The scatter fades out below a few hundred Hz, because a soundboard
+        // is not ragged down there. Raggedness comes from high modal density
+        // and heavy modal overlap; at 130 Hz a board has only a handful of
+        // modes and its response is smooth. Applying the same +/-6 dB of
+        // synthetic scatter that far down is not physics, it is a lottery --
+        // and C2 lost it. Measured, its second partial is the STRONGEST in
+        // both the real instrument and the reference, and this model had it
+        // 9.5 dB down, sitting in a notch that landed there by accident.
+        let settled = 1.0 / (1.0 + powf(SCATTER_KNEE_HZ.get() / frequency.max(20.0), 2.0));
+        let amplitude = powf(10.0, normalized * 0.30 * settled);
+        let decay = 1.0 / (1.0 + 0.35 * normalized * settled);
+        (amplitude, decay)
+    }
+
+    /// How readily this string gives its energy to the bridge, against the
+    /// tenor string the bridge loss is calibrated on. The rate at which a
+    /// string loses energy through its termination goes as the bridge's
+    /// admittance over the string's characteristic impedance, and with the
+    /// scale's tension nearly constant that impedance is T/c: a heavy bass
+    /// string with its slow wave loses slowly, a light treble string fast.
+    /// Measured on two references, a bass string's partial at 220 Hz rings
+    /// three times longer than a tenor fundamental at the same frequency.
+    fn bridge_speed_factor(&self, f0: f32) -> f32 {
+        let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
+        let speed = 2.0 * self.string_length(position) * f0;
+        // What the bridge takes from a string goes as the bridge's admittance
+        // over the string's wave impedance, Z = mu * c: a wound A0 string
+        // carries twelve times the mass per metre of a tenor's plain wire, so
+        // the bridge takes a tenth as much from it per second. Measured on
+        // both references (2026-09-02): a bass string's partials at 400-800
+        // Hz ring 10 s early where a tenor's ring 4, and the aftersound of
+        // its 2-3 kHz partials 8-9 s. The wave speed alone (bottom octave
+        // foreshortened, the rest near 320 m/s) gives a fifth of that spread.
+        // And the reflections per second: a wave meets the bridge c / 2L
+        // times a second, so for a given tension what the bridge takes per
+        // second goes as 1 / L -- the physical law is rate = 2 T Re(Y) / L.
+        let length = self.string_length(position);
+        let reflections = powf(
+            BRIDGE_REFERENCE_LENGTH_M.get() / length.max(0.01),
+            BRIDGE_LENGTH_POWER.get(),
+        );
+        (reflections * self.string_impedance_factor(position, speed))
+            .clamp(0.05, BRIDGE_FACTOR_CAP.get())
     }
 
     /// Interpolated per-note calibration multiplier.
@@ -5409,951 +6545,6 @@ impl ConcertGrand {
         let (a, b) = (CAL_ANCHORS[i], CAL_ANCHORS[i + 1]);
         let t = (n - a) as f32 / (b - a) as f32;
         self.cal[i][param] * (1.0 - t) + self.cal[i + 1][param] * t
-    }
-
-    /// Fits published inharmonicity measurements: a quadratic in log-space,
-    /// minimum near A2, ~1e-4 in the middle of the compass to ~1e-2 at C8.
-    /// Inharmonicity: the calibrated instrument's measured curve, carried to
-    /// other scale lengths by the exact law that relates them.
-    ///
-    /// B = pi^3 E d^4 / (64 T L^2) for a stiff string. Hold the pitch and the
-    /// tension and shorten the scale, and the wire must thicken as 1/L to keep
-    /// its linear density -- so the stiffness rises as the fourth power of
-    /// that and B goes as 1/L^6. That exponent is exact, and it is most of why
-    /// a small piano sounds small: a 1.2 m upright carries about thirty times
-    /// the bass inharmonicity of a 2.7 m grand, and the tuner's stretch, which
-    /// `tune` derives FROM B, widens with it.
-    ///
-    /// The curve in note number stays as the anchor. Deriving B from the
-    /// geometry outright was tried and measured: with a two-constant wound-core
-    /// profile it reproduces this curve within 1.1 dB across eight octaves --
-    /// the physics is sound -- but that residue cost six points of chromatic
-    /// fit for nothing, because the size dependence is a power law that rides
-    /// on top of a measurement perfectly well. Measured where there is a
-    /// measurement, derived where there is not.
-    fn inharmonicity_for(&self, note: u8) -> f32 {
-        let n = note as f32;
-        let exponent = -3.95 + 4.9e-4 * (n - 45.0) * (n - 45.0);
-        // B goes as T/L^6: the length exponent above, and tension linearly,
-        // because a tighter scale needs a thicker wire (d ~ sqrt(T)) and
-        // stiffness follows d^4 while the restoring tension follows T.
-        let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
-        let scale = self.controls.scale_at(position);
-        let square = scale * scale;
-        let tension = self.controls.tension_newtons() / STRING_TENSION_N.get();
-        powf(10.0, exponent) * tension / (square * square * square)
-    }
-
-    /// Tunes the instrument the way a tuner does: A4 = 440, octave anchors
-    /// beatless against the lower note's second (sharp) partial, and the
-    /// stretch interpolated in cents between anchors. Railsback's curve is
-    /// the output of this procedure, not an input to it.
-    fn tune(&mut self) {
-        for index in 0..NOTE_COUNT {
-            self.inharmonicity[index] = self.inharmonicity_for(LOW_NOTE + index as u8);
-        }
-
-        // Stretch in cents at the octave anchors around A4 (index 48).
-        let mut anchor_cents = [0.0_f32; NOTE_COUNT];
-        let a4 = 69 - LOW_NOTE as usize;
-        let mut cents = 0.0;
-        let mut index = a4;
-        while index + 12 < NOTE_COUNT {
-            cents += 1200.0 * log2f(octave_stretch_ratio(self.inharmonicity[index]));
-            anchor_cents[index + 12] = cents;
-            index += 12;
-        }
-        cents = 0.0;
-        index = a4;
-        while index >= 12 {
-            cents -= 1200.0 * log2f(octave_stretch_ratio(self.inharmonicity[index - 12]));
-            anchor_cents[index - 12] = cents;
-            index -= 12;
-        }
-
-        for index in 0..NOTE_COUNT {
-            // Interpolate the stretch between the surrounding anchors.
-            let below = a4 as isize + (index as isize - a4 as isize).div_euclid(12) * 12;
-            let above = below + 12;
-            let fraction = (index as isize - below) as f32 / 12.0;
-            let below_cents = anchor_cents
-                .get(below.max(0) as usize)
-                .copied()
-                .unwrap_or(0.0);
-            let above_cents = anchor_cents
-                .get((above as usize).min(NOTE_COUNT - 1))
-                .copied()
-                .unwrap_or(below_cents);
-            let stretched = below_cents + (above_cents - below_cents) * fraction;
-            let semitones = index as f32 - a4 as f32;
-            self.fundamental[index] = 440.0 * powf(2.0, semitones / 12.0 + stretched / 1200.0);
-        }
-    }
-
-    /// Lays out the soundboard: walk up from 50 Hz taking the measured modal
-    /// spacing at each step, give every mode the loss factor of spruce, and
-    /// jitter frequency, strength and pan so the bank is ragged rather than
-    /// regular.
-    fn tune_board(&mut self) {
-        self.board_dirty = false;
-        // The rim: a sixth-order Butterworth high-pass at the radiation
-        // corner, three biquads whose Q are the Butterworth pole pairs.
-        // Below the corner it falls at 36 dB an octave, the measured law.
-        let corner = RADIATION_CORNER_HZ.get().clamp(5.0, self.sample_rate * 0.2);
-        let (sin, cos) = sincosf(core::f32::consts::PI * corner / self.sample_rate);
-        let k = sin / cos;
-        for (section, q) in RIM_Q.iter().enumerate() {
-            let norm = 1.0 / (1.0 + k / q + k * k);
-            self.rim_coef[section] = [
-                norm,
-                -2.0 * norm,
-                norm,
-                2.0 * (k * k - 1.0) * norm,
-                (1.0 - k / q + k * k) * norm,
-            ];
-        }
-        for q in 0..BOARD_DRIVE_POINTS {
-            for j in 0..BOARD_DRIVE_POINTS {
-                let x = j as f32 / (BOARD_DRIVE_POINTS - 1) as f32;
-                let (sin, cos) = sincosf(core::f32::consts::PI * q as f32 * x);
-                self.drive_basis_cos[q][j] = cos;
-                self.drive_basis_sin[q][j] = sin;
-            }
-        }
-        let loss = self.controls.board_loss();
-        let density = self.controls.board_density();
-        let ceiling = if BOARD_TOP_HZ.get() < 0.45 * self.sample_rate {
-            BOARD_TOP_HZ.get()
-        } else {
-            0.45 * self.sample_rate
-        };
-        let mut index = 0;
-        // The measured low modes first: where the reference's board puts
-        // them, each with the ripple the taps read there. `measured` is
-        // their share; the statistical modes under the same knee carry the
-        // rest, so the knob crossfades one bank into the other and the ear
-        // can settle it live.
-        let measured = BOARD_MEASURED_MODES.get().clamp(0.0, 1.0);
-        if measured > 0.0 {
-            let modes = BOARD_LOW_MODES;
-            for (i, (hz, ripple_db)) in modes.iter().copied().enumerate() {
-                if index >= BOARD_MODES || hz >= ceiling {
-                    break;
-                }
-                // The local spacing for the mean-mobility normalisation is
-                // the gap to the neighbours, as it is for the drawn bank.
-                let below = if i > 0 { modes[i - 1].0 } else { 0.0 };
-                let above = if i + 1 < modes.len() {
-                    modes[i + 1].0
-                } else {
-                    BOARD_MEASURED_KNEE_HZ
-                };
-                let spacing_here = 0.5 * (above - below);
-                let mut mode = self.board_mode(
-                    0x4D0D_E000 | i as u32,
-                    hz,
-                    spacing_here,
-                    loss,
-                    powf(10.0, ripple_db / 20.0),
-                );
-                mode.drive *= measured;
-                self.board[index] = mode;
-                index += 1;
-            }
-        }
-        let mut frequency = BOARD_BOTTOM_HZ.get();
-        // The drawn modes keep their own count for the seeds: with the
-        // measured set in front of them their slot moves, and a seed taken
-        // from the slot would re-roll every drawn mode's jitter, pan,
-        // strength and sign the moment the knob left zero -- a different
-        // bank above the knee, not a different bank below it.
-        let mut drawn = 0u32;
-        while index < BOARD_MODES && frequency < ceiling {
-            let seed = drawn;
-            drawn += 1;
-            // ±3% of the local spacing, so neighbouring modes crowd and part
-            // the way a real plate's do instead of marching in step.
-            let jitter = 1.0 + 0.06 * (hash01(0xB0A2D ^ seed << 3) - 0.5);
-            let placed = frequency * jitter;
-            // A real plate's mobility is ragged: per-mode strength swings
-            // ~±8 dB — a bank of equal modes is only a volume knob.
-            let strength = 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
-            let mut mode = self.board_mode(
-                seed,
-                placed,
-                board_spacing(frequency, density),
-                loss,
-                strength,
-            );
-            if placed < BOARD_MEASURED_KNEE_HZ {
-                mode.drive *= 1.0 - measured;
-            }
-            self.board[index] = mode;
-            frequency += board_spacing(frequency, density);
-            index += 1;
-        }
-        self.board_count = index;
-        for slot in self.board.iter_mut().skip(index) {
-            *slot = BodyMode::default();
-        }
-        self.pair_next = 0;
-    }
-
-    /// One mode of the board bank at `placed` hertz: its damping from the
-    /// measured plate's law, its drive normalised for a level mean mobility
-    /// over `spacing_here`, coloured by the measured chain transfer, scaled
-    /// by `strength` (the drawn bank's ±8 dB lottery, or a measured mode's
-    /// ripple), rolled off below the radiation corner and the coincidence
-    /// corner, panned and signed by hash.
-    /// The Rayleigh integral of every board mode toward each capsule, a
-    /// few modes per block from `pair_next` until the board is done. See
-    /// `BOARD_PAIR`.
-    fn tune_pair(&mut self) {
-        if self.pair_next >= self.board_count {
-            return;
-        }
-        let from = self.pair_next;
-        let to = (from + PAIR_MODES_PER_BLOCK).min(self.board_count);
-        self.pair_next = to;
-        if BOARD_PAIR.get() < 0.5 {
-            for mode in self.board[from..to].iter_mut() {
-                mode.out_y = [mode.pan_left, mode.pan_right];
-                mode.out_y1 = [0.0, 0.0];
-            }
-            return;
-        }
-        let height = clamp_between(
-            self.controls.mic_distance,
-            MIC_DISTANCE_MIN_M.get(),
-            MIC_DISTANCE_MAX_M.get(),
-        );
-        let half = 0.5 * MIC_SPACING_M.get() * self.controls.width;
-        let capsules = [0.5 * BRIDGE_LENGTH_M - half, 0.5 * BRIDGE_LENGTH_M + half];
-        let pattern = self.controls.mic_pattern;
-        let speed = SOUND_SPEED.get();
-        const ALONG: usize = 40;
-        const ACROSS: usize = 7;
-        let sample_rate = self.sample_rate;
-        for mode in self.board[from..to].iter_mut() {
-            let frequency = mode.omega * sample_rate / core::f32::consts::TAU;
-            let k = core::f32::consts::TAU * frequency / speed;
-            let mut gains = [(0.0f32, 0.0f32); 2];
-            for i in 0..ALONG {
-                let x = (i as f32 + 0.5) / ALONG as f32;
-                let along =
-                    sincosf(core::f32::consts::PI * mode.shape_q as f32 * x + mode.shape_theta).1;
-                for j in 0..ACROSS {
-                    let y = ((j as f32 + 0.5) / ACROSS as f32 - 0.5) * BOARD_WIDTH_M;
-                    let across = sincosf(
-                        core::f32::consts::PI * mode.shape_qy * y / BOARD_WIDTH_M
-                            + mode.shape_theta_y,
-                    )
-                    .1;
-                    let shape = 2.0 * along * across;
-                    for (m, capsule) in capsules.iter().enumerate() {
-                        let dx = x * BRIDGE_LENGTH_M - capsule;
-                        let r = sqrtf(dx * dx + y * y + height * height).max(1e-3);
-                        let directivity = (1.0 - pattern) + pattern * height / r;
-                        let (sin_kr, cos_kr) = sincosf(-k * r);
-                        let weight = shape * directivity / r / (ALONG * ACROSS) as f32;
-                        gains[m].0 += weight * cos_kr;
-                        gains[m].1 += weight * sin_kr;
-                    }
-                }
-            }
-            // Every mode keeps the power its pan gave it: 0.5 for the pair.
-            let power = gains[0].0 * gains[0].0
-                + gains[0].1 * gains[0].1
-                + gains[1].0 * gains[1].0
-                + gains[1].1 * gains[1].1;
-            let scale = if power > 0.0 { sqrtf(0.5 / power) } else { 0.0 };
-            for gain in gains.iter_mut() {
-                gain.0 *= scale;
-                gain.1 *= scale;
-            }
-            mode.set_pair(gains);
-        }
-    }
-
-    fn board_mode(
-        &self,
-        seed: u32,
-        placed: f32,
-        spacing_here: f32,
-        loss: f32,
-        strength: f32,
-    ) -> BodyMode {
-        let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ seed << 5);
-        // The lowest modes of a real board are the most damped -- three
-        // to five percent against two above the ribs' transition -- and
-        // wide enough that no bass fundamental falls into a hole between
-        // two neighbours of opposite sign. The loss rises toward the
-        // bottom, log-linear from 300 Hz down to BOARD_LOW_LOSS at 50 Hz.
-        let low = (log2f(300.0 / placed.max(20.0)) / log2f(6.0)).clamp(0.0, 1.0);
-        let loss_here = loss * powf(BOARD_LOW_LOSS.get() / BOARD_LOSS_FACTOR.get(), low);
-        let mut mode = BodyMode::tune(placed, board_t60(placed, loss_here), pan, self.sample_rate);
-        // Skudrzyk: a plate's MEAN mobility is flat with frequency,
-        // whatever its modal density and damping. A bank of unit-gain
-        // peaks is not -- where the modes overlap more the mean rises --
-        // so each peak is scaled by the square root of its spacing over
-        // its bandwidth, and the mean comes out level.
-        let bandwidth = (loss_here * placed).max(1e-3);
-        mode.drive *= sqrtf(spacing_here.max(1e-3) / bandwidth).min(BOARD_MEAN_CAP.get())
-            * BOARD_MEAN_MOBILITY.get();
-        // Then the chain as measured: the flat mean is Skudrzyk's plate
-        // alone, and what reaches a microphone is that plate radiating
-        // into a lid and a room, which is not flat -- see the table.
-        mode.drive *= board_transfer(placed);
-        mode.drive *= strength;
-        // The mode shape at the bridge is as often negative as positive.
-        //
-        // A mode's transfer from the bridge to the ear is the product of
-        // its shape at the drive point and its net radiating area, and both
-        // alternate as the shapes gain nodal lines -- a real plate's
-        // transfer flips sign mode to mode. A bank of all-positive modes in
-        // parallel with the through path notches every anti-resonance
-        // coherently: measured on B3, the bank alone carved its eleventh
-        // partial 8.4 dB below the naked string sum, its twelfth 10, in a
-        // fixed-in-Hz patchwork that gave every note a different ragged
-        // ladder -- the bell-like strike the ear reported.
-        //
-        // Only below BOARD_SIGN_TOP_HZ. Above the ribbed-plate transition
-        // the modes are sparse against their bandwidth (at 4 kHz the spacing
-        // is 113 Hz and the bandwidth 92), and two neighbours of opposite
-        // sign notch the transfer between them by twenty decibels or more.
-        // Measured on the grid (2026-09-07): the treble's second partial
-        // swung +-30 dB from note to note and re-rolled entirely when the
-        // bank's density moved -- a lottery, not a board. A real plate up
-        // there has heavy modal overlap and a smooth, ragged-by-5-dB
-        // transfer; one sign with the strength swing kept gives that.
-        if placed < BOARD_SIGN_TOP_HZ.get() && hash01(0x51C4 ^ seed << 9) < 0.5 {
-            mode.drive = -mode.drive;
-        }
-        {
-            let depth = BOARD_SHAPE.get().clamp(0.0, 1.0);
-            let theta = core::f32::consts::TAU * hash01(0x5A4E ^ seed << 11);
-            let (sin_theta, cos_theta) = sincosf(theta);
-            let half_waves = (BOARD_DRIVE_POINTS - 1) as f32 * sqrtf(placed / BOARD_SHAPE_TOP_HZ);
-            // The plate's wavenumber points somewhere between along the
-            // bridge and across the board; along the bridge the shape has
-            // its cosine of that share, across it the sine.
-            let (sin_alpha, cos_alpha) =
-                sincosf(core::f32::consts::FRAC_PI_2 * hash01(0x2D1E ^ seed << 13));
-            mode.shape_qy = half_waves * sin_alpha * BOARD_WIDTH_M / BRIDGE_LENGTH_M;
-            mode.shape_theta_y = core::f32::consts::TAU * hash01(0x7E1A ^ seed << 15);
-            if placed < BOARD_SHAPE_FLOOR_HZ {
-                // The whole board, in phase, from every string.
-                mode.shape_q = 0;
-                mode.shape_theta = 0.0;
-                mode.shape_a = 1.0;
-                mode.shape_b = 0.0;
-                mode.shape_c = 0.0;
-            } else {
-                mode.shape_q =
-                    (roundf(half_waves * cos_alpha) as usize).clamp(1, BOARD_DRIVE_POINTS - 1);
-                mode.shape_theta = theta;
-                mode.shape_a = 1.0 - depth;
-                mode.shape_b = depth * core::f32::consts::SQRT_2 * cos_theta;
-                mode.shape_c = -depth * core::f32::consts::SQRT_2 * sin_theta;
-            }
-        }
-        // The board does not radiate its own lowest modes any more than it
-        // radiates a string's lowest partials -- and it radiates a string's
-        // partials below its lowest mode less still. That is the rim, a
-        // filter on the bank's sum (`RADIATION_CORNER_HZ`), where it also
-        // reaches the tail of the 50 Hz mode that a 27 Hz fundamental
-        // leaves through. It used to be a factor here, on each mode's
-        // drive: it held the 49.8 Hz drone every treble strike kicked, and
-        // it could not hold A0.
-        // Below coincidence a plate radiates poorly: the near-field of
-        // neighbouring antinodes cancels. A first-order rise toward the
-        // corner keeps the bass fundamental where the references put it,
-        // well under its own second and third partials.
-        let ratio = powf(
-            placed / BOARD_COINCIDENCE_HZ.get(),
-            BOARD_RADIATION_ORDER.get(),
-        );
-        mode.drive *= ratio / (1.0 + ratio);
-        mode
-    }
-
-    /// Retunes the undamped top-octave strings.
-    /// Lays the duplex bank out across its range with scattered spacing.
-    ///
-    /// Geometric progression for the placement, then each pitch is pushed off
-    /// it by up to a third of the gap to its neighbour. Even spacing in log
-    /// frequency would beat against the partial ladder of every note in the
-    /// same way and read as a chord; scattered spacing reads as a mat.
-    /// Retunes the damped strings' bed to the instrument's own fundamentals.
-    fn tune_bed(&mut self) {
-        let t60_bottom = BED_T60_S.get().max(0.05);
-        for (i, string) in self.bed.iter_mut().enumerate() {
-            let hz = self.fundamental[i.min(NOTE_COUNT - 1)].max(20.0);
-            // A damper is the same felt on every string, but a wound bass
-            // string carries ten times the mass per metre of a plain tenor
-            // one, so the felt takes seconds to stop it and under a second
-            // to stop a plain string. The ring falls from BED_T60_S at A0 to
-            // a fifth of it at the top of the bed, log-linear -- which is
-            // also what keeps a damped chord's tail a tail
-            // (`the_staging_leaves_a_tail_that_dies`).
-            let t60 = t60_bottom * powf(0.2, i as f32 / (BED_COUNT - 1) as f32);
-            // Along the bridge, bass to the left as the pair hears it.
-            let pan = 0.3 + 0.4 * i as f32 / (BED_COUNT - 1) as f32;
-            *string = BodyMode::tune(hz, t60, pan, self.sample_rate);
-        }
-    }
-
-    /// The hammer's speed at let-off and at the string for a unit velocity:
-    /// the action's calibrated law, the keyboard's knee under it, and the
-    /// flight's toll between the two. See `LETOFF_DISTANCE_MM`.
-    fn hammer_speeds(&self, velocity: f32) -> (f32, f32) {
-        let span = ACTION_SPAN_BASE.get() + ACTION_SPAN_PER_DYNAMICS.get() * self.controls.dynamics;
-        let mut letoff = HAMMER_V_FF.get() * powf(span, velocity - 1.0) * self.repetition_scale;
-        let knee = (LETOFF_KNEE.get() / 127.0).clamp(0.0, 1.0);
-        if knee > 0.0 && velocity < knee {
-            letoff *= velocity / knee;
-        }
-        let toll = 2.0 * 9.81 * LETOFF_DISTANCE_MM.get().max(0.0) * 1.0e-3;
-        let at_string = sqrtf((letoff * letoff - toll).max(0.0));
-        (letoff, at_string)
-    }
-
-    /// A key down without a strike: its string, damper up, joins the
-    /// conversation the way the top octave's do.
-    fn hold_silent(&mut self, note: u8) {
-        if let Some(slot) = self.silent_slot_of(note) {
-            self.silent_state[slot] = SILENT_HELD;
-            return;
-        }
-        // A free slot, or the one closest to being given back.
-        let slot = (0..SILENT_SLOTS)
-            .find(|&slot| self.silent_state[slot] == SILENT_FREE)
-            .or_else(|| {
-                (0..SILENT_SLOTS)
-                    .filter(|&slot| self.silent_state[slot] == SILENT_DAMPED)
-                    .min_by_key(|&slot| self.silent_in[slot])
-            });
-        let Some(slot) = slot else {
-            return;
-        };
-        self.tune_silent(slot, note);
-        self.silent_note[slot] = note;
-        self.silent_state[slot] = SILENT_HELD;
-        self.silent_in[slot] = 0;
-    }
-
-    /// A key pressed again before the jack reset: no blow, but the key is
-    /// down and its damper is up again. A felt on its way down is caught;
-    /// a string under the pedal is held by the key from here; a string with
-    /// no voice is a silent key.
-    fn catch_key(&mut self, channel: u8, note: u8) {
-        let rate = self.sample_rate;
-        let grip = self.controls.damper_grip();
-        let mut caught = false;
-        for voice in &mut self.voices {
-            if !(voice.active && !voice.halo && voice.note == note && voice.channel == channel) {
-                continue;
-            }
-            if voice.damper_phase != 0 {
-                voice.cancel_damper();
-            }
-            if voice.sustained && voice.damper_applied > 0.0 {
-                let own = Self::damper_for(note, rate, grip * voice.firmness, 1.0);
-                voice.press_damper(own, -voice.damper_applied);
-                voice.damper_applied = 0.0;
-            }
-            voice.held = true;
-            voice.sustained = false;
-            caught = true;
-        }
-        if !caught {
-            self.hold_silent(note);
-        }
-    }
-
-    fn silent_slot_of(&self, note: u8) -> Option<usize> {
-        (0..SILENT_SLOTS)
-            .find(|&slot| self.silent_state[slot] != SILENT_FREE && self.silent_note[slot] == note)
-    }
-
-    fn free_silent(&mut self, note: u8) {
-        if let Some(slot) = self.silent_slot_of(note) {
-            self.silent_state[slot] = SILENT_FREE;
-            let base = slot * SILENT_MODES_PER_SLOT;
-            for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
-                *mode = BodyMode::default();
-            }
-        }
-    }
-
-    /// The felt landing on a silent string: its modes' radii scaled from
-    /// here on, and the slot given back once the felt's work is done.
-    fn damp_silent(&mut self, slot: usize, factor: f32) {
-        let base = slot * SILENT_MODES_PER_SLOT;
-        for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
-            mode.damp(factor);
-        }
-        self.silent_state[slot] = SILENT_DAMPED;
-        self.silent_in[slot] = (SILENT_RELEASE_S * self.sample_rate) as u32;
-    }
-
-    /// The silent string's partials, tuned as the undamped bank's are but
-    /// ringing as the string itself does at that pitch: the voices' own
-    /// slow-stage law, since a free string with no hammer on it is exactly
-    /// the tail of a note.
-    fn tune_silent(&mut self, slot: usize, note: u8) {
-        let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
-        let f0 = self.fundamental[index].max(20.0);
-        let b = self.inharmonicity_for(note);
-        let position = index as f32 / (NOTE_COUNT - 1) as f32;
-        let pan = (0.5 + 0.8 * (position - 0.5) * self.controls.width).clamp(0.05, 0.95);
-        let high = 0.45 * self.sample_rate;
-        let base = slot * SILENT_MODES_PER_SLOT;
-        let mut cursor = 0;
-        for k in 1..=FREE_STRING_PARTIALS {
-            let kf = k as f32;
-            let hz = kf * f0 * sqrtf(1.0 + b * kf * kf);
-            if hz >= high {
-                break;
-            }
-            let t60 = self.slow_t60_seconds(hz, f0, 1.0).max(0.05);
-            let spread =
-                FREE_STRING_DETUNE_CENTS * (0.5 + hash01((note as u32) << 4 | k as u32)) / 1200.0;
-            for side in [-0.5f32, 0.5] {
-                let tuned = hz * powf(2.0, side * spread);
-                let mut string = BodyMode::tune(tuned, t60, pan, self.sample_rate);
-                string.drive *= 0.7;
-                self.silent[base + cursor] = string;
-                cursor += 1;
-            }
-        }
-        for mode in &mut self.silent[base + cursor..base + SILENT_MODES_PER_SLOT] {
-            *mode = BodyMode::default();
-        }
-    }
-
-    fn tune_undamped(&mut self) {
-        self.tune_bed();
-        let low = UNDAMPED_LOW_HZ.get().min(UNDAMPED_HIGH_HZ.get());
-        let high = UNDAMPED_HIGH_HZ
-            .get()
-            .max(low * 1.01)
-            .min(0.45 * self.sample_rate);
-        let mut index = 0;
-        for note in (self.controls.last_damper + 1)..=(LOW_NOTE + NOTE_COUNT as u8 - 1) {
-            let f0 = self.fundamental[(note - LOW_NOTE) as usize].max(20.0);
-            let b = self.inharmonicity_for(note);
-            let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
-            let pan = (0.5 + 0.8 * (position - 0.5) * self.controls.width).clamp(0.05, 0.95);
-            for k in 1..=FREE_STRING_PARTIALS {
-                if index >= UNDAMPED_COUNT {
-                    break;
-                }
-                let kf = k as f32;
-                let hz = kf * f0 * sqrtf(1.0 + b * kf * kf);
-                if hz >= high {
-                    break;
-                }
-                // The ring falls with frequency between the range's ends.
-                let t = ((hz - low) / (high - low)).clamp(0.0, 1.0);
-                let t60 = UNDAMPED_T60_LOW_S.get()
-                    + (UNDAMPED_T60_HIGH_S.get() - UNDAMPED_T60_LOW_S.get()) * t;
-                let spread = FREE_STRING_DETUNE_CENTS
-                    * (0.5 + hash01((note as u32) << 4 | k as u32))
-                    / 1200.0;
-                for side in [-0.5f32, 0.5] {
-                    if index >= UNDAMPED_COUNT {
-                        break;
-                    }
-                    let tuned = hz * powf(2.0, side * spread);
-                    let mut string = BodyMode::tune(tuned, t60, pan, self.sample_rate);
-                    string.drive *= 0.7;
-                    self.undamped[index] = string;
-                    self.undamped_note[index] = note;
-                    index += 1;
-                }
-            }
-        }
-        for (string, owner) in self
-            .undamped
-            .iter_mut()
-            .zip(self.undamped_note.iter_mut())
-            .skip(index)
-        {
-            *string = BodyMode::default();
-            *owner = 0;
-        }
-    }
-
-    fn tune_open_strings(&mut self) {
-        for (string, (frequency, t60, pan)) in self.open_strings.iter_mut().zip(OPEN_STRINGS) {
-            *string = if frequency < 0.45 * self.sample_rate {
-                let mut tuned = BodyMode::tune(frequency, t60, pan, self.sample_rate);
-                // A long string's bandwidth is under a hertz: at unit peak
-                // gain it would catch nothing from a transient. The bridge
-                // feeds it far better than that — calibrated against the
-                // YDP's sustained 3-8 kHz halo.
-                tuned.drive *= 45.0;
-                tuned
-            } else {
-                BodyMode::default()
-            };
-        }
-    }
-
-    /// Sizes the shimmer's delay lines for the current rate.
-    fn tune_halo(&mut self) {
-        for (line, delay) in HALO_DELAYS_S.iter().copied().enumerate() {
-            self.halo_len[line] = ((delay * self.sample_rate) as usize).clamp(1, HALO_BUFFER - 1);
-            self.halo_index[line] %= self.halo_len[line];
-            self.halo_gain[line] = powf(10.0, -3.0 * delay / HALO_RT60_S.get());
-        }
-        self.halo_hp_k = 1.0 - expf(-core::f32::consts::TAU * HALO_HP_HZ.get() / self.sample_rate);
-    }
-
-    /// Sizes the chamber's delay lines and feedback for the current rate.
-    fn tune_room(&mut self) {
-        // The space the sliders describe. The control is the volume itself, in
-        // cubic metres, shaped into a hall-ish box (2.4 : 1.6 : 1); per-band
-        // absorption comes from one hardness axis, where soft surfaces eat the
-        // top first and take the lows with the mids, and hard ones keep the
-        // top ringing and let the lows boom.
-        let volume = clamp_between(
-            self.controls.room_size,
-            ROOM_VOLUME_MIN_M3.get(),
-            ROOM_VOLUME_MAX_M3.get(),
-        );
-        let scale = powf(volume / 3.84, 1.0 / 3.0);
-        let (length, width, height) = (2.4 * scale, 1.6 * scale, scale);
-        let surface = 2.0 * (length * width + length * height + width * height);
-        let mean_free_path = 4.0 * volume / surface;
-        let hardness = self.controls.room_hardness;
-        let alpha_mid = 0.5 * expf(-2.6 * hardness) + 0.035;
-        let alpha_high = alpha_mid * (1.0 + 1.3 * (1.0 - hardness));
-        let alpha_low = alpha_mid * (0.55 + 0.65 * hardness);
-        // Sabine per band, with the air taking the top of big rooms no
-        // matter what the walls are made of.
-        let rt = |alpha: f32, air_per_m: f32| -> f32 {
-            (0.161 * volume / (surface * alpha + 4.0 * air_per_m * volume)).clamp(0.10, 12.0)
-        };
-        let rt_low = rt(alpha_low, 0.0);
-        let rt_mid = rt(alpha_mid, 0.0002);
-        let rt_high = rt(alpha_high, AIR_ABSORB_4K_PER_M.get());
-
-        for (line, spread) in ROOM_SPREAD.iter().copied().enumerate() {
-            let seconds = mean_free_path / SOUND_SPEED.get() * spread;
-            let samples = ((seconds * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
-            self.room_len[line] = samples;
-            self.room_index[line] %= samples;
-            // Per-line gain so every path decays at the mid-band RT60.
-            self.room_gain[line] = powf(10.0, -3.0 * seconds / rt_mid);
-            // The in-loop lowpass takes the highs down to their own faster
-            // RT60: its response at the damping corner supplies the extra
-            // per-pass loss 10^(-3*seconds*(1/rt_high - 1/rt_mid)).
-        }
-        // The in-loop lowpass takes the highs down to their own faster RT60:
-        // one shared corner, from the mean path's required extra loss at
-        // 4 kHz.
-        let seconds_mean = mean_free_path / SOUND_SPEED.get();
-        let extra_high = powf(10.0, -3.0 * seconds_mean * (1.0 / rt_high - 1.0 / rt_mid));
-        let corner = (4200.0 * extra_high / (1.0 - extra_high + 1e-4)).clamp(300.0, 16_000.0);
-        self.room_damp = 1.0 - expf(-core::f32::consts::TAU * corner / self.sample_rate);
-        // The low shelf: gain that takes 150 Hz to its own RT60.
-        let low_ratio = powf(10.0, -3.0 * seconds_mean * (1.0 / rt_low - 1.0 / rt_mid));
-        self.room_low_gain = (low_ratio - 1.0).clamp(-0.6, 0.35);
-        self.room_low_coeff = 1.0 - expf(-core::f32::consts::TAU * 150.0 / self.sample_rate);
-
-        // The microphones, as two capsules rather than one point. Distance
-        // on a log axis; the direct sound falls as r_ref/r per capsule, the
-        // reverberant field holds, and the early reflections arrive from their
-        // mirror images along each capsule's own path.
-        // The control is the distance, in metres. It used to be a position on
-        // a log axis between these two knobs; they are still the range the
-        // model will work over, but they bound the value now rather than
-        // defining it. The fader keeps its feel through the logarithmic taper
-        // its descriptor declares, which is a property of the control and not
-        // of the number.
-        let distance = clamp_between(
-            self.controls.mic_distance,
-            MIC_DISTANCE_MIN_M.get(),
-            MIC_DISTANCE_MAX_M.get(),
-        );
-        // The pattern axis b: p(theta) = (1-b) + b*cos(theta). Random-energy
-        // efficiency is what a capsule hears of a DIFFUSE field, which depends
-        // on the pattern and not on where the capsule stands, so it stays
-        // shared between the two.
-        let b = self.controls.mic_pattern;
-        let random_energy = (1.0 - b) * (1.0 - b) + b * b / 3.0;
-        self.reverb_gain = sqrtf(random_energy) / 0.577;
-
-        // The piano stands a third of the way down the hall, mid-width,
-        // soundboard at 1 m; the pair faces it from `distance` away, ears at
-        // 1.4 m.
-        let piano = (0.33 * length, 0.5 * width, 1.0_f32);
-        let (az_sin, az_cos) = sincosf(MIC_AZIMUTH_RAD.get());
-        let reach = distance.min(0.6 * length);
-        // Close, the pair is lowered toward the strings, as an engineer does;
-        // at the reference distance and beyond it stands at ear height. With
-        // the height fixed at 1.4 m the bottom fifth of the fader changed the
-        // path by centimetres, and Mic Distance did nothing there.
-        //
-        // Named for what it is, and not `height`: that name is the ROOM's
-        // height a few lines up, and shadowing it put the ceiling image at
-        // the pair's own height. The mirror then sat at the same distance as
-        // the direct path, the clamp below pushed it to direct + 0.1 m, and
-        // every note in the compass went through a comb whose first notch
-        // is at 343 / (2 * 0.1) = 1.7 kHz. Measured on the partial envelope
-        // of all 30 grid notes against the reference: a fixed 15 dB hole
-        // from 1.4 to 2 kHz, present in every register alike, that vanished
-        // with the air chain off and survived the lid and the chamber being
-        // turned down one at a time.
-        let pair_height =
-            piano.2 + MIC_HEIGHT_M.get() * (reach / MIC_REFERENCE_M.get()).clamp(0.0, 1.0);
-        let centre = (
-            0.33 * length + reach * az_cos,
-            (0.5 * width - reach * az_sin).max(0.3),
-            pair_height,
-        );
-        // Both capsules look back at the instrument, splayed either side of
-        // that line. The splay is what makes the pattern axis do directional
-        // work: a cardioid turned 55 degrees off the source hears the near
-        // wall and the far wall quite differently, and an omni does not.
-        let aim = {
-            let (dx, dy) = (piano.0 - centre.0, piano.1 - centre.1);
-            let length = sqrtf(dx * dx + dy * dy).max(1e-3);
-            (dx / length, dy / length)
-        };
-        let (sin_half, cos_half) = sincosf(MIC_HALF_ANGLE_RAD);
-        let images = [
-            (piano.0, piano.1, -piano.2),               // floor
-            (piano.0, piano.1, 2.0 * height - piano.2), // ceiling
-            (piano.0, -piano.1, piano.2),               // near wall
-            (piano.0, 2.0 * width - piano.1, piano.2),  // far wall
-            (-piano.0, piano.1, piano.2),               // back wall
-            (2.0 * length - piano.0, piano.1, piano.2), // front wall
-        ];
-        let reflect = 1.0 - alpha_mid;
-        let lid_angle = self.lid_radians();
-        for side in 0..2 {
-            let turn = if side == 0 { 1.0 } else { -1.0 };
-            // The capsule, offset across the pair's line and turned outward.
-            let across = (-aim.1, aim.0);
-            let half = 0.5 * MIC_SPACING_M.get() * turn;
-            let mic = (
-                centre.0 + across.0 * half,
-                centre.1 + across.1 * half,
-                centre.2,
-            );
-            let axis = (
-                aim.0 * cos_half - aim.1 * sin_half * turn,
-                aim.1 * cos_half + aim.0 * sin_half * turn,
-            );
-            // What this capsule makes of a source at `point`: its distance and
-            // its polar response at the angle the source arrives from. The
-            // sign is kept -- a figure-of-eight really does invert what
-            // reaches it from behind, and two capsules disagreeing about that
-            // is a thing a pair does.
-            let heard = |point: (f32, f32, f32)| -> (f32, f32) {
-                let (dx, dy, dz) = (point.0 - mic.0, point.1 - mic.1, point.2 - mic.2);
-                let range = sqrtf(dx * dx + dy * dy + dz * dz).max(0.3);
-                let cosine = (dx * axis.0 + dy * axis.1) / range;
-                (range, (1.0 - b) + b * cosine)
-            };
-            let (direct_path, direct_response) = heard(piano);
-            // The direct sound falls as r_ref / r, and the cap sits well past
-            // the closest the fader reaches. It used to sit at 3.0, which the
-            // fader's whole bottom fifth (0.5 to 0.83 m, the default among it)
-            // was clamped to -- measured, Mic Distance did nothing there.
-            let near = (MIC_REFERENCE_M.get() / direct_path).clamp(0.12, MIC_NEAR_CAP.get())
-                * MIC_PREAMP.get();
-            self.direct_gain[side] = near * direct_response;
-            // The keyboard: farther by its offset, and further off the
-            // capsule's axis by the same geometry.
-            let keybed_path = sqrtf(direct_path * direct_path + KEYBED_OFFSET_M * KEYBED_OFFSET_M);
-            let keybed_response = (1.0 - b)
-                + b * (direct_response - (1.0 - b)) / b.max(1e-3) * (direct_path / keybed_path);
-            self.keybed_gain[side] = (MIC_REFERENCE_M.get() / keybed_path).min(MIC_NEAR_CAP.get())
-                * MIC_PREAMP.get()
-                * keybed_response;
-            // Proximity: the pressure-gradient term rises as c/(2*pi*f*r).
-            // Felt below ~ c/(2*pi*r); rendered as a 120 Hz shelf whose gain
-            // follows b/r, and each capsule has its own r.
-            self.proximity_gain[side] =
-                PROXIMITY_STRENGTH.get() * b * (1.0 / direct_path) * MIC_REFERENCE_M.get();
-            for (slot, image) in self.early_taps[side].iter_mut().zip(images) {
-                let (path, response) = heard(image);
-                let path = path.max(direct_path + 0.1);
-                let delay_s = (path - direct_path) / SOUND_SPEED.get();
-                let samples = ((delay_s * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
-                let gain = reflect * (direct_path / path) * response * near;
-                *slot = (samples, gain);
-            }
-            // The lid: hinged along the far side of the rim, raised by the
-            // control, and the board's image in it heard like any other
-            // surface -- from four points of the board, bass to treble and
-            // hinge to far rim, so the reflection is a smear rather than one
-            // comb. A finite
-            // lid: the point where the path meets the plane must lie on it,
-            // and the reflection fades as it runs off the edge. Closed, most
-            // of it goes back into the case, and what leaks past the rim is
-            // dark.
-            let (lid_sin, lid_cos) = sincosf(lid_angle);
-            let half_width = LID_HALF_WIDTH_M.get();
-            let hinge_y = piano.1 + half_width;
-            let leak = powf(LID_CLOSED_LEAK.get(), 1.0 - self.lid_fraction());
-            for ((along_hinge, across), tap) in
-                [(-0.6f32, -0.45f32), (0.6, -0.45), (-0.6, 0.45), (0.6, 0.45)]
-                    .into_iter()
-                    .zip(self.lid_tap[side].iter_mut())
-            {
-                // Four points of the board: two along the hinge, two across
-                // it, because the lid's height above the board -- and so the
-                // reflection's detour -- grows from nothing at the hinge to its
-                // most at the far rim.
-                let source = (
-                    piano.0 + along_hinge * LID_HALF_LENGTH_M.get(),
-                    piano.1 + across * half_width,
-                    piano.2,
-                );
-                let image = (
-                    source.0,
-                    source.1 + 2.0 * half_width * lid_sin * lid_sin,
-                    source.2 + 2.0 * half_width * lid_sin * lid_cos,
-                );
-                // Against the direct path from the same end of the board, not
-                // from its centre: the reflection's delay is its own detour.
-                let (source_path, _) = heard(source);
-                let (path, response) = heard(image);
-                let path = path.max(source_path + 0.02);
-                // Where the mic-to-image line crosses the lid's plane, in the
-                // lid's own coordinates: along the hinge, and up the lid from
-                // the hinge.
-                let normal = (0.0f32, lid_sin, lid_cos);
-                let to_image = (image.0 - mic.0, image.1 - mic.1, image.2 - mic.2);
-                let mic_height = (mic.1 - hinge_y) * normal.1 + (mic.2 - piano.2) * normal.2;
-                let image_height = (image.1 - hinge_y) * normal.1 + (image.2 - piano.2) * normal.2;
-                let t = (mic_height / (mic_height - image_height).max(1e-3)).clamp(0.0, 1.0);
-                let hit = (
-                    mic.0 + t * to_image.0,
-                    mic.1 + t * to_image.1,
-                    mic.2 + t * to_image.2,
-                );
-                let along = hit.0 - piano.0;
-                let up = -(hit.1 - hinge_y) * lid_cos + (hit.2 - piano.2) * lid_sin;
-                let edge = 0.3;
-                let on_lid = (1.0 - ((along.abs() - LID_HALF_LENGTH_M.get()) / edge).max(0.0))
-                    .clamp(0.0, 1.0)
-                    * (1.0 - ((up - 2.0 * half_width) / edge).max(0.0)).clamp(0.0, 1.0)
-                    * (1.0 + (up / edge).min(0.0)).clamp(0.0, 1.0);
-                let delay_s = (path - source_path) / SOUND_SPEED.get();
-                let samples = ((delay_s * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
-                *tap = (
-                    samples,
-                    0.25 * LID_REFLECT.get()
-                        * leak
-                        * on_lid
-                        * (direct_path / path)
-                        * response
-                        * near,
-                );
-            }
-        }
-        let lid_corner = LID_CLOSED_HZ.get()
-            * powf(LID_OPEN_HZ.get() / LID_CLOSED_HZ.get(), self.lid_fraction());
-        self.lid_damp = 1.0
-            - expf(
-                -core::f32::consts::TAU * lid_corner.min(0.45 * self.sample_rate)
-                    / self.sample_rate,
-            );
-        self.early_gain = 0.55 * self.reverb_gain;
-        self.room_dirty = false;
-        self.pair_next = 0;
-    }
-
-    /// T60 fitted to published decay ranges: tens of seconds for the lowest
-    /// fundamentals, over a second at the top (Valette & Cuesta's losses all
-    /// grow with frequency). Every partial reads this at its own frequency.
-    /// `string_scale` shifts the loss curve by string weight: a 2 kHz
-    /// partial on a massive wound A0 string rings for seconds, the same
-    /// 2 kHz as a short treble string's fundamental dies at once. Measured
-    /// on the YDP: A0's 1.2-8 kHz band decays ~11 dB/s, which a
-    /// frequency-only curve misses by 30+ dB.
-    /// How long this partial would ring if the bridge took NOTHING: the
-    /// string's internal and air losses plus bending, without the radiation
-    /// channel. This is the second stage of the decay -- what survives once
-    /// the unison has dephased and only the horizontal is left pushing a
-    /// bridge that barely feels it.
-    fn slow_t60_seconds(&self, frequency: f32, f0: f32, string_scale: f32) -> f32 {
-        let partial_number: f32 = (frequency / f0.max(1.0)).max(1.0);
-        let radiating = frequency;
-        let frequency = frequency * string_scale;
-        let string = STRING_T60_S.get()
-            / (1.0 + powf(frequency / STRING_KNEE_HZ.get(), STRING_TILT.get()))
-            + 0.6;
-        let bending = KAPPA_LOSS.get() * partial_number * partial_number;
-        // Dephased strings still radiate. The antisymmetric configurations
-        // drive the bridge far less than the coherent one, but not zero --
-        // Weinreich's measured second slopes are slower, not flat -- so the
-        // slow stage keeps a share of the radiation channel. Without it the
-        // top of the compass rang 2.3x too long once it dephased.
-        let top = Self::top_octave(
-            (12.0 * log2f(f0.max(1.0) / 440.0) + 69.0 - LOW_NOTE as f32) / (NOTE_COUNT - 1) as f32,
-        );
-        let rate = LN_1000 / (SLOW_STAGE_RATIO.get() * string)
-            + bending
-            + INCOHERENT_RADIATION.get()
-                * (1.0 + TOP_INCOHERENT_EXTRA * top)
-                * RADIATION_RATE.get()
-                * Self::radiation_efficiency(radiating)
-                * self.slow_bridge_factor(f0)
-            + SLOW_WIRE_SHARE.get()
-                * Self::viscoelastic_loss(radiating)
-                * self.slow_bridge_factor(f0);
-        (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
-    }
-
-    fn t60_seconds(&self, frequency: f32, f0: f32, string_scale: f32, treble_life: f32) -> f32 {
-        // Which partial this is. The string's losses go with the WAVE NUMBER,
-        // not the frequency -- kappa ~ n/L -- so the same 6 kHz is partial 218
-        // on A0 and partial 92 on C2, and the bass one is far more heavily
-        // damped. Reading the loss off the frequency alone, as a single global
-        // rate did, over-damped the tenor to get the bottom octave right: the
-        // highs died the instant they were struck, which is a banjo.
-        let partial_number: f32 = (frequency / f0.max(1.0)).max(1.0);
-        let radiating = frequency;
-        let frequency = frequency * string_scale;
-        let string = STRING_T60_S.get()
-            / (1.0 + powf(frequency / STRING_KNEE_HZ.get(), STRING_TILT.get()))
-            + 0.6;
-        // Radiation is a second loss channel, in parallel with the string's
-        // own, so the two rates add.
-        //
-        // There used to be an empirical treble rolloff here as well -- a
-        // second 1/(1+(f/10400)^1.1) on top -- put there to stop high
-        // partials ringing like a guitar's. That is the same job radiation
-        // now does from the mechanism, and keeping both counted the loss
-        // twice: measured, it took 4-8 kHz at F#1 and C2 to 18 and 34 dB
-        // BELOW the real instrument. `treble_life` survives as the control it
-        // was, but it now sets how readily the board gives the highs away,
-        // which is where the effect actually comes from.
-        // Bensa et al. give the string's loss as sigma = b1 + b2*kappa^2, and
-        // kappa is proportional to the partial number. Radiation is a second
-        // channel in parallel with it, so the rates add.
-        let bending = KAPPA_LOSS.get() * partial_number * partial_number;
-        let rate = LN_1000 / string
-            + (RADIATION_RATE.get()
-                * Self::radiation_efficiency(radiating)
-                * self.bridge_speed_factor(f0)
-                + bending)
-                / treble_life.max(0.05)
-            + Self::viscoelastic_loss(radiating) * self.bridge_speed_factor(f0);
-        // There is no register correction here any more, and that is the
-        // point. One used to divide the whole note by up to 2.6 because the
-        // bass rang too long; but the bass rang too long because the curve
-        // above was too steep, and dividing the note flat also shortened the
-        // upper partials that were already dying too fast. The curve carries
-        // it now.
-        (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
     }
 
     /// How readily the soundboard turns a partial of this frequency into
@@ -6449,134 +6640,211 @@ impl ConcertGrand {
         powf(reach, falloff) * wound
     }
 
-    /// How readily this string gives its energy to the bridge, against the
-    /// tenor string the bridge loss is calibrated on. The rate at which a
-    /// string loses energy through its termination goes as the bridge's
-    /// admittance over the string's characteristic impedance, and with the
-    /// scale's tension nearly constant that impedance is T/c: a heavy bass
-    /// string with its slow wave loses slowly, a light treble string fast.
-    /// Measured on two references, a bass string's partial at 220 Hz rings
-    /// three times longer than a tenor fundamental at the same frequency.
-    fn bridge_speed_factor(&self, f0: f32) -> f32 {
-        let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
-        let speed = 2.0 * self.string_length(position) * f0;
-        // What the bridge takes from a string goes as the bridge's admittance
-        // over the string's wave impedance, Z = mu * c: a wound A0 string
-        // carries twelve times the mass per metre of a tenor's plain wire, so
-        // the bridge takes a tenth as much from it per second. Measured on
-        // both references (2026-09-02): a bass string's partials at 400-800
-        // Hz ring 10 s early where a tenor's ring 4, and the aftersound of
-        // its 2-3 kHz partials 8-9 s. The wave speed alone (bottom octave
-        // foreshortened, the rest near 320 m/s) gives a fifth of that spread.
-        // And the reflections per second: a wave meets the bridge c / 2L
-        // times a second, so for a given tension what the bridge takes per
-        // second goes as 1 / L -- the physical law is rate = 2 T Re(Y) / L.
-        let length = self.string_length(position);
-        let reflections = powf(
-            BRIDGE_REFERENCE_LENGTH_M.get() / length.max(0.01),
-            BRIDGE_LENGTH_POWER.get(),
-        );
-        (reflections * self.string_impedance_factor(position, speed))
-            .clamp(0.05, BRIDGE_FACTOR_CAP.get())
-    }
-
-    /// The bridge's admittance over the string's impedance, relative to the
-    /// tenor, to the measured power.
-    fn string_impedance_factor(&self, position: f32, speed: f32) -> f32 {
-        let gauge = self.string_gauge(position) / BRIDGE_REFERENCE_GAUGE_M.get();
-        let impedance = gauge * gauge * speed / BRIDGE_REFERENCE_SPEED.get();
-        powf(1.0 / impedance.max(1e-3), BRIDGE_IMPEDANCE_POWER.get())
-    }
-
-    /// What the bridge takes from the DEPHASED configurations, by string:
-    /// the impedance law alone. Measured (2026-09-02), the treble's
-    /// aftersound holds four to five seconds whatever its string's length;
-    /// scaling it with the reflections as the coherent stage is cut it to
-    /// a second and a half.
-    fn slow_bridge_factor(&self, f0: f32) -> f32 {
-        let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
-        let speed = 2.0 * self.string_length(position) * f0;
-        self.string_impedance_factor(position, speed)
-            .clamp(0.05, SLOW_FACTOR_CAP.get())
-    }
-
-    /// The wire's own high-frequency loss, growing with the square of the
-    /// frequency as a viscoelastic loss does. Measured on both references,
-    /// an A5's fifth partial (4.4 kHz) falls from -26 to -42 dB between 50
-    /// and 200 ms -- a T60 near half a second -- where the bridge channel
-    /// alone let it ring three times longer, and a C7's fundamental at
-    /// 2.1 kHz keeps its 1.7 s. STRING_HF_LOSS is the rate at 4.4 kHz, 1/s.
-    fn viscoelastic_loss(frequency: f32) -> f32 {
-        let r = frequency / 4400.0;
-        STRING_HF_LOSS.get() * r * r
-    }
-
-    fn radiation_efficiency(frequency: f32) -> f32 {
-        // The bridge channel, as the real instrument's prompt decay shows
-        // it: measured partial by partial on two references, the early T60
-        // is 20-30 s below 100 Hz, ~12 s at 200, ~6 at 500, ~3 at 1 kHz,
-        // ~2.2 from 2 to 5 kHz and ~3 at 8 kHz -- a bell, with the loss
-        // peaking where the board is most mobile and radiates best, and
-        // small at both ends. A square-law rise to a corner and a roll-off
-        // where the ribs confine the board reproduce that shape within the
-        // spread of the two references.
-        let r = powf(frequency / RADIATION_COINCIDENCE.get(), 2.5);
-        let confined = powf(frequency / RADIATION_ROLLOFF_HZ.get(), 2.0);
-        r / (1.0 + r) / (1.0 + confined)
-    }
-
-    /// The soundboard as the filter it is. Measured bridge mobility is ragged
-    /// — peaks and dips of ±10 dB and more across the whole compass (Giordano,
-    /// "Simple model of a piano soundboard", *JASA* 102, 1997) — and every
-    /// partial of every note samples the same fixed curve. Returned as an
-    /// amplitude multiplier (~±5 dB) and a decay multiplier: where the board
-    /// takes energy readily the partial speaks louder and dies faster.
+    /// Fits published inharmonicity measurements: a quadratic in log-space,
+    /// minimum near A2, ~1e-4 in the middle of the compass to ~1e-2 at C8.
+    /// Inharmonicity: the calibrated instrument's measured curve, carried to
+    /// other scale lengths by the exact law that relates them.
     ///
-    /// Three incommensurate sines in log-frequency stand in for the measured
-    /// curve: fixed, smooth at the scale of one partial, uncorrelated at the
-    /// scale of a semitone — synthetic, and stated as such.
-    fn board_response(frequency: f32) -> (f32, f32) {
-        let l = log2f(frequency.max(1.0));
-        // Fine scatter, not a few broad humps. Three slow sines across the
-        // audio range put a bump every octave or so, and a fixed bump an
-        // octave wide is a FORMANT: every note samples the same one, so the
-        // instrument speaks with one fixed colour. Measured by averaging every
-        // note's spectrum on a log grid -- structure belonging to the note
-        // averages away, structure fixed in frequency survives -- the model
-        // carried 8.2 dB rms and 47 dB peak to peak of it against the real
-        // instrument's 4.7 and 25.
-        //
-        // It is worst in the bass, and that is the tell: a low note spreads
-        // partials across the whole range and so samples the entire pattern,
-        // while a treble note touches one small piece of it and sounds fine.
-        //
-        // A real soundboard's mobility above its ribbed-plate transition
-        // (~1.1 kHz, Ege and Boutillon) has high modal density and heavy modal
-        // overlap: its raggedness is fine-grained scatter, statistically flat
-        // at the scale of an octave. These rates are ten times faster and the
-        // depth is halved, which is scatter rather than colour.
-        let ragged = sincosf(17.3 * l + 1.3).0
-            + sincosf(28.7 * l + 4.1).0
-            + sincosf(43.1 * l + 2.2).0
-            + sincosf(67.9 * l + 5.7).0
-            + sincosf(103.9 * l + 0.4).0;
-        let normalized = ragged * (1.0 / 5.0);
-        // ±9 dB of level (YDP spectra swing ±15 dB between neighbours; the
-        // per-note irregularity supplies the rest), and up to ~×1.5 / ÷1.4 of
-        // decay rate, in opposition: a mobile board radiates more and damps
-        // the string more.
-        // The scatter fades out below a few hundred Hz, because a soundboard
-        // is not ragged down there. Raggedness comes from high modal density
-        // and heavy modal overlap; at 130 Hz a board has only a handful of
-        // modes and its response is smooth. Applying the same +/-6 dB of
-        // synthetic scatter that far down is not physics, it is a lottery --
-        // and C2 lost it. Measured, its second partial is the STRONGEST in
-        // both the real instrument and the reference, and this model had it
-        // 9.5 dB down, sitting in a notch that landed there by accident.
-        let settled = 1.0 / (1.0 + powf(SCATTER_KNEE_HZ.get() / frequency.max(20.0), 2.0));
-        let amplitude = powf(10.0, normalized * 0.30 * settled);
-        let decay = 1.0 / (1.0 + 0.35 * normalized * settled);
-        (amplitude, decay)
+    /// B = pi^3 E d^4 / (64 T L^2) for a stiff string. Hold the pitch and the
+    /// tension and shorten the scale, and the wire must thicken as 1/L to keep
+    /// its linear density -- so the stiffness rises as the fourth power of
+    /// that and B goes as 1/L^6. That exponent is exact, and it is most of why
+    /// a small piano sounds small: a 1.2 m upright carries about thirty times
+    /// the bass inharmonicity of a 2.7 m grand, and the tuner's stretch, which
+    /// `tune` derives FROM B, widens with it.
+    ///
+    /// The curve in note number stays as the anchor. Deriving B from the
+    /// geometry outright was tried and measured: with a two-constant wound-core
+    /// profile it reproduces this curve within 1.1 dB across eight octaves --
+    /// the physics is sound -- but that residue cost six points of chromatic
+    /// fit for nothing, because the size dependence is a power law that rides
+    /// on top of a measurement perfectly well. Measured where there is a
+    /// measurement, derived where there is not.
+    fn inharmonicity_for(&self, note: u8) -> f32 {
+        let n = note as f32;
+        let exponent = -3.95 + 4.9e-4 * (n - 45.0) * (n - 45.0);
+        // B goes as T/L^6: the length exponent above, and tension linearly,
+        // because a tighter scale needs a thicker wire (d ~ sqrt(T)) and
+        // stiffness follows d^4 while the restoring tension follows T.
+        let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+        let scale = self.controls.scale_at(position);
+        let square = scale * scale;
+        let tension = self.controls.tension_newtons() / STRING_TENSION_N.get();
+        powf(10.0, exponent) * tension / (square * square * square)
+    }
+
+    fn contact_time(&self, note: u8, velocity: f32) -> f32 {
+        let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+        // The base is the fortissimo contact — ~2 ms in the bass, under half
+        // a millisecond at the top; soft blows stretch it via the swing.
+        // With the fourth-order felt this lands the measured cliffs: C4 ff
+        // ~2.5 kHz, A4 ff ~3.5 kHz.
+        let base = 0.002 - 0.0016 * position;
+        // `dynamics` reaches the felt through ACTION_SPAN_* now, not through
+        // here: the simulated strike owns the partials it reaches, and it
+        // reaches all of them since the strike budget was lifted. Measured,
+        // moving CONTACT_SWING_BASE over four values changed the render by
+        // nothing at all. What survives here is the recipe's own cutoff.
+        let swing =
+            CONTACT_SWING_BASE.get() + CONTACT_SWING_PER_DYNAMICS.get() * self.controls.dynamics;
+        base * (1.0 + swing - swing * 2.0 * (velocity - 0.5))
+    }
+
+    fn damper_factor(&self, note: u8, firmness: f32, span: f32) -> f32 {
+        Self::damper_for(
+            note,
+            self.sample_rate,
+            self.controls.damper_grip() * firmness,
+            span,
+        )
+    }
+
+    /// How firmly ONE damper lands, this time, on this note.
+    ///
+    /// A key never returns twice at the same speed and the felt never seats on
+    /// exactly the same spot -- least of all on a wound bass string, where the
+    /// damper straddles a winding. So a release is not a constant: it is the
+    /// one part of a piano that genuinely differs blow to blow, which is why
+    /// a real instrument's releases sound like a mechanism and a model's
+    /// sound like a gate.
+    ///
+    /// The two things it moves are CORRELATED, and that is the point of doing
+    /// it with one number instead of two. A fast key return lands the felt
+    /// hard: it stops the string sooner AND knocks louder. Rolling those
+    /// independently would give firm-but-silent and soft-but-loud landings,
+    /// which no action can produce, and the ear hears the incoherence as
+    /// noise rather than as mechanism.
+    ///
+    /// The spread is judgement, not measurement: what a key return varies by
+    /// between ordinary releases is not something published. +/-15% on the
+    /// stopping time is small enough to read as an action and not as a fault.
+    fn damper_firmness(serial: u32, note: u8) -> f32 {
+        let salt = serial
+            .wrapping_mul(0x9E37_79B9)
+            .wrapping_add((note as u32).wrapping_mul(0x85EB_CA6B));
+        0.85 + 0.30 * hash01(salt ^ 0x5D)
+    }
+
+    /// Dampers are not equally effective across the compass: a treble damper
+    /// stops its short light string almost at once, while a wound bass string
+    /// carries far too much energy to be stopped that fast. A single 60 ms
+    /// constant for the whole keyboard left every release ringing ~230 ms
+    /// down to −34 dB, which smears into a wash as soon as playing gets fast.
+    fn damper_for(note: u8, sample_rate: f32, grip: f32, span: f32) -> f32 {
+        let position = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as f32
+            / (NOTE_COUNT - 1) as f32;
+        // Grip divides the stopping time: a hard new set shuts the string in
+        // a third of it, worn felt takes three times as long and the note
+        // bleeds past the key. `span` is the key's own return, from release
+        // velocity (`damper_span`); the pedal passes exactly 1.0, which
+        // multiplies out bit-identically, because a rail dropping sixty
+        // dampers is the pedal's gesture and not the finger's.
+        let seconds = (0.075 - 0.055 * position) / grip.max(0.05) * span;
+        expf(-1.0 / (seconds * sample_rate))
+    }
+
+    /// Release velocity as a multiplier on the release knock: the key coming
+    /// back and the felt landing. Same direction as the damper -- a fast
+    /// return lands harder and sounds it -- with a smaller travel, 0.7x to
+    /// 1.4x, because the knock is a small sound and the ear does not want it
+    /// to double.
+    fn damper_knock(release: u8) -> f32 {
+        if release == 64 {
+            return 1.0;
+        }
+        let t = (release as f32 - 64.0) / 63.0;
+        if t >= 0.0 {
+            powf(1.4, t)
+        } else {
+            powf(1.0 / 0.7, t)
+        }
+    }
+
+    /// Release velocity as a multiplier on the damper's stopping time.
+    ///
+    /// Asymmetric by mechanism. The damper falls under its own weight and the
+    /// key's return, so a fast release cannot drive it down faster than the
+    /// mechanism allows -- it converges on a floor, 1.25x at most. A slow
+    /// release rides it down as far as the player wants, the legato of a
+    /// finger easing off a key: up to 2.5x. Little travel above neutral,
+    /// much below it. That asymmetry is the physical claim; the two spans are
+    /// DRAWN, chosen to sit where the mechanism plausibly does, not read from
+    /// any measurement.
+    ///
+    /// 64 returns exactly 1.0 by early return, so neutral is bit-identical to
+    /// the release path before this existed as a property of the code and
+    /// not of a chain of float reasoning.
+    fn damper_span(release: u8) -> f32 {
+        const FAST_SPAN: f32 = 1.25;
+        const SLOW_SPAN: f32 = 2.5;
+        if release == 64 {
+            return 1.0;
+        }
+        let t = (release as f32 - 64.0) / 63.0;
+        if t >= 0.0 {
+            powf(FAST_SPAN, -t)
+        } else {
+            powf(SLOW_SPAN, -t)
+        }
+    }
+
+    /// The damper thud's colour and length: dark and short.
+    fn damper_thud(&self) -> (f32, f32) {
+        let coefficient = 1.0 - expf(-core::f32::consts::TAU * 260.0 / self.sample_rate);
+        let decay = expf(-1.0 / (0.010 * self.sample_rate));
+        (coefficient, decay)
+    }
+
+    fn decay_per_sample(&self, t60: f32) -> f32 {
+        // Amplitude e-folds T60/6.91 apart; per-sample factor follows.
+        expf(-LN_1000 / (t60 * self.sample_rate))
+    }
+
+    /// Hammer–string contact time in seconds: longer for soft blows and low
+    /// notes, under a millisecond for hard treble blows (Askenfelt & Jansson).
+    /// The lowest the felt's corner may fall, as a multiple of the
+    /// fundamental. 1.5 f0 through the compass; in the top octave, where the
+    /// recipe draws the strike, it eases to `FELT_FLOOR_TOP` f0 at C8.
+    ///
+    /// Measured (2026-09-07, Salamander C7..C8 at four velocities): the
+    /// second partial of a real top-octave note stands 20 to 44 decibels
+    /// under its fundamental, around -32, and the third around -55 -- a
+    /// hammer in contact for a millisecond cannot push a string at 4 kHz.
+    /// With the corner pinned at 1.5 f0 the recipe put the second at -6 to
+    /// -17 (C7 -15 at fortissimo, D#7 -6 at every velocity), and the user
+    /// heard it under the pedal: "una estridencia, como un trasteo finito
+    /// que queda resonando ... si son varias notas chilla mucho". The ramp
+    /// starts where the recipe takes over from the integration (G#6).
+    fn felt_floor_ratio(position: f32) -> f32 {
+        1.5 + (FELT_FLOOR_TOP - 1.5) * Self::top_octave(position)
+    }
+
+    /// The same, for a repetition scaling that is not on `self` yet --
+    /// which is the coordinator's case: it is deciding whether there is a
+    /// blow at all, and the section is the one that will make it.
+    fn hammer_speeds_at(&self, repetition: f32, velocity: f32) -> (f32, f32) {
+        let span = ACTION_SPAN_BASE.get() + ACTION_SPAN_PER_DYNAMICS.get() * self.controls.dynamics;
+        let mut letoff = HAMMER_V_FF.get() * powf(span, velocity - 1.0) * repetition;
+        let knee = (LETOFF_KNEE.get() / 127.0).clamp(0.0, 1.0);
+        if knee > 0.0 && velocity < knee {
+            letoff *= velocity / knee;
+        }
+        let toll = 2.0 * 9.81 * LETOFF_DISTANCE_MM.get().max(0.0) * 1.0e-3;
+        let at_string = sqrtf((letoff * letoff - toll).max(0.0));
+        (letoff, at_string)
+    }
+
+    /// The hammer's contact width as a fraction of string length: a few
+    /// percent on the long bass strings, proportionally much wider on the
+    /// short treble ones. A point excitation is a pluck — the finite width
+    /// is what separates a struck piano string from a classical guitar.
+    fn hammer_width(note: u8) -> f32 {
+        let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+        // Scaled by real string lengths: an A0 string runs ~2 m under a
+        // ~12 mm contact (≈0.6%), a top treble string ~5 cm under the same
+        // hammer (≈15%). The earlier 3% bass figure was five times too wide
+        // and filtered the top three octaves out of the bass ladder.
+        0.006 + 0.14 * position * position
     }
 
     /// How long a partial is allowed to live because of where it sits in the
@@ -6618,9 +6886,159 @@ impl ConcertGrand {
         powf(HF_FLOOR_SPAN.get(), travel * reach)
     }
 
-    fn decay_per_sample(&self, t60: f32) -> f32 {
-        // Amplitude e-folds T60/6.91 apart; per-sample factor follows.
-        expf(-LN_1000 / (t60 * self.sample_rate))
+    /// The voice half of a pedal motion, for one section's voices.
+    ///
+    /// Two loops, because the rail does two things at once: coming up it
+    /// catches the felts still travelling, and at any position it presses
+    /// or relieves the ones already down. Both are per-voice arithmetic on
+    /// state the voice carries, so a section can do its own.
+    /// What a rail coming up does to one string, note or halo.
+    ///
+    /// Generic over the ladder's length so the halos, which carry a
+    /// twenty-fourth of a struck note's room, go through the same felt as
+    /// the notes rather than through a copy of it.
+    fn lift_rail<const N: usize>(voice: &mut Voice<N>, pressure: f32) {
+        if voice.active && voice.damper_phase != 0 {
+            voice.cancel_damper();
+            voice.held = false;
+            voice.sustained = true;
+            voice.damper_applied = pressure;
+            let own = voice.damper_own;
+            voice.press_damper(own, pressure);
+        }
+    }
+
+    fn radiation_efficiency(frequency: f32) -> f32 {
+        // The bridge channel, as the real instrument's prompt decay shows
+        // it: measured partial by partial on two references, the early T60
+        // is 20-30 s below 100 Hz, ~12 s at 200, ~6 at 500, ~3 at 1 kHz,
+        // ~2.2 from 2 to 5 kHz and ~3 at 8 kHz -- a bell, with the loss
+        // peaking where the board is most mobile and radiates best, and
+        // small at both ends. A square-law rise to a corner and a roll-off
+        // where the ribs confine the board reproduce that shape within the
+        // spread of the two references.
+        let r = powf(frequency / RADIATION_COINCIDENCE.get(), 2.5);
+        let confined = powf(frequency / RADIATION_ROLLOFF_HZ.get(), 2.0);
+        r / (1.0 + r) / (1.0 + confined)
+    }
+
+    /// What a rail at a given position does to one string, note or halo.
+    #[allow(clippy::too_many_arguments)]
+    fn seat_damper<const N: usize>(
+        voice: &mut Voice<N>,
+        pressure: f32,
+        sostenuto: bool,
+        serial: u32,
+        rate: f32,
+        grip: f32,
+        thud: (f32, f32),
+        release_gain: f32,
+    ) {
+        if !(voice.active && voice.sustained) || voice.undamped {
+            return;
+        }
+        if sostenuto && voice.sostenuto {
+            return;
+        }
+        // The voice's own damper, not one drawn per pedal event. Drawn
+        // per event, a press through a firm damper and its relief
+        // through a soft one left the string's decay factor ABOVE where
+        // it started, and a nocturne's three thousand pedal positions
+        // walked it past one: measured on the Op. 9 No. 2 file, the
+        // output grew for two seconds from 96 s in, sat on the ceiling
+        // for eight and went non-finite. Quantised to on/off the same
+        // passage was fine, which is what named the path.
+        let firmness = if pressure >= 0.98 {
+            Self::damper_firmness(serial, voice.note)
+        } else {
+            voice.firmness
+        };
+        let damper = Self::damper_for(voice.note, rate, grip * firmness, 1.0);
+        if pressure >= 0.98 {
+            // Seated: the legacy full damp, note over.
+            voice.damp(damper, thud.0, thud.1, release_gain * firmness);
+            voice.damper_applied = 0.0;
+        } else {
+            let delta = pressure - voice.damper_applied;
+            voice.press_damper(damper, delta);
+            voice.damper_applied = pressure;
+        }
+    }
+
+    /// What the bridge takes from the DEPHASED configurations, by string:
+    /// the impedance law alone. Measured (2026-09-02), the treble's
+    /// aftersound holds four to five seconds whatever its string's length;
+    /// scaling it with the reflections as the coherent stage is cut it to
+    /// a second and a half.
+    fn slow_bridge_factor(&self, f0: f32) -> f32 {
+        let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
+        let speed = 2.0 * self.string_length(position) * f0;
+        self.string_impedance_factor(position, speed)
+            .clamp(0.05, SLOW_FACTOR_CAP.get())
+    }
+
+    /// T60 fitted to published decay ranges: tens of seconds for the lowest
+    /// fundamentals, over a second at the top (Valette & Cuesta's losses all
+    /// grow with frequency). Every partial reads this at its own frequency.
+    /// `string_scale` shifts the loss curve by string weight: a 2 kHz
+    /// partial on a massive wound A0 string rings for seconds, the same
+    /// 2 kHz as a short treble string's fundamental dies at once. Measured
+    /// on the YDP: A0's 1.2-8 kHz band decays ~11 dB/s, which a
+    /// frequency-only curve misses by 30+ dB.
+    /// How long this partial would ring if the bridge took NOTHING: the
+    /// string's internal and air losses plus bending, without the radiation
+    /// channel. This is the second stage of the decay -- what survives once
+    /// the unison has dephased and only the horizontal is left pushing a
+    /// bridge that barely feels it.
+    fn slow_t60_seconds(&self, frequency: f32, f0: f32, string_scale: f32) -> f32 {
+        let partial_number: f32 = (frequency / f0.max(1.0)).max(1.0);
+        let radiating = frequency;
+        let frequency = frequency * string_scale;
+        let string = STRING_T60_S.get()
+            / (1.0 + powf(frequency / STRING_KNEE_HZ.get(), STRING_TILT.get()))
+            + 0.6;
+        let bending = KAPPA_LOSS.get() * partial_number * partial_number;
+        // Dephased strings still radiate. The antisymmetric configurations
+        // drive the bridge far less than the coherent one, but not zero --
+        // Weinreich's measured second slopes are slower, not flat -- so the
+        // slow stage keeps a share of the radiation channel. Without it the
+        // top of the compass rang 2.3x too long once it dephased.
+        let top = Self::top_octave(
+            (12.0 * log2f(f0.max(1.0) / 440.0) + 69.0 - LOW_NOTE as f32) / (NOTE_COUNT - 1) as f32,
+        );
+        let rate = LN_1000 / (SLOW_STAGE_RATIO.get() * string)
+            + bending
+            + INCOHERENT_RADIATION.get()
+                * (1.0 + TOP_INCOHERENT_EXTRA * top)
+                * RADIATION_RATE.get()
+                * Self::radiation_efficiency(radiating)
+                * self.slow_bridge_factor(f0)
+            + SLOW_WIRE_SHARE.get()
+                * Self::viscoelastic_loss(radiating, f0)
+                * self.slow_bridge_factor(f0);
+        (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
+    }
+
+    fn strike_point(&self, note: u8) -> f32 {
+        let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+        // Flat at one eighth through the bass, where a real action strikes,
+        // and moving toward the bridge only in the upper half.
+        //
+        // The old law reached 1/8.86 by C2, which puts the comb's null
+        // between partials 8 and 9 and takes both. Measured, the instrument
+        // notches partial EIGHT sharply -- 26.4 dB down, its weakest -- and
+        // leaves the ninth at 11.9 with its neighbours. Ours had the eighth at
+        // 30.8 and the ninth at 48.3: the hole in the middle of the harmonics
+        // that makes the note sound like a thinner string.
+        let upper = (position - 0.35).max(0.0) / 0.65;
+        let base = STRIKE_BASS_FRACTION / (1.0 + upper * upper) * self.controls.strike_ratio();
+        #[cfg(test)]
+        if let Ok(scale) = std::env::var("CG_X0_SCALE")
+            && let Ok(scale) = scale.parse::<f32>()
+        {
+            return base * scale;
+        }
+        base
     }
 
     /// Where the hammer strikes, as a fraction of string length: ~1/8 in the
@@ -6686,6 +7104,14 @@ impl ConcertGrand {
         }
     }
 
+    /// The bridge's admittance over the string's impedance, relative to the
+    /// tenor, to the measured power.
+    fn string_impedance_factor(&self, position: f32, speed: f32) -> f32 {
+        let gauge = self.string_gauge(position) / BRIDGE_REFERENCE_GAUGE_M.get();
+        let impedance = gauge * gauge * speed / BRIDGE_REFERENCE_SPEED.get();
+        powf(1.0 / impedance.max(1e-3), BRIDGE_IMPEDANCE_POWER.get())
+    }
+
     fn string_length(&self, position: f32) -> f32 {
         let base = if position >= SCALE_JOIN.get() {
             expf(0.642 - (1.61 + 1.99 * position) * position)
@@ -6703,58 +7129,48 @@ impl ConcertGrand {
         base * self.controls.scale_at(position)
     }
 
-    fn strike_point(&self, note: u8) -> f32 {
-        let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
-        // Flat at one eighth through the bass, where a real action strikes,
-        // and moving toward the bridge only in the upper half.
+    fn t60_seconds(&self, frequency: f32, f0: f32, string_scale: f32, treble_life: f32) -> f32 {
+        // Which partial this is. The string's losses go with the WAVE NUMBER,
+        // not the frequency -- kappa ~ n/L -- so the same 6 kHz is partial 218
+        // on A0 and partial 92 on C2, and the bass one is far more heavily
+        // damped. Reading the loss off the frequency alone, as a single global
+        // rate did, over-damped the tenor to get the bottom octave right: the
+        // highs died the instant they were struck, which is a banjo.
+        let partial_number: f32 = (frequency / f0.max(1.0)).max(1.0);
+        let radiating = frequency;
+        let frequency = frequency * string_scale;
+        let string = STRING_T60_S.get()
+            / (1.0 + powf(frequency / STRING_KNEE_HZ.get(), STRING_TILT.get()))
+            + 0.6;
+        // Radiation is a second loss channel, in parallel with the string's
+        // own, so the two rates add.
         //
-        // The old law reached 1/8.86 by C2, which puts the comb's null
-        // between partials 8 and 9 and takes both. Measured, the instrument
-        // notches partial EIGHT sharply -- 26.4 dB down, its weakest -- and
-        // leaves the ninth at 11.9 with its neighbours. Ours had the eighth at
-        // 30.8 and the ninth at 48.3: the hole in the middle of the harmonics
-        // that makes the note sound like a thinner string.
-        let upper = (position - 0.35).max(0.0) / 0.65;
-        let base = STRIKE_BASS_FRACTION / (1.0 + upper * upper) * self.controls.strike_ratio();
-        #[cfg(test)]
-        if let Ok(scale) = std::env::var("CG_X0_SCALE")
-            && let Ok(scale) = scale.parse::<f32>()
-        {
-            return base * scale;
-        }
-        base
-    }
-
-    /// The hammer's contact width as a fraction of string length: a few
-    /// percent on the long bass strings, proportionally much wider on the
-    /// short treble ones. A point excitation is a pluck — the finite width
-    /// is what separates a struck piano string from a classical guitar.
-    fn hammer_width(note: u8) -> f32 {
-        let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
-        // Scaled by real string lengths: an A0 string runs ~2 m under a
-        // ~12 mm contact (≈0.6%), a top treble string ~5 cm under the same
-        // hammer (≈15%). The earlier 3% bass figure was five times too wide
-        // and filtered the top three octaves out of the bass ladder.
-        0.006 + 0.14 * position * position
-    }
-
-    /// Hammer–string contact time in seconds: longer for soft blows and low
-    /// notes, under a millisecond for hard treble blows (Askenfelt & Jansson).
-    /// The lowest the felt's corner may fall, as a multiple of the
-    /// fundamental. 1.5 f0 through the compass; in the top octave, where the
-    /// recipe draws the strike, it eases to `FELT_FLOOR_TOP` f0 at C8.
-    ///
-    /// Measured (2026-09-07, Salamander C7..C8 at four velocities): the
-    /// second partial of a real top-octave note stands 20 to 44 decibels
-    /// under its fundamental, around -32, and the third around -55 -- a
-    /// hammer in contact for a millisecond cannot push a string at 4 kHz.
-    /// With the corner pinned at 1.5 f0 the recipe put the second at -6 to
-    /// -17 (C7 -15 at fortissimo, D#7 -6 at every velocity), and the user
-    /// heard it under the pedal: "una estridencia, como un trasteo finito
-    /// que queda resonando ... si son varias notas chilla mucho". The ramp
-    /// starts where the recipe takes over from the integration (G#6).
-    fn felt_floor_ratio(position: f32) -> f32 {
-        1.5 + (FELT_FLOOR_TOP - 1.5) * Self::top_octave(position)
+        // There used to be an empirical treble rolloff here as well -- a
+        // second 1/(1+(f/10400)^1.1) on top -- put there to stop high
+        // partials ringing like a guitar's. That is the same job radiation
+        // now does from the mechanism, and keeping both counted the loss
+        // twice: measured, it took 4-8 kHz at F#1 and C2 to 18 and 34 dB
+        // BELOW the real instrument. `treble_life` survives as the control it
+        // was, but it now sets how readily the board gives the highs away,
+        // which is where the effect actually comes from.
+        // Bensa et al. give the string's loss as sigma = b1 + b2*kappa^2, and
+        // kappa is proportional to the partial number. Radiation is a second
+        // channel in parallel with it, so the rates add.
+        let bending = KAPPA_LOSS.get() * partial_number * partial_number;
+        let rate = LN_1000 / string
+            + (RADIATION_RATE.get()
+                * Self::radiation_efficiency(radiating)
+                * self.bridge_speed_factor(f0)
+                + bending)
+                / treble_life.max(0.05)
+            + Self::viscoelastic_loss(radiating, f0) * self.bridge_speed_factor(f0);
+        // There is no register correction here any more, and that is the
+        // point. One used to divide the whole note by up to 2.6 because the
+        // bass rang too long; but the bass rang too long because the curve
+        // above was too steep, and dividing the note flat also shortened the
+        // upper partials that were already dying too fast. The curve carries
+        // it now.
+        (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
     }
 
     /// How far into the drawn top a note is: 0 through the integrated
@@ -6765,33 +7181,91 @@ impl ConcertGrand {
         ((position - 0.80) / 0.06).clamp(0.0, 1.0)
     }
 
-    fn contact_time(&self, note: u8, velocity: f32) -> f32 {
-        let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
-        // The base is the fortissimo contact — ~2 ms in the bass, under half
-        // a millisecond at the top; soft blows stretch it via the swing.
-        // With the fourth-order felt this lands the measured cliffs: C4 ff
-        // ~2.5 kHz, A4 ff ~3.5 kHz.
-        let base = 0.002 - 0.0016 * position;
-        // `dynamics` reaches the felt through ACTION_SPAN_* now, not through
-        // here: the simulated strike owns the partials it reaches, and it
-        // reaches all of them since the strike budget was lifted. Measured,
-        // moving CONTACT_SWING_BASE over four values changed the render by
-        // nothing at all. What survives here is the recipe's own cutoff.
-        let swing =
-            CONTACT_SWING_BASE.get() + CONTACT_SWING_PER_DYNAMICS.get() * self.controls.dynamics;
-        base * (1.0 + swing - swing * 2.0 * (velocity - 0.5))
+    /// The wire's own high-frequency loss, growing with the square of the
+    /// frequency as a viscoelastic loss does. Measured on both references,
+    /// an A5's fifth partial (4.4 kHz) falls from -26 to -42 dB between 50
+    /// and 200 ms -- a T60 near half a second -- where the bridge channel
+    /// alone let it ring three times longer, and a C7's fundamental at
+    /// 2.1 kHz keeps its 1.7 s. STRING_HF_LOSS is the rate at 4.4 kHz, 1/s.
+    fn viscoelastic_loss(frequency: f32, f0: f32) -> f32 {
+        let r = frequency / 4400.0;
+        STRING_HF_LOSS.get() * r * r * Self::wire_loss_factor(f0)
     }
 
-    fn start_voice(&mut self, channel: u8, note: u8, velocity: u8) {
-        self.start_voice_unit(channel, note, velocity as f32 / 127.0);
+    /// How much more than the fitted rate this string's wire loses: one
+    /// below `WIRE_LOSS_FROM`, `WIRE_LOSS_TOP` at C8, log-linear between.
+    /// `powf(1.0, x)` is exactly one, so a top of 1.0 leaves every note as it
+    /// was.
+    fn wire_loss_factor(f0: f32) -> f32 {
+        let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
+        let from = WIRE_LOSS_FROM;
+        let reach = ((position - from) / (1.0 - from)).clamp(0.0, 1.0);
+        powf(WIRE_LOSS_TOP.get().max(0.01), reach)
     }
+}
 
+/// A voice or a halo by its slot, from OUTSIDE the unit that owns it.
+///
+/// Only the tests reach this way. Production code cannot: a handler is a
+/// method of the unit whose strings it touches, and that is the property
+/// the whole boundary rests on. A test that checks what a note did has to
+/// look at it from somewhere, and this is that somewhere.
+#[cfg(test)]
+macro_rules! voice_at {
+    ($owner:expr, $slot:expr) => {
+        $owner.sections[$slot & (STRING_SECTIONS - 1)].voices[$slot >> SECTION_SHIFT]
+    };
+}
+
+#[cfg(test)]
+macro_rules! halo_at {
+    ($owner:expr, $section:expr, $index:expr) => {
+        $owner.sections[$section].halos[$index]
+    };
+}
+
+/// The slots a unit owns, as the unit numbers them.
+///
+/// A unit does not know which section it is, and does not need to: the
+/// section bits of a slot are its own, so shifting them away gives the
+/// index into its voices whether the slot came from this iterator or from
+/// a strike the coordinator addressed to it.
+fn unit_slots() -> impl Iterator<Item = usize> {
+    (0..VOICES_PER_SECTION).map(|index| index << SECTION_SHIFT)
+}
+
+/// One of a unit's voices, by the slot the coordinator calls it.
+macro_rules! unit_voice {
+    ($unit:expr, $slot:expr) => {
+        $unit.voices[$slot >> SECTION_SHIFT]
+    };
+}
+
+impl StringUnit {
     /// The strike with its velocity already on the unit scale. Seven-bit
     /// sources come through `start_voice` and land here at exactly the value
     /// they always produced; a 16-bit velocity lands between those steps.
-    fn start_voice_unit(&mut self, channel: u8, note: u8, velocity: f32) {
+    /// The strike, into a slot the coordinator already chose.
+    ///
+    /// `slot` decides the section, and the section decides which worker does
+    /// this work: the recipe, the contact integration and the ladder are
+    /// 42-47 %, 37 % and the rest of a note-on, and all of it happens here.
+    #[allow(clippy::too_many_arguments)]
+    fn start_voice_unit(
+        &mut self,
+        channel: u8,
+        note: u8,
+        velocity: f32,
+        slot: usize,
+        pedal: bool,
+        soft: f32,
+        returned: f32,
+        serial: u32,
+    ) {
+        #[cfg(test)]
+        let mut mark = std::time::Instant::now();
         let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
-        let mut velocity = velocity;
+
         // Una corda: the shifted hammer meets the strings with softer felt
         // (the unworn side) and strikes one string fewer.
         // The left pedal, through whichever mechanism this instrument has.
@@ -6809,43 +7283,17 @@ impl ConcertGrand {
         // here: 37 mm turns up among technicians as a shortened figure and
         // ~46 mm as the regulated one. The mechanism is certain; the fraction
         // is judgement, like the strike skew and the damper's spread.
-        let shift = self.soft * (1.0 - self.controls.action);
-        let half_blow = self.soft * self.controls.action;
-        velocity *= 1.0 - 0.22 * shift - 0.15 * half_blow;
-
-        // The key is down from here, whether or not the hammer arrives.
-        self.key_down[index] = true;
-        // Where the key was when it was pressed again: all the way up, or
-        // still on its way back from the last key-up. Below the repetition
-        // point the jack has not reset -- the key goes down and lifts its
-        // damper again, and the hammer stays where it is. Above it the blow
-        // comes from the back check, lighter, growing back to the full one
-        // as the key returns the rest of the way.
-        let since = self.clock.wrapping_sub(self.key_up_at[index]);
-        let returned = if self.key_return[index] == 0 {
-            1.0
-        } else {
-            (since as f32 / self.key_return[index] as f32).min(1.0)
-        };
-        let point = KEY_REPETITION_POINT.get().clamp(0.0, 0.99);
-        if returned < point {
-            self.catch_key(channel, note);
-            return;
-        }
-        let from_check = REPETITION_FROM_CHECK.get().clamp(0.1, 1.0);
-        self.repetition_scale =
-            from_check + (1.0 - from_check) * (returned - point) / (1.0 - point);
-        // The escapement: the hammer flies the let-off on its own, and a
-        // hammer let off too slowly turns back short of the string. The key
-        // is down and its damper is up; the string is free and silent.
-        let (letoff, at_string) = self.hammer_speeds(velocity);
-        if at_string <= 0.0 {
-            self.hold_silent(note);
-            return;
-        }
-        // A struck string is its voice; a silent string it may have been is
-        // that voice now.
-        self.free_silent(note);
+        let (velocity, shift, repetition, at_string) =
+            self.engine.action_blow(velocity, soft, returned);
+        // The coordinator asked the same question of the same function
+        // before it took this slot, so a hammer that stops short cannot
+        // arrive here -- and if it ever did, it would be a silent note
+        // holding a voice, not a wrong sound.
+        debug_assert!(
+            at_string > 0.0,
+            "un martillo que no llega se quedo con una voz"
+        );
+        let (letoff, _) = self.engine.hammer_speeds_at(repetition, velocity);
 
         // A RE-STRUCK STRING IS THE SAME STRING. If this note is still
         // ringing free -- held, or sustained with its damper clear -- the
@@ -6871,12 +7319,18 @@ impl ConcertGrand {
         // milliseconds -- heard as "un pequeño popeo" that the thud fix did
         // not remove.
         let mut restrike_target: Option<usize> = None;
-        let rate = self.sample_rate;
-        let grip = self.controls.damper_grip();
-        for (slot, voice) in self.voices.iter_mut().enumerate() {
-            if self.restrike_merge
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        // The coordinator already chose: it sends a re-struck note back to
+        // the string it is already on, and a fresh one to a slot it emptied.
+        // So this asks only about the slot it was given -- which is all a
+        // section could ask anyway, since the others are not its to read.
+        // It still ASKS, because the picture the choice was made from is a
+        // block old in one respect: a string may have been damped since.
+        {
+            let voice = &mut unit_voice!(self, slot);
+            if self.engine.restrike_merge
                 && voice.active
-                && !voice.halo
                 && voice.note == note
                 && voice.channel == channel
                 && (voice.held || voice.sustained)
@@ -6889,48 +7343,18 @@ impl ConcertGrand {
                 // contact relieves a press that no longer stands.
                 voice.cancel_damper();
                 if voice.sustained && voice.damper_applied > 0.0 {
-                    let own = Self::damper_for(note, rate, grip * voice.firmness, 1.0);
+                    let own = StringEngine::damper_for(note, rate, grip * voice.firmness, 1.0);
                     voice.press_damper(own, -voice.damper_applied);
                     voice.damper_applied = 0.0;
                 }
                 restrike_target = Some(slot);
-                break;
             }
         }
-        if restrike_target.is_none() {
-            // Thirty milliseconds, from 250: the new voice covers the sound
-            // from its first cycle, and at 250 ms the old one lingered 1.7 s
-            // before the cull took it -- a ghost per repeated note, and on
-            // the Op. 9 No. 2 file 1351 voice steals against 185 with the
-            // merge. Thirty is still forty cycles of an A4, nothing steps.
-            let restrike = expf(-1.0 / (0.03 * self.sample_rate));
-            let (thud_coefficient, thud_decay) = self.damper_thud();
-            // WITHOUT the release thud. `damp` is the damper landing, and
-            // its thud is the felt meeting a moving string; here no damper
-            // lands -- the hammer re-strikes a string the pedal is holding
-            // half-clear -- yet the thud fired on every repeated note under
-            // a half pedal, because a half pedal leaves `damper_applied`
-            // above zero and every such re-strike takes this path. Heard on
-            // the Op. 9 No. 2 file as "un pequeño popeo" on the repeated
-            // B-flats at 1:11 (found by the score: both pops were re-strikes
-            // of note 70 under a moving pedal, and neither a steal nor a
-            // step). The ease-out stays; the knock goes.
-            for voice in &mut self.voices {
-                if voice.active && voice.note == note && voice.channel == channel {
-                    // Its felt too: an eased-out voice still ticks, and a
-                    // bounce landing on it relieves a press against a pole
-                    // `damp` has since moved.
-                    voice.cancel_damper();
-                    voice.damp(restrike, thud_coefficient, thud_decay, 0.0);
-                }
-            }
-        }
-
-        let f0 = self.fundamental[index];
-        let b = self.inharmonicity[index];
-        let x0 = self.strike_point(note);
-        let width = Self::hammer_width(note);
-        let nyquist = 0.47 * self.sample_rate;
+        let f0 = self.engine.fundamental[index];
+        let b = self.engine.inharmonicity[index];
+        let x0 = self.engine.strike_point(note);
+        let width = StringEngine::hammer_width(note);
+        let nyquist = 0.47 * self.engine.sample_rate;
         // A piano's ladder is spent long before nyquist: past ~11 kHz the
         // felt cliff has every partial on the noise floor, inaudible but
         // still billing four oscillators a sample. Carrying it that far was
@@ -6950,7 +7374,7 @@ impl ConcertGrand {
         // bend, not a piano's live blow. Measured piano glides are a few
         // cents at most.
         let glide_cents = if velocity > 0.6 {
-            11.5 * self.controls.lab(10)
+            11.5 * self.engine.controls.lab(10)
                 * velocity
                 * velocity
                 * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0)
@@ -6959,23 +7383,23 @@ impl ConcertGrand {
         };
         let f0 = f0 * powf(2.0, glide_cents / 1200.0);
         let string_scale = powf(f0 / 220.0, 0.55).clamp(0.35, 1.8);
-        let treble_life = self.cal(note, 8) * self.controls.lab(1);
-        let contact = self.contact_time(note, velocity);
+        let treble_life = self.engine.cal(note, 8) * self.engine.controls.lab(1);
+        let contact = self.engine.contact_time(note, velocity);
         // The contact as THIS program voices it: the Felt control scales
         // the felt's cutoff, and a cutoff is one over a contact time, so a
         // program with a softer felt (Mellow, the Bösendorfer) has its
         // hammers on the string longer and a brighter one (Concert 308,
         // the uprights) shorter. One knob, and each piano its own time.
         let ramp_s = MERGE_RAMP_S.get()
-            + MERGE_RAMP_CONTACT.get() * contact / self.controls.lab(0).max(0.05);
+            + MERGE_RAMP_CONTACT.get() * contact / self.engine.controls.lab(0).max(0.05);
         // The nonlinear forest keeps the bass ladder open far above what the
         // soft bass hammer alone would give; the felt corner widens with it.
         let bass_top = 1.0 + 2.2 * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0);
-        let cutoff = ((1.9 * self.cal(note, 0) / contact)
+        let cutoff = ((1.9 * self.engine.cal(note, 0) / contact)
             * bass_top
-            * self.controls.lab(0)
-            * (0.5 + 1.5 * self.controls.brightness))
-            .max(Self::felt_floor_ratio(position) * f0);
+            * self.engine.controls.lab(0)
+            * (0.5 + 1.5 * self.engine.controls.brightness))
+            .max(StringEngine::felt_floor_ratio(position) * f0);
 
         // Aftersound detune: a fraction of a cent in the bass, over a cent in
         // the treble, scaled by the unison control.
@@ -7023,9 +7447,9 @@ impl ConcertGrand {
         // The taper follows `top_octave`.
         let detune_cents = UNISON_WIDTH.get()
             * (0.9 + 0.9 * position)
-            * (1.0 - Self::top_octave(position))
-            * (self.controls.unison * 2.86)
-            * self.controls.lab(13)
+            * (1.0 - StringEngine::top_octave(position))
+            * (self.engine.controls.unison * 2.86)
+            * self.engine.controls.lab(13)
             * unison_precision;
         // A tuner hears beats, not cents: the same three cents that pass
         // unnoticed on a C2 beat twenty times a second on a C7's second
@@ -7108,7 +7532,11 @@ impl ConcertGrand {
             // does not vanish — it sits on a ragged −30…−45 dB shelf out to
             // 8 kHz, the sustained nonlinear forest, growing as the square
             // of velocity. A cliff to silence sounds hollowed out.
-            let floor = 0.0455 * velocity * velocity * self.controls.lab(6) * self.cal(note, 1);
+            let floor = 0.0455
+                * velocity
+                * velocity
+                * self.engine.controls.lab(6)
+                * self.engine.cal(note, 1);
             let felt = expf(-1.2 * felt_r * felt_r).max(floor);
             // The board barely radiates below its first mode: the lowest
             // notes' fundamentals (and even second partials) come out tens of
@@ -7134,6 +7562,7 @@ impl ConcertGrand {
             peak = peak.max(amplitude.abs());
             count += 1;
         }
+        phase!(0, mark);
         if count == 0 || peak <= 0.0 {
             return;
         }
@@ -7165,8 +7594,9 @@ impl ConcertGrand {
             // the strike and the recipe are wrong in the same place, and the
             // recipe is cheaper. The treble's hammer is the open item, not
             // this gate.
-            if sim_modes >= SIM_MIN_MODES.get().max(1.0) as usize && self.strike_budget > 0 {
-                self.strike_budget -= 1;
+            phase!(1, mark);
+            if sim_modes >= SIM_MIN_MODES.get().max(1.0) as usize && self.engine.strike_budget > 0 {
+                self.engine.strike_budget -= 1;
                 // Everything the contact needs, in physical units.
                 //
                 // The old block derived the stiffness FROM the desired
@@ -7186,10 +7616,10 @@ impl ConcertGrand {
                 // and the felt's K is a material property in N/m^p,
                 // calibrated once against measured contact times and then
                 // left alone. The contact time is an OUTCOME.
-                let length = self.string_length(position);
+                let length = self.engine.string_length(position);
                 let wave_speed = 2.0 * length * f0;
                 let string_mass =
-                    self.controls.tension_newtons() / (wave_speed * wave_speed) * length;
+                    self.engine.controls.tension_newtons() / (wave_speed * wave_speed) * length;
                 // A0 to ~E1 single-strung, doubled through the wound bass,
                 // three from ~C2 -- the same stringing the unison uses.
                 let strings_struck = 1.0
@@ -7203,15 +7633,16 @@ impl ConcertGrand {
                 // string-as-spring, tau = pi*sqrt(m / (T*L/(x0*(L-x0)))),
                 // and that is proportional to sqrt(m).
                 let head = 0.0035 + 0.0075 * powf(1.0 - position, 2.5);
-                let mass = (head / strings_struck * self.controls.lab(8) * HAMMER_MASS_SCALE.get())
-                    .max(1e-4);
+                let mass =
+                    (head / strings_struck * self.engine.controls.lab(8) * HAMMER_MASS_SCALE.get())
+                        .max(1e-4);
                 // The action's dynamic span: how much faster the hammer
                 // arrives at full velocity than at none. `dynamics` is the
                 // regulation -- a shallow action compresses the span, a deep
                 // one spreads it.
                 // The speed at the string: the action's law at let-off, less
                 // the flight's toll -- see `LETOFF_DISTANCE_MM`.
-                let (_, velocity0) = self.hammer_speeds(velocity);
+                let (_, velocity0) = self.engine.hammer_speeds_at(repetition, velocity);
                 // The felt: K in N/m^p, hardening steeply toward the treble.
                 // Brightness and the Hammer Hard control are voicing -- the
                 // needle and the lacquer act on exactly this property.
@@ -7288,7 +7719,7 @@ impl ConcertGrand {
                             * ((position - 0.448) / (1.0 - 0.448)).clamp(0.0, 1.0),
                     );
                 let house = FELT_EXPONENT_AT_BASS.get() + FELT_EXPONENT_RISE.get() * felt_position;
-                let reach = self.controls.felt_corner_travel();
+                let reach = self.engine.controls.felt_corner_travel();
                 // The top's own hardening, on top of the line: from the end
                 // of the tenor (position 0.55, about A4) to C8. It rides in
                 // `exponent`, not in `house`, so the constant-force
@@ -7335,8 +7766,11 @@ impl ConcertGrand {
                     * powf(10.0, FELT_K_DECADES.get() * felt_position)
                     * bass_gain
                     * treble_gain
-                    * self.controls.lab(7)
-                    * powf(10.0, 2.0 * (self.controls.brightness - HOUSE_BRIGHTNESS))
+                    * self.engine.controls.lab(7)
+                    * powf(
+                        10.0,
+                        2.0 * (self.engine.controls.brightness - HOUSE_BRIGHTNESS),
+                    )
                     * powf(
                         1.0 / FELT_REFERENCE_COMPRESSION_M.get(),
                         exponent - house_exponent,
@@ -7522,7 +7956,7 @@ impl ConcertGrand {
         }
 
         let floor = peak * 1e-3;
-        let budget_left = PARTIAL_BUDGET.saturating_sub(self.active_partials);
+        let budget_left = self.allowance.saturating_sub(self.partials);
         // Sixteen slots stay reserved for the nonlinear extras (phantoms and
         // the longitudinal clang): the lowest notes fill the whole array with
         // their transverse ladder otherwise, and the growl never fits.
@@ -7541,8 +7975,9 @@ impl ConcertGrand {
                 energy += amplitude * amplitude;
             }
         }
-        let scale = 0.28 * self.cal(note, 7) * powf(velocity.max(0.01), LEVEL_VELOCITY_POWER.get())
-            / sqrtf(energy.max(1e-9));
+        let scale =
+            0.28 * self.engine.cal(note, 7) * powf(velocity.max(0.01), LEVEL_VELOCITY_POWER.get())
+                / sqrtf(energy.max(1e-9));
 
         // Everything a partial needs, computed before a voice is borrowed:
         // both components draw their decay from the same loss curve, read at
@@ -7556,36 +7991,50 @@ impl ConcertGrand {
         // detune ratio across the whole spectrum beats every partial at a
         // rate proportional to its frequency — precisely the synthesizer
         // "shimmer" a real unison does not have.
-        let sample_rate = self.sample_rate;
+        let sample_rate = self.engine.sample_rate;
+        // Out of the ladder loop, because none of it depends on the partial.
+        // Measured, a note-on is 8.55 us per partial and almost nothing else,
+        // so what the loop does per partial is the whole of the note-on block
+        // -- and it was paying for a power of the strike position, and for
+        // nine atomic reads of knobs that cannot change inside it, once for
+        // every partial it built.
+        let horizontal_share = HORIZONTAL_SHARE.get() * (0.65 + 1.2 * powf(1.0 - position, 1.5));
+        let horizontal_bridge = HORIZONTAL_BRIDGE.get();
+        let unison_jitter_spread = UNISON_JITTER_SPREAD.get();
+        let polarisation_cents = POLARISATION_CENTS.get();
+        let prompt_measured_power = PROMPT_MEASURED_POWER.get();
         let mut partials = [Partial::default(); MAX_PARTIALS];
         let mut placed = 0;
+        phase!(6, mark);
         for n in 0..count {
             if placed >= cap || amplitudes[n].abs() < floor {
                 continue;
             }
             let frequency = frequencies[n];
             let amplitude = amplitudes[n] * scale;
-            let (_, board_decay) = Self::board_response(frequency);
+            let (_, board_decay) = StringEngine::board_response(frequency);
             // The aftersound sustains much flatter than the prompt: measured
             // A4 holds nearly level from 1 s to 2 s while a shared decay
             // curve kept falling. ×1.8 on the slow stage matches the
             // measured plateau.
-            let mut t60 = self.t60_seconds(frequency, f0, string_scale, treble_life);
+            let mut t60 = self
+                .engine
+                .t60_seconds(frequency, f0, string_scale, treble_life);
             if n == 0 {
                 // The fundamental's prompt stage as the reference measured
                 // it at this key -- the bridge's conductance at this point
                 // and pitch, which no smooth law carries. The law's own
                 // controls (the Decay fader, the treble life) stay on top
                 // of it: the table is the mechanism, not the setting.
-                let controls =
-                    (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency * string_scale);
+                let controls = (0.5 + 1.5 * self.engine.controls.decay)
+                    * self.engine.hf_life(frequency * string_scale);
                 let measured = measured_prompt_t60(note) * controls;
                 t60 *= powf(
                     measured / t60.max(1e-3),
-                    PROMPT_MEASURED_POWER.get() * measured_prompt_share(note),
+                    prompt_measured_power * measured_prompt_share(note),
                 );
             }
-            let t60 = t60 * board_decay * self.cal(note, 4) * string_life;
+            let t60 = t60 * board_decay * self.engine.cal(note, 4) * string_life;
             // Geometric, and WIDE. The linear x0.55-1.45 spread kept every
             // cluster's beat rate within a factor 2.6, so with rate
             // proportional to frequency the FIRST nulls of every 2-4 kHz
@@ -7597,7 +8046,7 @@ impl ConcertGrand {
             // ear already approved.
             let jitter = 0.95
                 * powf(
-                    UNISON_JITTER_SPREAD.get(),
+                    unison_jitter_spread,
                     hash01((note as u32) << 10 | (n as u32) << 2 | 1) - 0.5,
                 );
             let cents = detune_cents * jitter;
@@ -7630,10 +8079,9 @@ impl ConcertGrand {
             let split = 1.0 / (1.0 + second + third_string);
             let shares = [split, split * second, split * third_string];
             let ratios = [
-                powf(2.0, -cents / 2400.0),
-                powf(2.0, cents / 2400.0),
-                powf(
-                    2.0,
+                exp2f(-cents / 2400.0),
+                exp2f(cents / 2400.0),
+                exp2f(
                     cents * (0.9 + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3)) / 1200.0,
                 ),
             ];
@@ -7663,14 +8111,14 @@ impl ConcertGrand {
             // stage ignored the calibration that the audible curve was
             // fitted through, and the top of the compass rang 2.7x long
             // once it dephased.
-            let slow_t60 = (self.slow_t60_seconds(frequency, f0, string_scale)
+            let slow_t60 = (self.engine.slow_t60_seconds(frequency, f0, string_scale)
                 * board_decay
-                * self.cal(note, 4)
+                * self.engine.cal(note, 4)
                 * string_life
-                * self.controls.lab(12))
+                * self.engine.controls.lab(12))
             .max(0.05);
-            let fast_t60 = (t60 * self.controls.lab(11)).max(0.02);
-            let intrinsic = self.decay_per_sample(slow_t60);
+            let fast_t60 = (t60 * self.engine.controls.lab(11)).max(0.02);
+            let intrinsic = self.engine.decay_per_sample(slow_t60);
             let bridge_rate = (6.907_755 * (1.0 / fast_t60 - 1.0 / slow_t60)).max(0.0);
             let drained = 1.0 - expf(-bridge_rate * CULL_INTERVAL as f32 / sample_rate);
             // Normalised by the weight vector's square sum: with I - k*w*w^T
@@ -7681,7 +8129,7 @@ impl ConcertGrand {
                 + 1.0
                 + second * second
                 + third_string * third_string
-                + HORIZONTAL_BRIDGE.get() * HORIZONTAL_BRIDGE.get();
+                + horizontal_bridge * horizontal_bridge;
             let coupling = drained / weights;
             // How fast a partial reaches its amplitude. It is NOT a swell.
             //
@@ -7703,15 +8151,14 @@ impl ConcertGrand {
             // What legitimately gathers -- the horizontal polarisation, the
             // aftersound as the unison dephases -- gathers through the
             // two-stage decay and the halo, not through here.
-            let rise_seconds = ((5.0 / frequency) * self.controls.lab(9)).clamp(0.0008, 0.15);
+            let rise_seconds =
+                ((5.0 / frequency) * self.engine.controls.lab(9)).clamp(0.0008, 0.15);
             let rise = expf(-1.0 / (rise_seconds * sample_rate));
             // The horizontal picks up more of the blow in the bass: a wound
             // string's mass sits far off its bending axis and the bridge's
             // cross-coupling hands a larger share of the vertical motion
             // sideways. This is also where the second decay stage is most
             // prominent in measured pianos.
-            let horizontal_share =
-                HORIZONTAL_SHARE.get() * (0.65 + 1.2 * powf(1.0 - position, 1.5));
             let (pq, po) = (phase_q[n], phase_o[n]);
             let mut built = Partial::default();
             built.set_lane(
@@ -7720,9 +8167,8 @@ impl ConcertGrand {
                     amplitude * horizontal_share * pq,
                     amplitude * horizontal_share * po,
                     (frequency
-                        * powf(
-                            2.0,
-                            POLARISATION_CENTS.get()
+                        * exp2f(
+                            polarisation_cents
                                 * (0.6 + 0.8 * hash01((note as u32) << 7 | (n as u32) << 2 | 5))
                                 / 1200.0,
                         ))
@@ -7742,7 +8188,7 @@ impl ConcertGrand {
                 ),
             );
             built.coupling = coupling;
-            built.drain = Partial::drain_per_sample(coupling, HORIZONTAL_BRIDGE.get());
+            built.drain = Partial::drain_per_sample(coupling, horizontal_bridge);
             built.slope = {
                 let h = (n + 1) as f32;
                 let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
@@ -7779,6 +8225,7 @@ impl ConcertGrand {
             partials[placed] = built;
             placed += 1;
         }
+        phase!(2, mark);
         if placed == 0 {
             return;
         }
@@ -7846,15 +8293,14 @@ impl ConcertGrand {
         // and a real room. The default now sits ~10 dB under the measured
         // ceiling -- present, discreet -- and the fader still reaches the
         // recording level at ~0.65 and x16 above it at the top.
-        self.strike_serial = self.strike_serial.wrapping_add(1);
-        let strike_salt = self.strike_serial.wrapping_mul(0x9E37_79B9);
+        let strike_salt = serial.wrapping_mul(0x9E37_79B9);
         let clack_level = action_noise_dynamic(velocity)
             * KNOCK_LEVEL.get()
             * 3.4
             * (0.75 + 0.5 * hash01(strike_salt ^ 0xA5))
             * action
-            * self.controls.lab(3)
-            * Controls::noise_gain(self.controls.action_noise);
+            * self.engine.controls.lab(3)
+            * Controls::noise_gain(self.engine.controls.action_noise);
         if clack_level > 1e-5 {
             let rise = expf(-1.0 / (0.0012 * sample_rate));
             // The shank is shorter under a treble hammer, so its knock
@@ -7876,7 +8322,7 @@ impl ConcertGrand {
                     + CLACK_SCATTER.get() * (hash01((note as u32) << 8 | seed) - 0.5)
                     + 0.06 * (hash01(strike_salt ^ seed) - 0.5);
                 let amplitude = clack_level * level;
-                let decay = self.decay_per_sample(t60);
+                let decay = self.engine.decay_per_sample(t60);
                 let mut built = Partial::default();
                 built.set_lane(
                     0,
@@ -7892,7 +8338,7 @@ impl ConcertGrand {
         }
 
         // Constant-power pan by key position, narrowed by the width control.
-        let spread = (position - 0.5) * self.controls.width;
+        let spread = (position - 0.5) * self.engine.controls.width;
         let angle = (0.5 + spread * 0.8) * core::f32::consts::FRAC_PI_2;
         let (pan_right, pan_left) = sincosf(angle);
 
@@ -7906,7 +8352,7 @@ impl ConcertGrand {
         // A different burst every time, and a different one per key: the
         // components this replaces rang the same note on every strike.
         let thump_seed = strike_salt.wrapping_add((note as u32).wrapping_mul(2_654_435_761)) | 1;
-        let undamped = note > self.controls.last_damper;
+        let undamped = note > self.engine.controls.last_damper;
         let (thump_amp, thump_decay, thump_rise_step) = {
             let thump_level = powf(velocity.max(0.01), THUMP_VELOCITY_POWER.get())
                 * 0.095
@@ -7926,13 +8372,13 @@ impl ConcertGrand {
                         * ((position - 0.5) / 0.5).clamp(0.0, 1.0)
                         / 20.0,
                 )
-                * Controls::noise_gain(self.controls.action_noise)
-                * self.controls.lab(2)
-                * self.cal(note, 2);
+                * Controls::noise_gain(self.engine.controls.action_noise)
+                * self.engine.controls.lab(2)
+                * self.engine.cal(note, 2);
             let rise = expf(-1.0 / (0.004 * sample_rate));
             (
                 thump_level * THUMP_NOISE_GAIN,
-                self.decay_per_sample(THUMP_T60_S.get()),
+                self.engine.decay_per_sample(THUMP_T60_S.get()),
                 rise,
             )
         };
@@ -7958,21 +8404,21 @@ impl ConcertGrand {
                 let frequency = f0 * ratio * jitter;
                 if frequency < nyquist {
                     // Short segments, short ring: undamped is not endless.
-                    let t60 = (self.t60_seconds(frequency, f0, 1.0, 1.0) * 0.35).min(0.9);
-                    let decay = self.decay_per_sample(t60);
+                    let t60 = (self.engine.t60_seconds(frequency, f0, 1.0, 1.0) * 0.35).min(0.9);
+                    let decay = self.engine.decay_per_sample(t60);
                     *slot = Component::start(level, frequency, decay, sample_rate);
                 }
             }
         }
 
-        let chiff_mult = self.controls.lab(3) * self.cal(note, 3);
+        let chiff_mult = self.engine.controls.lab(3) * self.engine.cal(note, 3);
         // How hard this string's own stretch pulls it sharp. The bass gate is
         // the amplitude-to-length ratio in disguise: a treble string is short
         // and stiff and barely stretches, a bass string is long and slack and
         // stretches plenty.
         let tension_gain =
-            TENSION_GAIN.get() * bass_gate / (1.0 + 40.0 * position) * self.controls.lab(10);
-        let longitudinal_gain = LONGITUDINAL_MIX.get() * self.controls.lab(5);
+            TENSION_GAIN.get() * bass_gate / (1.0 + 40.0 * position) * self.engine.controls.lab(10);
+        let longitudinal_gain = LONGITUDINAL_MIX.get() * self.engine.controls.lab(5);
         // The attack surplus into the upper compressional modes. This was
         // x16, calibrated against a normalization that turned out not to be
         // comparable; measured the same way the YDP targets are measured
@@ -7985,16 +8431,16 @@ impl ConcertGrand {
         // "el golpe del martillo exagerado en notas bajas". Swept 2/4/6
         // against the targets on C2 and A0: x2 lands the 2 kHz band and
         // the thump on the reference; anything higher re-grows the knock.
-        let longitudinal_upper = self.controls.lab(4) * 2.0 * powf(1.0 - position, 1.5);
-        let action_gain = Controls::noise_gain(self.controls.action_noise);
-        let impact_gain = Controls::noise_gain(self.controls.impact);
+        let longitudinal_upper = self.engine.controls.lab(4) * 2.0 * powf(1.0 - position, 1.5);
+        let action_gain = Controls::noise_gain(self.engine.controls.action_noise);
+        let impact_gain = Controls::noise_gain(self.engine.controls.impact);
         if let Some(slot) = restrike_target {
             // The hammer lands on the wire it finds. Ladder partials merge
             // by harmonic number (each carries it in its slope weight);
             // everything else -- noise, clack, phantoms of the NEW blow, or
             // ladder partials the old voice has already culled -- appends
             // into free slots.
-            let voice = &mut self.voices[slot];
+            let voice = &mut unit_voice!(self, slot);
             let mut by_harmonic = [usize::MAX; MAX_PARTIALS];
             for (index, partial) in voice.partials[..voice.partial_count].iter().enumerate() {
                 if partial.slope != 0.0 {
@@ -8148,7 +8594,7 @@ impl ConcertGrand {
                     appended += 1;
                 }
             }
-            self.active_partials += appended;
+            self.partials += appended;
             voice.push_in = merge_ramp;
             // The key bottoms out on every blow, this one included, the
             // aftertouch after the strike.
@@ -8176,7 +8622,7 @@ impl ConcertGrand {
                     * KNOCK_LEVEL.get()
                     * action
                     * chiff_mult
-                    * Controls::noise_gain(self.controls.action_noise),
+                    * Controls::noise_gain(self.engine.controls.action_noise),
             );
             voice.noise_hold = voice.noise_amp - knock_before;
             voice.noise_decay = noise_decay;
@@ -8192,38 +8638,45 @@ impl ConcertGrand {
             let clang_kick = IMPACT_CLANG.get()
                 * impact_dynamic(velocity)
                 * powf(1.0 - position, 1.2)
-                * self.clang_register(position)
+                * self.engine.clang_register(position)
                 * impact_gain;
-            self.voices[slot].clang_feed += clang_kick;
-            self.voices[slot].clang_hold = clang_kick;
-            self.voices[slot].clang_feed_decay =
+            unit_voice!(self, slot).clang_feed += clang_kick;
+            unit_voice!(self, slot).clang_hold = clang_kick;
+            unit_voice!(self, slot).clang_feed_decay =
                 expf(-1.0 / (IMPACT_PULSE_TAU_S.get() * sample_rate));
             // The re-struck wire is full of fresh high partials again.
-            self.voices[slot].longitudinal_upper = longitudinal_upper;
-            self.voices[slot].upper_env = 1.0;
+            unit_voice!(self, slot).longitudinal_upper = longitudinal_upper;
+            unit_voice!(self, slot).upper_env = 1.0;
             return;
         }
         // Read before the voice is borrowed: this consults the scale, and the
         // borrow checker is right that the two cannot overlap.
-        let clang_register = self.clang_register(position);
-        let firmness = Self::damper_firmness(self.strike_serial, note);
-        let Some(voice) = self.allocate_voice() else {
-            return;
-        };
+        let clang_register = self.engine.clang_register(position);
+        let firmness = StringEngine::damper_firmness(serial, note);
+        phase!(3, mark);
+        let voice = self.claim_voice(slot);
         voice.active = true;
         voice.note = note;
         voice.channel = channel;
         voice.held = true;
         voice.sustained = false;
         voice.undamped = undamped;
-        voice.halo = false;
         voice.sostenuto = false;
         voice.damper_applied = 0.0;
         voice.firmness = firmness;
         voice.pole_ceiling = pole_ceiling(sample_rate);
         voice.onset = 0.0;
         voice.onset_step = 1.0 / (ATTACK_RAMP_S.get().max(1e-4) * sample_rate);
-        voice.partials = partials;
+        // Only what was placed. `voice.partials` is sized for the largest
+        // ladder any note could want -- 144 partials of 132 bytes, 18.6 KB --
+        // and assigning the whole array copied all of it on every note-on,
+        // however few partials the note actually has. Measured across the
+        // compass, a note uses 6 % of it at the top and 56 % at the bottom.
+        //
+        // Nothing reads past `partial_count`, so the stale tail a reused
+        // voice slot keeps is never looked at. Every read in the render path
+        // is `partials[..partial_count]`.
+        voice.partials[..placed].copy_from_slice(&partials[..placed]);
         voice.partial_count = placed;
         voice.duplex = duplex;
         voice.cull_in = CULL_INTERVAL;
@@ -8384,7 +8837,7 @@ impl ConcertGrand {
         // by the mechanism that also couples the modes to each other.
         voice.glide_rate = 0.0;
         voice.glide_steps = 0;
-        self.active_partials += placed;
+        self.partials += placed;
 
         // Sympathetic resonance, the pedal's halo: with the dampers up, the
         // other strings' coinciding partials pick the struck note's energy up
@@ -8392,9 +8845,14 @@ impl ConcertGrand {
         // the same partial ladder ~24 dB down, each component detuned by its
         // own few cents (many strings, none exactly aligned), single-stage
         // slow decay, released by the pedal like any sustained string.
-        if self.pedal && placed > 0 {
-            let halo_count = placed.min(24);
-            let mut halo = [Partial::default(); MAX_PARTIALS];
+        phase!(4, mark);
+        if pedal && placed > 0 {
+            let halo_count = placed.min(HALO_PARTIALS);
+            // Twenty-four, which is every entry the loop below can reach --
+            // `halo_count` is `placed.min(24)`. It was MAX_PARTIALS, so each
+            // note-on zeroed 18.6 KB of scratch to fill at most 3.1 KB of it,
+            // and a pedalled twelve-note chord did that twelve times.
+            let mut halo = [Partial::default(); HALO_PARTIALS];
             let rise = expf(-1.0 / (0.030 * sample_rate));
             for n in 0..halo_count {
                 let frequency = frequencies[n];
@@ -8404,8 +8862,11 @@ impl ConcertGrand {
                 );
                 let detuned = (frequency * spread).min(nyquist);
                 let amplitude = amplitudes[n] * scale * 0.063;
-                let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 1.5;
-                let slow = self.decay_per_sample(t60);
+                let t60 = self
+                    .engine
+                    .t60_seconds(frequency, f0, string_scale, treble_life)
+                    * 1.5;
+                let slow = self.engine.decay_per_sample(t60);
                 let mut built = Partial::default();
                 built.set_lane(0, Component::start(amplitude, detuned, slow, sample_rate));
                 built.set_lane(
@@ -8414,42 +8875,2370 @@ impl ConcertGrand {
                 );
                 halo[n] = built;
             }
-            if let Some(shadow) = self.allocate_voice() {
-                *shadow = Voice::default();
-                shadow.pole_ceiling = pole_ceiling(sample_rate);
-                shadow.active = true;
-                shadow.halo = true;
-                shadow.note = note;
-                shadow.channel = channel;
-                shadow.held = false;
-                shadow.sustained = true;
-                shadow.partials = halo;
-                shadow.partial_count = halo_count;
-                shadow.pan_left = pan_left;
-                shadow.pan_right = pan_right;
-                shadow.energy = 0.01;
-                self.active_partials += halo_count;
+            // Into this section's own halos, which are not voices anybody
+            // else could have wanted: a halo never takes a slot a note was
+            // going to use, and it never leaves the section that struck it.
+            let index = self.pick_halo();
+            let carried = self.halos[index].partial_count;
+            self.partials = self.partials.saturating_sub(carried);
+            let shadow = &mut self.halos[index];
+            *shadow = Voice::default();
+            shadow.pole_ceiling = pole_ceiling(sample_rate);
+            shadow.active = true;
+            shadow.note = note;
+            shadow.channel = channel;
+            shadow.held = false;
+            shadow.sustained = true;
+            shadow.partials[..halo_count].copy_from_slice(&halo[..halo_count]);
+            shadow.partial_count = halo_count;
+            shadow.pan_left = pan_left;
+            shadow.pan_right = pan_right;
+            shadow.energy = 0.01;
+            self.partials += halo_count;
+        }
+        phase!(5, mark);
+    }
+
+    /// The voice half of a release, for one section's voices.
+    ///
+    /// The scalars are recomputed from the record rather than carried in
+    /// it: they are pure arithmetic on the note, the release velocity and
+    /// the damper serial, and a worker has the same tables. What a worker
+    /// does NOT have is the coordinator's key tracking or its silent bank,
+    /// so those writes stay on the other side.
+    #[allow(clippy::too_many_arguments)]
+    fn release_voices(
+        &mut self,
+        channel: u8,
+        note: u8,
+        release: Option<u8>,
+        serial: u32,
+        pedal: bool,
+        sostenuto: bool,
+        pressure: f32,
+    ) {
+        let firmness = StringEngine::damper_firmness(serial, note);
+        // With a measured return the random landing becomes a residual: the
+        // felt still seats where it seats, but how fast the key came back is
+        // no longer a guess. Without one, the variation carries the landing
+        // exactly as it did before release velocity was read at all.
+        let (span, knock, firmness) = match release {
+            Some(velocity) => (
+                StringEngine::damper_span(velocity),
+                StringEngine::damper_knock(velocity),
+                1.0 + (firmness - 1.0) * ConcertGrand::RELEASE_RESIDUAL,
+            ),
+            None => (1.0, 1.0, firmness),
+        };
+        let damper = self.engine.damper_factor(note, firmness, span);
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        let release_gain =
+            Controls::noise_gain(self.engine.controls.release_noise) * firmness * knock;
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        let key_off = KEYOFF_KNOCK * release_gain;
+        let key_off_decay = expf(-LN_1000 / (KEYOFF_T60_S * rate));
+        let key_off_rise = expf(-1.0 / (0.002 * rate));
+        let key_off_seed = serial
+            .wrapping_mul(0x9E37_79B9)
+            .wrapping_add((note as u32).wrapping_mul(2_654_435_761));
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if voice.active && voice.note == note && voice.channel == channel && voice.held {
+                voice.key_off_knock(key_off, key_off_decay, key_off_rise, key_off_seed, rate);
+                if voice.undamped {
+                    // No felt lands: the key comes up and the string goes
+                    // on ringing exactly as it was. `sustained` keeps it
+                    // out of the re-strike's damper path; the pedal loops
+                    // skip it by the flag.
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = 0.0;
+                    continue;
+                }
+                if sostenuto && voice.sostenuto {
+                    // The sostenuto rod holds THIS damper clear, whatever
+                    // the sustain pedal does.
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = 0.0;
+                } else if pedal {
+                    // Released into a partially lifted rail: the felt takes
+                    // the string with whatever weight the pedal leaves it.
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = pressure;
+                    // Through the voice's OWN damper: the half pedal will
+                    // relieve this press through the same one, and a press
+                    // through one damper relieved through another is the
+                    // energy walk `a_half_pedal_never_adds_energy` guards.
+                    let own = StringEngine::damper_for(note, rate, grip * voice.firmness, span);
+                    voice.press_damper(own, pressure);
+                } else {
+                    // The felt is on its way, not down: see DAMPER_LAND_MS.
+                    // A key let go fast lands it sooner (`span` < 1), a key
+                    // eased up later.
+                    let own = StringEngine::damper_for(note, rate, grip * voice.firmness, span);
+                    voice.arm_damper(
+                        (DAMPER_LAND_MS.get() * 0.001 * rate * span) as u32,
+                        damper,
+                        own,
+                        DAMPER_BOUNCES.get().clamp(0.0, 12.0) as u8,
+                        DAMPER_HANG_MS.get() * 0.001 * rate,
+                        DAMPER_RESTITUTION.get(),
+                        (DAMPER_DWELL_MS.get() * 0.001 * rate) as u32,
+                        [thud_coefficient, thud_decay, release_gain],
+                    );
+                }
             }
         }
     }
 
-    fn allocate_voice(&mut self) -> Option<&mut Voice> {
-        if let Some(index) = self.voices.iter().position(|voice| !voice.active) {
-            return Some(&mut self.voices[index]);
+    fn pedal_voices(&mut self, pressure: f32, rail_lifted: bool, sostenuto: bool, serial: u32) {
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        if rail_lifted {
+            // The rail coming up catches every felt still on its way down:
+            // that string is sustained from here, its press relieved through
+            // the same damper it was made with.
+            for slot in unit_slots() {
+                StringEngine::lift_rail(&mut unit_voice!(self, slot), pressure);
+            }
+            for index in 0..HALOS_PER_SECTION {
+                StringEngine::lift_rail(&mut self.halos[index], pressure);
+            }
         }
-        // All busy: steal the quietest, refunding its partials to the budget.
-        #[cfg(not(target_arch = "wasm32"))]
-        STEALS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-        let index = self
-            .voices
-            .iter()
-            .enumerate()
-            .min_by(|(_, a), (_, b)| a.energy.total_cmp(&b.energy))
-            .map(|(index, _)| index)?;
-        self.active_partials = self
-            .active_partials
-            .saturating_sub(self.voices[index].partial_count);
-        Some(&mut self.voices[index])
+        // The halos with them: a halo is a string ringing with its damper
+        // up, so the rail lands on it exactly as it lands on a note.
+        let thud = (thud_coefficient, thud_decay);
+        for slot in unit_slots() {
+            StringEngine::seat_damper(
+                &mut unit_voice!(self, slot),
+                pressure,
+                sostenuto,
+                serial,
+                rate,
+                grip,
+                thud,
+                release_gain,
+            );
+        }
+        for index in 0..HALOS_PER_SECTION {
+            StringEngine::seat_damper(
+                &mut self.halos[index],
+                pressure,
+                sostenuto,
+                serial,
+                rate,
+                grip,
+                thud,
+                release_gain,
+            );
+        }
+    }
+
+    /// The voice half of the sostenuto rod, for one section's voices.
+    fn sostenuto_voices(&mut self, down: bool, pedal: bool, pressure: f32) {
+        if down {
+            for slot in unit_slots() {
+                let voice = &mut unit_voice!(self, slot);
+                if voice.active && voice.held {
+                    voice.sostenuto = true;
+                }
+            }
+            return;
+        }
+        // Released: every captured note falls into whatever the sustain
+        // pedal is doing right now.
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if !(voice.active && voice.sostenuto) {
+                continue;
+            }
+            voice.sostenuto = false;
+            if voice.held || !voice.sustained || voice.undamped {
+                continue;
+            }
+            if pedal && pressure < 0.98 {
+                let damper = StringEngine::damper_for(voice.note, rate, grip, 1.0);
+                voice.press_damper(damper, pressure - voice.damper_applied);
+                voice.damper_applied = pressure;
+            } else {
+                let damper = StringEngine::damper_for(voice.note, rate, grip, 1.0);
+                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+                voice.damper_applied = 0.0;
+            }
+        }
+    }
+
+    /// The voice half of an all-notes-off, for one section's voices.
+    fn all_notes_off_voices(&mut self) {
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        let release_gain = Controls::noise_gain(self.engine.controls.release_noise);
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if voice.active {
+                let damper = StringEngine::damper_for(voice.note, rate, grip, 1.0);
+                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+            }
+        }
+        for index in 0..HALOS_PER_SECTION {
+            let halo = &mut self.halos[index];
+            if halo.active {
+                let damper = StringEngine::damper_for(halo.note, rate, grip, 1.0);
+                halo.damp(damper, thud_coefficient, thud_decay, release_gain);
+            }
+        }
+    }
+
+    /// A key pressed again before the jack reset: no blow, but the key is
+    /// down and its damper is up again. A felt on its way down is caught;
+    /// a string under the pedal is held by the key from here; a string with
+    /// no voice is a silent key.
+    /// The voice half of a key caught below the repetition point, for one
+    /// section's voices. Whether anything was caught at all is the
+    /// coordinator's to know, and it reads it before this runs.
+    fn catch_voices(&mut self, channel: u8, note: u8) {
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if !(voice.active && voice.note == note && voice.channel == channel) {
+                continue;
+            }
+            if voice.damper_phase != 0 {
+                voice.cancel_damper();
+            }
+            if voice.sustained && voice.damper_applied > 0.0 {
+                let own = StringEngine::damper_for(note, rate, grip * voice.firmness, 1.0);
+                voice.press_damper(own, -voice.damper_applied);
+                voice.damper_applied = 0.0;
+            }
+            voice.held = true;
+            voice.sustained = false;
+        }
+    }
+
+    /// One section's half of a note struck again over a string of its own
+    /// that is not free to be re-struck: ease that string out.
+    ///
+    fn ease_voices(&mut self, channel: u8, note: u8) {
+        // Thirty milliseconds, from 250: the new voice covers the sound
+        // from its first cycle, and at 250 ms the old one lingered 1.7 s
+        // before the cull took it -- a ghost per repeated note, and on
+        // the Op. 9 No. 2 file 1351 voice steals against 185 with the
+        // merge. Thirty is still forty cycles of an A4, nothing steps.
+        let restrike = expf(-1.0 / (0.03 * self.engine.sample_rate));
+        let (thud_coefficient, thud_decay) = self.engine.damper_thud();
+        // WITHOUT the release thud. `damp` is the damper landing, and
+        // its thud is the felt meeting a moving string; here no damper
+        // lands -- the hammer re-strikes a string the pedal is holding
+        // half-clear -- yet the thud fired on every repeated note under
+        // a half pedal, because a half pedal leaves `damper_applied`
+        // above zero and every such re-strike takes this path. Heard on
+        // the Op. 9 No. 2 file as "un pequeño popeo" on the repeated
+        // B-flats at 1:11 (found by the score: both pops were re-strikes
+        // of note 70 under a moving pedal, and neither a steal nor a
+        // step). The ease-out stays; the knock goes.
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if voice.active && voice.note == note && voice.channel == channel {
+                // Its felt too: an eased-out voice still ticks, and a
+                // bounce landing on it relieves a press against a pole
+                // `damp` has since moved.
+                voice.cancel_damper();
+                voice.damp(restrike, thud_coefficient, thud_decay, 0.0);
+            }
+        }
+    }
+
+    /// This unit's strings for one frame: its eight voices and its four
+    /// halos, and what they put on the bridge.
+    fn render_frame(&mut self, feed: f32, sympathy_rate: f32, sostenuto: bool) -> SectionFrame {
+        let mut made = SectionFrame::default();
+        let mut culled = 0usize;
+        macro_rules! deposit {
+            ($rendered:expr) => {{
+                let one = $rendered;
+                made.sample += one.sample;
+                made.keybed_left += one.keybed_left;
+                made.keybed_right += one.keybed_right;
+                made.force += one.force;
+                made.drive_points[one.drive_index] += one.force * (1.0 - one.drive_frac);
+                made.drive_points[one.drive_index + 1] += one.force * one.drive_frac;
+                culled += one.culled;
+            }};
+        }
+        for slot in unit_slots() {
+            let voice = &mut unit_voice!(self, slot);
+            if voice.active {
+                deposit!(voice.render_frame(feed, sympathy_rate, sostenuto));
+            }
+        }
+        for index in 0..HALOS_PER_SECTION {
+            let halo = &mut self.halos[index];
+            if halo.active {
+                deposit!(halo.render_frame(feed, sympathy_rate, sostenuto));
+            }
+        }
+        self.partials = self.partials.saturating_sub(culled);
+        made
+    }
+
+    /// Does this unit's per-voice work for one frame, in the order it
+    /// arrived.
+    ///
+    /// No sorting across sections any more, and none needed: every handler
+    /// touches only the voices of the section it was given, and a section's
+    /// records are already in the order the events came in. When this ran
+    /// for all four at once the order mattered, because the handlers still
+    /// reached across; now it cannot.
+    fn run_work(&mut self, work: &[u8], frame: u16) {
+        if work.is_empty() {
+            return;
+        }
+        let mut due = [VoiceRecord::EMPTY; MAX_VOICE_WORK_PER_FRAME];
+        let mut count = 0usize;
+        for (at, bytes) in UnitWork::read(work) {
+            if at != frame || count == due.len() {
+                continue;
+            }
+            if let Some(record) = VoiceRecord::from_bytes(bytes) {
+                due[count] = record;
+                count += 1;
+            }
+        }
+        for record in due.iter().take(count).copied() {
+            match record.kind {
+                VoiceRecord::STRIKE => {
+                    // The claim is not released here any more. It was, back
+                    // when the strike ran in the same pass that chose the
+                    // next one; now every choice in the block is made before
+                    // any strike lands, so nothing reads the bit again and
+                    // clearing it was a section writing a coordinator's
+                    // word for no one.
+                    self.start_voice_unit(
+                        record.channel,
+                        record.note,
+                        record.velocity,
+                        record.slot as usize,
+                        record.has(VoiceRecord::FLAG_PEDAL),
+                        record.soft,
+                        record.returned,
+                        record.serial,
+                    );
+                }
+                VoiceRecord::RELEASE => {
+                    let release = (record.release > 0).then(|| record.release - 1);
+                    self.release_voices(
+                        record.channel,
+                        record.note,
+                        release,
+                        record.serial,
+                        record.has(VoiceRecord::FLAG_PEDAL),
+                        record.has(VoiceRecord::FLAG_SOSTENUTO),
+                        record.velocity,
+                    );
+                }
+                VoiceRecord::PEDAL => self.pedal_voices(
+                    record.velocity,
+                    record.has(VoiceRecord::FLAG_RAIL_LIFTED),
+                    record.has(VoiceRecord::FLAG_SOSTENUTO),
+                    record.serial,
+                ),
+                VoiceRecord::SOSTENUTO => self.sostenuto_voices(
+                    record.has(VoiceRecord::FLAG_SOSTENUTO),
+                    record.has(VoiceRecord::FLAG_PEDAL),
+                    record.velocity,
+                ),
+                VoiceRecord::ALL_OFF => self.all_notes_off_voices(),
+                VoiceRecord::CATCH => self.catch_voices(record.channel, record.note),
+                VoiceRecord::EASE => self.ease_voices(record.channel, record.note),
+                _ => debug_assert!(false, "clase de trabajo desconocida"),
+            }
+        }
+    }
+
+    /// What this unit has to say about itself, once the block is rendered.
+    fn report(&self) -> UnitReport {
+        UnitReport {
+            partials: self.partials as u32,
+            voices: core::array::from_fn(|index| VoiceSummary::of(&self.voices[index])),
+            halos: core::array::from_fn(|index| VoiceSummary::of(&self.halos[index])),
+        }
+    }
+
+    /// Which of a section's halos the next one takes: a silent one, or the
+    /// quietest of them.
+    ///
+    /// Halos compete only with halos. When they shared the voice pool the
+    /// loser of this choice was sometimes a struck note, which is a note
+    /// the player played going quiet so a sympathetic ring could start.
+    fn pick_halo(&mut self) -> usize {
+        if let Some(index) = (0..HALOS_PER_SECTION).find(|&i| !self.halos[i].active) {
+            return index;
+        }
+        (0..HALOS_PER_SECTION)
+            .min_by(|a, b| self.halos[*a].energy.total_cmp(&self.halos[*b].energy))
+            .unwrap_or(0)
+    }
+
+    /// Takes the slot `pick_voice_slot` chose, refunding what it was
+    /// carrying. This is where the budget moves, and it has not moved.
+    fn claim_voice(&mut self, slot: usize) -> &mut Voice {
+        self.partials = self
+            .partials
+            .saturating_sub(unit_voice!(self, slot).partial_count);
+        &mut unit_voice!(self, slot)
+    }
+}
+
+impl ConcertGrand {
+    /// The lid's angle in radians, from the degrees the player set.
+    fn lid_radians(&self) -> f32 {
+        clamp_between(
+            self.engine.controls.lid * DEGREES_TO_RADIANS,
+            LID_CLOSED_RAD.get(),
+            LID_OPEN_RAD.get(),
+        )
+    }
+
+    /// How far open the lid is, nought shut to one wide.
+    ///
+    /// The angle is what the player sets and what the geometry uses; the leak
+    /// and the cutoff were written against a fraction, so it is derived here
+    /// once rather than separately in each of them.
+    fn lid_fraction(&self) -> f32 {
+        let closed = LID_CLOSED_RAD.get();
+        let open = LID_OPEN_RAD.get();
+        if open <= closed {
+            return 0.0;
+        }
+        ((self.lid_radians() - closed) / (open - closed)).clamp(0.0, 1.0)
+    }
+
+    /// Tunes the instrument the way a tuner does: A4 = 440, octave anchors
+    /// beatless against the lower note's second (sharp) partial, and the
+    /// stretch interpolated in cents between anchors. Railsback's curve is
+    /// the output of this procedure, not an input to it.
+    fn tune(&mut self) {
+        for index in 0..NOTE_COUNT {
+            self.engine.inharmonicity[index] =
+                self.engine.inharmonicity_for(LOW_NOTE + index as u8);
+        }
+
+        // Stretch in cents at the octave anchors around A4 (index 48).
+        let mut anchor_cents = [0.0_f32; NOTE_COUNT];
+        let a4 = 69 - LOW_NOTE as usize;
+        let mut cents = 0.0;
+        let mut index = a4;
+        while index + 12 < NOTE_COUNT {
+            cents += 1200.0 * log2f(octave_stretch_ratio(self.engine.inharmonicity[index]));
+            anchor_cents[index + 12] = cents;
+            index += 12;
+        }
+        cents = 0.0;
+        index = a4;
+        while index >= 12 {
+            cents -= 1200.0 * log2f(octave_stretch_ratio(self.engine.inharmonicity[index - 12]));
+            anchor_cents[index - 12] = cents;
+            index -= 12;
+        }
+
+        for index in 0..NOTE_COUNT {
+            // Interpolate the stretch between the surrounding anchors.
+            let below = a4 as isize + (index as isize - a4 as isize).div_euclid(12) * 12;
+            let above = below + 12;
+            let fraction = (index as isize - below) as f32 / 12.0;
+            let below_cents = anchor_cents
+                .get(below.max(0) as usize)
+                .copied()
+                .unwrap_or(0.0);
+            let above_cents = anchor_cents
+                .get((above as usize).min(NOTE_COUNT - 1))
+                .copied()
+                .unwrap_or(below_cents);
+            let stretched = below_cents + (above_cents - below_cents) * fraction;
+            let semitones = index as f32 - a4 as f32;
+            self.engine.fundamental[index] =
+                440.0 * powf(2.0, semitones / 12.0 + stretched / 1200.0);
+        }
+    }
+
+    /// Lays out the soundboard: walk up from 50 Hz taking the measured modal
+    /// spacing at each step, give every mode the loss factor of spruce, and
+    /// jitter frequency, strength and pan so the bank is ragged rather than
+    /// regular.
+    fn tune_board(&mut self) {
+        self.board_dirty = false;
+        // The rim: a sixth-order Butterworth high-pass at the radiation
+        // corner, three biquads whose Q are the Butterworth pole pairs.
+        // Below the corner it falls at 36 dB an octave, the measured law.
+        let corner = RADIATION_CORNER_HZ
+            .get()
+            .clamp(5.0, self.engine.sample_rate * 0.2);
+        let (sin, cos) = sincosf(core::f32::consts::PI * corner / self.engine.sample_rate);
+        let k = sin / cos;
+        for (section, q) in RIM_Q.iter().enumerate() {
+            let norm = 1.0 / (1.0 + k / q + k * k);
+            self.rim_coef[section] = [
+                norm,
+                -2.0 * norm,
+                norm,
+                2.0 * (k * k - 1.0) * norm,
+                (1.0 - k / q + k * k) * norm,
+            ];
+        }
+        for q in 0..BOARD_DRIVE_POINTS {
+            for j in 0..BOARD_DRIVE_POINTS {
+                let x = j as f32 / (BOARD_DRIVE_POINTS - 1) as f32;
+                let (sin, cos) = sincosf(core::f32::consts::PI * q as f32 * x);
+                self.drive_basis_cos[q][j] = cos;
+                self.drive_basis_sin[q][j] = sin;
+            }
+        }
+        let loss = self.engine.controls.board_loss();
+        // The control says how close the modes sit; the budget says how much
+        // of that this machine can afford. Spacing, not a truncated count:
+        // dropping the last modes would cut the top off the body's range,
+        // while spacing them wider keeps the whole range and thins it, which
+        // is what the Density control itself does.
+        let density = self.engine.controls.board_density() * self.board_budget_spacing;
+        let ceiling = if BOARD_TOP_HZ.get() < 0.45 * self.engine.sample_rate {
+            BOARD_TOP_HZ.get()
+        } else {
+            0.45 * self.engine.sample_rate
+        };
+        let mut index = 0;
+        // The measured low modes first: where the reference's board puts
+        // them, each with the ripple the taps read there. `measured` is
+        // their share; the statistical modes under the same knee carry the
+        // rest, so the knob crossfades one bank into the other and the ear
+        // can settle it live.
+        let measured = BOARD_MEASURED_MODES.get().clamp(0.0, 1.0);
+        if measured > 0.0 {
+            let modes = BOARD_LOW_MODES;
+            for (i, (hz, ripple_db)) in modes.iter().copied().enumerate() {
+                if index >= BOARD_MODES || hz >= ceiling {
+                    break;
+                }
+                // The local spacing for the mean-mobility normalisation is
+                // the gap to the neighbours, as it is for the drawn bank.
+                let below = if i > 0 { modes[i - 1].0 } else { 0.0 };
+                let above = if i + 1 < modes.len() {
+                    modes[i + 1].0
+                } else {
+                    BOARD_MEASURED_KNEE_HZ
+                };
+                let spacing_here = 0.5 * (above - below);
+                let (mut mode, cold) = self.board_mode(
+                    0x4D0D_E000 | i as u32,
+                    hz,
+                    spacing_here,
+                    loss,
+                    powf(10.0, ripple_db / 20.0),
+                );
+                mode.drive *= measured;
+                self.board_cold[index] = cold;
+                // A rebuild keeps what the slot was ringing with. Replacing the
+                // resonator whole zeroes its state, and a bank of zeroed
+                // states under a sounding note is a step in the output: the
+                // tick the player hears when a budget lands mid-phrase.
+                let (y1, y2) = (self.board[index].y1, self.board[index].y2);
+                self.board[index] = mode;
+                self.board[index].y1 = y1;
+                self.board[index].y2 = y2;
+                index += 1;
+            }
+        }
+        let mut frequency = BOARD_BOTTOM_HZ.get();
+        // The drawn modes keep their own count for the seeds: with the
+        // measured set in front of them their slot moves, and a seed taken
+        // from the slot would re-roll every drawn mode's jitter, pan,
+        // strength and sign the moment the knob left zero -- a different
+        // bank above the knee, not a different bank below it.
+        let mut drawn = 0u32;
+        while index < BOARD_MODES && frequency < ceiling {
+            let seed = drawn;
+            drawn += 1;
+            // ±3% of the local spacing, so neighbouring modes crowd and part
+            // the way a real plate's do instead of marching in step.
+            let jitter = 1.0 + 0.06 * (hash01(0xB0A2D ^ seed << 3) - 0.5);
+            let placed = frequency * jitter;
+            // A real plate's mobility is ragged: per-mode strength swings
+            // ~±8 dB — a bank of equal modes is only a volume knob.
+            let strength = 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
+            let (mut mode, cold) = self.board_mode(
+                seed,
+                placed,
+                board_spacing(frequency, density),
+                loss,
+                strength,
+            );
+            self.board_cold[index] = cold;
+            if placed < BOARD_MEASURED_KNEE_HZ {
+                mode.drive *= 1.0 - measured;
+            }
+            let (y1, y2) = (self.board[index].y1, self.board[index].y2);
+            self.board[index] = mode;
+            self.board[index].y1 = y1;
+            self.board[index].y2 = y2;
+            frequency += board_spacing(frequency, density);
+            index += 1;
+        }
+        self.board_count = index;
+        for slot in self.board.iter_mut().skip(index) {
+            *slot = BoardMode::default();
+        }
+        self.pair_next = 0;
+    }
+
+    /// One mode of the board bank at `placed` hertz: its damping from the
+    /// measured plate's law, its drive normalised for a level mean mobility
+    /// over `spacing_here`, coloured by the measured chain transfer, scaled
+    /// by `strength` (the drawn bank's ±8 dB lottery, or a measured mode's
+    /// ripple), rolled off below the radiation corner and the coincidence
+    /// corner, panned and signed by hash.
+    /// The Rayleigh integral of every board mode toward each capsule, a
+    /// few modes per block from `pair_next` until the board is done. See
+    /// `BOARD_PAIR`.
+    fn tune_pair(&mut self) {
+        if self.pair_next >= self.board_count {
+            return;
+        }
+        let from = self.pair_next;
+        let to = (from + PAIR_MODES_PER_BLOCK).min(self.board_count);
+        self.pair_next = to;
+        if BOARD_PAIR.get() < 0.5 {
+            for (mode, cold) in self.board[from..to]
+                .iter_mut()
+                .zip(self.board_cold[from..to].iter())
+            {
+                mode.out_y = [cold.pan_left, cold.pan_right];
+                mode.out_y1 = [0.0, 0.0];
+            }
+            return;
+        }
+        let height = clamp_between(
+            self.engine.controls.mic_distance,
+            MIC_DISTANCE_MIN_M.get(),
+            MIC_DISTANCE_MAX_M.get(),
+        );
+        let half = 0.5 * MIC_SPACING_M.get() * self.engine.controls.width;
+        let capsules = [0.5 * BRIDGE_LENGTH_M - half, 0.5 * BRIDGE_LENGTH_M + half];
+        let pattern = self.engine.controls.mic_pattern;
+        let speed = SOUND_SPEED.get();
+        const ALONG: usize = 40;
+        const ACROSS: usize = 7;
+        let sample_rate = self.engine.sample_rate;
+        for (mode, cold) in self.board[from..to]
+            .iter_mut()
+            .zip(self.board_cold[from..to].iter())
+        {
+            let frequency = cold.omega * sample_rate / core::f32::consts::TAU;
+            let k = core::f32::consts::TAU * frequency / speed;
+            let mut gains = [(0.0f32, 0.0f32); 2];
+            for i in 0..ALONG {
+                let x = (i as f32 + 0.5) / ALONG as f32;
+                // The same window the excitation reads through: a mode that
+                // only hears its bay must only speak from it, or the board
+                // radiates energy no string ever put into it.
+                let along =
+                    sincosf(core::f32::consts::PI * mode.shape_q as f32 * x + cold.shape_theta).1;
+                for j in 0..ACROSS {
+                    let y = ((j as f32 + 0.5) / ACROSS as f32 - 0.5) * BOARD_WIDTH_M;
+                    let across = sincosf(
+                        core::f32::consts::PI * cold.shape_qy * y / BOARD_WIDTH_M
+                            + cold.shape_theta_y,
+                    )
+                    .1;
+                    let shape = 2.0 * along * across;
+                    for (m, capsule) in capsules.iter().enumerate() {
+                        let dx = x * BRIDGE_LENGTH_M - capsule;
+                        let r = sqrtf(dx * dx + y * y + height * height).max(1e-3);
+                        let directivity = (1.0 - pattern) + pattern * height / r;
+                        let (sin_kr, cos_kr) = sincosf(-k * r);
+                        let weight = shape * directivity / r / (ALONG * ACROSS) as f32;
+                        gains[m].0 += weight * cos_kr;
+                        gains[m].1 += weight * sin_kr;
+                    }
+                }
+            }
+            // Every mode keeps the power its pan gave it: 0.5 for the pair.
+            let power = gains[0].0 * gains[0].0
+                + gains[0].1 * gains[0].1
+                + gains[1].0 * gains[1].0
+                + gains[1].1 * gains[1].1;
+            let scale = if power > 0.0 { sqrtf(0.5 / power) } else { 0.0 };
+            for gain in gains.iter_mut() {
+                gain.0 *= scale;
+                gain.1 *= scale;
+            }
+            mode.set_pair(gains, cold.omega);
+        }
+    }
+
+    fn board_mode(
+        &self,
+        seed: u32,
+        placed: f32,
+        spacing_here: f32,
+        loss: f32,
+        strength: f32,
+    ) -> (BoardMode, BoardCold) {
+        let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ seed << 5);
+        // The lowest modes of a real board are the most damped -- three
+        // to five percent against two above the ribs' transition -- and
+        // wide enough that no bass fundamental falls into a hole between
+        // two neighbours of opposite sign. The loss rises toward the
+        // bottom, log-linear from 300 Hz down to BOARD_LOW_LOSS at 50 Hz.
+        let low = (log2f(300.0 / placed.max(20.0)) / log2f(6.0)).clamp(0.0, 1.0);
+        let loss_here = loss * powf(BOARD_LOW_LOSS.get() / BOARD_LOSS_FACTOR.get(), low);
+        let (mut mode, mut cold) = BoardMode::tune(
+            placed,
+            board_t60(placed, loss_here),
+            pan,
+            self.engine.sample_rate,
+        );
+        // Skudrzyk: a plate's MEAN mobility is flat with frequency,
+        // whatever its modal density and damping. A bank of unit-gain
+        // peaks is not -- where the modes overlap more the mean rises --
+        // so each peak is scaled by the square root of its spacing over
+        // its bandwidth, and the mean comes out level.
+        let bandwidth = (loss_here * placed).max(1e-3);
+        mode.drive *= sqrtf(spacing_here.max(1e-3) / bandwidth).min(BOARD_MEAN_CAP.get())
+            * BOARD_MEAN_MOBILITY.get();
+        // Then the chain as measured: the flat mean is Skudrzyk's plate
+        // alone, and what reaches a microphone is that plate radiating
+        // into a lid and a room, which is not flat -- see the table.
+        mode.drive *= board_transfer(placed);
+        mode.drive *= strength;
+        // The mode shape at the bridge is as often negative as positive.
+        //
+        // A mode's transfer from the bridge to the ear is the product of
+        // its shape at the drive point and its net radiating area, and both
+        // alternate as the shapes gain nodal lines -- a real plate's
+        // transfer flips sign mode to mode. A bank of all-positive modes in
+        // parallel with the through path notches every anti-resonance
+        // coherently: measured on B3, the bank alone carved its eleventh
+        // partial 8.4 dB below the naked string sum, its twelfth 10, in a
+        // fixed-in-Hz patchwork that gave every note a different ragged
+        // ladder -- the bell-like strike the ear reported.
+        //
+        // Only below BOARD_SIGN_TOP_HZ. Above the ribbed-plate transition
+        // the modes are sparse against their bandwidth (at 4 kHz the spacing
+        // is 113 Hz and the bandwidth 92), and two neighbours of opposite
+        // sign notch the transfer between them by twenty decibels or more.
+        // Measured on the grid (2026-09-07): the treble's second partial
+        // swung +-30 dB from note to note and re-rolled entirely when the
+        // bank's density moved -- a lottery, not a board. A real plate up
+        // there has heavy modal overlap and a smooth, ragged-by-5-dB
+        // transfer; one sign with the strength swing kept gives that.
+        if placed < BOARD_SIGN_TOP_HZ.get() && hash01(0x51C4 ^ seed << 9) < 0.5 {
+            mode.drive = -mode.drive;
+        }
+        {
+            let depth = BOARD_SHAPE.get().clamp(0.0, 1.0);
+            let theta = core::f32::consts::TAU * hash01(0x5A4E ^ seed << 11);
+            let (sin_theta, cos_theta) = sincosf(theta);
+            let half_waves = (BOARD_DRIVE_POINTS - 1) as f32 * sqrtf(placed / BOARD_SHAPE_TOP_HZ);
+            // The plate's wavenumber points somewhere between along the
+            // bridge and across the board; along the bridge the shape has
+            // its cosine of that share, across it the sine.
+            let (sin_alpha, cos_alpha) =
+                sincosf(core::f32::consts::FRAC_PI_2 * hash01(0x2D1E ^ seed << 13));
+            cold.shape_qy = half_waves * sin_alpha * BOARD_WIDTH_M / BRIDGE_LENGTH_M;
+            cold.shape_theta_y = core::f32::consts::TAU * hash01(0x7E1A ^ seed << 15);
+            if placed < BOARD_SHAPE_FLOOR_HZ {
+                // The whole board, in phase, from every string.
+                mode.shape_q = 0;
+                cold.shape_theta = 0.0;
+                mode.shape_a = 1.0;
+                mode.shape_b = 0.0;
+                mode.shape_c = 0.0;
+            } else {
+                mode.shape_q =
+                    (roundf(half_waves * cos_alpha) as u16).clamp(1, BOARD_DRIVE_POINTS as u16 - 1);
+                cold.shape_theta = theta;
+                mode.shape_a = 1.0 - depth;
+                mode.shape_b = depth * core::f32::consts::SQRT_2 * cos_theta;
+                mode.shape_c = -depth * core::f32::consts::SQRT_2 * sin_theta;
+            }
+        }
+        // The board does not radiate its own lowest modes any more than it
+        // radiates a string's lowest partials -- and it radiates a string's
+        // partials below its lowest mode less still. That is the rim, a
+        // filter on the bank's sum (`RADIATION_CORNER_HZ`), where it also
+        // reaches the tail of the 50 Hz mode that a 27 Hz fundamental
+        // leaves through. It used to be a factor here, on each mode's
+        // drive: it held the 49.8 Hz drone every treble strike kicked, and
+        // it could not hold A0.
+        // Below coincidence a plate radiates poorly: the near-field of
+        // neighbouring antinodes cancels. A first-order rise toward the
+        // corner keeps the bass fundamental where the references put it,
+        // well under its own second and third partials.
+        let ratio = powf(
+            placed / BOARD_COINCIDENCE_HZ.get(),
+            BOARD_RADIATION_ORDER.get(),
+        );
+        mode.drive *= ratio / (1.0 + ratio);
+        (mode, cold)
+    }
+
+    /// Retunes the undamped top-octave strings.
+    /// Lays the duplex bank out across its range with scattered spacing.
+    ///
+    /// Geometric progression for the placement, then each pitch is pushed off
+    /// it by up to a third of the gap to its neighbour. Even spacing in log
+    /// frequency would beat against the partial ladder of every note in the
+    /// same way and read as a chord; scattered spacing reads as a mat.
+    /// Retunes the damped strings' bed to the instrument's own fundamentals.
+    fn tune_bed(&mut self) {
+        let t60_bottom = BED_T60_S.get().max(0.05);
+        for (i, string) in self.bed.iter_mut().enumerate() {
+            let hz = self.engine.fundamental[i.min(NOTE_COUNT - 1)].max(20.0);
+            // A damper is the same felt on every string, but a wound bass
+            // string carries ten times the mass per metre of a plain tenor
+            // one, so the felt takes seconds to stop it and under a second
+            // to stop a plain string. The ring falls from BED_T60_S at A0 to
+            // a fifth of it at the top of the bed, log-linear -- which is
+            // also what keeps a damped chord's tail a tail
+            // (`the_staging_leaves_a_tail_that_dies`).
+            let t60 = t60_bottom * powf(0.2, i as f32 / (BED_COUNT - 1) as f32);
+            // Along the bridge, bass to the left as the pair hears it.
+            let pan = 0.3 + 0.4 * i as f32 / (BED_COUNT - 1) as f32;
+            *string = BodyMode::tune(hz, t60, pan, self.engine.sample_rate);
+        }
+    }
+
+    /// The hammer's speed at let-off and at the string for a unit velocity:
+    /// the action's calibrated law, the keyboard's knee under it, and the
+    /// flight's toll between the two. See `LETOFF_DISTANCE_MM`.
+    /// Nothing in the render asks this any more: a strike carries the
+    /// scaling it was given. It is the tests' window onto the law.
+    #[cfg(test)]
+    fn hammer_speeds(&self, velocity: f32) -> (f32, f32) {
+        self.engine
+            .hammer_speeds_at(self.repetition_scale, velocity)
+    }
+
+    /// A key down without a strike: its string, damper up, joins the
+    /// conversation the way the top octave's do.
+    fn hold_silent(&mut self, note: u8) {
+        if let Some(slot) = self.silent_slot_of(note) {
+            self.silent_state[slot] = SILENT_HELD;
+            return;
+        }
+        // A free slot, or the one closest to being given back.
+        let slot = (0..SILENT_SLOTS)
+            .find(|&slot| self.silent_state[slot] == SILENT_FREE)
+            .or_else(|| {
+                (0..SILENT_SLOTS)
+                    .filter(|&slot| self.silent_state[slot] == SILENT_DAMPED)
+                    .min_by_key(|&slot| self.silent_in[slot])
+            });
+        let Some(slot) = slot else {
+            return;
+        };
+        self.tune_silent(slot, note);
+        self.silent_note[slot] = note;
+        self.silent_state[slot] = SILENT_HELD;
+        self.silent_in[slot] = 0;
+    }
+
+    fn silent_slot_of(&self, note: u8) -> Option<usize> {
+        (0..SILENT_SLOTS)
+            .find(|&slot| self.silent_state[slot] != SILENT_FREE && self.silent_note[slot] == note)
+    }
+
+    fn free_silent(&mut self, note: u8) {
+        if let Some(slot) = self.silent_slot_of(note) {
+            self.silent_state[slot] = SILENT_FREE;
+            self.queue_silent_work(slot, 0.0);
+        }
+    }
+
+    /// The felt landing on a silent string: its modes' radii scaled from
+    /// here on, and the slot given back once the felt's work is done.
+    fn queue_silent_work(&mut self, slot: usize, factor: f32) {
+        if self.silent_work_len < self.silent_work.len() {
+            self.silent_work[self.silent_work_len] = (self.span_offset, slot as u8, factor);
+            self.silent_work_len += 1;
+        }
+    }
+
+    fn run_silent_work(&mut self, offset: u16) {
+        for index in 0..self.silent_work_len {
+            let (at, slot, factor) = self.silent_work[index];
+            if at != offset {
+                continue;
+            }
+            let base = slot as usize * SILENT_MODES_PER_SLOT;
+            if factor == 0.0 {
+                for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+                    *mode = BodyMode::default();
+                }
+            } else {
+                for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+                    mode.damp(factor);
+                }
+            }
+        }
+    }
+
+    fn damp_silent(&mut self, slot: usize, factor: f32) {
+        self.queue_silent_work(slot, factor);
+        self.silent_state[slot] = SILENT_DAMPED;
+        self.silent_in[slot] = (SILENT_RELEASE_S * self.engine.sample_rate) as u32;
+    }
+
+    /// The silent string's partials, tuned as the undamped bank's are but
+    /// ringing as the string itself does at that pitch: the voices' own
+    /// slow-stage law, since a free string with no hammer on it is exactly
+    /// the tail of a note.
+    fn tune_silent(&mut self, slot: usize, note: u8) {
+        let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
+        let f0 = self.engine.fundamental[index].max(20.0);
+        let b = self.engine.inharmonicity_for(note);
+        let position = index as f32 / (NOTE_COUNT - 1) as f32;
+        let pan = (0.5 + 0.8 * (position - 0.5) * self.engine.controls.width).clamp(0.05, 0.95);
+        let high = 0.45 * self.engine.sample_rate;
+        let base = slot * SILENT_MODES_PER_SLOT;
+        let mut cursor = 0;
+        for k in 1..=FREE_STRING_PARTIALS {
+            let kf = k as f32;
+            let hz = kf * f0 * sqrtf(1.0 + b * kf * kf);
+            if hz >= high {
+                break;
+            }
+            let t60 = self.engine.slow_t60_seconds(hz, f0, 1.0).max(0.05);
+            let spread =
+                FREE_STRING_DETUNE_CENTS * (0.5 + hash01((note as u32) << 4 | k as u32)) / 1200.0;
+            for side in [-0.5f32, 0.5] {
+                let tuned = hz * powf(2.0, side * spread);
+                let mut string = BodyMode::tune(tuned, t60, pan, self.engine.sample_rate);
+                string.drive *= 0.7;
+                self.silent[base + cursor] = string;
+                cursor += 1;
+            }
+        }
+        for mode in &mut self.silent[base + cursor..base + SILENT_MODES_PER_SLOT] {
+            *mode = BodyMode::default();
+        }
+    }
+
+    fn tune_undamped(&mut self) {
+        self.tune_bed();
+        let low = UNDAMPED_LOW_HZ.get().min(UNDAMPED_HIGH_HZ.get());
+        let high = UNDAMPED_HIGH_HZ
+            .get()
+            .max(low * 1.01)
+            .min(0.45 * self.engine.sample_rate);
+        let mut index = 0;
+        for note in (self.engine.controls.last_damper + 1)..=(LOW_NOTE + NOTE_COUNT as u8 - 1) {
+            let f0 = self.engine.fundamental[(note - LOW_NOTE) as usize].max(20.0);
+            let b = self.engine.inharmonicity_for(note);
+            let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+            let pan = (0.5 + 0.8 * (position - 0.5) * self.engine.controls.width).clamp(0.05, 0.95);
+            for k in 1..=self.undamped_partials {
+                if index >= UNDAMPED_COUNT {
+                    break;
+                }
+                let kf = k as f32;
+                let hz = kf * f0 * sqrtf(1.0 + b * kf * kf);
+                if hz >= high {
+                    break;
+                }
+                // The ring falls with frequency between the range's ends.
+                let t = ((hz - low) / (high - low)).clamp(0.0, 1.0);
+                let t60 = UNDAMPED_T60_LOW_S.get()
+                    + (UNDAMPED_T60_HIGH_S.get() - UNDAMPED_T60_LOW_S.get()) * t;
+                let spread = FREE_STRING_DETUNE_CENTS
+                    * (0.5 + hash01((note as u32) << 4 | k as u32))
+                    / 1200.0;
+                for side in [-0.5f32, 0.5] {
+                    if index >= UNDAMPED_COUNT {
+                        break;
+                    }
+                    let tuned = hz * powf(2.0, side * spread);
+                    let mut string = BodyMode::tune(tuned, t60, pan, self.engine.sample_rate);
+                    string.drive *= 0.7;
+                    let (y1, y2) = (self.undamped[index].y1, self.undamped[index].y2);
+                    self.undamped[index] = string;
+                    self.undamped[index].y1 = y1;
+                    self.undamped[index].y2 = y2;
+                    self.undamped_note[index] = note;
+                    index += 1;
+                }
+            }
+        }
+        for (string, owner) in self
+            .undamped
+            .iter_mut()
+            .zip(self.undamped_note.iter_mut())
+            .skip(index)
+        {
+            *string = BodyMode::default();
+            *owner = 0;
+        }
+        // A zeroed resonator still rotates, and rotating zero costs what
+        // rotating anything costs. What is not built is not ticked.
+        self.undamped_active = index;
+    }
+
+    fn tune_open_strings(&mut self) {
+        for (string, (frequency, t60, pan)) in self.open_strings.iter_mut().zip(OPEN_STRINGS) {
+            *string = if frequency < 0.45 * self.engine.sample_rate {
+                let mut tuned = BodyMode::tune(frequency, t60, pan, self.engine.sample_rate);
+                // A long string's bandwidth is under a hertz: at unit peak
+                // gain it would catch nothing from a transient. The bridge
+                // feeds it far better than that — calibrated against the
+                // YDP's sustained 3-8 kHz halo.
+                tuned.drive *= 45.0;
+                tuned
+            } else {
+                BodyMode::default()
+            };
+        }
+    }
+
+    /// Sizes the shimmer's delay lines for the current rate.
+    fn tune_halo(&mut self) {
+        for (line, delay) in HALO_DELAYS_S.iter().copied().enumerate() {
+            self.halo_len[line] =
+                ((delay * self.engine.sample_rate) as usize).clamp(1, HALO_BUFFER - 1);
+            self.halo_index[line] %= self.halo_len[line];
+            self.halo_gain[line] = powf(10.0, -3.0 * delay / HALO_RT60_S.get());
+        }
+        self.halo_hp_k =
+            1.0 - expf(-core::f32::consts::TAU * HALO_HP_HZ.get() / self.engine.sample_rate);
+    }
+
+    /// Sizes the chamber's delay lines and feedback for the current rate.
+    fn tune_room(&mut self) {
+        // The space the sliders describe. The control is the volume itself, in
+        // cubic metres, shaped into a hall-ish box (2.4 : 1.6 : 1); per-band
+        // absorption comes from one hardness axis, where soft surfaces eat the
+        // top first and take the lows with the mids, and hard ones keep the
+        // top ringing and let the lows boom.
+        let volume = clamp_between(
+            self.engine.controls.room_size,
+            ROOM_VOLUME_MIN_M3.get(),
+            ROOM_VOLUME_MAX_M3.get(),
+        );
+        let scale = powf(volume / 3.84, 1.0 / 3.0);
+        let (length, width, height) = (2.4 * scale, 1.6 * scale, scale);
+        let surface = 2.0 * (length * width + length * height + width * height);
+        let mean_free_path = 4.0 * volume / surface;
+        let hardness = self.engine.controls.room_hardness;
+        let alpha_mid = 0.5 * expf(-2.6 * hardness) + 0.035;
+        let alpha_high = alpha_mid * (1.0 + 1.3 * (1.0 - hardness));
+        let alpha_low = alpha_mid * (0.55 + 0.65 * hardness);
+        // Sabine per band, with the air taking the top of big rooms no
+        // matter what the walls are made of.
+        let rt = |alpha: f32, air_per_m: f32| -> f32 {
+            (0.161 * volume / (surface * alpha + 4.0 * air_per_m * volume)).clamp(0.10, 12.0)
+        };
+        let rt_low = rt(alpha_low, 0.0);
+        let rt_mid = rt(alpha_mid, 0.0002);
+        let rt_high = rt(alpha_high, AIR_ABSORB_4K_PER_M.get());
+
+        for (line, spread) in ROOM_SPREAD.iter().copied().enumerate() {
+            let seconds = mean_free_path / SOUND_SPEED.get() * spread;
+            let samples = ((seconds * self.engine.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+            self.room_len[line] = samples;
+            self.room_index[line] %= samples;
+            // Per-line gain so every path decays at the mid-band RT60.
+            self.room_gain[line] = powf(10.0, -3.0 * seconds / rt_mid);
+            // The in-loop lowpass takes the highs down to their own faster
+            // RT60: its response at the damping corner supplies the extra
+            // per-pass loss 10^(-3*seconds*(1/rt_high - 1/rt_mid)).
+        }
+        // The in-loop lowpass takes the highs down to their own faster RT60:
+        // one shared corner, from the mean path's required extra loss at
+        // 4 kHz.
+        let seconds_mean = mean_free_path / SOUND_SPEED.get();
+        let extra_high = powf(10.0, -3.0 * seconds_mean * (1.0 / rt_high - 1.0 / rt_mid));
+        let corner = (4200.0 * extra_high / (1.0 - extra_high + 1e-4)).clamp(300.0, 16_000.0);
+        self.room_damp = 1.0 - expf(-core::f32::consts::TAU * corner / self.engine.sample_rate);
+        // The low shelf: gain that takes 150 Hz to its own RT60.
+        let low_ratio = powf(10.0, -3.0 * seconds_mean * (1.0 / rt_low - 1.0 / rt_mid));
+        self.room_low_gain = (low_ratio - 1.0).clamp(-0.6, 0.35);
+        self.room_low_coeff = 1.0 - expf(-core::f32::consts::TAU * 150.0 / self.engine.sample_rate);
+
+        // The microphones, as two capsules rather than one point. Distance
+        // on a log axis; the direct sound falls as r_ref/r per capsule, the
+        // reverberant field holds, and the early reflections arrive from their
+        // mirror images along each capsule's own path.
+        // The control is the distance, in metres. It used to be a position on
+        // a log axis between these two knobs; they are still the range the
+        // model will work over, but they bound the value now rather than
+        // defining it. The fader keeps its feel through the logarithmic taper
+        // its descriptor declares, which is a property of the control and not
+        // of the number.
+        let distance = clamp_between(
+            self.engine.controls.mic_distance,
+            MIC_DISTANCE_MIN_M.get(),
+            MIC_DISTANCE_MAX_M.get(),
+        );
+        // The pattern axis b: p(theta) = (1-b) + b*cos(theta). Random-energy
+        // efficiency is what a capsule hears of a DIFFUSE field, which depends
+        // on the pattern and not on where the capsule stands, so it stays
+        // shared between the two.
+        let b = self.engine.controls.mic_pattern;
+        let random_energy = (1.0 - b) * (1.0 - b) + b * b / 3.0;
+        self.reverb_gain = sqrtf(random_energy) / 0.577;
+
+        // The piano stands a third of the way down the hall, mid-width,
+        // soundboard at 1 m; the pair faces it from `distance` away, ears at
+        // 1.4 m.
+        let piano = (0.33 * length, 0.5 * width, 1.0_f32);
+        let (az_sin, az_cos) = sincosf(MIC_AZIMUTH_RAD.get());
+        let reach = distance.min(0.6 * length);
+        // Close, the pair is lowered toward the strings, as an engineer does;
+        // at the reference distance and beyond it stands at ear height. With
+        // the height fixed at 1.4 m the bottom fifth of the fader changed the
+        // path by centimetres, and Mic Distance did nothing there.
+        //
+        // Named for what it is, and not `height`: that name is the ROOM's
+        // height a few lines up, and shadowing it put the ceiling image at
+        // the pair's own height. The mirror then sat at the same distance as
+        // the direct path, the clamp below pushed it to direct + 0.1 m, and
+        // every note in the compass went through a comb whose first notch
+        // is at 343 / (2 * 0.1) = 1.7 kHz. Measured on the partial envelope
+        // of all 30 grid notes against the reference: a fixed 15 dB hole
+        // from 1.4 to 2 kHz, present in every register alike, that vanished
+        // with the air chain off and survived the lid and the chamber being
+        // turned down one at a time.
+        let pair_height =
+            piano.2 + MIC_HEIGHT_M.get() * (reach / MIC_REFERENCE_M.get()).clamp(0.0, 1.0);
+        let centre = (
+            0.33 * length + reach * az_cos,
+            (0.5 * width - reach * az_sin).max(0.3),
+            pair_height,
+        );
+        // Both capsules look back at the instrument, splayed either side of
+        // that line. The splay is what makes the pattern axis do directional
+        // work: a cardioid turned 55 degrees off the source hears the near
+        // wall and the far wall quite differently, and an omni does not.
+        let aim = {
+            let (dx, dy) = (piano.0 - centre.0, piano.1 - centre.1);
+            let length = sqrtf(dx * dx + dy * dy).max(1e-3);
+            (dx / length, dy / length)
+        };
+        let (sin_half, cos_half) = sincosf(MIC_HALF_ANGLE_RAD);
+        let images = [
+            (piano.0, piano.1, -piano.2),               // floor
+            (piano.0, piano.1, 2.0 * height - piano.2), // ceiling
+            (piano.0, -piano.1, piano.2),               // near wall
+            (piano.0, 2.0 * width - piano.1, piano.2),  // far wall
+            (-piano.0, piano.1, piano.2),               // back wall
+            (2.0 * length - piano.0, piano.1, piano.2), // front wall
+        ];
+        let reflect = 1.0 - alpha_mid;
+        let lid_angle = self.lid_radians();
+        for side in 0..2 {
+            let turn = if side == 0 { 1.0 } else { -1.0 };
+            // The capsule, offset across the pair's line and turned outward.
+            let across = (-aim.1, aim.0);
+            let half = 0.5 * MIC_SPACING_M.get() * turn;
+            let mic = (
+                centre.0 + across.0 * half,
+                centre.1 + across.1 * half,
+                centre.2,
+            );
+            let axis = (
+                aim.0 * cos_half - aim.1 * sin_half * turn,
+                aim.1 * cos_half + aim.0 * sin_half * turn,
+            );
+            // What this capsule makes of a source at `point`: its distance and
+            // its polar response at the angle the source arrives from. The
+            // sign is kept -- a figure-of-eight really does invert what
+            // reaches it from behind, and two capsules disagreeing about that
+            // is a thing a pair does.
+            let heard = |point: (f32, f32, f32)| -> (f32, f32) {
+                let (dx, dy, dz) = (point.0 - mic.0, point.1 - mic.1, point.2 - mic.2);
+                let range = sqrtf(dx * dx + dy * dy + dz * dz).max(0.3);
+                let cosine = (dx * axis.0 + dy * axis.1) / range;
+                (range, (1.0 - b) + b * cosine)
+            };
+            let (direct_path, direct_response) = heard(piano);
+            // The direct sound falls as r_ref / r, and the cap sits well past
+            // the closest the fader reaches. It used to sit at 3.0, which the
+            // fader's whole bottom fifth (0.5 to 0.83 m, the default among it)
+            // was clamped to -- measured, Mic Distance did nothing there.
+            let near = (MIC_REFERENCE_M.get() / direct_path).clamp(0.12, MIC_NEAR_CAP.get())
+                * MIC_PREAMP.get();
+            self.direct_gain[side] = near * direct_response;
+            // The keyboard: farther by its offset, and further off the
+            // capsule's axis by the same geometry.
+            let keybed_path = sqrtf(direct_path * direct_path + KEYBED_OFFSET_M * KEYBED_OFFSET_M);
+            let keybed_response = (1.0 - b)
+                + b * (direct_response - (1.0 - b)) / b.max(1e-3) * (direct_path / keybed_path);
+            self.keybed_gain[side] = (MIC_REFERENCE_M.get() / keybed_path).min(MIC_NEAR_CAP.get())
+                * MIC_PREAMP.get()
+                * keybed_response;
+            // Proximity: the pressure-gradient term rises as c/(2*pi*f*r).
+            // Felt below ~ c/(2*pi*r); rendered as a 120 Hz shelf whose gain
+            // follows b/r, and each capsule has its own r.
+            self.proximity_gain[side] =
+                PROXIMITY_STRENGTH.get() * b * (1.0 / direct_path) * MIC_REFERENCE_M.get();
+            for (slot, image) in self.early_taps[side].iter_mut().zip(images) {
+                let (path, response) = heard(image);
+                let path = path.max(direct_path + 0.1);
+                let delay_s = (path - direct_path) / SOUND_SPEED.get();
+                let samples =
+                    ((delay_s * self.engine.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+                let gain = reflect * (direct_path / path) * response * near;
+                *slot = (samples, gain);
+            }
+            // The lid: hinged along the far side of the rim, raised by the
+            // control, and the board's image in it heard like any other
+            // surface -- from four points of the board, bass to treble and
+            // hinge to far rim, so the reflection is a smear rather than one
+            // comb. A finite
+            // lid: the point where the path meets the plane must lie on it,
+            // and the reflection fades as it runs off the edge. Closed, most
+            // of it goes back into the case, and what leaks past the rim is
+            // dark.
+            let (lid_sin, lid_cos) = sincosf(lid_angle);
+            let half_width = LID_HALF_WIDTH_M.get();
+            let hinge_y = piano.1 + half_width;
+            let leak = powf(LID_CLOSED_LEAK.get(), 1.0 - self.lid_fraction());
+            for ((along_hinge, across), tap) in
+                [(-0.6f32, -0.45f32), (0.6, -0.45), (-0.6, 0.45), (0.6, 0.45)]
+                    .into_iter()
+                    .zip(self.lid_tap[side].iter_mut())
+            {
+                // Four points of the board: two along the hinge, two across
+                // it, because the lid's height above the board -- and so the
+                // reflection's detour -- grows from nothing at the hinge to its
+                // most at the far rim.
+                let source = (
+                    piano.0 + along_hinge * LID_HALF_LENGTH_M.get(),
+                    piano.1 + across * half_width,
+                    piano.2,
+                );
+                let image = (
+                    source.0,
+                    source.1 + 2.0 * half_width * lid_sin * lid_sin,
+                    source.2 + 2.0 * half_width * lid_sin * lid_cos,
+                );
+                // Against the direct path from the same end of the board, not
+                // from its centre: the reflection's delay is its own detour.
+                let (source_path, _) = heard(source);
+                let (path, response) = heard(image);
+                let path = path.max(source_path + 0.02);
+                // Where the mic-to-image line crosses the lid's plane, in the
+                // lid's own coordinates: along the hinge, and up the lid from
+                // the hinge.
+                let normal = (0.0f32, lid_sin, lid_cos);
+                let to_image = (image.0 - mic.0, image.1 - mic.1, image.2 - mic.2);
+                let mic_height = (mic.1 - hinge_y) * normal.1 + (mic.2 - piano.2) * normal.2;
+                let image_height = (image.1 - hinge_y) * normal.1 + (image.2 - piano.2) * normal.2;
+                let t = (mic_height / (mic_height - image_height).max(1e-3)).clamp(0.0, 1.0);
+                let hit = (
+                    mic.0 + t * to_image.0,
+                    mic.1 + t * to_image.1,
+                    mic.2 + t * to_image.2,
+                );
+                let along = hit.0 - piano.0;
+                let up = -(hit.1 - hinge_y) * lid_cos + (hit.2 - piano.2) * lid_sin;
+                let edge = 0.3;
+                let on_lid = (1.0 - ((along.abs() - LID_HALF_LENGTH_M.get()) / edge).max(0.0))
+                    .clamp(0.0, 1.0)
+                    * (1.0 - ((up - 2.0 * half_width) / edge).max(0.0)).clamp(0.0, 1.0)
+                    * (1.0 + (up / edge).min(0.0)).clamp(0.0, 1.0);
+                let delay_s = (path - source_path) / SOUND_SPEED.get();
+                let samples =
+                    ((delay_s * self.engine.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+                *tap = (
+                    samples,
+                    0.25 * LID_REFLECT.get()
+                        * leak
+                        * on_lid
+                        * (direct_path / path)
+                        * response
+                        * near,
+                );
+            }
+        }
+        let lid_corner = LID_CLOSED_HZ.get()
+            * powf(LID_OPEN_HZ.get() / LID_CLOSED_HZ.get(), self.lid_fraction());
+        self.lid_damp = 1.0
+            - expf(
+                -core::f32::consts::TAU * lid_corner.min(0.45 * self.engine.sample_rate)
+                    / self.engine.sample_rate,
+            );
+        self.early_gain = 0.55 * self.reverb_gain;
+        self.room_dirty = false;
+        self.pair_next = 0;
+    }
+
+    fn start_voice(&mut self, channel: u8, note: u8, velocity: u8) {
+        self.plan_strike(channel, note, velocity as f32 / 127.0);
+    }
+
+    /// The coordinator's half of a note-on: choose the slot, and write the
+    /// strike into the work of the section that owns it.
+    ///
+    /// Choosing is all that happens here. The work itself is read back and
+    /// done at the frame it was written for, which today is the same frame
+    /// in the same pass -- and is why the fingerprint can still guard this.
+    fn plan_strike(&mut self, channel: u8, note: u8, velocity: f32) {
+        let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
+        // The key is down from here, whether or not a hammer arrives and
+        // whether or not a voice was free. It is the coordinator that
+        // tracks the keys, so this cannot wait for the section to run.
+        self.key_down[index] = true;
+        // Where the key was when it was pressed again: all the way up, or
+        // still on its way back from the last key-up. Below the repetition
+        // point the jack has not reset -- the key goes down and lifts its
+        // damper again, and the hammer stays where it is. Above it the blow
+        // comes from the back check, lighter, growing back to the full one
+        // as the key returns the rest of the way.
+        let since = self.clock.wrapping_sub(self.key_up_at[index]);
+        let returned = if self.key_return[index] == 0 {
+            1.0
+        } else {
+            (since as f32 / self.key_return[index] as f32).min(1.0)
+        };
+        if returned < KEY_REPETITION_POINT.get().clamp(0.0, 0.99) {
+            // No hammer flies, so no voice is taken. Whether any string is
+            // there to catch is read here rather than reported back from
+            // the sections: it is `active` and the note, which the sections
+            // do not change while they catch.
+            let caught = self
+                .summary
+                .iter()
+                .any(|voice| voice.active && voice.note == note && voice.channel == channel);
+            if !caught {
+                self.hold_silent(note);
+            }
+            self.broadcast_voice_work(VoiceRecord {
+                kind: VoiceRecord::CATCH,
+                channel,
+                note,
+                ..VoiceRecord::EMPTY
+            });
+            return;
+        }
+        // The escapement: the hammer flies the let-off on its own, and a
+        // hammer let off too slowly turns back short of the string. The key
+        // is down and its damper is up; the string is free and silent -- and
+        // no voice is taken, which is why this is decided here.
+        let (_, _, repetition, at_string) = self.engine.action_blow(velocity, self.soft, returned);
+        if at_string <= 0.0 {
+            self.hold_silent(note);
+            return;
+        }
+        // A struck string is its voice; a silent string it may have been is
+        // that voice now.
+        self.free_silent(note);
+        // A RE-STRUCK STRING IS THE SAME STRING, and only the section that
+        // owns it can strike it. So the choice of WHICH string is made here,
+        // from the picture, and the section is told: this slot. When no
+        // string of this note is free to be re-struck, the blow goes to a
+        // fresh slot and every section eases out whatever it is holding of
+        // that note -- which is the path a string under a damper takes,
+        // since its decay rates have been scaled and it cannot honestly be
+        // re-lifted.
+        let merge = self.engine.restrike_merge.then(|| {
+            self.summary.iter().position(|voice| {
+                voice.active && voice.note == note && voice.channel == channel && voice.ringing_free
+            })
+        });
+        let slot = match merge.flatten() {
+            Some(slot) => {
+                self.voice_claimed |= 1 << slot;
+                slot
+            }
+            None => {
+                let Some(slot) = self.pick_voice_slot() else {
+                    return;
+                };
+                self.broadcast_voice_work(VoiceRecord {
+                    kind: VoiceRecord::EASE,
+                    channel,
+                    note,
+                    ..VoiceRecord::EMPTY
+                });
+                slot
+            }
+        };
+        // Only now that the blow is certain: the back-check scaling it was
+        // given, and the salt for its felt. Drawn here so that a section
+        // never has to advance a counter another section is also advancing,
+        // and drawn HERE rather than earlier so that a key that takes no
+        // string -- no hammer reaches it, or no slot was free -- does not
+        // move a number the next real blow reads. That order is what the
+        // fingerprint noticed when this was written four lines higher.
+        self.repetition_scale = repetition;
+        self.strike_serial = self.strike_serial.wrapping_add(1);
+        // The coordinator's half of what it knows, written where it decided.
+        // The energy stays as it was until the block that renders this note
+        // reports one; nothing can steal the slot before then, because
+        // `voice_claimed` holds it for the rest of the block.
+        self.summary[slot].active = true;
+        self.summary[slot].note = note;
+        self.summary[slot].channel = channel;
+        // The key is down, so the string is free until something says
+        // otherwise. Which is what the next blow on this key will read.
+        self.summary[slot].ringing_free = true;
+        self.push_voice_work(
+            slot & (STRING_SECTIONS - 1),
+            VoiceRecord {
+                kind: VoiceRecord::STRIKE,
+                slot: slot as u8,
+                channel,
+                note,
+                flags: if self.pedal {
+                    VoiceRecord::FLAG_PEDAL
+                } else {
+                    0
+                },
+                velocity,
+                serial: self.strike_serial,
+                soft: self.soft,
+                returned,
+                ..VoiceRecord::EMPTY
+            },
+        );
+    }
+
+    /// Writes one record into one section's work, at the frame being walked,
+    /// and stamps it with where it sat in the block's event order.
+    fn push_voice_work(&mut self, section: usize, record: VoiceRecord) {
+        debug_assert!(section < STRING_SECTIONS, "seccion fuera de rango");
+        let frame = self.event_frame;
+        let record = VoiceRecord {
+            seq: self.voice_work_seq,
+            ..record
+        };
+        self.voice_work_seq = self.voice_work_seq.wrapping_add(1);
+        let written = self.voice_work_len[section];
+        let mut work = UnitWork::resume(&mut self.voice_work[section], written);
+        if work.push(frame, &record.to_bytes()) {
+            self.voice_work_len[section] = work.written();
+        } else {
+            // A full block's work: the note is lost rather than late, which
+            // is the right trade in a render thread and the wrong thing to
+            // discover in the dark.
+            debug_assert!(false, "el trabajo por voz de un bloque se lleno");
+        }
+    }
+
+    /// Writes one record into EVERY section's work, under a single sequence
+    /// number.
+    ///
+    /// One event that every section hears is still one event, so the four
+    /// copies share its place in the order and the tie is broken by section.
+    /// That is the order the sections were walked in before this was work at
+    /// all, which is why the fingerprint can guard the move.
+    fn broadcast_voice_work(&mut self, record: VoiceRecord) {
+        let seq = self.voice_work_seq;
+        for section in 0..STRING_SECTIONS {
+            self.voice_work_seq = seq;
+            self.push_voice_work(section, record);
+        }
+        self.voice_work_seq = seq.wrapping_add(1);
+    }
+
+    /// What the instrument is carrying, across all four sections.
+    ///
+    /// Everything a block needs settled before its first frame: the knobs
+    /// this block runs at, what a dirty control has to retune, the silent
+    /// bank's clock, which notes are sounding, and the copy of the engine
+    /// every unit works from.
+    ///
+    /// Returns what the phases after it need and nothing keeps: the rate
+    /// the sympathetic coupling runs at, and how fast the pedal's noise
+    /// decays.
+    fn open_block(&mut self, frames: u32) -> (f32, f32) {
+        if self.engine.controls.knobs_dirty {
+            self.engine.controls.knobs_dirty = false;
+            self.retune();
+        }
+        // Knobs read once per call, not per sample.
+        self.tune_pair();
+        for slot in 0..SILENT_SLOTS {
+            if self.silent_state[slot] == SILENT_DAMPED {
+                self.silent_in[slot] = self.silent_in[slot].saturating_sub(frames);
+                if self.silent_in[slot] == 0 {
+                    self.silent_state[slot] = SILENT_FREE;
+                    let base = slot * SILENT_MODES_PER_SLOT;
+                    for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+                        *mode = BodyMode::default();
+                    }
+                }
+            }
+        }
+        self.note_sounding = [false; NOTE_COUNT];
+        for slot in 0..MAX_VOICES {
+            let voice = self.summary[slot];
+            if !(voice.active && voice.note >= LOW_NOTE) {
+                continue;
+            }
+            if let Some(slot) = self.note_sounding.get_mut((voice.note - LOW_NOTE) as usize) {
+                *slot = true;
+            }
+        }
+        // `note_sounding` is rebuilt here and never changes inside the block,
+        // so which undamped lengths are muted is settled for the whole block
+        // too. It used to be asked per string per sample -- a hundred and
+        // ninety-two bounds-checked lookups, a hundred and twenty-eight times
+        // a block, all of them returning what the one before them returned.
+        //
+        // Measured on a Raspberry Pi 4 by taking each bank away: an undamped
+        // length cost 2.05 us a block where the open top octave's identical
+        // resonator cost 1.07 us, and this lookup was the whole difference.
+        for (muted, owner) in self
+            .undamped_muted
+            .iter_mut()
+            .zip(self.undamped_note.iter())
+        {
+            *muted = *owner >= LOW_NOTE && self.note_sounding[(*owner - LOW_NOTE) as usize];
+        }
+        let pedal_decay = expf(-LN_1000 / (PEDAL_NOISE_T60_S * self.engine.sample_rate));
+        let knob_sympathy_rate = SYMPATHY_RATE.get();
+        // Every note-on in the buffer gets the full hammer-string integration.
+        //
+        // This was three, to keep the callback affordable, and the fourth key
+        // in a chord fell back to the calibrated recipe instead. That is
+        // audibly a different instrument: measured note by note against the
+        // simulated strike, the recipe comes out about 4 dB light from 60 to
+        // 500 Hz and 17.9 dB heavy from 4 to 8 kHz, at the same peak level. A
+        // chord lost body and grew an edge from its fourth note on, and which
+        // notes those were depended on where the buffer boundary fell, so the
+        // same chord did not sound the same twice.
+        //
+        // The budget turns out to have been costing fuel as well as tone.
+        // Measured in the host's own currency (tests/concert_grand_fuel.rs),
+        // thirteen notes struck in one 1024-frame block spend 167.3M fuel with
+        // the budget at three and 149.7M with every strike simulated -- 84% of
+        // the ceiling against 75%. The cheap path is only cheap at the strike:
+        // it leaves a brighter, denser set of partials running, and that is
+        // billed on every sample afterwards.
+        //
+        // MAX_VOICES is the bound because no more than that can sound at once;
+        // it only limits a buffer carrying more note-ons than the instrument
+        // has voices, where the surplus would be stolen away regardless.
+        self.engine.strike_budget = MAX_VOICES as u32;
+        if self.room_dirty {
+            self.tune_room();
+        }
+        if self.budget_pending {
+            self.budget_pending = false;
+            let quality = self.budgeted_quality(frames);
+            if (quality - self.quality).abs() > 0.05 {
+                self.quality = quality;
+                self.apply_quality();
+                // A budget that just moved is divided at once rather than at
+                // the end of the block: the governor's cut is the moment the
+                // allowances are most wrong.
+                self.share_the_budget();
+            }
+        }
+        if (self.rebuild_board_after_fade || self.rebuild_undamped_after_fade)
+            && self.body_gain <= 0.0
+        {
+            if self.rebuild_board_after_fade {
+                self.rebuild_board_after_fade = false;
+                self.board_dirty = true;
+            }
+            if self.rebuild_undamped_after_fade {
+                self.rebuild_undamped_after_fade = false;
+                self.undamped_dirty = true;
+            }
+            self.body_target = 1.0;
+        }
+        if self.board_dirty {
+            self.tune_board();
+        }
+        if self.undamped_dirty {
+            self.undamped_dirty = false;
+            self.tune_undamped();
+        }
+        if self.scale_dirty {
+            self.scale_dirty = false;
+            self.tune();
+            self.tune_undamped();
+        }
+        // The sympathetic feed: the bridge's total string signal from the
+        // PREVIOUS sample, handed to every free string this sample. One
+        // sample of latency around the loop keeps the order of voices
+        // meaningless and the feedback explicit.
+        let sympathy_rate = knob_sympathy_rate * self.engine.controls.lab(15).min(4.0);
+        // Read once per block, not per sample: it is a knob, and an atomic
+        // load inside the hot loop is a barrier the optimiser has to honour.
+        // Which bed strings are sounding on their own right now: those are
+        // not damped, and their voice already carries the sympathy; the bed
+        // must not seed a second copy of a note's own onset and ring it for
+        // seconds. Refreshed whenever a MIDI event lands.
+
+        // The strings and the stages after them, in two passes over a span of
+        // frames rather than interleaved frame by frame -- what a
+        // `parallel_render_v1` unit needs, since a unit renders a whole span
+        // of its own voices and deposits what it made.
+        // Every unit gets this block's instrument. In four instances this is
+        // what the block-shared payload carries and each worker copies; in
+        // one it is the same copy, made here, where the tuning for the block
+        // has settled and before any unit has read a thing. A kilobyte four
+        // times per block, against a note-on that costs hundreds.
+        for unit in self.sections.iter_mut() {
+            unit.engine = self.engine;
+        }
+        self.voice_work_len = [0; STRING_SECTIONS];
+        self.voice_work_seq = 0;
+        self.voice_claimed = 0;
+        (sympathy_rate, pedal_decay)
+    }
+
+    /// What the units have to say about their own voices once the block is
+    /// rendered, and the budget divided again on what they said.
+    fn close_block(&mut self, report: impl Fn(usize) -> UnitReport) {
+        // The only moment the coordinator learns that a note has died or
+        // how loud one is. It comes by hand rather than out of the units,
+        // because in four instances the units it can see are not the ones
+        // that rendered.
+        for section in 0..STRING_SECTIONS {
+            let said = report(section);
+            self.sections[section].partials = said.partials as usize;
+            for (index, voice) in said.voices.iter().enumerate() {
+                self.summary[(index << SECTION_SHIFT) | section] = *voice;
+            }
+            for (index, halo) in said.halos.iter().enumerate() {
+                self.halo_summary[section * HALOS_PER_SECTION + index] = *halo;
+            }
+        }
+        self.share_the_budget();
+    }
+
+    /// Every event of a span, in order, and the picture each frame leaves
+    /// behind.
+    ///
+    /// This is the shape `begin_block` has. Nothing in it reads a voice --
+    /// that is the property the whole boundary rests on -- so what it
+    /// produces is everything four units need and everything the stages
+    /// after them need: one picture per frame for the serial side, and per
+    /// frame for each unit what it will hear of the OTHERS, read out of the
+    /// delay ring before anything writes to it.
+    #[allow(clippy::too_many_arguments)]
+    fn plan_span(
+        &mut self,
+        midi: &[MidiEvent],
+        midi2: &[MidiEvent2],
+        parameters: &[ParameterEvent],
+        midi_index: &mut usize,
+        midi2_index: &mut usize,
+        parameter_index: &mut usize,
+        refresh_busy: &mut bool,
+        bed_busy: &mut [bool; BED_COUNT],
+        span_start: usize,
+        span: usize,
+        pedal_decay: f32,
+    ) {
+        // PHASE ONE -- the coordinator: every event in the span, in
+        // order, and the picture each frame leaves behind. Nothing here
+        // reads a voice, which is what lets phase two be four things.
+        for offset in 0..span {
+            let frame = span_start + offset;
+            self.span_offset = offset as u16;
+            self.event_frame = frame as u16;
+            self.clock = self.clock.wrapping_add(1);
+            while let Some(event) = midi.get(*midi_index) {
+                if event.frame as usize != frame {
+                    break;
+                }
+                self.handle_midi(event);
+                *midi_index += 1;
+                *refresh_busy = true;
+            }
+            while let Some(event) = midi2.get(*midi2_index) {
+                if event.frame as usize != frame {
+                    break;
+                }
+                self.handle_wide(event);
+                *midi2_index += 1;
+                *refresh_busy = true;
+            }
+            while let Some(event) = parameters.get(*parameter_index) {
+                if event.frame as usize != frame {
+                    break;
+                }
+                let _ = self.engine.controls.set(event.index, event.value);
+                *parameter_index += 1;
+            }
+
+            if *refresh_busy {
+                *refresh_busy = false;
+                *bed_busy = [false; BED_COUNT];
+                for slot in 0..MAX_VOICES {
+                    // A halo is that note's strings ringing free, so the
+                    // bed it would have damped is busy for it too.
+                    //
+                    // The notes through the summary, because this feeds
+                    // the stages that run after the sections and those
+                    // will not be able to read a voice. A note struck
+                    // this frame is in it already; a note that died
+                    // during this block leaves its bed marked busy until
+                    // the block ends, which is a damper lifted two and a
+                    // half milliseconds too long.
+                    let note = {
+                        let voice = &self.summary[slot];
+                        voice.active.then_some(voice.note)
+                    };
+                    if let Some(note) = note {
+                        let bed = note.saturating_sub(LOW_NOTE) as usize;
+                        if bed < BED_COUNT {
+                            bed_busy[bed] = true;
+                        }
+                    }
+                }
+                // A halo is that note's strings ringing free, so the bed
+                // it would have damped is busy for it too. Sixteen of
+                // them against thirty-two slots, so they get their own
+                // walk rather than a seat in the voices'.
+                for halo in self.halo_summary.iter().filter(|halo| halo.active) {
+                    let bed = halo.note.saturating_sub(LOW_NOTE) as usize;
+                    if bed < BED_COUNT {
+                        bed_busy[bed] = true;
+                    }
+                }
+                // A key that is down has its damper up: its string is not
+                // in the damped bed, whether it was struck or not.
+                for (slot, busy) in bed_busy.iter_mut().enumerate() {
+                    if self.key_down[slot] {
+                        *busy = true;
+                    }
+                }
+            }
+            self.plan_sostenuto[offset] = self.sostenuto;
+            // What each section will hear of the OTHERS: their sums from
+            // a block ago, which is the whole reason the four can run at
+            // once. Read here, before anything renders, because after
+            // this the sections write the same ring.
+            //
+            // The delay has to reach back past the span. Anything shorter
+            // would be asking for a sum this span has not produced yet,
+            // and the ring would hand back the block before it without
+            // saying so.
+            debug_assert!(
+                self.section_delay >= span,
+                "el retraso entre secciones no alcanza el tramo"
+            );
+            let read = (self.section_cursor + offset + MAX_SECTION_DELAY - self.section_delay)
+                % MAX_SECTION_DELAY;
+            let mut stale = 0.0f32;
+            for section in 0..STRING_SECTIONS {
+                stale += self.section_history[section][read];
+            }
+            self.plan_others[offset] =
+                core::array::from_fn(|s| stale - self.section_history[s][read]);
+            self.plan_states[offset] = FrameState {
+                lab: [
+                    self.engine.controls.lab(14),
+                    self.engine.controls.lab(15),
+                    self.engine.controls.lab(16),
+                ],
+                pedal_noise_amp: self.pedal_noise_amp,
+                silent_state: self.silent_state,
+                silent_note: self.silent_note,
+                bed_busy: *bed_busy,
+            };
+            if self.pedal_noise_amp > 1e-6 {
+                self.pedal_noise_amp *= pedal_decay;
+            }
+        }
+    }
+
+    /// Everything downstream of the strings, for one span of frames.
+    ///
+    /// The units' slots added up in ascending order -- the order a host
+    /// must combine them in -- and then the board, the sympathetic banks,
+    /// the keybed and the room. This is the shape `end_block` has: it reads
+    /// the frame pictures phase one left behind and the sums phase two
+    /// made, and nothing else of theirs.
+    ///
+    /// The units arrive as a function rather than an array because in one
+    /// instance they are a local and in four they are the host's slots, and
+    /// this does not need to know which.
+    ///
+    /// Its knobs are read here rather than passed in. They are registry
+    /// reads, the same values this block already saw, and a parameter that
+    /// moves mid-block moves `self.controls`, not these.
+    fn serial_stages(
+        &mut self,
+        unit: impl Fn(usize, usize) -> SectionFrame,
+        span_start: usize,
+        span: usize,
+        output: &mut [f32],
+        channels: usize,
+    ) {
+        let knob_air_highpass = AIR_HIGHPASS.get();
+        let knob_bed_mix = BED_MIX.get();
+        let knob_board_mix = BOARD_MIX.get();
+        let knob_halo_mix = HALO_MIX.get();
+        let knob_headroom = HEADROOM.get();
+        let knob_open_mix = OPEN_MIX.get();
+        let knob_room_mix = ROOM_MIX.get();
+        let knob_undamped_mix = UNDAMPED_MIX.get();
+        let board_feed_delay = (BOARD_FEED_DELAY
+            .get()
+            .clamp(0.0, BOARD_FEED_HISTORY as f32 - 1.0)) as usize;
+        let pedal_c1 =
+            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.0 / self.engine.sample_rate);
+        let pedal_c2 =
+            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.1 / self.engine.sample_rate);
+        let pedal_c0 =
+            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.2 / self.engine.sample_rate);
+        let level = self.engine.controls.level_gain() * powf(10.0, OUTPUT_TRIM_DB / 20.0);
+        let preamp_gain = self.preamp_gain();
+        let knee_positive = PREAMP_KNEE.get().clamp(0.1, 0.95);
+        // The asymmetry: the negative half bends a little later.
+        let knee_negative =
+            (knee_positive * (1.0 + PREAMP_ASYMMETRY.get())).clamp(knee_positive, 0.99);
+        // PHASE THREE -- the coordinator again: the four sections added
+        // up in ascending order, which is the order a host must combine
+        // their slots in, and then everything downstream of the strings.
+        for offset in 0..span {
+            let mut bridge_drive = 0.0f32;
+            let mut drive_points = [0.0f32; BOARD_DRIVE_POINTS];
+            let mut keybed_left = 0.0f32;
+            let mut keybed_right = 0.0f32;
+            for section in 0..STRING_SECTIONS {
+                let made = unit(section, offset);
+                bridge_drive += made.force;
+                for (point, made) in drive_points.iter_mut().zip(made.drive_points) {
+                    *point += made;
+                }
+                keybed_left += made.keybed_left;
+                keybed_right += made.keybed_right;
+                self.section_history[section][self.section_cursor] = made.sample;
+            }
+            self.section_cursor = (self.section_cursor + 1) % MAX_SECTION_DELAY;
+
+            let frame = span_start + offset;
+            self.run_silent_work(offset as u16);
+            let frame_state = self.plan_states[offset];
+            let bed_busy = frame_state.bed_busy;
+            // Everything the strings produce radiates through the board --
+            // each string from its own point of the bridge (`BOARD_SHAPE`).
+            // What everything downstream of the strings hears, which is what
+            // those units could reach if they rendered beside the strings
+            // instead of after them. The board and the sympathetic banks move
+            // TOGETHER: the board is the through path and the banks sit
+            // beside it, so delaying one alone leaves two copies of the
+            // strike a block apart, and the ear heard that as the attack
+            // losing a pinch. At zero both are handed straight through and
+            // nothing is written, so the shipped render is untouched.
+            let (drive_points, excitation, keybed_left, keybed_right) = if board_feed_delay == 0 {
+                (drive_points, bridge_drive, keybed_left, keybed_right)
+            } else {
+                let write = self.board_feed_cursor;
+                let read = (write + BOARD_FEED_HISTORY - board_feed_delay) % BOARD_FEED_HISTORY;
+                self.board_feed_history[write] = drive_points;
+                self.bridge_feed_history[write] = bridge_drive;
+                self.keybed_feed_history[write] = [keybed_left, keybed_right];
+                self.board_feed_cursor = (write + 1) % BOARD_FEED_HISTORY;
+                let keybed = self.keybed_feed_history[read];
+                (
+                    self.board_feed_history[read],
+                    self.bridge_feed_history[read],
+                    keybed[0],
+                    keybed[1],
+                )
+            };
+            let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
+            let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
+            // With nothing sounding every drive point is zero, and the
+            // projection below spends five hundred and twelve multiplies a
+            // frame proving that zero times a basis is zero. Skipping it is
+            // exact -- the arrays are already the zeros the loop would leave
+            // -- and it is 155 us of a Raspberry Pi's 2667 us block.
+            if drive_points.iter().any(|point| *point != 0.0) {
+                for q in 0..BOARD_DRIVE_POINTS {
+                    let mut c = 0.0f32;
+                    let mut s = 0.0f32;
+                    for ((basis_cos, basis_sin), point) in self.drive_basis_cos[q]
+                        .iter()
+                        .zip(self.drive_basis_sin[q].iter())
+                        .zip(drive_points.iter())
+                    {
+                        c += basis_cos * point;
+                        s += basis_sin * point;
+                    }
+                    cos_t[q] = c;
+                    sin_t[q] = s;
+                }
+            }
+            let mut board_left = 0.0;
+            let mut board_right = 0.0;
+            for mode in self.board.iter_mut().take(self.board_count) {
+                let (left, right) = mode.tick_pair(mode.excitation(&cos_t, &sin_t));
+                board_left += left;
+                board_right += right;
+            }
+            // The rim: below its first mode the board radiates almost nothing.
+            board_left = rim_pass(&mut self.rim[0], &self.rim_coef, board_left);
+            board_right = rim_pass(&mut self.rim[1], &self.rim_coef, board_right);
+            if self.body_gain != self.body_target {
+                let step = 1.0 / BANK_FADE_SAMPLES;
+                self.body_gain = if self.body_target > self.body_gain {
+                    (self.body_gain + step).min(self.body_target)
+                } else {
+                    (self.body_gain - step).max(self.body_target)
+                };
+            }
+            board_left *= self.body_gain;
+            board_right *= self.body_gain;
+            // The open top octave listens to the bridge and rings on.
+            let mut open_left = 0.0;
+            let mut open_right = 0.0;
+            for string in &mut self.open_strings {
+                let y = string.tick(excitation);
+                open_left += y * string.pan_left;
+                open_right += y * string.pan_right;
+            }
+            // Every other string's undamped length, listening to the bridge.
+            let mut undamped_left = 0.0;
+            let mut undamped_right = 0.0;
+            for (string, muted) in self
+                .undamped
+                .iter_mut()
+                .take(self.undamped_active)
+                .zip(self.undamped_muted.iter())
+            {
+                let y = string.tick(if *muted { 0.0 } else { excitation });
+                undamped_left += y * string.pan_left;
+                undamped_right += y * string.pan_right;
+            }
+            // The silent keys' strings, listening like the top octave's;
+            // one whose own voice is sounding is that voice.
+            for slot in 0..SILENT_SLOTS {
+                if frame_state.silent_state[slot] == SILENT_FREE {
+                    continue;
+                }
+                let owner = frame_state.silent_note[slot];
+                let sounding = owner >= LOW_NOTE && self.note_sounding[(owner - LOW_NOTE) as usize];
+                let feed = if sounding { 0.0 } else { excitation };
+                let base = slot * SILENT_MODES_PER_SLOT;
+                for string in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
+                    let y = string.tick(feed);
+                    undamped_left += y * string.pan_left;
+                    undamped_right += y * string.pan_right;
+                }
+            }
+            undamped_left = rim_pass(&mut self.rim[2], &self.rim_coef, undamped_left);
+            undamped_right = rim_pass(&mut self.rim[3], &self.rim_coef, undamped_right);
+            undamped_left *= self.body_gain;
+            undamped_right *= self.body_gain;
+            let undamped_gain = knob_undamped_mix * frame_state.lab[1];
+            // The damped strings' bed, listening to the bridge like the
+            // undamped lengths do -- see BED_MIX.
+            let mut bed_left = 0.0;
+            let mut bed_right = 0.0;
+            for (string, busy) in self.bed.iter_mut().zip(bed_busy) {
+                let y = string.tick(if busy { 0.0 } else { excitation });
+                bed_left += y * string.pan_left;
+                bed_right += y * string.pan_right;
+            }
+            // The bed reaches the air through the board too: with the pedal
+            // down every bass string rings by sympathy, and below the
+            // board's first mode the rim cancels their fundamentals as it
+            // cancels the struck string's. Measured, the bed alone put A0's
+            // fundamental 12 dB over its partials, past the board.
+            bed_left = rim_pass(&mut self.rim[4], &self.rim_coef, bed_left);
+            bed_right = rim_pass(&mut self.rim[5], &self.rim_coef, bed_right);
+            bed_left *= self.body_gain;
+            bed_right *= self.body_gain;
+            let bed_gain = knob_bed_mix * frame_state.lab[1];
+
+            // The shimmer: everything above ~1.8 kHz feeds the undamped
+            // open register and rings on.
+            self.halo_lp += self.halo_hp_k * (excitation - self.halo_lp);
+            let bright = excitation - self.halo_lp;
+            let mut halo_outs = [0.0f32; 4];
+            let mut halo_sum = 0.0;
+            for (line, output) in halo_outs.iter_mut().enumerate() {
+                *output = self.halo[line][self.halo_index[line]];
+                halo_sum += *output;
+            }
+            let halo_householder = halo_sum * 0.5;
+            for (line, output) in halo_outs.iter().copied().enumerate() {
+                let feedback = (output - halo_householder) * self.halo_gain[line];
+                let index = self.halo_index[line];
+                self.halo[line][index] = bright * 0.5 + feedback;
+                let next = index + 1;
+                self.halo_index[line] = if next == self.halo_len[line] { 0 } else { next };
+            }
+            let sympathy = frame_state.lab[1];
+            let halo_left = (halo_outs[0] - halo_outs[1]) * knob_halo_mix * sympathy;
+            let halo_right = (halo_outs[2] - halo_outs[3]) * knob_halo_mix * sympathy;
+
+            // The lid and rim reflect the near field back a few dozen
+            // milliseconds late, differently per side.
+            // What the lid and the room reflect is what the board radiates,
+            // not the string's own motion: the string reaches the air only
+            // through the bridge and the board.
+            let staged = (board_left + board_right) * knob_board_mix
+                + (keybed_left + keybed_right) * knob_board_mix
+                + (undamped_left + undamped_right) * undamped_gain
+                + (bed_left + bed_right) * bed_gain
+                + (open_left + open_right) * knob_open_mix * sympathy
+                + halo_left
+                + halo_right;
+            // What drives the air is what the BOARD radiates, and the
+            // board radiates almost nothing below its first mode. The lid and
+            // the chamber were being fed the full signal instead, and the
+            // chamber is a six-line feedback network with a 1.4 s decay and
+            // only a 4.2 kHz lowpass in the loop -- nothing damps its low
+            // modes at all. So it rang at one of them, and it rang under
+            // everything.
+            //
+            // Measured: a fixed 46.2 Hz tone sat under every single note,
+            // following nothing, at -73.6 dB under C4 -- and setting the air
+            // control to zero was the only thing that removed it (-83.8 dB,
+            // and the peak moves off it entirely). Six voices of a chord each
+            // contribute their own copy, and it sums into an audible drone an
+            // octave and a half below the music. That is the octave
+            // discrepancy the user heard the moment they played chords on the
+            // packaged build, and no single-note render could show it.
+            //
+            // One pole at the radiation corner, subtracted: the ambience now
+            // receives the same spectrum the board actually puts into the
+            // room.
+            // Two poles, not one: a single pole rolls off at 6 dB an octave
+            // and the board's own measured law is sixth-order. Two is still
+            // gentler than the board, which is the safe direction -- it
+            // cannot remove anything the board would have radiated.
+            //
+            // The high-pass is cascaded, not the low-pass. Subtracting two
+            // cascaded low-passes gives `1 - H^2 = (1 - H)(1 + H)`, and near
+            // DC `1 + H` is nearly 2 -- so it lets through about twice what
+            // one pole does. Measured, that version was 5 dB WORSE than a
+            // single pole. Each stage has to high-pass what the last one
+            // handed it.
+            self.air_dc[0] += knob_air_highpass * (staged - self.air_dc[0]);
+            let once = staged - self.air_dc[0];
+            self.air_dc[1] += knob_air_highpass * (once - self.air_dc[1]);
+            let staged = once - self.air_dc[1];
+            // The early reflections: what the board radiates, mirrored in
+            // the six surfaces, three images read by each side of the pair.
+            self.early[self.early_write] = staged;
+            // Every surface reaches BOTH capsules, each by its own path and
+            // at its own polar angle. The floor and the ceiling arrive almost
+            // together, which is what holds the centre; the near and far walls
+            // arrive apart, which is what opens the image. Neither is decided
+            // here any more.
+            let mut early = [0.0f32; 2];
+            for (side, taps) in self.early_taps.iter().enumerate() {
+                for (offset, gain) in taps {
+                    early[side] +=
+                        self.early[(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER] * gain;
+                }
+            }
+            let (early_left, early_right) = (early[0], early[1]);
+            self.early_write = (self.early_write + 1) % ROOM_BUFFER;
+            // The lid's image, read from the same buffer (the write pointer
+            // has already moved on by one), through its own darkening pole.
+            let mut lid = [0.0f32; 2];
+            for ((taps, pole), out) in self
+                .lid_tap
+                .iter()
+                .zip(self.lid_lp.iter_mut())
+                .zip(lid.iter_mut())
+            {
+                let mut heard = 0.0;
+                for (offset, gain) in taps {
+                    heard += self.early
+                        [(self.early_write + ROOM_BUFFER - 1 - offset) % ROOM_BUFFER]
+                        * gain;
+                }
+                *pole += self.lid_damp * (heard - *pole);
+                *out = *pole * self.early_gain;
+            }
+            let (lid_left, lid_right) = (lid[0], lid[1]);
+
+            // The chamber: read every line, mix through the Householder
+            // matrix, damp the highs in the feedback, write back with the
+            // input. The recorded instrument the model is measured against
+            // lives in a room; the tail is part of the piano the ear knows.
+            let mut outs = [0.0f32; ROOM_LINES];
+            let mut outs_sum = 0.0;
+            for (line, output) in outs.iter_mut().enumerate() {
+                *output = self.room[line][self.room_index[line]];
+                outs_sum += *output;
+            }
+            let householder = outs_sum * (2.0 / ROOM_LINES as f32);
+            for (line, output) in outs.iter().copied().enumerate() {
+                let feedback = output - householder;
+                self.room_lp[line] += self.room_damp * (feedback - self.room_lp[line]);
+                // The low shelf: hard rooms let the bottom ring past the
+                // mids, soft ones take it down with everything else.
+                self.room_low[line] +=
+                    self.room_low_coeff * (self.room_lp[line] - self.room_low[line]);
+                let shaped = self.room_lp[line] + self.room_low_gain * self.room_low[line];
+                let index = self.room_index[line];
+                self.room[line][index] = staged * 0.25 + shaped * self.room_gain[line];
+                let next = index + 1;
+                self.room_index[line] = if next == self.room_len[line] { 0 } else { next };
+            }
+            let air = frame_state.lab[2];
+            let wet = knob_room_mix * air * self.reverb_gain;
+            let room_left =
+                (outs[0] - outs[1] + outs[2]) * wet + early_left * self.early_gain * air;
+            let room_right =
+                (outs[3] - outs[4] + outs[5]) * wet + early_right * self.early_gain * air;
+
+            // There is one board and it is the through path, so there is one
+            // gain. The pair it replaced was mixed 25 dB apart in the wrong
+            // direction, which let a sparse parallel comb own 78-87% of the
+            // output below 3 kHz.
+            // Headroom, so the instrument stops living inside its own
+            // limiter.
+            //
+            // Measured at what reaches `soften`, which clamps at 1.5: a
+            // single fortissimo bass note arrived at 1.60, a bass octave at
+            // 2.53, a five-note chord at 5.49 and a ten-note chord at 6.58 --
+            // more than four times into a brick wall. Everything above
+            // mezzoforte came out flat-topped, so a ten-note chord peaked at
+            // exactly the same 0.462 as one note.
+            //
+            // A piano whose dynamics stop at mezzoforte, whose attacks are
+            // decapitated because the attack IS the peak, and where raising
+            // any level control just pushes further into the clamp and
+            // returns the same flattened shape, is not a piano. It is an
+            // electric piano, which is what this has been called for forty
+            // versions -- and it also explains, at last, why moving the panel
+            // seemed to do so little.
+            //
+            // Sized so the loudest thing the instrument can be asked for, a
+            // ten-note fortissimo chord, lands near 1.2 and stays out of the
+            // clamp. That costs about 11 dB of output, which belongs in the
+            // host's gain and not in a saturator: the desktop already runs
+            // +6 dB and allows +12.
+            let board_mix = knob_board_mix * frame_state.lab[0] * knob_headroom;
+            let (near_left, near_right) = (self.direct_gain[0], self.direct_gain[1]);
+            let mut direct_left = board_left * board_mix * near_left
+                + keybed_left * board_mix * self.keybed_gain[0]
+                + undamped_left * undamped_gain * knob_headroom * near_left
+                + bed_left * bed_gain * knob_headroom * near_left
+                + open_left * knob_open_mix * sympathy * knob_headroom
+                + halo_left * knob_headroom
+                + lid_left * air * knob_headroom;
+            let mut direct_right = board_right * board_mix * near_right
+                + keybed_right * board_mix * self.keybed_gain[1]
+                + undamped_right * undamped_gain * knob_headroom * near_right
+                + bed_right * bed_gain * knob_headroom * near_right
+                + open_right * knob_open_mix * sympathy * knob_headroom
+                + halo_right * knob_headroom
+                + lid_right * air * knob_headroom;
+            if frame_state.pedal_noise_amp > 1e-6 {
+                self.pedal_noise_seed = self
+                    .pedal_noise_seed
+                    .wrapping_mul(1_664_525)
+                    .wrapping_add(1_013_904_223);
+                let white = (self.pedal_noise_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
+                // Dark and woody: the rail speaks through the case. Measured
+                // on the reference's own pedal samples (`PEDAL_NOISE_POLES_HZ`).
+                self.pedal_noise_lp += pedal_c1 * (white - self.pedal_noise_lp);
+                self.pedal_noise_lp2 += pedal_c2 * (self.pedal_noise_lp - self.pedal_noise_lp2);
+                self.pedal_noise_floor +=
+                    pedal_c0 * (self.pedal_noise_lp2 - self.pedal_noise_floor);
+                let knock =
+                    (self.pedal_noise_lp2 - self.pedal_noise_floor) * frame_state.pedal_noise_amp;
+                direct_left += knock;
+                direct_right += knock;
+            }
+            // Proximity: the pressure-gradient microphone's low end rises
+            // with 1/r. A 120 Hz shelf whose gain follows the pattern and
+            // the distance -- an omni has none, a ribbon up close blooms.
+            if self.proximity_gain[0] > 1e-3 || self.proximity_gain[1] > 1e-3 {
+                self.proximity[0] += self.proximity_coeff * (direct_left - self.proximity[0]);
+                self.proximity[1] += self.proximity_coeff * (direct_right - self.proximity[1]);
+                direct_left += self.proximity_gain[0] * self.proximity[0];
+                direct_right += self.proximity_gain[1] * self.proximity[1];
+            }
+            // The soft clip is a safety net on the output, not part of the
+            // voice, so it belongs AFTER the level control -- and it was sitting
+            // before it. Level is a gain of 0.518 by default (-5.7 dB), so
+            // the clip was defending against a 1.38 peak that the very next
+            // multiply was about to bring down to 0.71. Measured on a seven-note
+            // fortissimo chord against the sum of the same notes struck alone,
+            // which is what the chord would be if nothing here were nonlinear:
+            // 250-500 Hz came out 6.1 dB down and 500-1000 Hz 2.5 dB down, while
+            // 1-2 kHz ran 6.4 dB hot, 2-4 kHz 6.7 dB and 4-8 kHz 13.8 dB. That is
+            // not a piano's spectrum; it is the fundamentals being flattened and
+            // reappearing as intermodulation. It also flattened the dynamics: a
+            // chord at velocity 127 peaked 0.11 dB above the same chord at 100.
+            // A soundboard is linear to a very good approximation, so nothing
+            // here should compress until the output itself would clip.
+            let scaled_left = (direct_left + room_left * knob_headroom) * level;
+            let scaled_right = (direct_right + room_right * knob_headroom) * level;
+            // The preamplifier: the gain an engineer adds after the capsules,
+            // with the input stage's own bend above its knee -- a chord
+            // driven past it compresses a couple of decibels and warms; a
+            // single note never reaches it. `soften` stays behind it as the
+            // safety net it was.
+            let (scaled_left, scaled_right) = (
+                Self::transformer(scaled_left * preamp_gain, knee_positive, knee_negative),
+                Self::transformer(scaled_right * preamp_gain, knee_positive, knee_negative),
+            );
+            let left = Self::soften(scaled_left);
+            let right = Self::soften(scaled_right);
+            match channels {
+                0 => {}
+                // Two nearly identical channels ADDED are 6 dB louder than
+                // either, which the clip then had to give back. A mono host
+                // should hear the same instrument, not a louder distorted one.
+                1 => output[frame] = Self::soften(0.5 * (scaled_left + scaled_right)),
+                _ => {
+                    output[frame * channels] = left;
+                    output[frame * channels + 1] = right;
+                    for channel in 2..channels {
+                        output[frame * channels + channel] = 0.0;
+                    }
+                }
+            }
+        }
+    }
+
+    /// What the instrument is carrying, across all four units.
+    fn active_partials(&self) -> usize {
+        self.sections.iter().map(|section| section.partials).sum()
+    }
+
+    /// Divides the budget among the sections for the coming block.
+    ///
+    /// A flat quarter each was the first shape and it costs too much: a
+    /// section running long ladders hits its own wall while another sits
+    /// half empty, and the pedalled arpeggio lost 21.7 dB to it.
+    ///
+    /// So a section keeps what it is already carrying -- those partials
+    /// exist, they are sounding, and nothing is gained by pretending
+    /// otherwise -- and only what is FREE is divided evenly. The four
+    /// allowances still sum to exactly the budget, so the instrument spends
+    /// what the governor gave it and no more. A section over its share
+    /// simply gets nothing new until it sheds some, which is what a full
+    /// pool should do.
+    ///
+    /// Fixed for the whole block, which is what makes it work in four
+    /// instances: a unit reads a number nobody else is writing.
+    fn share_the_budget(&mut self) {
+        let carried = self.active_partials();
+        let free = self.partial_budget.saturating_sub(carried);
+        for section in self.sections.iter_mut() {
+            section.allowance = section.partials + free / STRING_SECTIONS;
+        }
+    }
+
+    /// How much instrument this machine affords, from 1.0 down.
+    ///
+    /// The budget is per real-time call, so it is worth only as much as the
+    /// call is long: the same number over 512 frames buys a quarter of what it
+    /// buys over 128. Everything below is therefore per frame.
+    ///
+    /// Returns 1.0 -- the instrument exactly as voiced -- when no host has
+    /// said anything, which is what older hosts and the browser always see.
+    ///
+    /// The arithmetic does not have to be right. The host watches what the
+    /// render actually does with the period and keeps moving the budget until
+    /// it fits, so an estimate off by a factor still lands; it just takes a
+    /// few seconds longer. It is here to make the first jump land near the
+    /// answer instead of walking to it.
+    fn budgeted_quality(&self, frames: u32) -> f32 {
+        if self.budget_fuel_per_call == 0 || frames == 0 {
+            return 1.0;
+        }
+        let per_frame = self.budget_fuel_per_call as f32 / frames as f32;
+        let scalable = BOARD_AT_FULL_FUEL + UNDAMPED_AT_FULL_FUEL + RESERVED_VOICES * VOICE_FUEL;
+        ((per_frame - UNAVOIDABLE_FUEL) / scalable).clamp(MINIMUM_QUALITY, 1.0)
+    }
+
+    /// Spends the quality scalar across the three things this instrument can
+    /// be smaller in.
+    ///
+    /// They move together on purpose. Thinning one axis to its floor while
+    /// another stays lavish gives a piano with a dry body and an extravagant
+    /// sympathetic halo, which is not a smaller piano -- it is a differently
+    /// shaped one. What the ear is offered here is the same instrument, less
+    /// of it.
+    fn apply_quality(&mut self) {
+        // The body: the modes sit further apart, keeping the whole frequency
+        // range and thinning it, which is what the Density control does.
+        let spacing = (1.0 / self.quality).clamp(1.0, MAXIMUM_BUDGET_SPACING);
+        if (spacing - self.board_budget_spacing).abs() > 0.02 {
+            self.board_budget_spacing = spacing;
+            self.rebuild_board_after_fade = true;
+            self.body_target = 0.0;
+        }
+
+        // The sympathetic top register: fewer partials per string, taken from
+        // the top down. The highest are the quietest and the shortest-lived,
+        // so this is the axis that costs the ear least per microsecond.
+        // Plus a half and truncate: `f32::round` is std, and this compiles
+        // without it for the wasm hosts.
+        let partials = ((FREE_STRING_PARTIALS as f32 * self.quality + 0.5) as usize)
+            .clamp(MINIMUM_UNDAMPED_PARTIALS, FREE_STRING_PARTIALS);
+        if partials != self.undamped_partials {
+            self.undamped_partials = partials;
+            self.rebuild_undamped_after_fade = true;
+            self.body_target = 0.0;
+        }
+
+        // The notes themselves. Nothing is rebuilt for this: the strike path
+        // already reads the ceiling and gives a new note a shorter ladder when
+        // the instrument is busy, which is the graceful degradation the
+        // constant was written for and never got told about.
+        self.partial_budget = ((PARTIAL_BUDGET as f32 * self.quality) as usize)
+            .clamp(MINIMUM_PARTIAL_BUDGET, PARTIAL_BUDGET);
+    }
+
+    /// Which slot a new note takes, deciding nothing else.
+    ///
+    /// Separated from the refund below because a `parallel_render_v1`
+    /// coordinator has to choose the slot -- and with it the SECTION, and
+    /// with that which worker does the work -- before any of the work
+    /// happens, while the refund has to stay where it always was. The
+    /// partial ladder is sized from the section's allowance seven hundred lines
+    /// before the old `allocate_voice` was reached, so refunding earlier
+    /// would size every stolen note's ladder against a larger budget. That
+    /// is a different instrument, and the fingerprint says so.
+    ///
+    /// Nothing between here and the refund touches a voice, so choosing
+    /// early is safe: the answer is the same either way.
+    fn pick_voice_slot(&mut self) -> Option<usize> {
+        // A slot promised earlier in this block is taken, even though
+        // nothing has struck it yet. The old code could not have this
+        // problem: it allocated at the END of the strike, so the previous
+        // note was already active by the time the next one looked. Choosing
+        // up front, seven notes of one chord all chose slot zero, and
+        // `a_chord_is_the_sum_of_its_notes` said so.
+        let free = |owner: &Self, slot: usize| {
+            !owner.summary[slot].active && owner.voice_claimed & (1 << slot) == 0
+        };
+        let chosen = if let Some(index) = (0..MAX_VOICES).find(|slot| free(self, *slot)) {
+            index
+        } else {
+            #[cfg(not(target_arch = "wasm32"))]
+            STEALS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            // In slot order, so a tie steals the same voice it always did,
+            // and never one this block has already promised away.
+            (0..MAX_VOICES)
+                .filter(|slot| self.voice_claimed & (1 << slot) == 0)
+                .min_by(|a, b| self.summary[*a].energy.total_cmp(&self.summary[*b].energy))?
+        };
+        self.voice_claimed |= 1 << chosen;
+        Some(chosen)
     }
 
     /// Per-sample decay multiplier a falling damper applies: the note dies in
@@ -8475,138 +11264,28 @@ impl ConcertGrand {
         }
     }
 
-    /// Release velocity as a multiplier on the damper's stopping time.
-    ///
-    /// Asymmetric by mechanism. The damper falls under its own weight and the
-    /// key's return, so a fast release cannot drive it down faster than the
-    /// mechanism allows -- it converges on a floor, 1.25x at most. A slow
-    /// release rides it down as far as the player wants, the legato of a
-    /// finger easing off a key: up to 2.5x. Little travel above neutral,
-    /// much below it. That asymmetry is the physical claim; the two spans are
-    /// DRAWN, chosen to sit where the mechanism plausibly does, not read from
-    /// any measurement.
-    ///
-    /// 64 returns exactly 1.0 by early return, so neutral is bit-identical to
-    /// the release path before this existed as a property of the code and
-    /// not of a chain of float reasoning.
-    fn damper_span(release: u8) -> f32 {
-        const FAST_SPAN: f32 = 1.25;
-        const SLOW_SPAN: f32 = 2.5;
-        if release == 64 {
-            return 1.0;
-        }
-        let t = (release as f32 - 64.0) / 63.0;
-        if t >= 0.0 {
-            powf(FAST_SPAN, -t)
-        } else {
-            powf(SLOW_SPAN, -t)
-        }
-    }
-
-    /// Release velocity as a multiplier on the release knock: the key coming
-    /// back and the felt landing. Same direction as the damper -- a fast
-    /// return lands harder and sounds it -- with a smaller travel, 0.7x to
-    /// 1.4x, because the knock is a small sound and the ear does not want it
-    /// to double.
-    fn damper_knock(release: u8) -> f32 {
-        if release == 64 {
-            return 1.0;
-        }
-        let t = (release as f32 - 64.0) / 63.0;
-        if t >= 0.0 {
-            powf(1.4, t)
-        } else {
-            powf(1.0 / 0.7, t)
-        }
-    }
-
     /// How much of the random per-landing variation survives once the key's
     /// return is actually measured: the felt still seats where it seats, but
     /// the return speed is no longer something to guess at. A third of the
     /// spread, so +/-15% becomes +/-5%.
     const RELEASE_RESIDUAL: f32 = 0.33;
 
-    /// How firmly ONE damper lands, this time, on this note.
-    ///
-    /// A key never returns twice at the same speed and the felt never seats on
-    /// exactly the same spot -- least of all on a wound bass string, where the
-    /// damper straddles a winding. So a release is not a constant: it is the
-    /// one part of a piano that genuinely differs blow to blow, which is why
-    /// a real instrument's releases sound like a mechanism and a model's
-    /// sound like a gate.
-    ///
-    /// The two things it moves are CORRELATED, and that is the point of doing
-    /// it with one number instead of two. A fast key return lands the felt
-    /// hard: it stops the string sooner AND knocks louder. Rolling those
-    /// independently would give firm-but-silent and soft-but-loud landings,
-    /// which no action can produce, and the ear hears the incoherence as
-    /// noise rather than as mechanism.
-    ///
-    /// The spread is judgement, not measurement: what a key return varies by
-    /// between ordinary releases is not something published. +/-15% on the
-    /// stopping time is small enough to read as an action and not as a fault.
-    fn damper_firmness(serial: u32, note: u8) -> f32 {
-        let salt = serial
-            .wrapping_mul(0x9E37_79B9)
-            .wrapping_add((note as u32).wrapping_mul(0x85EB_CA6B));
-        0.85 + 0.30 * hash01(salt ^ 0x5D)
-    }
-
-    fn damper_factor(&self, note: u8, firmness: f32, span: f32) -> f32 {
-        Self::damper_for(
-            note,
-            self.sample_rate,
-            self.controls.damper_grip() * firmness,
-            span,
-        )
-    }
-
-    /// Dampers are not equally effective across the compass: a treble damper
-    /// stops its short light string almost at once, while a wound bass string
-    /// carries far too much energy to be stopped that fast. A single 60 ms
-    /// constant for the whole keyboard left every release ringing ~230 ms
-    /// down to −34 dB, which smears into a wash as soon as playing gets fast.
-    fn damper_for(note: u8, sample_rate: f32, grip: f32, span: f32) -> f32 {
-        let position = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as f32
-            / (NOTE_COUNT - 1) as f32;
-        // Grip divides the stopping time: a hard new set shuts the string in
-        // a third of it, worn felt takes three times as long and the note
-        // bleeds past the key. `span` is the key's own return, from release
-        // velocity (`damper_span`); the pedal passes exactly 1.0, which
-        // multiplies out bit-identically, because a rail dropping sixty
-        // dampers is the pedal's gesture and not the finger's.
-        let seconds = (0.075 - 0.055 * position) / grip.max(0.05) * span;
-        expf(-1.0 / (seconds * sample_rate))
-    }
-
-    /// The damper thud's colour and length: dark and short.
-    fn damper_thud(&self) -> (f32, f32) {
-        let coefficient = 1.0 - expf(-core::f32::consts::TAU * 260.0 / self.sample_rate);
-        let decay = expf(-1.0 / (0.010 * self.sample_rate));
-        (coefficient, decay)
-    }
-
     fn release(&mut self, channel: u8, note: u8, release: Option<u8>) {
         self.damp_serial = self.damp_serial.wrapping_add(1);
-        let firmness = Self::damper_firmness(self.damp_serial, note);
+        let firmness = StringEngine::damper_firmness(self.damp_serial, note);
         // With a measured return the random landing becomes a residual: the
         // felt still seats where it seats, but how fast the key came back is
         // no longer a guess. Without one, the variation carries the landing
         // exactly as it did before release velocity was read at all.
-        let (span, knock, firmness) = match release {
+        let (span, firmness) = match release {
             Some(velocity) => (
-                Self::damper_span(velocity),
-                Self::damper_knock(velocity),
+                StringEngine::damper_span(velocity),
                 1.0 + (firmness - 1.0) * Self::RELEASE_RESIDUAL,
             ),
-            None => (1.0, 1.0, firmness),
+            None => (1.0, firmness),
         };
-        let damper = self.damper_factor(note, firmness, span);
-        let (thud_coefficient, thud_decay) = self.damper_thud();
-        let release_gain = Controls::noise_gain(self.controls.release_noise) * firmness * knock;
-        let pressure = self.pedal_pressure;
-        let rate = self.sample_rate;
-        let grip = self.controls.damper_grip();
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
         if let Some(slot) = note.checked_sub(LOW_NOTE).map(usize::from)
             && slot < NOTE_COUNT
         {
@@ -8624,66 +11303,30 @@ impl ConcertGrand {
             if self.pedal {
                 self.silent_state[slot] = SILENT_SUSTAINED;
             } else {
-                let own = Self::damper_for(note, rate, grip * firmness, span);
+                let own = StringEngine::damper_for(note, rate, grip * firmness, span);
                 self.damp_silent(slot, own);
             }
         }
-        let key_off = KEYOFF_KNOCK * release_gain;
-        let key_off_decay = expf(-LN_1000 / (KEYOFF_T60_S * rate));
-        let key_off_rise = expf(-1.0 / (0.002 * rate));
-        let key_off_seed = self
-            .damp_serial
-            .wrapping_mul(0x9E37_79B9)
-            .wrapping_add((note as u32).wrapping_mul(2_654_435_761));
-        for voice in &mut self.voices {
-            if voice.active && voice.note == note && voice.channel == channel && voice.held {
-                voice.key_off_knock(key_off, key_off_decay, key_off_rise, key_off_seed, rate);
-                if voice.undamped {
-                    // No felt lands: the key comes up and the string goes
-                    // on ringing exactly as it was. `sustained` keeps it
-                    // out of the re-strike's damper path; the pedal loops
-                    // skip it by the flag.
-                    voice.held = false;
-                    voice.sustained = true;
-                    voice.damper_applied = 0.0;
-                    continue;
-                }
-                if self.sostenuto && voice.sostenuto {
-                    // The sostenuto rod holds THIS damper clear, whatever
-                    // the sustain pedal does.
-                    voice.held = false;
-                    voice.sustained = true;
-                    voice.damper_applied = 0.0;
-                } else if self.pedal {
-                    // Released into a partially lifted rail: the felt takes
-                    // the string with whatever weight the pedal leaves it.
-                    voice.held = false;
-                    voice.sustained = true;
-                    voice.damper_applied = pressure;
-                    // Through the voice's OWN damper: the half pedal will
-                    // relieve this press through the same one, and a press
-                    // through one damper relieved through another is the
-                    // energy walk `a_half_pedal_never_adds_energy` guards.
-                    let own = Self::damper_for(note, rate, grip * voice.firmness, span);
-                    voice.press_damper(own, pressure);
-                } else {
-                    // The felt is on its way, not down: see DAMPER_LAND_MS.
-                    // A key let go fast lands it sooner (`span` < 1), a key
-                    // eased up later.
-                    let own = Self::damper_for(note, rate, grip * voice.firmness, span);
-                    voice.arm_damper(
-                        (DAMPER_LAND_MS.get() * 0.001 * rate * span) as u32,
-                        damper,
-                        own,
-                        DAMPER_BOUNCES.get().clamp(0.0, 12.0) as u8,
-                        DAMPER_HANG_MS.get() * 0.001 * rate,
-                        DAMPER_RESTITUTION.get(),
-                        (DAMPER_DWELL_MS.get() * 0.001 * rate) as u32,
-                        [thud_coefficient, thud_decay, release_gain],
-                    );
-                }
-            }
+        // Every section hears it. Which of them carries this note is a
+        // thing only a unit knows about its own voices, so the matching
+        // happens there and the coordinator only says what happened.
+        let mut flags = 0;
+        if self.pedal {
+            flags |= VoiceRecord::FLAG_PEDAL;
         }
+        if self.sostenuto {
+            flags |= VoiceRecord::FLAG_SOSTENUTO;
+        }
+        self.broadcast_voice_work(VoiceRecord {
+            kind: VoiceRecord::RELEASE,
+            channel,
+            note,
+            release: release.map_or(0, |velocity| velocity.saturating_add(1)),
+            flags,
+            velocity: self.pedal_pressure,
+            serial: self.damp_serial,
+            ..VoiceRecord::EMPTY
+        });
     }
 
     /// CC64 as the continuous control it is. The bottom of the travel is
@@ -8702,37 +11345,20 @@ impl ConcertGrand {
             // and the level asked down by ear; four decibels, with the
             // brightness gone, is where the ear put it.
             let knock = (if down { 0.0038 } else { 0.007 })
-                * Controls::noise_gain(self.controls.pedal_noise);
+                * Controls::noise_gain(self.engine.controls.pedal_noise);
             self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
         }
         let rail_lifted = down && !self.pedal;
         self.pedal = down;
         self.pedal_pressure = pressure;
-        let (thud_coefficient, thud_decay) = self.damper_thud();
-        let release_gain = Controls::noise_gain(self.controls.release_noise);
-        let rate = self.sample_rate;
-        let grip = self.controls.damper_grip();
-        if rail_lifted {
-            // The rail coming up catches every felt still on its way down:
-            // that string is sustained from here, its press relieved through
-            // the same damper it was made with.
-            for voice in &mut self.voices {
-                if voice.active && voice.damper_phase != 0 {
-                    voice.cancel_damper();
-                    voice.held = false;
-                    voice.sustained = true;
-                    voice.damper_applied = pressure;
-                    let own = voice.damper_own;
-                    voice.press_damper(own, pressure);
-                }
-            }
-        }
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
         if !down {
             // The rail coming down seats the silent strings whose keys
             // are already up.
             for slot in 0..SILENT_SLOTS {
                 if self.silent_state[slot] == SILENT_SUSTAINED {
-                    let own = Self::damper_for(self.silent_note[slot], rate, grip, 1.0);
+                    let own = StringEngine::damper_for(self.silent_note[slot], rate, grip, 1.0);
                     self.damp_silent(slot, own);
                 }
             }
@@ -8741,44 +11367,20 @@ impl ConcertGrand {
         // string. Sharing a single factor across the rail was audible as a
         // chord ending like a gate rather than like felt.
         self.damp_serial = self.damp_serial.wrapping_add(1);
-        let serial = self.damp_serial;
-        for voice in &mut self.voices {
-            if !(voice.active && voice.sustained) || voice.undamped {
-                continue;
-            }
-            if self.sostenuto && voice.sostenuto {
-                continue;
-            }
-            // The voice's own damper, not one drawn per pedal event. Drawn
-            // per event, a press through a firm damper and its relief
-            // through a soft one left the string's decay factor ABOVE where
-            // it started, and a nocturne's three thousand pedal positions
-            // walked it past one: measured on the Op. 9 No. 2 file, the
-            // output grew for two seconds from 96 s in, sat on the ceiling
-            // for eight and went non-finite. Quantised to on/off the same
-            // passage was fine, which is what named the path.
-            let firmness = if pressure >= 0.98 {
-                Self::damper_firmness(serial, voice.note)
-            } else {
-                voice.firmness
-            };
-            if pressure >= 0.98 {
-                // Seated: the legacy full damp, note over.
-                let damper = Self::damper_for(voice.note, rate, grip * firmness, 1.0);
-                voice.damp(
-                    damper,
-                    thud_coefficient,
-                    thud_decay,
-                    release_gain * firmness,
-                );
-                voice.damper_applied = 0.0;
-            } else {
-                let delta = pressure - voice.damper_applied;
-                let damper = Self::damper_for(voice.note, rate, grip * firmness, 1.0);
-                voice.press_damper(damper, delta);
-                voice.damper_applied = pressure;
-            }
+        let mut flags = 0;
+        if rail_lifted {
+            flags |= VoiceRecord::FLAG_RAIL_LIFTED;
         }
+        if self.sostenuto {
+            flags |= VoiceRecord::FLAG_SOSTENUTO;
+        }
+        self.broadcast_voice_work(VoiceRecord {
+            kind: VoiceRecord::PEDAL,
+            flags,
+            velocity: pressure,
+            serial: self.damp_serial,
+            ..VoiceRecord::EMPTY
+        });
     }
 
     /// CC66: the sostenuto rod catches exactly the dampers that are up at
@@ -8789,58 +11391,34 @@ impl ConcertGrand {
             return;
         }
         self.sostenuto = down;
-        let knock = 0.0025 * Controls::noise_gain(self.controls.pedal_noise);
+        let knock = 0.0025 * Controls::noise_gain(self.engine.controls.pedal_noise);
         self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
+        let mut flags = 0;
         if down {
-            for voice in &mut self.voices {
-                if voice.active && voice.held {
-                    voice.sostenuto = true;
-                }
-            }
-            return;
+            flags |= VoiceRecord::FLAG_SOSTENUTO;
         }
-        // Released: every captured note falls into whatever the sustain
-        // pedal is doing right now.
-        let (thud_coefficient, thud_decay) = self.damper_thud();
-        let release_gain = Controls::noise_gain(self.controls.release_noise);
-        let rate = self.sample_rate;
-        let grip = self.controls.damper_grip();
-        let pressure = self.pedal_pressure;
-        for voice in &mut self.voices {
-            if !(voice.active && voice.sostenuto) {
-                continue;
-            }
-            voice.sostenuto = false;
-            if voice.held || !voice.sustained || voice.undamped {
-                continue;
-            }
-            if self.pedal && pressure < 0.98 {
-                let damper = Self::damper_for(voice.note, rate, grip, 1.0);
-                voice.press_damper(damper, pressure - voice.damper_applied);
-                voice.damper_applied = pressure;
-            } else {
-                let damper = Self::damper_for(voice.note, rate, grip, 1.0);
-                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
-                voice.damper_applied = 0.0;
-            }
+        if self.pedal {
+            flags |= VoiceRecord::FLAG_PEDAL;
         }
+        self.broadcast_voice_work(VoiceRecord {
+            kind: VoiceRecord::SOSTENUTO,
+            flags,
+            velocity: self.pedal_pressure,
+            ..VoiceRecord::EMPTY
+        });
     }
 
     fn all_notes_off(&mut self) {
-        let (thud_coefficient, thud_decay) = self.damper_thud();
-        let release_gain = Controls::noise_gain(self.controls.release_noise);
-        let rate = self.sample_rate;
-        let grip = self.controls.damper_grip();
-        for voice in &mut self.voices {
-            if voice.active {
-                let damper = Self::damper_for(voice.note, rate, grip, 1.0);
-                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
-            }
-        }
+        let rate = self.engine.sample_rate;
+        let grip = self.engine.controls.damper_grip();
+        self.broadcast_voice_work(VoiceRecord {
+            kind: VoiceRecord::ALL_OFF,
+            ..VoiceRecord::EMPTY
+        });
         self.key_down = [false; NOTE_COUNT];
         for slot in 0..SILENT_SLOTS {
             if self.silent_state[slot] != SILENT_FREE {
-                let own = Self::damper_for(self.silent_note[slot], rate, grip, 1.0);
+                let own = StringEngine::damper_for(self.silent_note[slot], rate, grip, 1.0);
                 self.damp_silent(slot, own);
             }
         }
@@ -8913,7 +11491,7 @@ impl ConcertGrand {
                 // softest calibrated strike is one seven-bit step, and a
                 // hammer thrown slower than that is that strike.
                 let unit = (velocity as f32 / 65535.0).max(1.0 / 127.0);
-                self.start_voice_unit(channel, note, unit);
+                self.plan_strike(channel, note, unit);
             }
             MIDI2_KIND_NOTE_OFF => {
                 // The host raises `RELEASE_MEASURED` under exactly the rule
@@ -8982,7 +11560,11 @@ impl ConcertGrand {
     fn preamp_gain(&self) -> f32 {
         powf(
             10.0,
-            self.controls.preamp.clamp(0.0, PREAMP_RANGE_DB.get()) / 20.0,
+            self.engine
+                .controls
+                .preamp
+                .clamp(0.0, PREAMP_RANGE_DB.get())
+                / 20.0,
         )
     }
 
@@ -9027,10 +11609,10 @@ impl ConcertGrand {
     /// lid -- so a tuning file changed while the instrument runs reaches the
     /// parts that are only built once.
     pub fn retune(&mut self) {
-        if self.sample_rate <= 0.0 {
+        if self.engine.sample_rate <= 0.0 {
             return;
         }
-        self.restrike_merge = RESTRIKE_FRESH.get() < 0.5;
+        self.engine.restrike_merge = RESTRIKE_FRESH.get() < 0.5;
         self.tune();
         self.tune_board();
         self.tune_undamped();
@@ -9146,32 +11728,57 @@ fn relaid_state(state: &[u8]) -> Option<[u8; STATE_COUNT * 4]> {
     Some(out)
 }
 
-impl Processor for ConcertGrand {
-    fn prepare(
+/// The instrument's own control plane, which the two contracts share.
+///
+/// Inherent rather than a `Processor` impl, because `ParallelProcessor`
+/// carries the same ten names and a call like `piano.prepare(..)` would
+/// have no way to choose. The trait below is a delegation to these, which
+/// is what it should have been anyway: the logic belongs to the
+/// instrument, not to whichever contract the host is holding it by.
+impl ConcertGrand {
+    pub fn prepare(
         &mut self,
         sample_rate: f64,
-        _maximum_frames: u32,
+        maximum_frames: u32,
         _input_channels: u32,
         _output_channels: u32,
     ) -> bool {
         if !sample_rate.is_finite() || sample_rate <= 0.0 {
             return false;
         }
-        self.sample_rate = sample_rate as f32;
-        self.restrike_merge = RESTRIKE_FRESH.get() < 0.5;
+        self.engine.sample_rate = sample_rate as f32;
+        self.section_delay = (maximum_frames as usize).clamp(1, MAX_SECTION_DELAY);
+        self.engine.restrike_merge = RESTRIKE_FRESH.get() < 0.5;
         self.tune_board();
         self.tune_open_strings();
         self.tune_undamped();
         self.tune_halo();
         self.tune_room();
-        self.reset();
+        Self::reset(self);
         true
     }
 
-    fn reset(&mut self) {
-        self.voices = [Voice::default(); MAX_VOICES];
+    /// Takes the host's real-time budget. See `BOARD_MODE_FUEL` for where the
+    /// arithmetic that spends it comes from.
+    ///
+    /// Only the number is taken here; the bank is not rebuilt until the next
+    /// block, where the frame count is known -- a budget is per call, and a
+    /// call's worth of work depends on how many frames are in it.
+    pub fn set_realtime_budget(&mut self, fuel_per_call: u64) -> bool {
+        self.budget_fuel_per_call = fuel_per_call;
+        self.budget_pending = true;
+        true
+    }
+
+    pub fn reset(&mut self) {
+        self.sections = [StringUnit::default(); STRING_SECTIONS];
+        self.summary = [VoiceSummary::default(); MAX_VOICES];
+        self.halo_summary = [VoiceSummary::default(); STRING_SECTIONS * HALOS_PER_SECTION];
         self.pedal = false;
-        self.active_partials = 0;
+        for section in 0..STRING_SECTIONS {
+            self.sections[section].partials = 0;
+            self.sections[section].allowance = self.partial_budget / STRING_SECTIONS;
+        }
         for string in &mut self.undamped {
             string.y1 = 0.0;
             string.y2 = 0.0;
@@ -9197,8 +11804,8 @@ impl Processor for ConcertGrand {
         self.room_index = [0; ROOM_LINES];
     }
 
-    fn set_parameter(&mut self, index: u32, value: f64) -> bool {
-        let accepted = self.controls.set(index, value);
+    pub fn set_parameter(&mut self, index: u32, value: f64) -> bool {
+        let accepted = self.engine.controls.set(index, value);
         if accepted && index >= KNOB_PARAM_BASE {
             self.board_dirty = true;
             self.room_dirty = true;
@@ -9239,8 +11846,8 @@ impl Processor for ConcertGrand {
         accepted
     }
 
-    fn get_parameter(&self, index: u32) -> Option<f64> {
-        self.controls.get(index)
+    pub fn get_parameter(&self, index: u32) -> Option<f64> {
+        self.engine.controls.get(index)
     }
 
     // Two voicings place the pair at 0.7071 m, which is 0.5 * 32^0.1 -- the
@@ -9250,7 +11857,7 @@ impl Processor for ConcertGrand {
     // soundboard, and writing it to more figures only makes it look more like
     // the constant it is not.
     #[allow(clippy::approx_constant)]
-    fn load_preset(&mut self, id: &str) -> bool {
+    pub fn load_preset(&mut self, id: &str) -> bool {
         /// The house lab bank with a few entries moved.
         ///
         /// A preset builds ON the factory voicing and only says what makes it
@@ -9277,7 +11884,7 @@ impl Processor for ConcertGrand {
         // itself. These used to hard-code lab: [0.5; ..], so selecting any
         // of them (or the session restoring one at boot) silently erased
         // the baked voicing, which read as "my values were not applied".
-        self.controls = match id {
+        self.engine.controls = match id {
             "concert" => Controls::default(),
             // Mellow: darker hammer, longer room, the pair a step back,
             // ribbon-ward pattern.
@@ -9612,8 +12219,8 @@ impl Processor for ConcertGrand {
         true
     }
 
-    fn save_state(&self, destination: &mut [u8]) -> Option<usize> {
-        let values = state_words(&self.controls);
+    pub fn save_state(&self, destination: &mut [u8]) -> Option<usize> {
+        let values = state_words(&self.engine.controls);
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -9621,9 +12228,9 @@ impl Processor for ConcertGrand {
         Some(values.len() * 4)
     }
 
-    fn load_state(&mut self, state: &[u8]) -> bool {
+    pub fn load_state(&mut self, state: &[u8]) -> bool {
         if let Some(relaid) = relaid_state(state) {
-            return self.load_state(&relaid);
+            return Self::load_state(self, &relaid);
         }
         // A state saved by an older build is shorter, because controls have
         // only ever been added to the end. Read what it has and leave the
@@ -9755,7 +12362,7 @@ impl Processor for ConcertGrand {
         }
         let mut lab = [0.5f32; LAB_COUNT];
         lab.copy_from_slice(&values[6..6 + LAB_COUNT]);
-        self.controls = Controls {
+        self.engine.controls = Controls {
             knobs_dirty: true,
             brightness: values[0],
             dynamics: values[1],
@@ -9800,14 +12407,15 @@ impl Processor for ConcertGrand {
             knob.set(knob_from_fader(knob.compiled(), fader));
         }
         if !same_layout {
-            self.controls.preamp = Controls::default().preamp;
+            self.engine.controls.preamp = Controls::default().preamp;
         }
         self.room_dirty = true;
         self.board_dirty = true;
         true
     }
 
-    fn process(
+    #[allow(clippy::too_many_arguments)]
+    pub fn process(
         &mut self,
         input: &[f32],
         output: &mut [f32],
@@ -9829,7 +12437,11 @@ impl Processor for ConcertGrand {
         );
     }
 
-    fn process_wide(
+    // The section loop indexes several per-frame plans by the same offset and
+    // sums in a fixed order that the render fingerprint pins; an iterator
+    // chain would read worse and prove nothing more.
+    #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
+    pub fn process_wide(
         &mut self,
         _input: &[f32],
         output: &mut [f32],
@@ -9840,565 +12452,369 @@ impl Processor for ConcertGrand {
         _input_channels: u32,
         output_channels: u32,
     ) {
-        if self.controls.knobs_dirty {
-            self.controls.knobs_dirty = false;
-            self.retune();
-        }
-        // Knobs read once per call, not per sample.
-        let knob_air_highpass = AIR_HIGHPASS.get();
-        let knob_board_mix = BOARD_MIX.get();
-        let knob_halo_mix = HALO_MIX.get();
-        self.tune_pair();
-        for slot in 0..SILENT_SLOTS {
-            if self.silent_state[slot] == SILENT_DAMPED {
-                self.silent_in[slot] = self.silent_in[slot].saturating_sub(frames);
-                if self.silent_in[slot] == 0 {
-                    self.silent_state[slot] = SILENT_FREE;
-                    let base = slot * SILENT_MODES_PER_SLOT;
-                    for mode in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
-                        *mode = BodyMode::default();
-                    }
-                }
-            }
-        }
-        self.note_sounding = [false; NOTE_COUNT];
-        for voice in &self.voices {
-            if !(voice.active && !voice.halo && voice.note >= LOW_NOTE) {
-                continue;
-            }
-            if let Some(slot) = self.note_sounding.get_mut((voice.note - LOW_NOTE) as usize) {
-                *slot = true;
-            }
-        }
-        let knob_headroom = HEADROOM.get();
-        let knob_open_mix = OPEN_MIX.get();
-        let pedal_c1 =
-            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.0 / self.sample_rate);
-        let pedal_c2 =
-            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.1 / self.sample_rate);
-        let pedal_c0 =
-            1.0 - expf(-core::f32::consts::TAU * PEDAL_NOISE_POLES_HZ.2 / self.sample_rate);
-        let pedal_decay = expf(-LN_1000 / (PEDAL_NOISE_T60_S * self.sample_rate));
-        let knob_room_mix = ROOM_MIX.get();
-        let knob_sympathy_rate = SYMPATHY_RATE.get();
-        let knob_undamped_mix = UNDAMPED_MIX.get();
-        let knob_bed_mix = BED_MIX.get();
+        let (sympathy_rate, pedal_decay) = self.open_block(frames);
         let channels = output_channels as usize;
-        // Every note-on in the buffer gets the full hammer-string integration.
-        //
-        // This was three, to keep the callback affordable, and the fourth key
-        // in a chord fell back to the calibrated recipe instead. That is
-        // audibly a different instrument: measured note by note against the
-        // simulated strike, the recipe comes out about 4 dB light from 60 to
-        // 500 Hz and 17.9 dB heavy from 4 to 8 kHz, at the same peak level. A
-        // chord lost body and grew an edge from its fourth note on, and which
-        // notes those were depended on where the buffer boundary fell, so the
-        // same chord did not sound the same twice.
-        //
-        // The budget turns out to have been costing fuel as well as tone.
-        // Measured in the host's own currency (tests/concert_grand_fuel.rs),
-        // thirteen notes struck in one 1024-frame block spend 167.3M fuel with
-        // the budget at three and 149.7M with every strike simulated -- 84% of
-        // the ceiling against 75%. The cheap path is only cheap at the strike:
-        // it leaves a brighter, denser set of partials running, and that is
-        // billed on every sample afterwards.
-        //
-        // MAX_VOICES is the bound because no more than that can sound at once;
-        // it only limits a buffer carrying more note-ons than the instrument
-        // has voices, where the surplus would be stolen away regardless.
-        self.strike_budget = MAX_VOICES as u32;
-        if self.room_dirty {
-            self.tune_room();
-        }
-        if self.board_dirty {
-            self.tune_board();
-        }
-        if self.scale_dirty {
-            self.scale_dirty = false;
-            self.tune();
-            self.tune_undamped();
-        }
-        let level = self.controls.level_gain() * powf(10.0, OUTPUT_TRIM_DB / 20.0);
-        let preamp_gain = self.preamp_gain();
-        let knee_positive = PREAMP_KNEE.get().clamp(0.1, 0.95);
-        // The asymmetry: the negative half bends a little later.
-        let knee_negative =
-            (knee_positive * (1.0 + PREAMP_ASYMMETRY.get())).clamp(knee_positive, 0.99);
-        // The sympathetic feed: the bridge's total string signal from the
-        // PREVIOUS sample, handed to every free string this sample. One
-        // sample of latency around the loop keeps the order of voices
-        // meaningless and the feedback explicit.
-        let sympathy_rate = knob_sympathy_rate * self.controls.lab(15).min(4.0);
-        let mut bridge_feed = self.bridge_feed;
         let mut midi_index = 0;
         let mut midi2_index = 0;
         let mut parameter_index = 0;
-        // Which bed strings are sounding on their own right now: those are
-        // not damped, and their voice already carries the sympathy; the bed
-        // must not seed a second copy of a note's own onset and ring it for
-        // seconds. Refreshed whenever a MIDI event lands.
         let mut bed_busy = [false; BED_COUNT];
         let mut refresh_busy = true;
-
-        for frame in 0..frames as usize {
-            self.clock = self.clock.wrapping_add(1);
-            while let Some(event) = midi.get(midi_index) {
-                if event.frame as usize != frame {
-                    break;
-                }
-                self.handle_midi(event);
-                midi_index += 1;
-                refresh_busy = true;
-            }
-            while let Some(event) = midi2.get(midi2_index) {
-                if event.frame as usize != frame {
-                    break;
-                }
-                self.handle_wide(event);
-                midi2_index += 1;
-                refresh_busy = true;
-            }
-            while let Some(event) = parameters.get(parameter_index) {
-                if event.frame as usize != frame {
-                    break;
-                }
-                let _ = self.controls.set(event.index, event.value);
-                parameter_index += 1;
-            }
-
-            if refresh_busy {
-                refresh_busy = false;
-                bed_busy = [false; BED_COUNT];
-                for voice in &self.voices {
-                    if voice.active {
-                        let slot = voice.note.saturating_sub(LOW_NOTE) as usize;
-                        if slot < BED_COUNT {
-                            bed_busy[slot] = true;
-                        }
-                    }
-                }
-                // A key that is down has its damper up: its string is not
-                // in the damped bed, whether it was struck or not.
-                for (slot, busy) in bed_busy.iter_mut().enumerate() {
-                    if self.key_down[slot] {
-                        *busy = true;
-                    }
-                }
-            }
-            let mut strings_total = 0.0f32;
-            let mut bridge_drive = 0.0f32;
-            let mut drive_points = [0.0f32; BOARD_DRIVE_POINTS];
-            let mut keybed_left = 0.0f32;
-            let mut keybed_right = 0.0f32;
-            for voice in &mut self.voices {
-                if !voice.active {
-                    continue;
-                }
-                // Everyone but me, gated by the damper: a seated or
-                // pressed damper takes a string out of the conversation
-                // exactly as far as it is pressed.
-                let free = if voice.held {
-                    1.0
-                } else if voice.sustained {
-                    1.0 - voice.damper_applied
-                } else {
-                    0.0
-                };
-                let sympathy = (bridge_feed - voice.last_out) * sympathy_rate * free;
-                let sample = voice.tick(sympathy);
-                voice.last_out = sample;
-                strings_total += sample;
-                keybed_left += voice.keybed_out * voice.pan_left;
-                keybed_right += voice.keybed_out * voice.pan_right;
-                // What drives the BODY is the bridge. The strings used to
-                // pass through a per-voice "spaced pair" -- one write read at
-                // two delays, panned, then summed -- and that sum was this
-                // excitation. Summing two arrival times is a comb, and since
-                // NOTHING else ever read the pair's left and right (the
-                // output mix is built from the board, the lid and the room
-                // alone), the pair never made stereo: its entire audible
-                // output was that comb, deterministic per note. For B3 the
-                // first notch landed at ~2.7 kHz, on its eleventh partial --
-                // measured 5-8 dB of absolute loss across the upper ladder,
-                // and every note got its own notch pattern: the ragged,
-                // bell-like mid-register the ear reported as metallic. The
-                // machinery is gone; the pan weight stays so each string
-                // drives the board at the level the calibration expects.
-                let force = sample * (voice.pan_left + voice.pan_right);
-                bridge_drive += force;
-                drive_points[voice.drive_index] += force * (1.0 - voice.drive_frac);
-                drive_points[voice.drive_index + 1] += force * voice.drive_frac;
-
-                if voice.damper_phase != 0 {
-                    voice.damper_in -= 1;
-                    if voice.damper_in == 0 {
-                        if self.sostenuto && voice.sostenuto {
-                            // The middle pedal caught this key while its
-                            // felt was still up: it stays up.
-                            voice.cancel_damper();
-                            voice.held = false;
-                            voice.sustained = true;
-                            voice.damper_applied = 0.0;
-                        } else {
-                            voice.advance_damper();
-                        }
-                    }
-                }
-                voice.tension_in -= 1;
-                if voice.tension_in == 0 {
-                    voice.tension_in = TENSION_INTERVAL;
-                    voice.tension_step();
-                }
-                voice.cull_in -= 1;
-                if voice.cull_in == 0 {
-                    voice.cull_in = CULL_INTERVAL;
-                    let removed = voice.cull();
-                    self.active_partials = self.active_partials.saturating_sub(removed);
-                }
-            }
-
-            bridge_feed = strings_total;
-            // Everything the strings produce radiates through the board --
-            // each string from its own point of the bridge (`BOARD_SHAPE`).
-            let excitation = bridge_drive;
-            let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
-            let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
-            for q in 0..BOARD_DRIVE_POINTS {
-                let mut c = 0.0f32;
-                let mut s = 0.0f32;
-                for ((basis_cos, basis_sin), point) in self.drive_basis_cos[q]
-                    .iter()
-                    .zip(self.drive_basis_sin[q].iter())
-                    .zip(drive_points.iter())
-                {
-                    c += basis_cos * point;
-                    s += basis_sin * point;
-                }
-                cos_t[q] = c;
-                sin_t[q] = s;
-            }
-            let mut board_left = 0.0;
-            let mut board_right = 0.0;
-            for mode in self.board.iter_mut().take(self.board_count) {
-                let (left, right) = mode.tick_pair(mode.excitation(&cos_t, &sin_t));
-                board_left += left;
-                board_right += right;
-            }
-            // The rim: below its first mode the board radiates almost nothing.
-            board_left = rim_pass(&mut self.rim[0], &self.rim_coef, board_left);
-            board_right = rim_pass(&mut self.rim[1], &self.rim_coef, board_right);
-            // The open top octave listens to the bridge and rings on.
-            let mut open_left = 0.0;
-            let mut open_right = 0.0;
-            for string in &mut self.open_strings {
-                let y = string.tick(excitation);
-                open_left += y * string.pan_left;
-                open_right += y * string.pan_right;
-            }
-            // Every other string's undamped length, listening to the bridge.
-            let mut undamped_left = 0.0;
-            let mut undamped_right = 0.0;
-            for (string, owner) in self.undamped.iter_mut().zip(self.undamped_note.iter()) {
-                let sounding =
-                    *owner >= LOW_NOTE && self.note_sounding[(*owner - LOW_NOTE) as usize];
-                let y = string.tick(if sounding { 0.0 } else { excitation });
-                undamped_left += y * string.pan_left;
-                undamped_right += y * string.pan_right;
-            }
-            // The silent keys' strings, listening like the top octave's;
-            // one whose own voice is sounding is that voice.
-            for slot in 0..SILENT_SLOTS {
-                if self.silent_state[slot] == SILENT_FREE {
-                    continue;
-                }
-                let owner = self.silent_note[slot];
-                let sounding = owner >= LOW_NOTE && self.note_sounding[(owner - LOW_NOTE) as usize];
-                let feed = if sounding { 0.0 } else { excitation };
-                let base = slot * SILENT_MODES_PER_SLOT;
-                for string in &mut self.silent[base..base + SILENT_MODES_PER_SLOT] {
-                    let y = string.tick(feed);
-                    undamped_left += y * string.pan_left;
-                    undamped_right += y * string.pan_right;
-                }
-            }
-            undamped_left = rim_pass(&mut self.rim[2], &self.rim_coef, undamped_left);
-            undamped_right = rim_pass(&mut self.rim[3], &self.rim_coef, undamped_right);
-            let undamped_gain = knob_undamped_mix * self.controls.lab(15);
-            // The damped strings' bed, listening to the bridge like the
-            // undamped lengths do -- see BED_MIX.
-            let mut bed_left = 0.0;
-            let mut bed_right = 0.0;
-            for (string, busy) in self.bed.iter_mut().zip(bed_busy) {
-                let y = string.tick(if busy { 0.0 } else { excitation });
-                bed_left += y * string.pan_left;
-                bed_right += y * string.pan_right;
-            }
-            // The bed reaches the air through the board too: with the pedal
-            // down every bass string rings by sympathy, and below the
-            // board's first mode the rim cancels their fundamentals as it
-            // cancels the struck string's. Measured, the bed alone put A0's
-            // fundamental 12 dB over its partials, past the board.
-            bed_left = rim_pass(&mut self.rim[4], &self.rim_coef, bed_left);
-            bed_right = rim_pass(&mut self.rim[5], &self.rim_coef, bed_right);
-            let bed_gain = knob_bed_mix * self.controls.lab(15);
-
-            // The shimmer: everything above ~1.8 kHz feeds the undamped
-            // open register and rings on.
-            self.halo_lp += self.halo_hp_k * (excitation - self.halo_lp);
-            let bright = excitation - self.halo_lp;
-            let mut halo_outs = [0.0f32; 4];
-            let mut halo_sum = 0.0;
-            for (line, output) in halo_outs.iter_mut().enumerate() {
-                *output = self.halo[line][self.halo_index[line]];
-                halo_sum += *output;
-            }
-            let halo_householder = halo_sum * 0.5;
-            for (line, output) in halo_outs.iter().copied().enumerate() {
-                let feedback = (output - halo_householder) * self.halo_gain[line];
-                let index = self.halo_index[line];
-                self.halo[line][index] = bright * 0.5 + feedback;
-                let next = index + 1;
-                self.halo_index[line] = if next == self.halo_len[line] { 0 } else { next };
-            }
-            let sympathy = self.controls.lab(15);
-            let halo_left = (halo_outs[0] - halo_outs[1]) * knob_halo_mix * sympathy;
-            let halo_right = (halo_outs[2] - halo_outs[3]) * knob_halo_mix * sympathy;
-
-            // The lid and rim reflect the near field back a few dozen
-            // milliseconds late, differently per side.
-            // What the lid and the room reflect is what the board radiates,
-            // not the string's own motion: the string reaches the air only
-            // through the bridge and the board.
-            let staged = (board_left + board_right) * knob_board_mix
-                + (keybed_left + keybed_right) * knob_board_mix
-                + (undamped_left + undamped_right) * undamped_gain
-                + (bed_left + bed_right) * bed_gain
-                + (open_left + open_right) * knob_open_mix * sympathy
-                + halo_left
-                + halo_right;
-            // What drives the air is what the BOARD radiates, and the
-            // board radiates almost nothing below its first mode. The lid and
-            // the chamber were being fed the full signal instead, and the
-            // chamber is a six-line feedback network with a 1.4 s decay and
-            // only a 4.2 kHz lowpass in the loop -- nothing damps its low
-            // modes at all. So it rang at one of them, and it rang under
-            // everything.
-            //
-            // Measured: a fixed 46.2 Hz tone sat under every single note,
-            // following nothing, at -73.6 dB under C4 -- and setting the air
-            // control to zero was the only thing that removed it (-83.8 dB,
-            // and the peak moves off it entirely). Six voices of a chord each
-            // contribute their own copy, and it sums into an audible drone an
-            // octave and a half below the music. That is the octave
-            // discrepancy the user heard the moment they played chords on the
-            // packaged build, and no single-note render could show it.
-            //
-            // One pole at the radiation corner, subtracted: the ambience now
-            // receives the same spectrum the board actually puts into the
-            // room.
-            // Two poles, not one: a single pole rolls off at 6 dB an octave
-            // and the board's own measured law is sixth-order. Two is still
-            // gentler than the board, which is the safe direction -- it
-            // cannot remove anything the board would have radiated.
-            //
-            // The high-pass is cascaded, not the low-pass. Subtracting two
-            // cascaded low-passes gives `1 - H^2 = (1 - H)(1 + H)`, and near
-            // DC `1 + H` is nearly 2 -- so it lets through about twice what
-            // one pole does. Measured, that version was 5 dB WORSE than a
-            // single pole. Each stage has to high-pass what the last one
-            // handed it.
-            self.air_dc[0] += knob_air_highpass * (staged - self.air_dc[0]);
-            let once = staged - self.air_dc[0];
-            self.air_dc[1] += knob_air_highpass * (once - self.air_dc[1]);
-            let staged = once - self.air_dc[1];
-            // The early reflections: what the board radiates, mirrored in
-            // the six surfaces, three images read by each side of the pair.
-            self.early[self.early_write] = staged;
-            // Every surface reaches BOTH capsules, each by its own path and
-            // at its own polar angle. The floor and the ceiling arrive almost
-            // together, which is what holds the centre; the near and far walls
-            // arrive apart, which is what opens the image. Neither is decided
-            // here any more.
-            let mut early = [0.0f32; 2];
-            for (side, taps) in self.early_taps.iter().enumerate() {
-                for (offset, gain) in taps {
-                    early[side] +=
-                        self.early[(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER] * gain;
-                }
-            }
-            let (early_left, early_right) = (early[0], early[1]);
-            self.early_write = (self.early_write + 1) % ROOM_BUFFER;
-            // The lid's image, read from the same buffer (the write pointer
-            // has already moved on by one), through its own darkening pole.
-            let mut lid = [0.0f32; 2];
-            for ((taps, pole), out) in self
-                .lid_tap
-                .iter()
-                .zip(self.lid_lp.iter_mut())
-                .zip(lid.iter_mut())
-            {
-                let mut heard = 0.0;
-                for (offset, gain) in taps {
-                    heard += self.early
-                        [(self.early_write + ROOM_BUFFER - 1 - offset) % ROOM_BUFFER]
-                        * gain;
-                }
-                *pole += self.lid_damp * (heard - *pole);
-                *out = *pole * self.early_gain;
-            }
-            let (lid_left, lid_right) = (lid[0], lid[1]);
-
-            // The chamber: read every line, mix through the Householder
-            // matrix, damp the highs in the feedback, write back with the
-            // input. The recorded instrument the model is measured against
-            // lives in a room; the tail is part of the piano the ear knows.
-            let mut outs = [0.0f32; ROOM_LINES];
-            let mut outs_sum = 0.0;
-            for (line, output) in outs.iter_mut().enumerate() {
-                *output = self.room[line][self.room_index[line]];
-                outs_sum += *output;
-            }
-            let householder = outs_sum * (2.0 / ROOM_LINES as f32);
-            for (line, output) in outs.iter().copied().enumerate() {
-                let feedback = output - householder;
-                self.room_lp[line] += self.room_damp * (feedback - self.room_lp[line]);
-                // The low shelf: hard rooms let the bottom ring past the
-                // mids, soft ones take it down with everything else.
-                self.room_low[line] +=
-                    self.room_low_coeff * (self.room_lp[line] - self.room_low[line]);
-                let shaped = self.room_lp[line] + self.room_low_gain * self.room_low[line];
-                let index = self.room_index[line];
-                self.room[line][index] = staged * 0.25 + shaped * self.room_gain[line];
-                let next = index + 1;
-                self.room_index[line] = if next == self.room_len[line] { 0 } else { next };
-            }
-            let air = self.controls.lab(16);
-            let wet = knob_room_mix * air * self.reverb_gain;
-            let room_left =
-                (outs[0] - outs[1] + outs[2]) * wet + early_left * self.early_gain * air;
-            let room_right =
-                (outs[3] - outs[4] + outs[5]) * wet + early_right * self.early_gain * air;
-
-            // There is one board and it is the through path, so there is one
-            // gain. The pair it replaced was mixed 25 dB apart in the wrong
-            // direction, which let a sparse parallel comb own 78-87% of the
-            // output below 3 kHz.
-            // Headroom, so the instrument stops living inside its own
-            // limiter.
-            //
-            // Measured at what reaches `soften`, which clamps at 1.5: a
-            // single fortissimo bass note arrived at 1.60, a bass octave at
-            // 2.53, a five-note chord at 5.49 and a ten-note chord at 6.58 --
-            // more than four times into a brick wall. Everything above
-            // mezzoforte came out flat-topped, so a ten-note chord peaked at
-            // exactly the same 0.462 as one note.
-            //
-            // A piano whose dynamics stop at mezzoforte, whose attacks are
-            // decapitated because the attack IS the peak, and where raising
-            // any level control just pushes further into the clamp and
-            // returns the same flattened shape, is not a piano. It is an
-            // electric piano, which is what this has been called for forty
-            // versions -- and it also explains, at last, why moving the panel
-            // seemed to do so little.
-            //
-            // Sized so the loudest thing the instrument can be asked for, a
-            // ten-note fortissimo chord, lands near 1.2 and stays out of the
-            // clamp. That costs about 11 dB of output, which belongs in the
-            // host's gain and not in a saturator: the desktop already runs
-            // +6 dB and allows +12.
-            let board_mix = knob_board_mix * self.controls.lab(14) * knob_headroom;
-            let (near_left, near_right) = (self.direct_gain[0], self.direct_gain[1]);
-            let mut direct_left = board_left * board_mix * near_left
-                + keybed_left * board_mix * self.keybed_gain[0]
-                + undamped_left * undamped_gain * knob_headroom * near_left
-                + bed_left * bed_gain * knob_headroom * near_left
-                + open_left * knob_open_mix * sympathy * knob_headroom
-                + halo_left * knob_headroom
-                + lid_left * air * knob_headroom;
-            let mut direct_right = board_right * board_mix * near_right
-                + keybed_right * board_mix * self.keybed_gain[1]
-                + undamped_right * undamped_gain * knob_headroom * near_right
-                + bed_right * bed_gain * knob_headroom * near_right
-                + open_right * knob_open_mix * sympathy * knob_headroom
-                + halo_right * knob_headroom
-                + lid_right * air * knob_headroom;
-            if self.pedal_noise_amp > 1e-6 {
-                self.pedal_noise_seed = self
-                    .pedal_noise_seed
-                    .wrapping_mul(1_664_525)
-                    .wrapping_add(1_013_904_223);
-                let white = (self.pedal_noise_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
-                // Dark and woody: the rail speaks through the case. Measured
-                // on the reference's own pedal samples (`PEDAL_NOISE_POLES_HZ`).
-                self.pedal_noise_lp += pedal_c1 * (white - self.pedal_noise_lp);
-                self.pedal_noise_lp2 += pedal_c2 * (self.pedal_noise_lp - self.pedal_noise_lp2);
-                self.pedal_noise_floor +=
-                    pedal_c0 * (self.pedal_noise_lp2 - self.pedal_noise_floor);
-                let knock = (self.pedal_noise_lp2 - self.pedal_noise_floor) * self.pedal_noise_amp;
-                direct_left += knock;
-                direct_right += knock;
-                self.pedal_noise_amp *= pedal_decay;
-            }
-            // Proximity: the pressure-gradient microphone's low end rises
-            // with 1/r. A 120 Hz shelf whose gain follows the pattern and
-            // the distance -- an omni has none, a ribbon up close blooms.
-            if self.proximity_gain[0] > 1e-3 || self.proximity_gain[1] > 1e-3 {
-                self.proximity[0] += self.proximity_coeff * (direct_left - self.proximity[0]);
-                self.proximity[1] += self.proximity_coeff * (direct_right - self.proximity[1]);
-                direct_left += self.proximity_gain[0] * self.proximity[0];
-                direct_right += self.proximity_gain[1] * self.proximity[1];
-            }
-            // The soft clip is a safety net on the output, not part of the
-            // voice, so it belongs AFTER the level control -- and it was sitting
-            // before it. Level is a gain of 0.518 by default (-5.7 dB), so
-            // the clip was defending against a 1.38 peak that the very next
-            // multiply was about to bring down to 0.71. Measured on a seven-note
-            // fortissimo chord against the sum of the same notes struck alone,
-            // which is what the chord would be if nothing here were nonlinear:
-            // 250-500 Hz came out 6.1 dB down and 500-1000 Hz 2.5 dB down, while
-            // 1-2 kHz ran 6.4 dB hot, 2-4 kHz 6.7 dB and 4-8 kHz 13.8 dB. That is
-            // not a piano's spectrum; it is the fundamentals being flattened and
-            // reappearing as intermodulation. It also flattened the dynamics: a
-            // chord at velocity 127 peaked 0.11 dB above the same chord at 100.
-            // A soundboard is linear to a very good approximation, so nothing
-            // here should compress until the output itself would clip.
-            let scaled_left = (direct_left + room_left * knob_headroom) * level;
-            let scaled_right = (direct_right + room_right * knob_headroom) * level;
-            // The preamplifier: the gain an engineer adds after the capsules,
-            // with the input stage's own bend above its knee -- a chord
-            // driven past it compresses a couple of decibels and warms; a
-            // single note never reaches it. `soften` stays behind it as the
-            // safety net it was.
-            let (scaled_left, scaled_right) = (
-                Self::transformer(scaled_left * preamp_gain, knee_positive, knee_negative),
-                Self::transformer(scaled_right * preamp_gain, knee_positive, knee_negative),
+        // What phase one writes down for phase two, and what phase two hands
+        // to phase three.
+        let mut unit_out = [[SectionFrame::default(); RENDER_SPAN]; STRING_SECTIONS];
+        let mut span_start = 0usize;
+        while span_start < frames as usize {
+            let span = (frames as usize - span_start).min(RENDER_SPAN);
+            self.silent_work_len = 0;
+            self.plan_span(
+                midi,
+                midi2,
+                parameters,
+                &mut midi_index,
+                &mut midi2_index,
+                &mut parameter_index,
+                &mut refresh_busy,
+                &mut bed_busy,
+                span_start,
+                span,
+                pedal_decay,
             );
-            let left = Self::soften(scaled_left);
-            let right = Self::soften(scaled_right);
-            match channels {
-                0 => {}
-                // Two nearly identical channels ADDED are 6 dB louder than
-                // either, which the clip then had to give back. A mono host
-                // should hear the same instrument, not a louder distorted one.
-                1 => output[frame] = Self::soften(0.5 * (scaled_left + scaled_right)),
-                _ => {
-                    output[frame * channels] = left;
-                    output[frame * channels + 1] = right;
-                    for channel in 2..channels {
-                        output[frame * channels + channel] = 0.0;
-                    }
+            // PHASE TWO -- the sections. Each one renders its own strings for
+            // the whole span from its own state and what phase one wrote
+            // down, and nothing it touches belongs to another section. This
+            // is the loop a host with four cores runs four ways.
+            for section in 0..STRING_SECTIONS {
+                let mut previous = self.sections[section].previous;
+                for offset in 0..span {
+                    let written = self.voice_work_len[section];
+                    let (units, work) = (&mut self.sections, &self.voice_work);
+                    units[section]
+                        .run_work(&work[section][..written], (span_start + offset) as u16);
+                    // Itself from one sample ago, everyone else from a whole
+                    // block ago. A section that is the only one sounding
+                    // hears exactly what it always heard: the others' sums
+                    // are zero, so there is nothing to be late.
+                    let feed = self.plan_others[offset][section] + previous;
+                    let made = self.sections[section].render_frame(
+                        feed,
+                        sympathy_rate,
+                        self.plan_sostenuto[offset],
+                    );
+                    previous = made.sample;
+                    unit_out[section][offset] = made;
                 }
+                self.sections[section].previous = previous;
             }
+
+            self.serial_stages(
+                |section, offset| unit_out[section][offset],
+                span_start,
+                span,
+                output,
+                channels,
+            );
+            span_start += span;
         }
-        self.bridge_feed = bridge_feed;
+        let said: [UnitReport; STRING_SECTIONS] =
+            core::array::from_fn(|section| self.sections[section].report());
+        self.close_block(|section| said[section]);
     }
 }
 
-export_processor!(
+/// How many floats a unit writes per frame: its own string sound, the
+/// force it put on the bridge, where on the bridge that force landed, and
+/// what the keybed under it heard.
+const SECTION_FRAME_FLOATS: usize = 4 + BOARD_DRIVE_POINTS;
+
+/// The block-shared payload: the sympathetic rate this block runs at, then
+/// per frame what each unit hears of the others and whether the sostenuto
+/// rod is down.
+///
+/// A unit is another instance with its own memory, so everything it needs
+/// and does not already own has to arrive as bytes. This is the whole of
+/// that, and it is the same thing `process_wide` hands its units from the
+/// coordinator's own arrays.
+/// The engine comes first, so it lands on the region's own alignment, and
+/// then the rate this block's sympathy runs at.
+///
+/// A unit cannot be told the instrument any other way. `prepare` reaches
+/// the coordinator; a unit is only ever handed bytes, and its `Default` is
+/// an untuned engine that would render a piano with no strings in it --
+/// which is exactly what the equivalence test caught, in the first frame
+/// of the first block.
+const SHARED_ENGINE: usize = core::mem::size_of::<StringEngine>();
+/// Then what each unit may spend this block. The coordinator divides the
+/// budget from what the units reported; a unit that never heard the answer
+/// would keep spending against the quarter it was born with.
+const SHARED_ALLOWANCE: usize = SHARED_ENGINE + 4;
+const SHARED_HEAD: usize = SHARED_ALLOWANCE + STRING_SECTIONS * 4;
+const SHARED_PER_FRAME: usize = STRING_SECTIONS * 4 + 1;
+const SHARED_CAPACITY: usize =
+    (SHARED_HEAD + MAX_BLOCK_FRAMES * SHARED_PER_FRAME).next_multiple_of(8);
+
+// The host requires it, and requires it at startup: the appliance refused to
+// start with "parallel-render shared capacity must be a positive multiple of
+// 8" the first time this shipped, because the header is the engine plus
+// twenty bytes and seventeen bytes a frame is not a multiple of anything
+// convenient. Cheaper to fail here.
+const _: () = assert!(
+    SHARED_CAPACITY.is_multiple_of(8) && SHARED_CAPACITY > 0,
+    "la capacidad compartida tiene que ser un multiplo positivo de 8"
+);
+
+impl SectionFrame {
+    /// Into a unit's slot, and back out of it in `end_block`.
+    fn write(self, into: &mut [f32]) {
+        into[0] = self.sample;
+        into[1] = self.force;
+        into[2] = self.keybed_left;
+        into[3] = self.keybed_right;
+        into[4..4 + BOARD_DRIVE_POINTS].copy_from_slice(&self.drive_points);
+    }
+
+    fn read(from: &[f32]) -> Self {
+        let mut made = Self {
+            sample: from[0],
+            force: from[1],
+            keybed_left: from[2],
+            keybed_right: from[3],
+            drive_points: [0.0; BOARD_DRIVE_POINTS],
+        };
+        made.drive_points
+            .copy_from_slice(&from[4..4 + BOARD_DRIVE_POINTS]);
+        made
+    }
+}
+
+impl ParallelProcessor for ConcertGrand {
+    type Unit = StringUnit;
+
+    /// A section does not produce sound. It produces the force on the
+    /// bridge and where it landed, and a serial stage turns four sections'
+    /// worth of that into a piano -- which two channels cannot carry.
+    const UNIT_CHANNELS: u32 = SECTION_FRAME_FLOATS as u32;
+
+    /// What only rendering knows: which strings died, how loud the rest
+    /// are, and how many partials the unit is left carrying.
+    const REPORT_BYTES: u32 = UNIT_REPORT_BYTES as u32;
+
+    fn prepare(
+        &mut self,
+        sample_rate: f64,
+        maximum_frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+    ) -> bool {
+        maximum_frames as usize <= MAX_BLOCK_FRAMES
+            && Self::prepare(
+                self,
+                sample_rate,
+                maximum_frames,
+                input_channels,
+                output_channels,
+            )
+    }
+
+    fn set_parameter(&mut self, index: u32, value: f64) -> bool {
+        Self::set_parameter(self, index, value)
+    }
+
+    fn get_parameter(&self, index: u32) -> Option<f64> {
+        Self::get_parameter(self, index)
+    }
+
+    fn set_realtime_budget(&mut self, fuel_per_call: u64) -> bool {
+        Self::set_realtime_budget(self, fuel_per_call)
+    }
+
+    fn reset(&mut self) {
+        Self::reset(self)
+    }
+
+    fn load_preset(&mut self, id: &str) -> bool {
+        Self::load_preset(self, id)
+    }
+
+    fn save_state(&self, destination: &mut [u8]) -> Option<usize> {
+        Self::save_state(self, destination)
+    }
+
+    fn load_state(&mut self, state: &[u8]) -> bool {
+        Self::load_state(self, state)
+    }
+
+    /// The serial pre-stage: open the block, walk every event in it, and
+    /// write down what the four units will need.
+    fn begin_block(&mut self, context: &BlockContext<'_>, plan: &mut PlanWriter<'_>) {
+        let frames = (context.frames as usize).min(MAX_BLOCK_FRAMES);
+        let (sympathy_rate, pedal_decay) = self.open_block(context.frames);
+        self.silent_work_len = 0;
+        let mut bed_busy = [false; BED_COUNT];
+        let (mut midi_index, mut midi2_index, mut parameter_index) = (0, 0, 0);
+        let mut refresh_busy = true;
+        self.plan_span(
+            context.midi,
+            context.midi2,
+            context.parameters,
+            &mut midi_index,
+            &mut midi2_index,
+            &mut parameter_index,
+            &mut refresh_busy,
+            &mut bed_busy,
+            0,
+            frames,
+            pedal_decay,
+        );
+
+        // What every unit hears, in the one region they all get.
+        let shared = plan.shared_buffer();
+        // Through a zeroed staging copy, so that whatever padding the engine
+        // has is initialised bytes rather than a promise nobody made.
+        let mut staged = core::mem::MaybeUninit::<StringEngine>::zeroed();
+        staged.write(self.engine);
+        // SAFETY: `staged` is initialised, including its padding, and is read
+        // as the bytes of one `StringEngine`.
+        let engine_bytes =
+            unsafe { core::slice::from_raw_parts(staged.as_ptr().cast::<u8>(), SHARED_ENGINE) };
+        shared[..SHARED_ENGINE].copy_from_slice(engine_bytes);
+        shared[SHARED_ENGINE..SHARED_ALLOWANCE].copy_from_slice(&sympathy_rate.to_le_bytes());
+        for section in 0..STRING_SECTIONS {
+            let at = SHARED_ALLOWANCE + section * 4;
+            let allowance = self.sections[section].allowance as u32;
+            shared[at..at + 4].copy_from_slice(&allowance.to_le_bytes());
+        }
+        for offset in 0..frames {
+            let at = SHARED_HEAD + offset * SHARED_PER_FRAME;
+            for section in 0..STRING_SECTIONS {
+                let hears = self.plan_others[offset][section].to_le_bytes();
+                shared[at + section * 4..at + section * 4 + 4].copy_from_slice(&hears);
+            }
+            shared[at + STRING_SECTIONS * 4] = u8::from(self.plan_sostenuto[offset]);
+        }
+        let committed = plan.commit_shared(SHARED_HEAD + frames * SHARED_PER_FRAME);
+        debug_assert!(committed, "el payload compartido no entro");
+
+        // And what each one has to DO, in ascending order, which is the
+        // order the host combines them in.
+        for section in 0..STRING_SECTIONS {
+            let written = self.voice_work_len[section];
+            let activated = plan.activate(section as u32, &self.voice_work[section][..written]);
+            debug_assert!(activated, "una seccion no entro en el plan");
+        }
+    }
+
+    /// One unit's strings for the whole block, from its own state and the
+    /// two payloads. No `&self`: everything here is the unit's or the
+    /// coordinator's word for it.
+    fn render_unit(
+        unit_index: u32,
+        unit: &mut Self::Unit,
+        payload: &[u8],
+        context: &UnitContext<'_>,
+        output: &mut [f32],
+        report: &mut [u8],
+    ) {
+        let frames = context.frames as usize;
+        let section = unit_index as usize;
+        if context.shared.len() < SHARED_HEAD + frames * SHARED_PER_FRAME {
+            debug_assert!(false, "el payload compartido llego corto");
+            return;
+        }
+        // The instrument, as this block has it. A unit is handed it every
+        // block rather than configured once, because the only thing a host
+        // promises a unit is its payloads.
+        let mut staged = core::mem::MaybeUninit::<StringEngine>::zeroed();
+        // SAFETY: the coordinator wrote exactly these bytes from a
+        // `StringEngine`, and `staged` has room for one.
+        unit.engine = unsafe {
+            core::ptr::copy_nonoverlapping(
+                context.shared.as_ptr(),
+                staged.as_mut_ptr().cast::<u8>(),
+                SHARED_ENGINE,
+            );
+            staged.assume_init()
+        };
+        let sympathy_rate = f32::from_le_bytes([
+            context.shared[SHARED_ENGINE],
+            context.shared[SHARED_ENGINE + 1],
+            context.shared[SHARED_ENGINE + 2],
+            context.shared[SHARED_ENGINE + 3],
+        ]);
+        let at = SHARED_ALLOWANCE + section * 4;
+        unit.allowance = u32::from_le_bytes([
+            context.shared[at],
+            context.shared[at + 1],
+            context.shared[at + 2],
+            context.shared[at + 3],
+        ]) as usize;
+        let mut previous = unit.previous;
+        for offset in 0..frames {
+            unit.run_work(payload, offset as u16);
+            let at = SHARED_HEAD + offset * SHARED_PER_FRAME + section * 4;
+            let hears = f32::from_le_bytes([
+                context.shared[at],
+                context.shared[at + 1],
+                context.shared[at + 2],
+                context.shared[at + 3],
+            ]);
+            let sostenuto =
+                context.shared[SHARED_HEAD + offset * SHARED_PER_FRAME + STRING_SECTIONS * 4] != 0;
+            // Itself from one sample ago, everyone else from a whole block
+            // ago, which is what lets this run beside the other three.
+            let made = unit.render_frame(hears + previous, sympathy_rate, sostenuto);
+            previous = made.sample;
+            made.write(&mut output[offset * SECTION_FRAME_FLOATS..]);
+        }
+        unit.previous = previous;
+        unit.report().write(report);
+    }
+
+    /// The serial post-stage: the four slots combined in ascending order,
+    /// everything downstream of the strings, and then the block closed on
+    /// what the units reported.
+    fn end_block(
+        &mut self,
+        mix: &UnitMix<'_>,
+        output: &mut [f32],
+        frames: u32,
+        output_channels: u32,
+    ) {
+        let frames = (frames as usize).min(MAX_BLOCK_FRAMES);
+        let mut slots = [None; STRING_SECTIONS];
+        for unit in mix.active_units() {
+            if (unit as usize) < STRING_SECTIONS {
+                slots[unit as usize] = Some(mix.slot(unit));
+            }
+        }
+        self.serial_stages(
+            |section, offset| match slots[section] {
+                // A unit the host had to silence reads as zeros, which is
+                // exactly what a section with nothing sounding produces.
+                None => SectionFrame::default(),
+                Some(slot) => SectionFrame::read(&slot[offset * SECTION_FRAME_FLOATS..]),
+            },
+            0,
+            frames,
+            output,
+            output_channels as usize,
+        );
+        let said: [UnitReport; STRING_SECTIONS] =
+            core::array::from_fn(|section| UnitReport::read(mix.report(section as u32)));
+        self.close_block(|section| said[section]);
+    }
+}
+
+export_parallel_processor!(
     ConcertGrand,
-    max_frames = 4096,
+    max_units = STRING_SECTIONS,
+    dispatch_stride = VOICE_WORK_BYTES,
+    shared_capacity = SHARED_CAPACITY,
+    max_frames = MAX_BLOCK_FRAMES,
     max_input_channels = 0,
-    max_output_channels = 2,
+    // A unit writes twenty floats a frame, not two, and the region it
+    // writes into is sized from this. The instrument still renders stereo:
+    // what the host asks for at `prepare` is what comes out of `end_block`.
+    max_output_channels = SECTION_FRAME_FLOATS,
     max_midi_events = 256,
     max_parameter_events = 256,
     max_transfer_bytes = 4096,
@@ -10437,15 +12853,15 @@ mod tests {
 
         // 0.5 * (16/0.5)^0.08
         assert!(
-            (piano.controls.mic_distance - 0.6598).abs() < 5e-4,
+            (piano.engine.controls.mic_distance - 0.6598).abs() < 5e-4,
             "mic distance is {} m",
-            piano.controls.mic_distance
+            piano.engine.controls.mic_distance
         );
         // 45 * (45000/45)^0.28
         assert!(
-            (piano.controls.room_size - 311.3).abs() < 0.5,
+            (piano.engine.controls.room_size - 311.3).abs() < 0.5,
             "room is {} m3",
-            piano.controls.room_size
+            piano.engine.controls.room_size
         );
         // The lid is degrees now; the geometry still wants the radians the
         // old halfway fader gave it: 0.05 + (0.8 - 0.05) * 0.5.
@@ -10461,9 +12877,9 @@ mod tests {
         );
         // 30 dB * 0.15 = 4.5 dB, and the gain that was and remains 10^(4.5/20).
         assert!(
-            (piano.controls.preamp - 4.5).abs() < 1e-3,
+            (piano.engine.controls.preamp - 4.5).abs() < 1e-3,
             "preamp is {} dB",
-            piano.controls.preamp
+            piano.engine.controls.preamp
         );
         assert!(
             (piano.preamp_gain() - 1.678_804).abs() < 1e-4,
@@ -10480,13 +12896,13 @@ mod tests {
     #[test]
     fn the_room_controls_are_bounded_by_the_model() {
         let mut piano = ConcertGrand::default();
-        piano.controls.lid = 1_000.0;
+        piano.engine.controls.lid = 1_000.0;
         assert!((piano.lid_radians() - LID_OPEN_RAD.get()).abs() < 1e-6);
         assert!((piano.lid_fraction() - 1.0).abs() < 1e-6);
-        piano.controls.lid = -1_000.0;
+        piano.engine.controls.lid = -1_000.0;
         assert!((piano.lid_radians() - LID_CLOSED_RAD.get()).abs() < 1e-6);
         assert!((piano.lid_fraction() - 0.0).abs() < 1e-6);
-        piano.controls.preamp = 1_000.0;
+        piano.engine.controls.preamp = 1_000.0;
         let ceiling = powf(10.0, PREAMP_RANGE_DB.get() / 20.0);
         assert!((piano.preamp_gain() - ceiling).abs() < 1e-3);
     }
@@ -10609,15 +13025,15 @@ mod tests {
     #[test]
     fn a4_is_the_tuning_anchor_and_octaves_stretch_outward() {
         let piano = Box::new(ConcertGrand::default());
-        let a4 = piano.fundamental[69 - LOW_NOTE as usize];
+        let a4 = piano.engine.fundamental[69 - LOW_NOTE as usize];
         assert!((a4 - 440.0).abs() < 0.01, "A4 is {a4}");
         // Above A4 the octaves run sharp of 2:1; below, flat — Railsback's
         // curve, derived from the inharmonicity rather than drawn.
-        let a5 = piano.fundamental[81 - LOW_NOTE as usize];
+        let a5 = piano.engine.fundamental[81 - LOW_NOTE as usize];
         assert!(a5 > 2.0 * a4, "A5 {a5} is not stretched above {}", 2.0 * a4);
-        let a3 = piano.fundamental[57 - LOW_NOTE as usize];
+        let a3 = piano.engine.fundamental[57 - LOW_NOTE as usize];
         assert!(a3 < a4 / 2.0, "A3 {a3} is not stretched below {}", a4 / 2.0);
-        let a0 = piano.fundamental[0];
+        let a0 = piano.engine.fundamental[0];
         assert!(a0 < 27.5, "A0 {a0} should sit flat of equal temperament");
     }
 
@@ -10627,9 +13043,9 @@ mod tests {
         // Fletcher & Rossing ch. 12. Derived from the scale's geometry now,
         // so this also guards the derivation against the published ranges.
         let piano = prepared();
-        let tenor = piano.inharmonicity_for(45);
-        let bass = piano.inharmonicity_for(21);
-        let top = piano.inharmonicity_for(108);
+        let tenor = piano.engine.inharmonicity_for(45);
+        let bass = piano.engine.inharmonicity_for(21);
+        let top = piano.engine.inharmonicity_for(108);
         assert!(tenor < bass && bass < top);
         assert!((5e-5..5e-4).contains(&tenor), "tenor B {tenor}");
         assert!((1e-3..5e-2).contains(&top), "treble B {top}");
@@ -10640,7 +13056,7 @@ mod tests {
         // The hammer strikes near 1/8 in the bass, so partials with a node
         // there — around n=8 — must come out well below their neighbours.
         let piano = prepared();
-        let x0 = piano.strike_point(21);
+        let x0 = piano.engine.strike_point(21);
         let comb = |n: f32| sincosf(core::f32::consts::PI * n * x0).0.abs();
         let null = (1.0 / x0).round();
         assert!(comb(null) < 0.25 * comb(null - 2.0));
@@ -10738,7 +13154,7 @@ mod tests {
     fn the_left_pedal_is_two_mechanisms_and_a_piano_has_one() {
         let struck = |upright: bool, pedal: u8| -> f32 {
             let mut piano = prepared();
-            piano.controls.action = if upright { 1.0 } else { 0.0 };
+            piano.engine.controls.action = if upright { 1.0 } else { 0.0 };
             render(
                 &mut piano,
                 64,
@@ -10958,13 +13374,13 @@ mod tests {
         assert_eq!(ConcertGrand::release_velocity(0x90, 0), None);
         assert_eq!(ConcertGrand::release_velocity(0x80, 20), Some(20));
         assert_eq!(ConcertGrand::release_velocity(0x80, 127), Some(127));
-        assert_eq!(ConcertGrand::damper_span(64), 1.0);
-        assert!(ConcertGrand::damper_span(127) < 1.0 && ConcertGrand::damper_span(127) > 0.79);
-        assert!(ConcertGrand::damper_span(1) > 2.4 && ConcertGrand::damper_span(1) < 2.6);
-        assert!(ConcertGrand::damper_span(20) > ConcertGrand::damper_span(64));
-        assert!(ConcertGrand::damper_span(110) < ConcertGrand::damper_span(64));
-        assert_eq!(ConcertGrand::damper_knock(64), 1.0);
-        assert!(ConcertGrand::damper_knock(127) > 1.0 && ConcertGrand::damper_knock(1) < 1.0);
+        assert_eq!(StringEngine::damper_span(64), 1.0);
+        assert!(StringEngine::damper_span(127) < 1.0 && StringEngine::damper_span(127) > 0.79);
+        assert!(StringEngine::damper_span(1) > 2.4 && StringEngine::damper_span(1) < 2.6);
+        assert!(StringEngine::damper_span(20) > StringEngine::damper_span(64));
+        assert!(StringEngine::damper_span(110) < StringEngine::damper_span(64));
+        assert_eq!(StringEngine::damper_knock(64), 1.0);
+        assert!(StringEngine::damper_knock(127) > 1.0 && StringEngine::damper_knock(1) < 1.0);
     }
 
     /// The measurement has authority: a slow release leaves more of the note
@@ -11013,7 +13429,7 @@ mod tests {
     #[test]
     fn no_two_damper_landings_are_the_same_one() {
         let firmness: Vec<f32> = (0..8)
-            .map(|s| ConcertGrand::damper_firmness(s, 60))
+            .map(|s| StringEngine::damper_firmness(s, 60))
             .collect();
         for value in &firmness {
             assert!(
@@ -11027,11 +13443,11 @@ mod tests {
         );
         // Same landing, same answer: this is variation, not noise, and a
         // rendered note must be reproducible from its own state.
-        assert_eq!(firmness[3], ConcertGrand::damper_firmness(3, 60));
+        assert_eq!(firmness[3], StringEngine::damper_firmness(3, 60));
         // One pedal motion still seats every damper on its own string.
         assert_ne!(
-            ConcertGrand::damper_firmness(3, 60),
-            ConcertGrand::damper_firmness(3, 61)
+            StringEngine::damper_firmness(3, 60),
+            StringEngine::damper_firmness(3, 61)
         );
 
         // And it reaches the audio: the same note, released from the same
@@ -11065,8 +13481,8 @@ mod tests {
         let piano = prepared();
         for note in [21u8, 33, 45] {
             let index = (note - LOW_NOTE) as usize;
-            let f0 = piano.fundamental[index];
-            let b = piano.inharmonicity[index];
+            let f0 = piano.engine.fundamental[index];
+            let b = piano.engine.inharmonicity[index];
             let mut top = 0.0f32;
             for n in 1..=SIM_MODES {
                 let nf = n as f32;
@@ -11217,8 +13633,7 @@ mod tests {
             let mut piano = prepared();
             render(&mut piano, 1, &[note_on(60, velocity)]);
             let voice = piano
-                .voices
-                .iter()
+                .voices()
                 .find(|voice| voice.active && voice.note == 60)
                 .unwrap();
             voice.thump_in as f32 / FS as f32 * 1000.0
@@ -11238,8 +13653,7 @@ mod tests {
         render(&mut piano, 1, &[note_on(60, 20)]);
         render(&mut piano, (FS * 0.02) as usize, &[]);
         let voice = piano
-            .voices
-            .iter()
+            .voices()
             .find(|voice| voice.active && voice.note == 60)
             .unwrap();
         assert_eq!(voice.thump_in, 0);
@@ -11263,8 +13677,7 @@ mod tests {
             "the hammer struck below the repetition point"
         );
         let voice = piano
-            .voices
-            .iter()
+            .voices()
             .find(|voice| voice.active && voice.note == 60)
             .unwrap();
         assert!(
@@ -11450,32 +13863,32 @@ mod tests {
         render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 90)]);
         render(&mut piano, 16, &[note_off(60)]);
         let voice = piano
-            .voices
-            .iter()
+            .voices()
             .position(|voice| voice.active && voice.note == 60)
             .unwrap();
-        assert_eq!(piano.voices[voice].damper_phase, 1, "the felt is falling");
+        assert_eq!(piano.voice(voice).damper_phase, 1, "the felt is falling");
         // Run the felt through its landing and bounces.
         render(&mut piano, (FS * 0.15) as usize, &[]);
-        assert_eq!(piano.voices[voice].damper_phase, 0, "the felt has seated");
-        assert!(!piano.voices[voice].held && !piano.voices[voice].sustained);
+        assert_eq!(piano.voice(voice).damper_phase, 0, "the felt has seated");
+        assert!(!piano.voice(voice).held && !piano.voice(voice).sustained);
 
         // The same voice damped at once, for the ledger.
         let mut at_once = prepared();
         render(&mut at_once, (FS * 0.3) as usize, &[note_on(60, 90)]);
         let slot = at_once
-            .voices
-            .iter()
+            .voices()
             .position(|voice| voice.active && voice.note == 60)
             .unwrap();
-        let firmness = piano.voices[voice].firmness;
-        at_once.voices[slot].firmness = firmness;
-        let grip = at_once.controls.damper_grip();
-        let damper = ConcertGrand::damper_for(60, FS as f32, grip * firmness, 1.0);
-        let (coefficient, decay) = at_once.damper_thud();
-        at_once.voices[slot].damp(damper, coefficient, decay, 0.0);
-        let late = &piano.voices[voice];
-        let now = &at_once.voices[slot];
+        let firmness = piano.voice(voice).firmness;
+        at_once.voice_mut(slot).firmness = firmness;
+        let grip = at_once.engine.controls.damper_grip();
+        let damper = StringEngine::damper_for(60, FS as f32, grip * firmness, 1.0);
+        let (coefficient, decay) = at_once.engine.damper_thud();
+        at_once
+            .voice_mut(slot)
+            .damp(damper, coefficient, decay, 0.0);
+        let late = &piano.voice(voice);
+        let now = &at_once.voice(slot);
         // Matched by harmonic number: the cull reorders a voice's partials.
         let mut compared = 0;
         for a in &late.partials[..late.partial_count] {
@@ -11552,7 +13965,7 @@ mod tests {
         let mut piano = prepared();
         let quiet = render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 1)]);
         assert!(
-            piano.voices.iter().all(|voice| !voice.active),
+            piano.voices().all(|voice| !voice.active),
             "velocity 1 struck a string"
         );
         assert!(piano.key_down[60 - LOW_NOTE as usize], "the key is down");
@@ -11567,7 +13980,7 @@ mod tests {
         );
         let mut piano = prepared();
         let struck = render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 36)]);
-        assert!(piano.voices.iter().any(|voice| voice.active));
+        assert!(piano.voices().any(|voice| voice.active));
         assert!(energy(&struck) > 1.0e-6);
         render(&mut piano, 16, &[note_off(60)]);
         assert!(!piano.key_down[60 - LOW_NOTE as usize]);
@@ -11670,6 +14083,7 @@ mod tests {
         };
         let top = window(100, false) / window(100, true);
         let mid = window(84, false) / window(84, true);
+        std::println!("E7 suelta/pedal {top:.3}   C6 suelta/pedal {mid:.3}");
         assert!(
             (0.5..2.0).contains(&top),
             "E7 released carries {top:.3} of E7 pedalled; there is no damper up there"
@@ -11957,14 +14371,17 @@ mod tests {
         }
         let mut again = Box::new(ConcertGrand::default());
         assert!(again.load_state(&state), "the previous layout must open");
-        assert!((again.controls.brightness - 0.61).abs() < 1e-6);
+        assert!((again.engine.controls.brightness - 0.61).abs() < 1e-6);
         assert!(
-            (again.controls.lab[2] - 0.26).abs() < 1e-6,
+            (again.engine.controls.lab[2] - 0.26).abs() < 1e-6,
             "Thud Colour came back at {}",
-            again.controls.lab[2]
+            again.engine.controls.lab[2]
         );
-        assert!((again.controls.release_noise + 15.0).abs() < 1e-4);
-        assert_eq!(again.controls.last_damper, Controls::default().last_damper);
+        assert!((again.engine.controls.release_noise + 15.0).abs() < 1e-4);
+        assert_eq!(
+            again.engine.controls.last_damper,
+            Controls::default().last_damper
+        );
         // With one knob fewer in the old registry the panel still holds and
         // the knobs go to their compiled values.
         let mut fewer = old.clone();
@@ -11978,7 +14395,7 @@ mod tests {
             third.load_state(&state),
             "an older registry's layout must open"
         );
-        assert!((third.controls.lab[2] - 0.26).abs() < 1e-6);
+        assert!((third.engine.controls.lab[2] - 0.26).abs() < 1e-6);
     }
 
     #[test]
@@ -12024,7 +14441,7 @@ mod tests {
         );
 
         let factory = Controls::default();
-        let read = piano.controls;
+        let read = piano.engine.controls;
         for (name, was, now) in [
             ("level", read.level, factory.level),
             ("room size", read.room_size, factory.room_size),
@@ -12058,10 +14475,10 @@ mod tests {
         let mut again = Box::new(ConcertGrand::default());
         assert!(again.load_state(&written));
         assert_eq!(
-            again.controls.level, read.level,
+            again.engine.controls.level, read.level,
             "read twice, converted twice"
         );
-        assert_eq!(again.controls.tension, read.tension);
+        assert_eq!(again.engine.controls.tension, read.tension);
     }
 
     #[test]
@@ -12137,17 +14554,17 @@ mod tests {
                 assert!(piano.load_preset(id), "{id} is not a preset");
                 piano.retune();
                 let index = (note - LOW_NOTE) as usize;
-                let b = piano.inharmonicity[index];
-                let f0 = piano.fundamental[index];
+                let b = piano.engine.inharmonicity[index];
+                let f0 = piano.engine.fundamental[index];
                 // The second partial against a true octave, in cents.
                 let stretched = 2.0 * f0 * sqrtf(1.0 + b * 4.0);
                 let octave_off = 1200.0 * log2f(stretched / (2.0 * f0));
                 let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
-                let length = piano.string_length(position);
+                let length = piano.engine.string_length(position);
                 let cents = 0.5
                     * (0.9 + 0.9 * position)
-                    * (piano.controls.unison * 2.86)
-                    * piano.controls.lab(13);
+                    * (piano.engine.controls.unison * 2.86)
+                    * piano.engine.controls.lab(13);
                 println!("{id:>16} {note:>5} {length:>8.2}m {octave_off:>10.1}c {cents:>9.2}c");
             }
         }
@@ -12384,7 +14801,7 @@ mod tests {
             render(&mut piano, 64, &[note_on(note, 125)]);
             for block in 0..6 {
                 render(&mut piano, (FS * 0.12) as usize, &[]);
-                let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                let Some(voice) = piano.voices().find(|v| v.active) else {
                     break;
                 };
                 let mut stretch = 0.0f32;
@@ -12519,7 +14936,7 @@ mod tests {
         for note in [21u8, 36, 48, 60, 72] {
             let mut piano = prepared();
             render(&mut piano, 128, &[note_on(note, 125)]);
-            let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+            let Some(voice) = piano.voices().find(|v| v.active) else {
                 continue;
             };
             let count = voice.partial_count;
@@ -12654,7 +15071,7 @@ mod tests {
                     render(&mut piano, 128, &[note_on(note, velocity)]);
                     let steps = CONTACT_STEPS.load(core::sync::atomic::Ordering::Relaxed);
                     times[slot] = steps as f32 * 4.0e-6 * 1000.0;
-                    asked[slot] = piano.contact_time(note, velocity as f32 / 127.0) * 1000.0;
+                    asked[slot] = piano.engine.contact_time(note, velocity as f32 / 127.0) * 1000.0;
                     *SWEEP_OVERRIDE.lock().unwrap() = None;
                 }
                 if times[0] <= 0.0 {
@@ -12693,7 +15110,7 @@ mod tests {
                     continue;
                 }
                 let simulated = steps as f32 * 4.0e-6 * 1000.0;
-                let asked = piano.contact_time(note, velocity as f32 / 127.0) * 1000.0;
+                let asked = piano.engine.contact_time(note, velocity as f32 / 127.0) * 1000.0;
                 println!(
                     "{note:>5} {velocity:>4} {simulated:>9.2} ms {asked:>9.2} ms {:>8.2}",
                     simulated / asked
@@ -12908,8 +15325,8 @@ mod tests {
                 *SWEEP_OVERRIDE.lock().unwrap() = None;
                 let steps = CONTACT_STEPS.load(core::sync::atomic::Ordering::Relaxed);
                 let contact_ms = steps as f32 * 4.0e-6 * 1000.0;
-                let asked_ms = piano.contact_time(note, velocity as f32 / 127.0) * 1000.0;
-                let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                let asked_ms = piano.engine.contact_time(note, velocity as f32 / 127.0) * 1000.0;
+                let Some(voice) = piano.voices().find(|v| v.active) else {
                     continue;
                 };
                 // The partial state the strike left: magnitude and frequency
@@ -12956,7 +15373,7 @@ mod tests {
         let mut piano = Box::new(ConcertGrand::default());
         assert!(piano.prepare(44_100.0, 512, 0, 2));
         render(&mut piano, 64, &[note_on(note, 110)]);
-        let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+        let Some(voice) = piano.voices().find(|v| v.active) else {
             return;
         };
         let rate = 44_100.0f32;
@@ -13059,19 +15476,19 @@ mod tests {
         for (id, expected_a0) in instruments {
             let mut piano = Box::new(ConcertGrand::default());
             assert!(piano.load_preset(id), "{id} is not a preset");
-            let a0 = piano.string_length(0.0);
+            let a0 = piano.engine.string_length(0.0);
             assert!(
                 (a0 - expected_a0).abs() < 0.06,
                 "{id}: A0 speaking length {a0:.2} m, expected about {expected_a0:.2}"
             );
             // The treble is the same piano on every instrument: makers
             // differ in the bass, and the top note is set by pitch and wire.
-            let top = piano.string_length(1.0);
+            let top = piano.engine.string_length(1.0);
             assert!(
                 (top - 0.052).abs() < 0.002,
                 "{id}: the top note moved to {top:.3} m"
             );
-            sizes.push(piano.controls.size);
+            sizes.push(piano.engine.controls.size);
         }
         // And they are actually different instruments, not one with labels.
         sizes.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -13098,7 +15515,10 @@ mod tests {
         let frames = (rate * 0.08) as usize;
         let f0_of = |piano: &ConcertGrand| {
             let index = (note - LOW_NOTE) as usize;
-            (piano.fundamental[index], piano.inharmonicity[index])
+            (
+                piano.engine.fundamental[index],
+                piano.engine.inharmonicity[index],
+            )
         };
         let mut ladders: Vec<[f32; 14]> = Vec::new();
         // Third pass: the naked sum PLUS the board bank in parallel, exactly
@@ -13112,8 +15532,8 @@ mod tests {
             render(&mut piano, 64, &[note_on(note, 110)]);
             let (f0, b) = f0_of(&piano);
             let board_count = piano.board_count;
-            let mut board: Vec<BodyMode> = piano.board[..board_count].to_vec();
-            let Some(voice) = piano.voices.iter_mut().find(|v| v.active) else {
+            let mut board: Vec<BoardMode> = piano.board[..board_count].to_vec();
+            let Some(voice) = piano.find_voice_mut(|v| v.active) else {
                 return;
             };
             // Goertzel accumulators per partial.
@@ -13204,7 +15624,7 @@ mod tests {
             for velocity in [60u8, 127] {
                 let mut piano = prepared();
                 render(&mut piano, 64, &[note_on(note, velocity)]);
-                let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                let Some(voice) = piano.voices().find(|v| v.active) else {
                     continue;
                 };
                 // At note-on the components hold (s, c) = amplitude * (pq, po),
@@ -13233,10 +15653,10 @@ mod tests {
         // carry components a pianissimo A0 does not have at all.
         let mut soft = prepared();
         render(&mut soft, 64, &[note_on(21, 30)]);
-        let soft_count = soft.voices.iter().find(|v| v.active).unwrap().partial_count;
+        let soft_count = soft.voices().find(|v| v.active).unwrap().partial_count;
         let mut hard = prepared();
         render(&mut hard, 64, &[note_on(21, 127)]);
-        let hard_count = hard.voices.iter().find(|v| v.active).unwrap().partial_count;
+        let hard_count = hard.voices().find(|v| v.active).unwrap().partial_count;
         assert!(
             hard_count > soft_count,
             "ff placed {hard_count} partials vs pp {soft_count}"
@@ -13250,7 +15670,7 @@ mod tests {
         // number instead of staying a uniform chorus.
         let mut piano = prepared();
         render(&mut piano, 1, &[note_on(45, 100)]);
-        let voice = piano.voices.iter().find(|v| v.active).unwrap();
+        let voice = piano.voices().find(|v| v.active).unwrap();
         let ratio = |p: &Partial| {
             (p.lane_magnitude_squared(3) / p.lane_magnitude_squared(0).max(1e-20)).sqrt()
         };
@@ -13268,8 +15688,8 @@ mod tests {
     fn dump_c4_ladder() {
         let mut piano = prepared();
         render(&mut piano, 8, &[note_on(60, 125)]);
-        let voice = piano.voices.iter().find(|v| v.active).unwrap();
-        let f0 = piano.fundamental[60 - LOW_NOTE as usize];
+        let voice = piano.voices().find(|v| v.active).unwrap();
+        let f0 = piano.engine.fundamental[60 - LOW_NOTE as usize];
         for n in 0..voice.partial_count {
             let p = &voice.partials[n];
             let amp = (p.lane_magnitude_squared(0)
@@ -13597,7 +16017,7 @@ mod tests {
         for (note, velocity) in notes {
             let mut piano = Box::new(ConcertGrand::default());
             if let Some(table) = cal {
-                piano.cal = table;
+                piano.engine.cal = table;
             }
             for (index, value) in &overrides {
                 assert!(
@@ -13666,7 +16086,7 @@ mod tests {
         for velocity in [36u8, 117u8] {
             let mut piano = prepared();
             render(&mut piano, 64, &[note_on(note, velocity)]);
-            let voice = piano.voices.iter().find(|v| v.active).unwrap();
+            let voice = piano.voices().find(|v| v.active).unwrap();
             let mut num = 0.0f64;
             let mut den = 0.0f64;
             let mut rows = String::new();
@@ -13723,9 +16143,8 @@ mod tests {
             render(&mut piano, 64, &opening);
             render(&mut piano, (FS * 2.0) as usize, &[]);
             piano
-                .voices
-                .iter()
-                .filter(|v| v.active && !v.halo && v.note == 60)
+                .voices()
+                .filter(|v| v.active && v.note == 60)
                 .map(|v| {
                     v.partials[..v.partial_count]
                         .iter()
@@ -13755,13 +16174,12 @@ mod tests {
         // The merge is a switch, off by default since 0.171.5; this test is
         // about the merge itself, so it turns it on for its own instance.
         let mut piano = prepared();
-        piano.restrike_merge = true;
+        piano.engine.restrike_merge = true;
         render(&mut piano, 64, &[note_on(48, 100)]);
         render(&mut piano, (FS * 0.15) as usize, &[]);
         let before: f32 = piano
-            .voices
-            .iter()
-            .filter(|v| v.active && !v.halo && v.note == 48)
+            .voices()
+            .filter(|v| v.active && v.note == 48)
             .map(|v| {
                 v.partials[..v.partial_count]
                     .iter()
@@ -13774,16 +16192,11 @@ mod tests {
             })
             .sum();
         render(&mut piano, 64, &[note_on(48, 100)]);
-        let voices = piano
-            .voices
-            .iter()
-            .filter(|v| v.active && !v.halo && v.note == 48)
-            .count();
+        let voices = piano.voices().filter(|v| v.active && v.note == 48).count();
         assert_eq!(voices, 1, "a re-strike must not mint a second voice");
         let after: f32 = piano
-            .voices
-            .iter()
-            .filter(|v| v.active && !v.halo && v.note == 48)
+            .voices()
+            .filter(|v| v.active && v.note == 48)
             .map(|v| {
                 v.partials[..v.partial_count]
                     .iter()
@@ -13848,7 +16261,7 @@ mod tests {
         render(&mut piano, (FS * 0.4) as usize, &[]);
         let mut held = 0.0f32;
         let mut dropped = 0.0f32;
-        for voice in piano.voices.iter().filter(|v| v.active) {
+        for voice in piano.voices().filter(|v| v.active) {
             let mut total = 0.0;
             for partial in &voice.partials[..voice.partial_count] {
                 total += partial.lane_magnitude_squared(0)
@@ -13891,7 +16304,7 @@ mod tests {
             let mut piano = Box::new(ConcertGrand::default());
             let gain_of = |piano: &ConcertGrand| {
                 if index == PARAM_LEVEL {
-                    piano.controls.level_gain()
+                    piano.engine.controls.level_gain()
                 } else {
                     Controls::noise_gain(piano.get_parameter(index).unwrap() as f32)
                 }
@@ -14105,7 +16518,7 @@ mod tests {";
         let mut piano = prepared();
         render(&mut piano, 64, &[note_on(60, 100)]);
         let coherence = |piano: &ConcertGrand| {
-            let voice = piano.voices.iter().find(|v| v.active).unwrap();
+            let voice = piano.voices().find(|v| v.active).unwrap();
             // A low partial, because this test is about dephasing and needs a
             // partial that is still alive to watch. Radiation damping now
             // kills C4's eighth by two seconds, which is what the real
@@ -14204,7 +16617,7 @@ mod tests {";
         // than the same strike without the pedal: the shadow voice is there.
         let mut dry = prepared();
         render(&mut dry, 64, &[note_on(60, 100)]);
-        let without = dry.active_partials;
+        let without = dry.active_partials();
         let mut pedalled = prepared();
         let pedal = MidiEvent {
             frame: 0,
@@ -14213,9 +16626,9 @@ mod tests {";
         };
         render(&mut pedalled, 64, &[pedal, note_on(60, 100)]);
         assert!(
-            pedalled.active_partials > without,
+            pedalled.active_partials() > without,
             "pedalled {} vs dry {without}",
-            pedalled.active_partials
+            pedalled.active_partials()
         );
         // And lifting the pedal releases the halo with everything else.
         let lift = MidiEvent {
@@ -14237,7 +16650,7 @@ mod tests {";
         let mut piano = prepared();
         render(&mut piano, 256, &[note_on(84, 120)]);
         let decay_squared = |c: &Component| c.rc * c.rc + c.rs * c.rs;
-        let voice = piano.voices.iter().find(|v| v.active).unwrap();
+        let voice = piano.voices().find(|v| v.active).unwrap();
         assert!(
             decay_squared(&voice.duplex[0]) > 0.0,
             "treble note grew no duplex"
@@ -14248,7 +16661,7 @@ mod tests {";
         render(&mut piano, 8, &[note_off(84)]);
         // The felt lands late (DAMPER_LAND_MS) and bounces before it seats.
         render(&mut piano, (FS * 0.15) as usize, &[]);
-        let voice = piano.voices.iter().find(|v| v.active).unwrap();
+        let voice = piano.voices().find(|v| v.active).unwrap();
         let string_after = voice.partials[0].rc[0] * voice.partials[0].rc[0]
             + voice.partials[0].rs[0] * voice.partials[0].rs[0];
         let duplex_after = decay_squared(&voice.duplex[0]);
@@ -14339,10 +16752,10 @@ mod tests {";
                 piano.process(&[], &mut output, &[], &[], 512, 0, 2);
             }
             let per = start.elapsed().as_secs_f64() * 1000.0 / ROUNDS as f64;
-            let live: usize = piano.voices.iter().filter(|v| v.active).count();
+            let live: usize = piano.voices().filter(|v| v.active).count();
             std::println!(
                 "{held} pedalled notes ({live} voices, {} partials): {per:.2} ms ({:.0}% of budget)",
-                piano.active_partials,
+                piano.active_partials(),
                 per / 10.67 * 100.0
             );
         }
@@ -14421,7 +16834,7 @@ mod tests {";
                     ms_to_silence = Some(block as f32 * 512.0 / 48.0);
                 }
             }
-            let voices = piano.voices.iter().filter(|v| v.active).count();
+            let voices = piano.voices().filter(|v| v.active).count();
             std::println!(
                 "{label}: -34 dB after {:?} ms, {voices} voices still live",
                 ms_to_silence.map(|v| v as u32)
@@ -14680,8 +17093,7 @@ mod tests {";
             // The largest oscillator state anywhere in the bank: if this
             // grows, something has a pole outside the unit circle.
             let state = piano
-                .voices
-                .iter()
+                .voices()
                 .filter(|v| v.active)
                 .flat_map(|v| v.partials[..v.partial_count].iter())
                 .flat_map(|p| p.s.iter().chain(p.c.iter()))
@@ -14690,9 +17102,13 @@ mod tests {";
                 bank.iter()
                     .fold(0.0f32, |a, m| a.max(m.y1.abs()).max(m.y2.abs()))
             };
+            let board_peak_of = |bank: &[BoardMode]| {
+                bank.iter()
+                    .fold(0.0f32, |a, m| a.max(m.y1.abs()).max(m.y2.abs()))
+            };
             states.push((
                 state,
-                peak_of(&piano.board[..piano.board_count]),
+                board_peak_of(&piano.board[..piano.board_count]),
                 peak_of(&piano.undamped),
                 peak_of(&piano.open_strings),
             ));
@@ -14799,7 +17215,7 @@ mod tests {";
                 assert!(piano.prepare(f64::from(rate), 512, 0, 2));
                 let mut output = vec![0.0f32; 512 * 2];
                 piano.process(&[], &mut output, &[note_on(note, 127)], &[], 512, 0, 2);
-                for voice in piano.voices.iter().filter(|v| v.active) {
+                for voice in piano.voices().filter(|v| v.active) {
                     for partial in &voice.partials[..voice.partial_count] {
                         for lane in 0..LANES {
                             let r = sqrtf(
@@ -14869,7 +17285,7 @@ mod tests {";
                     }
                     output.fill(0.0);
                     piano.process(&[], &mut output, &midi, &[], block as u32, 0, 2);
-                    for voice in piano.voices.iter().filter(|v| v.active) {
+                    for voice in piano.voices().filter(|v| v.active) {
                         for partial in &voice.partials[..voice.partial_count] {
                             for lane in 0..LANES {
                                 pole = pole.max(
@@ -14980,7 +17396,7 @@ mod tests {";
                     }
                     output.fill(0.0);
                     piano.process(&[], &mut output, &midi, &[], block as u32, 0, 2);
-                    for voice in piano.voices.iter().filter(|v| v.active) {
+                    for voice in piano.voices().filter(|v| v.active) {
                         for partial in &voice.partials[..voice.partial_count] {
                             for lane in 0..LANES {
                                 let squared = partial.rc[lane] * partial.rc[lane]
@@ -15135,16 +17551,14 @@ mod tests {";
         for step in 0..24 {
             let note = 48 + step as u8;
             // What the bank looks like the instant before the strike.
-            let active = piano.voices.iter().filter(|v| v.active).count();
+            let active = piano.voices().filter(|v| v.active).count();
             let quietest = piano
-                .voices
-                .iter()
+                .voices()
                 .filter(|v| v.active)
                 .map(|v| v.energy)
                 .fold(f32::INFINITY, f32::min);
             let loudest = piano
-                .voices
-                .iter()
+                .voices()
                 .filter(|v| v.active)
                 .map(|v| v.energy)
                 .fold(0.0f32, f32::max);
@@ -15254,7 +17668,7 @@ mod tests {";
                 piano.process(&[], &mut output, &[], &[], 512, 0, 2);
             }
             let background = output.iter().fold(0.0f32, |a, s| a.max(s.abs()));
-            let voices = piano.voices.iter().filter(|v| v.active).count();
+            let voices = piano.voices().filter(|v| v.active).count();
             // The onset under test, alone at frame 0.
             let onset = [MidiEvent {
                 frame: 0,
@@ -15362,7 +17776,7 @@ mod tests {";
         // bloom starts as the exact negative of the other three, so a
         // struck partial leaves here at ~zero and swells into the tone.
         let magnitude = |piano: &ConcertGrand| {
-            let voice = piano.voices.iter().find(|v| v.active).unwrap();
+            let voice = piano.voices().find(|v| v.active).unwrap();
             let p = &voice.partials[0];
             let s = p.s[0] + p.s[1] + p.s[2] + p.s[3] + p.s[4];
             let c = p.c[0] + p.c[1] + p.c[2] + p.c[3] + p.c[4];
@@ -15481,16 +17895,16 @@ mod tests {";
             let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
             let mut line = format!(
                 "note {note:3} f0 {f0:7.1} L {:.2} factor {:.2}:",
-                piano.string_length(position),
-                piano.bridge_speed_factor(f0)
+                piano.engine.string_length(position),
+                piano.engine.bridge_speed_factor(f0)
             );
             for n in [1, 2, 3, 4, 6, 8, 12, 16] {
                 let f = n as f32 * f0;
                 if f > 8000.0 {
                     break;
                 }
-                let fast = piano.t60_seconds(f, f0, 1.0, 1.0);
-                let slow = piano.slow_t60_seconds(f, f0, 1.0);
+                let fast = piano.engine.t60_seconds(f, f0, 1.0, 1.0);
+                let slow = piano.engine.slow_t60_seconds(f, f0, 1.0);
                 line.push_str(&format!("  n{n}:{fast:.1}/{slow:.1}"));
             }
             println!("{line}");
@@ -15505,7 +17919,7 @@ mod tests {";
         for lid in [0.0f64, 0.25, 0.5, 0.75, 1.0] {
             piano.set_parameter(PARAM_LID, lid);
             piano.tune_room();
-            let rate = piano.sample_rate;
+            let rate = piano.engine.sample_rate;
             let ms = |tap: (usize, f32)| {
                 (
                     (tap.0 as f32 / rate * 1000.0 * 100.0).round() / 100.0,
@@ -15541,8 +17955,13 @@ mod tests {";
         for (i, slot) in out.iter_mut().enumerate() {
             let input = if i == 0 { 1.0 } else { 0.0 };
             let mut left = 0.0;
-            for mode in piano.board.iter_mut().take(piano.board_count) {
-                left += mode.tick(input) * mode.pan_left;
+            for (mode, cold) in piano
+                .board
+                .iter_mut()
+                .zip(piano.board_cold.iter())
+                .take(piano.board_count)
+            {
+                left += mode.tick(input) * cold.pan_left;
             }
             *slot = left;
         }
@@ -15615,8 +18034,8 @@ mod tests {";
         let mut maximum = f32::MIN;
         for step in 0..400 {
             let frequency = 30.0 * powf(2.0, step as f32 / 50.0).min(12_000.0);
-            let (amplitude, decay) = ConcertGrand::board_response(frequency);
-            let again = ConcertGrand::board_response(frequency);
+            let (amplitude, decay) = StringEngine::board_response(frequency);
+            let again = StringEngine::board_response(frequency);
             assert_eq!((amplitude, decay), again);
             assert!(
                 (0.3..3.4).contains(&amplitude),
@@ -15643,9 +18062,9 @@ mod tests {";
         render(&mut piano, 2048, &[note_on(48, 110)]);
         // Let the attack chiff die out first, then release.
         render(&mut piano, (FS * 0.5) as usize, &[]);
-        let before = piano.voices.iter().find(|v| v.active).unwrap().noise_amp;
+        let before = piano.voices().find(|v| v.active).unwrap().noise_amp;
         render(&mut piano, 8, &[note_off(48)]);
-        let after = piano.voices.iter().find(|v| v.active).unwrap().noise_amp;
+        let after = piano.voices().find(|v| v.active).unwrap().noise_amp;
         assert!(
             after > before && after > 1e-4,
             "release thud {after} (was {before})"
@@ -15657,7 +18076,7 @@ mod tests {";
         // The sinc window of the distributed contact must attenuate high
         // partials well below what a point excitation would give: at C4
         // (width ~5%), partial 20 sits past the window's first null region.
-        let width = ConcertGrand::hammer_width(60);
+        let width = StringEngine::hammer_width(60);
         let window = |n: f32| {
             let argument = n * width;
             expf(-1.2 * argument * argument)
@@ -15725,16 +18144,42 @@ mod tests {";
     fn dead_partials_are_retired_from_the_budget() {
         let mut piano = prepared();
         render(&mut piano, 64, &[note_on(96, 90)]);
-        let at_start = piano.active_partials;
+        let at_start = piano.active_partials();
         assert!(at_start > 0);
         render(&mut piano, 64, &[note_off(96)]);
         // Damped treble partials die in tens of milliseconds; a second later
         // the budget must have been refunded.
         render(&mut piano, FS as usize, &[]);
         assert!(
-            piano.active_partials < at_start,
+            piano.active_partials() < at_start,
             "budget still {at_start} after the note died"
         );
+    }
+}
+
+/// The voices in slot order, for tests that read them as one array.
+///
+/// Production code reaches a voice through `voice_at!`, which borrows one
+/// section and nothing else -- that is what a `parallel_render_v1` unit
+/// gets. Tests want the old flat view, and they are not on the audio thread.
+#[cfg(test)]
+impl ConcertGrand {
+    fn voices(&self) -> impl Iterator<Item = &Voice> + '_ {
+        (0..MAX_VOICES).map(move |slot| &voice_at!(self, slot))
+    }
+
+    fn voice(&self, slot: usize) -> &Voice {
+        &voice_at!(self, slot)
+    }
+
+    fn voice_mut(&mut self, slot: usize) -> &mut Voice {
+        &mut voice_at!(self, slot)
+    }
+
+    /// The first voice in slot order that `wanted` accepts, mutably.
+    fn find_voice_mut(&mut self, wanted: impl Fn(&Voice) -> bool) -> Option<&mut Voice> {
+        let slot = (0..MAX_VOICES).find(|slot| wanted(&voice_at!(self, *slot)))?;
+        Some(&mut voice_at!(self, slot))
     }
 }
 
@@ -15747,6 +18192,3297 @@ mod bench {
             frame: 0,
             data: [0x90, note, velocity],
             length: 3,
+        }
+    }
+
+    /// Puts every knob back to the value it was compiled with.
+    ///
+    /// The knobs are process-wide atomics and eighteen tests write them, so
+    /// a fingerprint that renders after one of those has run measures that
+    /// test's instrument instead of this one. This is half the answer; the
+    /// `#[ignore]` on the two fingerprints is the other half.
+    #[cfg(test)]
+    fn reset_every_knob() {
+        for (_, knob, _) in TUNABLES {
+            knob.set(knob.compiled());
+        }
+    }
+
+    /// What the instrument renders today.
+    ///
+    /// Stable across debug and release, and across x86 and the appliance's
+    /// aarch64 -- all four were checked before this number was written down,
+    /// which is what makes it safe to assert rather than merely print.
+    ///
+    /// If a change moves it, that is the question, not the answer: say which
+    /// samples moved and why, and paste the new number here deliberately.
+    /// Nothing about the instrument's sound should move by accident, and
+    /// until now nothing stopped it -- these two tests printed their hash and
+    /// asserted nothing, so they passed whatever the instrument did.
+    const RENDER_FINGERPRINT: u64 = 0xe74d_f301_16b3_9a5a;
+    /// As `RENDER_FINGERPRINT`, for the pedalled scenario.
+    const RENDER_FINGERPRINT_PEDALS: u64 = 0x8d20_f899_b050_9bd0;
+
+    /// A fingerprint of rendered audio: what the instrument sounds like,
+    /// as one number.
+    ///
+    /// Every sample of a fixed scenario folded into one number. Two builds
+    /// with the same number rendered the same audio, bit for bit; two that
+    /// differ, did not, and the difference is then worth explaining.
+    ///
+    /// This used to print the number and assert nothing, which meant it
+    /// passed no matter what the instrument did -- a guard in name only.
+    ///
+    /// It stays `#[ignore]`d for a reason nobody had written down: the knobs
+    /// are process-wide atomics, eighteen tests write them, and the harness
+    /// runs tests in parallel, so unignoring it makes it fail whenever one
+    /// of those eighteen overlaps it. CI runs it in its own invocation,
+    /// single threaded, which is where the guard actually guards.
+    #[test]
+    #[ignore = "process-wide knobs: run it single threaded, as CI does"]
+    fn render_fingerprint() {
+        const FRAMES: usize = 128;
+        reset_every_knob();
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+        for block in 0..240 {
+            let midi: std::vec::Vec<MidiEvent> = if block % 20 == 0 {
+                [36u8, 43, 48, 55, 60]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &note)| MidiEvent {
+                        frame: (i * 7) as u32,
+                        data: [0x90, note + (block / 20) as u8, 96],
+                        length: 3,
+                    })
+                    .collect()
+            } else {
+                std::vec::Vec::new()
+            };
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            for sample in &output {
+                hash ^= sample.to_bits() as u64;
+                hash = hash.wrapping_mul(0x100_0000_01b3);
+            }
+        }
+        std::println!("huella del render: {hash:#018x}");
+        assert_eq!(
+            hash, RENDER_FINGERPRINT,
+            "el render cambio: {hash:#018x} donde habia {RENDER_FINGERPRINT:#018x}"
+        );
+    }
+
+    /// The pedalled script, built once and played by three tests.
+    ///
+    /// Deterministic: the same events every run, on any machine.
+    fn pedal_script(blocks: u32) -> std::vec::Vec<std::vec::Vec<MidiEvent>> {
+        fn step(state: &mut u32) -> u32 {
+            *state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *state >> 16
+        }
+        let mut state: u32 = 0x1234_5678;
+        let mut sounding = [0u8; 8];
+        let mut script = std::vec::Vec::with_capacity(blocks as usize);
+        for block in 0..blocks {
+            let mut midi = std::vec::Vec::new();
+            let note = 33 + (step(&mut state) % 52) as u8;
+            // Frame zero: the pedal at a level, a note under it, and twice
+            // in the run everything lifted -- all in one frame.
+            midi.push(MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, (step(&mut state) % 128) as u8],
+                length: 3,
+            });
+            // Every eleventh note is barely touched, which is under the
+            // let-off: no hammer arrives, the key is held silent, and the
+            // silent bank is coordinator state a strike writes.
+            let velocity = if block % 11 == 0 {
+                1
+            } else {
+                64 + (step(&mut state) % 63) as u8
+            };
+            midi.push(MidiEvent {
+                frame: 0,
+                data: [0x90, note, velocity],
+                length: 3,
+            });
+            // AFTER the strike, in its frame: the una corda changes the blow
+            // the strike is still to make, and a second CC64 reads the bank
+            // that strike may just have written.
+            midi.push(MidiEvent {
+                frame: 0,
+                data: [0xB0, 67, (step(&mut state) % 128) as u8],
+                length: 3,
+            });
+            midi.push(MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, (step(&mut state) % 128) as u8],
+                length: 3,
+            });
+            if block == 150 || block == 275 {
+                midi.push(MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 123, 0],
+                    length: 3,
+                });
+            }
+            // Frame forty: a key let go with a measured velocity, another
+            // struck, and the sostenuto rod moving against both.
+            let older = sounding[(block % 8) as usize];
+            if older != 0 {
+                midi.push(MidiEvent {
+                    frame: 40,
+                    data: [0x80, older, (step(&mut state) % 128) as u8],
+                    length: 3,
+                });
+            }
+            sounding[(block % 8) as usize] = note;
+            midi.push(MidiEvent {
+                frame: 40,
+                data: [0x90, note.saturating_add(12), 80],
+                length: 3,
+            });
+            // A key down and up inside one frame: the note-off writes the
+            // key's return, and the strike before it reads it.
+            if block % 5 == 0 {
+                midi.push(MidiEvent {
+                    frame: 40,
+                    data: [0x80, note.saturating_add(12), 64],
+                    length: 3,
+                });
+            }
+            if block % 37 == 0 {
+                midi.push(MidiEvent {
+                    frame: 40,
+                    data: [0xB0, 66, if block % 74 == 0 { 127 } else { 0 }],
+                    length: 3,
+                });
+            }
+            script.push(midi);
+        }
+        script
+    }
+
+    /// Plays the pedalled script and returns the left channel.
+    fn play_pedal_script(blocks: u32) -> std::vec::Vec<f32> {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let mut captured = std::vec::Vec::with_capacity(blocks as usize * FRAMES);
+        for midi in pedal_script(blocks) {
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            captured.extend(output.chunks(2).map(|frame| frame[0]));
+        }
+        captured
+    }
+
+    /// The same idea as `render_fingerprint`, for the frames it never crosses.
+    ///
+    /// `render_fingerprint` presses the sustain pedal once, before the
+    /// first note, and then only strikes -- so it says nothing about the
+    /// ORDER of a pedal against a strike inside one frame. That order is a
+    /// real dependency: a strike reads `self.pedal`, because the
+    /// sympathetic halo it places is sustained by it, and a release reads
+    /// the pedal, its pressure and the sostenuto rod. Moving any of them
+    /// across the coordinator/unit boundary can reorder exactly that and
+    /// leave the plain fingerprint unmoved -- which is what happened twice
+    /// before this test existed.
+    ///
+    /// As above: it asserts now, and is ignored for the same reason.
+    #[test]
+    #[ignore = "process-wide knobs: run it single threaded, as CI does"]
+    fn render_fingerprint_pedals() {
+        reset_every_knob();
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for sample in play_pedal_script(300) {
+            hash ^= sample.to_bits() as u64;
+            hash = hash.wrapping_mul(0x100_0000_01b3);
+        }
+        std::println!("huella con pedales: {hash:#018x}");
+        assert_eq!(
+            hash, RENDER_FINGERPRINT_PEDALS,
+            "el render con pedales cambio: {hash:#018x} donde habia {RENDER_FINGERPRINT_PEDALS:#018x}"
+        );
+    }
+
+    /// Writes the pedalled script's audio, to compare two builds sample by
+    /// sample rather than by one number -- a hash says THAT two builds
+    /// differ, this says WHERE, and the where names the event.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release pedal_capture -- --ignored --nocapture`
+    /// How hard the script presses on the voice pool, which is what tells a
+    /// re-ordering apart from a shortage.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release pedal_steals -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn pedal_steals() {
+        STEALS.store(0, core::sync::atomic::Ordering::Relaxed);
+        let _ = play_pedal_script(300);
+        std::println!(
+            "robos de voz en el guion: {}",
+            STEALS.load(core::sync::atomic::Ordering::Relaxed)
+        );
+    }
+
+    /// The four purses add up to the one budget.
+    ///
+    /// This is the whole reason the division is safe: a section spends
+    /// against a number nobody else is writing, and the four numbers
+    /// together are what the governor granted. If they ever add up to more,
+    /// the instrument is spending money the machine did not give it.
+    #[test]
+    fn the_sections_share_exactly_one_budget() {
+        const FRAMES: u32 = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        let mut output = vec![0.0f32; FRAMES as usize * 2];
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES, 0, 2);
+        for block in 0..96u32 {
+            let midi: std::vec::Vec<MidiEvent> = (0..4)
+                .map(|voice| MidiEvent {
+                    frame: voice * 5,
+                    data: [0x90, 28 + (block * 7 + voice * 11) as u8 % 60, 96],
+                    length: 3,
+                })
+                .collect();
+            piano.process(&[], &mut output, &midi, &[], FRAMES, 0, 2);
+            let granted: usize = piano
+                .sections
+                .iter()
+                .map(|section| section.allowance)
+                .sum::<usize>();
+            let carried: usize = piano
+                .sections
+                .iter()
+                .map(|section| section.partials)
+                .sum::<usize>();
+            // The four purses hold the budget, or -- when the instrument is
+            // already over it -- exactly what is sounding and not a partial
+            // more. Over it is reachable: a note may always place twelve
+            // partials however empty its purse, so that a note is never
+            // silent, and that floor is older than this division. What the
+            // division must never do is GRANT the overshoot.
+            let ceiling = carried.max(piano.partial_budget);
+            assert!(
+                granted <= ceiling && granted + STRING_SECTIONS > ceiling,
+                "bloque {block}: repartidos {granted}, techo {ceiling}                  (presupuesto {}, en uso {carried})",
+                piano.partial_budget
+            );
+            // And nothing is allowed to sit below what it is already
+            // carrying, which would be asking a section to un-ring a string.
+            for section in 0..STRING_SECTIONS {
+                assert!(
+                    piano.sections[section].allowance >= piano.sections[section].partials
+                        || piano.sections[section].partials > piano.partial_budget,
+                    "bloque {block}, seccion {section}: {} permitidos, {} en uso",
+                    piano.sections[section].allowance,
+                    piano.sections[section].partials
+                );
+            }
+        }
+    }
+
+    /// The three phases render exactly what the one-pass path renders.
+    ///
+    /// This is the test the switch is worth: `export_parallel_processor!`
+    /// derives the classic entry point FROM the phases, so declaring the
+    /// trait does not add a path, it replaces the one the instrument has
+    /// always used. The only honest way to make that a safe change is to
+    /// drive both by hand and subtract them.
+    ///
+    /// It plays a pedalled passage with strikes, releases, a moving CC64
+    /// and the sostenuto rod, because what the phases move across the
+    /// boundary is exactly the per-voice work those produce.
+    /// The three phases render exactly what the one-pass path renders.
+    ///
+    /// This is the test the switch is worth. `export_parallel_processor!`
+    /// derives the classic entry point FROM the phases, so declaring the
+    /// trait does not add a path, it replaces the one the instrument has
+    /// always used. The only honest way to make that a safe change is to
+    /// drive both by hand and subtract them.
+    ///
+    /// It plays two hundred and forty blocks of a pedalled passage --
+    /// strikes, releases, a moving CC64 and the sostenuto rod -- because
+    /// what the phases carry across the boundary is exactly the per-voice
+    /// work those produce. It reports the FIRST sample where the two part
+    /// company rather than the largest gap between them: where two renders
+    /// separate is a cause, and where they are furthest apart is only how
+    /// long they have been separated. Finding the engine, the allowance and
+    /// a payload read past its written length all came from that.
+    #[test]
+    fn the_phases_render_what_the_one_pass_renders() {
+        const FRAMES: usize = 128;
+        const BLOCKS: usize = 240;
+        let script = |block: usize| -> std::vec::Vec<MidiEvent> {
+            let mut midi = std::vec::Vec::new();
+            if block.is_multiple_of(3) {
+                midi.push(MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, ((block * 37) % 128) as u8],
+                    length: 3,
+                });
+                midi.push(MidiEvent {
+                    frame: 0,
+                    data: [0x90, 28 + (block * 7 % 60) as u8, 92],
+                    length: 3,
+                });
+            }
+            if block.is_multiple_of(7) {
+                midi.push(MidiEvent {
+                    frame: 40,
+                    data: [0x80, 28 + ((block.saturating_sub(21)) * 7 % 60) as u8, 64],
+                    length: 3,
+                });
+            }
+            if block.is_multiple_of(41) {
+                midi.push(MidiEvent {
+                    frame: 64,
+                    data: [0xB0, 66, if block.is_multiple_of(82) { 127 } else { 0 }],
+                    length: 3,
+                });
+            }
+            midi
+        };
+
+        // Both at once, block by block, rather than one run and then the
+        // other. The knob registry is global and another test moves knobs
+        // while this one runs: rendering the two halves apart in time let a
+        // knob change reach one of them and not the other, and the test
+        // failed in the suite and passed alone. Interleaved, whatever moves
+        // moves for both.
+        let mut one_pass = Box::new(ConcertGrand::default());
+        assert!(one_pass.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut coordinator = Box::new(ConcertGrand::default());
+        assert!(<ConcertGrand as ParallelProcessor>::prepare(
+            &mut coordinator,
+            48_000.0,
+            FRAMES as u32,
+            0,
+            2
+        ));
+        let mut units = [StringUnit::default(); STRING_SECTIONS];
+        let mut plan = [0u32; STRING_SECTIONS * 2];
+        let mut dispatch = vec![0u8; STRING_SECTIONS * VOICE_WORK_BYTES];
+        let mut shared = vec![0u8; SHARED_CAPACITY];
+        let mut slots = vec![0.0f32; STRING_SECTIONS * FRAMES * SECTION_FRAME_FLOATS];
+        let mut reports = vec![0u8; STRING_SECTIONS * UNIT_REPORT_BYTES];
+        let mut shipped = vec![0.0f32; FRAMES * 2];
+        let mut phased = vec![0.0f32; FRAMES * 2];
+
+        for block in 0..BLOCKS {
+            let midi = script(block);
+            one_pass.process(&[], &mut shipped, &midi, &[], FRAMES as u32, 0, 2);
+
+            let (count, shared_len) = {
+                let mut writer = PlanWriter::new(
+                    &mut plan,
+                    &mut dispatch,
+                    &mut shared,
+                    VOICE_WORK_BYTES,
+                    STRING_SECTIONS,
+                );
+                coordinator.begin_block(
+                    &BlockContext {
+                        input: &[],
+                        midi: &midi,
+                        midi2: &[],
+                        parameters: &[],
+                        frames: FRAMES as u32,
+                        input_channels: 0,
+                        output_channels: 2,
+                    },
+                    &mut writer,
+                );
+                (writer.activated(), writer.shared_len())
+            };
+            assert_eq!(count, STRING_SECTIONS, "bloque {block}: faltaron unidades");
+            for index in 0..count {
+                let unit = plan[index * 2] as usize;
+                // Only what was written: the slot keeps the previous block's
+                // bytes after it, and `UnitWork` would read them as records.
+                let written = plan[index * 2 + 1] as usize;
+                let payload = &dispatch[unit * VOICE_WORK_BYTES..][..written];
+                let slot = &mut slots[unit * FRAMES * SECTION_FRAME_FLOATS
+                    ..(unit + 1) * FRAMES * SECTION_FRAME_FLOATS];
+                <ConcertGrand as ParallelProcessor>::render_unit(
+                    unit as u32,
+                    &mut units[unit],
+                    payload,
+                    &UnitContext {
+                        input: &[],
+                        shared: &shared[..shared_len],
+                        frames: FRAMES as u32,
+                        output_channels: 2,
+                    },
+                    slot,
+                    &mut reports[unit * UNIT_REPORT_BYTES..(unit + 1) * UNIT_REPORT_BYTES],
+                );
+            }
+            let mix = UnitMix::new(
+                &slots,
+                FRAMES * SECTION_FRAME_FLOATS,
+                &plan,
+                count,
+                FRAMES * SECTION_FRAME_FLOATS,
+                &reports,
+                UNIT_REPORT_BYTES,
+            );
+            coordinator.end_block(&mix, &mut phased, FRAMES as u32, 2);
+
+            if let Some(at) = shipped
+                .iter()
+                .zip(phased.iter())
+                .position(|(one, four)| one != four)
+            {
+                panic!(
+                    "se separan en el bloque {block}, cuadro {}, canal {}: {} contra {}",
+                    at / 2,
+                    at % 2,
+                    shipped[at],
+                    phased[at]
+                );
+            }
+        }
+    }
+
+    /// The coordinator's picture of the voices is what the sections last
+    /// reported, at the moment a block ends.
+    ///
+    /// Inside a block it is deliberately not: a note is busy from the
+    /// instant it is planned, and a note that died is still busy until the
+    /// block that killed it finishes. But when `process` returns, the two
+    /// have to agree exactly -- if they ever stop agreeing, the coordinator
+    /// is choosing slots from a picture nobody is painting.
+    #[test]
+    fn the_summary_is_what_the_sections_reported() {
+        const FRAMES: u32 = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        let mut output = vec![0.0f32; FRAMES as usize * 2];
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES, 0, 2);
+        for block in 0..64u32 {
+            let midi: std::vec::Vec<MidiEvent> = (0..3)
+                .map(|voice| MidiEvent {
+                    frame: voice * 7,
+                    data: [0x90, 30 + (block * 5 + voice * 13) as u8 % 60, 90],
+                    length: 3,
+                })
+                .collect();
+            piano.process(&[], &mut output, &midi, &[], FRAMES, 0, 2);
+            for slot in 0..MAX_VOICES {
+                let voice = &voice_at!(piano, slot);
+                let seen = piano.summary[slot];
+                assert_eq!(seen.active, voice.active, "slot {slot}, bloque {block}");
+                assert_eq!(seen.note, voice.note, "slot {slot}, bloque {block}");
+                assert_eq!(seen.channel, voice.channel, "slot {slot}, bloque {block}");
+                assert_eq!(seen.energy, voice.energy, "slot {slot}, bloque {block}");
+            }
+        }
+    }
+
+    /// A pedalled passage, written out so two builds can be heard against
+    /// each other.
+    ///
+    /// The difference the halos' home makes lives where the pool is full:
+    /// under the pedal, with more ringing than there are slots. So this is
+    /// an arpeggio held down over four octaves, a bass octave under it, and
+    /// no lifting of the pedal until the end -- which is what a pedalled
+    /// romantic texture does to a voice pool and what a scale does not.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release halo_ab_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn halo_ab_render() {
+        const FRAMES: usize = 128;
+        // 128 frames at 48 kHz: a block is 2.667 ms.
+        const PER_SECOND: usize = 48_000 / FRAMES;
+        STEALS.store(0, core::sync::atomic::Ordering::Relaxed);
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let mut captured = std::vec::Vec::new();
+
+        let mut script: std::vec::Vec<(usize, [u8; 3])> = std::vec::Vec::new();
+        script.push((0, [0xB0, 64, 127]));
+        // Thirty-two notes a second for six seconds, climbing in fifths so
+        // the same string is never asked for twice while it is still
+        // ringing -- a repeated note takes its own voice back, and a figure
+        // that comes round never fills the pool. A bass octave on each bar
+        // under it. Nothing is ever let go, so the pedal holds all of it,
+        // and the pool is saturated from the second second on: this is
+        // written to be the hard case, because the decisions being compared
+        // are the ones a full pool forces.
+        for step in 0..192usize {
+            let at = 8 + step * (PER_SECOND / 32);
+            script.push((at, [0x90, 28 + (step * 7 % 60) as u8, 84]));
+            if step % 32 == 0 {
+                script.push((at, [0x90, 33 + (step / 32 % 3) as u8 * 5, 104]));
+            }
+        }
+        let blocks = 11 * PER_SECOND;
+        for block in 0..blocks {
+            let midi: std::vec::Vec<MidiEvent> = script
+                .iter()
+                .filter(|(at, _)| *at == block)
+                .map(|(_, data)| MidiEvent {
+                    frame: 0,
+                    data: *data,
+                    length: 3,
+                })
+                .collect();
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            captured.extend(output.chunks(2).map(|frame| frame[0]));
+        }
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let path = std::format!("{directory}/halo-ab.f32");
+        let mut bytes = std::vec::Vec::with_capacity(captured.len() * 4);
+        for sample in &captured {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        std::fs::write(&path, bytes).expect("escribir el render");
+        let peak = captured.iter().fold(0.0f32, |a, b| a.max(b.abs()));
+        std::println!(
+            "escrito {path}: {:.1} s, pico {peak:.4}, {} robos de voz",
+            captured.len() as f64 / 48_000.0,
+            STEALS.load(core::sync::atomic::Ordering::Relaxed)
+        );
+    }
+
+    /// What share of the voice pool the halos hold, and what they cost in
+    /// partials -- which is what decides how big a home of their own would
+    /// have to be.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release halo_share -- --ignored --nocapture`
+    /// What the instrument weighs, which is what a stack has to carry when
+    /// it is built before it is boxed.
+    #[test]
+    #[ignore]
+    fn instrument_size() {
+        std::println!(
+            "FrameState {} B, o {} KB por cada 4096 cuadros",
+            core::mem::size_of::<FrameState>(),
+            core::mem::size_of::<FrameState>() * 4096 / 1024,
+        );
+        std::println!(
+            "ConcertGrand {} KB, seccion {} KB, motor {} KB;              una unidad seria {} KB y cinco de ellas {} KB,              contra {} KB si una unidad cargara el instrumento entero",
+            core::mem::size_of::<ConcertGrand>() / 1024,
+            core::mem::size_of::<StringUnit>() / 1024,
+            core::mem::size_of::<StringEngine>() / 1024,
+            (core::mem::size_of::<StringUnit>() + core::mem::size_of::<StringEngine>()) / 1024,
+            (core::mem::size_of::<ConcertGrand>()
+                + STRING_SECTIONS
+                    * (core::mem::size_of::<StringUnit>() + core::mem::size_of::<StringEngine>()))
+                / 1024,
+            (core::mem::size_of::<ConcertGrand>() * (STRING_SECTIONS + 1)) / 1024,
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn halo_share() {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let (mut peak_notes, mut peak_halos) = (0usize, 0usize);
+        let (mut peak_note_partials, mut peak_halo_partials) = (0usize, 0usize);
+        for midi in pedal_script(300) {
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            let (mut notes, mut halos) = (0usize, 0usize);
+            let (mut note_partials, mut halo_partials) = (0usize, 0usize);
+            for slot in 0..MAX_VOICES {
+                let voice = &voice_at!(piano, slot);
+                if voice.active {
+                    notes += 1;
+                    note_partials += voice.partial_count;
+                }
+            }
+            for section in 0..STRING_SECTIONS {
+                for index in 0..HALOS_PER_SECTION {
+                    let halo = &halo_at!(piano, section, index);
+                    if halo.active {
+                        halos += 1;
+                        halo_partials += halo.partial_count;
+                    }
+                }
+            }
+            peak_notes = peak_notes.max(notes);
+            peak_halos = peak_halos.max(halos);
+            peak_note_partials = peak_note_partials.max(note_partials);
+            peak_halo_partials = peak_halo_partials.max(halo_partials);
+        }
+        std::println!("pico de notas sonando:  {peak_notes:>3} ({peak_note_partials} parciales)");
+        std::println!("pico de halos sonando:  {peak_halos:>3} ({peak_halo_partials} parciales)");
+    }
+
+    #[test]
+    #[ignore]
+    fn pedal_capture() {
+        let captured = play_pedal_script(300);
+        let mut bytes = std::vec::Vec::with_capacity(captured.len() * 4);
+        for sample in &captured {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        std::fs::write("./pedales-128.f32", &bytes).expect("escribir la captura");
+        std::println!("escrito ./pedales-128.f32: {} muestras", captured.len());
+    }
+
+    /// `cargo test -p rackforge-concert-grand --release pedal_compare -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn pedal_compare() {
+        const FRAMES: usize = 128;
+        let raw = std::fs::read("./pedales-128.f32").expect("primero corre pedal_capture");
+        let reference: std::vec::Vec<f32> = raw
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|four| f32::from_le_bytes(*four))
+            .collect();
+        let mine = play_pedal_script(300);
+        assert_eq!(reference.len(), mine.len(), "capturas de distinto largo");
+        let mut first: Option<usize> = None;
+        let mut worst = 0.0f32;
+        let mut worst_at = 0usize;
+        for (at, (want, got)) in reference.iter().zip(mine.iter()).enumerate() {
+            let error = (want - got).abs();
+            if error > 0.0 && first.is_none() {
+                first = Some(at);
+            }
+            if error > worst {
+                worst = error;
+                worst_at = at;
+            }
+        }
+        let peak = reference.iter().fold(0.0f32, |a, b| a.max(b.abs()));
+        let db = |value: f32| {
+            if value > 0.0 {
+                20.0 * (value / peak).log10()
+            } else {
+                -240.0
+            }
+        };
+        match first {
+            None => std::println!("identico a la captura"),
+            Some(at) => {
+                let block = at / FRAMES;
+                std::println!(
+                    "primera diferencia: muestra {at} (bloque {block}, cuadro {} del bloque)",
+                    at % FRAMES
+                );
+                for event in &pedal_script(300)[block] {
+                    std::println!(
+                        "  evento en el cuadro {}: {:02x} {} {}",
+                        event.frame,
+                        event.data[0],
+                        event.data[1],
+                        event.data[2]
+                    );
+                }
+            }
+        }
+        std::println!(
+            "peor {:.1} dB bajo el pico, en la muestra {worst_at} (bloque {})",
+            db(worst),
+            worst_at / FRAMES
+        );
+    }
+
+    /// Renders a script and returns the left channel.
+    #[cfg(test)]
+    fn render_script(delay: usize, chord: &[u8], blocks: usize) -> std::vec::Vec<f32> {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        piano.section_delay = delay;
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+        for block in 0..blocks {
+            let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                chord
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &note)| MidiEvent {
+                        frame: (i * 11) as u32,
+                        data: [0x90, note, 100],
+                        length: 3,
+                    })
+                    .collect()
+            } else {
+                std::vec::Vec::new()
+            };
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            for frame in 0..FRAMES {
+                captured.push(output[frame * 2]);
+            }
+        }
+        captured
+    }
+
+    /// Power of one frequency in one windowed segment (Goertzel, in f64 so a
+    /// long render does not drift).
+    #[cfg(test)]
+    fn goertzel(samples: &[f32], hertz: f64) -> f64 {
+        let w = core::f64::consts::TAU * hertz / 48_000.0;
+        let coefficient = 2.0 * w.cos();
+        let (mut s1, mut s2) = (0.0f64, 0.0f64);
+        let n = samples.len() as f64;
+        for (index, sample) in samples.iter().enumerate() {
+            // Hann, so neighbouring partials do not leak into the band.
+            let phase = core::f64::consts::TAU * index as f64 / n;
+            let window = 0.5 - 0.5 * phase.cos();
+            let s0 = f64::from(*sample) * window + coefficient * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        (s1 * s1 + s2 * s2 - coefficient * s1 * s2).max(0.0)
+    }
+
+    /// Band levels, third-octave, averaged over overlapping windows.
+    #[cfg(test)]
+    fn band_levels(samples: &[f32]) -> std::vec::Vec<(f64, f64)> {
+        const WINDOW: usize = 8192;
+        const HOP: usize = 4096;
+        const PROBES: usize = 8;
+        let mut bands = std::vec::Vec::new();
+        let mut centre = 40.0f64;
+        while centre < 16_000.0 {
+            let mut power = 0.0f64;
+            let mut windows = 0usize;
+            let mut start = 0usize;
+            while start + WINDOW <= samples.len() {
+                let segment = &samples[start..start + WINDOW];
+                for probe in 0..PROBES {
+                    // Spread the probes across the band's width.
+                    let fraction = (probe as f64 + 0.5) / PROBES as f64 - 0.5;
+                    power += goertzel(segment, centre * 2.0f64.powf(fraction / 3.0));
+                }
+                windows += 1;
+                start += HOP;
+            }
+            if windows > 0 {
+                bands.push((centre, power / windows as f64));
+            }
+            centre *= 2.0f64.powf(1.0 / 3.0);
+        }
+        bands
+    }
+
+    /// How many board modes each Board Density setting builds.
+    ///
+    /// The bank's size is what a machine pays for the instrument standing
+    /// still, and Density is the only control that changes it. This mapping is
+    /// deterministic and machine independent, so it can be taken here and used
+    /// to read an ablation sweep run on a Raspberry Pi -- which is the only
+    /// machine whose stage split is worth knowing.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release board_count_by_density -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn board_count_by_density() {
+        let (low, high) = parameter_bounds(PARAM_BOARD_DENSITY);
+        std::println!("Board Density: {low} .. {high}");
+        std::println!("{:>9}  {:>6}", "densidad", "modos");
+        for step in 0..=10 {
+            let density = low + (high - low) * f64::from(step) / 10.0;
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, 128, 0, 2));
+            assert!(piano.set_parameter(PARAM_BOARD_DENSITY, density));
+            // The bank is rebuilt lazily; one block is enough to force it.
+            let mut output = vec![0.0f32; 256];
+            piano.process(&[], &mut output, &[], &[], 128, 0, 2);
+            std::println!("{density:>9.1}  {:>6}", piano.board_count);
+        }
+    }
+
+    /// What a voice costs once it is only ringing, at the polyphony a
+    /// pedalled performance actually reaches.
+    ///
+    /// The ramp held twelve. Measured against MAESTRO, a pedalled Liszt
+    /// leaves **forty-seven** ringing, and La Campanella's dense passage
+    /// spends 82 % of the period on the appliance -- so the steady cost, not
+    /// the strike, is what it cannot afford. This measures it in that
+    /// regime.
+    ///
+    /// Notes are struck the way a performance strikes them, a few
+    /// milliseconds apart rather than in one block, and then left under the
+    /// pedal for four seconds so the partial cull has finished. What is
+    /// reported is the cost per voice and per LIVE component -- live because
+    /// `Component::tick` retires a lane whose radius has reached zero, and
+    /// the third string does not exist below the tenor, so the slots and the
+    /// work are very different numbers.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release sustained_voice_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn sustained_voice_cost() {
+        const FRAMES: usize = 128;
+        std::println!(
+            "{:>6} {:>7} {:>10} {:>11} {:>10} {:>11} {:>12}",
+            "voces",
+            "activas",
+            "parciales",
+            "componentes",
+            "bloque",
+            "us/voz",
+            "us/componente"
+        );
+        let mut previous: Option<(usize, f64)> = None;
+        for wanted in [1usize, 4, 8, 16, 24, 32, 47] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            // Spread across the compass and across time, as a hand does.
+            let mut struck = 0usize;
+            for block in 0..1_600 {
+                let events: std::vec::Vec<MidiEvent> = if struck < wanted && block % 3 == 0 {
+                    struck += 1;
+                    std::vec![note_on(24 + ((struck * 5) % 64) as u8, 90)]
+                } else {
+                    std::vec::Vec::new()
+                };
+                piano.process(&[], &mut output, &events, &[], FRAMES as u32, 0, 2);
+            }
+            // Settled: the cull has run, the blooms have retired.
+            let mut cost = 0.0f64;
+            for _ in 0..300 {
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                cost += start.elapsed().as_secs_f64() * 1e6;
+            }
+            cost /= 300.0;
+
+            // The halos counted with the notes: they are strings ringing and
+            // they are rendered every block, so a table that left them out
+            // would report a cheaper instrument than the one being timed.
+            let (mut active, mut partials, mut components) = (0usize, 0usize, 0usize);
+            {
+                let mut tally = |ladder: &[Partial]| {
+                    active += 1;
+                    partials += ladder.len();
+                    for partial in ladder {
+                        for lane in 0..LANES {
+                            if partial.rc[lane] != 0.0 || partial.rs[lane] != 0.0 {
+                                components += 1;
+                            }
+                        }
+                    }
+                };
+                for slot in 0..MAX_VOICES {
+                    let voice = &voice_at!(piano, slot);
+                    if voice.active {
+                        tally(&voice.partials[..voice.partial_count]);
+                    }
+                }
+                for section in 0..STRING_SECTIONS {
+                    for index in 0..HALOS_PER_SECTION {
+                        let halo = &halo_at!(piano, section, index);
+                        if halo.active {
+                            tally(&halo.partials[..halo.partial_count]);
+                        }
+                    }
+                }
+            }
+            // The marginal cost, which is the honest one: the fixed part of a
+            // block is the board and the sympathetic banks, not the voices.
+            let marginal = previous.map(|(voices, before)| {
+                (cost - before) / (active.saturating_sub(voices)).max(1) as f64
+            });
+            std::println!(
+                "{wanted:>6} {active:>7} {partials:>10} {components:>11} {:>8.0}us {:>9} {:>12.2}",
+                cost,
+                marginal.map_or(std::string::String::from("--"), |m| std::format!(
+                    "{m:.0}us"
+                )),
+                if components > 0 {
+                    cost / components as f64
+                } else {
+                    0.0
+                },
+            );
+            previous = Some((active, cost));
+
+            if wanted == 32 {
+                // Where the live components actually sit, against what is
+                // being heard. `DEAD_MAGNITUDE_SQUARED` kills one at about
+                // -95 dB ABSOLUTE; masking is relative, and under a pedal in
+                // a loud passage those are very different lines.
+                let peak = output.iter().fold(0.0f32, |a, x| a.max(x.abs())).max(1e-9);
+                let mut levels: std::vec::Vec<f32> = std::vec::Vec::new();
+                for voice in piano.voices().filter(|voice| voice.active) {
+                    for partial in &voice.partials[..voice.partial_count] {
+                        for lane in 0..LANES {
+                            if partial.rc[lane] == 0.0 && partial.rs[lane] == 0.0 {
+                                continue;
+                            }
+                            let (sn, cn) = (partial.s[lane], partial.c[lane]);
+                            let magnitude = (sn * sn + cn * cn).sqrt();
+                            levels.push(20.0 * log2f((magnitude / peak).max(1e-12)) / log2f(10.0));
+                        }
+                    }
+                }
+                // And the safer line: each component against the loudest one
+                // of ITS OWN voice. A threshold on the global peak is a
+                // moving one -- a pedalled note masked under a loud chord
+                // would be killed, and it cannot come back when the chord
+                // releases and it should be exposed again. Within a note the
+                // ratio is stable, because the whole note decays together.
+                let mut within: std::vec::Vec<f32> = std::vec::Vec::new();
+                for voice in piano.voices().filter(|voice| voice.active) {
+                    let mut loudest = 1e-12f32;
+                    for partial in &voice.partials[..voice.partial_count] {
+                        for lane in 0..LANES {
+                            let (sn, cn) = (partial.s[lane], partial.c[lane]);
+                            loudest = loudest.max((sn * sn + cn * cn).sqrt());
+                        }
+                    }
+                    for partial in &voice.partials[..voice.partial_count] {
+                        for lane in 0..LANES {
+                            if partial.rc[lane] == 0.0 && partial.rs[lane] == 0.0 {
+                                continue;
+                            }
+                            let (sn, cn) = (partial.s[lane], partial.c[lane]);
+                            let magnitude = (sn * sn + cn * cn).sqrt();
+                            within
+                                .push(20.0 * log2f((magnitude / loudest).max(1e-12)) / log2f(10.0));
+                        }
+                    }
+                }
+                within.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                levels.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                std::println!();
+                std::println!(
+                    "  con 32 voces: {} componentes vivos, pico de salida {peak:.4}",
+                    levels.len()
+                );
+                std::println!("  cuantos estan por debajo de cada nivel, contra el pico:");
+                for floor in [-100.0f32, -90.0, -80.0, -70.0, -60.0, -50.0, -40.0] {
+                    let under = levels.iter().filter(|db| **db < floor).count();
+                    std::println!(
+                        "    {floor:>6.0} dB: {under:>5} de {:>5} ({:>4.0} %)  {}",
+                        levels.len(),
+                        100.0 * under as f32 / levels.len() as f32,
+                        "#".repeat((50.0 * under as f32 / levels.len() as f32) as usize)
+                    );
+                }
+                // One note is TWO voices: the note and its halo, a second
+                // smaller ladder built under the pedal. At this polyphony
+                // that is half the slots, and the question is what share of
+                // the WORK it is.
+                let (mut halo_voices, mut halo_components) = (0usize, 0usize);
+                let (mut note_voices, mut note_components) = (0usize, 0usize);
+                let live = |partials: &[Partial]| {
+                    let mut count = 0usize;
+                    for partial in partials {
+                        for lane in 0..LANES {
+                            if partial.rc[lane] != 0.0 || partial.rs[lane] != 0.0 {
+                                count += 1;
+                            }
+                        }
+                    }
+                    count
+                };
+                for slot in 0..MAX_VOICES {
+                    let voice = &voice_at!(piano, slot);
+                    if voice.active {
+                        note_voices += 1;
+                        note_components += live(&voice.partials[..voice.partial_count]);
+                    }
+                }
+                for section in 0..STRING_SECTIONS {
+                    for index in 0..HALOS_PER_SECTION {
+                        let halo = &halo_at!(piano, section, index);
+                        if halo.active {
+                            halo_voices += 1;
+                            halo_components += live(&halo.partials[..halo.partial_count]);
+                        }
+                    }
+                }
+                let total = (note_components + halo_components).max(1);
+                std::println!();
+                std::println!(
+                    "  notas: {note_voices:>2} voces, {note_components:>5} componentes ({:>3.0} %)",
+                    100.0 * note_components as f32 / total as f32
+                );
+                std::println!(
+                    "  halos: {halo_voices:>2} voces, {halo_components:>5} componentes ({:>3.0} %)",
+                    100.0 * halo_components as f32 / total as f32
+                );
+                std::println!();
+                std::println!("  y contra el componente mas fuerte de SU PROPIA voz:");
+                for floor in [-80.0f32, -70.0, -60.0, -50.0, -40.0, -30.0] {
+                    let under = within.iter().filter(|db| **db < floor).count();
+                    std::println!(
+                        "    {floor:>6.0} dB: {under:>5} de {:>5} ({:>4.0} %)  {}",
+                        within.len(),
+                        100.0 * under as f32 / within.len() as f32,
+                        "#".repeat((50.0 * under as f32 / within.len() as f32) as usize)
+                    );
+                }
+                std::println!();
+            }
+        }
+        std::println!("  MAX_VOICES es {MAX_VOICES}, asi que 47 notas roban voces");
+        std::println!("  el deadline de la Pi a 128 cuadros es 2666 us");
+    }
+
+    /// The oracle for the loop inversion: this render, kept on disk.
+    ///
+    /// Inverting the loops -- sections outside, frames inside -- cannot be
+    /// bit-identical, because each section will accumulate its own bridge
+    /// contributions and `end_block` will sum them in section order where
+    /// today every voice adds into one running total in slot order. Float
+    /// addition is not associative, so the fingerprint stops being the
+    /// guard exactly where the risk starts.
+    ///
+    /// What CAN be checked is that the difference is rounding and not
+    /// behaviour. So this captures the render at `section_delay = 128` --
+    /// the delay the inversion needs and the ear has approved -- before the
+    /// inversion, and `parallel_oracle_compare` measures against it after.
+    /// A difference near -140 dB is float order. Anything above it is a bug,
+    /// and the delay's own effect (-40 dB) is the scale that matters.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release parallel_oracle_capture -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn parallel_oracle_capture() {
+        let (samples, peak) = oracle_render();
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let path = std::format!("{directory}/oracle-seccion-128.f32");
+        let mut bytes = std::vec::Vec::with_capacity(samples.len() * 4);
+        for sample in &samples {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        std::fs::write(&path, bytes).expect("writing the oracle");
+        std::println!("escrito {path}: {} muestras, pico {peak:.4}", samples.len());
+    }
+
+    /// Measures the inverted loops against the oracle captured before them.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release parallel_oracle_compare -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn parallel_oracle_compare() {
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let path = std::format!("{directory}/oracle-seccion-128.f32");
+        let Ok(bytes) = std::fs::read(&path) else {
+            std::println!("no hay oraculo en {path}; corre parallel_oracle_capture primero");
+            return;
+        };
+        let before: std::vec::Vec<f32> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|four| f32::from_le_bytes(*four))
+            .collect();
+        let (after, peak) = oracle_render();
+        assert_eq!(before.len(), after.len(), "el render cambio de largo");
+        let (mut worst, mut sum) = (0.0f32, 0.0f64);
+        for (a, b) in before.iter().zip(after.iter()) {
+            let difference = (a - b).abs();
+            worst = worst.max(difference);
+            sum += f64::from(difference) * f64::from(difference);
+        }
+        let rms = (sum / before.len() as f64).sqrt() as f32;
+        let worst_db = 20.0 * log2f((worst / peak).max(1e-12)) / log2f(10.0);
+        let rms_db = 20.0 * log2f((rms / peak).max(1e-12)) / log2f(10.0);
+        std::println!("contra el oraculo: peor {worst_db:.1} dB, rms {rms_db:.1} dB bajo el pico");
+        // WHERE, before anyone says why. Twice today the cause was found by
+        // looking and missed by reasoning.
+        {
+            let block = 128usize;
+            let mut rows: std::vec::Vec<(usize, f32)> = std::vec::Vec::new();
+            for start in (0..before.len() - block).step_by(block) {
+                let (mut local, mut signal) = (0.0f32, 0.0f32);
+                for index in start..start + block {
+                    local = local.max((before[index] - after[index]).abs());
+                    signal = signal.max(before[index].abs());
+                }
+                rows.push((
+                    start / block,
+                    20.0 * log2f((local / signal.max(1e-12)).max(1e-12)) / log2f(10.0),
+                ));
+            }
+            let first = rows.iter().find(|(_, db)| *db > -130.0);
+            std::println!(
+                "  primer bloque que difiere: {:?}",
+                first.map(|(at, db)| (*at, std::format!("{db:.0} dB")))
+            );
+            let mut worst_rows = rows.clone();
+            worst_rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            std::print!("  peores bloques:");
+            for (at, db) in worst_rows.iter().take(6) {
+                std::print!(" [{at}]{db:.0}");
+            }
+            std::println!();
+            // The single worst sample, and where it sits inside its block.
+            let mut at = 0usize;
+            let mut top = 0.0f32;
+            for index in 0..before.len() {
+                let d = (before[index] - after[index]).abs();
+                if d > top {
+                    top = d;
+                    at = index;
+                }
+            }
+            std::println!(
+                "  peor muestra: {at} (bloque {}, cuadro {} del bloque)",
+                at / block,
+                at % block
+            );
+        }
+        std::println!("  (orden de flotantes ~ -140 dB; el retraso de seccion vale -40 dB)");
+        assert!(
+            worst_db < -100.0,
+            "la inversion cambio mas que el orden de las sumas: {worst_db:.1} dB"
+        );
+    }
+
+    /// One pedalled passage at `section_delay = 128`, for both halves of the
+    /// oracle to render the same way.
+    fn oracle_render() -> (std::vec::Vec<f32>, f32) {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        piano.section_delay = 128;
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xB0, 64, 127],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+        let chord: [u8; 8] = [36, 43, 48, 55, 60, 64, 67, 72];
+        let mut captured = std::vec::Vec::with_capacity(900 * FRAMES);
+        for block in 0..900 {
+            // Notes at odd frames, so the events land mid-block and the
+            // inversion has to place them where they belong.
+            let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                chord
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &note)| MidiEvent {
+                        frame: (i * 13 + 5) as u32,
+                        data: [0x90, note, 100],
+                        length: 3,
+                    })
+                    .collect()
+            } else if block == 400 {
+                std::vec![MidiEvent {
+                    frame: 37,
+                    data: [0xB0, 64, 0],
+                    length: 3
+                }]
+            } else {
+                std::vec::Vec::new()
+            };
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            for frame in 0..FRAMES {
+                captured.push(output[frame * 2]);
+            }
+        }
+        let peak = captured.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+        (captured, peak)
+    }
+
+    /// Is the contact integrator converged at the timestep it ships with?
+    ///
+    /// The strike simulation is 42-47 % of a note-on on the appliance, and
+    /// it is symplectic Euler at a four-microsecond step -- first order, so
+    /// the step is an accuracy choice. Stability would allow far more:
+    /// `omega*dt` for the highest mode integrated is about 0.25 against a
+    /// bound of 2.
+    ///
+    /// If halving the step does not move the strike, the shipped sound does
+    /// not depend on the discretisation error, and an integrator that is
+    /// exact for each mode -- a rotation by `omega*dt`, precomputed once per
+    /// mode, the same arithmetic per step -- can take a much larger step and
+    /// land in the same place. If halving it DOES move the strike, then the
+    /// instrument as voiced includes that error, and making the integrator
+    /// better is a change to the sound rather than a saving.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release contact_convergence -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn contact_convergence() {
+        const FRAMES: usize = 128;
+        fn ladder(note: u8, velocity: u8, dt: f32) -> std::vec::Vec<f32> {
+            SIM_DT_S.set(dt);
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            piano.process(
+                &[],
+                &mut output,
+                &[note_on(note, velocity)],
+                &[],
+                FRAMES as u32,
+                0,
+                2,
+            );
+            let Some(voice) = piano.voices().find(|voice| voice.active) else {
+                return std::vec::Vec::new();
+            };
+            voice.partials[..voice.partial_count]
+                .iter()
+                .map(|partial| {
+                    let (s, c) = (partial.s[0], partial.c[0]);
+                    (s * s + c * c).sqrt()
+                })
+                .collect()
+        }
+        let steps = [1.0e-6f32, 2.0e-6, 4.0e-6, 8.0e-6, 16.0e-6];
+        for (note, velocity) in [(40u8, 100u8), (64, 100), (64, 30), (76, 110)] {
+            // The truth both schemes should agree on: the shipped scheme at a
+            // step eight times finer than it ships with.
+            let reference = ladder(note, velocity, 0.5e-6);
+            std::println!(
+                "
+nota {note}, velocidad {velocity}: {} parciales, referencia dt=0.5 us",
+                reference.len()
+            );
+            std::println!("  {:>10} {:>12} {:>12}", "dt", "peor dB", "rms dB");
+            for dt in steps {
+                let got = ladder(note, velocity, dt);
+                if got.len() != reference.len() {
+                    std::println!(
+                        "  {:>8.1} us   escalera distinta ({} parciales)",
+                        dt * 1e6,
+                        got.len()
+                    );
+                    continue;
+                }
+                let (mut worst, mut sum, mut counted) = (0.0f32, 0.0f32, 0usize);
+                for (a, b) in reference.iter().zip(got.iter()) {
+                    // Only partials that carry something: a difference of
+                    // nothing against nothing is not a difference.
+                    if *a < reference.iter().cloned().fold(0.0f32, f32::max) * 1e-3 {
+                        continue;
+                    }
+                    let db = 20.0 * log2f((b / a).max(1e-9)) / log2f(10.0);
+                    worst = worst.max(db.abs());
+                    sum += db * db;
+                    counted += 1;
+                }
+                let rms = if counted > 0 {
+                    (sum / counted as f32).sqrt()
+                } else {
+                    0.0
+                };
+                std::println!("  {:>8.1} us {:>9.2} dB {:>9.2} dB", dt * 1e6, worst, rms);
+            }
+        }
+        SIM_DT_S.set(4.0e-6);
+    }
+
+    /// Where a note-on's time actually goes, by phase.
+    ///
+    /// Four rounds of picking the next plausible candidate each landed under
+    /// ten percent -- the hammer integration at zero, the (note, n)
+    /// transcendentals at six, the scratch zeroing and copies at seven. This
+    /// stops guessing and asks the function.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release note_on_profile -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn note_on_profile() {
+        const FRAMES: usize = 128;
+        for (label, notes) in [
+            ("una nota (C2)", &[40u8][..]),
+            (
+                "doce notas, un acorde",
+                &[40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84][..],
+            ),
+        ] {
+            probe::reset();
+            let mut blocks = 0.0f64;
+            for round in 0..12 {
+                let mut piano = Box::new(ConcertGrand::default());
+                assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+                let mut output = vec![0.0f32; FRAMES * 2];
+                let pedal = MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, 127],
+                    length: 3,
+                };
+                piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+                for _ in 0..200 {
+                    piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                }
+                let chord: std::vec::Vec<MidiEvent> =
+                    notes.iter().map(|note| note_on(*note, 100)).collect();
+                // The probes are reset by the first round's warm-up, so the
+                // block that is timed is only the ones that are counted.
+                if round == 0 {
+                    probe::reset();
+                }
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, &chord, &[], FRAMES as u32, 0, 2);
+                blocks += start.elapsed().as_secs_f64() * 1e6;
+            }
+            probe::report(label);
+            std::println!(
+                "  el bloque entero del note-on, sumado: {:.0} us   (lo que las fases no cubren es renderizar la voz nueva)",
+                blocks
+            );
+        }
+    }
+
+    /// What a note-on writes before it computes anything.
+    ///
+    /// The ladder is built into `[Partial::default(); MAX_PARTIALS]`, a stack
+    /// array sized for the largest ladder any note could want, zeroed in full
+    /// on every note-on -- and then `placed` of its entries are used, which
+    /// for most of the compass is a small fraction. On a desktop that is
+    /// invisible. This machine has already shown twice that it is not a
+    /// desktop.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release note_on_scratch -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn note_on_scratch() {
+        let one = core::mem::size_of::<Partial>();
+        std::println!(
+            "Partial: {one} bytes   MAX_PARTIALS: {MAX_PARTIALS}   Voice: {} bytes",
+            core::mem::size_of::<Voice>()
+        );
+        std::println!(
+            "  un note-on con pedal inicializa: {:.1} KB de escalera + {:.1} KB de halo + {:.1} KB de Voice::default() = {:.1} KB",
+            (one * MAX_PARTIALS) as f32 / 1024.0,
+            (one * 24) as f32 / 1024.0,
+            core::mem::size_of::<Voice>() as f32 / 1024.0,
+            (one * MAX_PARTIALS + one * 24 + core::mem::size_of::<Voice>()) as f32 / 1024.0,
+        );
+        std::println!(
+            "  el borrador que un note-on inicializa: {:.1} KB",
+            (one * MAX_PARTIALS) as f32 / 1024.0
+        );
+        std::println!(
+            "  y con doce notas en un bloque: {:.1} KB, contra 32 KB de L1",
+            (one * MAX_PARTIALS * 12) as f32 / 1024.0
+        );
+        // What is actually used, per note, across the compass.
+        const FRAMES: usize = 128;
+        std::println!(
+            "
+{:>5} {:>10} {:>12} {:>14}",
+            "nota",
+            "parciales",
+            "usado KB",
+            "% del borrador"
+        );
+        for note in [24u8, 40, 55, 72, 96] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            piano.process(
+                &[],
+                &mut output,
+                &[note_on(note, 100)],
+                &[],
+                FRAMES as u32,
+                0,
+                2,
+            );
+            let placed: usize = piano
+                .voices()
+                .filter(|voice| voice.active)
+                .map(|voice| voice.partial_count)
+                .sum();
+            std::println!(
+                "{note:>5} {placed:>10} {:>10.1} {:>13.0}%",
+                (placed * one) as f32 / 1024.0,
+                100.0 * placed as f32 / MAX_PARTIALS as f32,
+            );
+        }
+    }
+
+    /// Is the note-on block proportional to the ladder it builds, or is it
+    /// mostly a fixed cost?
+    ///
+    /// This decides whether spreading the build over several blocks is worth
+    /// doing at all. A note-on that is 90 % ladder can be amortised; one that
+    /// is mostly fixed setup cannot, and the effort belongs elsewhere.
+    ///
+    /// One note at a time, across the compass, because a low note's ladder is
+    /// many times a high note's and that is the only lever here that moves
+    /// `placed` without moving anything else.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release strike_cost_per_partial -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn strike_cost_per_partial() {
+        const FRAMES: usize = 128;
+        std::println!(
+            "{:>5} {:>10} {:>11} {:>10} {:>12}",
+            "nota",
+            "parciales",
+            "asentado",
+            "golpe",
+            "us/parcial"
+        );
+        let mut rows: std::vec::Vec<(f64, f64)> = std::vec::Vec::new();
+        for note in [24u8, 33, 40, 48, 55, 64, 72, 84, 96] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            for _ in 0..500 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut floor = 0.0f64;
+            for _ in 0..200 {
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                floor += start.elapsed().as_secs_f64() * 1e6;
+            }
+            floor /= 200.0;
+            let strike = [note_on(note, 100)];
+            let start = std::time::Instant::now();
+            piano.process(&[], &mut output, &strike, &[], FRAMES as u32, 0, 2);
+            let block = start.elapsed().as_secs_f64() * 1e6;
+            let placed: usize = piano
+                .voices()
+                .filter(|voice| voice.active)
+                .map(|voice| voice.partial_count)
+                .sum();
+            let over = block - floor;
+            rows.push((placed as f64, over));
+            std::println!(
+                "{note:>5} {placed:>10} {:>9.0}us {:>8.0}us {:>12.2}",
+                floor,
+                over,
+                if placed > 0 {
+                    over / placed as f64
+                } else {
+                    0.0
+                }
+            );
+        }
+        // A straight line through the points: the slope is what a partial
+        // costs to build, the intercept is what a note-on costs regardless.
+        let n = rows.len() as f64;
+        let sx: f64 = rows.iter().map(|r| r.0).sum();
+        let sy: f64 = rows.iter().map(|r| r.1).sum();
+        let sxx: f64 = rows.iter().map(|r| r.0 * r.0).sum();
+        let sxy: f64 = rows.iter().map(|r| r.0 * r.1).sum();
+        let slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+        let intercept = (sy - slope * sx) / n;
+        std::println!();
+        std::println!(
+            "  ajuste: {:.2} us por parcial + {:.0} us fijos por note-on",
+            slope,
+            intercept
+        );
+        std::println!(
+            "  con una escalera de 46 parciales eso es {:.0} us de escalera contra {:.0} us fijos",
+            slope * 46.0,
+            intercept
+        );
+    }
+
+    /// Does the size of a voice's partial ladder explain BOTH halves of the
+    /// strike transient?
+    ///
+    /// `strike_transient` measures two things at once on the appliance: a
+    /// note-on block that costs 7.5 ms against a 2.7 ms deadline, and a tail
+    /// that takes one to two seconds to come back down. It also shows that
+    /// the hammer-string integration is not what costs -- gating it off
+    /// changes nothing. The remaining candidate explains both at once: a
+    /// fresh voice is born with a large ladder, which is expensive to BUILD
+    /// (the block) and expensive to RUN until the cull thins it (the tail).
+    ///
+    /// If that is right, both halves scale with the budget the voice is
+    /// given. If the block stays put while the tail shrinks, the build is
+    /// something else and this is the wrong tree.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release strike_cost_by_ladder -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn strike_cost_by_ladder() {
+        const FRAMES: usize = 128;
+        const BLOCKS: usize = 900;
+        let block_us = FRAMES as f64 / 48.0;
+        std::println!(
+            "{:>12} {:>9} {:>10} {:>11} {:>10} {:>12}",
+            "fuel",
+            "parciales",
+            "asentado",
+            "golpe",
+            "x deadline",
+            "cola >1.2x"
+        );
+        for fuel in [u64::MAX, 4_000_000, 2_000_000, 1_000_000, 400_000] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            if fuel != u64::MAX {
+                piano.set_realtime_budget(fuel);
+            }
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            for _ in 0..600 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let chord: std::vec::Vec<MidiEvent> =
+                (0..12).map(|i| note_on(40 + (i as u8) * 4, 100)).collect();
+            let mut costs = std::vec::Vec::with_capacity(BLOCKS);
+            // The ladder as it ages. Counting it only at the end counts what
+            // the cull LEFT, which is the one number that cannot show a birth
+            // ladder -- the first version of this test did exactly that and
+            // reported 220 partials at every budget.
+            let ages = [1usize, 10, 50, 200, 899];
+            let mut ladder = [0usize; 5];
+            for block in 0..BLOCKS {
+                let events: &[MidiEvent] = if block == 0 { &chord } else { &[] };
+                let start = std::time::Instant::now();
+                piano.process(&[], &mut output, events, &[], FRAMES as u32, 0, 2);
+                costs.push(start.elapsed().as_secs_f64() * 1e6);
+                if let Some(slot) = ages.iter().position(|age| *age == block) {
+                    ladder[slot] = piano
+                        .voices()
+                        .filter(|voice| voice.active)
+                        .map(|voice| voice.partial_count)
+                        .sum();
+                }
+            }
+            let partials = ladder[0];
+            let settled: f64 = costs[BLOCKS - 200..].iter().sum::<f64>() / 200.0;
+            let tail = costs.iter().filter(|c| **c > settled * 1.2).count();
+            let name = if fuel == u64::MAX {
+                std::string::String::from("sin tope")
+            } else {
+                std::format!("{fuel}")
+            };
+            std::println!(
+                "{:>12} {:>9} {:>8.0}us {:>9.0}us {:>10.2} {:>9.0} ms",
+                name,
+                partials,
+                settled,
+                costs[0],
+                costs[0] / 2666.0,
+                tail as f64 * block_us,
+            );
+            std::println!(
+                "             escalera por edad: {} en el bloque 1 -> {} -> {} -> {} -> {} a 2.4 s",
+                ladder[0],
+                ladder[1],
+                ladder[2],
+                ladder[3],
+                ladder[4]
+            );
+        }
+        std::println!(
+            "  (12 notas en un solo bloque; el deadline de la Pi a 128 cuadros es 2666 us)"
+        );
+    }
+
+    /// How long a struck chord stays expensive, and how expensive.
+    ///
+    /// Held notes are cheap on the appliance -- twelve of them at half the
+    /// period, missing nothing -- and what misses is the strike. No budget
+    /// the governor can publish makes a hammer cost less, so the shape of
+    /// this spike is what the ceiling actually is.
+    ///
+    /// The chord lands in ONE block rather than spread over a hand's worth
+    /// of milliseconds, because what is being measured is the decay of the
+    /// transient and not the shape of an arpeggio.
+    ///
+    /// Run it on the appliance. Measured on a desktop the spike is 1.6-2.2x
+    /// and gone inside a hundred milliseconds; measured through the
+    /// appliance's own telemetry it is 2.5x and lasts about half a second,
+    /// and a desktop has now given the wrong answer about this machine three
+    /// times in one session.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release strike_transient -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn strike_transient() {
+        const FRAMES: usize = 128;
+        const BLOCKS: usize = 1000;
+        let block_us = FRAMES as f64 / 48.0;
+        std::println!(
+            "un bloque son {block_us:.2} ms; el deadline de la Pi a 128 cuadros es 2667 us"
+        );
+        // Twice over: with the hammer-string integration on, as it ships,
+        // and with it gated off by `SIM_MIN_MODES`, so the strike block can
+        // be split into "what the simulation costs" and "what a note-on
+        // costs anyway". Lowering `strike_budget` is NOT the lever -- it was
+        // three once, and a seven-note chord came out 3.25 dB down in its
+        // fundamentals and 10.34 dB up at 4-8 kHz, which is what
+        // `a_chord_is_the_sum_of_its_notes` now guards.
+        for simulated in [true, false] {
+            SIM_MIN_MODES.set(if simulated { 4.0 } else { 1e9 });
+            std::println!(
+                "
+===== simulacion del golpe: {} =====",
+                if simulated {
+                    "ENCENDIDA (como se envia)"
+                } else {
+                    "APAGADA"
+                }
+            );
+            for held in [1usize, 6, 12] {
+                let mut piano = Box::new(ConcertGrand::default());
+                assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+                let mut output = vec![0.0f32; FRAMES * 2];
+                let pedal = MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, 127],
+                    length: 3,
+                };
+                piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+                // The floor: what this instrument costs with nothing sounding.
+                for _ in 0..400 {
+                    piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                }
+                let mut floor = 0.0f64;
+                for _ in 0..200 {
+                    let start = std::time::Instant::now();
+                    piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                    floor += start.elapsed().as_secs_f64() * 1e6;
+                }
+                floor /= 200.0;
+
+                // The whole chord in one block.
+                let chord: std::vec::Vec<MidiEvent> = (0..held)
+                    .map(|i| note_on(40 + (i as u8) * 4, 100))
+                    .collect();
+                let mut costs = std::vec::Vec::with_capacity(BLOCKS);
+                for block in 0..BLOCKS {
+                    let events: &[MidiEvent] = if block == 0 { &chord } else { &[] };
+                    let start = std::time::Instant::now();
+                    piano.process(&[], &mut output, events, &[], FRAMES as u32, 0, 2);
+                    costs.push(start.elapsed().as_secs_f64() * 1e6);
+                }
+                // Settled: the last 200 blocks, well past the partial cull.
+                let settled: f64 = costs[BLOCKS - 200..].iter().sum::<f64>() / 200.0;
+                let peak = costs.iter().cloned().fold(0.0f64, f64::max);
+                let over = costs.iter().filter(|c| **c > settled * 1.2).count();
+                std::println!();
+                std::println!(
+                    "--- {held} nota(s) ---  silencio {:.0} us   asentado {:.0} us   primer bloque {:.0} us   pico {:.0} us",
+                    floor,
+                    settled,
+                    costs[0],
+                    peak
+                );
+                std::println!(
+                    "    el golpe cuesta {:.0} us sobre el asentado; {} bloques sobre 1.2x ({:.0} ms)",
+                    costs[0] - settled,
+                    over,
+                    over as f64 * block_us,
+                );
+                // Fine near the strike, coarse after it.
+                let spans: &[(usize, usize)] = &[
+                    (0, 1),
+                    (1, 5),
+                    (5, 20),
+                    (20, 50),
+                    (50, 100),
+                    (100, 200),
+                    (200, 400),
+                    (400, 700),
+                    (700, 1000),
+                ];
+                std::println!("    {:>12} {:>9} {:>9}", "bloques", "us", "x asentado");
+                for (from, to) in spans {
+                    let mean: f64 = costs[*from..*to].iter().sum::<f64>() / (*to - *from) as f64;
+                    let label = std::format!("{from}-{to}");
+                    std::println!(
+                        "    {:>12} {:>9.0} {:>9.2}   {:>5.0} ms",
+                        label,
+                        mean,
+                        mean / settled,
+                        *from as f64 * block_us,
+                    );
+                }
+            }
+        }
+        SIM_MIN_MODES.set(4.0);
+    }
+
+    /// Times the render, to say whether the banks are paying for arithmetic
+    /// or for memory.
+    ///
+    /// `bank_working_set` says the banks sweep 65 KB every sample against a
+    /// Raspberry Pi's 32 KB of L1. If that is what costs, then PADDING
+    /// `BodyMode` -- adding bytes the loop never reads -- has to cost time
+    /// in proportion. If the loop is compute-bound the padding is free.
+    /// That is the whole experiment, and it is worth running before any
+    /// refactor that packs these structs.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bank_render_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bank_render_cost() {
+        const FRAMES: usize = 128;
+        const BLOCKS: usize = 4000;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        // Six notes held, which is where the appliance's ramp starts.
+        let events: std::vec::Vec<MidiEvent> = [40u8, 47, 52, 59, 64, 71]
+            .iter()
+            .map(|note| note_on(*note, 90))
+            .collect();
+        piano.process(&[], &mut output, &events, &[], FRAMES as u32, 0, 2);
+        // Warm the caches before the clock starts.
+        for _ in 0..200 {
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+        }
+        let start = std::time::Instant::now();
+        for _ in 0..BLOCKS {
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+        }
+        let each = start.elapsed().as_secs_f64() * 1e6 / BLOCKS as f64;
+        std::println!(
+            "BodyMode {} bytes, {} modos de tabla: {each:.1} us por bloque de {FRAMES}",
+            core::mem::size_of::<BodyMode>(),
+            piano.board_count,
+        );
+    }
+
+    /// What the resonator banks weigh, against the cache that has to hold
+    /// them -- as the instrument actually runs, not as the arrays are sized.
+    ///
+    /// The distinction is the whole test. An earlier version of it counted
+    /// `BOARD_MODES`, `UNDAMPED_COUNT` and `SILENT_MODES` -- the array
+    /// CAPACITIES -- and reported 65 KB against a Cortex-A72's 32 KB of L1.
+    /// That number never happens. The density law places 167 modes in the
+    /// board's range, not 256; the undamped bank stops at
+    /// `UNDAMPED_HIGH_HZ` after about 90; and `silent` only ticks the slots
+    /// a held silent key has taken. The banks that actually sweep come to
+    /// 27 KB, which fits -- and a bank that fits cannot be made faster by
+    /// making it fit.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bank_working_set -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bank_working_set() {
+        const FRAMES: usize = 128;
+        let simple = core::mem::size_of::<BodyMode>();
+        let board_one = core::mem::size_of::<BoardMode>();
+        std::println!(
+            "BodyMode: {simple} bytes   BoardMode: {board_one} bytes   BoardCold: {} bytes (frio, fuera del lazo)",
+            core::mem::size_of::<BoardCold>()
+        );
+        std::println!();
+        let (low, high) = parameter_bounds(PARAM_BOARD_DENSITY);
+        std::println!(
+            "{:>18} {:>7} {:>9} {:>11} {:>11}",
+            "Board Density",
+            "tabla",
+            "undamped",
+            "KB ahora",
+            "KB con 88 B"
+        );
+        for step in [0.0f64, 0.5, 1.0] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            assert!(piano.set_parameter(PARAM_BOARD_DENSITY, low + (high - low) * step));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            let others = piano.undamped_active + BED_COUNT + OPEN_STRINGS.len();
+            let now = piano.board_count * board_one + others * simple;
+            let before = (piano.board_count + others) * 88;
+            std::println!(
+                "{:>18.2} {:>7} {:>9} {:>11.1} {:>11.1}",
+                low + (high - low) * step,
+                piano.board_count,
+                piano.undamped_active,
+                now as f32 / 1024.0,
+                before as f32 / 1024.0,
+            );
+        }
+        std::println!();
+        std::println!(
+            "  y con teclas mudas tomadas, hasta {} resonadores mas ({:.1} KB ahora, {:.1} antes)",
+            SILENT_MODES,
+            (SILENT_MODES * simple) as f32 / 1024.0,
+            (SILENT_MODES * 88) as f32 / 1024.0,
+        );
+        std::println!("  L1d de un Cortex-A72 (Raspberry Pi 4): 32 KB por nucleo");
+        std::println!(
+            "  el appliance corre en el renglon del medio -- 28 KB, que ya cabian.
+\n  solo la densidad maxima, o unas teclas mudas tomadas, se pasan de L1."
+        );
+    }
+
+    /// How much of the soundboard bank is audible at any one moment.
+    ///
+    /// Every mode is ticked every sample, and above the rib knee a mode's
+    /// T60 is short -- 2.2/(eta f) is about 30 ms at 3 kHz -- so a mode
+    /// whose bay nothing has struck lately is advancing a state that
+    /// rounds to nothing. This counts them, against the block's own peak,
+    /// so the threshold is relative to what is actually being heard.
+    ///
+    /// The estimate per mode is its state times what the output takes from
+    /// it: `max(|y1|,|y2|) * velocity * (|out_y| + |out_y1|)`, the envelope
+    /// of its contribution to a capsule.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release board_audible_share -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn board_audible_share() {
+        const FRAMES: usize = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+
+        // A realistic passage rather than one held chord: a bass octave, a
+        // mid chord, then a treble run over the top of them.
+        let script: &[(usize, &[u8])] = &[
+            (0, &[28, 40]),
+            (12, &[55, 59, 62]),
+            (40, &[76, 79, 83]),
+            (70, &[88, 91]),
+        ];
+
+        let knee_hz = 1477.0f32;
+        let mut rows: std::vec::Vec<(usize, f32, usize, usize, usize, usize)> =
+            std::vec::Vec::new();
+        for block in 0..140 {
+            let mut events: std::vec::Vec<MidiEvent> = std::vec::Vec::new();
+            for (at, notes) in script {
+                if *at == block {
+                    for note in *notes {
+                        events.push(note_on(*note, 88));
+                    }
+                }
+            }
+            piano.process(&[], &mut output, &events, &[], FRAMES as u32, 0, 2);
+
+            let peak = output.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            if peak <= 0.0 {
+                continue;
+            }
+            // -80 dB under the block's own peak: a mode this far down is
+            // below the noise of any converter this will ever reach.
+            let floor = peak * 1e-4;
+            let (mut quiet, mut quiet_high, mut high) = (0usize, 0usize, 0usize);
+            for (mode, cold) in piano
+                .board
+                .iter()
+                .zip(piano.board_cold.iter())
+                .take(piano.board_count)
+            {
+                let state = mode.y1.abs().max(mode.y2.abs());
+                let mut reach = 0.0f32;
+                for capsule in 0..2 {
+                    reach = reach.max(mode.out_y[capsule].abs() + mode.out_y1[capsule].abs());
+                }
+                let amp = state * mode.velocity.abs() * reach;
+                let above_knee = cold.omega * 48_000.0 / core::f32::consts::TAU >= knee_hz;
+                if above_knee {
+                    high += 1;
+                }
+                if amp < floor {
+                    quiet += 1;
+                    if above_knee {
+                        quiet_high += 1;
+                    }
+                }
+            }
+            if block % 10 == 0 || block == 139 {
+                rows.push((block, peak, quiet, piano.board_count, quiet_high, high));
+            }
+            if matches!(block, 20 | 60 | 100 | 139) {
+                let mut db: std::vec::Vec<f32> = piano
+                    .board
+                    .iter()
+                    .take(piano.board_count)
+                    .map(|mode| {
+                        let state = mode.y1.abs().max(mode.y2.abs());
+                        let mut reach = 0.0f32;
+                        for capsule in 0..2 {
+                            reach =
+                                reach.max(mode.out_y[capsule].abs() + mode.out_y1[capsule].abs());
+                        }
+                        let amp = state * mode.velocity.abs() * reach;
+                        20.0 * log2f((amp / peak).max(1e-12)) / log2f(10.0)
+                    })
+                    .collect();
+                db.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let at = |q: f32| db[((db.len() - 1) as f32 * q) as usize];
+                std::println!(
+                    "  bloque {block:>3}: dB bajo el pico -- p5 {:>6.1}  p25 {:>6.1}  p50 {:>6.1}  p75 {:>6.1}  max {:>6.1}",
+                    at(0.05),
+                    at(0.25),
+                    at(0.50),
+                    at(0.75),
+                    at(1.0)
+                );
+            }
+        }
+        std::println!(
+            "{:>7} {:>9} {:>16} {:>18}",
+            "bloque",
+            "pico",
+            "callados/total",
+            "de esos, agudos"
+        );
+        for (block, peak, quiet, total, quiet_high, high) in &rows {
+            std::println!(
+                "{block:>7} {peak:>9.4} {:>9} ({:>3.0} %) {:>10} de {high:>3}",
+                std::format!("{quiet}/{total}"),
+                100.0 * *quiet as f32 / *total as f32,
+                quiet_high,
+            );
+        }
+    }
+
+    /// Which rows of the drive transform the bank actually reads.
+    ///
+    /// The transform computes all sixteen cosine and sine rows every sample,
+    /// 512 multiplies, and each mode reads three numbers out of it: row 0 and
+    /// its own `shape_q`. A row no mode names is computed for nobody -- and
+    /// `shape_q` is fixed when the bank is built, so which rows those are is
+    /// known before a sample is rendered.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release board_row_usage -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn board_row_usage() {
+        for density in [0.0f64, 0.5, 1.0] {
+            let (low, high) = parameter_bounds(PARAM_BOARD_DENSITY);
+            let value = low + (high - low) * density;
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, 128, 0, 2));
+            assert!(piano.set_parameter(PARAM_BOARD_DENSITY, value));
+            let mut output = vec![0.0f32; 256];
+            piano.process(&[], &mut output, &[], &[], 128, 0, 2);
+
+            let mut per_row = [0usize; BOARD_DRIVE_POINTS];
+            let mut knee_split = (0usize, 0usize);
+            let mut top_below_knee = 0usize;
+            for (mode, cold) in piano
+                .board
+                .iter()
+                .zip(piano.board_cold.iter())
+                .take(piano.board_count)
+            {
+                per_row[mode.shape_q as usize] += 1;
+                let hertz = cold.omega * 48_000.0 / core::f32::consts::TAU;
+                if hertz < 1477.0 {
+                    knee_split.0 += 1;
+                    top_below_knee = top_below_knee.max(mode.shape_q as usize);
+                } else {
+                    knee_split.1 += 1;
+                }
+            }
+            std::println!(
+                "
+densidad {value:.2}: {} modos  ({} bajo la rodilla, {} sobre)",
+                piano.board_count,
+                knee_split.0,
+                knee_split.1
+            );
+            std::println!("  fila q:  modos que la leen");
+            let mut dead = 0;
+            for (q, count) in per_row.iter().enumerate() {
+                let bar = "#".repeat(*count);
+                if *count == 0 {
+                    dead += 1;
+                }
+                std::println!("  {q:>6}: {count:>3}  {bar}");
+            }
+            std::println!("  filas muertas: {dead} de {BOARD_DRIVE_POINTS}");
+            std::println!("  mayor q bajo la rodilla: {top_below_knee}");
+        }
+    }
+
+    /// Writes the A/B the measurement cannot make: the ear decides beating,
+    /// and a band level averaged over four seconds cannot see it.
+    ///
+    /// Both cases go into ONE file, separated by silence, because switching
+    /// files is the worst way to compare these. A player restarts its output
+    /// stream on every file, and a wireless headset gates its radio when the
+    /// stream stops -- so the first few hundred milliseconds after each switch
+    /// are swallowed by the device waking up, which is exactly the attack the
+    /// comparison is about. One continuous stream keeps every onset intact.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release section_delay_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn section_delay_render() {
+        fn wav(path: &str, samples: &[f32]) {
+            let mut bytes = std::vec::Vec::with_capacity(44 + samples.len() * 2);
+            let data = samples.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in samples {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(path, bytes).expect("writing the comparison render");
+        }
+
+        // Long enough for a radio to wake, a player to settle and an ear to
+        // arrive before anything is asked of it.
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let scripts: [(&str, &[u8]); 2] = [
+            ("acorde", &[36, 43, 48, 55, 60, 64, 67, 72]),
+            ("nota", &[60]),
+        ];
+        for (name, chord) in scripts {
+            let reference = render_script(0, chord, 1_400);
+            // One block at the appliance's period, which is the delay
+            // `parallel_render_v1` actually imposes: units are rendered in
+            // isolation for a whole block, so a section hears its
+            // neighbours one block old. 512 was the worst case this
+            // rendered before -- four blocks, and a bound rather than a
+            // proposal.
+            let delayed = render_script(128, chord, 1_400);
+            let mut track = vec![0.0f32; LEAD_IN];
+            // A B A B: the second pair is what actually gets judged, once the
+            // ear knows what it is listening for.
+            for pass in 0..2 {
+                for rendered in [&reference, &delayed] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+                let _ = pass;
+            }
+            let path = std::format!("{directory}/ab-{name}.wav");
+            wav(&path, &track);
+            std::println!(
+                "escrito {path} ({:.1} s) -- {:.0} s de silencio, luego A(sin retardo) B(128) A B",
+                track.len() as f64 / 48_000.0,
+                LEAD_IN as f64 / 48_000.0,
+            );
+        }
+    }
+
+    /// What a budget does to the instrument, at the two ends that exist.
+    ///
+    /// The numbers are the ones the hosts measured: about 60M fuel a block on
+    /// a desktop, about 5M on a Raspberry Pi 4 at 128 frames.
+    #[test]
+    fn a_budget_thins_the_instrument_only_when_it_has_to() {
+        const FRAMES: u32 = 128;
+        fn block(piano: &mut ConcertGrand) {
+            let mut output = vec![0.0f32; FRAMES as usize * 2];
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+        }
+
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        block(&mut piano);
+        let voiced = (
+            piano.board_count,
+            piano.undamped_active,
+            piano.partial_budget,
+        );
+        assert!(
+            voiced.0 > 150,
+            "the shipped bank should be most of its slots"
+        );
+        assert_eq!(voiced.2, PARTIAL_BUDGET);
+
+        // A machine with room to spare is left exactly as voiced: a budget may
+        // take quality away and must never invent some.
+        assert!(piano.set_realtime_budget(60_000_000));
+        block(&mut piano);
+        block(&mut piano);
+        assert_eq!(
+            (
+                piano.board_count,
+                piano.undamped_active,
+                piano.partial_budget
+            ),
+            voiced
+        );
+
+        // A machine without room. Every axis gives, together -- after the
+        // body has faded out, which takes forty milliseconds of blocks.
+        assert!(piano.set_realtime_budget(5_000_000));
+        for _ in 0..20 {
+            block(&mut piano);
+        }
+        let thinned = (
+            piano.board_count,
+            piano.undamped_active,
+            piano.partial_budget,
+        );
+        assert!(
+            thinned.0 < voiced.0,
+            "the soundboard kept {} modes",
+            thinned.0
+        );
+        assert!(
+            thinned.1 < voiced.1,
+            "the undamped register kept {} resonators",
+            thinned.1
+        );
+        assert!(
+            thinned.2 < voiced.2,
+            "the partial ceiling stayed at {}",
+            thinned.2
+        );
+        assert!(
+            thinned.2 >= MINIMUM_PARTIAL_BUDGET,
+            "the partial ceiling fell to {}, below a piano",
+            thinned.2
+        );
+        assert!(piano.quality >= MINIMUM_QUALITY);
+
+        // And it settles: a second look at the same budget does not keep
+        // cutting, which is what would make the timbre breathe.
+        for _ in 0..40 {
+            block(&mut piano);
+        }
+        assert_eq!(
+            (
+                piano.board_count,
+                piano.undamped_active,
+                piano.partial_budget
+            ),
+            thinned
+        );
+
+        // Room again, and the instrument comes back whole -- through the
+        // same fade, so it takes the same forty blocks.
+        assert!(piano.set_realtime_budget(60_000_000));
+        for _ in 0..40 {
+            block(&mut piano);
+        }
+        assert_eq!(
+            (
+                piano.board_count,
+                piano.undamped_active,
+                piano.partial_budget
+            ),
+            voiced,
+            "the instrument did not come back after the machine was free"
+        );
+    }
+
+    /// A budget landing under a sounding note must not tick.
+    ///
+    /// The player heard one: "se escucha como un tick y cambia el sonido".
+    /// A bank rebuild used to replace every resonator whole, state included,
+    /// and a bank of freshly zeroed states under a ringing note is a step in
+    /// the output. The rebuild now carries each slot's state across, so the
+    /// largest sample-to-sample jump in the block the budget lands in is no
+    /// worse than the note was already making on its own.
+    #[test]
+    fn a_budget_landing_under_a_note_does_not_tick() {
+        const FRAMES: u32 = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        let mut output = vec![0.0f32; FRAMES as usize * 2];
+        let strike = MidiEvent {
+            frame: 0,
+            data: [0x90, 64, 110],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[strike], &[], FRAMES, 0, 2);
+        let biggest_step = |output: &[f32]| -> f32 {
+            output
+                .chunks(2)
+                .map(|f| f[0])
+                .collect::<std::vec::Vec<_>>()
+                .windows(2)
+                .map(|w| (w[1] - w[0]).abs())
+                .fold(0.0f32, f32::max)
+        };
+        // Well past the attack, into the ring: what the note steps by on
+        // its own, taken from the blocks right before the budget lands.
+        for _ in 0..60 {
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+        }
+        let mut before = 0.0f32;
+        let mut last = 0.0f32;
+        for _ in 0..4 {
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+            before = before.max(biggest_step(&output));
+            last = output[output.len() - 2];
+        }
+        let modes_before = piano.board_count;
+        // The budget lands, the body fades through silence, both banks
+        // rebuild while nothing of them is sounding, and it fades back:
+        // about forty blocks in all, every one of them watched.
+        assert!(piano.set_realtime_budget(1_260_758));
+        let mut during = 0.0f32;
+        let mut seam = 0.0f32;
+        for block in 0..40 {
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+            during = during.max(biggest_step(&output));
+            seam = seam.max((output[0] - last).abs());
+            last = output[output.len() - 2];
+            let _ = block;
+        }
+        assert!(piano.board_count < modes_before, "the bank did not rebuild");
+        std::println!(
+            "paso propio {before:.5}  paso en la reconstruccion {during:.5}  costura {seam:.5}"
+        );
+        assert!(
+            during <= before * 1.5 && seam <= before * 1.5,
+            "the rebuild stepped the output by {during} (seam {seam}) where the note stepped by {before}"
+        );
+    }
+
+    /// A thinned instrument is still an instrument: it renders, it is not
+    /// silent, and nothing in it has gone to NaN.
+    #[test]
+    fn the_smallest_instrument_still_sounds() {
+        const FRAMES: u32 = 128;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, FRAMES, 0, 2));
+        assert!(piano.set_realtime_budget(1_000_000));
+        let mut output = vec![0.0f32; FRAMES as usize * 2];
+        piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+        assert_eq!(piano.quality, MINIMUM_QUALITY);
+
+        let strike = MidiEvent {
+            frame: 0,
+            data: [0x90, 60, 100],
+            length: 3,
+        };
+        piano.process(&[], &mut output, &[strike], &[], FRAMES, 0, 2);
+        let mut peak = 0.0f32;
+        for _ in 0..80 {
+            piano.process(&[], &mut output, &[], &[], FRAMES, 0, 2);
+            for sample in &output {
+                assert!(
+                    sample.is_finite(),
+                    "the thinned instrument rendered {sample}"
+                );
+                peak = peak.max(sample.abs());
+            }
+        }
+        assert!(
+            peak > 1e-3,
+            "a struck note at the smallest quality peaked at {peak}"
+        );
+    }
+
+    /// The instrument as it stands, rendered to be listened to.
+    ///
+    /// Two scenes. The ladder walks one note per register with no pedal, so
+    /// the ear can find where the tone thins out -- `PIANO_MIDRANGE.md` puts
+    /// that between F#3 and A3, and this is what it sounds like. The phrase
+    /// plays the same region in use, under the pedal, with the bass under it
+    /// for the body to answer to.
+    ///
+    /// Full quality: no budget is set, so this is the model, not what a
+    /// Raspberry Pi thins it to.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release listen -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn listen() {
+        const FRAMES: usize = 128;
+        const BLOCKS_PER_SECOND: usize = 48_000 / FRAMES;
+
+        /// `(block, note, velocity)`; velocity 0 is a release.
+        fn render(
+            script: &[(usize, u8, u8)],
+            blocks: usize,
+            pedal: bool,
+            budget: u64,
+        ) -> std::vec::Vec<f32> {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            if budget > 0 {
+                assert!(piano.set_realtime_budget(budget));
+                // Two blocks to take it, forty for the body to fade through
+                // silence, rebuild and come back.
+                for _ in 0..44 {
+                    piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                }
+            }
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES * 2);
+            if pedal {
+                let down = MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, 127],
+                    length: 3,
+                };
+                piano.process(&[], &mut output, &[down], &[], FRAMES as u32, 0, 2);
+            }
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = script
+                    .iter()
+                    .filter(|(at, _, _)| *at == block)
+                    .map(|(_, note, velocity)| MidiEvent {
+                        frame: 0,
+                        data: [if *velocity == 0 { 0x80 } else { 0x90 }, *note, *velocity],
+                        length: 3,
+                    })
+                    .collect();
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                captured.extend_from_slice(&output[..FRAMES * 2]);
+            }
+            captured
+        }
+
+        // One note per register, a second and a half apart, each left to ring.
+        let ladder: std::vec::Vec<(usize, u8, u8)> =
+            [36u8, 43, 48, 52, 55, 57, 60, 64, 69, 72, 76, 81]
+                .iter()
+                .enumerate()
+                .map(|(i, &note)| {
+                    (
+                        BLOCKS_PER_SECOND * 3 / 2 * i + BLOCKS_PER_SECOND / 2,
+                        note,
+                        96u8,
+                    )
+                })
+                .collect();
+
+        // The same region in use: a bass root, then a figure through A3-A4.
+        let mut phrase: std::vec::Vec<(usize, u8, u8)> = std::vec::Vec::new();
+        let beat = BLOCKS_PER_SECOND / 2;
+        for (bar, (root, notes)) in [
+            (36u8, [57u8, 60, 64, 69, 64, 60]),
+            (41u8, [57u8, 61, 65, 69, 65, 61]),
+            (43u8, [59u8, 62, 67, 71, 67, 62]),
+            (36u8, [60u8, 64, 69, 72, 69, 64]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let start = BLOCKS_PER_SECOND / 2 + bar * beat * 7;
+            phrase.push((start, root, 88));
+            for (step, note) in notes.into_iter().enumerate() {
+                let velocity = if step == 3 { 104 } else { 84 };
+                phrase.push((start + beat * (step + 1), note, velocity));
+            }
+        }
+
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        for (name, script, seconds, pedal) in [
+            ("escalera", ladder, 21usize, false),
+            ("frase", phrase, 20, true),
+        ] {
+            let blocks = BLOCKS_PER_SECOND * seconds;
+            let mut track = vec![0.0f32; 48_000 * 2 * 3 / 2];
+            track.extend_from_slice(&render(&script, blocks, pedal, 0));
+            let path = std::format!("{directory}/piano-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&192_000u32.to_le_bytes());
+            bytes.extend_from_slice(&4u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            let peak = track.iter().fold(0.0f32, |m, s| m.max(s.abs())).max(1e-6);
+            let gain = (0.89 / peak).min(4.0);
+            for sample in &track {
+                let clipped = (sample * gain * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the render");
+            std::println!(
+                "escrito {path} ({:.1} s, estereo, ganancia x{gain:.2})",
+                track.len() as f64 / 2.0 / 48_000.0
+            );
+            if name != "frase" {
+                continue;
+            }
+            // The same phrase at what a Raspberry Pi settled on, against the
+            // instrument as voiced: the budget's cost, in use rather than on
+            // a held chord.
+            let budget: u64 = std::env::var("CG_LISTEN_BUDGET")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(373_087);
+            let thinned = render(&script, blocks, pedal, budget);
+            let full = render(&script, blocks, pedal, 0);
+            let mut pair = vec![0.0f32; 48_000 * 2 * 3 / 2];
+            for _ in 0..2 {
+                for side in [&full, &thinned] {
+                    pair.extend_from_slice(side);
+                    pair.extend(core::iter::repeat_n(0.0, 48_000 * 2));
+                }
+            }
+            let path = std::format!("{directory}/piano-frase-ab.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + pair.len() * 2);
+            let data = pair.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&192_000u32.to_le_bytes());
+            bytes.extend_from_slice(&4u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            // One gain for both sides, so a level difference stays audible as
+            // one.
+            for sample in &pair {
+                let clipped = (sample * gain * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison");
+            std::println!(
+                "escrito {path} ({:.1} s) -- entera(A) presupuesto {budget}(B) A B",
+                pair.len() as f64 / 2.0 / 48_000.0
+            );
+        }
+    }
+
+    /// What a block of delay between the strings and the BOARD costs the
+    /// ear.
+    ///
+    /// Splitting the strings across four cores costs one block of delay
+    /// between sections, and that one passed: "son iguales". It buys the
+    /// strings, which on La Campanella is about 810 us of a 2191 us block.
+    /// The rest -- the board bank, the sympathetic banks, the room -- runs
+    /// serially after them, and at roughly 1380 us it is the floor.
+    ///
+    /// The board could divide too: its modes are independent oscillators
+    /// and four groups of them would keep four workers busy. But they are
+    /// driven by bridge points that depend on every string section, so a
+    /// board unit rendering BESIDE the strings could only read them a block
+    /// old. That is a second approximation, and a more exposed one: section
+    /// to section is a sympathetic path, string to board is the direct one
+    /// every note travels.
+    ///
+    /// So it is rendered rather than argued. A is the instrument as it
+    /// ships; B hands the board its drive points 128 samples late.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release board_feed_delay_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn board_feed_delay_render() {
+        const FRAMES: usize = 128;
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+
+        fn render(delay: f32, chord: &[u8], blocks: usize) -> std::vec::Vec<f32> {
+            BOARD_FEED_DELAY.set(delay);
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                    chord
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &note)| MidiEvent {
+                            frame: (i * 11) as u32,
+                            data: [0x90, note, 100],
+                            length: 3,
+                        })
+                        .collect()
+                } else {
+                    std::vec::Vec::new()
+                };
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                for frame in 0..FRAMES {
+                    captured.push(output[frame * 2]);
+                }
+            }
+            captured
+        }
+
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let scripts: [(&str, &[u8]); 2] = [
+            ("acorde", &[36, 43, 48, 55, 60, 64, 67, 72]),
+            ("nota", &[60]),
+        ];
+        for (name, chord) in scripts {
+            let shipped = render(0.0, chord, 1_400);
+            let delayed = render(128.0, chord, 1_400);
+            let peak = shipped.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            // ALIGNED before differencing. Delaying everything downstream of
+            // the strings delays the output, and subtracting a signal from a
+            // shifted copy of itself gives an error the size of the signal --
+            // which is what the first version of this measured and reported
+            // as -3.8 dB. That number was the latency, not the colour. What
+            // is left after the shift is taken out is the colour.
+            // Which shift actually aligns them. A residual concentrated at
+            // the attack and falling away after it is the signature of a
+            // misalignment of a few samples, not of a colour: the error is
+            // largest where the signal changes fastest.
+            let mut shift = 128usize;
+            {
+                let mut best = f64::MAX;
+                for candidate in 120..=136usize {
+                    let mut sum = 0.0f64;
+                    for index in 0..shipped.len().saturating_sub(candidate).min(48_000) {
+                        let d = f64::from(shipped[index] - delayed[index + candidate]);
+                        sum += d * d;
+                    }
+                    if sum < best {
+                        best = sum;
+                        shift = candidate;
+                    }
+                }
+                std::println!("  {name}: alinea mejor a {shift} muestras");
+            }
+            let (mut worst, mut sum, mut counted) = (0.0f32, 0.0f64, 0usize);
+            for index in 0..shipped.len().saturating_sub(shift) {
+                let difference = (shipped[index] - delayed[index + shift]).abs();
+                worst = worst.max(difference);
+                sum += f64::from(difference) * f64::from(difference);
+                counted += 1;
+            }
+            let rms = (sum / counted.max(1) as f64).sqrt() as f32;
+            std::println!(
+                "{name}: pico {peak:.4}, alineado: mayor diferencia {:.1} dB bajo el pico, rms {:.1} dB",
+                20.0 * log2f((worst / peak).max(1e-9)) / log2f(10.0),
+                20.0 * log2f((rms / peak).max(1e-9)) / log2f(10.0),
+            );
+            // WHERE it is, before anyone guesses why. Two hypotheses in a row
+            // -- the sympathetic banks, then the keybed -- each moved the
+            // number by nothing, which is what guessing buys.
+            std::println!("    la diferencia en el tiempo, por 100 ms:");
+            let window = 4_800usize;
+            let mut line = std::string::String::new();
+            for start in (0..counted.saturating_sub(window)).step_by(window).take(20) {
+                let mut local = 0.0f32;
+                let mut signal = 0.0f32;
+                for index in start..start + window {
+                    local = local.max((shipped[index] - delayed[index + shift]).abs());
+                    signal = signal.max(shipped[index].abs());
+                }
+                let db = 20.0 * log2f((local / signal.max(1e-9)).max(1e-9)) / log2f(10.0);
+                line.push_str(&std::format!(" {db:.0}"));
+            }
+            std::println!("    {line}  (dB bajo la senal local)");
+            let mut track = vec![0.0f32; LEAD_IN];
+            for _ in 0..2 {
+                for rendered in [&shipped, &delayed] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+            }
+            let path = std::format!("{directory}/ab-tabla-atrasada-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in &track {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison render");
+            std::println!(
+                "  escrito {path} ({:.1} s) -- 2 s de silencio, luego A(hoy) B(128) A B",
+                track.len() as f64 / 48_000.0
+            );
+        }
+        BOARD_FEED_DELAY.set(0.0);
+    }
+
+    /// What the contact integrator's step costs the ear, rendered.
+    ///
+    /// `contact_convergence` measures the shipped four-microsecond step at
+    /// 1.23 dB from converged on the worst partial of a mezzo-forte C4, and
+    /// on a bass note the error is enough to change how many partials the
+    /// ladder carries. Whether any of that is audible is not a measurement,
+    /// so this renders it.
+    ///
+    /// A is the instrument as it ships. B is the same instrument with the
+    /// step at one microsecond, four times the cost and near enough
+    /// converged (0.12 dB worst on the same note). If B sounds better, the
+    /// piano is voiced on top of a discretisation artefact and the step is a
+    /// voicing decision rather than an inherited constant. If they are the
+    /// same, the step is justified and the question closes.
+    ///
+    /// One file, a lead-in of silence, and A B A B -- a player restarts its
+    /// output stream on every file and a wireless headset gates its radio
+    /// when the stream stops, so a switch between files swallows exactly the
+    /// attack this comparison is about.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release contact_step_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn contact_step_render() {
+        const FRAMES: usize = 128;
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+
+        fn render(dt: f32, chord: &[u8], velocity: u8, blocks: usize) -> std::vec::Vec<f32> {
+            SIM_DT_S.set(dt);
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                    chord
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &note)| MidiEvent {
+                            frame: (i * 11) as u32,
+                            data: [0x90, note, velocity],
+                            length: 3,
+                        })
+                        .collect()
+                } else {
+                    std::vec::Vec::new()
+                };
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                for frame in 0..FRAMES {
+                    captured.push(output[frame * 2]);
+                }
+            }
+            captured
+        }
+
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        // The bass, where the error changes the ladder's LENGTH; a single
+        // mezzo-forte C4, which is where the 1.23 dB was measured; and a
+        // pianissimo, where the felt is least compressed and the contact
+        // longest, so the step has the most to resolve.
+        let scripts: [(&str, &[u8], u8); 3] = [
+            ("bajo", &[28, 35, 40], 100),
+            ("c4", &[60], 100),
+            ("c4-pianissimo", &[60], 28),
+        ];
+        for (name, chord, velocity) in scripts {
+            let shipped = render(4.0e-6, chord, velocity, 1_400);
+            let fine = render(1.0e-6, chord, velocity, 1_400);
+            // How far apart they are, before anyone listens: the ear should
+            // be told what it is looking for.
+            let (mut worst, mut sum) = (0.0f32, 0.0f64);
+            for (a, b) in shipped.iter().zip(fine.iter()) {
+                let difference = (a - b).abs();
+                worst = worst.max(difference);
+                sum += f64::from(difference) * f64::from(difference);
+            }
+            let peak = shipped.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            let rms = (sum / shipped.len() as f64).sqrt() as f32;
+            std::println!(
+                "{name}: pico {peak:.4}, mayor diferencia {worst:.4} ({:.1} dB bajo el pico), rms de la diferencia {:.1} dB",
+                20.0 * log2f((worst / peak).max(1e-9)) / log2f(10.0),
+                20.0 * log2f((rms / peak).max(1e-9)) / log2f(10.0),
+            );
+            let mut track = vec![0.0f32; LEAD_IN];
+            for _ in 0..2 {
+                for rendered in [&shipped, &fine] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+            }
+            let path = std::format!("{directory}/ab-paso-contacto-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in &track {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison render");
+            std::println!(
+                "  escrito {path} ({:.1} s) -- 2 s de silencio, luego 4us(A) 1us(B) A B",
+                track.len() as f64 / 48_000.0
+            );
+        }
+        SIM_DT_S.set(4.0e-6);
+    }
+
+    /// What the budget costs the ear, rendered so it can be judged.
+    ///
+    /// The measurement says a Raspberry Pi stops missing deadlines; it cannot
+    /// say whether the piano that does so is still the piano. Both cases go
+    /// into ONE file after a lead-in of silence, because a player restarts its
+    /// output stream on every file and a wireless headset gates its radio when
+    /// the stream stops -- the first few hundred milliseconds after a switch
+    /// are swallowed by the device waking up.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release budget_quality_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn budget_quality_render() {
+        const FRAMES: usize = 128;
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+
+        fn render(budget: u64, chord: &[u8], blocks: usize) -> std::vec::Vec<f32> {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            if budget > 0 {
+                assert!(piano.set_realtime_budget(budget));
+                // Two blocks for the banks to be rebuilt at the new quality.
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xB0, 64, 127],
+                length: 3,
+            };
+            piano.process(&[], &mut output, &[pedal], &[], FRAMES as u32, 0, 2);
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = if block == 2 {
+                    chord
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &note)| MidiEvent {
+                            frame: (i * 11) as u32,
+                            data: [0x90, note, 100],
+                            length: 3,
+                        })
+                        .collect()
+                } else {
+                    std::vec::Vec::new()
+                };
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                for frame in 0..FRAMES {
+                    captured.push(output[frame * 2]);
+                }
+            }
+            captured
+        }
+
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        let scripts: [(&str, &[u8]); 2] = [
+            ("acorde", &[36, 43, 48, 55, 60, 64, 67, 72]),
+            ("nota", &[60]),
+        ];
+        for (name, chord) in scripts {
+            // 0 is the instrument as voiced; 1,260,758 fuel is what a
+            // Raspberry Pi 4 settled on, measured.
+            let full = render(0, chord, 1_400);
+            let thinned = render(1_260_758, chord, 1_400);
+            let mut track = vec![0.0f32; LEAD_IN];
+            for _ in 0..2 {
+                for rendered in [&full, &thinned] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+            }
+            let path = std::format!("{directory}/ab-presupuesto-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in &track {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison render");
+            std::println!(
+                "escrito {path} ({:.1} s) -- 2 s de silencio, luego entero(A) reducido(B) A B",
+                track.len() as f64 / 48_000.0
+            );
+        }
+    }
+
+    /// The per-string wire loss, rendered so it can be judged by ear.
+    ///
+    /// A is `WIRE_LOSS_TOP = 1` (the instrument before), B is whatever
+    /// `CG_WIRE_TOP` says (the candidate). A mid-register phrase and a
+    /// single mid-high note, each as one continuous file after a lead-in of
+    /// silence, because a player restarts its output on every file and a
+    /// wireless headset swallows the first attack after a switch.
+    ///
+    /// `CG_WIRE_TOP=6 cargo test -p rackforge-concert-grand --release wire_loss_render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn wire_loss_render() {
+        const FRAMES: usize = 128;
+        const LEAD_IN: usize = 48_000 * 2;
+        const GAP: usize = 48_000;
+        let candidate: f32 = std::env::var("CG_WIRE_TOP")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(6.0);
+
+        fn render(top: f32, script: &[(usize, u8)], blocks: usize) -> std::vec::Vec<f32> {
+            WIRE_LOSS_TOP.set(top);
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let mut captured = std::vec::Vec::with_capacity(blocks * FRAMES);
+            for block in 0..blocks {
+                let midi: std::vec::Vec<MidiEvent> = script
+                    .iter()
+                    .filter(|(at, _)| *at == block)
+                    .map(|(_, note)| MidiEvent {
+                        frame: 0,
+                        data: [0x90, *note, 96],
+                        length: 3,
+                    })
+                    .collect();
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                for frame in 0..FRAMES {
+                    captured.push(output[frame * 2]);
+                }
+            }
+            WIRE_LOSS_TOP.set(1.0);
+            captured
+        }
+
+        // A tenor phrase, the register the complaint is about: ascending
+        // fourths from A3, a note every 400 ms, then the last one rings.
+        let phrase: std::vec::Vec<(usize, u8)> = [57u8, 62, 66, 69, 74]
+            .iter()
+            .enumerate()
+            .map(|(i, &n)| (i * 150, n))
+            .collect();
+        let directory = std::env::var("RACKFORGE_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        for (name, script, blocks) in [
+            ("frase", phrase.as_slice(), 1_500usize),
+            ("nota-fa4", &[(2usize, 66u8)][..], 1_200),
+        ] {
+            let before = render(1.0, script, blocks);
+            let after = render(candidate, script, blocks);
+            let mut track = vec![0.0f32; LEAD_IN];
+            for _ in 0..2 {
+                for rendered in [&before, &after] {
+                    track.extend_from_slice(rendered);
+                    track.extend(core::iter::repeat_n(0.0, GAP));
+                }
+            }
+            let path = std::format!("{directory}/ab-wire-{name}.wav");
+            let mut bytes = std::vec::Vec::with_capacity(44 + track.len() * 2);
+            let data = track.len() as u32 * 2;
+            bytes.extend_from_slice(b"RIFF");
+            bytes.extend_from_slice(&(36 + data).to_le_bytes());
+            bytes.extend_from_slice(b"WAVEfmt ");
+            bytes.extend_from_slice(&16u32.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&1u16.to_le_bytes());
+            bytes.extend_from_slice(&48_000u32.to_le_bytes());
+            bytes.extend_from_slice(&96_000u32.to_le_bytes());
+            bytes.extend_from_slice(&2u16.to_le_bytes());
+            bytes.extend_from_slice(&16u16.to_le_bytes());
+            bytes.extend_from_slice(b"data");
+            bytes.extend_from_slice(&data.to_le_bytes());
+            for sample in &track {
+                let clipped = (sample * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
+                bytes.extend_from_slice(&clipped.to_le_bytes());
+            }
+            std::fs::write(&path, bytes).expect("writing the comparison render");
+            std::println!(
+                "escrito {path} ({:.1} s) -- 2 s de silencio, luego antes(A) despues(B) A B, B = WIRE_LOSS_TOP {candidate}",
+                track.len() as f64 / 48_000.0
+            );
+        }
+    }
+
+    /// What a block of delay between string sections costs the ear.
+    ///
+    /// `parallel_render_v1` renders units in isolation for a whole block, so
+    /// sections can only hear each other with at least a block of delay --
+    /// and `PARALLEL_RENDER.md` requires the sequential path to sound
+    /// identical, which means the delay is not a rendering trick but a change
+    /// to the instrument, on every machine. This is what decides whether the
+    /// piano may be spread across four cores at all.
+    ///
+    /// Two numbers per delay, because they bound the answer from both sides:
+    ///
+    ///   * **band**, the largest third-octave level change, is the fair one --
+    ///     a delayed drive changes the phase of a sympathetic response without
+    ///     changing its magnitude, and the ear hears the magnitude.
+    ///   * **residual**, the difference signal against the reference, is the
+    ///     pessimistic bound: it counts pure phase as error.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release section_delay_audibility -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn section_delay_audibility() {
+        // A single note under the pedal is where sympathy is most exposed:
+        // every other string is free and ringing only because this one is.
+        // A dense chord is where the delay is largest, and most masked.
+        let scripts: [(&str, &[u8]); 2] = [
+            ("una nota con pedal", &[60]),
+            ("acorde denso", &[36, 43, 48, 55, 60, 64, 67, 72]),
+        ];
+        for (name, chord) in scripts {
+            let reference = render_script(0, chord, 1_400);
+            let reference_bands = band_levels(&reference);
+            let reference_rms = (reference
+                .iter()
+                .map(|s| f64::from(*s) * f64::from(*s))
+                .sum::<f64>()
+                / reference.len() as f64)
+                .sqrt();
+            std::println!(
+                "\n{name} ({} voces, {:.1} s)",
+                chord.len(),
+                reference.len() as f64 / 48_000.0
+            );
+            std::println!(
+                "  {:>7}  {:>12}  {:>10}  {:>22}",
+                "retardo",
+                "banda peor",
+                "residual",
+                "donde"
+            );
+            // 1 and 8 are controls, not candidates: a single sample of
+            // delay is a perturbation far below anything a block could
+            // cause. If they move the residual as much as 512 does, the
+            // residual is measuring the model's sensitivity to being nudged
+            // and not the cost of the delay, and only the band levels mean
+            // anything.
+            for delay in [1usize, 8, 128, 256, 512] {
+                let rendered = render_script(delay, chord, 1_400);
+                let mut worst = 0.0f64;
+                let mut worst_hz = 0.0f64;
+                for ((hertz, reference_power), (_, power)) in
+                    reference_bands.iter().zip(band_levels(&rendered).iter())
+                {
+                    // Bands with no signal in them cannot be audibly wrong.
+                    if *reference_power < 1e-12 {
+                        continue;
+                    }
+                    let change = 10.0 * (power / reference_power).log10();
+                    if change.abs() > worst.abs() {
+                        worst = change;
+                        worst_hz = *hertz;
+                    }
+                }
+                let residual = (reference
+                    .iter()
+                    .zip(rendered.iter())
+                    .map(|(a, b)| {
+                        let d = f64::from(*a) - f64::from(*b);
+                        d * d
+                    })
+                    .sum::<f64>()
+                    / reference.len() as f64)
+                    .sqrt();
+                std::println!(
+                    "  {delay:>7}  {worst:>+11.2} dB  {:>9.1} dB  {worst_hz:>18.0} Hz",
+                    20.0 * (residual / reference_rms.max(1e-12)).log10(),
+                );
+            }
+        }
+    }
+
+    /// Not a test: the tail, not the mean.
+    ///
+    /// A Raspberry Pi holds p95 inside its 2667 us budget and then misses it
+    /// on about one block in a hundred, always by the same amount. A mean
+    /// cannot see that; this prints the distribution and where in the stream
+    /// the worst blocks fall, which is what tells a periodic task apart from
+    /// an unlucky one.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bench_block_tail -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_block_tail() {
+        const FRAMES: usize = 128;
+        const RATE: f64 = 48_000.0;
+        const BLOCKS: usize = 2_000;
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
+        let mut output = vec![0.0f32; FRAMES * 2];
+        let midi: Vec<MidiEvent> = [40u8, 47, 52, 55]
+            .iter()
+            .map(|&note| MidiEvent {
+                frame: 0,
+                data: [0x90, note, 100],
+                length: 3,
+            })
+            .collect();
+        piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+        for _ in 0..32 {
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+        }
+        let mut times = std::vec::Vec::with_capacity(BLOCKS);
+        for _ in 0..BLOCKS {
+            let t0 = std::time::Instant::now();
+            piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            times.push(t0.elapsed().as_secs_f64() * 1e6);
+        }
+        let mut sorted = times.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let at = |q: f64| sorted[((sorted.len() - 1) as f64 * q) as usize];
+        std::println!(
+            "p50 {:.0} us | p95 {:.0} us | p99 {:.0} us | max {:.0} us",
+            at(0.50),
+            at(0.95),
+            at(0.99),
+            sorted[sorted.len() - 1],
+        );
+        let threshold = at(0.50) * 1.8;
+        let spikes: std::vec::Vec<usize> = times
+            .iter()
+            .enumerate()
+            .filter(|&(_, &t)| t > threshold)
+            .map(|(i, _)| i)
+            .collect();
+        std::println!("bloques por encima de 1.8x la mediana: {}", spikes.len());
+        if spikes.len() > 1 {
+            let gaps: std::vec::Vec<usize> =
+                spikes.windows(2).map(|w| w[1] - w[0]).take(12).collect();
+            std::println!("primeros indices: {:?}", &spikes[..spikes.len().min(8)]);
+            std::println!("separaciones entre picos: {gaps:?}");
+        }
+    }
+
+    /// Not a test: what each sustaining voice costs in a 128-frame block.
+    ///
+    /// The engine on a Raspberry Pi renders 128 frames at 48 kHz, a 2667 us
+    /// deadline. This reports the steady-state block cost with N notes held
+    /// down, which is the number that decides how many notes the instrument
+    /// can hold there at all.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bench_voice_scaling -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_voice_scaling() {
+        const FRAMES: usize = 128;
+        const RATE: f64 = 48_000.0;
+        const BLOCKS: usize = 200;
+        let deadline_us = FRAMES as f64 / RATE * 1e6;
+        let mut previous = 0.0f64;
+        for held in [0usize, 1, 2, 4, 8, 16, 24] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            let midi: Vec<MidiEvent> = (0..held)
+                .map(|i| MidiEvent {
+                    frame: 0,
+                    data: [0x90, 28 + (i * 3) as u8, 110],
+                    length: 3,
+                })
+                .collect();
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            // Past the attack, into the part of the note that lasts.
+            for _ in 0..32 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut worst = 0.0f64;
+            let started = std::time::Instant::now();
+            for _ in 0..BLOCKS {
+                let t0 = std::time::Instant::now();
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                worst = worst.max(t0.elapsed().as_secs_f64() * 1e6);
+            }
+            let mean = started.elapsed().as_secs_f64() * 1e6 / BLOCKS as f64;
+            let marginal = if held == 0 {
+                0.0
+            } else {
+                (mean - previous) / 1.0
+            };
+            previous = mean;
+            std::println!(
+                "{held:>2} notas sostenidas: media {mean:6.0} us ({:5.1}% del deadline) |                  peor {worst:6.0} us | salto desde el anterior {marginal:6.0} us",
+                mean / deadline_us * 100.0,
+            );
+        }
+    }
+
+    /// Not a test: which half of a note-on costs what.
+    ///
+    /// A control change sets the same "something arrived" flag a note does and
+    /// refreshes the same damped-string bookkeeping, but builds no voice. The
+    /// difference between the two is the voice.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bench_onset_split -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_onset_split() {
+        const FRAMES: usize = 128;
+        const RATE: f64 = 48_000.0;
+        const ROUNDS: usize = 64;
+        let cases: [(&str, [u8; 3]); 3] = [
+            ("nothing arrives   ", [0, 0, 0]),
+            ("a control change  ", [0xB0, 67, 64]),
+            ("a note-on         ", [0x90, 60, 100]),
+        ];
+        for (label, data) in cases {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            for _ in 0..8 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut total = 0.0f64;
+            for round in 0..ROUNDS {
+                let mut event = data;
+                if event[0] == 0x90 {
+                    event[1] = 36 + ((round * 7) % 48) as u8;
+                }
+                let midi: Vec<MidiEvent> = if event[0] == 0 {
+                    vec![]
+                } else {
+                    vec![MidiEvent {
+                        frame: 0,
+                        data: event,
+                        length: 3,
+                    }]
+                };
+                let t0 = std::time::Instant::now();
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                total += t0.elapsed().as_secs_f64() * 1e6;
+                if event[0] == 0x90 {
+                    let off = MidiEvent {
+                        frame: 0,
+                        data: [0x80, event[1], 0],
+                        length: 3,
+                    };
+                    piano.process(&[], &mut output, &[off], &[], FRAMES as u32, 0, 2);
+                }
+            }
+            std::println!("{label}: mean {:.0} us", total / ROUNDS as f64);
+        }
+    }
+
+    /// Not a test: what a block costs *while notes are arriving in it*.
+    ///
+    /// `bench_blocks` above sends its note-ons in one block and then times the
+    /// blocks after it, so it reports steady-state voice cost and never the
+    /// arrival itself. On a Raspberry Pi the arrival is what misses the
+    /// deadline: a run played fast lands several note-ons inside one 128-frame
+    /// block, and each one builds its partials inline.
+    ///
+    /// `cargo test -p rackforge-concert-grand --release bench_note_onset -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_note_onset() {
+        const FRAMES: usize = 128;
+        const RATE: f64 = 48_000.0;
+        let deadline_us = FRAMES as f64 / RATE * 1e6;
+        for arrivals in [0usize, 1, 2, 4, 8] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            for _ in 0..8 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut worst = 0.0f64;
+            let mut total = 0.0f64;
+            const ROUNDS: usize = 64;
+            for round in 0..ROUNDS {
+                let midi: Vec<MidiEvent> = (0..arrivals)
+                    .map(|i| {
+                        let note = 36 + ((round * 7 + i * 5) % 48) as u8;
+                        MidiEvent {
+                            frame: (i * 3) as u32,
+                            data: [0x90, note, 100],
+                            length: 3,
+                        }
+                    })
+                    .collect();
+                let t0 = std::time::Instant::now();
+                piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+                let spent = t0.elapsed().as_secs_f64() * 1e6;
+                worst = worst.max(spent);
+                total += spent;
+                // Release them so the next round starts from a comparable
+                // voice count rather than measuring an ever-fuller piano.
+                let offs: Vec<MidiEvent> = (0..arrivals)
+                    .map(|i| {
+                        let note = 36 + ((round * 7 + i * 5) % 48) as u8;
+                        MidiEvent {
+                            frame: 0,
+                            data: [0x80, note, 0],
+                            length: 3,
+                        }
+                    })
+                    .collect();
+                piano.process(&[], &mut output, &offs, &[], FRAMES as u32, 0, 2);
+            }
+            std::println!(
+                "{arrivals} note-on(s) in a block: mean {:.0} us | worst {worst:.0} us |                  worst is {:.0}% of the {deadline_us:.0} us deadline",
+                total / ROUNDS as f64,
+                worst / deadline_us * 100.0,
+            );
         }
     }
 

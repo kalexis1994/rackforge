@@ -1,38 +1,64 @@
-schema_version = 3
-package = "plugins/rf-dls"
-data_root = "data"
-preset = "gm.piano-1"
+# The startup audio configuration RackForge hands to Core.
+#
+# Installers render this file into `<root>/config/audio.toml.example`,
+# replacing @RACKFORGE_ROOT@ with the deployment root and
+# @RACKFORGE_DEFAULT_PACKAGE@ with the bundled instrument they just
+# installed. The rendered file is a working configuration: copy it to
+# `config/audio.toml` and Core starts with it.
+#
+# It is also the seed the Web host copies the first time an instrument is
+# activated, replacing `package` with that instrument and dropping `preset`.
+# Everything else below reaches Core exactly as written, which is why this
+# file carries nothing specific to one plugin or one machine.
 
-[resources]
-dls-bank = "data/plugins/rf-dls/banks/gm.dls"
+schema_version = 3
+package = "@RACKFORGE_DEFAULT_PACKAGE@"
+data_root = "@RACKFORGE_ROOT@/data"
+
+# Resource overrides belong to the plugin that declares them: Core refuses a
+# configuration that overrides a resource the active plugin does not declare,
+# so this seed carries none. Add them under a `[resources]` table only
+# alongside a `package` that declares those ids.
 
 [audio.output]
-fallback = "none"
+# Nothing here names a make or a model, and nothing should: this file is
+# imaged onto machines whose interface nobody has met yet. `automatic` means
+# "whichever connected output can run this profile", and when more than one
+# can, the choice is by kind of connection -- something plugged into USB was
+# plugged in to be played through, a board's own output is the fallback, and
+# HDMI on a headless appliance usually leads to a screen that is not there.
+#
+# To pin one deliberately, replace the device table with
+# `mode = "usb"` and the interface's ids, or `mode = "id"` and the device id
+# Core prints in AUDIO_READY.
 sample_format = "s32_le"
 sample_rate_hz = 48000
 channels = 2
-period_frames = 128
-buffer_frames = 384
+# RackForge's buffer on every platform: 256 samples a block, played from a
+# queue of three. LITTLE and the web settings change it to 128 or 512.
+period_frames = 256
+buffer_frames = 768
 
 [audio.output.device]
-mode = "usb"
-vendor_id = 0x1235
-product_id = 0x8211
+mode = "automatic"
 
-# Audio capture is opt-in. Uncomment this section for a mono guitar connected
-# to physical input 1 of the same interface. Keep rate and period equal to the
-# output profile so both streams remain in one clock domain.
+# Audio capture is opt-in. Uncomment this section to capture every input of
+# the interface -- up to 32 -- and let each Rack cable from the audio input
+# choose its own: a guitar on input 1, a voice on input 2. Keep rate and period
+# equal to the output profile so both streams remain in one clock domain.
+#
+# To capture only some inputs, list them: `channels = [1]` for a mono guitar
+# on input 1 alone. PLAY takes what is captured as a whole, as a Rack cable
+# left on "All" does -- one input on both sides, a pair side for side.
+# Core runs the capture on the output's rate and buffer whatever is written
+# here, and takes it along when the output's buffer changes.
 #
 # [audio.input]
-# fallback = "none"
 # sample_format = "s32_le"
 # sample_rate_hz = 48000
-# channels = [1]
-# period_frames = 128
-# buffer_frames = 384
+# period_frames = 256
+# buffer_frames = 768
 # gain_db = 0
 #
 # [audio.input.device]
-# mode = "usb"
-# vendor_id = 0x1235
-# product_id = 0x8211
+# mode = "automatic"

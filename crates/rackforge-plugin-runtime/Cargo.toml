@@ -12,6 +12,11 @@ anyhow.workspace = true
 # compiler is only a dependency of the native hosts.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wasmtime.workspace = true
+# Binaryen, run over every component before Cranelift compiles it (see
+# src/optimize.rs). Without its DWARF support: components carry none the
+# host reads.
+wasm-opt = { version = "0.116.1", default-features = false }
+sha2.workspace = true
 
 [dev-dependencies]
 wat = "1.245"

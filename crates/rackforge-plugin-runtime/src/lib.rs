@@ -23,9 +23,15 @@ pub use shared::{
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
+mod optimize;
+#[cfg(not(target_arch = "wasm32"))]
 pub use native::unload_process_handlers;
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{PortableEngine, PortableInstance, PortableModule};
+pub use native::{
+    PortableEngine, PortableInstance, PortableModule, component_uses_simd, optimize_component,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use optimize::DISABLE_ENV as OPTIMIZE_DISABLE_ENV;
 
 #[cfg(target_arch = "wasm32")]
 mod browser;

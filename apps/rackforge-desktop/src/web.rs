@@ -55,6 +55,17 @@ fn plugin_install_cancellations() -> &'static Mutex<BTreeMap<String, Arc<AtomicB
 
 #[derive(Clone)]
 struct WebState {
+    /// Where a physical keyboard's notes, forwarded by its controller
+    /// driver, may go without waiting for the app thread. See
+    /// `ForwardedMidiRoute`.
+    forwarded_midi: Arc<RwLock<ForwardedMidiRoute>>,
+    /// True only on the server the desktop window's own webview talks to.
+    /// Operations that act on this machine's screen -- opening the audio
+    /// driver's window, which may be modal and holds the app's main thread
+    /// until someone at this computer closes it -- are refused everywhere
+    /// else: a phone on the LAN would otherwise freeze the host behind a
+    /// dialog nobody near the phone can see.
+    local_ui: bool,
     session: Arc<RwLock<SessionState>>,
     /// The performance library's current revision, published by the app
     /// thread after every edit so each session socket can push a fresh
@@ -194,7 +205,17 @@ pub enum DesktopControlCall {
         delete_plugin_data: bool,
         response: Sender<Result<Value, String>>,
     },
+    /// A note from an enabled port already sent to the audio thread, for the
+    /// app thread's ledger of held notes. Posted, never answered.
+    ForwardedMidi {
+        client_id: ClientId,
+        source_name: String,
+        message: rackforge_control_api::VirtualMidiMessage,
+    },
     AudioSettings {
+        /// Scan the audio hardware even though a stream is running. Only
+        /// the player's own "Refresh devices" asks for it.
+        refresh: bool,
         response: Sender<Result<Value, String>>,
     },
     ApplyAudioSettings {
@@ -208,6 +229,9 @@ pub enum DesktopControlCall {
         preferences: WebServerPreferences,
         response: Sender<Result<Value, String>>,
     },
+    /// The player allowed or stopped a package's messages to its
+    /// controller: the packages are attached again. Posted, never answered.
+    ControllerOutputChanged,
 }
 
 pub fn control_channel() -> (Sender<DesktopControlCall>, Receiver<DesktopControlCall>) {
@@ -350,6 +374,15 @@ impl DesktopWebServers {
         }
     }
 
+    /// Publishes which forwarded MIDI may skip the app thread. The app
+    /// thread calls this whenever the enabled ports or the MIDI learn
+    /// change; the connections read it on every note.
+    pub fn set_forwarded_midi_route(&self, route: ForwardedMidiRoute) {
+        if let Ok(mut slot) = self.state.forwarded_midi.write() {
+            *slot = route;
+        }
+    }
+
     /// The cell the audition's heartbeat lands in, for the app loop to watch.
     pub fn velocity_preview_heartbeat(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.state.velocity_preview_heartbeat)
@@ -437,6 +470,8 @@ struct PublicPluginWeb {
     resources: Vec<rackforge_plugin_api::ResourceRequirement>,
     /// The effects the instrument suggests after itself in PLAY.
     suggested_chain: Vec<rackforge_plugin_api::SuggestedChainEntry>,
+    /// An effect played on its own from the audio input, offered in PLAY.
+    play_source: bool,
 }
 
 #[derive(Clone)]
@@ -458,6 +493,8 @@ pub fn start(
     let last_strike = Arc::new(Mutex::new(None));
     let velocity_preview_heartbeat = Arc::new(AtomicU64::new(0));
     let state = WebState {
+        forwarded_midi: Arc::default(),
+        local_ui: false,
         injected_midi: Arc::clone(&injected_midi),
         last_strike: Arc::clone(&last_strike),
         velocity_preview_heartbeat: Arc::clone(&velocity_preview_heartbeat),
@@ -592,6 +629,7 @@ fn release_injected_midi(state: &WebState) {
     for channel in 0..16 {
         for (controller, value) in [(64, 0), (123, 0)] {
             let _ = sender.try_send(crate::desktop_audio::MidiPacket {
+                received_at: 0,
                 source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
                 length: 3,
                 data: [0xb0 | channel, controller, value],
@@ -599,6 +637,85 @@ fn release_injected_midi(state: &WebState) {
                 timestamp: None,
             });
         }
+    }
+}
+
+/// Which notes a controller driver forwards from a physical keyboard may go
+/// straight to the audio thread.
+///
+/// A driver that owns a keyboard's port -- the KeyLab's does -- forwards
+/// every key it reads through the control bridge. Those notes used to be
+/// handed to the app thread and injected from there, on its next frame:
+/// sixty a second at best, and none at all while that thread was busy. A
+/// device scan on the settings page, a dialog, a slow frame, and every note
+/// played in the meantime waited, then arrived together -- heard as a note
+/// that came late and a release that came later, a key that stuck. The
+/// touch keyboard had already been taken off that route for the same
+/// reason; the physical one had not.
+///
+/// What the app thread decided for each note is decided once instead and
+/// published here: whether the player enabled that port, and the key the
+/// audio thread knows it by, which selects the port's velocity reading.
+/// Anything this does not cover still takes the app thread's route, where
+/// it gets the same answer it always did.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ForwardedMidiRoute {
+    /// The ports the player enabled, by name, each with its routing key.
+    pub approved: BTreeMap<String, rackforge_midi_api::MidiSourceKey>,
+    /// A MIDI learn is listening. What it hears is the app thread's to see,
+    /// so until it ends, forwarded MIDI takes the app thread's route.
+    pub learning: bool,
+}
+
+/// Sends a forwarded note from an enabled port straight to the audio
+/// thread. `None` means this route does not apply and the caller should
+/// take the app thread's.
+fn try_forwarded_midi(
+    state: &WebState,
+    client_id: &ClientId,
+    source_name: &str,
+    message: &rackforge_control_api::VirtualMidiMessage,
+) -> Option<Value> {
+    let source = {
+        let route = state.forwarded_midi.read().ok()?;
+        if route.learning {
+            return None;
+        }
+        *route.approved.get(source_name)?
+    };
+    let packet = crate::desktop_audio::MidiPacket {
+        // Stamped so the audio thread measures how long it waited from here.
+        received_at: crate::desktop_audio::performance_counter(),
+        source,
+        length: 3,
+        data: message.bytes(),
+        wide: None,
+        timestamp: None,
+    };
+    match try_injected_midi(state, packet) {
+        Ok(true) => {
+            // The app thread keeps the ledger of held notes -- it releases
+            // them if this driver goes away -- but the note does not wait
+            // for it: the entry is posted and nobody reads a reply.
+            let _ = state.control.send(DesktopControlCall::ForwardedMidi {
+                client_id: client_id.clone(),
+                source_name: source_name.to_owned(),
+                message: *message,
+            });
+            Some(
+                serde_json::to_value(ControlResponse::VirtualMidiAccepted {
+                    client_id: client_id.clone(),
+                    active_notes: 0,
+                })
+                .expect("virtual MIDI response"),
+            )
+        }
+        Err(message) => Some(json!({
+            "status":"error",
+            "code":"unavailable",
+            "message": message,
+        })),
+        Ok(false) => None,
     }
 }
 
@@ -644,6 +761,8 @@ fn spawn_server(
     allow_native_resources: bool,
 ) -> anyhow::Result<RunningServer> {
     listener.set_nonblocking(true)?;
+    let mut state = state;
+    state.local_ui = allow_native_resources;
     let (shutdown, shutdown_receiver) = tokio::sync::oneshot::channel();
     let thread = std::thread::Builder::new()
         .name(thread_name.into())
@@ -712,6 +831,10 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
         .route(
             "/api/v1/controllers/{controller_id}/settings",
             axum::routing::put(apply_controller_settings),
+        )
+        .route(
+            "/api/v1/controllers/{controller_id}/output",
+            axum::routing::put(allow_controller_output),
         );
     let router = if allow_native_resources {
         router
@@ -828,20 +951,57 @@ async fn apply_web_settings(
     })
 }
 
-async fn audio_settings(State(state): State<WebState>) -> Response {
-    desktop_settings_response(&state, |response| DesktopControlCall::AudioSettings {
-        response,
-    })
+#[derive(Deserialize, Default)]
+struct AudioSettingsQuery {
+    #[serde(default)]
+    refresh: bool,
+}
+
+async fn audio_settings(
+    State(state): State<WebState>,
+    Query(query): Query<AudioSettingsQuery>,
+) -> Response {
+    desktop_settings_response_mapped(
+        &state,
+        |response| DesktopControlCall::AudioSettings {
+            refresh: query.refresh,
+            response,
+        },
+        |settings| scope_driver_panel(settings, state.local_ui),
+    )
+}
+
+/// The driver window is offered only where it can open: on this computer,
+/// through the desktop window's own webview. Anywhere else it is listed as
+/// unavailable, with why, so a phone shows a disabled button that explains
+/// itself rather than one that fails when pressed.
+fn scope_driver_panel(mut settings: Value, local_ui: bool) -> Value {
+    if !local_ui
+        && let Some(panel) = settings
+            .get_mut("driver_panel")
+            .and_then(Value::as_object_mut)
+    {
+        panel.insert("available".into(), Value::Bool(false));
+        panel.insert(
+            "detail".into(),
+            Value::from("Opens on the computer running RackForge, from its own window."),
+        );
+    }
+    settings
 }
 
 async fn apply_audio_settings(
     State(state): State<WebState>,
     Json(preferences): Json<Value>,
 ) -> Response {
-    desktop_settings_response(&state, |response| DesktopControlCall::ApplyAudioSettings {
-        preferences,
-        response,
-    })
+    desktop_settings_response_mapped(
+        &state,
+        |response| DesktopControlCall::ApplyAudioSettings {
+            preferences,
+            response,
+        },
+        |settings| scope_driver_panel(settings, state.local_ui),
+    )
 }
 
 /// Milliseconds since the epoch, for the audition's heartbeat.
@@ -926,12 +1086,20 @@ fn desktop_settings_response(
     state: &WebState,
     call: impl FnOnce(Sender<Result<Value, String>>) -> DesktopControlCall,
 ) -> Response {
+    desktop_settings_response_mapped(state, call, |value| value)
+}
+
+fn desktop_settings_response_mapped(
+    state: &WebState,
+    call: impl FnOnce(Sender<Result<Value, String>>) -> DesktopControlCall,
+    map: impl FnOnce(Value) -> Value,
+) -> Response {
     let (response_sender, response_receiver) = mpsc::channel();
     if state.control.send(call(response_sender)).is_err() {
         return desktop_settings_error("Desktop runtime is shutting down".into());
     }
     match response_receiver.recv_timeout(DESKTOP_SETTINGS_TIMEOUT) {
-        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Ok(value)) => Json(map(value)).into_response(),
         Ok(Err(message)) => desktop_settings_error(message),
         Err(_) => desktop_settings_error(
             "Desktop runtime did not answer the audio settings request in time.".into(),
@@ -1982,19 +2150,60 @@ async fn controller_catalog(State(state): State<WebState>) -> Response {
                     })
                 })
                 .collect();
+            // The controls themselves, for the Controllers editor.
+            let editor = manifest.editor_inputs();
             json!({
                 "id": controller.record.id,
                 "name": manifest.name,
+                "vendor": manifest.vendor,
+                "schema_version": manifest.schema_version,
                 "version": controller.record.version,
                 "enabled": controller.record.enabled,
                 "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
                 "runtime": format!("{:?}", manifest.runtime.kind),
                 "devices": manifest.devices.len(),
                 "settings": settings,
+                "inputs": editor.inputs,
+                "roles": editor.roles,
+                "actions": editor.actions,
+                "output": controller.output_summary(),
             })
         })
         .collect();
     Json(json!({"status": "ok", "controllers": controllers})).into_response()
+}
+
+#[derive(Deserialize)]
+struct ControllerOutputRequest {
+    allow: bool,
+}
+
+/// The player allows -- or stops -- a package's messages to its controller.
+/// The answer holds for the package's active version.
+async fn allow_controller_output(
+    AxumPath(controller_id): AxumPath<String>,
+    State(state): State<WebState>,
+    Json(request): Json<ControllerOutputRequest>,
+) -> Response {
+    let store = rackforge_controller_package::PackageStore::new(&state.controllers_root);
+    match store.allow_output(&controller_id, request.allow) {
+        Ok(installed) => {
+            let _ = state
+                .control
+                .send(DesktopControlCall::ControllerOutputChanged);
+            Json(json!({
+                "status": "ok",
+                "id": installed.record.id,
+                "output": installed.output_summary(),
+            }))
+            .into_response()
+        }
+        Err(error) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
 fn controller_settings_path(state: &WebState, controller_id: &str) -> PathBuf {
@@ -2297,6 +2506,14 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
 }
 
 fn response_for(request: ControlRequest, state: &WebState) -> Value {
+    if matches!(request, ControlRequest::OpenAudioDriverPanel) && !state.local_ui {
+        return serde_json::to_value(ControlResponse::Error {
+            code: rackforge_control_api::ControlErrorCode::Rejected,
+            message: "The audio driver's settings open on the computer running RackForge, from its own window.".into(),
+            current_revision: None,
+        })
+        .expect("control response");
+    }
     match request {
         ControlRequest::Snapshot => {
             serde_json::from_str(&snapshot_json(state)).expect("snapshot JSON")
@@ -2327,7 +2544,22 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::BeginMidiLearn { .. }
         | ControlRequest::MidiLearnStatus { .. }
         | ControlRequest::CancelMidiLearn { .. }
-        | ControlRequest::OutputMeter) => {
+        | ControlRequest::AudioHealth
+        | ControlRequest::OpenAudioDriverPanel
+        | ControlRequest::SaveOutputCapture
+        | ControlRequest::AudioInput
+        | ControlRequest::OutputMeter
+        // The Controllers page: without these it answered "not connected"
+        // on the desktop.
+        | ControlRequest::MidiActivity { .. }
+        | ControlRequest::ControllerMaps
+        | ControlRequest::SaveControllerMap { .. }
+        | ControlRequest::SetControllerTakeover { .. }
+        | ControlRequest::SaveUserController { .. }
+        | ControlRequest::ExportControllerMap { .. }
+        | ControlRequest::ImportControllerMap { .. }
+        // What a control last moved, for the window at the top of the page.
+        | ControlRequest::ParameterTouch { .. }) => {
             let (response_sender, response_receiver) = mpsc::channel();
             if state
                 .control
@@ -2372,11 +2604,21 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
             }
             if let ControlRequest::VirtualMidi {
                 client_id,
+                source_name: Some(source_name),
+                message,
+            } = &request
+                && let Some(response) = try_forwarded_midi(state, client_id, source_name, message)
+            {
+                return response;
+            }
+            if let ControlRequest::VirtualMidi {
+                client_id,
                 source_name: None,
                 message,
             } = &request
             {
                 let packet = crate::desktop_audio::MidiPacket {
+                    received_at: 0,
                     source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
                     length: 3,
                     data: message.bytes(),
@@ -2501,6 +2743,7 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                 version: manifest.version.clone(),
                 kind: manifest.kind,
                 suggested_chain: manifest.suggested_chain.clone(),
+                play_source: manifest.play_source,
                 active: if managed {
                     state.plugin_store_root.as_ref().is_some_and(|store| {
                         rackforge_repository::plugin_is_enabled(store, &manifest.id)
@@ -2652,10 +2895,88 @@ mod tests {
         assert!(preferences.validate().is_err());
     }
 
+    fn driver_panel_state(control: Sender<DesktopControlCall>, local_ui: bool) -> WebState {
+        WebState {
+            forwarded_midi: Arc::default(),
+            local_ui,
+            session: Arc::new(RwLock::new(SessionState::new(
+                SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
+            ))),
+            performance_revision: Arc::new(RwLock::new(String::new())),
+            plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
+            legacy_plugins_root: PathBuf::new(),
+            plugin_store_root: None,
+            data_root: PathBuf::new(),
+            public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
+            control,
+            resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
+            resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
+            injected_midi: Arc::new(Mutex::new(None)),
+            last_strike: Arc::new(Mutex::new(None)),
+            velocity_preview_heartbeat: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    #[test]
+    fn the_settings_offer_the_driver_window_only_to_the_desktop_window() {
+        let settings = json!({
+            "status": "ok",
+            "driver_panel": {"kind": "asio", "available": true, "detail": null},
+        });
+        let local = scope_driver_panel(settings.clone(), true);
+        assert_eq!(local, settings, "the desktop window sees what the app said");
+        let remote = scope_driver_panel(settings, false);
+        assert_eq!(remote["driver_panel"]["kind"], "asio");
+        assert_eq!(remote["driver_panel"]["available"], false);
+        assert!(remote["driver_panel"]["detail"].is_string());
+        // A driver with no window stays without one everywhere.
+        let none = scope_driver_panel(json!({"driver_panel": null}), false);
+        assert!(none["driver_panel"].is_null());
+    }
+
+    #[test]
+    fn a_client_on_the_network_cannot_open_a_window_on_this_computer() {
+        let (control, receiver) = control_channel();
+        let state = driver_panel_state(control, false);
+        let response = response_for(ControlRequest::OpenAudioDriverPanel, &state);
+        assert_eq!(response["status"], "error");
+        assert_eq!(response["code"], "rejected");
+        assert!(
+            receiver.try_recv().is_err(),
+            "refused before it reaches the app thread"
+        );
+    }
+
+    #[test]
+    fn the_desktop_window_asks_the_app_thread_to_open_the_driver_window() {
+        let (control, receiver) = control_channel();
+        let state = driver_panel_state(control, true);
+        let app = std::thread::spawn(move || match receiver.recv().unwrap() {
+            DesktopControlCall::Performance { request, response } => {
+                assert_eq!(request, ControlRequest::OpenAudioDriverPanel);
+                response
+                    .send(ControlResponse::AudioDriverPanelOpening {
+                        panel: rackforge_control_api::AudioDriverPanel::Asio,
+                    })
+                    .unwrap();
+            }
+            _ => panic!("the request belongs on the performance path"),
+        });
+        let response = response_for(ControlRequest::OpenAudioDriverPanel, &state);
+        app.join().unwrap();
+        assert_eq!(response["status"], "audio_driver_panel_opening");
+        assert_eq!(response["panel"], "asio");
+    }
+
     #[test]
     fn surface_midi_discards_a_retired_audio_generation_and_accepts_the_next_one() {
         let (control, _receiver) = control_channel();
         let state = WebState {
+            forwarded_midi: Arc::default(),
+            local_ui: false,
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
@@ -2676,6 +2997,7 @@ mod tests {
             velocity_preview_heartbeat: Arc::new(AtomicU64::new(0)),
         };
         let packet = crate::desktop_audio::MidiPacket {
+            received_at: 0,
             source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
             length: 3,
             data: [0x90, 60, 100],
@@ -2697,11 +3019,119 @@ mod tests {
         assert_eq!(delivered.data, packet.data);
     }
 
+    fn forwarded_note(client: &str, port: &str) -> ControlRequest {
+        ControlRequest::VirtualMidi {
+            client_id: ClientId::new(client).unwrap(),
+            source_name: Some(port.into()),
+            message: rackforge_control_api::VirtualMidiMessage {
+                status: 0x90,
+                data1: 60,
+                data2: 100,
+            },
+        }
+    }
+
     #[test]
-    fn forwarded_physical_midi_bypasses_the_touch_fast_path() {
+    fn a_note_from_an_enabled_port_reaches_the_audio_thread_without_the_app_thread() {
+        let (control, receiver) = control_channel();
+        let (audio_sender, audio_receiver) = mpsc::sync_channel(4);
+        let state = driver_panel_state(control, false);
+        *state.injected_midi.lock().unwrap() = Some(audio_sender);
+        let key = crate::desktop_audio::stable_midi_source_key_from_id(
+            &crate::desktop_audio::midi_source_descriptor("KL Essential 61 mk3")
+                .unwrap()
+                .id,
+        );
+        state
+            .forwarded_midi
+            .write()
+            .unwrap()
+            .approved
+            .insert("KL Essential 61 mk3".into(), key);
+
+        // Nobody is serving the app thread's side: if the note waited for
+        // it, this call would not return until the timeout.
+        let response = response_for(
+            forwarded_note("controller.test.keylab", "KL Essential 61 mk3"),
+            &state,
+        );
+        assert_eq!(response["status"], "virtual_midi_accepted");
+
+        let packet = audio_receiver
+            .try_recv()
+            .expect("the note went straight to audio");
+        assert_eq!(
+            packet.source, key,
+            "with the port's own key, for its velocity reading"
+        );
+        assert_eq!(packet.data, [0x90, 60, 100]);
+        assert_ne!(
+            packet.received_at, 0,
+            "stamped, so its wait in the queue is measured"
+        );
+
+        // And the app thread was told afterwards, for its ledger of held
+        // notes, without being asked for an answer.
+        match receiver.try_recv().expect("the ledger entry was posted") {
+            DesktopControlCall::ForwardedMidi {
+                source_name,
+                message,
+                ..
+            } => {
+                assert_eq!(source_name, "KL Essential 61 mk3");
+                assert_eq!(message.data1, 60);
+            }
+            _ => panic!("expected the ledger entry, not a request"),
+        }
+    }
+
+    #[test]
+    fn a_midi_learn_hears_forwarded_notes_through_the_app_thread() {
+        let (control, receiver) = control_channel();
+        let (audio_sender, audio_receiver) = mpsc::sync_channel(4);
+        let state = driver_panel_state(control, false);
+        *state.injected_midi.lock().unwrap() = Some(audio_sender);
+        {
+            let mut route = state.forwarded_midi.write().unwrap();
+            route.approved.insert(
+                "KL Essential 61 mk3".into(),
+                crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
+            );
+            route.learning = true;
+        }
+        let responder = std::thread::spawn(move || {
+            let DesktopControlCall::Session { request, response } = receiver.recv().unwrap() else {
+                panic!("a learning session must see the note");
+            };
+            let ControlRequest::VirtualMidi { client_id, .. } = request else {
+                panic!("the note, as it was sent");
+            };
+            response
+                .send(ControlResponse::VirtualMidiAccepted {
+                    client_id,
+                    active_notes: 1,
+                })
+                .unwrap();
+        });
+        let response = response_for(
+            forwarded_note("controller.test.keylab", "KL Essential 61 mk3"),
+            &state,
+        );
+        responder.join().unwrap();
+        assert_eq!(response["status"], "virtual_midi_accepted");
+        assert!(
+            audio_receiver.try_recv().is_err(),
+            "the app thread injects it, not this"
+        );
+    }
+
+    #[test]
+    fn forwarded_midi_from_a_port_not_yet_approved_takes_the_app_route() {
         let (control, receiver) = control_channel();
         let (audio_sender, audio_receiver) = mpsc::sync_channel(1);
         let state = WebState {
+            forwarded_midi: Arc::default(),
+            local_ui: false,
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
@@ -2763,6 +3193,8 @@ mod tests {
     fn dispatches_session_changes_to_the_desktop_runtime() {
         let (control, receiver) = control_channel();
         let state = WebState {
+            forwarded_midi: Arc::default(),
+            local_ui: false,
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
@@ -2828,6 +3260,8 @@ mod tests {
     fn dispatches_play_mode_changes_to_the_desktop_runtime() {
         let (control, receiver) = control_channel();
         let state = WebState {
+            forwarded_midi: Arc::default(),
+            local_ui: false,
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
@@ -2893,6 +3327,8 @@ mod tests {
     fn dispatches_program_edit_commands_to_the_desktop_runtime() {
         let (control, receiver) = control_channel();
         let state = WebState {
+            forwarded_midi: Arc::default(),
+            local_ui: false,
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
@@ -2958,6 +3394,8 @@ mod tests {
     fn dispatches_preset_mutations_to_the_desktop_runtime() {
         let (control, receiver) = control_channel();
         let state = WebState {
+            forwarded_midi: Arc::default(),
+            local_ui: false,
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
@@ -3014,6 +3452,8 @@ mod tests {
     fn dispatches_live_plugin_parameter_requests_to_the_desktop_runtime() {
         let (control, receiver) = control_channel();
         let state = WebState {
+            forwarded_midi: Arc::default(),
+            local_ui: false,
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),

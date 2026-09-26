@@ -7,6 +7,7 @@ members = [
     "crates/rackforge-control-profile",
     "crates/rackforge-controller-api",
     "crates/rackforge-controller-package",
+    "crates/rackforge-controller-catalog",
     "crates/rackforge-controller-host",
     "apps/rackforge-desktop",
     "apps/rackforge-vst3",
@@ -44,10 +45,11 @@ exclude = [
     "platforms/raspberry-pi/engines/nuked-sc55/tools/scva-inspect",
     "platforms/raspberry-pi/engines/nuked-sc55/tools/scva-render",
     "platforms/raspberry-pi/engines/scva-arm64",
+    "vendor/asio-sys",
 ]
 
 [workspace.package]
-version = "0.1.23"
+version = "0.1.24"
 edition = "2024"
 license = "GPL-2.0-or-later"
 
@@ -61,7 +63,10 @@ hound = "3.5"
 png = "0.18"
 semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# float_roundtrip: a number reads back as the value that was written. Without
+# it serde_json may land one bit off, and a range's end -- a noise level at
+# -24.082401275634766 dB -- read one bit past what the plugin accepts.
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
 sha2 = "0.10"
 thiserror = "2.0"
 toml = "0.9"
@@ -71,3 +76,9 @@ url = "2.5"
 zeroize = "1.8"
 zip = { version = "8.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 wasmtime = { version = "47.0.3", default-features = false, features = ["anyhow", "cache", "cranelift", "runtime", "std"] }
+
+# cpal's ASIO layer, forked so the driver's own reports of lost audio reach the
+# host instead of being dropped: upstream 0.2.6 ignores `kAsioOverload` and
+# leaves `kAsioResyncRequest` as a TODO. See vendor/asio-sys/FORK.md.
+[patch.crates-io]
+asio-sys = { path = "vendor/asio-sys" }

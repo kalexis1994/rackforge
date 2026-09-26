@@ -4,21 +4,46 @@ use rackforge_midi_api::{CompiledMidiRoute, IngressMidiEvent, MidiPacket, MidiSo
 use rackforge_plugin_api::abi::MidiEventV1;
 
 use crate::midi2::{Midi2Event, Midi2Message, scale_down};
+use rackforge_controller_api::MidiRealtime;
 use rackforge_session_api::{
-    ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding, MidiButtonBinding,
+    ButtonPhase, HeldControl, HostActionBinding, HostActionTarget, HostControlBinding,
 };
 
 const MIDI_CHANNELS: usize = 16;
 const CONTINUOUS_CONTROLLERS: usize = 120;
 
+/// One controller's reserved bindings, and the MIDI source they speak for.
+/// Without a source they apply to every input, as a driver that named no
+/// port always had them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct ReservedBindingSet {
+    pub(super) source: Option<MidiSourceKey>,
+    pub(super) controls: Vec<HostControlBinding>,
+    pub(super) actions: Vec<HostActionBinding>,
+    /// Controls maps read and no instrument hears.
+    pub(super) held: Vec<HeldControl>,
+}
+
 pub(super) struct ReservedMidiControls {
+    /// Controls a controller keeps from the instruments: maps still read
+    /// them.
+    held: Vec<(Option<MidiSourceKey>, HeldControl)>,
+    /// Control Changes reserved on every source.
     control_changes: [[bool; 120]; MIDI_CHANNELS],
-    keyboard_parts: Option<MidiButtonBinding>,
+    /// Control Changes reserved on one source only: a controller's port.
+    scoped_control_changes: Vec<(MidiSourceKey, u8, u8)>,
+    /// The button that holds the keyboard's parts: a Control Change or a
+    /// note, either with a release.
+    keyboard_parts: Option<(Option<MidiSourceKey>, HostActionBinding)>,
     /// Transport and lane buttons a controller reserved. Presses are looked
-    /// up by the audio loop *before* the generic consume, so the CC both
+    /// up by the audio loop *before* the generic consume, so the message both
     /// drives the sequencer and stays invisible to plugins.
-    sequencer_actions: Vec<(HostActionTarget, MidiButtonBinding)>,
+    sequencer_actions: Vec<(Option<MidiSourceKey>, HostActionBinding)>,
     sources: Vec<ReservedMidiSourceState>,
+}
+
+fn speaks_for(scope: Option<MidiSourceKey>, source: MidiSourceKey) -> bool {
+    scope.is_none_or(|scope| scope == source)
 }
 
 struct ReservedMidiSourceState {
@@ -35,7 +60,9 @@ impl Default for ReservedMidiControls {
 impl ReservedMidiControls {
     pub(super) fn with_sources(source_count: usize) -> Self {
         Self {
+            held: Vec::new(),
             control_changes: [[false; 120]; MIDI_CHANNELS],
+            scoped_control_changes: Vec::new(),
             keyboard_parts: None,
             sequencer_actions: Vec::new(),
             sources: (0..source_count)
@@ -47,47 +74,88 @@ impl ReservedMidiControls {
         }
     }
 
-    pub(super) fn replace(
-        &mut self,
-        controls: &[HostControlBinding],
-        actions: &[HostActionBinding],
-    ) {
+    /// Every controller's reservations at once: one controller registering
+    /// no longer takes another's away.
+    pub(super) fn replace<'a>(&mut self, sets: impl IntoIterator<Item = &'a ReservedBindingSet>) {
         self.control_changes = [[false; CONTINUOUS_CONTROLLERS]; MIDI_CHANNELS];
+        self.scoped_control_changes.clear();
         self.keyboard_parts = None;
         self.sequencer_actions.clear();
+        self.held.clear();
         for source in &mut self.sources {
             source.keyboard_parts_held = false;
             source.suppressed_notes = [[false; 128]; MIDI_CHANNELS];
         }
-        for binding in controls {
-            self.control_changes[binding.midi_cc.channel as usize]
-                [binding.midi_cc.controller as usize] = true;
-        }
-        for binding in actions {
-            self.control_changes[binding.midi_cc.channel as usize]
-                [binding.midi_cc.controller as usize] = true;
-            if binding.target == HostActionTarget::KeyboardParts {
-                self.keyboard_parts = Some(binding.midi_cc);
-            } else {
-                self.sequencer_actions
-                    .push((binding.target, binding.midi_cc));
+        for set in sets {
+            self.held
+                .extend(set.held.iter().map(|control| (set.source, *control)));
+            let reserved = set
+                .controls
+                .iter()
+                .map(|binding| (binding.midi_cc.channel, binding.midi_cc.controller))
+                .chain(
+                    set.actions
+                        .iter()
+                        .filter_map(|binding| binding.reserved_control_change()),
+                );
+            for (channel, controller) in reserved {
+                if usize::from(channel) >= MIDI_CHANNELS
+                    || usize::from(controller) >= CONTINUOUS_CONTROLLERS
+                {
+                    continue;
+                }
+                match set.source {
+                    None => {
+                        self.control_changes[usize::from(channel)][usize::from(controller)] = true;
+                    }
+                    Some(source) => self
+                        .scoped_control_changes
+                        .push((source, channel, controller)),
+                }
+            }
+            for binding in &set.actions {
+                if binding.target == HostActionTarget::KeyboardParts {
+                    // Held while pressed: only a button with a release holds it.
+                    if binding.has_release() {
+                        self.keyboard_parts = Some((set.source, *binding));
+                    }
+                } else {
+                    self.sequencer_actions.push((set.source, *binding));
+                }
             }
         }
     }
 
-    /// The host action a pressed reserved button means, if this event is one.
-    /// Releases answer `None`: transport and lane keys act on the press.
-    pub(super) fn pressed_action(&self, event: MidiEventV1) -> Option<HostActionTarget> {
+    /// The host action a pressed reserved button means, if this event is one
+    /// and comes from the controller that reserved it. Releases answer
+    /// `None`: transport and lane keys act on the press.
+    pub(super) fn pressed_action(
+        &self,
+        source: MidiSourceKey,
+        event: MidiEventV1,
+    ) -> Option<HostActionTarget> {
         let message = &event.data[..usize::from(event.length.min(3))];
         self.sequencer_actions
             .iter()
-            .find(|(_, binding)| binding.phase(message) == Some(ButtonPhase::Press))
-            .map(|(target, _)| *target)
+            .find(|(scope, binding)| {
+                speaks_for(*scope, source) && binding.phase(message) == Some(ButtonPhase::Press)
+            })
+            .map(|(_, binding)| binding.target)
+    }
+
+    /// Whether the event is a control its controller keeps from the
+    /// instruments and the sequencer: maps and actions still read it.
+    pub(super) fn holds_back(&self, source: MidiSourceKey, event: MidiEventV1) -> bool {
+        let message = &event.data[..usize::from(event.length.min(3))];
+        self.held
+            .iter()
+            .any(|(scope, control)| speaks_for(*scope, source) && control.matches(message))
     }
 
     pub(super) fn consume(&mut self, source: MidiSourceKey, event: MidiEventV1) -> bool {
         let message = &event.data[..usize::from(event.length.min(3))];
-        if let Some(binding) = self.keyboard_parts
+        if let Some((scope, binding)) = self.keyboard_parts
+            && speaks_for(scope, source)
             && let Some(phase) = binding.phase(message)
         {
             if let Some(state) = self.sources.get_mut(source.get() as usize) {
@@ -95,10 +163,34 @@ impl ReservedMidiControls {
             }
             return true;
         }
-        if event.length == 3
-            && event.data[0] & 0xf0 == 0xb0
-            && event.data[1] <= 119
-            && self.control_changes[(event.data[0] & 0x0f) as usize][event.data[1] as usize]
+        if event.length == 3 && event.data[0] & 0xf0 == 0xb0 && event.data[1] <= 119 {
+            let channel = event.data[0] & 0x0f;
+            let controller = event.data[1];
+            if self.control_changes[usize::from(channel)][usize::from(controller)]
+                || self
+                    .scoped_control_changes
+                    .contains(&(source, channel, controller))
+            {
+                return true;
+            }
+        }
+        // A reserved button's note is the controller's button, pressed or
+        // released, not a note an instrument plays.
+        if self
+            .sequencer_actions
+            .iter()
+            .any(|(scope, binding)| speaks_for(*scope, source) && binding.reserves_note(message))
+        {
+            return true;
+        }
+        // A reserved real time message is the controller's button, not a
+        // clock the instruments follow.
+        if MidiRealtime::of(message).is_some()
+            && self.sequencer_actions.iter().any(|(scope, binding)| {
+                speaks_for(*scope, source)
+                    && binding.midi_realtime.is_some()
+                    && binding.midi_realtime == MidiRealtime::of(message)
+            })
         {
             return true;
         }

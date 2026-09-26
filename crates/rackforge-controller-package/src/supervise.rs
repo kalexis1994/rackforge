@@ -183,6 +183,12 @@ pub fn supervise(root: &Path, options: &SuperviseOptions) -> Result<usize, Strin
         .map_err(|error| format!("listing controller store: {error}"))?
         .into_iter()
         .filter(|installed| installed.record.enabled)
+        // A declarative package has nothing to run: its host interprets it.
+        // Saying so for each one only filled the log, a line per catalog
+        // controller at every start.
+        .filter(|installed| {
+            installed.package.manifest().runtime.kind != crate::DriverRuntimeKind::DeclarativeV1
+        })
         .filter_map(
             |installed| match ensure_executable(&installed, options.allow_community) {
                 Ok(()) => Some(ManagedController {

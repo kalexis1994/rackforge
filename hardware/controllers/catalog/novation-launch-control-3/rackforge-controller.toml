@@ -1,0 +1,325 @@
+# Novation Launch Control 3, Mode 8: the default set of Control Changes that
+# cannot be edited. Every value below is sourced in SOURCES.md; [UG] is the
+# Launch Control 3 User Guide v1.1, [PR] its online programmer's reference
+# guide, [BW] Bitwig's Launch Control 3 extension definition.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-launch-control-3"
+name = "Launch Control 3"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "launch-control-3"
+
+# The MIDI interface, where a Custom Mode's controls speak [PR "MIDI on Launch
+# Control 3"]: "LC3 1 MIDI" on Windows, the number being the device ID. Its DAW
+# interface is "MIDIIN2 (LC3 1 MIDI)" on Windows, "LC3 1 DAW Out" on a Mac,
+# "LC3 1 LC3 1 DAW Out" on Linux [BW]; the third and fourth feed the DIN outputs
+# [PR]. The Launch Control XL 3 is "LCXL3" and never matches.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["lc3"]
+exclude_contains = ["daw", "midiin", "port 2", "midi 2 ", "din"]
+
+# Its DAW port, where it takes the messages that change its mode:
+# "MIDIOUT2 (LC3 1 MIDI)" on Windows, "LC3 1 DAW In" on a Mac, "LC3 1 LC3 1
+# DAW In" on Linux [BW; PR "feature Controls"].
+[[devices.endpoints]]
+role = "setup_output"
+name_contains = ["lc3"]
+name_contains_any = ["midiout2", "daw in", "port 2"]
+
+# On connect, RackForge selects Mode 8, the mode described below: feature
+# controls on (9Fh 0Bh 7Fh), then surface mode select, Control Change 1Eh on
+# channel 7, value 15h: Custom Modes 5-16 are 12h-1Dh [PR "feature
+# Controls"]. Both go to the DAW port. The Launch Control 3 powers up in
+# standalone mode, on a Custom Mode [PR "standalone (MIDI) mode"; UG p22].
+[permissions]
+midi_input = true
+midi_output = true
+
+[[on_connect]]
+message = "9F 0B 7F"
+to = "setup_output"
+
+[[on_connect]]
+message = "B6 1E 15"
+to = "setup_output"
+
+# Encoders, Mode 8: row 1 CC 13-20, row 2 CC 21-28, on channel 16 [UG p66,
+# "Default Mode (8) parameters"]. No faders: row 1 takes the first row, row 2
+# the second. The Launch Control 3 has no keys, and its controls' numbers are
+# an instrument's controllers: none of them ever plays.
+
+[[inputs]]
+id = "encoder-1-1"
+name = "Row 1 encoder 1"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 13 }
+slot = "control-1.1"
+plays = false
+
+[[inputs]]
+id = "encoder-1-2"
+name = "Row 1 encoder 2"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 14 }
+slot = "control-1.2"
+plays = false
+
+[[inputs]]
+id = "encoder-1-3"
+name = "Row 1 encoder 3"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 15 }
+slot = "control-1.3"
+plays = false
+
+[[inputs]]
+id = "encoder-1-4"
+name = "Row 1 encoder 4"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 16 }
+slot = "control-1.4"
+plays = false
+
+[[inputs]]
+id = "encoder-1-5"
+name = "Row 1 encoder 5"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 17 }
+slot = "control-1.5"
+plays = false
+
+[[inputs]]
+id = "encoder-1-6"
+name = "Row 1 encoder 6"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 18 }
+slot = "control-1.6"
+plays = false
+
+[[inputs]]
+id = "encoder-1-7"
+name = "Row 1 encoder 7"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 19 }
+slot = "control-1.7"
+plays = false
+
+[[inputs]]
+id = "encoder-1-8"
+name = "Row 1 encoder 8"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 20 }
+slot = "control-1.8"
+plays = false
+
+[[inputs]]
+id = "encoder-2-1"
+name = "Row 2 encoder 1"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 21 }
+slot = "control-2.1"
+plays = false
+
+[[inputs]]
+id = "encoder-2-2"
+name = "Row 2 encoder 2"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 22 }
+slot = "control-2.2"
+plays = false
+
+[[inputs]]
+id = "encoder-2-3"
+name = "Row 2 encoder 3"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 23 }
+slot = "control-2.3"
+plays = false
+
+[[inputs]]
+id = "encoder-2-4"
+name = "Row 2 encoder 4"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 24 }
+slot = "control-2.4"
+plays = false
+
+[[inputs]]
+id = "encoder-2-5"
+name = "Row 2 encoder 5"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 25 }
+slot = "control-2.5"
+plays = false
+
+[[inputs]]
+id = "encoder-2-6"
+name = "Row 2 encoder 6"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 26 }
+slot = "control-2.6"
+plays = false
+
+[[inputs]]
+id = "encoder-2-7"
+name = "Row 2 encoder 7"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 27 }
+slot = "control-2.7"
+plays = false
+
+[[inputs]]
+id = "encoder-2-8"
+name = "Row 2 encoder 8"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 28 }
+slot = "control-2.8"
+plays = false
+
+# Buttons, Mode 8: CC 37-44 on channel 16 [UG p66], a row of eight taking the
+# first switch row. CC 37-44 are LSBs of an instrument's volume, pan and
+# expression: they never play. Page, Track, Record, Play, Solo/Arm and
+# Mute/Select send nothing outside DAW mode [PR "standalone (MIDI) mode"].
+
+[[inputs]]
+id = "button-1"
+name = "Button 1"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 37 }
+slot = "switch-1.1"
+plays = false
+
+[[inputs]]
+id = "button-2"
+name = "Button 2"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 38 }
+slot = "switch-1.2"
+plays = false
+
+[[inputs]]
+id = "button-3"
+name = "Button 3"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 39 }
+slot = "switch-1.3"
+plays = false
+
+[[inputs]]
+id = "button-4"
+name = "Button 4"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 40 }
+slot = "switch-1.4"
+plays = false
+
+[[inputs]]
+id = "button-5"
+name = "Button 5"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 41 }
+slot = "switch-1.5"
+plays = false
+
+[[inputs]]
+id = "button-6"
+name = "Button 6"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 42 }
+slot = "switch-1.6"
+plays = false
+
+[[inputs]]
+id = "button-7"
+name = "Button 7"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 43 }
+slot = "switch-1.7"
+plays = false
+
+[[inputs]]
+id = "button-8"
+name = "Button 8"
+kind = "button"
+group = "Buttons"
+midi = { channel = 15, cc = 44 }
+slot = "switch-1.8"
+plays = false
+
+# RackForge's default meanings for eight knobs and no faders, on row 1; row 2
+# is left for the player.
+[[roles]]
+input = "encoder-1-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "encoder-1-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "encoder-1-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "encoder-1-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "encoder-1-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "encoder-1-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "encoder-1-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "encoder-1-8"
+role = "synth.envelope.amp.release"

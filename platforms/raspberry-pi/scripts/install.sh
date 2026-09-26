@@ -68,7 +68,13 @@ fi
 # the bundle decides which ones travel, so a new one needs no edit. A plugin
 # the store already knows is installed but left as the player set it — only a
 # newcomer is enabled on their behalf.
-known_ids=" $(ls "$root/plugin-store/packages" 2>/dev/null | tr '\n' ' ') "
+# On a first install there is no packages directory yet, and `ls` failing
+# inside a pipeline ends the whole installer under `set -o pipefail` -- with
+# no message, which is how a clean appliance stopped right here.
+known_ids=" "
+if [[ -d "$root/plugin-store/packages" ]]; then
+  known_ids=" $(ls "$root/plugin-store/packages" | tr '\n' ' ') "
+fi
 shopt -s nullglob
 for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
   [[ "$(basename "$official_plugin")" == "RF-Concert-Grand.rfplugin" ]] && continue
@@ -109,6 +115,12 @@ if [[ -d "$controller_package" ]]; then
     --root "$root/controllers" \
     --trust official
 fi
+
+# The controllers RackForge describes from their makers' documentation. The
+# controller host's service sees its store read-only, so they are installed
+# here, with every release.
+install -d "$root/controllers"
+"$root/bin/rackforge-controller-host" install-catalog --root "$root/controllers"
 
 if [ ! -f "$root/config/rackforge.toml" ]; then
   install -m 0644 \

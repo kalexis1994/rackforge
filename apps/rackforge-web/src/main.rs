@@ -10,7 +10,7 @@ use axum::{
         },
     },
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{any, get, post},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures_util::{SinkExt, StreamExt};
@@ -195,6 +195,8 @@ struct PublicPluginWeb {
     resources: Vec<rackforge_plugin_api::ResourceRequirement>,
     /// The effects the instrument suggests after itself in PLAY.
     suggested_chain: Vec<rackforge_plugin_api::SuggestedChainEntry>,
+    /// An effect played on its own from the audio input, offered in PLAY.
+    play_source: bool,
 }
 
 #[derive(Clone)]
@@ -592,6 +594,10 @@ async fn main() -> Result<()> {
             axum::routing::put(apply_controller_settings),
         )
         .route(
+            "/api/v1/controllers/{controller_id}/output",
+            axum::routing::put(allow_controller_output),
+        )
+        .route(
             "/api/v1/plugins/{plugin_id}",
             get(plugin_web_descriptor).delete(uninstall_managed_plugin),
         )
@@ -640,6 +646,13 @@ async fn main() -> Result<()> {
         )
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_web_asset))
+        // An unknown /api path is an error, not a page. Without this it
+        // reached the static fallback and answered 200 with index.html: the
+        // interface then parsed a web page as JSON, failed, and reported
+        // whatever its own catch said -- which is how a route this host
+        // simply does not serve was read on screen as "the current host did
+        // not publish its audio and MIDI settings".
+        .route("/api/{*rest}", any(unknown_api))
         .fallback_service(static_files)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -1047,6 +1060,7 @@ impl PluginWebRegistry {
                 version: manifest.version,
                 kind: manifest.kind,
                 suggested_chain: manifest.suggested_chain,
+                play_source: manifest.play_source,
                 active,
                 // Raspberry Pi packages may still live in the legacy
                 // `plugins/` directory. They are host-managed installations
@@ -1062,6 +1076,25 @@ impl PluginWebRegistry {
             },
         })
     }
+}
+
+/// Answers an /api path this host does not serve.
+///
+/// Every route above is one this build implements; the rest belong to another
+/// RackForge shell -- `/api/v1/host/audio` is the desktop app's, for
+/// instance -- or do not exist at all. Saying so plainly is what lets an
+/// interface tell "this host cannot do that" apart from "the request failed",
+/// which it could not do while the answer was a 200 and a page.
+async fn unknown_api(AxumPath(rest): AxumPath<String>) -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({
+            "status": "error",
+            "error": "unknown_endpoint",
+            "message": format!("this RackForge host does not serve /api/{rest}"),
+        })),
+    )
+        .into_response()
 }
 
 fn plugin_asset_url(plugin_id: &str, asset: &str, version: &str) -> String {
@@ -1246,21 +1279,54 @@ async fn controller_catalog(
                     })
                 })
                 .collect();
+            // The controls themselves, for the Controllers editor: what the
+            // package declares, or the messages a schema 1 package binds.
+            let editor = manifest.editor_inputs();
             serde_json::json!({
                 "id": controller.record.id,
                 "name": manifest.name,
+                "vendor": manifest.vendor,
+                "schema_version": manifest.schema_version,
                 "version": controller.record.version,
                 "enabled": controller.record.enabled,
                 "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
                 "runtime": format!("{:?}", manifest.runtime.kind),
                 "devices": manifest.devices.len(),
                 "settings": settings,
+                "inputs": editor.inputs,
+                "roles": editor.roles,
+                "actions": editor.actions,
+                "output": controller.output_summary(),
             })
         })
         .collect();
     Ok(Json(
         serde_json::json!({"status": "ok", "controllers": controllers}),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ControllerOutputRequest {
+    allow: bool,
+}
+
+/// The player allows -- or stops -- a package's messages to its controller.
+/// The controller host sends them on its next pass over the inputs.
+async fn allow_controller_output(
+    axum::extract::Path(controller_id): axum::extract::Path<String>,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ControllerOutputRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    require_authorized(&state, &headers)?;
+    let installed = rackforge_controller_package::PackageStore::new(&state.controllers_root)
+        .allow_output(&controller_id, request.allow)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "id": installed.record.id,
+        "output": installed.output_summary(),
+    })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2989,6 +3055,41 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_SERIAL: AtomicU64 = AtomicU64::new(0);
+
+    /// An /api path this host does not serve must say so.
+    ///
+    /// It used to reach the static fallback and answer 200 with index.html.
+    /// The interface parsed that page as JSON, failed, and fell back to its
+    /// own wording -- which is how a missing route was read on a Raspberry Pi
+    /// as "the current host did not publish its audio and MIDI settings",
+    /// with nothing anywhere saying the route was simply not there.
+    #[tokio::test]
+    async fn an_unknown_api_path_is_not_a_page() {
+        let response = unknown_api(AxumPath("v1/host/audio".to_string())).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            content_type.starts_with("application/json"),
+            "an unknown API path answered with {content_type}, not JSON"
+        );
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("reading the body");
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("/api/v1/host/audio"),
+            "the answer does not name the path that was asked for: {text}"
+        );
+        assert!(
+            !text.contains("<!doctype"),
+            "the answer is still a page: {text}"
+        );
+    }
 
     /// The appliance had both RF-5 0.1.13 and 0.1.14 installed and enabled,
     /// and served the older panel while the engine played the newer one.

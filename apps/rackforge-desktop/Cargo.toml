@@ -19,6 +19,7 @@ rackforge-audio-api = { path = "../../crates/rackforge-audio-api" }
 rackforge-dsp = { path = "../../crates/rackforge-dsp" }
 rackforge-controller-api = { path = "../../crates/rackforge-controller-api" }
 keylab-essential-mk3 = { package = "rackforge-controller-arturia-keylab-essential-mk3", path = "../../hardware/keylab-bridge" }
+rackforge-controller-catalog = { path = "../../crates/rackforge-controller-catalog" }
 rackforge-controller-package = { path = "../../crates/rackforge-controller-package" }
 rackforge-core = { path = "../../crates/rackforge-core" }
 rackforge-performance-api = { path = "../../crates/rackforge-performance-api" }
@@ -33,6 +34,7 @@ rackforge-surface-runtime = { path = "../../crates/rackforge-surface-runtime" }
 serde_json.workspace = true
 serde.workspace = true
 semver.workspace = true
+hound.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 toml.workspace = true
@@ -42,6 +44,10 @@ webbrowser = "1.0"
 winresource = { version = "0.1.31", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
+# The same crate cpal's ASIO host is built on -- the workspace patches it to
+# the fork in vendor/asio-sys -- read directly for the driver's own dropout
+# reports, which cpal has no way to pass on.
+asio-sys = "0.2.6"
 cpal = { version = "0.16.0", features = ["asio"] }
 midir = "0.11"
 rfd = "0.17.2"

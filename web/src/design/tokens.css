@@ -52,6 +52,81 @@
   --rf-layer-critical: 90;
 }
 
+/* ============================================================ COLOUR CODE ===
+   Five colours say what a thing is about, wherever it appears. A new
+   control, tab, tag, frame, node, cable or chip that belongs to one of
+   these takes its colour from here -- never from the hue that happens to
+   look right -- so the code stays one code across PLAY, the rack editor,
+   the Plugin Manager, the touch controller and MIDI Link.
+
+     --rf-color-instrument  blue    instruments: SELECT PLUGIN, the
+                                    instrument's node in the FX chain, the
+                                    Instrument tab and tag, instrument
+                                    nodes in the rack editor and its
+                                    Choose an instrument dialog.
+     --rf-color-sound       amber   effects and sound, the audio itself:
+                                    EFFECTS and the whole FX drawer (frames,
+                                    ON, PANEL, Add effect, ADD), the Effect
+                                    tab and tag; in the rack editor, effect
+                                    nodes, audio ports, cables, ins and
+                                    outs, and the Choose an effect dialog.
+     --rf-color-preset      green   presets, the saved memory: PRESETS and
+                                    the preset sheet's keys.
+     --rf-color-input       violet  what plays into RackForge -- MIDI and
+                                    controllers: the RF Controller surface,
+                                    the Controllers tab and tag, MIDI
+                                    Processors, MIDI Link and MIDI learn,
+                                    and in the rack editor MIDI ports,
+                                    cables, ins and outs.
+     --rf-color-rack        grey    a rack as a container: rack nodes in
+                                    the rack editor. It holds instruments
+                                    and effects; it is neither.
+
+   Hues were chosen apart: blue ~218, amber ~40, green ~150, violet ~270.
+   MIDI was cyan until it sat 28 degrees from the instruments' blue.
+
+   Each --rf-color-* is the theme's legible mix: deep in daylight, so a
+   cream glyph on a plate of it clears 4.5:1, and bright on the dark panel,
+   under a dark glyph. A glyph on a plate takes --rf-color-on-code.
+
+   Some surfaces are screens and stay dark in both lighting modes -- the
+   rack editor's canvas. They take the lit set, --rf-lit-*, the bright
+   values whatever the theme.
+
+   Outside the code, and meaning something else:
+     red      attention -- LIVE, deleting, panic, errors -- and the marker
+              of where you are (the rail's active key, the playing row).
+     status   warning amber, error red, success green on notices and
+              messages say how something went, not what it is about.
+     the rail's chips (--nav-*) mark the page you are on, except the
+              controller page, which is input and takes its violet.
+     LIVE's entity palette (--entity-rack, -song, -song-part, -setlist)
+              is under review with LIVE itself. */
+:root {
+  --rf-color-instrument: var(--entity-instrument);
+  --rf-color-sound: var(--amber-ink);
+  --rf-color-preset: var(--green);
+  --rf-color-input: #5b3a8e;
+  --rf-color-rack: var(--muted);
+  --rf-color-on-code: var(--acid-ink);
+
+  --rf-lit-instrument: #7ca5e0;
+  --rf-lit-sound: #e3b45c;
+  --rf-lit-preset: #57c48c;
+  --rf-lit-input: #b48cf0;
+  --rf-lit-rack: #9d978c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --rf-color-input: #b48cf0;
+  }
+}
+
+:root[data-theme="dark"] {
+  --rf-color-input: #b48cf0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --rf-motion-instant: 1ms;

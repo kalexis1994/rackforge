@@ -1,4 +1,7 @@
 use crate::PluginStorage;
+use crate::controller_map_store::{ControllerMapStore, export_rfmap};
+use crate::midi_activity::MidiActivityLog;
+use crate::parameter_link::{CompiledModifier, ParameterLinkTable};
 use crate::performance::PerformanceRepository;
 use crate::rack_graph::{
     CompiledAudioSource, CompiledRackSlot, compile_instrument_definition, compile_instrument_rack,
@@ -6,30 +9,34 @@ use crate::rack_graph::{
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{
-    CompiledParameterLink, SemanticParameterLinkContext, compile_semantic_parameter_links,
+    CompiledParameterLink, ControllerMapLinkContext, SemanticParameterLinkContext,
+    compile_controller_map_links, compile_semantic_parameter_links,
 };
 use crate::{
     IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginStateStore,
     validate_state_reference,
 };
 use anyhow::{Context, Result, bail};
-use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState, OutputMeter};
-use rackforge_control_api::{
-    ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
-    MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, VirtualMidiMessage, decode_request,
-    encode_line,
+use rackforge_audio_api::{
+    AudioInputAvailability, AudioInputStatus, AudioOutputDocument, AudioOutputProfile,
+    AudioOutputState, InputMeter, OutputMeter,
 };
-#[cfg(test)]
-use rackforge_midi_api::MidiSourceDescriptor;
+use rackforge_control_api::{
+    ControlErrorCode, ControlRequest, ControlResponse, ControllerMap, MAX_CONTROL_MESSAGE_BYTES,
+    MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, RegisteredController,
+    VirtualMidiMessage, decode_request, encode_line,
+};
+use rackforge_midi_api::control_layout::ControlLayout;
+use rackforge_midi_api::{ControlTakeover, MidiSourceDescriptor};
 use rackforge_midi_api::{
-    IngressMidiEvent, MidiMessageKind, MidiPacket, MidiSourceRegistry, ParameterLink,
-    ParameterLinkMessage,
+    IngressMidiEvent, MidiMessageKind, MidiPacket, ParameterLink, ParameterLinkMessage,
+    SharedMidiSourceRegistry,
 };
 #[cfg(test)]
 use rackforge_performance_api::PerformanceLibrary;
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
-    RackDefinition, RackId, RackKeyboardParts, RackMidiTransform,
+    RackDefinition, RackId,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{
@@ -59,33 +66,11 @@ const AUDIO_COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
 const AUDIO_RECONFIGURE_TIMEOUT: Duration = Duration::from_secs(8);
 const AUDITION_LEASE_TIMEOUT: Duration = Duration::from_secs(15);
 const AUDITION_WATCHDOG_PERIOD: Duration = Duration::from_millis(250);
-pub const MAX_ACTIVE_RACK_SLOTS: usize = 8;
-pub const MAX_EVENTS_PER_BLOCK: usize = 256;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RackSlotStateLoad {
-    Default,
-    Opaque(Vec<u8>),
-    LegacyPreset(String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RackMidiStageRuntimeSpec {
-    pub transform: RackMidiTransform,
-    pub keyboard_parts: Option<RackKeyboardParts>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RackSlotRuntimeSpec {
-    pub slot_id: String,
-    pub plugin_id: String,
-    pub state: RackSlotStateLoad,
-    pub midi_stages: Vec<RackMidiStageRuntimeSpec>,
-    pub audio_sources: Vec<CompiledAudioSource>,
-    pub sends_to_main: bool,
-    pub level_per_mille: u16,
-    pub pan_per_mille: i16,
-}
+// A Rack's Slots are described where every host can build them.
+pub use crate::rack_voice::{
+    MAX_ACTIVE_RACK_SLOTS, MAX_EVENTS_PER_BLOCK, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec,
+    RackSlotStateLoad,
+};
 
 pub enum AudioControlCommand {
     InjectVirtualMidi {
@@ -115,6 +100,10 @@ pub enum AudioControlCommand {
         controller_id: String,
         controls: Vec<HostControlBinding>,
         actions: Vec<HostActionBinding>,
+        held: Vec<rackforge_session_api::HeldControl>,
+        /// The controller's own MIDI source, when its port is known: its
+        /// reservations then apply to that input only.
+        source: Option<rackforge_midi_api::MidiSourceKey>,
         reply: SyncSender<Result<(), String>>,
     },
     SetMasterLevel {
@@ -227,8 +216,9 @@ pub enum AudioControlCommand {
         value: f64,
         reply: SyncSender<Result<f64, String>>,
     },
+    /// The links and the Fn buttons that choose between their layers.
     ReplaceParameterLinks {
-        links: Vec<CompiledParameterLink>,
+        table: ParameterLinkTable,
         reply: SyncSender<Result<(), String>>,
     },
     ReplaceStandaloneVoice {
@@ -345,11 +335,16 @@ impl ControlFailure {
     }
 }
 
+/// A controller package attached to a MIDI input. Its semantic profile is
+/// optional: a controller with no roles -- a player's own, whose knobs only
+/// they assign -- still has to be known, so its map can find its input.
 #[derive(Clone)]
 struct RegisteredSemanticProfile {
-    profile: SemanticControlProfile,
+    profile: Option<SemanticControlProfile>,
     runtime_source_id: Option<rackforge_midi_api::MidiSourceId>,
     runtime_source_name: Option<String>,
+    /// The device's Identity Reply chose the package.
+    identified: bool,
 }
 
 struct ControlContext {
@@ -357,16 +352,30 @@ struct ControlContext {
     audio_sender: SyncSender<AudioControlCommand>,
     audio_state: Arc<Mutex<AudioOutputState>>,
     output_meter: Arc<OutputMeter>,
+    audio_input: AudioInputStatus,
+    input_meter: Arc<InputMeter>,
     audio_state_path: PathBuf,
     performance_repository: Arc<Mutex<PerformanceRepository>>,
     state_store: Arc<Mutex<PluginStateStore>>,
     plugin_manifests: BTreeMap<String, PluginManifest>,
     portable_plugins: BTreeMap<String, PortableControlPlugin>,
     semantic_profiles: Mutex<BTreeMap<String, RegisteredSemanticProfile>>,
-    midi_sources: MidiSourceRegistry,
+    controller_map_store: ControllerMapStore,
+    /// The player's maps, by controller id, as stored.
+    controller_maps: Mutex<BTreeMap<String, ControllerMap>>,
+    /// How knobs and faders take a parameter over, as stored.
+    controller_takeover: Mutex<ControlTakeover>,
+    controllers_root: Option<PathBuf>,
+    /// Shared with the MIDI supervisor, which registers a keyboard plugged
+    /// in while the engine runs.
+    midi_sources: SharedMidiSourceRegistry,
     connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
     midi_observer: Mutex<Receiver<IngressMidiEvent>>,
     midi_learn: Mutex<Option<MidiLearnState>>,
+    /// What came in lately, for the Controllers editor. Fed with Learn from
+    /// the same drain of the observer, so the two never take messages from
+    /// each other. Locked after `midi_observer` and `midi_learn`.
+    midi_activity: Mutex<MidiActivityLog>,
     dynamic_resources: Mutex<BTreeMap<InstanceId, BTreeMap<String, PathBuf>>>,
     virtual_midi: Mutex<BTreeMap<ClientId, VirtualMidiClientState>>,
     plugin_sample_rate: f64,
@@ -383,6 +392,7 @@ struct ControlContext {
 pub struct ControlServer {
     _server_thread: JoinHandle<()>,
     _watchdog_thread: JoinHandle<()>,
+    _sources_thread: JoinHandle<()>,
 }
 
 pub struct ControlServerOptions {
@@ -390,12 +400,15 @@ pub struct ControlServerOptions {
     pub audio_sender: SyncSender<AudioControlCommand>,
     pub audio_state: Arc<Mutex<AudioOutputState>>,
     pub output_meter: Arc<OutputMeter>,
+    /// What the engine captures, said once when it opened the input.
+    pub audio_input: AudioInputStatus,
+    pub input_meter: Arc<InputMeter>,
     pub audio_state_path: PathBuf,
     pub performance_repository: Arc<Mutex<PerformanceRepository>>,
     pub state_store: Arc<Mutex<PluginStateStore>>,
     pub plugin_manifests: BTreeMap<String, PluginManifest>,
     pub portable_plugins: BTreeMap<String, PortableControlPlugin>,
-    pub midi_sources: MidiSourceRegistry,
+    pub midi_sources: SharedMidiSourceRegistry,
     pub midi_observer: Receiver<IngressMidiEvent>,
     pub connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
     pub plugin_sample_rate: f64,
@@ -403,6 +416,14 @@ pub struct ControlServerOptions {
     pub plugin_output_channels: u32,
     pub storage: Option<PluginStorage>,
     pub checkpoint: Option<SessionCheckpointStore>,
+    /// Where the player's controller maps are kept.
+    pub controller_maps: ControllerMapStore,
+    /// What each plugin lays out for the keyboards: the maps offered are
+    /// made from them.
+    pub control_layouts: Vec<ControlLayout>,
+    /// The controller package store, where a controller the player makes
+    /// is installed. The controller host attaches it from there.
+    pub controllers_root: Option<PathBuf>,
 }
 
 pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<ControlServer> {
@@ -438,21 +459,46 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         )
     })?;
 
+    let factory_maps = crate::controller_layouts::factory_maps(
+        &crate::controller_layouts::slotted_controllers(options.controllers_root.as_deref()),
+        &options.control_layouts,
+    );
+    match options.controller_maps.seed_factory_maps(&factory_maps) {
+        Ok(seeded) if !seeded.is_empty() => {
+            eprintln!("FACTORY_CONTROLLER_MAPS_SEEDED controllers={seeded:?}");
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}"),
+    }
+    // A map that cannot be read is reported and skipped inside; only a data
+    // root that cannot be listed at all stops the engine from starting maps.
+    let controller_maps = options.controller_maps.load_all().unwrap_or_else(|error| {
+        eprintln!("CONTROLLER_MAPS_UNAVAILABLE error={error:#}");
+        BTreeMap::new()
+    });
+    let controller_takeover = options.controller_maps.takeover();
     let context = Arc::new(ControlContext {
         store: options.store,
         audio_sender: options.audio_sender,
         audio_state: options.audio_state,
         output_meter: options.output_meter,
+        audio_input: options.audio_input,
+        input_meter: options.input_meter,
         audio_state_path: options.audio_state_path,
         performance_repository: options.performance_repository,
         state_store: options.state_store,
         plugin_manifests: options.plugin_manifests,
         portable_plugins: options.portable_plugins,
         semantic_profiles: Mutex::new(BTreeMap::new()),
+        controller_map_store: options.controller_maps,
+        controller_maps: Mutex::new(controller_maps),
+        controller_takeover: Mutex::new(controller_takeover),
+        controllers_root: options.controllers_root,
         midi_sources: options.midi_sources,
         connected_midi_sources: options.connected_midi_sources,
         midi_observer: Mutex::new(options.midi_observer),
         midi_learn: Mutex::new(None),
+        midi_activity: Mutex::new(MidiActivityLog::default()),
         dynamic_resources: Mutex::new(BTreeMap::new()),
         virtual_midi: Mutex::new(BTreeMap::new()),
         plugin_sample_rate: options.plugin_sample_rate,
@@ -471,14 +517,57 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         .name("rackforge-control".into())
         .spawn(move || serve(listener, path, server_context))
         .context("spawning RackForge control server")?;
+    let sources_context = Arc::clone(&context);
     let watchdog_thread = thread::Builder::new()
         .name("rackforge-audition-watchdog".into())
         .spawn(move || audition_watchdog(context))
         .context("spawning RackForge audition watchdog")?;
+    let sources_thread = thread::Builder::new()
+        .name("rackforge-midi-sources".into())
+        .spawn(move || follow_midi_sources(sources_context))
+        .context("spawning RackForge MIDI source follower")?;
     Ok(ControlServer {
         _server_thread: server_thread,
         _watchdog_thread: watchdog_thread,
+        _sources_thread: sources_thread,
     })
+}
+
+/// How often the MIDI source registry is looked at for a keyboard the
+/// supervisor took on.
+const MIDI_SOURCE_FOLLOW_PERIOD: Duration = Duration::from_millis(500);
+
+/// Compiles the links again when a keyboard plugged in while the engine runs
+/// joins the registry: the player's maps and links for it, learnt on an
+/// earlier day, apply from the moment it is heard.
+fn follow_midi_sources(context: Arc<ControlContext>) {
+    let mut seen = context.midi_sources.generation();
+    loop {
+        thread::sleep(MIDI_SOURCE_FOLLOW_PERIOD);
+        let generation = context.midi_sources.generation();
+        if generation == seen {
+            continue;
+        }
+        let _dispatch_guard = match context.dispatch_lock.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                eprintln!("MIDI_SOURCES_FOLLOW_ERROR dispatch lock is poisoned");
+                return;
+            }
+        };
+        match replace_runtime_parameter_links(&context) {
+            Ok(()) => {
+                seen = generation;
+                println!("PARAMETER_LINKS_RECOMPILED reason=midi-source-adopted");
+            }
+            // Tried again at the next look: the audio thread may have been
+            // busy loading a Rack.
+            Err(failure) => eprintln!(
+                "PARAMETER_LINKS_RECOMPILE_FAILED reason=midi-source-adopted error={}",
+                failure.message
+            ),
+        }
+    }
 }
 
 fn serve(listener: UnixListener, socket_path: PathBuf, context: Arc<ControlContext>) {
@@ -545,6 +634,17 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             Err(_) => internal_error("audio state lock is poisoned", current_revision(context)),
         },
         ControlRequest::OutputMeter => output_meter_response(context),
+        ControlRequest::AudioInput => audio_input_response(context),
+        // The desktop host's own: its callback's health, its driver's panel,
+        // its flight recorder. The appliance has none of them, and says so
+        // rather than failing to build.
+        ControlRequest::AudioHealth
+        | ControlRequest::OpenAudioDriverPanel
+        | ControlRequest::SaveOutputCapture => error_response(
+            ControlErrorCode::Unavailable,
+            "this host does not provide it",
+            current_revision(context),
+        ),
         ControlRequest::PerformanceSnapshot => {
             match (context.store.lock(), context.performance_repository.lock()) {
                 (Ok(store), Ok(repository)) => {
@@ -628,8 +728,8 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             let sources: Vec<MidiSourceStatus> = context
                 .midi_sources
                 .descriptors()
+                .into_iter()
                 .filter(|source| source.id.as_str() != "rackforge.virtual.touch")
-                .cloned()
                 .map(|source| {
                     let key = context.midi_sources.resolve_optional(&source.id);
                     MidiSourceStatus {
@@ -673,6 +773,49 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
                 None,
             )
         }
+        ControlRequest::MidiActivity { after } => midi_activity(context, after),
+        ControlRequest::ParameterTouch { after } => parameter_touch(context, after),
+        ControlRequest::ControllerMaps => controller_maps(context),
+        ControlRequest::SaveControllerMap { map } => save_controller_map(context, *map),
+        ControlRequest::SetControllerTakeover { takeover } => {
+            set_controller_takeover(context, takeover)
+        }
+        ControlRequest::SaveUserController { controller } => {
+            match &context.controllers_root {
+                None => error_response(
+                    ControlErrorCode::Unavailable,
+                    "this engine has no controller package store",
+                    None,
+                ),
+                Some(root) => match rackforge_controller_package::PackageStore::new(root)
+                    .save_user_controller(&controller)
+                {
+                    // The controller host looks for new packages every two
+                    // seconds and attaches this one to its input.
+                    Ok(installed) => ControlResponse::UserControllerSaved {
+                        controller_id: installed.record.id,
+                        version: installed.record.version,
+                    },
+                    Err(error) => error_response(
+                        ControlErrorCode::InvalidRequest,
+                        format!("Could not save the controller: {error}"),
+                        None,
+                    ),
+                },
+            }
+        }
+        ControlRequest::ExportControllerMap { controller_id } => {
+            export_controller_map(context, &controller_id)
+        }
+        ControlRequest::ImportControllerMap { file } => match file.validate() {
+            Err(error) => error_response(ControlErrorCode::InvalidRequest, error.to_string(), None),
+            Ok(()) => match save_controller_map(context, file.map) {
+                ControlResponse::ControllerMapSaved { map } => {
+                    ControlResponse::ControllerMapImported { map }
+                }
+                other => other,
+            },
+        },
         ControlRequest::BeginMidiLearn {
             instance_id,
             parameter_index,
@@ -812,7 +955,9 @@ fn accept_virtual_midi(
         }
     };
     let source = match source_name.as_deref() {
-        Some(name) => match context.midi_sources.resolve_name(name) {
+        // A driver forwards what it hears on its own port as the device's,
+        // the source its registration resolved to.
+        Some(name) => match context.midi_sources.resolve_device(name) {
             Some((source, _)) => source,
             None => {
                 return error_response(
@@ -1685,6 +1830,14 @@ fn edit_performance(
         );
     }
     let previous_live = live.clone();
+    let active_rack =
+        |library: &rackforge_performance_api::PerformanceLibrary,
+         live: &rackforge_performance_api::LivePerformanceState| {
+            live.active_rack_id
+                .as_ref()
+                .and_then(|id| library.racks.iter().find(|rack| &rack.id == id).cloned())
+        };
+    let previous_active_rack = active_rack(repository.library(), &live);
     if let Err(error) = repository.apply_edit(&expected_revision, edit, &mut live) {
         return error_response(
             ControlErrorCode::Rejected,
@@ -1696,6 +1849,36 @@ fn edit_performance(
     let library = repository.library().clone();
     drop(repository);
 
+    // A Slot added or removed takes its controller maps with it.
+    if let Err(failure) = replace_runtime_parameter_links(context) {
+        eprintln!(
+            "PARAMETER_LINKS_RECOMPILE_FAILED reason=library-edit error={}",
+            failure.message
+        );
+    }
+
+    // A save of the Rack on stage is heard at once. The engine kept the
+    // voices it built at LOAD, so the saved sound played only after the
+    // Rack was loaded again. The save stands if the rebuild fails; what was
+    // playing keeps playing, and the log says why.
+    if let (Some(before), Some(after)) = (previous_active_rack, active_rack(&library, &live))
+        && before != after
+    {
+        let session = match context.store.lock() {
+            Ok(store) => store.snapshot(),
+            Err(_) => return internal_error("session store lock is poisoned", None),
+        };
+        if session.active_mode == rackforge_session_api::SurfaceMode::Live {
+            match load_rack_into_engine(context, &session, &library, &after) {
+                Ok(()) => println!("LIVE_RACK_REBUILT rack={} reason=saved", after.id),
+                Err(failure) => eprintln!(
+                    "LIVE_RACK_REBUILD_FAILED rack={} error={}",
+                    after.id, failure.message
+                ),
+            }
+        }
+    }
+
     let active_rack_deleted =
         previous_live.active_rack_id.is_some() && live.active_rack_id.is_none();
     if active_rack_deleted {
@@ -1706,7 +1889,20 @@ fn edit_performance(
                 reply: reply_sender,
             },
         )
-        .and_then(|()| receive_audio(reply_receiver, "stop deleted LIVE Rack"));
+        .and_then(|()| receive_audio(reply_receiver, "stop deleted LIVE Rack"))
+        // An emergency stop keeps the Rack's voices for a return to LIVE;
+        // a deleted Rack's are let go, or that return would play it again.
+        .and_then(|()| {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            send_audio(
+                context,
+                AudioControlCommand::SetRenderMode {
+                    mode: rackforge_session_api::SurfaceMode::Idle,
+                    reply: reply_sender,
+                },
+            )?;
+            receive_audio(reply_receiver, "release deleted LIVE Rack")
+        });
         match silence_result {
             Ok(()) => println!("LIVE_RACK_DEACTIVATED reason=deleted mode=Empty"),
             Err(failure) => eprintln!(
@@ -2613,9 +2809,9 @@ fn begin_midi_learn(
         );
     }
     drop(repository);
-    if let Ok(observer) = context.midi_observer.lock() {
-        while observer.try_recv().is_ok() {}
-    }
+    // What came before Learn began is activity, not a candidate: drain it
+    // before the session exists.
+    drain_midi_observer(context);
     let learn_id = context
         .next_midi_learn_id
         .fetch_add(1, Ordering::Relaxed)
@@ -2633,7 +2829,7 @@ fn begin_midi_learn(
 }
 
 fn midi_learn_candidate(
-    sources: &MidiSourceRegistry,
+    sources: &SharedMidiSourceRegistry,
     ingress: IngressMidiEvent,
 ) -> Option<MidiLearnCandidate> {
     let message = match ingress.packet.kind() {
@@ -2651,25 +2847,64 @@ fn midi_learn_candidate(
         MidiMessageKind::ProgramChange => None,
     }?;
     Some(MidiLearnCandidate {
-        source: sources.descriptor(ingress.source)?.clone(),
+        source: sources.descriptor(ingress.source)?,
         channel: ingress.packet.channel(),
         message,
     })
 }
 
+/// MIDI a controller driver forwards under its own source never passes the
+/// observer channel; it is observed here, as the channel's messages are.
 fn observe_forwarded_midi_learn(context: &ControlContext, ingress: IngressMidiEvent) {
-    let Some(candidate) = midi_learn_candidate(&context.midi_sources, ingress) else {
+    let mut learn = context.midi_learn.lock().ok();
+    record_observed_midi(context, ingress, learn.as_deref_mut());
+}
+
+/// Takes everything the engine observed: each message goes to the activity
+/// log, and the first learnable one becomes an open Learn session's
+/// candidate. The one reader of the observer channel, so Learn and the
+/// Controllers editor never take messages from each other.
+fn drain_midi_observer(context: &ControlContext) {
+    let Ok(observer) = context.midi_observer.lock() else {
         return;
     };
-    if let Ok(mut learn) = context.midi_learn.lock()
-        && let Some(active) = learn.as_mut()
+    let mut learn = context.midi_learn.lock().ok();
+    while let Ok(ingress) = observer.try_recv() {
+        record_observed_midi(context, ingress, learn.as_deref_mut());
+    }
+}
+
+fn record_observed_midi(
+    context: &ControlContext,
+    ingress: IngressMidiEvent,
+    learn: Option<&mut Option<MidiLearnState>>,
+) {
+    if let Some(source) = context.midi_sources.descriptor(ingress.source)
+        && let Ok(mut activity) = context.midi_activity.lock()
+    {
+        let length = usize::from(ingress.packet.length).clamp(1, 3);
+        activity.record(&source, &ingress.packet.data[..length]);
+    }
+    if let Some(Some(active)) = learn
         && active.candidate.is_none()
     {
-        active.candidate = Some(candidate);
+        active.candidate = midi_learn_candidate(&context.midi_sources, ingress);
+    }
+}
+
+fn midi_activity(context: &ControlContext, after: u64) -> ControlResponse {
+    drain_midi_observer(context);
+    match context.midi_activity.lock() {
+        Ok(activity) => {
+            let (cursor, events) = activity.since(after);
+            ControlResponse::MidiActivity { cursor, events }
+        }
+        Err(_) => internal_error("MIDI activity lock is poisoned", None),
     }
 }
 
 fn midi_learn_status(context: &ControlContext, learn_id: u64) -> ControlResponse {
+    drain_midi_observer(context);
     let mut learn = match context.midi_learn.lock() {
         Ok(learn) => learn,
         Err(_) => {
@@ -2692,16 +2927,6 @@ fn midi_learn_status(context: &ControlContext, learn_id: u64) -> ControlResponse
             format!("MIDI Learn session {learn_id} does not exist"),
             current_revision(context),
         );
-    }
-    if active.candidate.is_none()
-        && let Ok(observer) = context.midi_observer.lock()
-    {
-        while let Ok(ingress) = observer.try_recv() {
-            if let Some(candidate) = midi_learn_candidate(&context.midi_sources, ingress) {
-                active.candidate = Some(candidate);
-                break;
-            }
-        }
     }
     ControlResponse::MidiLearnStatus {
         learn_id,
@@ -2727,11 +2952,281 @@ fn cancel_midi_learn(context: &ControlContext, learn_id: u64) -> ControlResponse
     }
 }
 
+/// The controllers attached to inputs and every stored map, including maps
+/// of controllers not connected now.
+fn controller_maps(context: &ControlContext) -> ControlResponse {
+    let connected = context.connected_midi_sources.lock().ok();
+    let mut fn_open = Vec::new();
+    let controllers = match context.semantic_profiles.lock() {
+        Ok(profiles) => profiles
+            .iter()
+            .map(|(controller_id, registered)| {
+                let key = registered
+                    .runtime_source_id
+                    .as_ref()
+                    .and_then(|id| context.midi_sources.resolve_optional(id));
+                if key.is_some_and(crate::parameter_link::fn_layer_open) {
+                    fn_open.push(controller_id.clone());
+                }
+                RegisteredController {
+                    controller_id: controller_id.clone(),
+                    source: registered
+                        .runtime_source_id
+                        .as_ref()
+                        .map(|id| MidiSourceDescriptor {
+                            id: id.clone(),
+                            name: registered
+                                .runtime_source_name
+                                .clone()
+                                .unwrap_or_else(|| controller_id.clone()),
+                            primary: false,
+                        }),
+                    connected: key.is_some_and(|key| {
+                        connected
+                            .as_ref()
+                            .is_some_and(|present| present.contains(&key.get()))
+                    }),
+                    identified: registered.identified,
+                }
+            })
+            .collect(),
+        Err(_) => return internal_error("semantic controller profile lock is poisoned", None),
+    };
+    let maps = match context.controller_maps.lock() {
+        Ok(maps) => maps.values().cloned().collect(),
+        Err(_) => return internal_error("controller map lock is poisoned", None),
+    };
+    let takeover = match context.controller_takeover.lock() {
+        Ok(takeover) => *takeover,
+        Err(_) => return internal_error("controller takeover lock is poisoned", None),
+    };
+    ControlResponse::ControllerMaps {
+        controllers,
+        maps,
+        takeover,
+        factory_untouched: context.controller_map_store.untouched_factory_maps(),
+        fn_open,
+    }
+}
+
+/// Stores how knobs and faders take a parameter over, and compiles the link
+/// table again so every control follows it at once.
+fn set_controller_takeover(context: &ControlContext, takeover: ControlTakeover) -> ControlResponse {
+    let _dispatch = match context.dispatch_lock.lock() {
+        Ok(guard) => guard,
+        Err(_) => return internal_error("control dispatch lock is poisoned", None),
+    };
+    if let Err(error) = context.controller_map_store.set_takeover(takeover) {
+        return internal_error(format!("storing the controller takeover: {error:#}"), None);
+    }
+    match context.controller_takeover.lock() {
+        Ok(mut current) => *current = takeover,
+        Err(_) => return internal_error("controller takeover lock is poisoned", None),
+    }
+    if let Err(failure) = replace_runtime_parameter_links(context) {
+        return failure.into_response();
+    }
+    ControlResponse::ControllerTakeoverSet { takeover }
+}
+
+/// Stores a controller's whole map and puts it to work at once: the link
+/// table is compiled again with it, as it is when a link is learnt.
+fn save_controller_map(context: &ControlContext, map: ControllerMap) -> ControlResponse {
+    if let Err(error) = map.validate() {
+        return error_response(ControlErrorCode::InvalidRequest, error.to_string(), None);
+    }
+    let _dispatch = match context.dispatch_lock.lock() {
+        Ok(guard) => guard,
+        Err(_) => return internal_error("control dispatch lock is poisoned", None),
+    };
+    if let Err(error) = context.controller_map_store.save(&map) {
+        return internal_error(format!("storing the controller map: {error:#}"), None);
+    }
+    match context.controller_maps.lock() {
+        Ok(mut maps) => {
+            if map.is_empty() {
+                maps.remove(&map.controller_id);
+            } else {
+                maps.insert(map.controller_id.clone(), map.clone());
+            }
+        }
+        Err(_) => return internal_error("controller map lock is poisoned", None),
+    }
+    if let Err(failure) = replace_runtime_parameter_links(context) {
+        return failure.into_response();
+    }
+    ControlResponse::ControllerMapSaved { map: Box::new(map) }
+}
+
+fn export_controller_map(context: &ControlContext, controller_id: &str) -> ControlResponse {
+    let map = match context.controller_maps.lock() {
+        Ok(maps) => maps.get(controller_id).cloned(),
+        Err(_) => return internal_error("controller map lock is poisoned", None),
+    };
+    let Some(map) = map else {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("no map is stored for controller {controller_id}"),
+            None,
+        );
+    };
+    let exported_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64);
+    let (file_name, file) = export_rfmap(
+        &map,
+        &format!("RackForge {}", env!("CARGO_PKG_VERSION")),
+        exported_unix_ms,
+    );
+    ControlResponse::ControllerMapExported {
+        file_name,
+        file: Box::new(file),
+    }
+}
+
+/// Compiles the session's links, the player's maps and the controllers'
+/// defaults again, and hands the table to the audio thread.
+fn replace_runtime_parameter_links(context: &ControlContext) -> Result<(), ControlFailure> {
+    let snapshot = context
+        .store
+        .lock()
+        .map(|store| store.snapshot())
+        .map_err(|_| {
+            control_failure(
+                ControlErrorCode::Internal,
+                "session store lock is poisoned",
+                None,
+            )
+        })?;
+    let compiled = compile_parameter_links(context, &snapshot, &snapshot.parameter_links)?;
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    send_audio(
+        context,
+        AudioControlCommand::ReplaceParameterLinks {
+            table: compiled,
+            reply: reply_sender,
+        },
+    )?;
+    receive_audio(reply_receiver, "apply controller maps")
+}
+
+/// What a control last did to a parameter, named for the screen: the PLAY
+/// instance or Rack Slot the link moved, the parameter's descriptor, and the
+/// value or, before pickup, where the parameter stands.
+fn parameter_touch(context: &ControlContext, after: u64) -> ControlResponse {
+    use crate::parameter_touch::{PARAMETER_TOUCHES, TouchPickup, touch_names};
+    use rackforge_control_api::{ParameterTouchPickup, ParameterTouchReport};
+    if after == 0 {
+        return ControlResponse::ParameterTouched {
+            sequence: PARAMETER_TOUCHES.current_sequence(),
+            touch: None,
+        };
+    }
+    let mut sequence = after;
+    let Some(touch) = PARAMETER_TOUCHES.latest(&mut sequence) else {
+        return ControlResponse::ParameterTouched {
+            sequence,
+            touch: None,
+        };
+    };
+    let named = (|| {
+        let (instances, active_rack) = {
+            let store = context.store.lock().ok()?;
+            let state = store.state();
+            (state.instances.clone(), state.live.active_rack_id.clone())
+        };
+        let (instance_id, plugin_id) = match instances
+            .iter()
+            .find(|instance| touch_names(&touch, instance.instance_id.as_str()))
+        {
+            Some(instance) => (
+                instance.instance_id.as_str().to_owned(),
+                instance.plugin_id.clone(),
+            ),
+            None => {
+                // Slot ids are only unique within a Rack: the one playing
+                // is asked first, so two Racks' `slot-0` never name each
+                // other's parameter.
+                let repository = context.performance_repository.lock().ok()?;
+                let racks = &repository.library().racks;
+                let slot = racks
+                    .iter()
+                    .filter(|rack| Some(&rack.id) == active_rack.as_ref())
+                    .chain(
+                        racks
+                            .iter()
+                            .filter(|rack| Some(&rack.id) != active_rack.as_ref()),
+                    )
+                    .flat_map(|rack| rack.slots.iter())
+                    .find(|slot| touch_names(&touch, slot.id.as_str()))?;
+                (slot.id.as_str().to_owned(), slot.plugin_id.clone())
+            }
+        };
+        let schema = context.portable_plugins.get(&plugin_id)?.0.parameters();
+        let parameter = schema
+            .parameters
+            .iter()
+            .find(|parameter| parameter.index == touch.parameter_index)?
+            .clone();
+        Some(ParameterTouchReport {
+            instance_id,
+            parameter,
+            value: touch.value,
+            display_decimals: schema.display_decimals,
+            pickup: match touch.pickup {
+                TouchPickup::Engaged => ParameterTouchPickup::Engaged,
+                TouchPickup::MoveUp => ParameterTouchPickup::MoveUp,
+                TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
+            },
+            control: (touch.pickup != TouchPickup::Engaged).then_some(touch.control),
+            fn_layer: touch.fn_layer,
+        })
+    })();
+    if named.is_none() {
+        // A touch nobody can name leaves the screen showing what it showed
+        // before: said once per parameter, so the log names the culprit
+        // without filling up while a fader moves.
+        static LAST_UNNAMED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let key = touch.instance_key ^ u64::from(touch.parameter_index).rotate_left(32);
+        if LAST_UNNAMED.swap(key, std::sync::atomic::Ordering::Relaxed) != key {
+            eprintln!(
+                "PARAMETER_TOUCH_UNNAMED instance_key={:016x} parameter={}",
+                touch.instance_key, touch.parameter_index
+            );
+        }
+    }
+    ControlResponse::ParameterTouched {
+        sequence,
+        touch: named.map(Box::new),
+    }
+}
+
+/// The plugin a link's target runs: a PLAY instance, or a Rack Slot.
+fn link_target_plugin<'a>(
+    snapshot: &'a rackforge_session_api::SessionState,
+    library: &'a rackforge_performance_api::PerformanceLibrary,
+    link: &ParameterLink,
+) -> Option<&'a str> {
+    snapshot
+        .instances
+        .iter()
+        .find(|instance| instance.instance_id.as_str() == link.instance_id)
+        .map(|instance| instance.plugin_id.as_str())
+        .or_else(|| {
+            library
+                .racks
+                .iter()
+                .flat_map(|rack| rack.slots.iter())
+                .find(|slot| slot.id.as_str() == link.instance_id)
+                .map(|slot| slot.plugin_id.as_str())
+        })
+}
+
 fn compile_parameter_links(
     context: &ControlContext,
     snapshot: &rackforge_session_api::SessionState,
     links: &[ParameterLink],
-) -> Result<Vec<CompiledParameterLink>, ControlFailure> {
+) -> Result<ParameterLinkTable, ControlFailure> {
     let repository = context.performance_repository.lock().map_err(|_| {
         control_failure(
             ControlErrorCode::Internal,
@@ -2741,30 +3236,16 @@ fn compile_parameter_links(
     })?;
     let mut compiled = Vec::with_capacity(links.len());
     for link in links {
-        let plugin_id = snapshot
-            .instances
-            .iter()
-            .find(|instance| instance.instance_id.as_str() == link.instance_id)
-            .map(|instance| instance.plugin_id.as_str())
-            .or_else(|| {
-                repository
-                    .library()
-                    .racks
-                    .iter()
-                    .flat_map(|rack| rack.slots.iter())
-                    .find(|slot| slot.id.as_str() == link.instance_id)
-                    .map(|slot| slot.plugin_id.as_str())
-            })
-            .ok_or_else(|| {
-                control_failure(
-                    ControlErrorCode::NotFound,
-                    format!(
-                        "parameter link {} targets unknown instance {}",
-                        link.id, link.instance_id
-                    ),
-                    Some(snapshot.revision),
-                )
-            })?;
+        // A link whose Slot went with its Rack is kept and left out: one
+        // stale link used to fail every later link edit, and every
+        // controller map applied after it.
+        let Some(plugin_id) = link_target_plugin(snapshot, repository.library(), link) else {
+            println!(
+                "PARAMETER_LINK_PENDING link={} instance={} reason=unknown-target",
+                link.id, link.instance_id
+            );
+            continue;
+        };
         let plugin = context.portable_plugins.get(plugin_id).ok_or_else(|| {
             control_failure(
                 ControlErrorCode::Unavailable,
@@ -2801,32 +3282,74 @@ fn compile_parameter_links(
             Some(snapshot.revision),
         )
     })?;
+    let controller_maps = context.controller_maps.lock().map_err(|_| {
+        control_failure(
+            ControlErrorCode::Internal,
+            "controller map lock is poisoned",
+            Some(snapshot.revision),
+        )
+    })?;
+    let mut modifiers = Vec::new();
     for (controller_id, registered) in semantic_profiles.iter() {
         let Some(source_id) = &registered.runtime_source_id else {
             continue;
         };
-        let profile = &registered.profile;
         let Some(source_key) = context.midi_sources.resolve_optional(source_id) else {
             // The package remains registered while its device is absent.
             continue;
         };
+        // The player's Fn button for this controller, on its port.
+        if let Some(modifier) = controller_maps
+            .get(controller_id)
+            .and_then(|map| CompiledModifier::from_map(map, source_key))
+        {
+            modifiers.push(modifier);
+        }
+        let controller_name = registered
+            .runtime_source_name
+            .as_deref()
+            .unwrap_or(controller_id);
         for instance in &snapshot.instances {
             let Some(plugin) = context.portable_plugins.get(&instance.plugin_id) else {
+                continue;
+            };
+            // The player's map for this controller and plugin sits between
+            // the session's own links and the package's defaults: what the
+            // map takes, a default does not also drive.
+            let mut explicit_links = links.to_vec();
+            if let Some(map) = controller_maps.get(controller_id) {
+                let mapped = compile_controller_map_links(ControllerMapLinkContext {
+                    map,
+                    plugin_id: &instance.plugin_id,
+                    runtime_source_id: source_id,
+                    source_name: controller_name,
+                    source_key,
+                    instance_id: instance.instance_id.as_str(),
+                    schema: plugin.0.parameters(),
+                    explicit_links: links,
+                });
+                for (mapping, reason) in &mapped.pending {
+                    eprintln!(
+                        "CONTROLLER_MAPPING_PENDING controller={controller_id} plugin={} mapping={mapping} reason={reason:?}",
+                        instance.plugin_id
+                    );
+                }
+                explicit_links.extend(mapped.links.iter().map(|link| link.link.clone()));
+                compiled.extend(mapped.links);
+            }
+            let Some(profile) = &registered.profile else {
                 continue;
             };
             compiled.extend(
                 compile_semantic_parameter_links(SemanticParameterLinkContext {
                     controller_id,
-                    controller_name: registered
-                        .runtime_source_name
-                        .as_deref()
-                        .unwrap_or(controller_id),
+                    controller_name,
                     profile,
                     runtime_source_id: source_id,
                     source_key,
                     instance_id: instance.instance_id.as_str(),
                     schema: plugin.0.parameters(),
-                    explicit_links: links,
+                    explicit_links: &explicit_links,
                 })
                 .map_err(|error| {
                     control_failure(
@@ -2840,8 +3363,54 @@ fn compile_parameter_links(
                 })?,
             );
         }
+        // The player's map plays a Rack's Slots as it plays PLAY's plugin:
+        // every Slot running a mapped plugin, in any Rack, takes the map.
+        // Only the Rack on stage has voices, and a link reaches only the
+        // voice it names, so a Rack not loaded costs a table entry.
+        if let Some(map) = controller_maps.get(controller_id) {
+            for slot in repository
+                .library()
+                .racks
+                .iter()
+                .flat_map(|rack| rack.slots.iter())
+            {
+                let Some(plugin) = context.portable_plugins.get(&slot.plugin_id) else {
+                    continue;
+                };
+                compiled.extend(
+                    compile_controller_map_links(ControllerMapLinkContext {
+                        map,
+                        plugin_id: &slot.plugin_id,
+                        runtime_source_id: source_id,
+                        source_name: controller_name,
+                        source_key,
+                        instance_id: slot.id.as_str(),
+                        schema: plugin.0.parameters(),
+                        explicit_links: links,
+                    })
+                    .links,
+                );
+            }
+        }
     }
-    Ok(compiled)
+    // Every link, learnt, mapped or default, takes a parameter over the way
+    // the player chose.
+    let takeover = context
+        .controller_takeover
+        .lock()
+        .map(|takeover| *takeover)
+        .unwrap_or_default();
+    for link in &mut compiled {
+        link.set_takeover(takeover);
+    }
+    Ok(ParameterLinkTable {
+        links: compiled,
+        modifiers,
+        // This engine holds reserved buttons and held controls back itself,
+        // controller by controller (`live_midi_state`).
+        host_buttons: Vec::new(),
+        held: Vec::new(),
+    })
 }
 
 fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) -> ControlResponse {
@@ -2895,6 +3464,28 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     Some(snapshot.revision),
                 );
             }
+            // The new link, unlike a stale one, has to name something.
+            let known = match context.performance_repository.lock() {
+                Ok(repository) => {
+                    link_target_plugin(&snapshot, repository.library(), &link).is_some()
+                }
+                Err(_) => {
+                    return internal_error(
+                        "performance repository lock is poisoned",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            if !known {
+                return error_response(
+                    ControlErrorCode::NotFound,
+                    format!(
+                        "parameter link {} targets unknown instance {}",
+                        link.id, link.instance_id
+                    ),
+                    Some(snapshot.revision),
+                );
+            }
             let mut links = snapshot.parameter_links.clone();
             if let Some(existing) = links.iter_mut().find(|existing| existing.id == link.id) {
                 *existing = link.clone();
@@ -2909,7 +3500,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             if let Err(failure) = send_audio(
                 context,
                 AudioControlCommand::ReplaceParameterLinks {
-                    links: compiled,
+                    table: compiled,
                     reply: reply_sender,
                 },
             ) {
@@ -2950,7 +3541,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             if let Err(failure) = send_audio(
                 context,
                 AudioControlCommand::ReplaceParameterLinks {
-                    links: compiled,
+                    table: compiled,
                     reply: reply_sender,
                 },
             ) {
@@ -3000,16 +3591,17 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             controller_id,
             controls,
             actions,
+            held,
             midi_source_name,
             semantic_profile,
+            identified,
         } => {
             let invalid = ClientId::new(&controller_id).is_err()
                 || controls
                     .iter()
                     .any(|binding| binding.midi_cc.validate().is_err())
-                || actions
-                    .iter()
-                    .any(|binding| binding.midi_cc.validate().is_err())
+                || actions.iter().any(|binding| binding.validate().is_err())
+                || held.iter().any(|control| control.validate().is_err())
                 || semantic_profile.as_ref().is_some_and(|profile| {
                     profile
                         .validate_against_reserved(&controls, &actions)
@@ -3022,6 +3614,12 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     Some(snapshot.revision),
                 );
             }
+            // A controller that names its port reserves on that input only;
+            // another device's MIDI Start is not its Play button.
+            let source = midi_source_name
+                .as_deref()
+                .and_then(|name| context.midi_sources.resolve_device(name))
+                .map(|(key, _)| key);
             let (reply_sender, reply_receiver) = sync_channel(1);
             if let Err(failure) = send_audio(
                 context,
@@ -3029,6 +3627,8 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     controller_id: controller_id.clone(),
                     controls,
                     actions,
+                    held,
+                    source,
                     reply: reply_sender,
                 },
             ) {
@@ -3039,42 +3639,36 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     let previous = match context.semantic_profiles.lock() {
                         Ok(mut profiles) => {
                             let previous = profiles.get(&controller_id).cloned();
-                            match semantic_profile {
-                                Some(profile) => {
-                                    let resolved = midi_source_name
-                                        .as_deref()
-                                        .and_then(|name| context.midi_sources.resolve_name(name))
-                                        .map(|(_, source)| {
-                                            (Some(source.id.clone()), Some(source.name.clone()))
+                            // Registered with or without roles: a controller
+                            // with none still needs its input known, for the
+                            // player's map of it.
+                            let resolved = midi_source_name
+                                .as_deref()
+                                .and_then(|name| context.midi_sources.resolve_device(name))
+                                .map(|(_, source)| {
+                                    (Some(source.id.clone()), Some(source.name.clone()))
+                                })
+                                .unwrap_or_else(|| {
+                                    if midi_source_name.is_none() {
+                                        previous.as_ref().map_or((None, None), |registered| {
+                                            (
+                                                registered.runtime_source_id.clone(),
+                                                registered.runtime_source_name.clone(),
+                                            )
                                         })
-                                        .unwrap_or_else(|| {
-                                            if midi_source_name.is_none() {
-                                                previous.as_ref().map_or(
-                                                    (None, None),
-                                                    |registered| {
-                                                        (
-                                                            registered.runtime_source_id.clone(),
-                                                            registered.runtime_source_name.clone(),
-                                                        )
-                                                    },
-                                                )
-                                            } else {
-                                                (None, None)
-                                            }
-                                        });
-                                    profiles.insert(
-                                        controller_id.clone(),
-                                        RegisteredSemanticProfile {
-                                            profile,
-                                            runtime_source_id: resolved.0,
-                                            runtime_source_name: resolved.1,
-                                        },
-                                    );
-                                }
-                                None => {
-                                    profiles.remove(&controller_id);
-                                }
-                            }
+                                    } else {
+                                        (None, None)
+                                    }
+                                });
+                            profiles.insert(
+                                controller_id.clone(),
+                                RegisteredSemanticProfile {
+                                    profile: semantic_profile,
+                                    runtime_source_id: resolved.0,
+                                    runtime_source_name: resolved.1,
+                                    identified,
+                                },
+                            );
                             previous
                         }
                         Err(_) => {
@@ -3108,7 +3702,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     if let Err(failure) = send_audio(
                         context,
                         AudioControlCommand::ReplaceParameterLinks {
-                            links: compiled,
+                            table: compiled,
                             reply: links_sender,
                         },
                     ) {
@@ -3182,9 +3776,33 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                         return failure.into_response();
                     }
                     let mut events = vec![SessionEvent::ActiveModeChanged { mode }];
-                    if mode == rackforge_session_api::SurfaceMode::Play
-                        && snapshot.live.active.is_some()
-                    {
+                    let live_target_lost = match mode {
+                        rackforge_session_api::SurfaceMode::Play => snapshot.live.active.is_some(),
+                        // Leaving LIVE released the Rack's voices; the Rack
+                        // LIVE still names is built again on the way back,
+                        // or LIVE came back silent under a PLAYING label.
+                        rackforge_session_api::SurfaceMode::Live
+                            if snapshot.active_mode != rackforge_session_api::SurfaceMode::Live =>
+                        {
+                            match snapshot.live.active.as_ref() {
+                                Some(location) => {
+                                    match reload_live_target(context, &snapshot, location) {
+                                        Ok(()) => false,
+                                        Err(failure) => {
+                                            eprintln!(
+                                                "LIVE_RACK_RELOAD_FAILED error={}",
+                                                failure.message
+                                            );
+                                            true
+                                        }
+                                    }
+                                }
+                                None => false,
+                            }
+                        }
+                        _ => false,
+                    };
+                    if live_target_lost {
                         let mut live = snapshot.live.clone();
                         live.deactivate();
                         events.push(SessionEvent::LiveStateReconciled { live });
@@ -3274,10 +3892,25 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             instrument_id,
             effects,
         } => {
-            if snapshot.instance(&instrument_id).is_none() {
+            let Some(source_plugin_id) = snapshot
+                .instance(&instrument_id)
+                .map(|instance| instance.plugin_id.clone())
+            else {
                 return error_response(
                     ControlErrorCode::NotFound,
                     format!("unknown instance {instrument_id}"),
+                    Some(snapshot.revision),
+                );
+            };
+            // A source played on its own (a pedalboard) cannot follow itself:
+            // one instance per plugin, and it is already on stage.
+            if effects
+                .iter()
+                .any(|effect| effect.plugin_id == source_plugin_id)
+            {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    format!("{source_plugin_id} cannot follow itself"),
                     Some(snapshot.revision),
                 );
             }
@@ -3346,15 +3979,10 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 );
             }
             let (library, rack) = match context.performance_repository.lock() {
+                // Every Rack plays: its `enabled` flag is kept in the data but
+                // no longer gates anything.
                 Ok(repository) => match repository.library().resolve_playable(&location) {
-                    Ok(rack) if rack.enabled => (repository.library().clone(), rack),
-                    Ok(_) => {
-                        return error_response(
-                            ControlErrorCode::Rejected,
-                            "the selected Rack is disabled",
-                            Some(snapshot.revision),
-                        );
-                    }
+                    Ok(rack) => (repository.library().clone(), rack),
                     Err(error) => {
                         return error_response(
                             ControlErrorCode::NotFound,
@@ -3371,39 +3999,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 }
             };
             let rack_id = rack.id.clone();
-            let (instance_id, slots) = match prepare_rack_definition_runtime(
-                &snapshot,
-                &library,
-                &rack,
-                &context.state_store,
-            ) {
-                Ok(runtime) => runtime,
-                Err(failure) => return failure.into_response(),
-            };
-            let prepared_slots =
-                match prepare_portable_rack_slots(context, snapshot.revision, &slots) {
-                    Ok(prepared) => prepared,
-                    Err(failure) => return failure.into_response(),
-                };
-            let slots = if prepared_slots.is_some() {
-                Vec::new()
-            } else {
-                slots
-            };
-            let (reply_sender, reply_receiver) = sync_channel(1);
-            if let Err(failure) = send_audio(
-                context,
-                AudioControlCommand::ActivateRack {
-                    rack_id: rack_id.as_str().to_owned(),
-                    instance_id: instance_id.clone(),
-                    slots,
-                    prepared_slots,
-                    reply: reply_sender,
-                },
-            ) {
-                return failure.into_response();
-            }
-            match receive_audio(reply_receiver, "activate LIVE Rack") {
+            match load_rack_into_engine(context, &snapshot, &library, &rack) {
                 Ok(()) => {
                     // The Part carries its groove on stage with it: queue its
                     // bound patterns, each on its lane, all on the next bar.
@@ -4963,6 +5559,65 @@ fn prepare_compiled_rack_runtime(
     Ok((active_instance.instance_id.clone(), specs))
 }
 
+/// Builds the Rack a LIVE location names, as the library has it now.
+fn reload_live_target(
+    context: &ControlContext,
+    snapshot: &rackforge_session_api::SessionState,
+    location: &rackforge_performance_api::LiveLocation,
+) -> Result<(), ControlFailure> {
+    let (library, rack) = {
+        let repository = context.performance_repository.lock().map_err(|_| {
+            control_failure(
+                ControlErrorCode::Internal,
+                "performance repository lock is poisoned",
+                Some(snapshot.revision),
+            )
+        })?;
+        let rack = repository
+            .library()
+            .resolve_playable(location)
+            .map_err(|error| {
+                control_failure(
+                    ControlErrorCode::NotFound,
+                    error.to_string(),
+                    Some(snapshot.revision),
+                )
+            })?;
+        (repository.library().clone(), rack)
+    };
+    load_rack_into_engine(context, snapshot, &library, &rack)
+}
+
+/// Builds a saved Rack into the engine in place of what plays: the path a
+/// LIVE activation takes, and a save of the Rack on stage.
+fn load_rack_into_engine(
+    context: &ControlContext,
+    snapshot: &rackforge_session_api::SessionState,
+    library: &rackforge_performance_api::PerformanceLibrary,
+    rack: &RackDefinition,
+) -> Result<(), ControlFailure> {
+    let (instance_id, slots) =
+        prepare_rack_definition_runtime(snapshot, library, rack, &context.state_store)?;
+    let prepared_slots = prepare_portable_rack_slots(context, snapshot.revision, &slots)?;
+    let slots = if prepared_slots.is_some() {
+        Vec::new()
+    } else {
+        slots
+    };
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    send_audio(
+        context,
+        AudioControlCommand::ActivateRack {
+            rack_id: rack.id.as_str().to_owned(),
+            instance_id,
+            slots,
+            prepared_slots,
+            reply: reply_sender,
+        },
+    )?;
+    receive_audio(reply_receiver, "activate LIVE Rack")
+}
+
 fn prepare_rack_definition_runtime(
     snapshot: &rackforge_session_api::SessionState,
     library: &rackforge_performance_api::PerformanceLibrary,
@@ -5021,6 +5676,9 @@ fn receive_audio_with_timeout<T>(
     }
 }
 
+// The error is the response the client is sent, built once on a failure path;
+// boxing it would move an allocation onto every caller for nothing.
+#[allow(clippy::result_large_err)]
 fn program_draft_state(
     draft_id: u64,
     instance_id: InstanceId,
@@ -5286,6 +5944,16 @@ fn internal_error(
     error_response(ControlErrorCode::Internal, message, current_revision)
 }
 
+fn audio_input_response(context: &ControlContext) -> ControlResponse {
+    let mut input = context.audio_input.clone();
+    input.peaks = if input.availability == AudioInputAvailability::Open {
+        context.input_meter.take(input.captured.len())
+    } else {
+        Vec::new()
+    };
+    ControlResponse::AudioInput { input }
+}
+
 fn output_meter_response(context: &ControlContext) -> ControlResponse {
     ControlResponse::OutputMeter {
         meter: context.output_meter.take(),
@@ -5414,7 +6082,7 @@ mod tests {
             period_frames: 128,
             buffer_frames: 384,
         };
-        let mut midi_sources = MidiSourceRegistry::default();
+        let mut midi_sources = rackforge_midi_api::MidiSourceRegistry::default();
         midi_sources
             .register(
                 rackforge_midi_api::MidiSourceKey::new(0),
@@ -5447,6 +6115,17 @@ mod tests {
                     devices: vec![device],
                 })),
                 output_meter: Arc::new(OutputMeter::default()),
+                audio_input: AudioInputStatus {
+                    availability: AudioInputAvailability::Open,
+                    device_name: Some("Scarlett 2i2".into()),
+                    device_channels: 2,
+                    captured: vec![1, 2],
+                    gain_db: 0,
+                    cable_routing: true,
+                    peaks: Vec::new(),
+                    reason: None,
+                },
+                input_meter: Arc::new(InputMeter::default()),
                 audio_state_path: std::env::temp_dir().join("rackforge-control-audio.toml"),
                 performance_repository: Arc::new(Mutex::new(
                     PerformanceRepository::in_memory(PerformanceLibrary {
@@ -5501,10 +6180,15 @@ mod tests {
                 )]),
                 portable_plugins: BTreeMap::new(),
                 semantic_profiles: Mutex::new(BTreeMap::new()),
-                midi_sources,
+                controller_map_store: ControllerMapStore::new(None),
+                controller_maps: Mutex::new(BTreeMap::new()),
+                controller_takeover: Mutex::new(ControlTakeover::default()),
+                controllers_root: None,
+                midi_sources: SharedMidiSourceRegistry::new(midi_sources),
                 connected_midi_sources: Arc::new(Mutex::new(BTreeSet::from([0, 1]))),
                 midi_observer: Mutex::new(midi_receiver),
                 midi_learn: Mutex::new(None),
+                midi_activity: Mutex::new(MidiActivityLog::default()),
                 dynamic_resources: Mutex::new(BTreeMap::new()),
                 virtual_midi: Mutex::new(BTreeMap::new()),
                 plugin_sample_rate: 48_000.0,
@@ -5518,6 +6202,22 @@ mod tests {
             }),
             receiver,
         )
+    }
+
+    #[test]
+    fn audio_input_request_says_what_is_captured_and_drains_its_peaks() {
+        let (context, _receiver) = context();
+        context.input_meter.observe_interleaved(&[0.5, -0.25], 2);
+        let ControlResponse::AudioInput { input } = audio_input_response(&context) else {
+            panic!("expected the audio input");
+        };
+        assert_eq!(input.captured, vec![1, 2]);
+        assert!(input.cable_routing);
+        assert_eq!(input.peaks, vec![0.5, 0.25]);
+        let ControlResponse::AudioInput { input } = audio_input_response(&context) else {
+            panic!("expected the audio input");
+        };
+        assert_eq!(input.peaks, vec![0.0, 0.0]);
     }
 
     #[test]
@@ -5650,11 +6350,30 @@ mod tests {
             .record(None, SessionEvent::LiveStateReconciled { live })
             .unwrap();
         let expected_revision = context.performance_repository.lock().unwrap().revision();
-        let audio = thread::spawn(move || match receiver.recv().unwrap() {
-            AudioControlCommand::EmergencyStop { reply } => {
-                reply.send(Ok(())).unwrap();
+        let audio = thread::spawn(move || {
+            // Every library edit recompiles the controller maps first: a
+            // Slot that goes takes its maps with it.
+            match receiver.recv().unwrap() {
+                AudioControlCommand::ReplaceParameterLinks { table, reply } => {
+                    assert!(table.links.is_empty());
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected the controller maps to be compiled again"),
             }
-            _ => panic!("expected deleted Rack to silence LIVE audio"),
+            match receiver.recv().unwrap() {
+                AudioControlCommand::EmergencyStop { reply } => {
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected deleted Rack to silence LIVE audio"),
+            }
+            // Its voices are let go, so a return to LIVE cannot play it.
+            match receiver.recv().unwrap() {
+                AudioControlCommand::SetRenderMode { mode, reply } => {
+                    assert_eq!(mode, rackforge_session_api::SurfaceMode::Idle);
+                    reply.send(Ok(())).unwrap();
+                }
+                _ => panic!("expected the deleted Rack's voices to be released"),
+            }
         });
 
         let response = edit_performance(

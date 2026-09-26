@@ -7,17 +7,24 @@ use crate::control::{
     PreparedChainVoice, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec, RackSlotStateLoad,
 };
 use crate::isolated_state::parameter_value_is_valid;
-use crate::live_midi_state::{MidiControllerStates, ReservedMidiControls, plugin_midi_event};
-use crate::midi_hotplug::{
-    self, SupervisedSource, is_performance_midi_input, stable_alsa_source_id,
+use crate::live_midi_state::{
+    MidiControllerStates, ReservedBindingSet, ReservedMidiControls, plugin_midi_event,
 };
+use crate::midi_hotplug::{self, SupervisedSource, is_played_midi_input, stable_alsa_source_id};
 use crate::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
     process_slots_sequential, spawn_telemetry_publisher,
 };
 use crate::performance::PerformanceRepository;
-use crate::rack_graph::compile_instrument_definition;
+use crate::rack_graph::voice_matches_link_target;
+#[cfg(test)]
+use crate::rack_voice::map_wide_velocity;
+use crate::rack_voice::{
+    RackSlotVoice, SlotBudget, create_rack_slot_parallel_units, create_rack_voices, mix_rack_slot,
+    observe_budget, plugin_audio_channels, report_budget, resolve_rack_voice_graph,
+};
 use crate::realtime::{self, XrunMonitor};
+use crate::realtime_budget;
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{
@@ -28,15 +35,16 @@ use alsa::pcm::PCM;
 use anyhow::{Context, Result, bail};
 use midir::MidiInput;
 use rackforge_audio_api::{
-    AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioInputProfile, AudioOutputProfile, AudioOutputState,
-    AudioSampleFormat, OutputMeter,
+    AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioInputAvailability, AudioInputProfile, AudioInputStatus,
+    AudioOutputProfile, AudioOutputState, AudioSampleFormat, InputMeter, OutputMeter,
 };
 use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
     CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
-    MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
+    MapLayer, MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
     MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
     MidiSourceSelector, MidiTargetId, ParameterLink, ParameterLinkPassThrough, PluginChannelModel,
+    SharedMidiSourceRegistry,
 };
 #[cfg(test)]
 use rackforge_performance_api::RackKeyboardParts;
@@ -135,84 +143,6 @@ fn resolve_render_mode(mode: SurfaceMode, rack_voice_count: usize) -> AudioRende
     }
 }
 
-/// One audio source of a Slot, resolved to indices once per activation so
-/// the per-block gather performs no string comparisons.
-#[derive(Clone, Copy)]
-enum ResolvedRackSource {
-    /// The hardware capture staged for the current block.
-    Capture,
-    /// The finished output of an earlier Slot in the compiled order.
-    Slot(usize),
-}
-
-struct RackSlotVoice<'plugin> {
-    slot_id: String,
-    plugin: &'plugin LoadedPlugin,
-    instance: PluginInstance<'plugin>,
-    /// Host-owned unit instances for `parallel_render_v1` plugins; `None`
-    /// keeps the Slot on the classic indivisible render path.
-    parallel: Option<ParallelUnits<'plugin>>,
-    midi_stages: Vec<RackMidiStageRuntimeSpec>,
-    audio_sources: Vec<crate::rack_graph::CompiledAudioSource>,
-    /// `audio_sources` resolved against the compiled Slot order.
-    resolved_sources: Vec<ResolvedRackSource>,
-    /// Bitmask of the earlier Slots feeding this one; the scheduler holds
-    /// this Slot until every one of them completed its block.
-    deps_mask: u32,
-    /// Hardware capture staged for the current block; rewritten by the
-    /// audio loop before every Rack render.
-    capture_ptr: *const f32,
-    capture_len: usize,
-    capture_channels: usize,
-    sends_to_main: bool,
-    input_channels: usize,
-    level: f32,
-    pan: f32,
-    input: Vec<f32>,
-    output: Vec<f32>,
-    events: Vec<crate::midi2::Midi2Event>,
-    /// The events as the parallel scheduler takes them, rebuilt each block.
-    parameter_events: Vec<ParameterEventV1>,
-    process_faulted: bool,
-}
-
-/// Resolves every Slot's cable sources to indices and dependency masks.
-/// Runs at activation, never per block. A source that does not name an
-/// earlier Slot is dropped, exactly as the previous sequential graph walk
-/// ignored it: the compiled order is topological, so a forward reference
-/// would be a compiler bug rather than a playable graph.
-fn resolve_rack_voice_graph(voices: &mut [RackSlotVoice<'_>]) {
-    for index in 0..voices.len() {
-        let (earlier, rest) = voices.split_at_mut(index);
-        let voice = &mut rest[0];
-        voice.resolved_sources.clear();
-        voice.deps_mask = 0;
-        for source in &voice.audio_sources {
-            match source {
-                crate::rack_graph::CompiledAudioSource::HardwareInput { .. } => {
-                    voice.resolved_sources.push(ResolvedRackSource::Capture);
-                }
-                crate::rack_graph::CompiledAudioSource::Slot { runtime_slot_id } => {
-                    if let Some(upstream) = earlier
-                        .iter()
-                        .position(|candidate| candidate.slot_id == *runtime_slot_id)
-                    {
-                        voice
-                            .resolved_sources
-                            .push(ResolvedRackSource::Slot(upstream));
-                        voice.deps_mask |= 1 << upstream;
-                    } else {
-                        eprintln!(
-                            "LIVE_RACK_SOURCE_IGNORED slot={} source={runtime_slot_id}                              reason=not-an-earlier-slot",
-                            voice.slot_id
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
 struct PreparedPortableRackVoices(Vec<RackSlotVoice<'static>>);
 
 // SAFETY: this wrapper is created only after checking that every voice uses
@@ -245,242 +175,6 @@ fn retire_portable_rack(
     }
 }
 
-/// One Slot as the global scheduler sees it: classic plugins contribute a
-/// single indivisible job, `parallel_render_v1` plugins contribute their
-/// begin → units → end family.
-//
-// SAFETY: rack voices reach worker threads only through the pool's epoch
-// protocol; unit jobs point at per-unit boxed cells inside `ParallelUnits`,
-// which hold isolated portable instances. Classic processing has always run
-// on pool workers, which the plugin ABI already requires plugins to accept.
-unsafe impl<'plugin> ScheduledSlot for RackSlotVoice<'plugin> {
-    fn max_units(&self) -> u32 {
-        self.parallel.as_ref().map_or(0, ParallelUnits::max_units)
-    }
-
-    fn dependency_mask(&self) -> u32 {
-        self.deps_mask
-    }
-
-    unsafe fn gather_input(
-        slot_index: usize,
-        slots: *mut Self,
-        _slot_count: usize,
-        frames: u32,
-        channels: u32,
-    ) {
-        // SAFETY: the scheduler grants exclusive access to this Slot and
-        // guarantees every Slot in the dependency mask is complete and
-        // immutable; upstream references are shared reads of lower indices.
-        let voice = unsafe { &mut *slots.add(slot_index) };
-        if voice.resolved_sources.is_empty() {
-            return;
-        }
-        voice.input.fill(0.0);
-        for source in &voice.resolved_sources {
-            match source {
-                ResolvedRackSource::Capture => {
-                    if voice.capture_len == 0 || voice.capture_channels == 0 {
-                        continue;
-                    }
-                    // SAFETY: staged by the audio loop for this block and
-                    // only read during it.
-                    let capture =
-                        unsafe { std::slice::from_raw_parts(voice.capture_ptr, voice.capture_len) };
-                    mix_capture_into_plugin(
-                        capture,
-                        voice.capture_channels,
-                        &mut voice.input,
-                        voice.input_channels,
-                        frames as usize,
-                    );
-                }
-                ResolvedRackSource::Slot(upstream) => {
-                    // SAFETY: `upstream` is a lower, completed index.
-                    let upstream =
-                        unsafe { &*(slots.add(*upstream) as *const RackSlotVoice<'plugin>) };
-                    if upstream.process_faulted {
-                        continue;
-                    }
-                    mix_slot_into_plugin(
-                        upstream,
-                        &mut voice.input,
-                        voice.input_channels,
-                        frames as usize,
-                        channels as usize,
-                    );
-                }
-            }
-        }
-    }
-
-    fn run_single(&mut self, frames: u32, channels: u32) -> bool {
-        process_rack_voice(self, frames, channels);
-        // Faults are already silenced and quarantined in place; report
-        // success so the scheduler does not quarantine a second time.
-        true
-    }
-
-    fn run_begin(&mut self, frames: u32, _channels: u32) -> Option<u32> {
-        self.output.fill(0.0);
-        if self.process_faulted {
-            return Some(0);
-        }
-        let parallel = self.parallel.as_mut()?;
-        parallel
-            .begin(
-                &mut self.instance,
-                &self.input,
-                frames,
-                &self.events,
-                &self.parameter_events,
-            )
-            .ok()
-    }
-
-    fn unit_job(&mut self, unit: u32, frames: u32, channels: u32) -> UnitJob {
-        self.parallel
-            .as_mut()
-            .expect("unit job requested for a classic Rack Slot")
-            .unit_job(unit, &self.input, frames, channels)
-    }
-
-    fn run_end(&mut self, frames: u32, channels: u32, completed: u32) -> bool {
-        if self.process_faulted {
-            return true;
-        }
-        let Some(parallel) = self.parallel.as_mut() else {
-            return false;
-        };
-        parallel
-            .finish(
-                &mut self.instance,
-                &mut self.output,
-                frames,
-                channels,
-                completed,
-            )
-            .is_ok()
-    }
-
-    fn quarantine(&mut self) {
-        self.output.fill(0.0);
-        self.process_faulted = true;
-    }
-}
-
-/// Creates the host-owned unit instances for one activated Rack Slot when
-/// the plugin declares `parallel_render_v1` and this host schedules units.
-/// State and program loads are mirrored so every instance agrees on control
-/// state; per-block dynamics still travel through dispatch payloads.
-fn create_rack_slot_parallel_units<'plugin>(
-    plugin: &'plugin LoadedPlugin,
-    state: &RackSlotStateLoad,
-    sample_rate_hz: u32,
-    period_frames: u32,
-    input_channels: u32,
-    output_channels: u32,
-) -> Result<Option<ParallelUnits<'plugin>>> {
-    if !parallel_render::parallel_units_enabled() {
-        return Ok(None);
-    }
-    let Some(mut units) = ParallelUnits::create(
-        plugin,
-        f64::from(sample_rate_hz),
-        period_frames,
-        input_channels,
-        output_channels,
-    )?
-    else {
-        return Ok(None);
-    };
-    match state {
-        RackSlotStateLoad::Default => {}
-        RackSlotStateLoad::Opaque(bytes) => {
-            units.mirror(|instance| instance.load_state(bytes))?;
-        }
-        RackSlotStateLoad::LegacyPreset(preset_id) => {
-            units.mirror(|instance| instance.load_preset(preset_id))?;
-        }
-    }
-    Ok(Some(units))
-}
-
-fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channels: u32) {
-    voice.output.fill(0.0);
-    if voice.process_faulted {
-        return;
-    }
-    let process_result = voice.instance.process_wide(
-        &voice.input,
-        &mut voice.output,
-        period_frames,
-        voice.input_channels as u32,
-        channels,
-        &voice.events,
-        &voice.parameter_events,
-    );
-    if let Err(error) = process_result {
-        voice.output.fill(0.0);
-        voice.process_faulted = true;
-        eprintln!(
-            "PLUGIN_PROCESS_QUARANTINED context=rack-slot:{} action=silence error={error}",
-            voice.slot_id
-        );
-    }
-}
-
-fn mix_capture_into_plugin(
-    capture: &[f32],
-    capture_channels: usize,
-    plugin: &mut [f32],
-    plugin_channels: usize,
-    frames: usize,
-) {
-    if capture_channels == 0 || plugin_channels == 0 {
-        return;
-    }
-    for frame in 0..frames {
-        for channel in 0..plugin_channels {
-            let sample = if capture_channels == 1 {
-                capture[frame]
-            } else if plugin_channels == 1 {
-                (capture[frame * capture_channels] + capture[frame * capture_channels + 1]) * 0.5
-            } else {
-                capture
-                    .get(frame * capture_channels + channel)
-                    .copied()
-                    .unwrap_or(0.0)
-            };
-            plugin[frame * plugin_channels + channel] += sample;
-        }
-    }
-}
-
-fn mix_slot_into_plugin(
-    source: &RackSlotVoice<'_>,
-    plugin: &mut [f32],
-    plugin_channels: usize,
-    frames: usize,
-    source_channels: usize,
-) {
-    if plugin_channels == 0 || source_channels == 0 {
-        return;
-    }
-    let left_gain = source.level * (1.0 - source.pan.max(0.0));
-    let right_gain = source.level * (1.0 + source.pan.min(0.0));
-    for frame in 0..frames {
-        let left = source.output[frame * source_channels] * left_gain;
-        let right = source.output[frame * source_channels + 1] * right_gain;
-        if plugin_channels == 1 {
-            plugin[frame] += (left + right) * 0.5;
-        } else {
-            plugin[frame * plugin_channels] += left;
-            plugin[frame * plugin_channels + 1] += right;
-        }
-    }
-}
-
 struct StandaloneVoice<'plugin> {
     instance_id: InstanceId,
     plugin: &'plugin LoadedPlugin,
@@ -496,9 +190,20 @@ struct StandaloneVoice<'plugin> {
     /// The events as the parallel scheduler takes them, rebuilt each block.
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
+    /// When this block's `begin` started, so the budget loop can be closed
+    /// at `end` with the wall time the WHOLE block took.
+    ///
+    /// The classic path measures one call and tells the governor about it. A
+    /// parallel block is three calls with four workers in between, and
+    /// nothing was telling the governor anything at all: both call sites
+    /// were in `process_wide`, so an instrument split across cores never
+    /// learned it was late and never gave ground. It ran La Campanella 2280
+    /// blocks past the deadline without one cut.
+    block_started: Option<Instant>,
     /// Present only for chain effects. Keeps bypass click-free and preserves
     /// the effect's declared latency while the wet path fades in or out.
     effect_bypass: Option<EffectBypass>,
+    budget: SlotBudget,
 }
 
 /// Host bypass remains latency-stable and takes ten milliseconds to cross.
@@ -636,7 +341,9 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
         if self.process_faulted {
             return true;
         }
-        self.instance
+        let started = Instant::now();
+        let rendered = self
+            .instance
             .process_wide(
                 &self.input,
                 &mut self.output,
@@ -646,11 +353,22 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
                 &self.events,
                 &self.parameter_events,
             )
-            .is_ok()
+            .is_ok();
+        if rendered {
+            // Only a block that finished says anything about what this
+            // machine costs; a faulted one is about to be silenced.
+            observe_budget(
+                &mut self.budget,
+                &mut self.instance,
+                started.elapsed().as_nanos() as u64,
+            );
+        }
+        rendered
     }
 
     fn run_begin(&mut self, frames: u32, _channels: u32) -> Option<u32> {
         self.output.fill(0.0);
+        self.block_started = Some(Instant::now());
         if self.process_faulted {
             return Some(0);
         }
@@ -680,7 +398,7 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
         let Some(parallel) = self.parallel.as_mut() else {
             return false;
         };
-        parallel
+        let finished = parallel
             .finish(
                 &mut self.instance,
                 &mut self.output,
@@ -688,7 +406,19 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
                 channels,
                 completed,
             )
-            .is_ok()
+            .is_ok();
+        // The budget loop, closed where the block actually ends. The fuel the
+        // coordinator reports now is the whole block's: the orchestrator adds
+        // what planning cost and what the four workers spent in their own
+        // instances.
+        if let (true, Some(started)) = (finished, self.block_started.take()) {
+            observe_budget(
+                &mut self.budget,
+                &mut self.instance,
+                started.elapsed().as_nanos() as u64,
+            );
+        }
+        finished
     }
 
     fn quarantine(&mut self) {
@@ -733,91 +463,21 @@ fn reactivate_standalone_parallel_units(
     }
 }
 
-fn create_rack_voices<'plugin>(
-    plugins: &BTreeMap<String, &'plugin LoadedPlugin>,
-    specs: &[RackSlotRuntimeSpec],
-    sample_rate_hz: u32,
-    period_frames: u32,
-    channels: u32,
-) -> Result<Vec<RackSlotVoice<'plugin>>> {
-    let mut voices = Vec::with_capacity(specs.len());
-    for spec in specs {
-        let plugin = plugins
-            .get(&spec.plugin_id)
-            .with_context(|| format!("plugin {} is not loaded", spec.plugin_id))?;
-        let (input_channels, output_channels) = plugin_audio_channels(plugin)?;
-        if output_channels != channels as usize {
-            bail!(
-                "Rack Slot {} exposes {output_channels} output channels; runtime requires {channels}",
-                spec.slot_id
-            );
-        }
-        if !spec.audio_sources.is_empty() && input_channels == 0 {
-            bail!(
-                "Rack Slot {} has an audio input cable but plugin {} declares no audio input",
-                spec.slot_id,
-                spec.plugin_id
-            );
-        }
-        let mut instance = plugin.create_instance()?;
-        match &spec.state {
-            RackSlotStateLoad::Default => {}
-            RackSlotStateLoad::Opaque(bytes) => instance
-                .load_state(bytes)
-                .with_context(|| format!("restoring Rack Slot {} state", spec.slot_id))?,
-            RackSlotStateLoad::LegacyPreset(preset_id) => {
-                instance.load_preset(preset_id).with_context(|| {
-                    format!(
-                        "loading legacy program {:?} for Rack Slot {}",
-                        preset_id, spec.slot_id
-                    )
-                })?
-            }
-        }
-        instance
-            .activate(
-                f64::from(sample_rate_hz),
-                period_frames,
-                input_channels as u32,
-                output_channels as u32,
-            )
-            .with_context(|| format!("activating Rack Slot {}", spec.slot_id))?;
-        let parallel = create_rack_slot_parallel_units(
-            plugin,
-            &spec.state,
-            sample_rate_hz,
-            period_frames,
-            input_channels as u32,
-            output_channels as u32,
-        )
-        .with_context(|| format!("preparing parallel units for Rack Slot {}", spec.slot_id))?;
-        voices.push(RackSlotVoice {
-            slot_id: spec.slot_id.clone(),
-            plugin,
-            instance,
-            parallel,
-            midi_stages: spec.midi_stages.clone(),
-            audio_sources: spec.audio_sources.clone(),
-            resolved_sources: Vec::new(),
-            deps_mask: 0,
-            capture_ptr: std::ptr::null(),
-            capture_len: 0,
-            capture_channels: 0,
-            sends_to_main: spec.sends_to_main,
-            input_channels,
-            level: f32::from(spec.level_per_mille) / 1_000.0,
-            pan: f32::from(spec.pan_per_mille) / 1_000.0,
-            input: vec![0.0; period_frames as usize * input_channels],
-            output: vec![0.0; period_frames as usize * channels as usize],
-            events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
-            parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
-            process_faulted: false,
-        });
+/// The runtime Slots of the Rack LIVE had on stage, empty when none was.
+fn initial_rack_runtime_specs(
+    live: &rackforge_performance_api::LivePerformanceState,
+    library: &rackforge_performance_api::PerformanceLibrary,
+    state_store: &PluginStateStore,
+) -> Result<Vec<RackSlotRuntimeSpec>> {
+    match live
+        .active
+        .as_ref()
+        .and_then(|location| library.resolve_playable(location).ok())
+    {
+        Some(rack) => crate::rack_voice::rack_runtime_specs(library, &rack, state_store),
+        None => Ok(Vec::new()),
     }
-    resolve_rack_voice_graph(&mut voices);
-    Ok(voices)
 }
-
 /// One effect of the PLAY chain, built where the caller stands: the boot
 /// thread, the audio loop for a native plugin.
 fn create_chain_voice<'plugin>(
@@ -863,6 +523,7 @@ fn create_chain_voice<'plugin>(
         plugin,
         instance,
         parallel: None,
+        block_started: None,
         input_channels,
         live_parameter_target: CHAIN_LIVE_PARAMETER_TARGET,
         input: vec![0.0; period_frames as usize * input_channels],
@@ -876,6 +537,7 @@ fn create_chain_voice<'plugin>(
             channels as usize,
             latency_frames,
         )?),
+        budget: SlotBudget::for_plugin(plugin),
     })
 }
 
@@ -922,6 +584,7 @@ fn chain_voices_from_prepared(
                 plugin,
                 instance,
                 parallel: None,
+                block_started: None,
                 input_channels,
                 live_parameter_target: CHAIN_LIVE_PARAMETER_TARGET,
                 input: vec![0.0; period_frames * input_channels],
@@ -935,6 +598,7 @@ fn chain_voices_from_prepared(
                     channels,
                     latency_frames,
                 )?),
+                budget: SlotBudget::for_plugin(plugin),
             })
         })
         .collect()
@@ -1011,6 +675,7 @@ fn rack_voices_from_prepared(
             plugin: prepared.plugin,
             instance: prepared.instance.0,
             parallel: prepared.parallel.map(|units| units.0),
+            block_started: None,
             midi_stages: prepared.midi_stages,
             audio_sources: prepared.audio_sources,
             resolved_sources: Vec::new(),
@@ -1018,6 +683,8 @@ fn rack_voices_from_prepared(
             capture_ptr: std::ptr::null(),
             capture_len: 0,
             capture_channels: 0,
+            capture_inputs_ptr: std::ptr::null(),
+            capture_inputs_len: 0,
             sends_to_main: prepared.sends_to_main,
             input_channels: prepared.input_channels,
             level: f32::from(prepared.level_per_mille) / 1_000.0,
@@ -1031,6 +698,7 @@ fn rack_voices_from_prepared(
                 .collect(),
             parameter_events: prepared.parameter_events,
             process_faulted: false,
+            budget: SlotBudget::for_plugin(prepared.plugin),
         })
         .collect::<Vec<_>>();
     resolve_rack_voice_graph(&mut voices);
@@ -1163,7 +831,28 @@ fn plugin_instance_id(plugin_id: &str, primary: bool) -> Result<InstanceId> {
     InstanceId::new(format!("play.{plugin_id}")).map_err(|message| anyhow::anyhow!(message))
 }
 
-pub fn run(config: LiveConfig) -> Result<()> {
+pub fn run(mut config: LiveConfig) -> Result<()> {
+    // An input saved beside an older output -- the buffer changed since --
+    // starts on the output's clock rather than refusing to start.
+    if let Some(input) = config.audio_input.as_mut() {
+        let following = input_following(input, &config.audio_output);
+        if following != *input {
+            println!(
+                "AUDIO_INPUT_FOLLOWS_OUTPUT rate={} period={} buffer={}",
+                following.sample_rate_hz, following.period_frames, following.buffer_frames
+            );
+            *input = following;
+        }
+    }
+    // Before any voice is built: a voice copies what the store remembers for
+    // its plugin at construction, and one built against an unloaded store
+    // starts every session from scratch -- measured on the appliance as a
+    // second session that said `measured` where it should have said `seeded`.
+    realtime_budget::load_store(
+        &config
+            .audio_state_path
+            .with_file_name("realtime-budget.txt"),
+    );
     let startup = crate::startup::StartupTimeline::new("core");
     ensure_supported_engine_profile(&config.audio_output)?;
     if let Some(input) = &config.audio_input {
@@ -1241,6 +930,13 @@ pub fn run(config: LiveConfig) -> Result<()> {
         None => (None, None, None, None, None, None, Vec::new()),
     };
     let packages = discover_plugin_packages(&config.package)?;
+    // What each installed plugin lays out for the keyboards, read while the
+    // packages still name their roots.
+    let control_layouts = crate::controller_layouts::control_layouts(
+        packages
+            .iter()
+            .map(|package| (package.manifest().id.as_str(), package.root())),
+    );
     let primary_id = packages
         .first()
         .context("no primary plugin package was configured")?
@@ -1340,14 +1036,24 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 plugin_id, preset.id, preset.name
             );
         }
-        let restored_parameters: Vec<(u32, f64)> =
+        let mut restored_parameters: Vec<(u32, f64)> =
             live_parameter_store.restored_values(plugin_id, plugin.parameters());
-        for (parameter_index, value) in restored_parameters.iter().copied() {
-            crate::set_plugin_parameter(plugin, &mut instance, parameter_index, value)
-                .with_context(|| {
-                    format!("restoring live parameter {parameter_index} for plugin {plugin_id}")
-                })?;
-        }
+        // A value the plugin refuses -- a newer version narrowed its range,
+        // or it never took the value that was saved -- costs that one
+        // parameter, which keeps the preset's value. It must not keep the
+        // engine from starting: that took the whole appliance down in a
+        // restart loop over one noise level.
+        restored_parameters.retain(|&(parameter_index, value)| {
+            match crate::set_plugin_parameter(plugin, &mut instance, parameter_index, value) {
+                Ok(_) => true,
+                Err(error) => {
+                    eprintln!(
+                        "LIVE_PARAMETER_NOT_RESTORED plugin={plugin_id} parameter={parameter_index} value={value} error={error:#}"
+                    );
+                    false
+                }
+            }
+        });
         let live_parameter_target = live_parameter_targets.len();
         live_parameter_targets.push(LiveParameterTarget {
             plugin_id: plugin_id.clone(),
@@ -1426,12 +1132,16 @@ pub fn run(config: LiveConfig) -> Result<()> {
                     .mirror(|instance| instance.load_preset(&preset.id))
                     .with_context(|| format!("mirroring program for plugin {plugin_id}"))?;
             }
+            // Only what the instance itself took, so the units and the
+            // instance they mirror agree.
             for (parameter_index, value) in restored_parameters.iter().copied() {
-                units
-                    .mirror(|instance| instance.set_parameter(parameter_index, value))
-                    .with_context(|| {
-                        format!("mirroring live parameter {parameter_index} for {plugin_id}")
-                    })?;
+                if let Err(error) =
+                    units.mirror(|instance| instance.set_parameter(parameter_index, value))
+                {
+                    eprintln!(
+                        "LIVE_PARAMETER_NOT_MIRRORED plugin={plugin_id} parameter={parameter_index} value={value} error={error:#}"
+                    );
+                }
             }
         }
         standalone_voices.push(StandaloneVoice {
@@ -1439,6 +1149,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             plugin,
             instance,
             parallel,
+            block_started: None,
             input_channels,
             live_parameter_target,
             input: vec![0.0; period_frames * input_channels],
@@ -1447,6 +1158,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
             effect_bypass: None,
+            budget: SlotBudget::for_plugin(plugin),
         });
     }
     let live_parameter_writer =
@@ -1495,84 +1207,58 @@ pub fn run(config: LiveConfig) -> Result<()> {
     if initial_surface_mode != SurfaceMode::Live {
         live_state.deactivate();
     }
-    let mut initial_rack_specs = Vec::new();
-    if let Some(rack) = live_state.active.as_ref().and_then(|location| {
-        performance_repository
-            .library()
-            .resolve_playable(location)
-            .ok()
-    }) {
-        let compiled_slots = compile_instrument_definition(&performance_library, &rack)?;
-        if compiled_slots.len() > control::MAX_ACTIVE_RACK_SLOTS {
-            bail!(
-                "initial Rack {} compiles to {} Slots; this engine supports at most {}",
-                rack.id,
-                compiled_slots.len(),
-                control::MAX_ACTIVE_RACK_SLOTS
-            );
-        }
-        for compiled in compiled_slots {
-            let slot = &compiled.slot;
-            let state = if let Some(reference) = &slot.state {
-                RackSlotStateLoad::Opaque(state_store.read(reference)?)
-            } else if let Some(program_id) = &slot.legacy_program_id {
-                RackSlotStateLoad::LegacyPreset(program_id.clone())
-            } else {
-                RackSlotStateLoad::Default
-            };
-            initial_rack_specs.push(RackSlotRuntimeSpec {
-                slot_id: compiled.runtime_slot_id,
-                plugin_id: slot.plugin_id.clone(),
-                state,
-                midi_stages: compiled
-                    .midi_stages
-                    .iter()
-                    .map(|stage| RackMidiStageRuntimeSpec {
-                        transform: stage.transform.clone(),
-                        keyboard_parts: stage.keyboard_parts,
-                    })
-                    .collect(),
-                audio_sources: compiled.audio_sources.clone(),
-                sends_to_main: compiled.sends_to_main,
-                level_per_mille: slot.level_per_mille,
-                pan_per_mille: slot.pan_per_mille,
+    // The Rack that was on stage is built again. One that no longer builds
+    // -- a plugin removed, a state file lost -- must not keep the engine
+    // from starting: that took PLAY and every other Rack down with it. It
+    // starts in LIVE with nothing loaded and says why.
+    let initial_rack =
+        initial_rack_runtime_specs(&live_state, performance_repository.library(), &state_store)
+            .and_then(|specs| {
+                let voices = create_rack_voices(
+                    &plugins,
+                    &specs,
+                    output_rate,
+                    period_frames as u32,
+                    channels as u32,
+                )?;
+                Ok((specs, voices))
             });
+    let (initial_rack_specs, rack_voices) = match initial_rack {
+        Ok(built) => built,
+        Err(error) => {
+            eprintln!("LIVE_BOOT_RACK_FAILED reason={error:#}");
+            live_state.deactivate();
+            (Vec::new(), Vec::new())
         }
-    }
-    let rack_voices = create_rack_voices(
-        &plugins,
-        &initial_rack_specs,
-        output_rate,
-        period_frames as u32,
-        channels as u32,
-    )?;
+    };
 
     let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
-    let (midi_port_names, mut midi_sources, midi_observer, connected_midi_sources) =
-        connect_midi_sources(sender)?;
-    let virtual_midi_source = MidiSourceKey::new(midi_port_names.len() as u32);
+    let ConnectedMidiSources {
+        names: midi_port_names,
+        registry: shared_midi_sources,
+        observer: midi_observer,
+        connected: connected_midi_sources,
+        virtual_source: virtual_midi_source,
+    } = connect_midi_sources(sender)?;
     let virtual_midi_source_id = MidiSourceId::new(VIRTUAL_MIDI_SOURCE_ID)?;
-    midi_sources.register(
-        virtual_midi_source,
-        MidiSourceDescriptor {
-            id: virtual_midi_source_id.clone(),
-            name: "RackForge Touch Controller".into(),
-            // The default play route resolves the *primary* source, so with no
-            // keyboard attached something has to be it or nothing can sound.
-            // The touch controller is the instrument the player still has.
-            primary: midi_port_names.is_empty(),
-        },
-    )?;
-    connected_midi_sources
-        .lock()
-        .map_err(|_| anyhow::anyhow!("MIDI connection state lock poisoned"))?
-        .insert(virtual_midi_source.get());
-    let initial_parameter_links = compile_parameter_links_for_runtime(
+    // What the routes and links compile against at start. A keyboard plugged
+    // in later joins the shared registry, the play route hears every
+    // performance source, and the control server compiles the links again.
+    let midi_sources = shared_midi_sources.snapshot();
+    let mut initial_parameter_links = compile_parameter_links_for_runtime(
         &persisted_parameter_links,
         &midi_sources,
         &standalone_voices,
         &rack_voices,
     )?;
+    // The links the engine starts with take over as the player chose, as
+    // every table the control server compiles later does.
+    let takeover =
+        crate::controller_map_store::ControllerMapStore::new(config.data_root.as_deref())
+            .takeover();
+    for link in &mut initial_parameter_links {
+        link.set_takeover(takeover);
+    }
     println!("MIDI_READY ports={midi_port_names:?}");
     if midi_port_names.is_empty() {
         println!(
@@ -1628,16 +1314,61 @@ pub fn run(config: LiveConfig) -> Result<()> {
     };
     // The same for capture: a guitar that is not plugged in must not cost the
     // player the instrument that is.
+    let mut input_absent_reason = None;
     let input = match config.audio_input.as_ref() {
-        Some(profile) => match open_audio_input_from_inventory(profile, &audio_devices) {
+        Some(profile) => match open_audio_input_from_inventory(
+            profile,
+            &audio_devices,
+            output.as_ref().map(|output| &output.device.id),
+        ) {
             Ok(input) => Some(input),
             Err(error) => {
                 println!("AUDIO_INPUT_ABSENT reason={:?}", error.to_string());
+                input_absent_reason = Some(error.to_string());
                 None
             }
         },
         None => None,
     };
+    // What the Rack editor is told about the input: fixed for the life of
+    // this loop, since the capture is opened once and never reopened.
+    let audio_input_status = match (&input, config.audio_input.as_ref()) {
+        (Some(opened), _) => AudioInputStatus {
+            availability: AudioInputAvailability::Open,
+            device_name: Some(opened.device.name.clone()),
+            device_channels: opened.device.capture.as_ref().map_or(0, |capture| {
+                capture.channels.maximum.min(u32::from(u16::MAX)) as u16
+            }),
+            captured: opened
+                .profile
+                .channels
+                .iter()
+                .map(|channel| (*channel).min(u32::from(u16::MAX)) as u16)
+                .collect(),
+            gain_db: opened.profile.gain_db,
+            cable_routing: true,
+            peaks: Vec::new(),
+            reason: None,
+        },
+        (None, Some(profile)) => AudioInputStatus {
+            availability: AudioInputAvailability::Absent,
+            captured: profile
+                .channels
+                .iter()
+                .map(|channel| (*channel).min(u32::from(u16::MAX)) as u16)
+                .collect(),
+            gain_db: profile.gain_db,
+            cable_routing: true,
+            reason: input_absent_reason,
+            ..AudioInputStatus::default()
+        },
+        (None, None) => AudioInputStatus {
+            availability: AudioInputAvailability::Disabled,
+            cable_routing: true,
+            ..AudioInputStatus::default()
+        },
+    };
+    let input_meter = Arc::new(InputMeter::default());
     if let Some(output) = &output {
         println!(
             "AUDIO_READY id={} name={:?} backend={} rate={} channels={} format={:?} \
@@ -1652,6 +1383,21 @@ pub fn run(config: LiveConfig) -> Result<()> {
             output.profile.buffer_frames,
             output.profile.nominal_buffer_latency_ms(),
         );
+        // From here the engine plays through this one device until it stops.
+        // The supervisor is what notices that the machine around it changed:
+        // the interface unplugged, or one arriving beside the board's own
+        // output, which is how an appliance meets the interface it will be
+        // played through.
+        if let Err(error) = crate::audio_hotplug::spawn(
+            output.device.id.clone(),
+            output.device.transport,
+            output.profile.clone(),
+            crate::audio_hotplug::DEFAULT_POLL_INTERVAL,
+        ) {
+            // Worth saying and not worth refusing to play over: without it the
+            // engine is exactly as good as it was before there was one.
+            eprintln!("AUDIO_SUPERVISOR_UNAVAILABLE error={error:#}");
+        }
     }
     if let Some(input) = &input {
         println!(
@@ -1772,7 +1518,9 @@ pub fn run(config: LiveConfig) -> Result<()> {
             audio_sender: control_sender,
             audio_state: Arc::clone(&audio_state),
             output_meter: Arc::clone(&output_meter),
-            audio_state_path: config.audio_state_path,
+            audio_input: audio_input_status,
+            input_meter: Arc::clone(&input_meter),
+            audio_state_path: config.audio_state_path.clone(),
             performance_repository: Arc::new(Mutex::new(performance_repository)),
             state_store,
             plugin_manifests: plugins
@@ -1786,7 +1534,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
                         .map(|runtime| (plugin.manifest().id.clone(), runtime))
                 })
                 .collect(),
-            midi_sources: midi_sources.clone(),
+            midi_sources: shared_midi_sources.clone(),
             midi_observer,
             connected_midi_sources: Arc::clone(&connected_midi_sources),
             plugin_sample_rate: f64::from(output_rate),
@@ -1794,6 +1542,22 @@ pub fn run(config: LiveConfig) -> Result<()> {
             plugin_output_channels: channels as u32,
             storage: control_storage,
             checkpoint,
+            controller_maps: crate::controller_map_store::ControllerMapStore::new(
+                config.data_root.as_deref(),
+            ),
+            control_layouts,
+            // The same root the controller host installs and watches.
+            controllers_root: Some(
+                env::var_os("RACKFORGE_ROOT")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        env::var_os("HOME")
+                            .map(PathBuf::from)
+                            .unwrap_or_else(|| PathBuf::from("."))
+                            .join("rackforge")
+                    })
+                    .join("controllers"),
+            ),
         },
     )?;
     println!("CONTROL_READY socket={}", control_path.display());
@@ -1812,12 +1576,13 @@ pub fn run(config: LiveConfig) -> Result<()> {
         play_route: &play_route,
         virtual_play_route: &virtual_play_route,
         virtual_midi_source,
-        midi_source_count: midi_port_names.len() + 1,
+        midi_source_count: MAX_LIVE_MIDI_SOURCES,
         initial_master_level,
         initial_master_pan,
         render_mode: resolve_render_mode(initial_surface_mode, initial_rack_specs.len()),
         audio_state,
         output_meter,
+        input_meter,
         live_parameter_writer: live_parameter_writer.handle(),
         startup,
     })
@@ -1843,7 +1608,7 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
     let mut matches = BTreeMap::new();
     for port in midi.ports() {
         let name = midi.port_name(&port)?;
-        if is_performance_midi_input(&name) {
+        if is_played_midi_input(&name) {
             matches.insert(name.clone(), name);
         }
     }
@@ -1861,15 +1626,38 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
 /// board that boots before its USB devices enumerate recovers on its own.
 ///
 /// Connections themselves move to [`midi_hotplug`], which keeps them alive
-/// across replugging for the rest of the session.
-type ConnectedMidiSources = (
-    Vec<String>,
-    MidiSourceRegistry,
-    Receiver<IngressMidiEvent>,
-    Arc<Mutex<BTreeSet<u32>>>,
-);
+/// across replugging for the rest of the session, and adopts a keyboard
+/// plugged in while the engine runs.
+struct ConnectedMidiSources {
+    names: Vec<String>,
+    registry: SharedMidiSourceRegistry,
+    observer: Receiver<IngressMidiEvent>,
+    connected: Arc<Mutex<BTreeSet<u32>>>,
+    virtual_source: MidiSourceKey,
+}
+
+/// How many MIDI sources the engine keeps per-source state for: the
+/// keyboards found at start, the touch controller, and the keyboards plugged
+/// in afterwards. A source past it still plays; its held controllers are not
+/// replayed to a Rack loaded later.
+pub(crate) const MAX_LIVE_MIDI_SOURCES: usize = 64;
 
 fn connect_midi_sources(sender: SyncSender<IngressMidiEvent>) -> Result<ConnectedMidiSources> {
+    // A port a controller package claims is read whatever it is called: the
+    // Oxygen Pro's knobs send on its Mackie/HUI port. The same root the
+    // controller host installs into.
+    let controllers_root = env::var_os("RACKFORGE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("rackforge")
+        })
+        .join("controllers");
+    midi_hotplug::claim_controller_inputs(&crate::controller_layouts::known_controller_packages(
+        Some(&controllers_root),
+    ));
     let discovery = MidiInput::new("rackforge-core-discovery")?;
     let names = performance_midi_names(&discovery)?;
     let mut registry = MidiSourceRegistry::default();
@@ -1895,16 +1683,35 @@ fn connect_midi_sources(sender: SyncSender<IngressMidiEvent>) -> Result<Connecte
             connected: false,
         });
     }
+    let virtual_source = MidiSourceKey::new(names.len() as u32);
+    registry.register(
+        virtual_source,
+        MidiSourceDescriptor {
+            id: MidiSourceId::new(VIRTUAL_MIDI_SOURCE_ID)?,
+            name: "RackForge Touch Controller".into(),
+            // With no keyboard attached the touch controller is the primary
+            // source: the instrument the player still has.
+            primary: names.is_empty(),
+        },
+    )?;
+    let registry = SharedMidiSourceRegistry::new(registry);
     let (observer_sender, observer_receiver) = mpsc::sync_channel(64);
-    let connected_sources = Arc::new(Mutex::new(BTreeSet::new()));
+    let connected_sources = Arc::new(Mutex::new(BTreeSet::from([virtual_source.get()])));
     midi_hotplug::spawn(
         sender,
         Some(observer_sender),
         Arc::clone(&connected_sources),
         supervised,
+        registry.clone(),
         midi_hotplug::DEFAULT_POLL_INTERVAL,
     )?;
-    Ok((names, registry, observer_receiver, connected_sources))
+    Ok(ConnectedMidiSources {
+        names,
+        registry,
+        observer: observer_receiver,
+        connected: connected_sources,
+        virtual_source,
+    })
 }
 
 fn play_route_id() -> &'static str {
@@ -1915,11 +1722,17 @@ fn compile_default_play_route(
     sources: &MidiSourceRegistry,
     channel_model: PluginChannelModel,
 ) -> Result<CompiledMidiRoute> {
+    // Every performance keyboard plays, as on the desktop and Android: a
+    // second keyboard is not a spare that stays silent. The touch controller
+    // has its own route.
     let route = MidiRoute {
         schema_version: MIDI_ROUTING_SCHEMA_VERSION,
         id: MidiRouteId::new(play_route_id())?,
         enabled: true,
-        matches: MidiRouteMatch::default(),
+        matches: MidiRouteMatch {
+            source: MidiSourceSelector::AllPerformance,
+            ..MidiRouteMatch::default()
+        },
         transform: MidiRouteTransform::default(),
         target: MidiRouteTarget {
             instance_id: MidiTargetId::new(DEFAULT_LIVE_INSTANCE_ID)?,
@@ -1972,6 +1785,17 @@ fn ensure_supported_engine_profile(profile: &AudioOutputProfile) -> Result<()> {
     Ok(())
 }
 
+/// The capture runs on the engine's clock: it takes the output's rate, block
+/// and queue, whatever they are. They are never the player's to set apart --
+/// the engine reads a block in and writes a block out in the same turn.
+fn input_following(input: &AudioInputProfile, output: &AudioOutputProfile) -> AudioInputProfile {
+    let mut following = input.clone();
+    following.sample_rate_hz = output.sample_rate_hz;
+    following.period_frames = output.period_frames;
+    following.buffer_frames = output.buffer_frames;
+    following
+}
+
 fn ensure_supported_input_profile(
     input: &AudioInputProfile,
     output: &AudioOutputProfile,
@@ -1994,23 +1818,6 @@ fn ensure_supported_input_profile(
         );
     }
     Ok(())
-}
-
-fn plugin_audio_channels(plugin: &LoadedPlugin) -> Result<(usize, usize)> {
-    let audio = plugin.manifest().resolved_audio_contract();
-    let input_channels = audio.input_channels() as usize;
-    let output_channels = audio.output_channels() as usize;
-    if input_channels > rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS {
-        bail!(
-            "plugin {} exposes {input_channels} input channels; this runtime supports at most {}",
-            plugin.manifest().id,
-            rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS
-        );
-    }
-    if output_channels == 0 {
-        bail!("plugin {} exposes no audio output", plugin.manifest().id);
-    }
-    Ok((input_channels, output_channels))
 }
 
 fn standalone_voice_mut<'voices, 'plugin>(
@@ -2042,36 +1849,41 @@ fn compile_parameter_links_for_runtime(
                 .or_else(|| {
                     rack_voices
                         .iter()
-                        .find(|voice| voice.slot_id == link.instance_id)
+                        .find(|voice| voice_matches_link_target(&voice.slot_id, &link.instance_id))
                         .map(|voice| voice.plugin.parameters())
                 });
-            Some(match schema {
-                Some(schema) => CompiledParameterLink::new(link.clone(), source_key, schema),
-                None => Err(anyhow::anyhow!(
-                    "parameter link {} targets unknown instance {}",
-                    link.id,
-                    link.instance_id
-                )),
-            })
+            // A link to a Slot of a Rack that is not loaded waits, as a link
+            // from an unplugged controller does: the control socket compiles
+            // it again against the library. Refusing it here stopped the
+            // engine at boot over one MIDI link.
+            let Some(schema) = schema else {
+                println!(
+                    "PARAMETER_LINK_PENDING link={} instance={} reason=not-loaded",
+                    link.id, link.instance_id
+                );
+                return None;
+            };
+            Some(CompiledParameterLink::new(link.clone(), source_key, schema))
         })
         .collect()
 }
 
-/// `current` answers where a parameter of the instance stands now, for a
-/// link whose control has not yet been picked up; it is asked at most once
-/// per link, on the first touch, and never on the block's ordinary path.
+/// `current` answers where a parameter of the instance stands now. A link
+/// asks on every move of an absolute control and every press of a button:
+/// to pick the parameter up where it is, and to let go when a pad, the
+/// screen or a sound moved it since.
 fn apply_parameter_links(
     links: &mut [CompiledParameterLink],
     event: IngressMidiEvent,
+    layer: MapLayer,
     instance_id: &str,
     output: &mut Vec<ParameterEventV1>,
     current: &mut dyn FnMut(u32) -> Option<f64>,
 ) -> bool {
     let mut consume = false;
-    for link in links
-        .iter_mut()
-        .filter(|link| link.link.instance_id == instance_id)
-    {
+    for link in links.iter_mut().filter(|link| {
+        link.layer() == layer && voice_matches_link_target(instance_id, &link.link.instance_id)
+    }) {
         let Some(mapped) = link.apply(event, &mut *current) else {
             continue;
         };
@@ -2108,6 +1920,7 @@ struct AudioLoopContext<'a> {
     render_mode: AudioRenderMode,
     audio_state: Arc<Mutex<AudioOutputState>>,
     output_meter: Arc<OutputMeter>,
+    input_meter: Arc<InputMeter>,
     live_parameter_writer: LiveParameterWriterHandle,
     startup: crate::startup::StartupTimeline,
 }
@@ -2134,9 +1947,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         mut render_mode,
         audio_state,
         output_meter,
+        input_meter,
         live_parameter_writer,
         startup,
     } = context;
+    // Which controllers' Fn layers are open, beside the links they choose
+    // between: a layer change recompiles nothing.
+    let mut control_layers = crate::parameter_link::ControlLayers::default();
     let mut output = initial_output;
     let mut input = initial_input;
     // Taken from the open device when there is one and from the configured
@@ -2168,6 +1985,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    // The physical input of each captured channel, for the cables that name
+    // inputs; staged beside the capture every block.
+    let capture_inputs = input
+        .as_ref()
+        .map(|capture| capture.profile.channels.clone())
+        .unwrap_or_default();
     let mut device_input = vec![0_i32; period_frames * capture_stream_channels];
     let mut captured_input = vec![0.0_f32; period_frames * capture_channels];
     let mut plugin_input =
@@ -2194,6 +2017,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     let mut master_gain = MasterGain::new(initial_master_level);
     let mut master_balance = MasterBalance::new(initial_master_pan);
     let mut reserved_midi_controls = ReservedMidiControls::with_sources(midi_source_count);
+    // Each controller's reservations, by its id: the engine reserves them
+    // all at once, so one controller registering keeps the others'.
+    let mut reserved_binding_sets = std::collections::BTreeMap::<String, ReservedBindingSet>::new();
     let mut pending_virtual_midi = Vec::with_capacity(32);
     // The host sequencer: transport and lanes, advanced once per period so
     // pattern MIDI joins the block sample-accurately. Rack-mode distribution
@@ -2229,11 +2055,24 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     // ordinary scheduler, where blocking on the filesystem is harmless.
     let realtime_status = realtime::engage(realtime::DEFAULT_AUDIO_PRIORITY);
     println!("{realtime_status}");
+    // A process property rather than a thread one, and the two do not
+    // substitute: a background process is slowed whatever its threads asked
+    // for. Reported separately for the same reason it is requested separately.
+    println!(
+        "REALTIME_THROTTLING {:?}",
+        realtime::exempt_process_from_throttling()
+    );
     if let Some(remedy) = realtime_status.remedy() {
         eprintln!("REALTIME_REMEDY {remedy}");
     }
     let render_telemetry = RenderTelemetry::new(parallel_render::MAX_RENDER_SLOTS);
     spawn_telemetry_publisher(&render_telemetry, Duration::from_secs(1));
+    render_telemetry.set_slot_plugins(
+        rack_voices
+            .iter()
+            .map(|voice| voice.plugin.descriptor().id.clone())
+            .collect(),
+    );
     let mut rack_renderer = RenderPool::automatic(Arc::clone(&render_telemetry));
     render_telemetry.set_slot_labels(
         rack_voices
@@ -2319,29 +2158,109 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     let _ = reply.try_send(Ok(sequencer.capture_take(lane)));
                 }
                 AudioControlCommand::ApplyAudioOutput { profile, reply } => {
-                    let result = if input.as_ref().is_some_and(|capture| {
+                    // A new rate or block takes the capture with it: closed
+                    // before the output changes -- they may be one device --
+                    // and opened again on the output's new clock, on the same
+                    // device and inputs.
+                    let capture_follows = input.as_ref().is_some_and(|capture| {
                         capture.profile.sample_rate_hz != profile.sample_rate_hz
                             || capture.profile.period_frames != profile.period_frames
-                    }) {
-                        Err(anyhow::anyhow!(
-                            "audio output rate/period cannot change while capture is active; disable or reconfigure the input first"
-                        ))
+                            || capture.profile.buffer_frames != profile.buffer_frames
+                    });
+                    let previous_input = if capture_follows {
+                        input.take().map(|capture| {
+                            let mut profile = capture.profile.clone();
+                            profile.device = rackforge_audio_api::AudioDeviceSelector::Id {
+                                id: capture.device.id.clone(),
+                            };
+                            profile
+                        })
                     } else {
-                        reconfigure_audio_output(
-                            &mut output,
-                            standalone_voices,
-                            &mut rack_voices,
-                            profile,
-                            &active_profile,
-                            &audio_state,
-                        )
+                        None
                     };
+                    let previous_output = active_profile.clone();
+                    let mut result = reconfigure_audio_output(
+                        &mut output,
+                        standalone_voices,
+                        &mut rack_voices,
+                        profile,
+                        &active_profile,
+                        &audio_state,
+                    );
+                    if let Some(previous_input) = previous_input {
+                        let devices = audio_state
+                            .lock()
+                            .map(|state| state.devices.clone())
+                            .unwrap_or_default();
+                        let reopen =
+                            |profile: &AudioInputProfile, output: &Option<OpenedAudioOutput>| {
+                                open_audio_input_from_inventory(
+                                    profile,
+                                    &devices,
+                                    output.as_ref().map(|output| &output.device.id),
+                                )
+                            };
+                        let followed = match &result {
+                            Ok(snapshot) => Some(reopen(
+                                &input_following(&previous_input, &snapshot.active_profile),
+                                &output,
+                            )),
+                            Err(_) => None,
+                        };
+                        match followed {
+                            Some(Ok(opened)) => {
+                                println!(
+                                    "AUDIO_INPUT_FOLLOWED id={} rate={} period={} buffer={}",
+                                    opened.device.id,
+                                    opened.profile.sample_rate_hz,
+                                    opened.profile.period_frames,
+                                    opened.profile.buffer_frames
+                                );
+                                input = Some(opened);
+                            }
+                            other => {
+                                // The input could not follow, or the output
+                                // never changed: both go back to the clock
+                                // they shared, and the player hears why.
+                                if let Some(Err(error)) = other {
+                                    eprintln!("AUDIO_INPUT_FOLLOW_FAILED error={error:#}");
+                                    if let Err(back) = reconfigure_audio_output(
+                                        &mut output,
+                                        standalone_voices,
+                                        &mut rack_voices,
+                                        previous_output.clone(),
+                                        &previous_output,
+                                        &audio_state,
+                                    ) {
+                                        eprintln!("AUDIO_OUTPUT_ROLLBACK_FAILED error={back:#}");
+                                    }
+                                    result = Err(anyhow::anyhow!(
+                                        "the audio input could not follow the new output: {error}"
+                                    ));
+                                }
+                                match reopen(&previous_input, &output) {
+                                    Ok(opened) => input = Some(opened),
+                                    Err(error) => {
+                                        eprintln!("AUDIO_INPUT_REOPEN_FAILED error={error:#}")
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if let Ok(snapshot) = &result {
                         active_profile = snapshot.active_profile.clone();
                         period_frames = snapshot.active_profile.period_frames as usize;
                         channels = snapshot.active_profile.channels as usize;
                         output_rate = snapshot.active_profile.sample_rate_hz as usize;
                         xruns.reconfigure(output_rate as u32, period_frames);
+                        // The capture followed: same inputs, the new block.
+                        input_xruns.reconfigure(output_rate as u32, period_frames);
+                        device_input.resize(period_frames * capture_stream_channels, 0);
+                        captured_input.resize(period_frames * capture_channels, 0.0);
+                        plugin_input.resize(
+                            period_frames * rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS,
+                            0.0,
+                        );
                         plugin_output.resize(period_frames * channels, 0.0);
                         mix_output.resize(period_frames * channels, 0.0);
                         for voice in &mut rack_voices {
@@ -2374,6 +2293,22 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 );
                                 voice.process_faulted = true;
                             }
+                            // An effect rendered in units takes the new block
+                            // as the instruments do.
+                            if let Some(units) = voice.parallel.as_mut()
+                                && let Err(error) = units.reconfigure(
+                                    output_rate as f64,
+                                    period_frames as u32,
+                                    voice.input_channels as u32,
+                                    channels as u32,
+                                )
+                            {
+                                eprintln!(
+                                    "PLAY_CHAIN_UNITS_REACTIVATE_FAILED instance={} error={error:#}",
+                                    voice.instance_id
+                                );
+                                voice.process_faulted = true;
+                            }
                         }
                         device_output.resize(period_frames * channels, 0);
                         meter_frames = 0;
@@ -2387,7 +2322,16 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     bindings,
                     reply,
                 } => {
-                    reserved_midi_controls.replace(&bindings, &[]);
+                    let set = ReservedBindingSet {
+                        source: None,
+                        held: Vec::new(),
+                        controls: bindings.clone(),
+                        actions: Vec::new(),
+                    };
+                    if reserved_binding_sets.get(&controller_id) != Some(&set) {
+                        reserved_binding_sets.insert(controller_id.clone(), set);
+                        reserved_midi_controls.replace(reserved_binding_sets.values());
+                    }
                     println!(
                         "HOST_CONTROLS_REGISTERED controller={controller_id} count={}",
                         bindings.len()
@@ -2398,14 +2342,31 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     controller_id,
                     controls,
                     actions,
+                    held,
+                    source,
                     reply,
                 } => {
-                    reserved_midi_controls.replace(&controls, &actions);
-                    println!(
-                        "HOST_BINDINGS_REGISTERED controller={controller_id} controls={} actions={}",
-                        controls.len(),
-                        actions.len()
-                    );
+                    let counts = (controls.len(), actions.len(), held.len());
+                    let set = ReservedBindingSet {
+                        source,
+                        controls,
+                        actions,
+                        held,
+                    };
+                    // Controllers register again every few seconds. The same
+                    // bindings change nothing, and must not let go of a
+                    // held parts key.
+                    if reserved_binding_sets.get(&controller_id) != Some(&set) {
+                        reserved_binding_sets.insert(controller_id.clone(), set);
+                        reserved_midi_controls.replace(reserved_binding_sets.values());
+                        println!(
+                            "HOST_BINDINGS_REGISTERED controller={controller_id} controls={} actions={} held={} source={}",
+                            counts.0,
+                            counts.1,
+                            counts.2,
+                            source.map_or_else(|| "any".to_owned(), |key| key.get().to_string())
+                        );
+                    }
                     let _ = reply.send(Ok(()));
                 }
                 AudioControlCommand::SetMasterLevel { level, reply } => {
@@ -2769,8 +2730,24 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     }
                     let _ = reply.send(result);
                 }
-                AudioControlCommand::ReplaceParameterLinks { links, reply } => {
+                AudioControlCommand::ReplaceParameterLinks { table, reply } => {
+                    let mut links = table.links;
+                    crate::parameter_link::carry_link_state(&mut links, &parameter_links);
+                    // How many links each input has, whenever the table
+                    // changes: a controller whose controls stop moving
+                    // anything shows here, at the moment its links went.
+                    // (2026-09-25: a KeyLab's links were gone until the
+                    // engine restarted, and nothing said when.)
+                    let mut by_source = BTreeMap::<u32, usize>::new();
+                    for link in &links {
+                        *by_source.entry(link.source_key.get()).or_default() += 1;
+                    }
+                    println!(
+                        "PARAMETER_LINKS_REPLACED links={} by_source={by_source:?}",
+                        links.len()
+                    );
                     parameter_links = links;
+                    control_layers.replace(table.modifiers);
                     let _ = reply.send(Ok(()));
                 }
                 AudioControlCommand::ReplaceStandaloneVoice {
@@ -2834,6 +2811,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             rack_voices
                                 .iter()
                                 .map(|voice| voice.slot_id.clone())
+                                .collect(),
+                        );
+                        render_telemetry.set_slot_plugins(
+                            rack_voices
+                                .iter()
+                                .map(|voice| voice.plugin.descriptor().id.clone())
                                 .collect(),
                         );
                         println!(
@@ -3131,13 +3114,19 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         }
         for event in pending_virtual_midi.drain(..) {
             let packet = event.packet;
-            controller_states.observe(event.source, plugin_midi_event(packet));
-            if feed_sequencer_input(&mut sequencer, packet.data, packet.length) {
+            // A control its controller keeps from the instruments: maps and
+            // actions read it below, and nothing plays it.
+            let held = event.source != virtual_midi_source
+                && reserved_midi_controls.holds_back(event.source, plugin_midi_event(packet));
+            if !held {
+                controller_states.observe(event.source, plugin_midi_event(packet));
+            }
+            if !held && feed_sequencer_input(&mut sequencer, packet.data, packet.length) {
                 continue;
             }
             if event.source != virtual_midi_source {
                 if let Some(action) =
-                    reserved_midi_controls.pressed_action(plugin_midi_event(packet))
+                    reserved_midi_controls.pressed_action(event.source, plugin_midi_event(packet))
                 {
                     apply_sequencer_host_action(
                         &mut sequencer,
@@ -3149,13 +3138,30 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 if reserved_midi_controls.consume(event.source, plugin_midi_event(packet)) {
                     continue;
                 }
+                // Start, Continue and Stop are a controller's buttons, never
+                // an instrument's notes.
+                if packet.is_transport_realtime() {
+                    continue;
+                }
+                // A controller's Fn button opens its Fn layer, and does
+                // nothing else.
+                if control_layers.observe(event, Instant::now()) {
+                    continue;
+                }
                 match render_mode {
                     AudioRenderMode::Silent => {}
                     AudioRenderMode::Plugin => {
                         let parameter_start = parameter_events.len();
+                        let layer = control_layers.layer_for(event, &parameter_links, |link| {
+                            voice_matches_link_target(
+                                active_instance_id.as_str(),
+                                &link.link.instance_id,
+                            )
+                        });
                         let consume = apply_parameter_links(
                             &mut parameter_links,
                             event,
+                            layer,
                             active_instance_id.as_str(),
                             &mut parameter_events,
                             &mut |index| {
@@ -3177,7 +3183,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 );
                             }
                         }
-                        if !consume && let Some(routed) = play_route.route(event) {
+                        if !consume
+                            && !held
+                            && let Some(routed) = play_route.route(event)
+                        {
                             if events.len() < MAX_EVENTS_PER_BLOCK {
                                 events.push(crate::midi2::Midi2Event::from_packet(&routed.packet));
                             } else {
@@ -3186,16 +3195,23 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         }
                     }
                     AudioRenderMode::Rack => {
+                        let layer = control_layers.layer_for(event, &parameter_links, |link| {
+                            rack_voices.iter().any(|voice| {
+                                voice_matches_link_target(&voice.slot_id, &link.link.instance_id)
+                            })
+                        });
                         for voice in &mut rack_voices {
                             let instance = &mut voice.instance;
                             let consume = apply_parameter_links(
                                 &mut parameter_links,
                                 event,
+                                layer,
                                 &voice.slot_id,
                                 &mut voice.parameter_events,
                                 &mut |index| instance.get_parameter(index).ok(),
                             );
                             if !consume
+                                && !held
                                 && let Some(routed) = route_rack_event_through_stages(
                                     event,
                                     &voice.midi_stages,
@@ -3243,10 +3259,15 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         }
         while let Ok(event) = receiver.try_recv() {
             let plugin_event = plugin_midi_event(event.packet);
-            if feed_sequencer_input(&mut sequencer, event.packet.data, event.packet.length) {
+            // A control its controller keeps from the instruments: maps and
+            // actions read it below, and nothing plays it.
+            let held = reserved_midi_controls.holds_back(event.source, plugin_event);
+            if !held && feed_sequencer_input(&mut sequencer, event.packet.data, event.packet.length)
+            {
                 continue;
             }
-            if let Some(action) = reserved_midi_controls.pressed_action(plugin_event) {
+            if let Some(action) = reserved_midi_controls.pressed_action(event.source, plugin_event)
+            {
                 apply_sequencer_host_action(
                     &mut sequencer,
                     &mut sequencer_taps,
@@ -3257,14 +3278,33 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             if reserved_midi_controls.consume(event.source, plugin_event) {
                 continue;
             }
-            controller_states.observe(event.source, plugin_event);
+            // Start, Continue and Stop are a controller's buttons, never an
+            // instrument's notes.
+            if event.packet.is_transport_realtime() {
+                continue;
+            }
+            // A controller's Fn button opens its Fn layer, and does nothing
+            // else.
+            if control_layers.observe(event, Instant::now()) {
+                continue;
+            }
+            if !held {
+                controller_states.observe(event.source, plugin_event);
+            }
             match render_mode {
                 AudioRenderMode::Silent => {}
                 AudioRenderMode::Plugin => {
                     let parameter_start = parameter_events.len();
+                    let layer = control_layers.layer_for(event, &parameter_links, |link| {
+                        voice_matches_link_target(
+                            active_instance_id.as_str(),
+                            &link.link.instance_id,
+                        )
+                    });
                     let consume = apply_parameter_links(
                         &mut parameter_links,
                         event,
+                        layer,
                         active_instance_id.as_str(),
                         &mut parameter_events,
                         &mut |index| {
@@ -3286,7 +3326,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             );
                         }
                     }
-                    if !consume && let Some(routed) = play_route.route(event) {
+                    if !consume
+                        && !held
+                        && let Some(routed) = play_route.route(event)
+                    {
                         if events.len() < MAX_EVENTS_PER_BLOCK {
                             events.push(crate::midi2::Midi2Event::from_packet(&routed.packet));
                         } else {
@@ -3295,16 +3338,23 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     }
                 }
                 AudioRenderMode::Rack => {
+                    let layer = control_layers.layer_for(event, &parameter_links, |link| {
+                        rack_voices.iter().any(|voice| {
+                            voice_matches_link_target(&voice.slot_id, &link.link.instance_id)
+                        })
+                    });
                     for voice in &mut rack_voices {
                         let instance = &mut voice.instance;
                         let consume = apply_parameter_links(
                             &mut parameter_links,
                             event,
+                            layer,
                             &voice.slot_id,
                             &mut voice.parameter_events,
                             &mut |index| instance.get_parameter(index).ok(),
                         );
                         if !consume
+                            && !held
                             && let Some(routed) = route_rack_event_through_stages(
                                 event,
                                 &voice.midi_stages,
@@ -3340,6 +3390,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 capture_gain,
                 &mut captured_input,
             );
+            input_meter.observe_interleaved(&captured_input, capture_channels);
             if let Some(report) = input_xruns.tick() {
                 eprintln!("AUDIO_INPUT_{report}");
             }
@@ -3429,6 +3480,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 voice.parameter_events.clear();
                 voice.parameter_events.extend_from_slice(&parameter_events);
                 let was_faulted = voice.process_faulted;
+                // One instrument, the whole period to itself.
+                voice.budget.governor.configure(deadline_ns, 1);
                 let render_started = Instant::now();
                 let scheduled = rack_renderer.process(
                     std::slice::from_mut(voice),
@@ -3449,6 +3502,21 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         None,
                     );
                 }
+                let about_to_settle = !voice.budget.stored
+                    && voice
+                        .budget
+                        .governor
+                        .settled(Instant::now().saturating_duration_since(voice.budget.epoch))
+                        .is_some();
+                if voice.budget.pending.is_some() || about_to_settle {
+                    // PLAY mode renders one instrument in slot 0, and the
+                    // store needs its name. Naming it from the control
+                    // thread would be cleaner; done here it is one
+                    // uncontended lock and one small allocation on the
+                    // handful of blocks per session that report anything.
+                    render_telemetry.set_slot_plugins(vec![voice.plugin.descriptor().id.clone()]);
+                }
+                report_budget(&mut voice.budget, 0, &render_telemetry);
                 if voice.process_faulted {
                     if !was_faulted {
                         eprintln!(
@@ -3509,10 +3577,17 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     period_frames as u64 * 1_000_000_000 / (output_rate as u64).max(1);
                 // Stage this block's capture for the Slots whose cables read
                 // the hardware input; the gather step consumes it.
+                let rack_slot_count = rack_voices.len();
                 for voice in &mut rack_voices {
+                    voice
+                        .budget
+                        .governor
+                        .configure(deadline_ns, rack_slot_count);
                     voice.capture_ptr = captured_input.as_ptr();
                     voice.capture_len = captured_input.len();
                     voice.capture_channels = capture_channels;
+                    voice.capture_inputs_ptr = capture_inputs.as_ptr();
+                    voice.capture_inputs_len = capture_inputs.len();
                 }
                 let render_started = Instant::now();
                 let scheduled = if rack_renderer.process(
@@ -3537,6 +3612,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         deadline_ns,
                         None,
                     );
+                }
+                for (slot, voice) in rack_voices.iter_mut().enumerate() {
+                    report_budget(&mut voice.budget, slot, &render_telemetry);
                 }
                 for voice in &rack_voices {
                     if voice.process_faulted || !voice.sends_to_main {
@@ -3867,19 +3945,6 @@ fn reactivate_rack_slot_parallel_units(
     }
 }
 
-fn mix_rack_slot(mix: &mut [f32], source: &[f32], channels: usize, level: f32, pan: f32) {
-    let left = level * (1.0 - pan.max(0.0));
-    let right = level * (1.0 + pan.min(0.0));
-    for (source_frame, mix_frame) in source
-        .chunks_exact(channels)
-        .zip(mix.chunks_exact_mut(channels))
-    {
-        for (channel, (sample, target)) in source_frame.iter().zip(mix_frame).enumerate() {
-            *target += sample * if channel == 0 { left } else { right };
-        }
-    }
-}
-
 fn reconfigure_audio_output(
     output: &mut Option<OpenedAudioOutput>,
     standalone_voices: &mut [StandaloneVoice<'_>],
@@ -4127,100 +4192,8 @@ fn route_rack_event_through_stages(
     stages: &[RackMidiStageRuntimeSpec],
     play_route: &CompiledMidiRoute,
 ) -> Option<crate::midi2::Midi2Event> {
-    if stages.is_empty() {
-        return play_route
-            .route(event)
-            .map(|routed| crate::midi2::Midi2Event::from_packet(&routed.packet));
-    }
-
-    let mut packet = event.packet;
-    for (index, stage) in stages.iter().enumerate() {
-        let transform = &stage.transform;
-        let status = packet.data[0] & 0xf0;
-        if transform.notes_only && !matches!(status, 0x80 | 0x90) {
-            return None;
-        }
-        let keyed_message = matches!(status, 0x80 | 0x90 | 0xa0) && packet.length >= 2;
-        let part_transpose = if let Some(parts) = stage.keyboard_parts {
-            let part = if keyed_message {
-                let note = packet.data[1];
-                match parts.split_key {
-                    Some(split) if note >= split => parts.part_2,
-                    _ => parts.part_1,
-                }
-            } else if parts.split_key.is_some()
-                && transform
-                    .source_channels
-                    .contains(&parts.part_2.midi_channel)
-            {
-                parts.part_2
-            } else {
-                parts.part_1
-            };
-            if !transform.source_channels.is_empty()
-                && !transform.source_channels.contains(&part.midi_channel)
-            {
-                return None;
-            }
-            part.transpose
-        } else {
-            let source_channel = (packet.data[0] & 0x0f) + 1;
-            if !transform.source_channels.is_empty()
-                && !transform.source_channels.contains(&source_channel)
-            {
-                return None;
-            }
-            0
-        };
-        if keyed_message && !(transform.note_low..=transform.note_high).contains(&packet.data[1]) {
-            return None;
-        }
-
-        if index == 0 {
-            packet = play_route.route(event)?.packet;
-        }
-        if keyed_message {
-            let transposed = i16::from(packet.data[1])
-                + i16::from(part_transpose)
-                + i16::from(transform.transpose);
-            if !(0..=127).contains(&transposed) {
-                return None;
-            }
-            packet.data[1] = transposed as u8;
-        }
-        if status == 0x90 && packet.length >= 3 && packet.data[2] > 0 {
-            packet.data[2] = map_midi_velocity(
-                packet.data[2],
-                transform.velocity_input_low,
-                transform.velocity_input_high,
-                transform.velocity_output_low,
-                transform.velocity_output_high,
-            );
-            // A velocity with more than seven bits rides the same curve at
-            // its own width -- the byte endpoints scaled up by the
-            // specification's rule, so an endpoint means the same loudness
-            // on both scales -- and its byte projection follows it.
-            if let Some(value) = packet.wide {
-                let mapped = map_wide_velocity(
-                    value & 0xffff,
-                    transform.velocity_input_low,
-                    transform.velocity_input_high,
-                    transform.velocity_output_low,
-                    transform.velocity_output_high,
-                );
-                packet.wide = Some(mapped);
-                packet.data[2] = ((mapped >> 9) as u8).max(1);
-            }
-        }
-        if let Some(channel) = transform.target_channel
-            && matches!(status, 0x80..=0xe0)
-        {
-            packet.data[0] = (packet.data[0] & 0xf0) | (channel - 1);
-        }
-    }
-    Some(crate::midi2::Midi2Event::from_packet(&packet))
+    crate::rack_voice::route_through_stages(event, stages, Some(play_route))
 }
-
 fn replay_rack_controller_state(
     controller_states: &MidiControllerStates,
     play_route: &CompiledMidiRoute,
@@ -4318,51 +4291,6 @@ fn route_rack_event(
         velocity_output_high: 127,
     };
     route_rack_event_transformed(event, &transform, keyboard_parts, play_route)
-}
-
-fn map_midi_velocity(
-    value: u8,
-    input_low: u8,
-    input_high: u8,
-    output_low: u8,
-    output_high: u8,
-) -> u8 {
-    if value <= input_low {
-        return output_low;
-    }
-    if value >= input_high {
-        return output_high;
-    }
-    let input_span = u16::from(input_high - input_low);
-    let output_span = u16::from(output_high - output_low);
-    let offset = u16::from(value - input_low);
-    output_low + ((offset * output_span + input_span / 2) / input_span) as u8
-}
-
-/// `map_midi_velocity` at sixteen bits: the same curve, its endpoints
-/// lifted by the specification's scaling so that `0..=127` is the identity
-/// on the whole 16-bit range and a byte-valued endpoint means the same
-/// loudness it means on the byte scale.
-fn map_wide_velocity(
-    value: u32,
-    input_low: u8,
-    input_high: u8,
-    output_low: u8,
-    output_high: u8,
-) -> u32 {
-    let lift = |byte: u8| crate::midi2::scale_up(u32::from(byte), 7, 16);
-    let (input_low, input_high) = (lift(input_low), lift(input_high));
-    let (output_low, output_high) = (lift(output_low), lift(output_high));
-    if value <= input_low {
-        return output_low;
-    }
-    if value >= input_high {
-        return output_high;
-    }
-    let input_span = u64::from(input_high - input_low);
-    let output_span = u64::from(output_high - output_low);
-    let offset = u64::from(value - input_low);
-    output_low + ((offset * output_span + input_span / 2) / input_span) as u32
 }
 
 fn restore_after_audition(voice: &mut StandaloneVoice<'_>, lease: &AuditionLease) -> Result<()> {
@@ -4699,7 +4627,9 @@ mod tests {
     }
 
     #[test]
-    fn default_play_route_uses_only_primary_and_normalizes_single_part_channel() {
+    /// Every keyboard plays, the one plugged in later included -- a key it
+    /// was never compiled against -- as on the desktop and Android.
+    fn default_play_route_hears_every_keyboard_and_normalizes_single_part_channel() {
         let mut sources = MidiSourceRegistry::default();
         sources
             .register(
@@ -4732,7 +4662,12 @@ mod tests {
         };
 
         assert_eq!(route.route(primary).unwrap().packet.data, [0x90, 60, 100]);
-        assert!(route.route(secondary).is_none());
+        assert_eq!(route.route(secondary).unwrap().packet.data, [0x90, 60, 100]);
+        let adopted = IngressMidiEvent {
+            source: MidiSourceKey::new(7),
+            packet: MidiPacket::new(0, &[0x93, 64, 90]).unwrap(),
+        };
+        assert_eq!(route.route(adopted).unwrap().packet.data, [0x90, 64, 90]);
     }
 
     #[test]
@@ -5004,16 +4939,18 @@ mod tests {
     #[test]
     fn reserved_host_control_never_reaches_plugin_midi() {
         let mut reserved = ReservedMidiControls::default();
-        reserved.replace(
-            &[HostControlBinding {
+        reserved.replace(&[ReservedBindingSet {
+            source: None,
+            held: Vec::new(),
+            controls: vec![HostControlBinding {
                 target: HostControlTarget::MasterLevel,
                 midi_cc: MidiControlChangeBinding {
                     channel: 0,
                     controller: 82,
                 },
             }],
-            &[],
-        );
+            actions: Vec::new(),
+        }]);
 
         let source = MidiSourceKey::new(0);
         assert!(reserved.consume(source, midi(3, [0xb0, 82, 64])));
@@ -5021,25 +4958,27 @@ mod tests {
         assert!(!reserved.consume(source, midi(3, [0xb1, 82, 64])));
         assert!(!reserved.consume(source, midi(3, [0x90, 82, 64])));
 
-        reserved.replace(&[], &[]);
+        reserved.replace(&[]);
         assert!(!reserved.consume(source, midi(3, [0xb0, 82, 64])));
     }
 
     #[test]
     fn reserved_host_action_never_reaches_plugin_midi() {
         let mut reserved = ReservedMidiControls::default();
-        reserved.replace(
-            &[],
-            &[HostActionBinding {
-                target: HostActionTarget::KeyboardParts,
-                midi_cc: MidiButtonBinding {
+        reserved.replace(&[ReservedBindingSet {
+            source: None,
+            held: Vec::new(),
+            controls: Vec::new(),
+            actions: vec![HostActionBinding::control_change(
+                HostActionTarget::KeyboardParts,
+                MidiButtonBinding {
                     channel: 0,
                     controller: 119,
                     press_value: 127,
                     release_value: 0,
                 },
-            }],
-        );
+            )],
+        }]);
 
         let source = MidiSourceKey::new(0);
         assert!(reserved.consume(source, midi(3, [0xb0, 119, 127])));
@@ -5049,6 +4988,121 @@ mod tests {
         assert!(!reserved.consume(source, midi(3, [0x90, 61, 100])));
         assert!(!reserved.consume(source, midi(3, [0xb0, 118, 127])));
         assert!(!reserved.consume(source, midi(3, [0xb1, 119, 127])));
+    }
+
+    /// A Launchkey MK4's Play sends MIDI Start: on its own port it starts
+    /// the transport and reaches no instrument; another device's Start, a
+    /// drum machine's, is left alone. A second controller registering keeps
+    /// the first one's buttons.
+    #[test]
+    fn a_controllers_real_time_play_button_is_its_own() {
+        let launchkey = MidiSourceKey::new(1);
+        let drum_machine = MidiSourceKey::new(2);
+        let keylab = ReservedBindingSet {
+            source: None,
+            held: Vec::new(),
+            controls: Vec::new(),
+            actions: vec![HostActionBinding::control_change(
+                HostActionTarget::TransportStop,
+                MidiButtonBinding {
+                    channel: 0,
+                    controller: 116,
+                    press_value: 127,
+                    release_value: 0,
+                },
+            )],
+        };
+        let play = ReservedBindingSet {
+            source: Some(launchkey),
+            held: Vec::new(),
+            controls: Vec::new(),
+            actions: vec![HostActionBinding::realtime(
+                HostActionTarget::TransportPlay,
+                rackforge_controller_api::MidiRealtime::Start,
+            )],
+        };
+        let mut reserved = ReservedMidiControls::with_sources(3);
+        reserved.replace([&keylab, &play]);
+
+        assert_eq!(
+            reserved.pressed_action(launchkey, midi(1, [0xfa, 0, 0])),
+            Some(HostActionTarget::TransportPlay)
+        );
+        assert!(reserved.consume(launchkey, midi(1, [0xfa, 0, 0])));
+        assert_eq!(
+            reserved.pressed_action(drum_machine, midi(1, [0xfa, 0, 0])),
+            None
+        );
+        assert!(!reserved.consume(drum_machine, midi(1, [0xfa, 0, 0])));
+        // The clock is never a button.
+        assert!(!reserved.consume(launchkey, midi(1, [0xf8, 0, 0])));
+        // The other controller's stop, reserved everywhere, still works.
+        assert_eq!(
+            reserved.pressed_action(drum_machine, midi(3, [0xb0, 116, 127])),
+            Some(HostActionTarget::TransportStop)
+        );
+    }
+
+    /// An APC's Play sends a note on its control port: pressing it starts
+    /// the transport, and neither its note-on nor its note-off reaches an
+    /// instrument. The same note from another device, or another note, is
+    /// an instrument's.
+    #[test]
+    fn a_controllers_note_play_button_is_its_own() {
+        let apc = MidiSourceKey::new(1);
+        let keyboard = MidiSourceKey::new(2);
+        let play = ReservedBindingSet {
+            source: Some(apc),
+            held: Vec::new(),
+            controls: Vec::new(),
+            actions: vec![HostActionBinding::note(
+                HostActionTarget::TransportPlay,
+                rackforge_controller_api::MidiNoteButtonBinding {
+                    channel: 0,
+                    note: 91,
+                },
+            )],
+        };
+        let mut reserved = ReservedMidiControls::with_sources(3);
+        reserved.replace([&play]);
+
+        assert_eq!(
+            reserved.pressed_action(apc, midi(3, [0x90, 91, 127])),
+            Some(HostActionTarget::TransportPlay)
+        );
+        assert_eq!(reserved.pressed_action(apc, midi(3, [0x80, 91, 0])), None);
+        assert!(reserved.consume(apc, midi(3, [0x90, 91, 127])));
+        assert!(reserved.consume(apc, midi(3, [0x80, 91, 0])));
+        assert!(!reserved.consume(apc, midi(3, [0x90, 90, 127])));
+        assert_eq!(
+            reserved.pressed_action(keyboard, midi(3, [0x90, 91, 127])),
+            None
+        );
+        assert!(!reserved.consume(keyboard, midi(3, [0x90, 91, 127])));
+    }
+
+    /// A KeyLab mkII's faders send pitch bend in its DAW mode: on its port a
+    /// fader's bend is held from the instruments -- the links read it, since
+    /// it is never consumed -- while a keyboard's pitch wheel still bends.
+    #[test]
+    fn a_controllers_held_fader_never_bends_an_instrument() {
+        let keylab = MidiSourceKey::new(1);
+        let keyboard = MidiSourceKey::new(2);
+        let faders = ReservedBindingSet {
+            source: Some(keylab),
+            controls: Vec::new(),
+            actions: Vec::new(),
+            held: vec![rackforge_session_api::HeldControl::PitchBend { channel: 0 }],
+        };
+        let mut reserved = ReservedMidiControls::with_sources(3);
+        reserved.replace([&faders]);
+
+        assert!(reserved.holds_back(keylab, midi(3, [0xe0, 0, 100])));
+        assert!(!reserved.consume(keylab, midi(3, [0xe0, 0, 100])));
+        assert!(!reserved.holds_back(keylab, midi(3, [0xe1, 0, 100])));
+        assert!(!reserved.holds_back(keyboard, midi(3, [0xe0, 0, 100])));
+        reserved.replace([]);
+        assert!(!reserved.holds_back(keylab, midi(3, [0xe0, 0, 100])));
     }
 
     #[test]

@@ -5,9 +5,9 @@ use alsa::{Direction, ValueOr};
 use anyhow::{Context, Result, bail};
 use rackforge_audio_api::{
     AUDIO_DEVICE_SCHEMA_VERSION, AudioBackend, AudioDeviceDescriptor, AudioDeviceId,
-    AudioFallbackPolicy, AudioInputProfile, AudioOutputProfile, AudioSampleFormat,
-    AudioStreamCapabilities, AudioTransport, AudioValueRange, COMMON_SAMPLE_RATES,
-    UsbAudioIdentity,
+    AudioDeviceSelector, AudioFallbackPolicy, AudioInputProfile, AudioOutputProfile,
+    AudioSampleFormat, AudioStreamCapabilities, AudioTransport, AudioValueRange,
+    COMMON_SAMPLE_RATES, UsbAudioIdentity, preferred_automatic_output,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -111,6 +111,38 @@ pub fn discover_audio_devices() -> Result<Vec<AudioDeviceDescriptor>> {
     Ok(devices)
 }
 
+/// The devices that are plugged in, whether or not they can be opened right
+/// now: cards and their PCMs, read from the control interface alone.
+///
+/// `discover_audio_devices` opens every stream to learn what it can do, and a
+/// stream the engine itself holds answers "busy". With only the output open
+/// the device still showed up through its free capture side; once the engine
+/// captured too, both sides were busy, the device dropped out of the
+/// inventory, and the supervisor took its own interface for unplugged --
+/// restarting the engine every two seconds. Presence does not need a stream.
+pub fn present_audio_device_ids() -> Result<BTreeSet<AudioDeviceId>> {
+    let mut present = BTreeSet::new();
+    for card in CardIter::new() {
+        let card = card.context("enumerating ALSA cards")?;
+        let index = card.get_index();
+        let Ok(control) = Ctl::new(&format!("hw:{index}"), true) else {
+            continue;
+        };
+        let card_id = read_trimmed(format!("/proc/asound/card{index}/id"))
+            .unwrap_or_else(|| format!("card-{index}"));
+        let usb = usb_identity(index);
+        for pcm_device in DeviceIter::new(&control) {
+            let has_stream = [Direction::Playback, Direction::Capture]
+                .into_iter()
+                .any(|direction| control.pcm_info(pcm_device as u32, 0, direction).is_ok());
+            if has_stream {
+                present.insert(stable_device_id(index, pcm_device, &card_id, usb.as_ref())?);
+            }
+        }
+    }
+    Ok(present)
+}
+
 pub fn open_audio_output(profile: &AudioOutputProfile) -> Result<OpenedAudioOutput> {
     profile
         .validate()
@@ -207,20 +239,27 @@ pub fn open_audio_input(profile: &AudioInputProfile) -> Result<OpenedAudioInput>
         .validate()
         .context("validating audio input profile")?;
     let devices = discover_audio_devices()?;
-    open_audio_input_from_inventory(profile, &devices)
+    open_audio_input_from_inventory(profile, &devices, None)
 }
 
+/// Opens the capture a profile names. `alongside` is the device the output
+/// is playing through, which an "automatic" input prefers.
 pub fn open_audio_input_from_inventory(
     profile: &AudioInputProfile,
     devices: &[AudioDeviceDescriptor],
+    alongside: Option<&AudioDeviceId>,
 ) -> Result<OpenedAudioInput> {
     profile
         .validate()
         .context("validating audio input profile")?;
-    let device = resolve_input_device(profile, devices)?.clone();
+    let device = resolve_input_device(profile, devices, alongside)?.clone();
     profile
         .validate_against(&device)
         .with_context(|| format!("validating input profile against {}", device.id))?;
+    // "Every input" becomes the device's own list here, once: from this
+    // point what is captured is always named, input by input.
+    let resolved = profile.resolved_for(&device);
+    let profile = &resolved;
 
     let pcm = PCM::new(&device.backend_address, Direction::Capture, false)
         .with_context(|| format!("opening ALSA capture {}", device.backend_address))?;
@@ -265,6 +304,41 @@ fn resolve_output_device<'a>(
     profile: &AudioOutputProfile,
     devices: &'a [AudioDeviceDescriptor],
 ) -> Result<&'a AudioDeviceDescriptor> {
+    if profile.device == AudioDeviceSelector::Automatic {
+        let compatible = devices
+            .iter()
+            .filter(|device| profile.validate_against(device).is_ok())
+            .collect::<Vec<_>>();
+        return match preferred_automatic_output(&compatible) {
+            Some(device) => {
+                // Two devices that can both serve is the ordinary case on a
+                // board with its own output, not an error to refuse over.
+                eprintln!(
+                    "AUDIO_AUTOMATIC selected={} transport={:?} considered={}",
+                    device.id,
+                    device.transport,
+                    compatible
+                        .iter()
+                        .map(|candidate| candidate.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                Ok(device)
+            }
+            None => {
+                let available = devices
+                    .iter()
+                    .filter(|device| device.playback.is_some())
+                    .map(|device| device.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                bail!(
+                    "no connected output can serve this audio profile;                      playback devices seen: {available}"
+                )
+            }
+        };
+    }
+
     let matching = devices
         .iter()
         .filter(|device| device.playback.is_some() && profile.device.matches(device))
@@ -321,7 +395,31 @@ fn resolve_output_device<'a>(
 fn resolve_input_device<'a>(
     profile: &AudioInputProfile,
     devices: &'a [AudioDeviceDescriptor],
+    alongside: Option<&AudioDeviceId>,
 ) -> Result<&'a AudioDeviceDescriptor> {
+    if profile.device == AudioDeviceSelector::Automatic {
+        return match rackforge_audio_api::automatic_input_device(profile, devices, alongside) {
+            Some(device) => {
+                eprintln!(
+                    "AUDIO_INPUT_AUTOMATIC selected={} beside_output={}",
+                    device.id,
+                    alongside.is_some_and(|id| id == &device.id)
+                );
+                Ok(device)
+            }
+            None => {
+                let available = devices
+                    .iter()
+                    .filter(|device| device.capture.is_some())
+                    .map(|device| device.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                bail!(
+                    "no connected input can capture this audio profile; capture devices seen: {available}"
+                )
+            }
+        };
+    }
     let matching = devices
         .iter()
         .filter(|device| device.capture.is_some() && profile.device.matches(device))

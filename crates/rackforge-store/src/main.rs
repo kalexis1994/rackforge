@@ -210,6 +210,13 @@ fn pack(package_path: &str, output_path: &str) -> Result<(), String> {
     if !output_path.ends_with(".rfplugin") {
         return Err("package output must end in .rfplugin".into());
     }
+    if let Ok(text) = fs::read_to_string(package.join("rackforge-plugin.toml"))
+        && let Ok(manifest) = toml::from_str::<PluginManifest>(&text)
+        && let Some(component) = manifest.portable_component()
+        && let Ok(bytes) = fs::read(package.join(&component.path))
+    {
+        warn_about_component(&bytes);
+    }
     let mut files = Vec::new();
     collect_files(&package, &package, &mut files)?;
     files.sort();
@@ -267,6 +274,8 @@ fn pack_wasm(package_path: &str, component_path: &str, output_path: &str) -> Res
     if !component_bytes.starts_with(b"\0asm") {
         return Err("portable component is not a WebAssembly binary".into());
     }
+    let component_bytes = optimized_for_packing(component_bytes)?;
+    warn_about_component(&component_bytes);
 
     let declared_path = PathBuf::from(&declared.path);
     let mut files = Vec::new();
@@ -306,6 +315,47 @@ fn pack_wasm(package_path: &str, component_path: &str, output_path: &str) -> Res
         hex_digest(&Sha256::digest(&bytes))
     );
     Ok(())
+}
+
+/// The component as the package will carry it: through binaryen's `-O3`,
+/// which every native host would otherwise do on first load and the browser
+/// never does. `RACKFORGE_OPTIMIZE_PLUGINS=0` packs it exactly as built.
+fn optimized_for_packing(component: Vec<u8>) -> Result<Vec<u8>, String> {
+    if std::env::var(rackforge_plugin_runtime::OPTIMIZE_DISABLE_ENV)
+        .is_ok_and(|value| value.trim() == "0")
+    {
+        return Ok(component);
+    }
+    let scratch = std::env::temp_dir().join("rackforge-store-optimize");
+    let optimized =
+        rackforge_plugin_runtime::optimize_component(&component, &scratch).map_err(|error| {
+            format!(
+                "could not optimise the component: {error:#} (set {}=0 to pack it as built)",
+                rackforge_plugin_runtime::OPTIMIZE_DISABLE_ENV
+            )
+        })?;
+    eprintln!(
+        "RFPLUGIN_OPTIMIZED before={} after={}",
+        component.len(),
+        optimized.len()
+    );
+    Ok(optimized)
+}
+
+/// What a component is likely to be leaving behind, said while it is being
+/// packed, when fixing it is one build flag away.
+fn warn_about_component(component: &[u8]) {
+    match rackforge_plugin_runtime::component_uses_simd(component) {
+        Ok(true) => {}
+        Ok(false) => eprintln!(
+            "RFPLUGIN_WARNING simd=none: the component uses no SIMD instruction. \
+             Build it with `-C target-feature=+simd128` and keep independent work \
+             (voices, partials, filter stages) in arrays the compiler can process \
+             four at a time: on the Concert Grand that is the difference between \
+             58 and 74 per cent of native speed. See docs/PLUGIN_DEVELOPMENT.md."
+        ),
+        Err(error) => eprintln!("RFPLUGIN_WARNING simd=unknown: {error:#}"),
+    }
 }
 
 fn collect_files(root: &Path, current: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {

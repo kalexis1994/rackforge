@@ -585,11 +585,6 @@ textarea {
   align-content: start;
   gap: var(--rf-space-3);
   padding: var(--rf-space-3) clamp(12px, 2.5vw, 26px) var(--rf-space-2);
-  color: var(--ink);
-  /* The same band the toolbar above is: one chrome around the plugin's own
-     panel, not a second surface with its own colour. */
-  background: rgba(7, 18, 27, 0.94);
-  border-top: 1px solid var(--line);
   overflow: hidden;
 }
 
@@ -635,50 +630,31 @@ textarea {
   min-width: 0;
 }
 
-.play-chain-head {
-  display: flex;
-  align-items: center;
-  gap: var(--rf-space-3);
-}
-
-.play-chain-status {
-  flex: 1 1 auto;
+/* The drawer is three framed sections -- the chain, what the instrument
+   suggests, and the open effect's panel -- each named on its own frame. A
+   fieldset draws that frame with its legend cutting the top edge, which is
+   what the RF-5's sections do with a drawn outline, without measuring the
+   title. A fieldset is `min-width: min-content` by default, which would lay
+   the chain's scrolling strip out at its whole length; it may shrink. */
+.play-chain-section {
   min-width: 0;
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.03em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.play-chain-close {
-  width: var(--rf-target-compact);
-  height: var(--rf-target-compact);
+  margin: 0;
+  padding: var(--rf-space-3) var(--rf-space-3) var(--rf-space-3);
   display: grid;
-  place-items: center;
-  color: var(--ink);
-  background: rgba(111, 219, 239, 0.06);
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-control);
-  box-shadow: var(--rf-elevation-control);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
+  gap: var(--rf-space-2);
 }
 
-.play-chain-close:hover,
-.play-chain-close:focus-visible {
-  color: #021016;
-  background: var(--acid);
-  border-color: var(--acid);
-  outline: none;
+.play-chain-section > legend {
+  padding: 0 6px;
 }
 
 .play-chain-nodes {
-  margin: 0;
+  /* The strip runs to the frame's inner edges, so what scrolls out of it
+     goes under the frame -- faded there, see the faceplate -- instead of
+     stopping square at the section's padding. */
+  margin: 0 calc(-1 * var(--rf-space-3));
   min-width: 0;
-  padding: 2px 0;
+  padding: 2px var(--rf-space-3);
   display: flex;
   align-items: stretch;
   gap: var(--rf-space-3);
@@ -694,10 +670,6 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--rf-space-2);
-  background: rgba(111, 219, 239, 0.06);
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-card);
-  box-shadow: var(--rf-elevation-control);
 }
 
 .play-chain-node + .play-chain-node::before {
@@ -741,9 +713,6 @@ textarea {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-card);
-  box-shadow: var(--rf-elevation-card);
   overflow: hidden;
 }
 
@@ -881,15 +850,8 @@ textarea {
   border-color: var(--acid);
 }
 
-/* On a phone the drawer keeps what it is for -- the chain, and the panel of
-   whichever effect is open -- and drops what it cannot show. The sentence
-   about the audio path is the first to go: at this width it is an ellipsis
-   holding a line to itself. */
+/* On a phone the chain's nodes tighten and drop their versions. */
 @media (max-width: 560px) {
-  .play-chain-status {
-    display: none;
-  }
-
   .play-chain-node {
     padding: var(--rf-space-2);
     gap: var(--rf-space-1);
@@ -940,18 +902,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: var(--rf-space-2);
-  color: var(--ink);
-  background: rgba(111, 219, 239, 0.06);
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-control);
-  box-shadow: var(--rf-elevation-control);
   cursor: pointer;
-}
-
-.play-chain-picker button:hover,
-.play-chain-picker button:focus-visible {
-  border-color: var(--acid);
-  outline: none;
 }
 
 .play-chain-picker button .play-chain-icon {
@@ -971,72 +922,63 @@ textarea {
   font-style: normal;
 }
 
-.play-chain-suggested {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+.play-chain-suggestions {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  list-style: none;
 }
 
-.play-chain-suggested > small {
-  color: var(--muted);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
+/* Every row the same height, whatever it ends in: Add, In chain and Not
+   installed all take the same box on the right. */
 .play-chain-suggestion {
-  display: inline-flex;
+  min-height: 40px;
+  padding: 4px 6px 4px 8px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 96px;
   align-items: center;
-  gap: 7px;
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--rf-radius-control);
-  font-size: 11px;
+  gap: var(--rf-space-2);
 }
 
-.play-chain-suggestion.missing {
-  border-style: dashed;
-  color: var(--muted);
+.play-chain-suggestion .play-chain-icon {
+  width: 24px;
+  height: 24px;
 }
 
-.play-chain-suggestion em,
-.play-chain-suggestion i {
-  color: var(--muted);
-  font-size: 10px;
-  font-style: normal;
+.play-chain-suggestion-copy {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--rf-space-2);
+  overflow: hidden;
+  white-space: nowrap;
 }
 
-.play-chain-suggestion button {
-  padding: var(--rf-space-1) var(--rf-space-2);
-  color: var(--acid-ink, #021016);
-  background: var(--acid);
-  border: 0;
-  border-radius: var(--rf-radius-control);
+.play-chain-suggestion-copy strong,
+.play-chain-suggestion-copy em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.play-chain-suggestion-add,
+.play-chain-tag {
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.play-chain-suggestion-add {
   cursor: pointer;
-  font: 800 10px/1 var(--display-font);
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
 }
 
-/* Taking the whole recommendation. It is the instrument speaking rather
-   than the host, so it carries the same weight as one of its own pills and
-   not the accent the individual Add buttons wear -- the emphasis belongs on
-   what is being suggested, not on accepting all of it at once. */
 .play-chain-suggest-all {
-  padding: 3px 10px;
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--acid);
-  border-radius: var(--rf-radius-control);
+  justify-self: end;
+  height: 26px;
+  padding: 0 12px;
   cursor: pointer;
-  font: 800 10px/1 var(--display-font);
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
-}
-
-.play-chain-suggest-all:hover {
-  background: color-mix(in srgb, var(--acid) 14%, transparent);
 }
 
 .play-header-button.presets {
@@ -1057,14 +999,6 @@ textarea {
   backdrop-filter: blur(10px);
   z-index: var(--rf-layer-dialog);
   animation: rf-backdrop-in var(--rf-motion-fast) var(--rf-ease-standard) both;
-}
-
-/* The one surface that keeps a strip uncovered: a plugin's own play surface
-   carries a 58px toolbar, and the dialog is a layer over the instrument
-   rather than over the whole app. Everywhere else the ground covers the
-   screen, or it leaves a lit band across the top with nothing behind it. */
-.plugin-surface-active .preset-modal-backdrop {
-  top: 58px;
 }
 
 .preset-modal {
@@ -1245,8 +1179,6 @@ textarea {
 
 .preset-modal-toolbar p {
   margin: 0;
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .preset-create-button,
@@ -1256,15 +1188,7 @@ textarea {
 .preset-row-actions button,
 .preset-delete-confirm button {
   padding: 9px 12px;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
-  border-radius: 10px;
   cursor: pointer;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .preset-toolbar-actions {
@@ -1285,13 +1209,6 @@ textarea {
   height: 14px;
 }
 
-.preset-create-button,
-.preset-create-form button[type="submit"],
-.preset-rename-form button[type="submit"] {
-  color: #021016;
-  background: var(--acid);
-  border-color: var(--acid);
-}
 
 .preset-create-form {
   margin: 0 clamp(18px, 4vw, 30px) 18px;
@@ -1300,9 +1217,6 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 10px;
-  background: rgba(68, 216, 238, 0.06);
-  border: 1px solid rgba(68, 216, 238, 0.18);
-  border-radius: 15px;
 }
 
 .preset-create-form label {
@@ -1310,29 +1224,16 @@ textarea {
   gap: 6px;
 }
 
-.preset-create-form label > span {
-  color: var(--muted);
-  font-size: 9px;
-  text-transform: uppercase;
-}
 
 .preset-create-form input,
 .preset-rename-form input {
   min-width: 0;
   padding: 10px 12px;
-  color: var(--ink);
-  background: rgba(1, 9, 14, 0.7);
-  border: 1px solid var(--line);
-  border-radius: 9px;
 }
 
 .preset-message {
   margin: 0 clamp(18px, 4vw, 30px) 14px;
   padding: 10px 12px;
-  color: var(--acid);
-  background: rgba(68, 216, 238, 0.07);
-  border-radius: 10px;
-  font-size: 10px;
 }
 
 .preset-list.modal-list {
@@ -1342,10 +1243,44 @@ textarea {
   gap: 9px;
 }
 
+/* The header stays put and only the list scrolls. The dialog shell scrolls
+   as a whole everywhere else, which here carried the title and the close key
+   away with the first flick through the instruments. So the picker is a
+   column: header and any notice keep their height, and the stage holding the
+   list takes what is left and scrolls inside it. */
+.plugin-picker-modal {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.plugin-picker-modal > * {
+  flex: none;
+}
+
+.plugin-picker-modal > .plugin-picker-boundary {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.plugin-picker-modal .plugin-picker-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The list begins right under the header's seam: there is no intro line
+   above it, so the list carries its own top margin. */
 .plugin-picker-modal .play-plugin-selector {
   width: 100%;
   margin: 0;
-  padding: 0 clamp(18px, 4vw, 30px) 28px;
+  padding: 20px clamp(18px, 4vw, 30px) 28px;
+}
+
+.plugin-picker-modal .plugin-switch-confirm {
+  margin-top: 20px;
 }
 
 .plugin-switch-confirm {
@@ -1406,9 +1341,6 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
-  background: rgba(4, 16, 24, 0.72);
-  border: 1px solid rgba(91, 223, 242, 0.14);
-  border-radius: 14px;
 }
 
 .preset-load-target {
@@ -1437,16 +1369,9 @@ textarea {
   white-space: nowrap;
 }
 
-.preset-load-target small {
-  color: var(--muted);
-  font-size: 9px;
-}
 
 .preset-load-target i {
-  color: var(--acid);
   font-style: normal;
-  font-size: 9px;
-  font-weight: 800;
 }
 
 .preset-row-actions {
@@ -1454,14 +1379,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 6px;
-  border-left: 1px solid rgba(91, 223, 242, 0.11);
 }
 
-.preset-row-actions .danger,
-.preset-delete-confirm .danger {
-  color: #ff99a5;
-  border-color: rgba(255, 117, 133, 0.32);
-}
 
 .preset-rename-form {
   grid-column: 1 / -1;
@@ -1478,10 +1397,6 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  color: #ffb1ba;
-  background: rgba(83, 16, 27, 0.48);
-  border-top: 1px solid rgba(255, 117, 133, 0.2);
-  font-size: 10px;
 }
 
 .preset-delete-confirm span {
@@ -1550,17 +1465,11 @@ textarea {
 .preset-import-stage-header span {
   display: block;
   margin-bottom: 5px;
-  color: var(--accent);
-  font: 700 9px/1.3 var(--mono);
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
 }
 
 .preset-import-stage-header h3 {
   margin: 0;
   overflow-wrap: anywhere;
-  color: var(--ink);
-  font: 700 clamp(19px, 4vw, 27px)/1.05 var(--display);
 }
 
 .preset-import-actions {
@@ -1581,8 +1490,6 @@ textarea {
   display: grid;
   gap: 1px;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 13px;
 }
 
 .preset-import-summary dl > div {
@@ -1591,43 +1498,22 @@ textarea {
   display: grid;
   grid-template-columns: minmax(110px, 0.4fr) minmax(0, 1fr);
   gap: 12px;
-  background: rgba(255, 255, 255, 0.025);
 }
 
-.preset-import-summary dt {
-  color: var(--muted);
-  font: 700 9px/1.4 var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 
 .preset-import-summary dd {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
-  color: var(--ink);
-  font-size: 11px;
 }
 
 .preset-import-conflict,
 .preset-import-warning {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 10px;
 }
 
-.preset-import-conflict {
-  color: #ffd1a1;
-  background: rgba(255, 166, 72, 0.09);
-  border: 1px solid rgba(255, 177, 92, 0.22);
-}
 
-.preset-import-warning {
-  color: #ffc0cb;
-  background: rgba(255, 90, 119, 0.08);
-  border: 1px solid rgba(255, 117, 144, 0.2);
-}
 
 @media (max-width: 520px) {
   .preset-import-summary dl > div {
@@ -1700,8 +1586,6 @@ textarea {
 
   .preset-row-actions {
     justify-content: flex-end;
-    border-top: 1px solid rgba(91, 223, 242, 0.11);
-    border-left: 0;
   }
 
   .preset-delete-confirm {
@@ -1740,9 +1624,58 @@ body {
     #e9e7e1;
 }
 
+/* A field and the action that submits it.
+
+   Fifteen rules in this file grew their own copy of `minmax(0, 1fr) auto`,
+   and they all fail the same way once the row is narrow: `auto` holds the
+   button at its natural width while the field collapses. Worse with a second
+   field, which claims its intrinsic width from the `auto` track and squeezes
+   the first one to a sliver -- which is what the PIN panel did on a phone.
+
+   Below the stacking width every control takes a full-width row of its own.
+   480px is the widest phone in portrait this host is used on; above it the
+   pair reads better side by side. */
+.field-row {
+  display: grid;
+  gap: var(--rf-space-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.field-row > * {
+  min-width: 0;
+}
+
+.field-row > .primary-button,
+.field-row > .secondary-button {
+  width: 100%;
+  min-height: var(--rf-target-default);
+}
+
+/* Confirming a value asks for it twice, so the row carries three controls.
+   The two fields share the width and the action takes its own row rather
+   than being wedged into what is left. */
+.field-row.confirm {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.field-row.confirm > .primary-button {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 480px) {
+  .field-row,
+  .field-row.confirm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .pairing-shell {
   min-height: 100vh;
-  padding: 28px;
+  /* The URL bar is part of 100vh but not of the screen, so a centred panel
+     ends up pushed below the fold on a phone. */
+  min-height: 100svh;
+  padding: clamp(var(--rf-space-4), 5vw, var(--rf-space-8));
   display: grid;
   place-items: center;
   color: #f4f2ec;
@@ -1765,7 +1698,7 @@ body {
 }
 
 .pairing-brand {
-  margin-bottom: 56px;
+  margin-bottom: clamp(var(--rf-space-6), 8vw, 56px);
   display: flex;
   align-items: center;
   gap: 13px;
@@ -1790,15 +1723,15 @@ body {
 }
 
 .pairing-panel form {
-  margin-top: 34px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  margin-top: clamp(var(--rf-space-5), 6vw, 34px);
 }
 
 .pairing-panel input {
   min-width: 0;
   height: 50px;
+  /* Centred text with letter-spacing sits half a space left of centre,
+     because the spacing is added after the last character too. */
+  text-indent: 0.3em;
   padding: 0 15px;
   color: #f4f2ec;
   background: #292925;
@@ -1814,12 +1747,6 @@ body {
   border-color: var(--acid);
 }
 
-.pairing-panel .primary-button:disabled {
-  color: #77766f;
-  background: #34342f;
-  cursor: not-allowed;
-}
-
 .pairing-error {
   margin-top: 12px;
   padding: 10px 12px;
@@ -1832,7 +1759,7 @@ body {
   display: block;
   margin-top: 22px;
   color: #73726b;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .app-shell {
@@ -2116,10 +2043,6 @@ body {
   display: none;
 }
 
-.performance-menu-button {
-  display: none;
-}
-
 .topbar {
   min-height: 78px;
   padding: 14px clamp(24px, 4vw, 64px);
@@ -2179,6 +2102,59 @@ body {
 .master-output-meter-label,
 .master-output-meter-channels {
   white-space: pre;
+}
+
+/* The callback's cost and its losses, under the meter that is already being
+   watched. Quiet while nothing is wrong: a readout that draws the eye at
+   rest stops being read when it matters. */
+.audio-health-readout {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+}
+
+.audio-health-readout .audio-health-lost {
+  opacity: 0.6;
+}
+
+/* The flight recorder's save mark: as quiet as the readout until pressed. */
+.audio-health-capture {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.audio-health-capture:hover,
+.audio-health-capture:focus-visible {
+  opacity: 1;
+  color: var(--warning, #d08770);
+}
+
+.audio-health-capture-saved {
+  opacity: 1;
+  color: var(--accent, #3ad8e0);
+}
+
+.audio-health-capture-failed {
+  opacity: 1;
+  color: var(--warning, #d08770);
+}
+
+/* Anything lost at all: the number stops being decoration. */
+.audio-health-readout-lost {
+  opacity: 1;
+  color: var(--warning, #d08770);
 }
 
 .master-output-meter-bars {
@@ -2544,13 +2520,14 @@ body {
   cursor: pointer;
 }
 
+/* Shape and type only. The faceplate paints this key -- fill, ink, border
+   and shadow -- and it does so with !important, so anything declared here
+   about its colour is read by people and by nothing else. */
 .primary-button {
   position: relative;
   z-index: 2;
   width: fit-content;
   padding: 13px 16px;
-  color: #171714;
-  background: var(--acid);
   font-size: 12px;
   font-weight: 800;
 }
@@ -3291,44 +3268,26 @@ body {
 .parameter-link-context-menu {
   position: fixed;
   z-index: 1200;
-  min-width: 190px;
+  min-width: 200px;
+  display: grid;
+  gap: 4px;
   padding: 6px;
-  border: 1px solid rgba(92, 220, 242, 0.34);
-  border-radius: 10px;
-  background: rgba(5, 22, 30, 0.98);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.46);
 }
 
 .parameter-link-context-menu button {
   display: block;
   width: 100%;
   padding: 10px 12px;
-  border: 0;
-  border-radius: 7px;
-  color: var(--text-main);
-  background: transparent;
   text-align: left;
-}
-
-.parameter-link-context-menu button:hover,
-.parameter-link-context-menu button:focus-visible {
-  background: rgba(92, 220, 242, 0.13);
-}
-
-.parameter-link-context-menu button.danger {
-  color: #ff9eae;
 }
 
 .parameter-link-context-menu button:disabled {
   cursor: wait;
-  opacity: 0.62;
 }
 
 .parameter-link-context-error {
-  width: 190px;
+  width: 200px;
   margin: 4px 8px 7px;
-  color: #ff9eae;
-  font-size: 0.72rem;
   line-height: 1.25;
 }
 
@@ -3345,20 +3304,13 @@ body {
 .parameter-link-form label {
   display: grid;
   gap: 7px;
-  color: var(--text-muted);
-  font-size: 0.76rem;
-  letter-spacing: 0.045em;
 }
 
 .parameter-link-form select,
 .parameter-link-form input[type="number"] {
   min-height: 42px;
   width: 100%;
-  border: 1px solid rgba(92, 220, 242, 0.23);
-  border-radius: 8px;
   padding: 0 11px;
-  color: var(--text-main);
-  background: #071c25;
 }
 
 .parameter-link-grid {
@@ -3383,15 +3335,6 @@ body {
 
 .midi-learn-button {
   min-height: 46px;
-  border: 1px solid rgba(92, 220, 242, 0.45);
-  border-radius: 9px;
-  color: var(--text-main);
-  background: linear-gradient(135deg, rgba(19, 78, 94, 0.72), rgba(7, 35, 45, 0.84));
-}
-
-.midi-learn-button.learning {
-  border-color: #5cdcf2;
-  box-shadow: 0 0 0 3px rgba(92, 220, 242, 0.12);
 }
 
 .parameter-link-error,
@@ -3400,10 +3343,6 @@ body {
   margin: 0;
   line-height: 1.45;
 }
-
-.parameter-link-error { color: #ff9eae; }
-.parameter-link-pending { color: #f1c879; }
-.parameter-link-help { color: var(--text-muted); font-size: 0.78rem; }
 
 @media (max-width: 620px) {
   .parameter-link-form {
@@ -3498,26 +3437,6 @@ body {
 .plugin-operation-overlay small {
   color: var(--muted);
   text-align: center;
-}
-
-.rack-slot-popover-surface {
-  position: relative;
-}
-
-.rack-slot-popover-busy {
-  position: absolute;
-  z-index: 5;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: #dff8ff;
-  background: rgba(3, 12, 19, 0.72);
-  backdrop-filter: blur(3px);
-  font-size: 0.75rem;
-  font-weight: 750;
-  letter-spacing: 0.05em;
 }
 
 .plugin-surface-state {
@@ -4368,8 +4287,12 @@ body {
     display: inline;
   }
 
+  /* Backwards, not both: kept after it ends, the last frame's translateY(0)
+     is still a transform, and a transformed page is the box every fixed
+     layer inside it is placed in -- a dialog's backdrop then began under
+     the top bar instead of at the top of the screen. */
   .page > * {
-    animation: mobile-page-in 220ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+    animation: mobile-page-in 220ms cubic-bezier(0.2, 0.75, 0.2, 1) backwards;
   }
 
   .now-playing .muted-inline,
@@ -4707,15 +4630,9 @@ body {
 
 .plugin-install-preview {
   --preview-accent: var(--acid);
-  --preview-background: #07131c;
   display: grid;
-  gap: 18px;
   margin: 20px 24px 0;
   overflow: hidden;
-  background: color-mix(in srgb, var(--preview-background) 88%, #102534);
-  border: 1px solid color-mix(in srgb, var(--preview-accent) 38%, transparent);
-  border-radius: 15px;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
 }
 
 .plugin-install-preview-banner {
@@ -4726,18 +4643,6 @@ body {
   display: grid;
   place-items: center;
   overflow: hidden;
-  color: #061018;
-  background:
-    linear-gradient(120deg, color-mix(in srgb, var(--preview-accent) 88%, white), var(--preview-accent));
-  border-bottom: 1px solid color-mix(in srgb, var(--preview-accent) 32%, transparent);
-}
-
-.plugin-install-preview-banner::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, 0.18));
 }
 
 .plugin-install-preview-banner img {
@@ -4747,16 +4652,8 @@ body {
   object-fit: cover;
 }
 
-.plugin-install-preview-banner > span {
-  font-family: var(--display-font);
-  font-size: clamp(2rem, 8vw, 4rem);
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
 .plugin-install-preview-copy {
   min-width: 0;
-  padding: 0 20px;
 }
 
 .plugin-install-preview-copy h3 {
@@ -4775,7 +4672,6 @@ body {
 
 .plugin-install-preview-copy p {
   margin: 0;
-  color: #a9bac5;
   font-size: 0.86rem;
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -4784,22 +4680,13 @@ body {
 .plugin-install-preview-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 14px;
 }
 
 .plugin-install-preview-meta span {
   max-width: 100%;
-  padding: 5px 8px;
   overflow: hidden;
-  color: #c8d6dd;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  font-size: 0.66rem;
   line-height: 1;
   text-overflow: ellipsis;
-  text-transform: capitalize;
   white-space: nowrap;
 }
 
@@ -4860,13 +4747,11 @@ body {
   height: 22px;
 }
 
-.install-plugin-status,
 .install-plugin-error,
 .install-plugin-success,
 .install-plugin-cancelled {
   margin: 16px 24px 0;
   padding: 12px 14px;
-  border-radius: 10px;
   font-size: 0.8rem;
 }
 
@@ -4875,35 +4760,19 @@ body {
   gap: 14px;
 }
 
-.install-plugin-status {
-  color: #a9bdc9;
-  background: rgba(109, 145, 247, 0.12);
-}
-
-.install-plugin-error {
-  color: #ffc6d0;
-  background: rgba(255, 85, 110, 0.12);
-}
-
 .install-plugin-success {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  color: #dfffa4;
-  background: rgba(201, 242, 84, 0.11);
 }
 
 .install-plugin-cancelled {
-  color: #d8e4e9;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.1);
   line-height: 1.5;
 }
 
 .install-plugin-next-step {
   margin: 0;
   padding: 0 24px 4px;
-  color: #9aaab5;
   font-size: 0.78rem;
   line-height: 1.5;
 }
@@ -4958,7 +4827,6 @@ body {
     padding-inline: 18px;
   }
 
-  .install-plugin-status,
   .install-plugin-error,
   .install-plugin-success,
   .install-plugin-cancelled {
@@ -5362,7 +5230,9 @@ body {
   border-color: var(--line);
 }
 
-.touch-performance-actions .touch-panic {
+.touch-performance-actions .touch-panic,
+.touch-controller-dockbar > button.touch-panic,
+.touch-keyboard-navigator-actions button.touch-panic {
   color: #ffacb8;
   border-color: rgba(255, 120, 144, 0.28);
 }
@@ -6500,7 +6370,15 @@ body {
   .touch-controller.docked.keyboard-navigator-active .touch-controller-dock {
     grid-template-rows: 16px 34px 42px minmax(0, 1fr);
   }
+}
 
+/* The range strip is the portrait dock's and the phone-on-its-side
+   controller's alike: the compact dock's media list, and the immersive one. */
+@media (max-width: 760px) and (orientation: portrait),
+  (orientation: landscape) and (max-height: 600px) and (max-aspect-ratio: 7/4),
+  (orientation: landscape) and (max-height: 600px) and (min-width: 1201px),
+  (pointer: fine) and (orientation: landscape) and (max-height: 600px),
+  (any-pointer: coarse) and (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) and (min-aspect-ratio: 7/4) {
   .touch-keyboard-navigator {
     min-width: 0;
     height: 34px;
@@ -6624,7 +6502,12 @@ body {
     outline: 2px solid #d9fbff;
     outline-offset: -2px;
   }
+}
 
+@media (max-width: 760px) and (orientation: portrait),
+  (orientation: landscape) and (max-height: 600px) and (max-aspect-ratio: 7/4),
+  (orientation: landscape) and (max-height: 600px) and (min-width: 1201px),
+  (pointer: fine) and (orientation: landscape) and (max-height: 600px) {
   .touch-controller.docked .touch-controller-dock.resizing {
     user-select: none;
   }
@@ -6684,6 +6567,21 @@ body {
 
   .touch-controller.docked .touch-controller-range-summary {
     display: none;
+  }
+
+  /* A phone's width does not hold both layout keys spelled out and the three
+     actions after them: Settings was cut off the edge. The icons say which
+     is which, so the words go; the key keeps its name for touch and screen
+     readers. */
+  @media (max-width: 560px) {
+    .touch-controller-dockbar .touch-mode-label {
+      display: none;
+    }
+
+    .touch-controller.docked .touch-controller-dockbar .touch-mode-switch button {
+      min-width: 38px;
+      padding-inline: 10px;
+    }
   }
 
   .touch-controller.docked .touch-controller-dock-resizer {
@@ -6822,6 +6720,70 @@ body {
   .controller-surface-active .piano-key span {
     font-size: 8px;
   }
+
+  /* A mini header over the keys, as the portrait dock has: the range strip,
+     with the menu key sitting in it rather than floating over the keys. */
+  .controller-surface-active .touch-controller.keyboard-navigator-active {
+    display: grid;
+    grid-template-rows: 44px minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .controller-surface-active .touch-controller.keyboard-navigator-active .touch-keyboard-navigator {
+    height: 44px;
+    padding: 6px 12px 6px calc(58px + var(--rackforge-safe-left));
+  }
+
+  .controller-surface-active .touch-controller.keyboard-navigator-active .touch-keyboard-navigator {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .controller-surface-active .touch-controller.keyboard-navigator-active .touch-keyboard-navigator-track {
+    height: 28px;
+  }
+
+  .touch-keyboard-navigator-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .touch-keyboard-navigator-actions button {
+    min-height: 32px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .touch-keyboard-navigator-actions button.active {
+    color: #031017;
+    background: var(--acid);
+    border-color: var(--acid);
+  }
+
+  .touch-keyboard-navigator-actions svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .controller-surface-active .touch-controller.keyboard-navigator-active .touch-controller-menu-button {
+    top: 4px;
+    left: calc(8px + var(--rackforge-safe-left));
+    width: 40px;
+    height: 36px;
+    border-radius: 9px;
+  }
 }
 
 /* LIVE performance workspace */
@@ -6906,14 +6868,17 @@ body {
   font-size: 11px;
 }
 
+/* One column: the browser is the whole choice. This was two, sized for an
+   ON STAGE card beside the lists; with the card gone the lists sat in the
+   narrow first column beside an empty one, and on a wide screen a Rack's
+   name was squeezed to nothing under its LOAD key. */
 .live-content {
   display: grid;
-  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 16px;
 }
 
-.active-performance-card,
 .live-browser,
 .config-library,
 .config-editor,
@@ -6926,59 +6891,37 @@ body {
   backdrop-filter: blur(18px) saturate(125%);
 }
 
-.active-performance-card {
-  min-height: 250px;
-  padding: 28px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  background:
-    radial-gradient(circle at 90% 8%, rgba(var(--acid-rgb), 0.17), transparent 34%),
-    var(--glass);
-}
 
-.active-performance-card h2 {
-  margin: 0 0 6px;
-  font-size: clamp(24px, 3vw, 38px);
-  font-weight: 500;
-  letter-spacing: -0.045em;
-}
 
-.active-performance-card p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-}
 
-.live-state {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-}
 
-.live-state i {
-  width: 7px;
-  height: 7px;
-  background: #6b7680;
-  border-radius: 50%;
-}
 
-.live-state.online {
-  color: var(--acid);
-}
 
-.live-state.online i {
-  background: var(--acid);
-  box-shadow: 0 0 0 4px rgba(var(--acid-rgb), 0.1);
-}
 
 .live-browser {
   min-width: 0;
   overflow: hidden;
+}
+
+/* Why a LOAD failed, above the list, until it is dismissed or retried. */
+.live-content > .live-load-error {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+
+.live-load-error button {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  color: inherit;
+  background: none;
+  border: 0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .live-mode-tabs {
@@ -7194,6 +7137,36 @@ body {
   margin: 0;
   color: var(--muted);
   font-size: 10px;
+}
+
+/* A name longer than its column ends in an ellipsis instead of running
+   under the key beside it. */
+.target-card > div {
+  min-width: 0;
+}
+
+.target-card h3,
+.target-card p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Measured on the list, not the window: wherever the list is narrow, the
+   key takes a row of its own under the name. */
+.target-grid {
+  container-type: inline-size;
+}
+
+@container (max-width: 240px) {
+  .target-grid .target-card {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .target-grid .target-card .activate-button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
 }
 
 .activate-button {
@@ -8247,11 +8220,17 @@ body {
   pointer-events: auto;
 }
 
+/* A cable's settings are a modal over the canvas, centred on it, as the
+   plugin editor is: the graph behind is inert until it closes. */
 .rack-midi-link-editor {
   position: absolute;
   z-index: 48;
+  inset: 0;
+  margin: auto;
   width: min(486px, calc(100% - 24px));
+  height: fit-content;
   max-height: calc(100% - 24px);
+  animation: rack-plugin-editor-in var(--rf-motion-emphasized) var(--rf-ease-emphasized) backwards;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
@@ -8563,9 +8542,6 @@ body {
     box-shadow: none;
   }
 
-  .rack-midi-link-editor > header {
-    padding-left: 58px;
-  }
 }
 
 @media (max-width: 430px) {
@@ -8588,305 +8564,6 @@ body {
   .rack-midi-curve {
     width: 92px;
     height: 92px;
-  }
-}
-
-.rack-slot-popover-link {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.rack-slot-popover-link line {
-  stroke: rgba(98, 223, 241, 0.62);
-  stroke-width: 1.5;
-  stroke-dasharray: 4 5;
-}
-
-.rack-slot-popover-link circle {
-  fill: var(--acid);
-}
-
-.rack-slot-popover {
-  position: absolute;
-  z-index: 44;
-  width: min(720px, calc(100% - 24px));
-  height: min(620px, calc(100% - 24px));
-  min-width: 420px;
-  min-height: 300px;
-  max-width: min(1280px, calc(100% - 24px));
-  max-height: min(920px, calc(100% - 24px));
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  overflow: visible;
-  color: var(--ink);
-  background: #061018;
-  border: 1px solid rgba(98, 223, 241, 0.42);
-  border-radius: 16px;
-  box-shadow: 0 28px 84px rgba(0, 0, 0, 0.72), var(--inner-light);
-  pointer-events: auto;
-}
-
-.rack-slot-popover-tail {
-  position: absolute;
-  top: 28px;
-  left: -12px;
-  width: 22px;
-  height: 22px;
-  border-left: 1px solid rgba(98, 223, 241, 0.42);
-  border-bottom: 1px solid rgba(98, 223, 241, 0.42);
-  background: #0a1922;
-  transform: rotate(45deg);
-}
-
-.rack-slot-popover.floating .rack-slot-popover-tail {
-  display: none;
-}
-
-.rack-slot-popover-header {
-  grid-row: 1;
-  position: relative;
-  z-index: 1;
-  min-height: 54px;
-  padding: 7px 8px 7px 13px;
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(180px, 1.25fr) auto auto;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid rgba(98, 223, 241, 0.15);
-  border-radius: 15px 15px 0 0;
-  background: linear-gradient(180deg, #10232d, #091720);
-  cursor: grab;
-  touch-action: none;
-}
-
-.rack-slot-popover-header:active {
-  cursor: grabbing;
-}
-
-.rack-slot-popover-header > div:first-child {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.rack-slot-popover-header > div:first-child span,
-.rack-slot-popover footer span {
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 7px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.rack-slot-popover-header > div:first-child strong {
-  overflow: hidden;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rack-slot-popover-preset {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 5px;
-}
-
-.rack-slot-popover select,
-.rack-slot-popover button {
-  min-height: 31px;
-  border: 1px solid rgba(98, 223, 241, 0.2);
-  border-radius: 6px;
-  color: var(--ink);
-  background: rgba(5, 15, 22, 0.86);
-  font: inherit;
-  font-size: 9px;
-}
-
-.rack-slot-popover button {
-  padding: 0 10px;
-  cursor: pointer;
-}
-
-.rack-slot-popover button:hover:not(:disabled),
-.rack-slot-popover button:focus-visible {
-  color: var(--acid);
-  border-color: rgba(98, 223, 241, 0.48);
-}
-
-.rack-slot-popover button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.rack-slot-close-button {
-  width: 32px;
-  padding: 0 !important;
-  font-size: 17px !important;
-}
-
-.rack-slot-popover-error {
-  grid-row: 2;
-  padding: 6px 10px;
-  color: #ffc4d0;
-  background: rgba(112, 18, 43, 0.38);
-  border-bottom: 1px solid rgba(255, 121, 149, 0.24);
-  font-size: 9px;
-}
-
-.rack-slot-popover-surface {
-  grid-row: 3;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  overflow: hidden;
-  border-radius: 0;
-  background: #02080c;
-}
-
-.rack-slot-popover-surface .plugin-frame-stage {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.rack-slot-popover-surface .plugin-frame {
-  width: 100%;
-  height: 100%;
-}
-
-.rack-slot-popover footer {
-  grid-row: 4;
-  min-height: 24px;
-  padding: 0 9px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border-top: 1px solid rgba(98, 223, 241, 0.12);
-  background: #08151d;
-}
-
-.rack-slot-resize-handle {
-  position: absolute;
-  z-index: 4;
-  right: -1px;
-  bottom: -1px;
-  width: 28px !important;
-  height: 28px;
-  min-height: 0 !important;
-  padding: 0 !important;
-  overflow: hidden;
-  border: 0 !important;
-  border-radius: 0 0 15px 0 !important;
-  background: transparent !important;
-  cursor: nwse-resize !important;
-  touch-action: none;
-}
-
-.rack-slot-resize-handle::before,
-.rack-slot-resize-handle::after {
-  content: "";
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  border-right: 1px solid rgba(98, 223, 241, 0.74);
-  border-bottom: 1px solid rgba(98, 223, 241, 0.74);
-}
-
-.rack-slot-resize-handle::before {
-  width: 11px;
-  height: 11px;
-}
-
-.rack-slot-resize-handle::after {
-  width: 6px;
-  height: 6px;
-}
-
-.rack-slot-resize-handle:hover::before,
-.rack-slot-resize-handle:hover::after,
-.rack-slot-resize-handle:focus-visible::before,
-.rack-slot-resize-handle:focus-visible::after {
-  border-color: var(--acid);
-}
-
-@media (max-width: 700px), (max-height: 600px) {
-  .rack-slot-popover-link,
-  .rack-slot-popover-tail,
-  .rack-slot-attach-button,
-  .rack-slot-resize-handle {
-    display: none !important;
-  }
-
-  .rack-slot-popover,
-  .rack-slot-popover.attached,
-  .rack-slot-popover.floating {
-    inset: 0 !important;
-    width: 100%;
-    height: 100%;
-    min-width: 0;
-    min-height: 0;
-    max-width: 100%;
-    max-height: 100%;
-    grid-template-columns: minmax(0, 1fr);
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
-
-  .rack-slot-popover-header {
-    min-height: 46px;
-    padding: 5px 7px 5px 58px;
-    grid-template-columns: minmax(80px, 0.75fr) minmax(150px, 1.25fr) auto;
-    border-radius: 0;
-    cursor: default;
-    touch-action: auto;
-  }
-
-  .rack-slot-popover footer {
-    display: none;
-  }
-
-  .rack-slot-popover-surface {
-    width: 100%;
-    max-width: 100%;
-    margin: 0;
-    align-self: stretch;
-    overflow: hidden;
-  }
-
-  .rack-slot-popover-surface > *,
-  .rack-slot-popover-surface .plugin-frame-stage,
-  .rack-slot-popover-surface .plugin-frame {
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    margin: 0;
-  }
-
-  .rack-slot-popover-surface .plugin-frame-stage,
-  .rack-slot-popover-surface .plugin-frame {
-    height: 100%;
-  }
-
-  .rack-slot-popover-surface .plugin-frame {
-    display: block;
-  }
-}
-
-@media (max-width: 520px) {
-  .rack-slot-popover-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .rack-slot-popover-preset {
-    grid-column: 1 / -1;
-    grid-row: 2;
   }
 }
 
@@ -8978,9 +8655,14 @@ body {
   overflow: hidden;
 }
 
+/* The node editor is the whole screen: the top bar, the LIVE toolbar, the
+   library and the sequencer all step away while it is open. The sequencer
+   used to stay above it, taking a third of the height from the canvas. */
 .graph-workspace-active .topbar,
 .graph-workspace-active .live-toolbar,
-.graph-workspace-active .config-library {
+.graph-workspace-active .config-library,
+.graph-workspace-active .sequencer-shell,
+.app-shell.graph-workspace-active .live-performance-bar {
   display: none;
 }
 
@@ -9076,28 +8758,7 @@ body {
     grid-column: 1;
   }
 
-  .graph-workspace-active .live-performance-bar {
-    padding-left: 58px;
-  }
 
-  .graph-workspace-active .performance-menu-button {
-    position: absolute;
-    z-index: 36;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: var(--acid);
-    background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(var(--acid-rgb), 0.34);
-    border-radius: 13px;
-    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
-    backdrop-filter: blur(14px) saturate(120%);
-    touch-action: none;
-    user-select: none;
-    cursor: grab;
-  }
 }
 
 .graph-workspace-active .performance-config.graph-workspace,
@@ -9417,10 +9078,6 @@ body {
 .rack-details-preview.ready { color: #79eaa7; }
 .rack-details-preview.applying { color: var(--acid); }
 
-.rack-details-sheet-backdrop {
-  display: none;
-}
-
 /* How far the editor's floating chrome sits off the canvas wall: the menu
    key, the details key beneath it, and the zoom column opposite. They used to
    disagree -- 8px on the left, 10px on the right -- and both read as stuck to
@@ -9429,86 +9086,6 @@ body {
   --rack-float-inset: 14px;
 }
 
-.rack-details-floating-button {
-  display: none;
-}
-
-@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
-  .rack-workspace-details-panel,
-  .song-workspace-details-panel {
-    display: none;
-  }
-
-  /* Beside the zoom cluster inside the canvas, one inset clear of it. The
-     cluster is three 30px keys and its two borders; if a fourth is ever
-     added, this is the number that moves with it. */
-  .rack-graph-canvas .rack-details-floating-button {
-    position: absolute;
-    top: var(--rack-float-inset);
-    right: calc(var(--rack-float-inset) * 2 + 92px);
-    z-index: 5;
-  }
-
-  .rack-details-floating-button {
-    position: absolute;
-    z-index: 36;
-    width: 42px;
-    height: 42px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: var(--acid);
-    background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(var(--acid-rgb), 0.34);
-    border-radius: 12px;
-    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
-    backdrop-filter: blur(14px) saturate(120%);
-    touch-action: manipulation;
-    cursor: pointer;
-    transition: color 130ms ease, background 130ms ease, border-color 130ms ease, transform 100ms ease;
-  }
-
-  .rack-details-floating-button svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  .rack-details-floating-button:active {
-    color: #031017;
-    background: var(--acid);
-    border-color: var(--acid);
-    transform: scale(0.94);
-  }
-
-  .rack-details-floating-button:focus-visible {
-    outline: 2px solid var(--acid);
-    outline-offset: 2px;
-  }
-
-  .rack-details-sheet-backdrop {
-    position: absolute;
-    inset: 0;
-    z-index: 40;
-    padding:
-      10px
-      max(10px, var(--rackforge-safe-right))
-      max(10px, var(--rackforge-safe-bottom))
-      max(10px, var(--rackforge-safe-left));
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    background: rgba(1, 7, 11, 0.58);
-    backdrop-filter: blur(6px);
-  }
-
-  .rack-workspace-details.mobile {
-    width: min(480px, 100%);
-    max-height: 100%;
-    overflow: auto;
-    border-radius: 16px;
-    animation: mobile-sheet-in 260ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
-  }
-}
 
 .graph-workspace-active .rack-editor-form.immersive > .editor-header,
 .graph-workspace-active .rack-editor-form.immersive > .basic-fields,
@@ -9521,6 +9098,7 @@ body {
 .graph-workspace-active .rack-editor-form.immersive > .editor-section.slot-settings,
 .graph-workspace-active .song-editor-form.immersive > .editor-header,
 .graph-workspace-active .song-editor-form.immersive > .basic-fields,
+.graph-workspace-active .rack-editor-form.immersive > .rack-preview-status,
 .graph-workspace-active .song-editor-form.immersive > .rack-preview-status,
 .graph-workspace-active .song-editor-form.immersive > .form-error {
   display: none;
@@ -9567,8 +9145,8 @@ body {
 }
 
 .graph-workspace-active .rack-graph-canvas .react-flow__minimap {
-  width: 116px;
-  height: 76px;
+  width: 160px;
+  height: 100px;
 }
 
 .graph-workspace-active .rack-graph-hint {
@@ -9748,8 +9326,10 @@ body {
 }
 
 .rack-flow-node-icon {
-  width: 40px;
+  width: 34px;
   height: 34px;
+  flex: none;
+  box-sizing: border-box;
   display: grid;
   place-items: center;
   border: 1px solid rgba(98, 223, 241, 0.28);
@@ -9837,7 +9417,6 @@ body {
 .rack-flow-label.tone-violet { color: #b99cff; border-color: rgba(185, 156, 255, 0.42); }
 .rack-flow-label.tone-red { color: #ff7995; border-color: rgba(255, 121, 149, 0.42); }
 
-.rack-graph-canvas .react-flow__controls,
 .rack-graph-canvas .react-flow__minimap {
   overflow: hidden;
   border: 1px solid rgba(98, 223, 241, 0.16);
@@ -9868,7 +9447,6 @@ body {
   fill: currentColor;
 }
 
-.rack-graph-canvas .react-flow__minimap-mask { fill: rgba(2, 8, 12, 0.72); }
 
 @media (max-width: 700px), (max-height: 600px) {
   .rack-graph-canvas .react-flow__minimap {
@@ -9903,9 +9481,6 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .active-performance-card {
-    min-height: 190px;
-  }
 
   .config-library {
     position: static;
@@ -10830,14 +10405,6 @@ body {
   border-radius: 10px;
 }
 
-.primary-button {
-  color: #021016;
-  background: linear-gradient(135deg, #98f4ff, #50ddf5);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.72),
-    0 8px 24px rgba(40, 201, 228, 0.18);
-}
-
 .plugin-card:hover {
   border-color: rgba(var(--acid-rgb), 0.45);
   box-shadow:
@@ -11165,14 +10732,9 @@ body {
   }
 
   .live-content {
-    grid-template-columns: minmax(210px, 0.72fr) minmax(0, 1.6fr);
     gap: 12px;
   }
 
-  .active-performance-card {
-    min-height: 180px;
-    padding: 18px;
-  }
 
   .live-mode-tabs {
     padding: 9px;
@@ -11318,7 +10880,6 @@ body {
   }
 
   .preset-modal-backdrop {
-    inset-block-start: 52px;
     padding: 8px;
   }
 
@@ -11352,9 +10913,9 @@ body {
   }
 }
 
-/* On a phone LIVE Perform is a dedicated stage surface. The ordinary app
-   header and the Perform/Configure switch move into the hamburger menu, while
-   the same compact information bar used by PLAY remains visible. */
+/* On a phone LIVE Perform is a dedicated stage surface. It keeps the same
+   header as every other page -- its window, the master and the menu key in
+   it -- and the Perform/Configure switch moves into the hamburger menu. */
 @media (max-width: 760px) {
   .app-shell.live-surface-active {
     overflow: hidden;
@@ -11366,35 +10927,6 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-  }
-
-  .live-surface-active .topbar {
-    display: none;
-  }
-
-  .live-surface-active .performance-menu-button {
-    position: absolute;
-    z-index: 36;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: var(--acid);
-    background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(var(--acid-rgb), 0.34);
-    border-radius: 13px;
-    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
-    backdrop-filter: blur(14px) saturate(120%);
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    cursor: grab;
-  }
-
-  .live-surface-active .performance-menu-button svg {
-    width: 22px;
-    height: 22px;
   }
 
   .live-surface-active .page.live-host-page {
@@ -11417,22 +10949,6 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-  }
-
-  .live-surface-active .live-performance-bar {
-    width: 100%;
-    min-height: 22px;
-    height: 22px;
-    padding: 0 6px 0 58px;
-    display: grid;
-    grid-template-columns: minmax(64px, 0.72fr) minmax(90px, 1.35fr) minmax(88px, 1fr);
-    align-items: center;
-    flex: 0 0 22px;
-    color: var(--ink);
-    background: rgba(5, 16, 24, 0.96);
-    border-bottom: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.04);
-    z-index: 4;
   }
 
   .live-surface-active .performance-info-slot {
@@ -11491,9 +11007,6 @@ body {
     overflow: hidden;
   }
 
-  .live-surface-active .live-perform-surface .active-performance-card {
-    display: none;
-  }
 
   .live-surface-active .live-perform-surface .live-browser {
     min-height: 0;
@@ -11595,46 +11108,6 @@ body {
 
   .performance-surface-active .topbar {
     display: none;
-  }
-
-  .performance-menu-button {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    z-index: 36;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: var(--acid);
-    background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(var(--acid-rgb), 0.34);
-    border-radius: 13px;
-    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
-    backdrop-filter: blur(14px) saturate(120%);
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    cursor: grab;
-    will-change: left, top, transform;
-    transform-origin: 50% 50%;
-    transition:
-      transform 180ms cubic-bezier(0.2, 0.82, 0.2, 1),
-      color 150ms ease,
-      background-color 150ms ease,
-      border-color 150ms ease,
-      box-shadow 180ms ease;
-  }
-
-  .performance-menu-button svg {
-    width: 22px;
-    height: 22px;
-  }
-
-  .performance-menu-button.dragging,
-  .performance-menu-button.dragging:active {
-    cursor: grabbing;
   }
 
   .performance-surface-active .page.plugin-host-page,
@@ -11765,22 +11238,6 @@ body {
     overflow: hidden;
   }
 
-  .live-surface-active .live-performance-bar {
-    width: 100%;
-    min-height: 22px;
-    height: 22px;
-    padding: 0 6px 0 58px;
-    display: grid;
-    grid-template-columns: minmax(70px, 0.75fr) minmax(120px, 1.5fr) minmax(120px, 1fr);
-    align-items: center;
-    flex: 0 0 22px;
-    color: var(--ink);
-    background: rgba(5, 16, 24, 0.96);
-    border-bottom: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.04);
-    z-index: 4;
-  }
-
   .live-surface-active .live-toolbar > div:first-child {
     display: none;
   }
@@ -11821,9 +11278,6 @@ body {
     overflow: hidden;
   }
 
-  .live-surface-active .live-perform-surface .active-performance-card {
-    display: none;
-  }
 
   .live-surface-active .live-perform-surface .live-browser {
     min-height: 0;
@@ -11872,15 +11326,6 @@ body {
   }
 }
 
-@media (orientation: landscape) and (max-height: 600px) and (max-width: 640px) {
-  .live-surface-active .live-perform-surface .live-content {
-    grid-template-columns: minmax(145px, 0.52fr) minmax(0, 1.48fr);
-  }
-
-  .live-surface-active .live-perform-surface .active-performance-card {
-    padding-inline: 12px;
-  }
-}
 
 /* Kind tags: every card in the manager says what it is. */
 .plugin-kind-tag {

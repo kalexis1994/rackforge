@@ -11,6 +11,7 @@ esac
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/scripts/lib/install-env.sh"
+source "$script_dir/scripts/lib/render-audio-seed.sh"
 rackforge_resolve_install_environment
 
 root="$RACKFORGE_ROOT_RESOLVED"
@@ -43,8 +44,12 @@ done
 if [[ ! -f "$root/config/rackforge.toml" ]]; then
   install -m 0644 "$script_dir/config/rackforge.toml" "$root/config/rackforge.toml"
 fi
+# Rendered, not copied: the seed names @RACKFORGE_ROOT@ and the bundled
+# instrument, because Core refuses a relative `package` or `data_root`.
 if [[ ! -f "$root/config/audio.toml.example" && -f "$source_root/config/audio.toml" ]]; then
-  install -m 0644 "$source_root/config/audio.toml" "$root/config/audio.toml.example"
+  rackforge_render_audio_seed \
+    "$source_root/config/audio.toml" \
+    "$root/config/audio.toml.example"
 fi
 
 web_stage="$(mktemp -d "$root/.web-stage.XXXXXX")"
@@ -76,7 +81,13 @@ fi
 # Every official instrument the release carries; see the Raspberry Pi
 # installer for the same rule. A newcomer is enabled, a plugin the store
 # already knows keeps whatever the player chose.
-known_ids=" $(ls "$root/plugin-store/packages" 2>/dev/null | tr '\n' ' ') "
+# On a first install there is no packages directory yet, and `ls` failing
+# inside a pipeline ends the whole installer under `set -o pipefail` -- with
+# no message, which is how a clean appliance stopped right here.
+known_ids=" "
+if [[ -d "$root/plugin-store/packages" ]]; then
+  known_ids=" $(ls "$root/plugin-store/packages" | tr '\n' ' ') "
+fi
 shopt -s nullglob
 for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
   [[ "$(basename "$official_plugin")" == "RF-Concert-Grand.rfplugin" ]] && continue
@@ -106,6 +117,11 @@ if [[ -d "$controller_package" ]]; then
   "$root/bin/rackforge-controller-host" install \
     "$controller_package" --root "$root/controllers" --trust official
 fi
+
+# The controllers RackForge describes from their makers' documentation; the
+# controller host's service sees its store read-only, so they go in here.
+install -d "$root/controllers"
+"$root/bin/rackforge-controller-host" install-catalog --root "$root/controllers"
 
 for unit in rackforge-platform-host rackforge-controller-host rackforge-web rackforge-audio
 do

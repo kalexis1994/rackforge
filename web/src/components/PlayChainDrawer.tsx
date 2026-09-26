@@ -23,6 +23,7 @@ import {
   type SuggestedChainEntry,
 } from "../playChain";
 import { PluginIcon } from "./PluginIcon";
+import { useScrollEdges } from "../hooks/useScrollEdges";
 
 const HEIGHT_STORAGE_KEY = "rackforge.play.chain-height.v1";
 /** The height the player chose with an effect's panel open: its own memory. */
@@ -108,7 +109,6 @@ export function PlayChainDrawer({
   instrumentDescriptor,
   suggested,
   onChange,
-  onClose,
   openEffectId = null,
   onOpenEffect,
   effectPanel,
@@ -123,7 +123,6 @@ export function PlayChainDrawer({
   instrumentDescriptor?: PluginWebDescriptor;
   suggested?: SuggestedChainEntry[];
   onChange: (chain: PlayChain) => void;
-  onClose: () => void;
   /** The effect whose panel is open in the drawer, if one is. */
   openEffectId?: string | null;
   onOpenEffect?: (effectId: string | null) => void;
@@ -147,6 +146,10 @@ export function PlayChainDrawer({
     storedHeight(PANEL_HEIGHT_STORAGE_KEY));
   const [panelHeight, setPanelHeight] = useState(PANEL_MINIMUM);
   const bandRef = useRef<HTMLDivElement | null>(null);
+  // Which ends of the chain's strip have nodes beyond them, so those ends
+  // fade out rather than cutting a node off square.
+  const nodesRef = useRef<HTMLOListElement | null>(null);
+  const nodeEdges = useScrollEdges(nodesRef);
   const [naturalHeight, setNaturalHeight] = useState(MINIMUM_HEIGHT);
   const [maximumHeight, setMaximumHeight] = useState(Number.POSITIVE_INFINITY);
   const [resizing, setResizing] = useState(false);
@@ -253,13 +256,17 @@ export function PlayChainDrawer({
     setChosen(clampHeight(height + direction * (event.shiftKey ? 40 : 10)));
   };
 
-  const available = effectPlugins(plugins, instances);
+  const available = effectPlugins(plugins, instances, instrumentDescriptor?.plugin_id);
   const suggestions = suggestedEffects(suggested, plugins, chain);
   // Offered only when the instrument is recommending more than one thing
   // the player has not already taken: with a single one left, "Add all"
   // is a second button for what the button beside it already does.
   const addableSuggestions = suggestions.filter(isAddableSuggestion);
   const byId = (pluginId: string) => plugins.find((plugin) => plugin.plugin_id === pluginId);
+  const openEffect = chain.effects.find((effect) => effect.id === openEffectId);
+  const openEffectName = openEffect
+    ? byId(openEffect.plugin_id)?.plugin_name ?? openEffect.plugin_id
+    : "";
   const shown = phase !== "closed";
   const tab = shown ? 0 : -1;
 
@@ -284,22 +291,16 @@ export function PlayChainDrawer({
         aria-label="Effects"
         aria-hidden={!shown}
       >
-        <div className="play-chain-head">
-          <span className="eyebrow accent">Effects</span>
-          <span className="play-chain-status">
-            Audio path: instrument → every effect that is on, in order → output.
-          </span>
-          <button
-            type="button"
-            className="play-chain-close"
-            onClick={onClose}
-            aria-label="Close effects"
-            tabIndex={tab}
-          >
-            ×
-          </button>
-        </div>
-        <ol className="play-chain-nodes">
+        {/* No head and no close key: FX in the toolbar opens and closes the
+            drawer, and each section below names itself on its own frame. */}
+        <fieldset className="play-chain-section chain">
+          <legend>Chain</legend>
+        <ol
+          ref={nodesRef}
+          className="play-chain-nodes"
+          data-fade-start={nodeEdges.start || undefined}
+          data-fade-end={nodeEdges.end || undefined}
+        >
           <li className="play-chain-node instrument">
             <PluginIcon
               plugin={instrumentDescriptor}
@@ -423,14 +424,50 @@ export function PlayChainDrawer({
             )}
           </div>
         ) : null}
-        {effectPanel ? (
-          <div ref={bandRef} className="play-chain-effect-panel" style={{ height: panelHeight }}>
-            {effectPanel}
-          </div>
-        ) : null}
+        </fieldset>
         {suggestions.length > 0 ? (
-          <div className="play-chain-suggested">
-            <small>{instrumentName} suggests</small>
+          <fieldset className="play-chain-section suggested">
+            <legend>
+              Suggested <span>by {instrumentName}</span>
+            </legend>
+            {/* One row per effect, each the same height: what an instrument
+                recommends is read down a list, and a row that can be added
+                must not stand taller than one that is already in. */}
+            <ul className="play-chain-suggestions">
+              {suggestions.map((suggestion) => (
+                <li
+                  key={suggestion.plugin_id}
+                  className={`play-chain-suggestion${suggestion.descriptor ? "" : " missing"}`}
+                >
+                  <PluginIcon
+                    plugin={suggestion.descriptor ?? undefined}
+                    name={suggestion.descriptor?.plugin_name ?? suggestion.plugin_id}
+                    className="play-chain-icon"
+                  />
+                  <span className="play-chain-suggestion-copy">
+                    <strong>{suggestion.descriptor?.plugin_name ?? suggestion.plugin_id}</strong>
+                    {suggestion.preset ? <em>{suggestion.preset}</em> : null}
+                  </span>
+                  {suggestion.descriptor ? (
+                    suggestion.inChain ? (
+                      <span className="play-chain-tag">In chain</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="play-chain-suggestion-add"
+                        onClick={() =>
+                          onChange(withEffect(chain, suggestion.plugin_id, suggestion.preset))}
+                        tabIndex={tab}
+                      >
+                        Add
+                      </button>
+                    )
+                  ) : (
+                    <span className="play-chain-tag missing">Not installed</span>
+                  )}
+                </li>
+              ))}
+            </ul>
             {addableSuggestions.length > 1 ? (
               <button
                 type="button"
@@ -441,32 +478,17 @@ export function PlayChainDrawer({
                 Add all
               </button>
             ) : null}
-            {suggestions.map((suggestion) => (
-              <span
-                key={suggestion.plugin_id}
-                className={`play-chain-suggestion${suggestion.descriptor ? "" : " missing"}`}
-              >
-                <strong>{suggestion.descriptor?.plugin_name ?? suggestion.plugin_id}</strong>
-                {suggestion.preset ? <em>{suggestion.preset}</em> : null}
-                {suggestion.descriptor ? (
-                  suggestion.inChain ? (
-                    <i>in chain</i>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onChange(withEffect(chain, suggestion.plugin_id, suggestion.preset))}
-                      tabIndex={tab}
-                    >
-                      Add
-                    </button>
-                  )
-                ) : (
-                  <i>not installed</i>
-                )}
-              </span>
-            ))}
-          </div>
+          </fieldset>
+        ) : null}
+        {effectPanel ? (
+          <fieldset className="play-chain-section panel">
+            <legend>
+              Panel <span>{openEffectName}</span>
+            </legend>
+            <div ref={bandRef} className="play-chain-effect-panel" style={{ height: panelHeight }}>
+              {effectPanel}
+            </div>
+          </fieldset>
         ) : null}
       </div>
       <button

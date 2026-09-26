@@ -1,0 +1,877 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSelector } from "react-redux";
+import { Link, useSearchParams } from "react-router";
+import { AsyncNotice } from "../components/AsyncStateBoundary";
+import { PageHeading } from "../components/PageHeading";
+import { RfLoader } from "../components/RfLoader";
+import { ControllerCheckCard } from "../components/controllers/ControllerCheckCard";
+import { ControllerInputList } from "../components/controllers/ControllerInputList";
+import { InputEditor, UserControllerForm } from "../components/controllers/ControlsEditor";
+import { InputAssignments } from "../components/controllers/InputAssignments";
+import { ControllerOutputNotice } from "../components/controllers/ControllerOutputNotice";
+import { FnButtonCard, type FnPick } from "../components/controllers/FnButtonCard";
+import {
+  buildControllerDevices,
+  type ControllerDevice,
+  type ControllerInput,
+  type ControllerOutput,
+  type ControllerPackageSummary,
+  emptyControllerMap,
+  fnCandidate,
+  inputForActivity,
+  inputFromActivity,
+  inputMessageLabel,
+  isButtonInput,
+  isModifierInput,
+  isUserController,
+  mappingsForInput,
+  unknownSourceDevices,
+  withLearntInput,
+  withMapping,
+  withModifier,
+  withoutMapping,
+} from "../controllerMapping";
+import { type ControllerCheck, checkReport, recordCheckEvents, startCheck } from "../controllerCheck";
+import {
+  exportControllerMap,
+  importControllerMap,
+  requestControllerMaps,
+  requestMidiSources,
+  saveControllerMap,
+  saveUserController,
+  subscribeMidiActivity,
+} from "../gateway";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+import {
+  hostJson,
+  hostKeepsControllerMaps,
+  isDesktopHost,
+  isNativeHost,
+  readNativeTextFile,
+  savePortableTextFile,
+} from "../host";
+import { usePluginCatalog } from "../pluginCatalog";
+import type { RootState } from "../store";
+import type {
+  ControllerMap,
+  MidiActivityEvent,
+  MidiSourceStatus,
+  RegisteredController,
+  RfMapFile,
+} from "../types";
+
+/** How long a control stays lit after its last message. */
+const LIT_MS = 450;
+/** How often the list of attached controllers is asked for again. */
+const REFRESH_MS = 5000;
+const PHONE = "(max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px)";
+const MAX_RFMAP_BYTES = 4 * 1024 * 1024;
+/** Controls learnt from unknown inputs, kept for the browser session. */
+const LEARNT_KEY = "rackforge.controllers.learnt";
+
+interface Loaded {
+  packages: ControllerPackageSummary[];
+  registered: RegisteredController[];
+  maps: ControllerMap[];
+  /** Controllers whose map is still RackForge's factory map, as offered. */
+  factoryUntouched: string[];
+  /** Controllers whose Fn layer is open now, held or latched. */
+  fnOpen: string[];
+  sources: MidiSourceStatus[];
+}
+
+type Notice = { tone: "success" | "error" | "info"; text: string };
+
+function readLearnt(): Map<string, ControllerInput[]> {
+  try {
+    const stored = window.sessionStorage.getItem(LEARNT_KEY);
+    const entries = stored ? (JSON.parse(stored) as Array<[string, ControllerInput[]]>) : [];
+    return new Map(Array.isArray(entries) ? entries : []);
+  } catch {
+    return new Map();
+  }
+}
+
+function writeLearnt(learnt: Map<string, ControllerInput[]>) {
+  try {
+    window.sessionStorage.setItem(LEARNT_KEY, JSON.stringify([...learnt.entries()]));
+  } catch {
+    // Private windows and full storage keep nothing; the controls stay on
+    // screen for as long as the page does.
+  }
+}
+
+/**
+ * The Controllers section: every controller RackForge knows, its controls,
+ * and what the player made each one do in each plugin. Moving a control
+ * lights it here, so the player finds the one in their hand without
+ * reading a manual. A keyboard RackForge has no package for is described
+ * here too: its controls are learnt as they move, named, and saved as a
+ * controller of the player's own.
+ */
+export function ControllersPage() {
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [busy, setBusy] = useState<"export" | "import" | "controls" | "output" | "fn" | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedInputId, setSelectedInputId] = useState<string | null>(null);
+  const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
+  const [latestLitId, setLatestLitId] = useState<string | null>(null);
+  const [stray, setStray] = useState<string | null>(null);
+  const [check, setCheck] = useState<ControllerCheck | null>(null);
+  const [fnPick, setFnPick] = useState<FnPick | null>(null);
+  const [learnt, setLearnt] = useState<Map<string, ControllerInput[]>>(readLearnt);
+  // A player's own controller whose controls are being changed.
+  const [controlsDraft, setControlsDraft] = useState<{ deviceId: string; inputs: ControllerInput[] } | null>(null);
+  const litUntil = useRef(new Map<string, number>());
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const phone = useMediaQuery(PHONE);
+  const catalog = usePluginCatalog();
+  const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
+  const connection = useSelector((state: RootState) => state.rackforge.connection);
+  const playingPluginId = snapshot?.instances.find(
+    (instance) => instance.instance_id === snapshot.active_instance_id,
+  )?.plugin_id;
+  const plugins = useMemo(
+    () => catalog.plugins.filter((plugin) => plugin.kind === "instrument" || plugin.kind === "effect"),
+    [catalog.plugins],
+  );
+  const keepsMaps = hostKeepsControllerMaps();
+
+  useEffect(() => writeLearnt(learnt), [learnt]);
+
+  // The packages rarely change and are asked for until they have been read
+  // once; the attachments, maps and inputs are asked for again all the time.
+  const packagesRead = useRef(false);
+  const load = useCallback(async () => {
+    const [maps, packages, sources] = await Promise.all([
+      requestControllerMaps(),
+      packagesRead.current
+        ? Promise.resolve(null)
+        : hostJson<{ controllers?: ControllerPackageSummary[] }>("/api/v1/controllers")
+          .then((response) => response.controllers ?? [])
+          .catch(() => null),
+      requestMidiSources().catch(() => null),
+    ]);
+    if (packages) packagesRead.current = true;
+    setLoaded((current) => ({
+      packages: packages ?? current?.packages ?? [],
+      registered: maps.controllers,
+      maps: maps.maps,
+      factoryUntouched: maps.factoryUntouched,
+      fnOpen: maps.fnOpen,
+      sources: sources ?? current?.sources ?? [],
+    }));
+    setLoadError(null);
+  }, []);
+
+  // Asked once the session is up, and again after every reconnection:
+  // controllers come and go as they are plugged in, and the host attaches
+  // them on its own.
+  useEffect(() => {
+    if (connection !== "online") return;
+    let active = true;
+    const run = () =>
+      load().catch((reason: unknown) => {
+        if (active) setLoadError(reason instanceof Error ? reason.message : "Could not read the controllers.");
+      });
+    void run();
+    const timer = window.setInterval(() => void run(), REFRESH_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [connection, load]);
+
+  const devices = useMemo(() => {
+    if (!loaded) return [];
+    const known = buildControllerDevices(
+      loaded.packages,
+      loaded.registered,
+      loaded.maps,
+      new Set(loaded.factoryUntouched),
+    );
+    if (!keepsMaps) return known;
+    const claimed = new Set(
+      loaded.registered.flatMap((entry) => (entry.source ? [entry.source.id] : [])),
+    );
+    // Hide the host's own touch keyboard: it is not a controller to map.
+    const sources = loaded.sources.filter((entry) => !entry.source.id.startsWith("rackforge."));
+    return [...known, ...unknownSourceDevices(sources, claimed, learnt)];
+  }, [keepsMaps, learnt, loaded]);
+  const requestedId = searchParams.get("device");
+  const chosen: ControllerDevice | undefined =
+    devices.find((candidate) => candidate.id === requestedId) ?? devices[0];
+  const editingControls = Boolean(chosen?.unknown) || (chosen !== undefined && controlsDraft?.deviceId === chosen.id);
+  const device: ControllerDevice | undefined = useMemo(
+    () => (chosen && controlsDraft?.deviceId === chosen.id ? { ...chosen, inputs: controlsDraft.inputs } : chosen),
+    [chosen, controlsDraft],
+  );
+  const selectedInput = device?.inputs.find((input) => input.id === selectedInputId);
+  const activeCheck = check && device && check.deviceId === device.id && !editingControls ? check : null;
+  const activePick = fnPick && device && fnPick.deviceId === device.id && !editingControls ? fnPick : null;
+
+  const selectDevice = (id: string) => {
+    setSelectedInputId(null);
+    setStray(null);
+    setCheck(null);
+    setFnPick(null);
+    setLatestLitId(null);
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params);
+      next.set("device", id);
+      return next;
+    }, { replace: true });
+  };
+
+  // What the device's input sends lights its controls -- and only lights
+  // them: the player opens one with its Edit button, so turning a knob to
+  // find it never takes the list away. While controls are being described,
+  // a message no control answers becomes a new one; otherwise it is shown as
+  // such, so a knob in another bank is not a mystery.
+  const deviceRef = useRef(device);
+  const learningRef = useRef(editingControls);
+  const checkingRef = useRef(false);
+  const pickingRef = useRef(false);
+  useEffect(() => {
+    deviceRef.current = device;
+    learningRef.current = editingControls;
+    checkingRef.current = activeCheck !== null;
+    pickingRef.current = activePick !== null;
+  }, [device, editingControls, activeCheck, activePick]);
+  // The Fn button pressed or released: the host is asked again, a moment
+  // later, whether the layer is open -- a tap latches only once released.
+  const fnRead = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const unsubscribe = subscribeMidiActivity((events) => {
+      const current = deviceRef.current;
+      if (!current?.source) return;
+      const sourceId = current.source.id;
+      const now = performance.now();
+      let changed = false;
+      let fnHeard = false;
+      let heard: ControllerInput[] = [];
+      const checked: MidiActivityEvent[] = [];
+      for (const event of events) {
+        if (event.source.id !== sourceId) continue;
+        if (checkingRef.current) checked.push(event);
+        if (pickingRef.current) {
+          const found = fnCandidate(event, current.inputs);
+          if (found) {
+            setFnPick((previous) =>
+              previous && previous.deviceId === current.id
+                ? "input" in found
+                  ? { deviceId: current.id, candidate: found.input }
+                  : { ...previous, problem: found.problem }
+                : previous,
+            );
+          }
+        }
+        const input = inputForActivity(event, [...current.inputs, ...heard]);
+        if (input) {
+          if (isModifierInput(current.map, input)) fnHeard = true;
+          litUntil.current.set(input.id, now + LIT_MS);
+          changed = true;
+          setStray(null);
+          setLatestLitId(input.id);
+          continue;
+        }
+        const unknown = inputFromActivity(event);
+        if (!unknown) continue;
+        if (learningRef.current) {
+          heard = withLearntInput(heard, unknown);
+          litUntil.current.set(unknown.id, now + LIT_MS);
+          changed = true;
+          setLatestLitId(unknown.id);
+        } else {
+          setStray(inputMessageLabel(unknown));
+        }
+      }
+      if (heard.length > 0) {
+        const add = (inputs: ControllerInput[]) =>
+          heard.reduce((list, input) => withLearntInput(list, input), inputs);
+        if (current.unknown) {
+          setLearnt((previous) => new Map(previous).set(sourceId, add(previous.get(sourceId) ?? [])));
+        } else {
+          setControlsDraft((previous) =>
+            previous && previous.deviceId === current.id ? { ...previous, inputs: add(previous.inputs) } : previous,
+          );
+        }
+      }
+      if (checked.length > 0) {
+        setCheck((previous) =>
+          previous && previous.deviceId === current.id
+            ? recordCheckEvents(previous, checked, current.inputs)
+            : previous,
+        );
+      }
+      if (changed) setLit(new Set(litUntil.current.keys()));
+      if (fnHeard) {
+        window.clearTimeout(fnRead.current);
+        fnRead.current = window.setTimeout(() => void load().catch(() => undefined), 120);
+      }
+    });
+    const sweep = window.setInterval(() => {
+      const now = performance.now();
+      let changed = false;
+      for (const [id, until] of litUntil.current) {
+        if (until <= now) {
+          litUntil.current.delete(id);
+          changed = true;
+        }
+      }
+      if (changed) setLit(new Set(litUntil.current.keys()));
+    }, 100);
+    return () => {
+      unsubscribe();
+      window.clearInterval(sweep);
+      window.clearTimeout(fnRead.current);
+    };
+  }, [load]);
+
+  const replaceMap = (map: ControllerMap) =>
+    setLoaded((current) =>
+      current
+        ? {
+            ...current,
+            maps: [
+              ...current.maps.filter((candidate) => candidate.controller_id !== map.controller_id),
+              // A map with a Fn button and nothing mapped yet is still kept.
+              ...(map.plugins.length > 0 || map.modifier ? [map] : []),
+            ],
+            // Saved by the player, it is theirs now.
+            factoryUntouched: current.factoryUntouched.filter((id) => id !== map.controller_id),
+          }
+        : current,
+    );
+
+  const commit = async (next: ControllerMap) => {
+    const saved = await saveControllerMap(next);
+    replaceMap(saved ?? next);
+  };
+
+  /** The Fn button changed from its card: its mode, or none at all. */
+  const changeFn = async (next: ControllerMap): Promise<boolean> => {
+    setBusy("fn");
+    setNotice(null);
+    try {
+      await commit(next);
+      return true;
+    } catch (reason) {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not change the Fn button." });
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** The controls being described, changed: learnt ones or a draft's. */
+  const changeControls = (change: (inputs: ControllerInput[]) => ControllerInput[]) => {
+    if (!device) return;
+    if (device.unknown && device.source) {
+      const sourceId = device.source.id;
+      setLearnt((previous) => new Map(previous).set(sourceId, change(previous.get(sourceId) ?? [])));
+    } else {
+      setControlsDraft((previous) =>
+        previous && previous.deviceId === device.id ? { ...previous, inputs: change(previous.inputs) } : previous,
+      );
+    }
+  };
+
+  const saveControls = async (name: string, vendor: string) => {
+    if (!device?.source) return;
+    setBusy("controls");
+    setNotice(null);
+    try {
+      const saved = await saveUserController({
+        ...(device.unknown ? {} : { controller_id: device.id }),
+        name,
+        ...(vendor ? { vendor } : {}),
+        endpoint_name: device.source.name,
+        inputs: device.inputs,
+      });
+      if (device.unknown) {
+        const sourceId = device.source.id;
+        setLearnt((previous) => {
+          const next = new Map(previous);
+          next.delete(sourceId);
+          return next;
+        });
+      }
+      setControlsDraft(null);
+      setSelectedInputId(null);
+      packagesRead.current = false;
+      await load().catch(() => undefined);
+      selectDevice(saved.controller_id);
+      setNotice({
+        tone: "success",
+        text: `${name} saved. RackForge attaches it to ${device.source.name} in a moment.`,
+      });
+    } catch (reason) {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not save the controller." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** The player's answer to a package asking to talk to its controller. */
+  const answerOutput = async (allow: boolean) => {
+    if (!device?.package) return;
+    const packageId = device.package.id;
+    setBusy("output");
+    setNotice(null);
+    try {
+      const response = await hostJson<{ output?: ControllerOutput }>(
+        `/api/v1/controllers/${encodeURIComponent(packageId)}/output`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ allow }),
+        },
+      );
+      const output = response.output;
+      if (output) {
+        setLoaded((current) =>
+          current
+            ? {
+                ...current,
+                packages: current.packages.map((entry) => (entry.id === packageId ? { ...entry, output } : entry)),
+              }
+            : current,
+        );
+      }
+      setNotice({
+        tone: "success",
+        text: allow
+          ? device.connected
+            ? `${device.name} hears its package's messages now.`
+            : `${device.name} hears its package's messages when it connects.`
+          : `Nothing more is sent to ${device.name}.`,
+      });
+    } catch (reason) {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not save the answer." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // The check's report, for the package's SOURCES.md: copied where the page
+  // may write the clipboard (a secure page), saved as a file everywhere.
+  const canCopyReport = typeof navigator !== "undefined" && Boolean(navigator.clipboard) && window.isSecureContext;
+  const copyReport = async () => {
+    if (!device || !activeCheck) return;
+    try {
+      await navigator.clipboard.writeText(checkReport(device, activeCheck));
+      setNotice({ tone: "success", text: "Report copied." });
+    } catch {
+      setNotice({ tone: "error", text: "Could not copy the report. Save it instead." });
+    }
+  };
+  const saveReport = async () => {
+    if (!device || !activeCheck) return;
+    const file_name = `${device.id.replace(/[^a-z0-9._-]+/gi, "-")}-check.md`;
+    try {
+      await savePortableTextFile({ file_name, mime_type: "text/markdown", text: checkReport(device, activeCheck) });
+      setNotice({ tone: "success", text: `${file_name} saved.` });
+    } catch (reason) {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not save the report." });
+    }
+  };
+
+  const exportMap = async () => {
+    if (!device?.map) return;
+    setBusy("export");
+    setNotice(null);
+    try {
+      const { file_name, file } = await exportControllerMap(device.id);
+      await savePortableTextFile({
+        file_name,
+        mime_type: "application/vnd.rackforge.map+json",
+        text: JSON.stringify(file, null, 2),
+      });
+      setNotice({ tone: "success", text: `${file_name} saved.` });
+    } catch (reason) {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not export the map." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const importText = async (fileName: string, text: string) => {
+    setBusy("import");
+    setNotice(null);
+    try {
+      if (!fileName.toLowerCase().endsWith(".rfmap")) throw new Error("Choose an .rfmap file.");
+      if (!text || new TextEncoder().encode(text).byteLength > MAX_RFMAP_BYTES) {
+        throw new Error("The map file is empty or larger than 4 MiB.");
+      }
+      const file = JSON.parse(text) as RfMapFile;
+      if (file?.format !== "org.rackforge.map" || !file.map?.controller_id) {
+        throw new Error("This is not a RackForge controller map.");
+      }
+      const map = await importControllerMap(file);
+      replaceMap(map);
+      selectDevice(map.controller_id);
+      setNotice({ tone: "success", text: `Map for ${map.controller_name} imported.` });
+    } catch (reason) {
+      setNotice({
+        tone: "error",
+        text: reason instanceof SyntaxError
+          ? "The map file is not valid JSON."
+          : reason instanceof Error ? reason.message : "Could not import the map.",
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const chooseImport = () => {
+    if (isNativeHost() || isDesktopHost()) {
+      setBusy("import");
+      readNativeTextFile({ extensions: ["rfmap"], maximum_bytes: MAX_RFMAP_BYTES })
+        .then(({ file_name, text }) => importText(file_name, text))
+        .catch((reason: Error) => {
+          setNotice({ tone: "error", text: reason.message });
+          setBusy(null);
+        });
+      return;
+    }
+    fileInput.current?.click();
+  };
+
+  const heading = (
+    <PageHeading
+      title="Controllers"
+      detail="Move a control to find it, then choose what it does in each plugin."
+    />
+  );
+
+  if (!loaded) {
+    return (
+      <>
+        {heading}
+        {loadError ? (
+          <AsyncNotice tone="error" title="Could not read the controllers">
+            {loadError} RackForge tries again on its own.
+          </AsyncNotice>
+        ) : (
+          <RfLoader
+            label="Controllers"
+            detail={connection === "online" ? "Reading the controllers and their maps…" : "Waiting for RackForge…"}
+            size="medium"
+          />
+        )}
+      </>
+    );
+  }
+
+  const showDetail = Boolean(selectedInput) && phone;
+  const groups = [...new Set((device?.inputs ?? []).flatMap((input) => (input.group ? [input.group] : [])))];
+  const canEditControls = Boolean(
+    keepsMaps && device && !device.unknown && isUserController(device.id) && device.package && device.source,
+  );
+
+  return (
+    <>
+      {heading}
+      {!keepsMaps || notice ? (
+        <div className="controllers-notices">
+          {keepsMaps ? null : (
+            <AsyncNotice tone="info" title="No maps kept here">
+              This edition shows a controller's controls. RackForge on a computer, a phone or a Raspberry
+              Pi keeps what you map them to.
+            </AsyncNotice>
+          )}
+          {notice ? (
+            <AsyncNotice tone={notice.tone} title={notice.text} onDismiss={() => setNotice(null)} />
+          ) : null}
+        </div>
+      ) : null}
+
+      {devices.length === 0 ? (
+        <section className="settings-card controller-empty">
+          <h2>No controller yet</h2>
+          <p>
+            Plug in a MIDI controller and enable it in <Link to="/settings">Settings · Audio &amp; MIDI</Link>.
+            It appears here as soon as RackForge hears it.
+          </p>
+          {keepsMaps ? (
+            <button type="button" className="secondary-button" disabled={busy !== null} onClick={chooseImport}>
+              Import a map…
+            </button>
+          ) : null}
+        </section>
+      ) : device ? (
+        <section className="controllers-workspace">
+          <header className="controllers-toolbar">
+            <label className="controllers-device">
+              <span>Controller</span>
+              <select value={device.id} disabled={busy === "controls"} onChange={(event) => selectDevice(event.target.value)}>
+                {devices.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                    {candidate.unknown
+                      ? " · new"
+                      : candidate.connected ? "" : candidate.orphaned ? " · package removed" : " · not connected"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className={`controllers-status${device.connected ? " connected" : ""}`}>
+              <i aria-hidden="true" />
+              {device.unknown
+                ? device.connected ? "No package knows this controller yet" : "This input is not connected"
+                : device.connected
+                  ? `Listening on ${device.source?.name ?? "its input"}${device.identified ? " · recognised by its identity" : ""}`
+                  : device.orphaned
+                    ? "Its package is no longer installed"
+                    : "Not connected: mappings apply when it returns"}
+            </span>
+            <div className="controllers-actions">
+              {!device.unknown && device.connected && !editingControls && !activeCheck && device.inputs.length > 0 ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy !== null}
+                  title="Move every control and see whether each sends what its package says"
+                  onClick={() => {
+                    setStray(null);
+                    setFnPick(null);
+                    setCheck(startCheck(device.id));
+                  }}
+                >
+                  Check controls
+                </button>
+              ) : null}
+              {canEditControls && !editingControls ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setSelectedInputId(null);
+                    setControlsDraft({ deviceId: device.id, inputs: device.inputs });
+                  }}
+                >
+                  Edit controls
+                </button>
+              ) : null}
+              {device.package && !editingControls ? (
+                <Link className="secondary-button" to={`/controllers/${encodeURIComponent(device.id)}`}>
+                  Package
+                </Link>
+              ) : null}
+              {keepsMaps && !editingControls ? (
+                <>
+                  <button type="button" className="secondary-button" disabled={busy !== null} onClick={chooseImport}>
+                    {busy === "import" ? "Importing…" : "Import…"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy !== null || !device.map}
+                    onClick={() => void exportMap()}
+                  >
+                    {busy === "export" ? "Exporting…" : "Export"}
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </header>
+
+          {device.package?.output && !editingControls ? (
+            <ControllerOutputNotice
+              output={device.package.output}
+              shipped={device.package.trust === "official" || device.package.trust === "certified"}
+              canAnswer={keepsMaps}
+              busy={busy === "output"}
+              onAnswer={(allow) => void answerOutput(allow)}
+            />
+          ) : null}
+
+          {keepsMaps && !editingControls && (device.map?.modifier || device.inputs.some(isButtonInput)) ? (
+            <FnButtonCard
+              device={device}
+              open={loaded.fnOpen.includes(device.id)}
+              readOnly={!keepsMaps}
+              busy={busy === "fn"}
+              pick={activePick}
+              candidateMappings={activePick?.candidate ? mappingsForInput(device.map, activePick.candidate).length : 0}
+              onListen={() => {
+                setCheck(null);
+                setFnPick({ deviceId: device.id });
+              }}
+              onCancel={() => setFnPick(null)}
+              onConfirm={(input) => {
+                const map = device.map ?? emptyControllerMap(device.id, device.name);
+                void changeFn(withModifier(map, input, map.modifier?.mode)).then((saved) => {
+                  if (saved) setFnPick(null);
+                });
+              }}
+              onMode={(mode) => {
+                const map = device.map;
+                if (!map?.modifier) return;
+                void changeFn({ ...map, modifier: { ...map.modifier, mode } });
+              }}
+              onRemove={() => {
+                if (device.map) void changeFn(withModifier(device.map, null));
+              }}
+            />
+          ) : null}
+
+          {editingControls ? (
+            <section className="controllers-describe">
+              <div className="controllers-describe-copy">
+                <h2>{device.unknown ? "Tell RackForge about this controller" : "Change its controls"}</h2>
+                <p>
+                  Move every knob, fader, button and pad you want to use: each one appears in the list as it
+                  moves. Name them, then save. The controller becomes yours, and its controls can then be
+                  assigned to any plugin.
+                </p>
+              </div>
+              <UserControllerForm
+                key={device.id}
+                initialName={device.name}
+                initialVendor={device.vendor}
+                inputs={device.inputs}
+                saving={busy === "controls"}
+                existing={!device.unknown}
+                onSave={(name, vendor) => void saveControls(name, vendor)}
+                onCancel={device.unknown ? undefined : () => {
+                  setControlsDraft(null);
+                  setSelectedInputId(null);
+                }}
+              />
+            </section>
+          ) : null}
+
+          {activeCheck ? (
+            <ControllerCheckCard
+              device={device}
+              check={activeCheck}
+              canCopy={canCopyReport}
+              onCopy={() => void copyReport()}
+              onSave={() => void saveReport()}
+              onRestart={() => setCheck(startCheck(device.id))}
+              onStop={() => setCheck(null)}
+            />
+          ) : null}
+
+          {stray && device.connected && !editingControls && !activeCheck && !activePick ? (
+            <p className="controllers-stray" role="status">
+              {stray} is not one of the controls this package names.
+            </p>
+          ) : null}
+
+          {device.inputs.length === 0 ? (
+            <section className="settings-card controller-empty">
+              {editingControls ? (
+                <>
+                  <h2>Move a control</h2>
+                  <p>
+                    {device.connected
+                      ? `Nothing heard from ${device.source?.name ?? "this input"} yet. Turn a knob or press a button.`
+                      : "This input is not connected. Plug the controller in and enable it in Settings."}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2>{device.name} names no control</h2>
+                  <p>Its package lists no inputs to assign. A newer version of the package may; ask its author.</p>
+                </>
+              )}
+            </section>
+          ) : (
+            <div className={`controllers-panes${showDetail ? " detail" : ""}`}>
+              <ControllerInputList
+                device={device}
+                selectedId={selectedInputId}
+                lit={lit}
+                latestLitId={latestLitId}
+                playingPluginId={playingPluginId}
+                editLabel={editingControls ? "Name" : "Edit"}
+                check={activeCheck ?? undefined}
+                onSelect={setSelectedInputId}
+              />
+              {selectedInput && editingControls ? (
+                <InputEditor
+                  key={`${device.id}:${selectedInput.id}`}
+                  input={selectedInput}
+                  groups={groups}
+                  onClose={phone ? () => setSelectedInputId(null) : undefined}
+                  onChange={(input) =>
+                    changeControls((inputs) => inputs.map((candidate) => (candidate.id === input.id ? input : candidate)))
+                  }
+                  onRemove={() => {
+                    changeControls((inputs) => inputs.filter((candidate) => candidate.id !== selectedInput.id));
+                    setSelectedInputId(null);
+                  }}
+                />
+              ) : selectedInput ? (
+                <InputAssignments
+                  key={`${device.id}:${selectedInput.id}`}
+                  device={device}
+                  input={selectedInput}
+                  plugins={plugins}
+                  playingPluginId={playingPluginId}
+                  readOnly={!keepsMaps}
+                  onClose={phone ? () => setSelectedInputId(null) : undefined}
+                  onSaveMapping={async (plugin, mapping) => {
+                    if (!keepsMaps) throw new Error("This device does not keep controller maps.");
+                    await commit(
+                      withMapping(
+                        device.map ?? emptyControllerMap(device.id, device.name),
+                        { plugin_id: plugin.plugin_id, plugin_name: plugin.plugin_name },
+                        mapping,
+                      ),
+                    );
+                  }}
+                  onRemoveMapping={async (pluginId, mappingId) => {
+                    if (!device.map) return;
+                    await commit(withoutMapping(device.map, pluginId, mappingId));
+                  }}
+                  onSetModifier={keepsMaps
+                    ? async (input) => {
+                      const map = device.map ?? emptyControllerMap(device.id, device.name);
+                      await commit(withModifier(map, input, map.modifier?.mode));
+                    }
+                    : undefined}
+                />
+              ) : (
+                <section className="controller-input-detail controller-input-hint">
+                  <h2>{editingControls ? "Name the controls" : "Find a control"}</h2>
+                  <p>
+                    {editingControls
+                      ? "Each control you move joins the list and lights. Press Name on one to name it."
+                      : device.connected
+                        ? "Turn a knob, push a fader or press a button: its LED lights in the list. Press Edit on it to choose what it does."
+                        : "Press Edit on a control to choose what it does. Its LED lights when it moves, once the controller is connected."}
+                  </p>
+                </section>
+              )}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      <input
+        ref={fileInput}
+        className="visually-hidden"
+        type="file"
+        accept=".rfmap,application/json"
+        tabIndex={-1}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (!file) return;
+          if (file.size > MAX_RFMAP_BYTES) {
+            setNotice({ tone: "error", text: "The map file is larger than 4 MiB." });
+            return;
+          }
+          void file.text().then((text) => importText(file.name, text));
+        }}
+      />
+    </>
+  );
+}

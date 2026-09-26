@@ -102,9 +102,36 @@ try {
 }
 
 $nativeOutput = Join-Path $androidProject "app/build/generated/rust-jni/arm64-v8a"
+if (Test-Path -LiteralPath $nativeOutput) {
+    Remove-Item -LiteralPath $nativeOutput -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $nativeOutput | Out-Null
+$nativeLibrary = Join-Path $nativeOutput "librackforge_android.so"
 Copy-Item -LiteralPath (Join-Path $repository "target/aarch64-linux-android/release/librackforge_android_native.so") `
-    -Destination (Join-Path $nativeOutput "librackforge_android.so") -Force
+    -Destination $nativeLibrary -Force
+
+# Binaryen (wasm-opt, in the plugin runtime) is C++ and links the NDK's
+# shared C++ runtime, which Android does not provide: it travels in the APK
+# beside the library. Without it the app died on launch, unable to load
+# librackforge_android.so. Every library the runtime needs is then checked:
+# either Android provides it (the NDK carries a stub for it at the minimum
+# API level) or it is packaged here.
+$sysrootLib = Join-Path $ndkRoot "toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/aarch64-linux-android"
+Copy-Item -LiteralPath (Join-Path $sysrootLib "libc++_shared.so") `
+    -Destination (Join-Path $nativeOutput "libc++_shared.so") -Force
+$neededLibraries = & (Join-Path $ndkBin "llvm-readelf.exe") --needed-libs $nativeLibrary |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -match '^lib\S*\.so$' }
+if ($LASTEXITCODE -ne 0 -or -not $neededLibraries) {
+    throw "Could not list the libraries librackforge_android.so needs."
+}
+foreach ($needed in $neededLibraries) {
+    $systemStub = Join-Path $sysrootLib "26/$needed"
+    $packaged = Join-Path $nativeOutput $needed
+    if (-not (Test-Path -LiteralPath $systemStub) -and -not (Test-Path -LiteralPath $packaged)) {
+        throw "librackforge_android.so needs $needed, which neither Android nor the APK provides."
+    }
+}
 
 $webOutput = Join-Path $androidProject "app/build/generated/web-ui/rackforge"
 if (Test-Path -LiteralPath $webOutput) {
@@ -133,8 +160,28 @@ $defaultPlugin = ""
 if ($Edition -eq "Standard") {
     $defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
     if (-not $defaultPlugin) {
-        $candidate = Join-Path $repository "dist/bundled-plugins/RF-Concert-Grand.rfplugin"
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $defaultPlugin = $candidate }
+        # The Standard edition opens on the Concert Grand. It is built from
+        # this repository rather than fetched, so a local build makes it when
+        # it is missing -- skipping it silently shipped an APK without the
+        # piano, which then opened on whichever plugin sorted first.
+        $defaultPlugin = Join-Path $repository "dist/bundled-plugins/RF-Concert-Grand.rfplugin"
+        if (-not (Test-Path -LiteralPath $defaultPlugin -PathType Leaf)) {
+            Push-Location $repository
+            try {
+                & rustup target add wasm32-unknown-unknown
+                if ($LASTEXITCODE -ne 0) { throw "Could not install the WebAssembly Rust target." }
+                & cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+                if ($LASTEXITCODE -ne 0) { throw "Concert Grand WebAssembly build failed." }
+                New-Item -ItemType Directory -Force (Split-Path -Parent $defaultPlugin) | Out-Null
+                & cargo run --release -p rackforge-store -- pack-wasm `
+                    plugins/concert-grand/package `
+                    target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
+                    $defaultPlugin
+                if ($LASTEXITCODE -ne 0) { throw "Concert Grand package build failed." }
+            } finally {
+                Pop-Location
+            }
+        }
     }
     if ($defaultPlugin) {
         if (-not (Test-Path -LiteralPath $defaultPlugin -PathType Leaf)) {

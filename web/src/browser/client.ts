@@ -949,7 +949,10 @@ export function isKeyLabMainEndpoint(
   const maker = (manufacturer ?? "").trim().toLowerCase();
   if (
     !folded ||
-    !["keylab", "kl essential"].some((part) => folded.includes(part)) ||
+    // This keyboard alone: "keylab" also names a KeyLab mkII's or mk3's main
+    // port and the first KeyLab Essential's, which speak other protocols.
+    !["keylab essential", "kl essential"].some((part) => folded.includes(part)) ||
+    !folded.includes("mk3") ||
     ["mcu", "hui", "dinthru", "alv"].some((part) => folded.includes(part))
   ) {
     return false;
@@ -960,11 +963,14 @@ export function isKeyLabMainEndpoint(
   // not the desktop port label. The KeyLab's main endpoint therefore appears
   // simply as "KeyLab Essential 61 mk3". Android preserves port ordering, so
   // resolveKeyLabTransport pairs the first matching input and output.
-  const androidProductNames = new Set([
-    "keylab essential 61 mk3",
-    "arturia keylab essential 61 mk3",
-    "kl essential 61 mk3",
-  ]);
+  // The 49, 61 and 88 have one panel and one display.
+  const androidProductNames = new Set(
+    ["49", "61", "88"].flatMap((size) => [
+      `keylab essential ${size} mk3`,
+      `arturia keylab essential ${size} mk3`,
+      `kl essential ${size} mk3`,
+    ]),
+  );
   return androidProductNames.has(folded) || maker.includes("arturia");
 }
 

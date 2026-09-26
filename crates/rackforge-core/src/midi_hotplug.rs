@@ -94,6 +94,26 @@ impl SupervisedMidiSources {
         self.sources.iter().find(|source| source.key == key)
     }
 
+    pub fn knows(&self, id: &MidiSourceId) -> bool {
+        self.sources.iter().any(|source| &source.id == id)
+    }
+
+    /// Takes on a keyboard plugged in while the host runs, under the key the
+    /// shared registry gave it. It starts disconnected, so the next
+    /// reconciliation connects it through the ordinary path.
+    pub fn adopt(&mut self, source: SupervisedSource) -> Result<(), MidiHotplugStateError> {
+        if self.sources.iter().any(|known| known.key == source.key) {
+            return Err(MidiHotplugStateError::DuplicateSourceKey(source.key.get()));
+        }
+        if self.knows(&source.id) {
+            return Err(MidiHotplugStateError::DuplicateSourceId(
+                source.id.to_string(),
+            ));
+        }
+        self.sources.push(source);
+        Ok(())
+    }
+
     /// Commits a transition only after its external operation succeeded.
     pub fn transition_succeeded(
         &mut self,
@@ -124,11 +144,11 @@ pub enum MidiHotplugStateError {
 
 /// Compares the supervised set against the devices currently enumerated.
 ///
-/// Only devices already known to the registry are acted on. A keyboard that
-/// appears mid-session cannot be adopted here because the compiled routes were
-/// built against the registry at startup, and inventing a key for it would
-/// route its notes nowhere. Reconnecting a *known* device is precisely the case
-/// where the original key still applies.
+/// Only devices already supervised are acted on here. A keyboard that appears
+/// mid-session is adopted first -- registered under a new key, which the play
+/// route hears because it listens to every performance source -- and is then
+/// connected by this same comparison. Reconnecting a *known* device keeps the
+/// key its links were compiled against.
 pub fn reconcile(
     supervised: &[SupervisedSource],
     present: &[MidiSourceId],
@@ -256,19 +276,73 @@ pub fn stable_alsa_source_id(name: &str) -> Result<MidiSourceId, anyhow::Error> 
     MidiSourceId::new(format!("alsa.{slug}-{hash:016x}")).map_err(Into::into)
 }
 
-/// Whether a port name is a keyboard RackForge should play from.
+/// The inputs controller packages claim as their performance input, set once
+/// at startup from the packages the host knows.
+static CLAIMED_INPUTS: std::sync::OnceLock<Vec<rackforge_controller_package::EndpointMatcher>> =
+    std::sync::OnceLock::new();
+
+/// Takes the performance inputs of these packages as ports to read,
+/// whatever they are called. Only the first call counts.
+pub fn claim_controller_inputs(
+    packages: &[rackforge_controller_package::ControllerPackageManifest],
+) {
+    let matchers = packages
+        .iter()
+        .flat_map(|package| &package.devices)
+        .flat_map(|device| &device.endpoints)
+        .filter(|endpoint| {
+            endpoint.role == rackforge_controller_package::EndpointRole::PerformanceInput
+        })
+        .cloned()
+        .collect();
+    let _ = CLAIMED_INPUTS.set(matchers);
+}
+
+/// Whether RackForge reads a MIDI input: a keyboard it plays from, or a
+/// port a controller package claims as its own -- the DAW port an Oxygen
+/// Pro's knobs send on, which a name alone would leave out.
+pub fn is_played_midi_input(name: &str) -> bool {
+    is_performance_midi_input(name)
+        || CLAIMED_INPUTS.get().is_some_and(|matchers| {
+            !name.to_ascii_lowercase().contains("rackforge")
+                && matchers.iter().any(|matcher| matcher.matches(name))
+        })
+}
+
+/// Whether a port name is a keyboard RackForge should play from: a port named
+/// as MIDI, or a USB device's first port whatever its maker called it. A
+/// kernel that names ports after the device's own jacks calls a Korg nanoKEY2
+/// "nanoKEY2 _ CTRL", with no "MIDI" in it.
 ///
 /// Excludes the loopback, the DIN pass-through and the control-surface ports a
 /// controller also exposes: those carry surface traffic, not performance notes.
 pub fn is_performance_midi_input(name: &str) -> bool {
     let folded = name.to_ascii_lowercase();
-    folded.contains("midi")
+    (folded.contains("midi") || is_first_device_port(name) && !folded.contains("daw"))
         && !folded.contains("midi through")
         && !folded.contains("dinthru")
         && !folded.contains("mcu")
         && !folded.contains("hui")
         && !folded.contains(" alv")
         && !folded.contains("rackforge")
+}
+
+/// Whether the ALSA address ending a port name is a sound card's first port:
+/// client 16-127, port 0. Clients below 16 are the system's, Midi Through
+/// among them; from 128 on they are programs'.
+fn is_first_device_port(name: &str) -> bool {
+    let Some((_, address)) = name.rsplit_once(' ') else {
+        return false;
+    };
+    let Some((client, port)) = address.split_once(':') else {
+        return false;
+    };
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    digits(client)
+        && port == "0"
+        && client
+            .parse::<u32>()
+            .is_ok_and(|client| (16..128).contains(&client))
 }
 
 #[cfg(target_os = "linux")]
@@ -278,11 +352,14 @@ pub use supervisor::{DEFAULT_POLL_INTERVAL, spawn};
 mod supervisor {
     use super::{
         PanicScope, SupervisedMidiSources, SupervisedSource, SupervisorAction,
-        is_performance_midi_input, panic_events, stable_alsa_source_id,
+        is_played_midi_input, panic_events, stable_alsa_source_id,
     };
     use anyhow::{Context, Result};
     use midir::{Ignore, MidiInput, MidiInputConnection};
-    use rackforge_midi_api::{IngressMidiEvent, MidiSourceKey};
+    use rackforge_midi_api::{
+        IngressMidiEvent, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
+        SharedMidiSourceRegistry,
+    };
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::sync::mpsc::SyncSender;
@@ -306,6 +383,7 @@ mod supervisor {
         observer: Option<SyncSender<IngressMidiEvent>>,
         connected_sources: Arc<Mutex<BTreeSet<u32>>>,
         supervised: Vec<SupervisedSource>,
+        registry: SharedMidiSourceRegistry,
         interval: Duration,
     ) -> Result<JoinHandle<()>> {
         // Resolved once, off the reconnection path, so a diagnosis run cannot
@@ -315,11 +393,6 @@ mod supervisor {
             "MIDI_SUPERVISOR_READY panic_scope={scope:?} interval_ms={}",
             interval.as_millis()
         );
-        // A machine that started with no keyboard compiled its routes without
-        // one, and a route cannot grow a source it was not built against. So
-        // the arrival of a keyboard is the one event this thread cannot
-        // absorb: it asks for the engine to be started again instead.
-        let started_without_keyboard = supervised.is_empty();
         let mut supervised =
             SupervisedMidiSources::new(supervised).context("validating supervised MIDI sources")?;
         thread::Builder::new()
@@ -327,20 +400,20 @@ mod supervisor {
             .spawn(move || {
                 let mut connections: BTreeMap<u32, MidiInputConnection<()>> = BTreeMap::new();
                 loop {
-                    match present_source_ids() {
+                    match present_sources() {
                         Ok(present) => {
-                            if started_without_keyboard && !present.is_empty() {
-                                // Supervised by systemd, which brings the
-                                // engine straight back with the keyboard in
-                                // its registry. This is the same recovery the
-                                // old refuse-to-start loop performed, except
-                                // the engine was playing in the meantime.
-                                println!(
-                                    "MIDI_PERFORMANCE_INPUT_ARRIVED sources={present:?} \
-                                     action=restart-to-adopt"
-                                );
-                                std::process::exit(0);
+                            // A keyboard plugged in while the engine runs is
+                            // taken on, not left out until a restart: the
+                            // play route hears every performance source, and
+                            // the control server compiles the links again
+                            // when the registry grows.
+                            for (id, name) in &present {
+                                if supervised.knows(id) {
+                                    continue;
+                                }
+                                adopt(&registry, &mut supervised, id, name);
                             }
+                            let present = present.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
                             for action in supervised.reconcile(&present) {
                                 apply(
                                     action,
@@ -365,6 +438,33 @@ mod supervisor {
                 }
             })
             .context("spawning RackForge MIDI supervisor")
+    }
+
+    fn adopt(
+        registry: &SharedMidiSourceRegistry,
+        supervised: &mut SupervisedMidiSources,
+        id: &MidiSourceId,
+        name: &str,
+    ) {
+        let descriptor = MidiSourceDescriptor {
+            id: id.clone(),
+            name: name.to_owned(),
+            primary: false,
+        };
+        match registry.adopt(descriptor) {
+            Ok(key) => match supervised.adopt(SupervisedSource {
+                key,
+                id: id.clone(),
+                connected: false,
+            }) {
+                Ok(()) => println!(
+                    "MIDI_SOURCE_ADOPTED source={} id={id} name={name:?}",
+                    key.get()
+                ),
+                Err(error) => eprintln!("MIDI_SOURCE_ADOPT_FAILED id={id} error={error}"),
+            },
+            Err(error) => eprintln!("MIDI_SOURCE_ADOPT_FAILED id={id} error={error}"),
+        }
     }
 
     fn apply(
@@ -447,17 +547,19 @@ mod supervisor {
         );
     }
 
-    fn present_source_ids() -> Result<Vec<rackforge_midi_api::MidiSourceId>> {
+    /// The performance inputs present, by stable identity, with the name
+    /// each was found under.
+    fn present_sources() -> Result<Vec<(MidiSourceId, String)>> {
         let scan = MidiInput::new("rackforge-core-scan")?;
-        let mut present = Vec::new();
+        let mut present: Vec<(MidiSourceId, String)> = Vec::new();
         for port in scan.ports() {
             let name = scan.port_name(&port)?;
-            if !is_performance_midi_input(&name) {
+            if !is_played_midi_input(&name) {
                 continue;
             }
             let id = stable_alsa_source_id(&name)?;
-            if !present.contains(&id) {
-                present.push(id);
+            if !present.iter().any(|(known, _)| known == &id) {
+                present.push((id, name));
             }
         }
         Ok(present)
@@ -479,7 +581,7 @@ mod supervisor {
             .find(|port| {
                 midi.port_name(port)
                     .ok()
-                    .filter(|name| is_performance_midi_input(name))
+                    .filter(|name| is_played_midi_input(name))
                     .and_then(|name| stable_alsa_source_id(&name).ok())
                     .is_some_and(|candidate| &candidate == id)
             })
@@ -488,7 +590,12 @@ mod supervisor {
             &port,
             &format!("rackforge-core-input-{}", key.get()),
             move |_timestamp, message, _| {
-                if let Ok(packet) = rackforge_midi_api::MidiPacket::new(0, message) {
+                // A keyboard's Play may send MIDI Start: it enters for the
+                // controller's reserved buttons, never for an instrument.
+                let packet = rackforge_midi_api::MidiPacket::new(0, message)
+                    .ok()
+                    .or_else(|| rackforge_midi_api::MidiPacket::transport_realtime(0, message));
+                if let Some(packet) = packet {
                     let ingress = IngressMidiEvent {
                         source: key,
                         packet,
@@ -559,6 +666,47 @@ mod tests {
     fn a_device_that_stays_absent_is_released_only_once() {
         let supervised = vec![source(0, "alsa.keylab", false)];
         assert!(reconcile(&supervised, &[]).is_empty());
+    }
+
+    /// A keyboard plugged in while the engine runs is taken on under a new
+    /// key, connected by the next comparison, and never taken on twice.
+    #[test]
+    fn a_keyboard_plugged_in_later_is_adopted_then_connected() {
+        let mut supervised =
+            SupervisedMidiSources::new(vec![source(0, "alsa.keylab", true)]).unwrap();
+        let launchkey = MidiSourceId::new("alsa.launchkey").unwrap();
+        assert!(!supervised.knows(&launchkey));
+        supervised
+            .adopt(SupervisedSource {
+                key: MidiSourceKey::new(2),
+                id: launchkey.clone(),
+                connected: false,
+            })
+            .unwrap();
+        assert!(supervised.knows(&launchkey));
+        let present = [MidiSourceId::new("alsa.keylab").unwrap(), launchkey.clone()];
+        assert_eq!(
+            supervised.reconcile(&present),
+            vec![SupervisorAction::Connect(MidiSourceKey::new(2))]
+        );
+        assert!(
+            supervised
+                .adopt(SupervisedSource {
+                    key: MidiSourceKey::new(3),
+                    id: launchkey,
+                    connected: false,
+                })
+                .is_err()
+        );
+        assert!(
+            supervised
+                .adopt(SupervisedSource {
+                    key: MidiSourceKey::new(0),
+                    id: MidiSourceId::new("alsa.other").unwrap(),
+                    connected: false,
+                })
+                .is_err()
+        );
     }
 
     #[test]
@@ -926,5 +1074,47 @@ mod tests {
         ));
         assert!(!is_performance_midi_input("KL Essential 61 mk3 ALV 28:3"));
         assert!(!is_performance_midi_input("Midi Through MIDI 0:1"));
+    }
+
+    /// A device whose first port is not named MIDI is still played: Korg's
+    /// nano series, named after their jacks. Its other ports, a DAW port, the
+    /// system's clients and programs' ports stay out.
+    #[test]
+    fn a_devices_first_port_is_played_whatever_it_is_called() {
+        assert!(is_performance_midi_input(
+            "nanoKEY2:nanoKEY2 nanoKEY2 _ CTRL 36:0"
+        ));
+        assert!(is_performance_midi_input(
+            "nanoKONTROL2:nanoKONTROL2 _ CTRL 20:0"
+        ));
+        assert!(!is_performance_midi_input(
+            "Launchpad X:Launchpad X LPX DAW Out 24:0"
+        ));
+        assert!(!is_performance_midi_input(
+            "Launchkey MK3 49:Launchkey MK3 49 LKMK3 DAW Out 24:1"
+        ));
+        assert!(!is_performance_midi_input("nanoKEY2:nanoKEY2 _ CTRL 36:1"));
+        assert!(!is_performance_midi_input(
+            "Midi Through:Midi Through Port-0 14:0"
+        ));
+        assert!(!is_performance_midi_input("System:Timer 0:0"));
+        assert!(!is_performance_midi_input("VMPK Output:out 130:0"));
+        assert!(!is_performance_midi_input("nanoKEY2 _ CTRL"));
+    }
+
+    /// A port a controller package claims is read though its name would
+    /// leave it out; the surface ports nobody claims stay out.
+    #[test]
+    fn a_port_a_controller_package_claims_is_read() {
+        claim_controller_inputs(&crate::controller_layouts::known_controller_packages(None));
+        assert!(is_played_midi_input(
+            "Oxygen Pro 49:Oxygen Pro 49 Mackie/HUI 24:2"
+        ));
+        assert!(is_played_midi_input("KL Essential 61 mk3 MIDI 28:0"));
+        assert!(!is_played_midi_input("KL Essential 61 mk3 MCU/HUI 28:2"));
+        assert!(!is_played_midi_input(
+            "Oxygen Pro 49:Oxygen Pro 49 Editor 24:3"
+        ));
+        assert!(!is_played_midi_input("Midi Through MIDI 0:1"));
     }
 }

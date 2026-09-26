@@ -15,10 +15,12 @@ use crate::{
     PARALLEL_ABI_VERSION_V1, ParallelBlockPlan, ParallelLayout, ParallelPlanEntry, ParameterEvent,
     RuntimeLimits,
 };
+use std::time::Duration;
+
 use anyhow::{Context, Result, bail};
 use std::fs::File;
 use std::io::{BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use wasmtime::{
     Cache, CacheConfig, Config, Engine, Instance, Memory, Module, OptLevel, Store, StoreLimits,
     StoreLimitsBuilder, TypedFunc,
@@ -28,9 +30,79 @@ struct HostState {
     limits: StoreLimits,
 }
 
+/// How often the epoch advances for the engine that does not meter fuel.
+///
+/// The deadline a real-time call is given is counted in these ticks, so the
+/// period sets how precisely a runaway call is cut off. A millisecond is
+/// far finer than any block it could overrun and costs one sleeping thread.
+const EPOCH_TICK: Duration = Duration::from_millis(1);
+/// How many ticks a real-time call may run for before it is cut off.
+///
+/// Generous next to any block a plugin is asked to render -- a 1024-frame
+/// block at 44.1 kHz is 23 ms -- and short enough that a call which has
+/// stopped making progress does not hold the audio thread for long.
+const REALTIME_EPOCH_DEADLINE: u64 = 200;
+/// The same, for the control calls, which are allowed to be slow: loading a
+/// state, building a preset catalogue, rebuilding coefficients.
+const CONTROL_EPOCH_DEADLINE: u64 = 60_000;
+
+/// The export a plugin answers to say it spends a real-time budget.
+///
+/// Its PRESENCE says nothing: the SDK exports it for every processor and
+/// answers 0 from the default body. Its ANSWER is the signal, which is why
+/// deciding costs an instantiation rather than a look at a name list.
+const BUDGET_EXPORT: &str = "rackforge_set_realtime_budget";
+/// What the probe offers, which is more than any machine will grant.
+///
+/// A processor that scales itself says yes to anything; one that does not
+/// says no to everything. The number only has to be a number.
+const BUDGET_PROBE_FUEL: i64 = i64::MAX;
+
+/// A component as binaryen's `-O3` leaves it, for packaging tools: what the
+/// host would otherwise do on every machine the plugin is installed on, done
+/// once where it is built. The component must be valid WebAssembly.
+pub fn optimize_component(bytes: &[u8], scratch: &Path) -> Result<Vec<u8>> {
+    let engine = Engine::new(&Config::new())
+        .map_err(|error| anyhow::anyhow!("creating a validating engine: {error}"))?;
+    Module::validate(&engine, bytes)
+        .map_err(|error| anyhow::anyhow!("the component is not valid WebAssembly: {error}"))?;
+    let optimized =
+        crate::optimize::optimize(bytes, scratch).map_err(|error| anyhow::anyhow!(error))?;
+    Module::validate(&engine, &optimized)
+        .map_err(|error| anyhow::anyhow!("the optimised component did not validate: {error}"))?;
+    Ok(optimized)
+}
+
+/// Whether a valid component uses any SIMD instruction.
+///
+/// Asked the way a validator would: the component is valid with SIMD and
+/// either still valid without it -- it uses none -- or not. A component with
+/// no SIMD at all leaves the largest measured lever unpulled: sixteen points
+/// of native speed on the Concert Grand (see `optimize`).
+pub fn component_uses_simd(bytes: &[u8]) -> Result<bool> {
+    let with = Engine::new(&Config::new())
+        .map_err(|error| anyhow::anyhow!("creating a validating engine: {error}"))?;
+    Module::validate(&with, bytes)
+        .map_err(|error| anyhow::anyhow!("the component is not valid WebAssembly: {error}"))?;
+    let mut config = Config::new();
+    config.wasm_relaxed_simd(false);
+    config.wasm_simd(false);
+    let without = Engine::new(&config)
+        .map_err(|error| anyhow::anyhow!("creating a validating engine: {error}"))?;
+    Ok(Module::validate(&without, bytes).is_err())
+}
+
 pub struct PortableEngine {
-    engine: Engine,
+    /// For plugins that take a budget: fuel, which is the unit the budget is
+    /// denominated in and cannot be had any other way.
+    metered: Engine,
+    /// For everyone else: an epoch the host advances, which interrupts a
+    /// runaway call without a counter in every basic block.
+    interrupted: Engine,
     limits: RuntimeLimits,
+    /// Where optimised components are kept; `None` compiles every component
+    /// as shipped (see `crate::optimize`).
+    cache_directory: Option<PathBuf>,
 }
 
 impl PortableEngine {
@@ -51,30 +123,106 @@ impl PortableEngine {
     }
 
     fn configured(limits: RuntimeLimits, cache_directory: Option<&Path>) -> Result<Self> {
-        let mut config = Config::new();
-        config.cranelift_opt_level(OptLevel::Speed);
-        config.consume_fuel(true);
-        config.wasm_multi_memory(false);
-        config.wasm_memory64(false);
-        if let Some(directory) = cache_directory {
-            let mut cache_config = CacheConfig::new();
-            cache_config.with_directory(directory);
-            config.cache(Some(Cache::new(cache_config).map_err(|error| {
-                anyhow::anyhow!("creating RackForge portable code cache: {error}")
-            })?));
-        }
+        let configure = |metered: bool| -> Result<Config> {
+            let mut config = Config::new();
+            config.cranelift_opt_level(OptLevel::Speed);
+            config.consume_fuel(metered);
+            config.epoch_interruption(!metered);
+            config.wasm_multi_memory(false);
+            config.wasm_memory64(false);
+            if let Some(directory) = cache_directory {
+                let mut cache_config = CacheConfig::new();
+                // Wasmtime's own directory, beside -- never around -- the
+                // optimised components: its cleaner removes whatever files in
+                // its directory it did not write itself.
+                cache_config.with_directory(directory.join("compiled"));
+                config.cache(Some(Cache::new(cache_config).map_err(|error| {
+                    anyhow::anyhow!("creating RackForge portable code cache: {error}")
+                })?));
+            }
+            Ok(config)
+        };
+        let engine = |metered: bool| -> Result<Engine> {
+            Engine::new(&configure(metered)?)
+                .map_err(|error| anyhow::anyhow!("creating RackForge WebAssembly engine: {error}"))
+        };
+        let interrupted = engine(false)?;
+        // One thread per host, sleeping. Wasmtime reads the epoch from the
+        // engine on the guest's side, so nothing here touches a Store and
+        // nothing here runs on the audio thread.
+        let ticking = interrupted.clone();
+        std::thread::Builder::new()
+            .name("rackforge-epoch".to_owned())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(EPOCH_TICK);
+                    ticking.increment_epoch();
+                }
+            })
+            .context("starting the RackForge epoch ticker")?;
         Ok(Self {
-            engine: Engine::new(&config).map_err(|error| {
-                anyhow::anyhow!("creating RackForge WebAssembly engine: {error}")
-            })?,
+            metered: engine(true)?,
+            interrupted,
             limits,
+            cache_directory: cache_directory.map(Path::to_path_buf),
         })
     }
 
+    /// The component this engine compiles for `bytes`: binaryen's optimised
+    /// form when there is a cache to keep it in, the original otherwise.
+    ///
+    /// Only an engine given a cache optimises. Optimising costs seconds, so it
+    /// is worth doing once per plugin version and kept -- not on every load,
+    /// which is what an engine without a cache would do.
+    fn optimized(&self, bytes: &[u8]) -> Option<Vec<u8>> {
+        let cache = self.cache_directory.as_deref()?;
+        if crate::optimize::disabled() {
+            return None;
+        }
+        let path = crate::optimize::cached_path(cache, bytes);
+        if let Ok(optimized) = std::fs::read(&path) {
+            return Some(optimized);
+        }
+        // Binaryen may end the process on a module it cannot read, rather
+        // than return an error, so it is only given modules the engine has
+        // already accepted. A module that fails here fails again, with the
+        // engine's own message, when the original is compiled.
+        Module::validate(&self.interrupted, bytes).ok()?;
+        let optimized =
+            crate::optimize::optimize(bytes, &cache.join("optimized").join("scratch")).ok()?;
+        Module::validate(&self.interrupted, &optimized).ok()?;
+        // A cache that cannot be written only means optimising again next
+        // time; the result is good either way.
+        let _ = crate::optimize::store(&path, &optimized);
+        Some(optimized)
+    }
+
     pub fn compile(&self, bytes: &[u8]) -> Result<PortableModule> {
-        let module = Module::from_binary(&self.engine, bytes).map_err(|error| {
-            anyhow::anyhow!("compiling RackForge WebAssembly component: {error}")
-        })?;
+        // The optimised component when there is one and it compiles; the
+        // component as shipped in every other case.
+        let optimized = self.optimized(bytes);
+        let bytes = match optimized.as_deref() {
+            Some(optimized) if Module::from_binary(&self.interrupted, optimized).is_ok() => {
+                optimized
+            }
+            _ => bytes,
+        };
+        let compile = |engine: &Engine| {
+            Module::from_binary(engine, bytes).map_err(|error| {
+                anyhow::anyhow!("compiling RackForge WebAssembly component: {error}")
+            })
+        };
+        // Compiled first for the engine most plugins belong in, then asked
+        // whether it belongs in the other one, and compiled again if it
+        // does. Asking costs an instantiation because the answer is the
+        // plugin's, not its export list's -- see `BUDGET_EXPORT`. The
+        // second compile falls only to plugins that scale themselves, and
+        // the code cache makes it once per machine rather than per launch.
+        let mut module = compile(&self.interrupted)?;
+        let metered = Self::spends_a_budget(&module)?;
+        if metered {
+            module = compile(&self.metered)?;
+        }
         if let Some(import) = module.imports().next() {
             bail!(
                 "wasm-v1 modules may not import host functions (found {}::{})",
@@ -84,8 +232,49 @@ impl PortableEngine {
         }
         Ok(PortableModule {
             module,
+            metered,
             limits: self.limits,
         })
+    }
+
+    /// Asks a freshly built module whether it spends a real-time budget.
+    ///
+    /// Initialises a throwaway instance and offers it a budget. A processor
+    /// that scales itself takes it and is compiled again into the metered
+    /// engine; every other answer -- declined, faulted, or the export
+    /// missing altogether -- leaves it where it is. The instance is dropped
+    /// here and the plugin is built again from nothing by whoever loads it,
+    /// so nothing the probe did is carried into the run.
+    ///
+    /// An error here is not a reason to refuse the plugin. A module that
+    /// cannot be instantiated will fail again, with a better message, in
+    /// `instantiate`; this only has to choose an engine, and the
+    /// unmetered one is the safe choice because a plugin that cannot
+    /// answer cannot be spending a budget either.
+    fn spends_a_budget(module: &Module) -> Result<bool> {
+        let mut store = Store::new(
+            module.engine(),
+            HostState {
+                limits: StoreLimitsBuilder::new().build(),
+            },
+        );
+        store.set_epoch_deadline(CONTROL_EPOCH_DEADLINE);
+        let Ok(instance) = Instance::new(&mut store, module, &[]) else {
+            return Ok(false);
+        };
+        let Ok(initialize) = instance.get_typed_func::<(), i32>(&mut store, "rackforge_initialize")
+        else {
+            return Ok(false);
+        };
+        if initialize.call(&mut store, ()).is_err() {
+            return Ok(false);
+        }
+        let Ok(set_budget) = instance.get_typed_func::<i64, i32>(&mut store, BUDGET_EXPORT) else {
+            return Ok(false);
+        };
+        Ok(set_budget
+            .call(&mut store, BUDGET_PROBE_FUEL)
+            .is_ok_and(|taken| taken == 1))
     }
 }
 
@@ -139,6 +328,8 @@ pub unsafe fn unload_process_handlers(modules: Vec<PortableModule>) -> Result<()
 
 pub struct PortableModule {
     module: Module,
+    /// Whether this plugin spends a real-time budget, and so is metered.
+    metered: bool,
     limits: RuntimeLimits,
 }
 
@@ -156,7 +347,11 @@ impl PortableModule {
             },
         );
         store.limiter(|state| &mut state.limits);
-        store.set_fuel(self.limits.control_fuel_per_call)?;
+        if self.metered {
+            store.set_fuel(self.limits.control_fuel_per_call)?;
+        } else {
+            store.set_epoch_deadline(CONTROL_EPOCH_DEADLINE);
+        }
         let instance = Instance::new(&mut store, &self.module, &[]).map_err(|error| {
             anyhow::anyhow!("instantiating RackForge WebAssembly plugin: {error}")
         })?;
@@ -242,7 +437,9 @@ impl PortableModule {
         )? {
             None => None,
             Some(capabilities) => {
-                store.set_fuel(self.limits.control_fuel_per_call)?;
+                if self.metered {
+                    store.set_fuel(self.limits.control_fuel_per_call)?;
+                }
                 let capabilities = capabilities.call(&mut store, ())?;
                 if capabilities < 0 {
                     bail!("portable plugin returned invalid program-editing capabilities");
@@ -323,7 +520,9 @@ impl PortableModule {
         )? {
             None => None,
             Some(version_function) => {
-                store.set_fuel(self.limits.control_fuel_per_call)?;
+                if self.metered {
+                    store.set_fuel(self.limits.control_fuel_per_call)?;
+                }
                 let version = version_function.call(&mut store, ())?;
                 if version != PARALLEL_ABI_VERSION_V1 {
                     bail!("unsupported parallel-render ABI version {version:#010x}");
@@ -353,6 +552,30 @@ impl PortableModule {
                 let mix_offset =
                     typed::<(), i32>(&instance, &mut store, "rackforge_parallel_mix_ptr")?
                         .call(&mut store, ())?;
+                // Optional: a component built before it existed does not
+                // export it, and zero means "the output channels", which is
+                // what those components always meant.
+                let unit_channels =
+                    typed::<(), i32>(&instance, &mut store, "rackforge_parallel_unit_channels")
+                        .ok()
+                        .and_then(|call| call.call(&mut store, ()).ok())
+                        .filter(|width| *width > 0)
+                        .unwrap_or(0);
+                // Optional, like the unit width: a component built before
+                // the report existed does not export it, and zero means it
+                // has nothing to say.
+                let report_stride =
+                    typed::<(), i32>(&instance, &mut store, "rackforge_parallel_report_stride")
+                        .ok()
+                        .and_then(|call| call.call(&mut store, ()).ok())
+                        .filter(|bytes| *bytes > 0)
+                        .unwrap_or(0);
+                let report_offset = if report_stride > 0 {
+                    typed::<(), i32>(&instance, &mut store, "rackforge_parallel_report_ptr")?
+                        .call(&mut store, ())?
+                } else {
+                    0
+                };
                 let shared_offset =
                     typed::<(), i32>(&instance, &mut store, "rackforge_parallel_shared_ptr")?
                         .call(&mut store, ())?;
@@ -412,12 +635,15 @@ impl PortableModule {
                         max_units,
                         dispatch_stride,
                         mix_slot_samples: output_capacity as usize,
+                        unit_channels: unit_channels as usize,
+                        report_stride: report_stride as usize,
                         shared_capacity,
                     },
                     dispatch_offset,
                     plan_offset,
                     mix_offset,
                     shared_offset,
+                    report_offset,
                     begin_block: typed(&instance, &mut store, "rackforge_parallel_begin_block")?,
                     begin_block_v2,
                     render_unit: typed(&instance, &mut store, "rackforge_parallel_render_unit")?,
@@ -432,6 +658,11 @@ impl PortableModule {
         if version > ABI_VERSION_V1_2 && latency_frames.is_none() {
             bail!("wasm-v1 ABI v1.3 plugin is missing export rackforge_latency_frames");
         }
+        // Optional, and deliberately unversioned: a plugin either accepts a
+        // real-time budget or it does not, and one that does not is a plugin
+        // that keeps whatever its author calibrated. See
+        // `rackforge_core::realtime_budget`.
+        let set_realtime_budget = optional_typed(&instance, &mut store, BUDGET_EXPORT)?;
         let reset = typed(&instance, &mut store, "rackforge_reset")?;
         let resource_begin = typed(&instance, &mut store, "rackforge_resource_begin")?;
         let resource_write = typed(&instance, &mut store, "rackforge_resource_write")?;
@@ -462,6 +693,7 @@ impl PortableModule {
             set_parameter,
             get_parameter,
             latency_frames,
+            set_realtime_budget,
             reset,
             resource_begin,
             resource_write,
@@ -473,6 +705,7 @@ impl PortableModule {
             program_api,
             parallel_api,
             process,
+            metered: self.metered,
             fuel_per_call: self.limits.fuel_per_call,
             control_fuel_per_call: self.limits.control_fuel_per_call,
             last_realtime_fuel_consumed: 0,
@@ -489,6 +722,7 @@ struct PortableParallelApi {
     plan_offset: i32,
     mix_offset: i32,
     shared_offset: i32,
+    report_offset: i32,
     begin_block: TypedFunc<(i32, i32, i32, i32, i32), i32>,
     /// The pre-stage that takes the wide count: present exactly when the
     /// component declared the wide-MIDI contract, and entered on every
@@ -515,6 +749,8 @@ type ProcessV2Fn = TypedFunc<(i32, i32, i32, i32, i32, i32), i32>;
 type ParallelBeginV2Fn = TypedFunc<(i32, i32, i32, i32, i32, i32), i32>;
 
 pub struct PortableInstance {
+    /// Whether this plugin spends a real-time budget, and so is metered.
+    metered: bool,
     store: Store<HostState>,
     memory: Memory,
     input_offset: i32,
@@ -537,6 +773,7 @@ pub struct PortableInstance {
     set_parameter: TypedFunc<(i32, f64), i32>,
     get_parameter: TypedFunc<i32, f64>,
     latency_frames: Option<TypedFunc<(), i32>>,
+    set_realtime_budget: Option<TypedFunc<i64, i32>>,
     reset: TypedFunc<(), i32>,
     resource_begin: TypedFunc<(i32, i64), i32>,
     resource_write: TypedFunc<(i64, i32), i32>,
@@ -657,6 +894,37 @@ impl PortableInstance {
             bail!("portable plugin returned an invalid latency");
         }
         Ok(value as u32)
+    }
+
+    /// Whether this plugin accepts a real-time budget at all.
+    pub const fn accepts_realtime_budget(&self) -> bool {
+        self.set_realtime_budget.is_some()
+    }
+
+    /// Tells the plugin how much fuel one real-time call may spend on this
+    /// machine.
+    ///
+    /// Called between blocks, never inside one, and rarely -- a plugin is
+    /// allowed to rebuild coefficients here, so the host earns the right to
+    /// call it by changing the number seldom (`BudgetGovernor`). Returns
+    /// whether the plugin took it; a plugin without the export returns false
+    /// and is left exactly as its author shipped it.
+    pub fn set_realtime_budget(&mut self, fuel: u64) -> Result<bool> {
+        let Some(call) = self.set_realtime_budget.clone() else {
+            return Ok(false);
+        };
+        self.reset_control_fuel()?;
+        // Saturating rather than wrapping: a budget larger than i64::MAX is
+        // "spend what you like", and that is what the plugin should read.
+        let fuel = i64::try_from(fuel).unwrap_or(i64::MAX);
+        // 1 taken, 0 declined, anything negative is a fault worth reporting.
+        // A plugin built against an SDK that has this method but does not
+        // implement it declines here, and is never asked again.
+        let status = call.call(&mut self.store, fuel)?;
+        if status < 0 {
+            check_status(status, "set_realtime_budget")?;
+        }
+        Ok(status == 1)
     }
 
     pub fn reset(&mut self) -> Result<()> {
@@ -1305,9 +1573,20 @@ impl PortableInstance {
             bail!("portable plugin is not prepared for this audio block");
         }
         let input_samples = checked_samples(frames, self.prepared_input_channels)?;
-        let output_samples = checked_samples(frames, self.prepared_output_channels)?;
+        // A unit writes its OWN width, which is the plugin's output channels
+        // only when it declared none. The Concert Grand's sections hand over
+        // twenty floats a frame -- a bridge force, sixteen drive points and
+        // two keybed contributions -- and sizing their slot by the
+        // instrument's two channels rejected every block they rendered. The
+        // host then counted each unit as failed and filled its slot with
+        // silence: an instrument whose strings all stop while its body still
+        // rings, which measured as peak 0.001 and sounded like nothing.
+        let unit_width = api
+            .layout
+            .unit_width(self.prepared_output_channels as usize) as u32;
+        let output_samples = checked_samples(frames, unit_width)?;
         if input.len() != input_samples || output.len() != output_samples {
-            bail!("audio buffer length does not match prepared input/output channels");
+            bail!("audio buffer length does not match the unit's width");
         }
         let memory_size = self.memory.data_size(&self.store);
         let input_range = memory_range(self.input_offset, input_samples, memory_size)?;
@@ -1330,6 +1609,50 @@ impl PortableInstance {
         check_status(result?, "parallel_render_unit")?;
         read_f32(self.memory.data(&self.store), output_range, output);
         Ok(())
+    }
+
+    /// Copies what a worker had to say about one unit into a host buffer.
+    ///
+    /// Empty for a plugin that declared no report, which is the same as a
+    /// unit that had nothing to say.
+    pub fn parallel_read_report(&self, unit: u32, report: &mut [u8]) -> Result<()> {
+        let api = self
+            .parallel_api
+            .as_ref()
+            .context("portable plugin does not expose parallel render")?;
+        let range = self.parallel_report_range(api, unit, report.len())?;
+        report.copy_from_slice(&self.memory.data(&self.store)[range]);
+        Ok(())
+    }
+
+    /// Deposits one unit's report into the coordinator, beside its audio.
+    pub fn parallel_write_report(&mut self, unit: u32, report: &[u8]) -> Result<()> {
+        let api = self
+            .parallel_api
+            .as_ref()
+            .context("portable plugin does not expose parallel render")?;
+        let range = self.parallel_report_range(api, unit, report.len())?;
+        self.memory.data_mut(&mut self.store)[range].copy_from_slice(report);
+        Ok(())
+    }
+
+    fn parallel_report_range(
+        &self,
+        api: &PortableParallelApi,
+        unit: u32,
+        len: usize,
+    ) -> Result<core::ops::Range<usize>> {
+        if unit as usize >= api.layout.max_units {
+            bail!("parallel report unit {unit} is beyond max_units");
+        }
+        if len > api.layout.report_stride {
+            bail!("parallel report exceeds the declared stride");
+        }
+        let at = api
+            .report_offset
+            .checked_add((unit as usize * api.layout.report_stride) as i32)
+            .context("parallel report offset overflows")?;
+        byte_range(at, len, 1, 1, self.memory.data_size(&self.store))
     }
 
     /// Deposits one finished unit's audio into the coordinator's mix region.
@@ -1390,16 +1713,47 @@ impl PortableInstance {
 
     /// Returns the Wasmtime fuel consumed by the most recent real-time call.
     /// This is diagnostic telemetry and does not alter the next call's budget.
+    /// Whether this plugin is metered at all.
+    ///
+    /// A plugin that spends no budget is not metered, so there is no honest
+    /// figure to report and the governor is told so rather than handed a
+    /// zero it would read as a free block.
+    pub const fn is_metered(&self) -> bool {
+        self.metered
+    }
+
     pub const fn last_realtime_fuel_consumed(&self) -> u64 {
         self.last_realtime_fuel_consumed
     }
 
+    /// Adds fuel burned OUTSIDE this instance to what it reports for the
+    /// block.
+    ///
+    /// A parallel block is spent in five instances: the coordinator's
+    /// `begin_block` and `end_block`, and one `render_unit` in each worker.
+    /// The governor reads one instance, and what that instance last recorded
+    /// is `end_block` alone -- a third of the block, which looks like
+    /// headroom that is not there. The orchestrator gathers what the rest
+    /// spent and adds it here, so the number the governor acts on is the
+    /// block's.
+    pub fn add_realtime_fuel(&mut self, fuel: u64) {
+        self.last_realtime_fuel_consumed = self.last_realtime_fuel_consumed.saturating_add(fuel);
+    }
+
     fn reset_realtime_fuel(&mut self) -> Result<()> {
-        self.store.set_fuel(self.fuel_per_call)?;
+        if self.metered {
+            self.store.set_fuel(self.fuel_per_call)?;
+        } else {
+            self.store.set_epoch_deadline(REALTIME_EPOCH_DEADLINE);
+        }
         Ok(())
     }
 
     fn reset_control_fuel(&mut self) -> Result<()> {
+        if !self.metered {
+            self.store.set_epoch_deadline(CONTROL_EPOCH_DEADLINE);
+            return Ok(());
+        }
         self.store.set_fuel(self.control_fuel_per_call)?;
         Ok(())
     }
@@ -1764,6 +2118,91 @@ mod tests {
             }
         }
         panic!("docs/PLUGIN_ABI.md no longer contains a complete wat module");
+    }
+
+    /// A cache directory of its own under the system's temporary directory,
+    /// removed when the test is done with it.
+    struct ScratchCache(std::path::PathBuf);
+
+    impl ScratchCache {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "rackforge-optimize-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            Self(path)
+        }
+    }
+
+    impl Drop for ScratchCache {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn gain_output(engine: &PortableEngine, bytes: &[u8]) -> [f32; 4] {
+        let module = engine.compile(bytes).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        instance.set_parameter(0, 0.5).unwrap();
+        let mut output = [0.0; 4];
+        instance
+            .process_interleaved(&[1.0, -1.0, 0.25, -0.25], &mut output, 2)
+            .unwrap();
+        output
+    }
+
+    #[test]
+    fn a_cached_engine_compiles_the_optimised_component_and_keeps_it() {
+        let bytes = wat::parse_str(GAIN).unwrap();
+        let cache = ScratchCache::new("kept");
+        let engine = PortableEngine::with_cache(RuntimeLimits::default(), &cache.0).unwrap();
+        // The same sound as the component compiled as shipped.
+        assert_eq!(gain_output(&engine, &bytes), [0.5, -0.5, 0.125, -0.125]);
+        let kept = crate::optimize::cached_path(&std::fs::canonicalize(&cache.0).unwrap(), &bytes);
+        let optimized = std::fs::read(&kept).expect("the optimised component is kept");
+        assert!(optimized.starts_with(b"\0asm"));
+        // And the next load finds it rather than optimising again.
+        let modified = std::fs::metadata(&kept).unwrap().modified().unwrap();
+        assert_eq!(gain_output(&engine, &bytes), [0.5, -0.5, 0.125, -0.125]);
+        assert_eq!(
+            std::fs::metadata(&kept).unwrap().modified().unwrap(),
+            modified
+        );
+    }
+
+    #[test]
+    fn an_engine_without_a_cache_compiles_the_component_as_shipped() {
+        let bytes = wat::parse_str(GAIN).unwrap();
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        assert!(engine.optimized(&bytes).is_none());
+    }
+
+    #[test]
+    fn a_component_that_does_not_validate_is_never_given_to_binaryen() {
+        let cache = ScratchCache::new("invalid");
+        let engine = PortableEngine::with_cache(RuntimeLimits::default(), &cache.0).unwrap();
+        // Binaryen may end the process on bytes it cannot read; the engine
+        // must refuse them first and leave the error to the real compile.
+        assert!(engine.optimized(b"\0asm\x01\0\0\0\xff").is_none());
+        assert!(engine.compile(b"\0asm\x01\0\0\0\xff").is_err());
+    }
+
+    #[test]
+    fn tells_a_component_with_simd_from_one_without() {
+        let scalar =
+            wat::parse_str("(module (func (export \"f\") (result f32) f32.const 1))").unwrap();
+        let vector = wat::parse_str(
+            "(module (func (export \"f\") (result f32) \
+               f32.const 1 f32x4.splat f32x4.extract_lane 0))",
+        )
+        .unwrap();
+        assert!(!super::component_uses_simd(&scalar).unwrap());
+        assert!(super::component_uses_simd(&vector).unwrap());
     }
 
     #[test]
@@ -2225,6 +2664,57 @@ mod tests {
         assert!(format!("{error:#}").contains("exceeds plugin capacity"));
     }
 
+    /// A unit's slot is sized by the width the unit declares, not by the
+    /// instrument's channels.
+    ///
+    /// This silenced a whole instrument and no test saw it. The Concert
+    /// Grand's four string sections hand back twenty floats a frame -- a
+    /// bridge force, sixteen bridge drive points, two keybed contributions
+    /// -- and the host sized their slots at the plugin's two output
+    /// channels, rejected every block they rendered as the wrong length,
+    /// counted each unit as failed and filled its slot with silence. What
+    /// came out was an instrument whose strings had all stopped while its
+    /// body still rang: peak 0.001. It was found by ear, on the appliance,
+    /// by someone asking why the headphones were quiet.
+    #[test]
+    fn a_units_slot_is_sized_by_the_width_it_declares() {
+        const FRAMES: u32 = 64;
+        const WIDTH: usize = 5;
+        let source = PARALLEL_SYNTH.replace(
+            "(func (export \"rackforge_parallel_max_units\")",
+            &format!(
+                "(func (export \"rackforge_parallel_unit_channels\") (result i32) i32.const {WIDTH})\n          (func (export \"rackforge_parallel_max_units\")"
+            ),
+        );
+        let engine = parallel_engine();
+        let module = engine.compile(&wat::parse_str(&source).unwrap()).unwrap();
+        let mut worker = module.instantiate().unwrap();
+        worker.prepare(48_000.0, FRAMES, 0, 2).unwrap();
+        assert_eq!(
+            worker.parallel_layout().map(|layout| layout.unit_channels),
+            Some(WIDTH),
+            "the host did not read the declared width"
+        );
+
+        // The width the unit declares is accepted...
+        let mut declared = vec![0.0_f32; FRAMES as usize * WIDTH];
+        worker
+            .parallel_render_unit(0, 0, 0, &[], &mut declared, FRAMES)
+            .expect("a unit's own width must be accepted");
+
+        // ...and the instrument's channel count, which is what the host used
+        // to assume, is not: a buffer that size cannot hold what the unit
+        // writes, and silently reading two channels of it is exactly the bug.
+        let mut assumed = vec![0.0_f32; FRAMES as usize * 2];
+        let error = worker
+            .parallel_render_unit(0, 0, 0, &[], &mut assumed, FRAMES)
+            .expect_err("the instrument's channel count must not be accepted");
+        assert!(
+            format!("{error:#}").contains("width"),
+            "unexpected refusal: {error:#}"
+        );
+    }
+
     #[test]
     fn a_wide_parallel_component_without_the_wide_pre_stage_is_refused() {
         let source = wide_parallel_synth().replace(
@@ -2310,19 +2800,39 @@ mod tests {
         assert!(produced.iter().all(|sample| *sample == 1.0));
     }
 
-    #[test]
-    fn fuel_trap_is_measured_and_control_calls_remain_recoverable() {
-        let source = GAIN.replace(
+    /// A module that never returns, with and without the budget export.
+    ///
+    /// The export is what puts a plugin in the metered engine, so the two
+    /// spellings of the same runaway are what the two guards are tested on.
+    fn spinning_plugin(takes_a_budget: bool) -> String {
+        let spinning = GAIN.replace(
             "            local.get $parameters i32.const 0 i32.gt_s",
             "            (loop $spin br $spin)\n            local.get $parameters i32.const 0 i32.gt_s",
         );
+        if !takes_a_budget {
+            return spinning;
+        }
+        // Takes the budget, which is what puts it in the metered engine.
+        // The host reads the answer, not the export's presence: the SDK
+        // exports this for every processor and answers 0 by default.
+        spinning.replace(
+            "          (global $gain (mut f32) (f32.const 1))",
+            "          (global $gain (mut f32) (f32.const 1))\n          (func (export \"rackforge_set_realtime_budget\") (param i64) (result i32) i32.const 1)",
+        )
+    }
+
+    #[test]
+    fn fuel_trap_is_measured_and_control_calls_remain_recoverable() {
         let limits = RuntimeLimits {
             fuel_per_call: 10_000,
             ..RuntimeLimits::default()
         };
         let engine = PortableEngine::new(limits).unwrap();
-        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let module = engine
+            .compile(&wat::parse_str(spinning_plugin(true)).unwrap())
+            .unwrap();
         let mut instance = module.instantiate().unwrap();
+        assert!(instance.is_metered());
         instance.prepare(48_000.0, 64, 2, 2).unwrap();
         let input = [0.0; 4];
         let mut output = [0.0; 4];
@@ -2331,6 +2841,63 @@ mod tests {
             .unwrap_err();
         assert!(format!("{error:#}").contains("fuel"));
         assert_eq!(instance.last_realtime_fuel_consumed(), 10_000);
+        instance.reset().unwrap();
+    }
+
+    /// The same runaway, stopped without a counter in every basic block.
+    ///
+    /// A plugin that spends no budget has no use for fuel, and fuel is not
+    /// free: it instruments every block of the generated code, which is
+    /// twelve percent of a voice on the appliance. Such a plugin is
+    /// compiled into an engine guarded by an epoch the host advances
+    /// instead, and this is the proof that the guard is still a guard --
+    /// the call is cut off, the error says so, and the instance recovers.
+    ///
+    /// It also states the other half: there is no honest fuel figure for
+    /// this plugin, so `is_metered` is false and the governor is told
+    /// nothing rather than told zero.
+    #[test]
+    fn an_unmetered_runaway_is_still_cut_off_by_the_epoch() {
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine
+            .compile(&wat::parse_str(spinning_plugin(false)).unwrap())
+            .unwrap();
+        let mut instance = module.instantiate().unwrap();
+        assert!(!instance.is_metered());
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        let input = [0.0; 4];
+        let mut output = [0.0; 4];
+        let error = instance
+            .process_interleaved(&input, &mut output, 2)
+            .unwrap_err();
+        let reported = format!("{error:#}");
+        assert!(
+            reported.contains("epoch") || reported.contains("interrupt"),
+            "{reported}"
+        );
+        instance.reset().unwrap();
+    }
+
+    /// A control call is allowed to be slow, and still is.
+    ///
+    /// The epoch deadline for the control calls is minutes rather than
+    /// milliseconds, because loading a state or building a preset catalogue
+    /// is allowed to take its time. A deadline left at the real-time one
+    /// would cut those off, so this walks a plugin through the control
+    /// calls that follow instantiation and asks that none of them trip.
+    #[test]
+    fn an_unmetered_plugin_survives_its_control_calls() {
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine.compile(&wat::parse_str(GAIN).unwrap()).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        assert!(!instance.is_metered());
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        instance.reset().unwrap();
+        let input = [0.0; 4];
+        let mut output = [0.0; 4];
+        instance
+            .process_interleaved(&input, &mut output, 2)
+            .unwrap();
         instance.reset().unwrap();
     }
 }

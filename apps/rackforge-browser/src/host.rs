@@ -43,6 +43,7 @@ use rackforge_midi_api::{
 };
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
+    RackDefinition,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{
@@ -555,10 +556,32 @@ impl BrowserHost {
             ControlRequest::OutputMeter => Ok(ControlResponse::OutputMeter {
                 meter: self.audio.take_output_meter(),
             }),
+            // A page cannot reach an audio interface's inputs; the Rack
+            // editor says so instead of routing a silence.
+            ControlRequest::AudioInput => Ok(ControlResponse::AudioInput {
+                input: rackforge_control_api::AudioInputStatus {
+                    availability: rackforge_control_api::AudioInputAvailability::Unsupported,
+                    ..Default::default()
+                },
+            }),
             ControlRequest::ApplyAudioOutput { .. } => Err(Failure::new(
                 ControlErrorCode::Unavailable,
                 "the browser host plays through the page's audio output, which it cannot reconfigure",
             )),
+            // No controller package is attached here yet, so there is no
+            // map to show: an empty answer, never a silence the interface
+            // would wait out.
+            ControlRequest::ControllerMaps => Ok(ControlResponse::ControllerMaps {
+                controllers: Vec::new(),
+                maps: Vec::new(),
+                takeover: Default::default(),
+                factory_untouched: Vec::new(),
+                fn_open: Vec::new(),
+            }),
+            ControlRequest::MidiActivity { .. } => Ok(ControlResponse::MidiActivity {
+                cursor: 0,
+                events: Vec::new(),
+            }),
             ControlRequest::VirtualMidi {
                 client_id, message, ..
             } => self.virtual_midi(client_id, message),
@@ -1140,68 +1163,49 @@ impl BrowserHost {
                         "LIVE targets can only be activated while LIVE is active",
                     ));
                 }
-                let (rack_id, part_commands, sounding, unsounded_slots) = {
+                // Every saved Rack loads, as on the other hosts: `enabled`
+                // stays in the data, unused.
+                let (rack, part_commands) = {
                     let library = self.performance.library();
                     let rack = library.resolve_playable(&location).map_err(|error| {
                         Failure::new(ControlErrorCode::NotFound, error.to_string())
                     })?;
-                    if !rack.enabled {
-                        return Err(Failure::new(
-                            ControlErrorCode::Rejected,
-                            "the selected Rack is disabled",
-                        ));
-                    }
                     let commands = library
                         .resolve_part(&location)
                         .map(|part| {
                             rackforge_core::sequencer::part_launch_commands(part, &library.patterns)
                         })
                         .unwrap_or_default();
-                    // The page renders one voice at a time, so a Rack sounds
-                    // through its first enabled Slot. Mixing several Slots is
-                    // the appliance's, and the Slot order is the Rack's own.
-                    let mut enabled = rack.slots.iter().filter(|slot| slot.enabled).peekable();
-                    let first = enabled
-                        .next()
-                        .map(|slot| (slot.plugin_id.clone(), slot.state.clone()));
-                    let remaining = enabled.count();
-                    (rack.id.clone(), commands, first, remaining)
+                    (rack, commands)
                 };
-                // A binding that fails must never fail the activation.
+                // The page renders one voice: a Rack sounds through its first
+                // instrument Slot. The render pool that mixes several Slots on
+                // every other host has no threads to run on in a page.
+                let (plugin_id, state, unsounded_slots) = self.first_instrument_slot(&rack)?;
+                preceding.extend(self.sound_rack_slot(
+                    &plugin_id,
+                    state,
+                    unsounded_slots,
+                    command_ref,
+                )?);
+                // The Part's patterns go out once the Rack sounds. A binding
+                // that fails must never fail the activation.
                 for command in &part_commands {
                     if let Err(reason) = self.sequencer.apply(command) {
                         eprintln!("SEQUENCER_PART_QUEUE_REJECTED reason={reason}");
                     }
                 }
-                // Until here the activation only moved LIVE's state, which is
-                // how a Rack could stand on stage while PLAY's instrument kept
-                // sounding: nobody ever pointed the voice at the Rack the
-                // performer chose.
-                if let Some((plugin_id, state)) = sounding {
-                    preceding.extend(self.sound_rack_slot(
-                        &plugin_id,
-                        state,
-                        unsounded_slots,
-                        command_ref,
-                    )?);
+                SessionEvent::LiveTargetActivated {
+                    location,
+                    rack_id: rack.id.clone(),
                 }
-                SessionEvent::LiveTargetActivated { location, rack_id }
             }
             SessionCommand::PreviewRack { rack } => {
                 // An unsaved draft is auditioned exactly the way an activated
                 // Rack sounds, so what a performer hears while building one is
                 // what they will hear on stage. The persisted LIVE target is
                 // deliberately untouched.
-                let mut enabled = rack.slots.iter().filter(|slot| slot.enabled).peekable();
-                let Some(slot) = enabled.next() else {
-                    return Err(Failure::new(
-                        ControlErrorCode::Rejected,
-                        "the Rack has no enabled instrument to audition",
-                    ));
-                };
-                let plugin_id = slot.plugin_id.clone();
-                let state = slot.state.clone();
-                let unsounded_slots = enabled.count();
+                let (plugin_id, state, unsounded_slots) = self.first_instrument_slot(&rack)?;
                 preceding.extend(self.sound_rack_slot(
                     &plugin_id,
                     state,
@@ -1931,6 +1935,40 @@ impl BrowserHost {
 
     /// Points the voice at a Rack Slot's instrument and gives it the Slot's
     /// sound, remembering what PLAY was holding on the way through.
+    /// The Slot a Rack sounds through on this one-voice host: its first
+    /// enabled Slot whose plugin is an installed instrument -- an effect
+    /// cannot be the voice, nothing would play into it -- and how many other
+    /// enabled Slots stay silent.
+    fn first_instrument_slot(
+        &self,
+        rack: &RackDefinition,
+    ) -> Result<(String, Option<PluginStateReference>, usize), Failure> {
+        let enabled: Vec<_> = rack.slots.iter().filter(|slot| slot.enabled).collect();
+        let slot = enabled
+            .iter()
+            .find(|slot| {
+                self.plugins.iter().any(|plugin| {
+                    plugin.plugin_id == slot.plugin_id
+                        && plugin.runtime.manifest().kind == PluginKind::Instrument
+                })
+            })
+            .ok_or_else(|| {
+                Failure::new(
+                    ControlErrorCode::Rejected,
+                    if enabled.is_empty() {
+                        format!("{} has no enabled Slots", rack.name)
+                    } else {
+                        format!("{} has no instrument installed here", rack.name)
+                    },
+                )
+            })?;
+        Ok((
+            slot.plugin_id.clone(),
+            slot.state.clone(),
+            enabled.len().saturating_sub(1),
+        ))
+    }
+
     fn sound_rack_slot(
         &mut self,
         plugin_id: &str,
@@ -2559,15 +2597,21 @@ impl BrowserHost {
         let manifest: ControllerPackageManifest =
             toml::from_str(keylab_essential_mk3::controller::PACKAGE_MANIFEST)
                 .expect("the bundled Arturia controller manifest is validated at build time");
+        let editor = manifest.editor_inputs();
         serde_json::json!({
             "controllers": [{
                 "id": manifest.id,
                 "name": manifest.name,
+                "vendor": manifest.vendor,
+                "schema_version": manifest.schema_version,
                 "version": manifest.version,
                 "enabled": true,
                 "trust": "official",
                 "runtime": "Browser",
                 "devices": manifest.devices.len(),
+                "inputs": editor.inputs,
+                "roles": editor.roles,
+                "actions": editor.actions,
                 "settings": manifest.settings.into_iter().map(|setting| serde_json::json!({
                     "id": setting.id,
                     "name": setting.name,
@@ -3213,6 +3257,7 @@ fn plugin_catalog_entry(
                 "preset": entry.preset,
             })
         }).collect::<Vec<_>>(),
+        "play_source": manifest.play_source,
         "resources": manifest.resources.iter().map(|resource| {
             serde_json::json!({
                 "id": resource.id,

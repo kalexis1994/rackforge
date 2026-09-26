@@ -1,0 +1,140 @@
+# Akai Professional MPK mini mkII, on factory Program 1. Akai publishes no
+# table of its programs; every value below comes from community sources
+# that agree, and is sourced and labelled in SOURCES.md. [DUMP] is the
+# factory SysEx dump of Programs 1-4 read back from a unit after a firmware
+# update restored them (mungewell/mpd-utils), [MZ] midizap's MPKmini2
+# example ("assumes that the MPKmini2 is set to factory defaults"), [MO]
+# the Modality toolkit's description, [SCR] super-controller.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.akai-mpk-mini-mkii"
+name = "MPK mini mkII"
+vendor = "Akai Professional"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "mpk-mini-mkii"
+
+# One port: "MPKmini2" on Windows and a Mac, "MPKmini2 MIDI 1" on Linux [MZ
+# JACK_IN; MO deviceName; Ableton model_name]. Its sisters name themselves
+# "MPK mini", "MPK mini 3", "MPK mini Plus", "MPK mini IV" and "MPK mini
+# Play": none carries "mpkmini2".
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["mpkmini2"]
+
+# Knobs K1-K8: CC 1-8 on channel 1, absolute [DUMP; MZ; MO; SCR; community
+# ×5 in all]. The joystick's up and down both send CC 1 too [DUMP; MO]: K1
+# and the joystick are one message, declared once, as the modulation wheel
+# it is. K2-K8 keep their places in the first row of slots. They are a
+# keyboard's knobs: they play when nothing maps them.
+
+[[inputs]]
+id = "knob-1"
+name = "Knob 1 / joystick up-down"
+kind = "wheel"
+group = "Knobs"
+midi = { channel = 0, cc = 1 }
+slot = "mod-wheel"
+
+[[inputs]]
+id = "knob-2"
+name = "Knob 2"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 2 }
+slot = "control-1.2"
+
+[[inputs]]
+id = "knob-3"
+name = "Knob 3"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 3 }
+slot = "control-1.3"
+
+[[inputs]]
+id = "knob-4"
+name = "Knob 4"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 4 }
+slot = "control-1.4"
+
+[[inputs]]
+id = "knob-5"
+name = "Knob 5"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 5 }
+slot = "control-1.5"
+
+[[inputs]]
+id = "knob-6"
+name = "Knob 6"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 6 }
+slot = "control-1.6"
+
+[[inputs]]
+id = "knob-7"
+name = "Knob 7"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 7 }
+slot = "control-1.7"
+
+[[inputs]]
+id = "knob-8"
+name = "Knob 8"
+kind = "knob"
+group = "Knobs"
+midi = { channel = 0, cc = 8 }
+slot = "control-1.8"
+
+# The joystick's left and right: pitch bend on channel 1 [DUMP; MO; SCR]. No
+# slot.
+
+[[inputs]]
+id = "joystick-x"
+name = "Joystick left / right"
+kind = "wheel"
+group = "Joystick"
+midi = { channel = 0, pitch_bend = true }
+
+# The pads are not declared. In Program 1 they send notes 44-51 (bank A) and
+# 32-39 (bank B) on channel 1 [DUMP], the keys' channel: a pad and the key
+# of the same note are one message. They play as those notes.
+
+# Knobs K2-K8 take the catalog's roles in their places (catalog README,
+# "Eight knobs, no faders"); K1 is the modulation wheel.
+
+[[roles]]
+input = "knob-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "knob-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "knob-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "knob-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "knob-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "knob-8"
+role = "synth.envelope.amp.release"

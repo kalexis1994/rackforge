@@ -5450,6 +5450,64 @@
    control, the scene number is silkscreen, and the order controls become a
    butted key gang. */
 
+.song-editor-form:not(.immersive) > .editor-header,
+.song-editor-form:not(.immersive) > .editor-section > header {
+  background: var(--fp-panel);
+  border-color: var(--line);
+  box-shadow: var(--fp-lip);
+}
+
+.song-editor-form .editor-actions button,
+.song-editor-form .editor-section > header > button {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  font-family: var(--display-font);
+  font-weight: 700;
+}
+
+.song-editor-form .editor-actions .save-button {
+  background: var(--acid);
+  border-color: var(--acid);
+}
+
+.song-editor-form .editor-actions .danger-button,
+.song-editor-form .form-error {
+  color: var(--red);
+}
+
+.song-editor-form .basic-fields label {
+  color: var(--fp-rail-label);
+  font-family: var(--display-font);
+}
+
+.song-editor-form .basic-fields input:not([type="checkbox"]) {
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font-family: var(--display-font);
+}
+
+.song-editor-form .basic-fields input:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
+.song-editor-form .toggle-field i {
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  box-shadow: var(--fp-well);
+}
+
+.song-editor-form .form-error {
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
 .song-part-nav-item {
   gap: 0 !important;
   padding: 8px 10px !important;

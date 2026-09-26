@@ -5676,6 +5676,9 @@ fn receive_audio_with_timeout<T>(
     }
 }
 
+// The error is the response the client is sent, built once on a failure path;
+// boxing it would move an allocation onto every caller for nothing.
+#[allow(clippy::result_large_err)]
 fn program_draft_state(
     draft_id: u64,
     instance_id: InstanceId,

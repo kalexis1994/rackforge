@@ -276,6 +276,84 @@ in `PLAY`. `CONFIG` is reserved for infrequent setup such as libraries,
 resources, compatibility options and plugin diagnostics. Program methods remain
 available to `CONFIG` so existing plugin packages keep working while migrating.
 
+## Program selector
+
+RackForge's own instruments choose programs the same way, so a player
+finds them alike on stage: `<rf-program-select>`, placed in the plugin's own
+header. It is optional. A plugin that draws its own selector is not
+misbehaving; RackForge still prescribes no layout or style.
+
+RackForge serves the element and injects it into every plugin frame, so a
+plugin never bundles it and every plugin gets the same fixes. It needs no
+code:
+
+```html
+<header class="my-header">
+  <rf-program-select></rf-program-select>
+</header>
+```
+
+It reads `instance.sounds`, `instance.banks` and
+`instance.selected_sound_id` from the context, shows the program with its
+place in the list and its bank, steps with ◀ ▶ (wrapping round), and opens a
+panel on its name: a search that finds by name, bank, detail or number and
+forgives accents, word order and missing letters; bank filters; the current
+program marked. Keyboard: arrows, Page Up/Down, Enter, Escape, and typing
+searches. On a touch screen the panel does not throw up the keyboard until
+the search is touched, and fills the screen on a phone. A choice goes to the
+host as `plugin.select_sound`; the name shows it at once and returns to the
+old program if the host refuses.
+
+Attributes:
+
+| attribute | effect |
+| --- | --- |
+| `arrows="none"` | no ◀ ▶ |
+| `hide-number` | no "12/128" |
+| `hide-bank` | no bank beside the name |
+| `stay-open` | the panel stays open after a choice, to audition |
+| `placeholder` | the search's placeholder ("Search programs") |
+| `label` | the spoken name of what is chosen ("Program") |
+| `empty-label` | the text with no programs ("No programs") |
+| `all-label`, `no-match-label` | the "All" bank chip and the text for a search that finds nothing ("No program matches") |
+| `disabled` | nothing can be chosen, e.g. while the plugin saves a program; also the `disabled` property |
+| `fit` | a long name is lettered smaller, down to the given share of its size (`fit="0.7"`; 0.62 when empty), before an ellipsis cuts it |
+| `slide` | the name slides in from the side the choice moved towards |
+| `source="manual"` | the element does not talk to the host: set `programs`, `banks` and `value` yourself and act on its events |
+
+Events (bubbling, composed): `rf-program-select` (cancelable; `detail`:
+`{ id, program }`; cancel it to choose by your own path), `rf-program-error`
+(`detail.error`, after the host refused), `rf-program-open`,
+`rf-program-close`.
+
+It is styled as the plugin's own. Custom properties set on the element:
+
+| property | default |
+| --- | --- |
+| `--rf-ps-font` | `inherit` |
+| `--rf-ps-color`, `--rf-ps-muted` | the text colour, and 60 % of it |
+| `--rf-ps-accent` | `#6aa9ff`: focus, the current program, the chosen bank |
+| `--rf-ps-background` | `transparent`: the bar's buttons |
+| `--rf-ps-surface`, `--rf-ps-surface-color` | the panel and its text |
+| `--rf-ps-border`, `--rf-ps-radius`, `--rf-ps-height`, `--rf-ps-gap` | lines, corners, the bar's height, spacing |
+| `--rf-ps-backdrop` | behind the panel |
+
+Every piece is also a part, for anything beyond the properties:
+`bar`, `prev`, `next`, `step`, `name`, `number`, `name-text`, `bank`,
+`dialog`, `header`, `search`, `close`, `banks`, `bank-chip`,
+`bank-chip-selected`, `list`, `item`, `item-selected`, `item-number`,
+`item-name`, `item-detail`, `note`. The arrows are slots (`slot="prev"`,
+`slot="next"`) for a plugin's own icons:
+
+```css
+rf-program-select { --rf-ps-accent: #e0a040; --rf-ps-height: 36px; }
+rf-program-select::part(name) { background: #111; letter-spacing: 0.08em; }
+rf-program-select::part(item-selected) { background: #3a2a10; }
+```
+
+The source is `web/src/plugin-kit/`. The build writes it unhashed to
+`rackforge-plugin-kit/program-select.js`.
+
 ## Host-owned resource explorer
 
 Plugins declare the resources they may request:

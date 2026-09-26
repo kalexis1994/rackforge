@@ -603,11 +603,15 @@ public final class MainActivity extends Activity {
                     if (path.startsWith("/rackforge/")) {
                         return applicationAsset(path.substring(1));
                     }
-                    if (path.startsWith("/assets/") || path.startsWith("/brand/")) {
+                    // The plugin kit and the scrollbar sheet are injected
+                    // into plugin frames from the Web UI's root.
+                    if (path.startsWith("/assets/") || path.startsWith("/brand/")
+                            || path.startsWith("/rackforge-plugin-kit/")) {
                         return applicationAsset("rackforge" + path);
                     }
                     if (path.equals("/favicon.svg") || path.equals("/favicon.ico")
-                            || path.equals("/site.webmanifest")) {
+                            || path.equals("/site.webmanifest")
+                            || path.equals("/rackforge-scrollbars.css")) {
                         return applicationAsset("rackforge" + path);
                     }
                     if (path.startsWith("/plugin-assets/")) {

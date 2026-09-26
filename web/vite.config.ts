@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { PLUGIN_KIT_DIRECTORY } from "./src/plugin-kit/location";
 
 // The UI carries the revision it was built from, and every deploy of this
 // dist writes the same stamp beside it (ui-revision.txt) so each host's
@@ -72,5 +73,20 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    rolldownOptions: {
+      input: {
+        index: "index.html",
+        // The plugin kit: served at a stable path, unhashed, and injected
+        // into every plugin frame (PluginFrame.tsx). Plugins only place its
+        // elements; they never bundle it.
+        "program-select": "src/plugin-kit/program-select.ts",
+      },
+      output: {
+        entryFileNames: (chunk) =>
+          chunk.name === "program-select"
+            ? `${PLUGIN_KIT_DIRECTORY}/program-select.js`
+            : "assets/[name]-[hash].js",
+      },
+    },
   },
 });

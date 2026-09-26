@@ -1,3 +1,4 @@
+import { hostAssetUrl, pluginKitUrls } from "../plugin-kit/location";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { NavLink, useNavigate } from "react-router";
@@ -1289,12 +1290,30 @@ export function PluginFrame({
               ) {
                 const link = frameDocument.createElement("link");
                 link.rel = "stylesheet";
-                link.href = new URL(
+                link.href = hostAssetUrl(
                   "rackforge-scrollbars.css",
                   window.document.baseURI,
-                ).href;
+                  import.meta.env.BASE_URL,
+                );
                 link.dataset.rackforgeScrollbars = "true";
                 frameDocument.head.append(link);
+              }
+              // RackForge's plugin kit: the elements its own instruments
+              // place in their surfaces (`<rf-program-select>`). One copy,
+              // served by the host; a plugin only uses the tags, and an
+              // element placed before the script arrives upgrades then.
+              if (frameDocument?.head && !frameDocument.querySelector("script[data-rackforge-plugin-kit]")) {
+                for (const src of pluginKitUrls(
+                  window.document.baseURI,
+                  import.meta.env.BASE_URL,
+                  import.meta.env.DEV,
+                )) {
+                  const script = frameDocument.createElement("script");
+                  script.type = "module";
+                  script.src = src;
+                  script.dataset.rackforgePluginKit = "true";
+                  frameDocument.head.append(script);
+                }
               }
             } catch {
               // A plugin that intentionally navigates away from the host

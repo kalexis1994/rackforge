@@ -303,6 +303,10 @@ provides:
 The same controller package is used on Windows, Linux x86-64, Android, and
 Raspberry Pi.
 
+The browser lists the same declarative controller catalog for inspection. Its
+Web MIDI control integration currently supports only the KeyLab Essential mk3;
+controller maps are saved by the native hosts, not by the browser demo.
+
 ## Save it, move it, play it
 
 RackForge restores the active mode, instrument, program, master controls, and

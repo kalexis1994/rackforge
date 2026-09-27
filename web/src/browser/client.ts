@@ -1342,7 +1342,9 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     return {
       controllers: answer.controllers.map((controller) => ({
         ...controller,
-        runtime,
+        // Only the KeyLab has a browser MIDI driver. Preserve the shipped
+        // declarative models' runtime so the editor groups them as a catalog.
+        runtime: controller.runtime === "Browser" ? runtime : controller.runtime,
         settings: controller.settings.map((setting) => ({
           ...setting,
           value:

@@ -44,6 +44,7 @@ import {
 } from "../gateway";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
+  IS_BROWSER_HOST,
   hostJson,
   hostKeepsControllerMaps,
   isDesktopHost,
@@ -592,6 +593,7 @@ export function ControllersPage() {
             <AsyncNotice tone="info" title="No maps kept here">
               This edition shows a controller's controls. RackForge on a computer, a phone or a Raspberry
               Pi keeps what you map them to.
+              {IS_BROWSER_HOST ? " In the browser, only KeyLab Essential mk3 has active MIDI control; the other supported models are available to inspect." : null}
             </AsyncNotice>
           )}
           {notice ? (

@@ -42,8 +42,8 @@ use rackforge_midi_api::{
     ParameterLinkPassThrough,
 };
 use rackforge_performance_api::{
-    LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
-    PerformanceLibrary, RackDefinition, RackGraphNodeKind, RackSlot,
+    LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceLibrary,
+    PerformanceSnapshot, RackDefinition, RackGraphNodeKind, RackSlot,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{

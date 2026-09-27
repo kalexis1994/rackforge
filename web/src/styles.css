@@ -2766,9 +2766,37 @@ body {
   width: 100%;
 }
 
-.plugin-play-loader--start {
-  align-content: center;
-  gap: 16px;
+.browser-start-gate {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 32px;
+  text-align: center;
+}
+
+.browser-start-gate__brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+}
+
+.browser-start-gate__brand .brand-mark {
+  width: 88px;
+  height: 88px;
+  flex-basis: 88px;
+}
+
+.browser-start-gate > button {
+  min-width: 200px;
 }
 
 .plugin-catalog-error {

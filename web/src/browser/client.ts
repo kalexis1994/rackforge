@@ -84,6 +84,7 @@ interface Pending {
 }
 
 let context: AudioContext | null = null;
+let bootAudioContext: AudioContext | null = null;
 let engine: AudioWorkletNode | null = null;
 let booting: Promise<void> | null = null;
 let bootError: string | null = null;
@@ -530,6 +531,12 @@ export async function startBrowserHost(): Promise<void> {
     throw new Error("the browser engine must not run inside the desktop shell");
   }
   if (booting) {
+    // This call can come from a new user gesture while the first boot is
+    // waiting for audio permission. Resume *before* awaiting that boot: the
+    // context is not assigned to `context` until the worklet is ready.
+    if (bootAudioContext?.state === "suspended") {
+      void bootAudioContext.resume().catch(() => undefined);
+    }
     await booting;
     if (context?.state === "suspended") {
       await context.resume();
@@ -539,6 +546,7 @@ export async function startBrowserHost(): Promise<void> {
   booting = (async () => {
     const startup = new StartupTimeline("browser");
     const audio = new AudioContext({ latencyHint: "interactive" });
+    bootAudioContext = audio;
     // A first tap can happen while the packaged filesystem is still being
     // downloaded. Listen before the first await so that gesture is not lost.
     resumeOnGesture(audio);
@@ -613,9 +621,15 @@ export async function startBrowserHost(): Promise<void> {
     await booting;
   } catch (error) {
     booting = null;
+    bootAudioContext = null;
     console.error("RackForge could not start in this page", error);
     throw error;
   }
+}
+
+/** Whether startup still needs a browser gesture to activate audio. */
+export function browserAudioNeedsGesture(): boolean {
+  return bootAudioContext?.state === "suspended";
 }
 
 /** Warnings the host reported while loading its packages. */

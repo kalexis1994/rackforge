@@ -135,11 +135,12 @@ export type EngineCommand =
   | ControllerRestorePlanMessage;
 
 /**
- * Sent as soon as the processor exists. A port message posted before that is
- * not delivered, so the page waits for this before it boots the engine.
+ * Sent on the first render callback. This gives the page the actual quantum
+ * selected by the browser before it allocates the host's render buffers.
  */
 export interface ReadyMessage {
   kind: "ready";
+  frames: number;
 }
 
 export interface BootedMessage {

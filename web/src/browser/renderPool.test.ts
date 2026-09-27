@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HEADER,
   automaticWorkerCount,
+  deviceIsMobile,
+  parallelPoolAllowed,
   poolLayout,
   readPlanEntry,
   unitOwner,
@@ -48,6 +50,23 @@ describe("the render pool layout", () => {
 });
 
 describe("worker policy", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("recognizes Android tablets even when Chromium's phone hint is false", () => {
+    vi.stubGlobal("navigator", {
+      userAgentData: { mobile: false },
+      userAgent: "Mozilla/5.0 (Linux; Android 14; Tablet) AppleWebKit/537.36 Chrome/152",
+    });
+    expect(deviceIsMobile()).toBe(true);
+  });
+
+  it("keeps mobile browsers on the audible sequential fallback", () => {
+    expect(parallelPoolAllowed(false, false)).toBe(false);
+    expect(parallelPoolAllowed(false, true)).toBe(false);
+    expect(parallelPoolAllowed(true, true)).toBe(false);
+    expect(parallelPoolAllowed(true, false)).toBe(true);
+  });
+
   it("reserves cores for the audio and main threads and caps at four", () => {
     expect(automaticWorkerCount(2, false)).toBe(1);
     expect(automaticWorkerCount(4, false)).toBe(2);

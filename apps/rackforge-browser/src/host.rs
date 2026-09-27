@@ -3463,15 +3463,12 @@ pub fn midi_event(frame: u32, data: [u8; 3], length: u8) -> MidiEventV1 {
 /// Every shipped controller can be inspected in the browser, although only
 /// the KeyLab Essential mk3 has a browser-side MIDI driver at present.
 fn browser_controller_catalog() -> serde_json::Value {
-    let manifests = std::iter::once((
-        keylab_essential_mk3::controller::PACKAGE_MANIFEST,
-        true,
-    ))
-    .chain(
-        rackforge_controller_catalog::BUNDLED
-            .iter()
-            .map(|bundled| (bundled.manifest, false)),
-    );
+    let manifests = std::iter::once((keylab_essential_mk3::controller::PACKAGE_MANIFEST, true))
+        .chain(
+            rackforge_controller_catalog::BUNDLED
+                .iter()
+                .map(|bundled| (bundled.manifest, false)),
+        );
     let controllers: Vec<_> = manifests
         .map(|(source, browser_driver)| {
             let manifest: ControllerPackageManifest =
@@ -3519,7 +3516,12 @@ mod package_preview_tests {
             rackforge_controller_catalog::BUNDLED.len() + 1
         );
         assert_eq!(controllers[0]["runtime"], "Browser");
-        assert!(controllers[0]["id"].as_str().unwrap().contains("keylab-essential-mk3"));
+        assert!(
+            controllers[0]["id"]
+                .as_str()
+                .unwrap()
+                .contains("keylab-essential-mk3")
+        );
         assert!(controllers[1..].iter().all(|controller| {
             controller["runtime"] == "DeclarativeV1"
                 && controller["enabled"] == true

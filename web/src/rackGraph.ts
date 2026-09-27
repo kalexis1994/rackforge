@@ -68,6 +68,22 @@ export function midiTransformFromSlot(slot: RackSlot): RackMidiTransform {
   };
 }
 
+/** Rust omits empty source_channels on the wire; the editor needs an array. */
+export function normalizeRackMidiTransform(value?: Partial<RackMidiTransform>): RackMidiTransform {
+  return {
+    source_channels: value?.source_channels ?? [],
+    target_channel: value?.target_channel,
+    note_low: value?.note_low ?? 0,
+    note_high: value?.note_high ?? 127,
+    transpose: value?.transpose ?? 0,
+    notes_only: value?.notes_only ?? false,
+    velocity_input_low: value?.velocity_input_low ?? 0,
+    velocity_input_high: value?.velocity_input_high ?? 127,
+    velocity_output_low: value?.velocity_output_low ?? 0,
+    velocity_output_high: value?.velocity_output_high ?? 127,
+  };
+}
+
 /**
  * Builds a graph for a Rack that has none.
  *

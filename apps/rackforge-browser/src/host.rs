@@ -42,8 +42,8 @@ use rackforge_midi_api::{
     ParameterLinkPassThrough,
 };
 use rackforge_performance_api::{
-    LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
-    RackDefinition,
+    LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceLibrary,
+    PerformanceSnapshot, RackDefinition, RackGraphNodeKind, RackSlot,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{
@@ -117,6 +117,36 @@ struct ChainVoice {
     instance_id: InstanceId,
     instance: PluginInstance<'static>,
     enabled: bool,
+}
+
+/// The page can render one instrument, but a Song Part may keep its Slots in
+/// reusable child Racks rather than in the Part's own flat Slot list.
+fn browser_voice_slots(library: &PerformanceLibrary, rack: &RackDefinition) -> Vec<RackSlot> {
+    fn visit(
+        library: &PerformanceLibrary,
+        rack: &RackDefinition,
+        path: &mut BTreeSet<String>,
+        slots: &mut Vec<RackSlot>,
+    ) {
+        if !path.insert(rack.id.as_str().to_owned()) {
+            return;
+        }
+        slots.extend(rack.slots.iter().filter(|slot| slot.enabled).cloned());
+        if let Some(graph) = &rack.graph {
+            for node in &graph.nodes {
+                if let RackGraphNodeKind::Rack { rack_id } = &node.kind
+                    && let Some(child) = library.rack(rack_id)
+                {
+                    visit(library, child, path, slots);
+                }
+            }
+        }
+        path.remove(rack.id.as_str());
+    }
+
+    let mut slots = Vec::new();
+    visit(library, rack, &mut BTreeSet::new(), &mut slots);
+    slots
 }
 
 pub struct BrowserHost {
@@ -1943,7 +1973,7 @@ impl BrowserHost {
         &self,
         rack: &RackDefinition,
     ) -> Result<(String, Option<PluginStateReference>, usize), Failure> {
-        let enabled: Vec<_> = rack.slots.iter().filter(|slot| slot.enabled).collect();
+        let enabled = browser_voice_slots(self.performance.library(), rack);
         let slot = enabled
             .iter()
             .find(|slot| {
@@ -3506,6 +3536,38 @@ fn browser_controller_catalog() -> serde_json::Value {
 mod package_preview_tests {
     use super::*;
     use rackforge_repository::LocalPackageBrandingPreview;
+
+    #[test]
+    fn song_part_can_sound_an_instrument_in_a_child_rack() {
+        let child: RackDefinition = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "id": "rack.piano",
+            "name": "Piano",
+            "slots": [
+                { "id": "slot.piano", "plugin_id": "org.rackforge.piano", "enabled": true },
+                { "id": "slot.muted", "plugin_id": "org.rackforge.muted", "enabled": false }
+            ]
+        }))
+        .unwrap();
+        let part: RackDefinition = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "id": "part.intro",
+            "name": "Intro",
+            "slots": [],
+            "graph": {
+                "schema_version": 2,
+                "nodes": [{ "id": "rack.01", "kind": { "kind": "rack", "rack_id": "rack.piano" } }],
+                "edges": []
+            }
+        }))
+        .unwrap();
+        let mut library = PerformanceLibrary::empty();
+        library.racks.push(child);
+
+        let slots = browser_voice_slots(&library, &part);
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].plugin_id, "org.rackforge.piano");
+    }
 
     #[test]
     fn browser_catalog_lists_keylab_and_all_declarative_models() {

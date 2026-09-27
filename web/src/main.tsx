@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { Provider } from "react-redux";
 import { BrowserRouter, HashRouter } from "react-router";
 import { App } from "./App";
+import { BrowserStartGate } from "./BrowserStartGate";
 import { IS_BROWSER_HOST, isVstHost } from "./host";
 import { store } from "./store";
 import {
@@ -47,7 +48,7 @@ createRoot(document.getElementById("root")!).render(
       <Router>
         <InteractionFeedbackRoot />
         <RouteExperienceObserver />
-        <App />
+        {IS_BROWSER_HOST ? <BrowserStartGate><App /></BrowserStartGate> : <App />}
       </Router>
     </Provider>
   </StrictMode>,

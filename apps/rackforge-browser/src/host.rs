@@ -134,10 +134,10 @@ fn browser_voice_slots(library: &PerformanceLibrary, rack: &RackDefinition) -> V
         slots.extend(rack.slots.iter().filter(|slot| slot.enabled).cloned());
         if let Some(graph) = &rack.graph {
             for node in &graph.nodes {
-                if let RackGraphNodeKind::Rack { rack_id } = &node.kind {
-                    if let Some(child) = library.rack(rack_id) {
-                        visit(library, child, path, slots);
-                    }
+                if let RackGraphNodeKind::Rack { rack_id } = &node.kind
+                    && let Some(child) = library.rack(rack_id)
+                {
+                    visit(library, child, path, slots);
                 }
             }
         }

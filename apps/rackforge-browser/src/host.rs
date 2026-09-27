@@ -2594,35 +2594,7 @@ impl BrowserHost {
     }
 
     pub fn controller_catalog(&self) -> serde_json::Value {
-        let manifest: ControllerPackageManifest =
-            toml::from_str(keylab_essential_mk3::controller::PACKAGE_MANIFEST)
-                .expect("the bundled Arturia controller manifest is validated at build time");
-        let editor = manifest.editor_inputs();
-        serde_json::json!({
-            "controllers": [{
-                "id": manifest.id,
-                "name": manifest.name,
-                "vendor": manifest.vendor,
-                "schema_version": manifest.schema_version,
-                "version": manifest.version,
-                "enabled": true,
-                "trust": "official",
-                "runtime": "Browser",
-                "devices": manifest.devices.len(),
-                "inputs": editor.inputs,
-                "roles": editor.roles,
-                "actions": editor.actions,
-                "settings": manifest.settings.into_iter().map(|setting| serde_json::json!({
-                    "id": setting.id,
-                    "name": setting.name,
-                    "kind": match setting.kind {
-                        rackforge_controller_package::ControllerSettingKind::Color => "color",
-                    },
-                    "default": setting.default,
-                    "page": setting.page,
-                })).collect::<Vec<_>>(),
-            }]
-        })
+        browser_controller_catalog()
     }
 
     fn sync_controller(&mut self) {
@@ -3488,10 +3460,72 @@ pub fn midi_event(frame: u32, data: [u8; 3], length: u8) -> MidiEventV1 {
     }
 }
 
+/// Every shipped controller can be inspected in the browser, although only
+/// the KeyLab Essential mk3 has a browser-side MIDI driver at present.
+fn browser_controller_catalog() -> serde_json::Value {
+    let manifests = std::iter::once((
+        keylab_essential_mk3::controller::PACKAGE_MANIFEST,
+        true,
+    ))
+    .chain(
+        rackforge_controller_catalog::BUNDLED
+            .iter()
+            .map(|bundled| (bundled.manifest, false)),
+    );
+    let controllers: Vec<_> = manifests
+        .map(|(source, browser_driver)| {
+            let manifest: ControllerPackageManifest =
+                toml::from_str(source).expect("a bundled controller manifest is valid");
+            let editor = manifest.editor_inputs();
+            serde_json::json!({
+                "id": manifest.id,
+                "name": manifest.name,
+                "vendor": manifest.vendor,
+                "schema_version": manifest.schema_version,
+                "version": manifest.version,
+                "enabled": true,
+                "trust": "official",
+                "runtime": if browser_driver { "Browser" } else { "DeclarativeV1" },
+                "devices": manifest.devices.len(),
+                "inputs": editor.inputs,
+                "roles": editor.roles,
+                "actions": editor.actions,
+                "settings": manifest.settings.into_iter().map(|setting| serde_json::json!({
+                    "id": setting.id,
+                    "name": setting.name,
+                    "kind": match setting.kind {
+                        rackforge_controller_package::ControllerSettingKind::Color => "color",
+                    },
+                    "default": setting.default,
+                    "page": setting.page,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    serde_json::json!({ "controllers": controllers })
+}
+
 #[cfg(test)]
 mod package_preview_tests {
     use super::*;
     use rackforge_repository::LocalPackageBrandingPreview;
+
+    #[test]
+    fn browser_catalog_lists_keylab_and_all_declarative_models() {
+        let catalog = browser_controller_catalog();
+        let controllers = catalog["controllers"].as_array().unwrap();
+        assert_eq!(
+            controllers.len(),
+            rackforge_controller_catalog::BUNDLED.len() + 1
+        );
+        assert_eq!(controllers[0]["runtime"], "Browser");
+        assert!(controllers[0]["id"].as_str().unwrap().contains("keylab-essential-mk3"));
+        assert!(controllers[1..].iter().all(|controller| {
+            controller["runtime"] == "DeclarativeV1"
+                && controller["enabled"] == true
+                && controller["inputs"].is_array()
+        }));
+    }
 
     #[test]
     fn runtime_keeps_one_semantically_newest_managed_version_per_plugin() {

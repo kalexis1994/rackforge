@@ -3755,6 +3755,7 @@ dependencies = [
  "rackforge-audio-api",
  "rackforge-control-api",
  "rackforge-controller-arturia-keylab-essential-mk3",
+ "rackforge-controller-catalog",
  "rackforge-controller-package",
  "rackforge-core",
  "rackforge-host-capabilities",

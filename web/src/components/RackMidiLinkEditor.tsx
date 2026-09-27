@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { useCanvasModal } from "../hooks/useCanvasModal";
+import { normalizeRackMidiTransform } from "../rackGraph";
 import type { RackGraphEdge, RackMidiTransform } from "../types";
 import { ScrubNumberField } from "./ScrubNumberField";
 
@@ -10,18 +11,6 @@ interface RackMidiLinkEditorProps {
   onApply: (transform: RackMidiTransform) => void;
   onClose: () => void;
 }
-
-const identityTransform: RackMidiTransform = {
-  source_channels: [],
-  note_low: 0,
-  note_high: 127,
-  transpose: 0,
-  notes_only: false,
-  velocity_input_low: 0,
-  velocity_input_high: 127,
-  velocity_output_low: 0,
-  velocity_output_high: 127,
-};
 
 function noteName(note: number) {
   const names = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
@@ -116,7 +105,7 @@ export function RackMidiLinkEditor({
   const { sectionRef, closeRef, onKeyDown } = useCanvasModal(onClose);
   const titleId = useId();
   const [draft, setDraft] = useState<RackMidiTransform>(
-    edge.midi_transform ?? fallback ?? identityTransform,
+    () => normalizeRackMidiTransform(edge.midi_transform ?? fallback),
   );
 
   const patch = (next: Partial<RackMidiTransform>) => setDraft((current) => ({ ...current, ...next }));
@@ -192,7 +181,7 @@ export function RackMidiLinkEditor({
         </section>
       </div>
       <footer>
-        <button type="button" onClick={() => setDraft(identityTransform)}>Reset</button>
+        <button type="button" onClick={() => setDraft(normalizeRackMidiTransform())}>Reset</button>
         <span />
         <button type="button" onClick={onClose}>Cancel</button>
         <button type="button" className="primary" disabled={!valid} onClick={() => onApply(draft)}>Apply</button>

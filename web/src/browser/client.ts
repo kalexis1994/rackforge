@@ -539,6 +539,9 @@ export async function startBrowserHost(): Promise<void> {
   booting = (async () => {
     const startup = new StartupTimeline("browser");
     const audio = new AudioContext({ latencyHint: "interactive" });
+    // A first tap can happen while the packaged filesystem is still being
+    // downloaded. Listen before the first await so that gesture is not lost.
+    resumeOnGesture(audio);
     await audio.audioWorklet.addModule(engineWorkletUrl);
     // The worker keeps non-hashed files available offline. Tie the host ABI to
     // the hashed UI build so a deployment can never pair a new worklet with
@@ -547,6 +550,16 @@ export async function startBrowserHost(): Promise<void> {
       fetchBytes(versionedBrowserAsset(HOST_MODULE)),
       loadStorage(),
     ]);
+    console.info(`BROWSER_BOOT files_ready count=${files.length} audio_state=${audio.state}`);
+
+    // The worklet can announce readiness as soon as it is constructed on a
+    // running context. Arm both listeners before creating the node.
+    const ready = milestone(
+      "ready",
+      audio,
+      "the RackForge engine did not start on the audio thread",
+    );
+    const booted = milestone("booted", audio, "the RackForge engine did not answer");
 
     const node = new AudioWorkletNode(audio, ENGINE_PROCESSOR, {
       numberOfInputs: 0,
@@ -563,20 +576,13 @@ export async function startBrowserHost(): Promise<void> {
     };
     node.connect(audio.destination);
 
-    const ready = milestone(
-      "ready",
-      audio,
-      "the RackForge engine did not start on the audio thread",
-    );
-    const booted = milestone("booted", audio, "the RackForge engine did not answer");
-
     // The processor only exists once the context is running, and a suspended
     // context never delivers the boot message. Most browsers keep it suspended
     // until someone has interacted with the page, so this waits for that
     // rather than failing: the engine has done nothing wrong, and a person who
     // has not touched the page yet is not waiting for sound.
-    resumeOnGesture(audio);
     await running(audio);
+    console.info("BROWSER_BOOT audio_running");
     await ready;
 
     node.port.postMessage(
@@ -716,17 +722,23 @@ function milestone(
  * asks once per gesture kind and stops asking as soon as it is running.
  */
 function resumeOnGesture(audio: AudioContext) {
+  const events = ["pointerdown", "keydown", "touchstart"] as const;
+  const stop = () => {
+    for (const event of events) window.removeEventListener(event, resume);
+    audio.removeEventListener("statechange", stopWhenRunning);
+  };
+  const stopWhenRunning = () => {
+    if (audio.state === "running") stop();
+  };
   const resume = () => {
     void audio.resume().catch(() => undefined);
-    if (audio.state === "running") {
-      for (const event of ["pointerdown", "keydown", "touchstart"] as const) {
-        window.removeEventListener(event, resume);
-      }
-    }
+    stopWhenRunning();
   };
-  for (const event of ["pointerdown", "keydown", "touchstart"] as const) {
+  audio.addEventListener("statechange", stopWhenRunning);
+  for (const event of events) {
     window.addEventListener(event, resume);
   }
+  resume();
 }
 
 function send(request: string): Promise<string> {
@@ -1270,6 +1282,10 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     } satisfies WebPublicConfig as T;
   }
   if (path === "/api/v1/plugins" && method === "GET") {
+    // The UI starts this request at the same time as the session connection.
+    // Without this gate the first request sees engine=null, turns the shared
+    // catalog into an error, and only a manual Retry works after boot.
+    await startBrowserHost();
     const answer = await sendPackage("catalog");
     if (!answer.ok || !answer.catalog) {
       throw new HostRequestError(answer.error ?? "The plugin catalog is unavailable.", 503);

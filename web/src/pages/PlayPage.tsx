@@ -8,7 +8,9 @@ import { PluginSurfaceState } from "../components/PluginSurfaceState";
 import { RfLoader } from "../components/RfLoader";
 import { PluginPickerModal } from "../dialogs/PluginPickerModal";
 import { PresetModal } from "../dialogs/PresetModal";
+import { startBrowserHost } from "../browser/client";
 import { dispatchCommandAwait } from "../gateway";
+import { IS_BROWSER_HOST } from "../host";
 import { type PlayChain, chainOf, sameChain } from "../playChain";
 import { usePluginCatalog } from "../pluginCatalog";
 import { formatPluginVersion } from "../pluginPresentation";
@@ -32,6 +34,17 @@ export function PlayPage({
       (instance) => instance.instance_id === snapshot?.active_instance_id,
     ) ?? instances[0];
   const playActivationStartedRef = useRef(false);
+  const [startingBrowserHost, setStartingBrowserHost] = useState(false);
+  const [browserStartError, setBrowserStartError] = useState<string | null>(null);
+  const startBrowserAudio = useCallback(() => {
+    setBrowserStartError(null);
+    setStartingBrowserHost(true);
+    void startBrowserHost()
+      .catch((error: unknown) => {
+        setBrowserStartError(error instanceof Error ? error.message : "RackForge could not start audio.");
+      })
+      .finally(() => setStartingBrowserHost(false));
+  }, []);
   useEffect(() => {
     if (
       playActivationStartedRef.current ||
@@ -267,12 +280,26 @@ export function PlayPage({
       ) : !snapshot ? (
         // No session yet is not "no instrument": the one that is playing
         // simply has not been reported.
-        <RfLoader
-          className="plugin-play-loader"
-          label="Connecting to RackForge"
-          detail="Waiting for the session…"
-          size="large"
-        />
+        IS_BROWSER_HOST ? (
+          <div className="plugin-play-loader plugin-play-loader--start">
+            <RfLoader
+              label="Connecting to RackForge"
+              detail="The browser needs a tap before audio can start."
+              size="large"
+            />
+            <button type="button" className="secondary-button" disabled={startingBrowserHost} onClick={startBrowserAudio}>
+              {startingBrowserHost ? "Starting…" : "Start RackForge audio"}
+            </button>
+            {browserStartError ? <p role="alert">{browserStartError}</p> : null}
+          </div>
+        ) : (
+          <RfLoader
+            className="plugin-play-loader"
+            label="Connecting to RackForge"
+            detail="Waiting for the session…"
+            size="large"
+          />
+        )
       ) : pluginCatalog.status === "idle" || pluginCatalog.status === "loading" ? (
         <RfLoader
           className="plugin-play-loader"

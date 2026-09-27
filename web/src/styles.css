@@ -2766,6 +2766,11 @@ body {
   width: 100%;
 }
 
+.plugin-play-loader--start {
+  align-content: center;
+  gap: 16px;
+}
+
 .plugin-catalog-error {
   min-height: 240px;
   display: grid;

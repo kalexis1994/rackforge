@@ -50,9 +50,14 @@ import type {
   WebAuthStatus,
   WebPublicConfig,
 } from "../types";
+import {
+  DEFAULT_WEB_BUFFER_FRAMES,
+  WEB_BUFFER_STORAGE_KEY,
+  requestedWebBufferFrames,
+  validWebBufferFrames,
+  webBufferChoices,
+} from "./audioBuffer";
 
-/** Frames per render. Web Audio always asks for 128. */
-const RENDER_FRAMES = 128;
 const OUTPUT_CHANNELS = 2;
 /** Where the built site keeps the storage image the host boots against. */
 const STORAGE_MANIFEST = "demo/storage.json";
@@ -85,6 +90,23 @@ interface Pending {
 }
 
 let context: AudioContext | null = null;
+let activeRenderFrames = DEFAULT_WEB_BUFFER_FRAMES;
+let readyRenderFrames = DEFAULT_WEB_BUFFER_FRAMES;
+
+function variableRenderQuantaSupported(): boolean {
+  return typeof AudioContext !== "undefined" && "renderQuantumSize" in AudioContext.prototype;
+}
+
+function savedRenderFrames(): number {
+  try {
+    return requestedWebBufferFrames(
+      localStorage.getItem(WEB_BUFFER_STORAGE_KEY),
+      variableRenderQuantaSupported(),
+    );
+  } catch {
+    return DEFAULT_WEB_BUFFER_FRAMES;
+  }
+}
 let bootAudioContext: AudioContext | null = null;
 let engine: AudioWorkletNode | null = null;
 let booting: Promise<void> | null = null;
@@ -492,6 +514,7 @@ function handleEngineEvent(event: EngineEvent) {
       break;
     }
     case "ready":
+      readyRenderFrames = event.frames;
       milestones.ready?.();
       break;
     case "pool_request":
@@ -551,7 +574,11 @@ export async function startBrowserHost(): Promise<void> {
   }
   booting = (async () => {
     const startup = new StartupTimeline("browser");
-    const audio = new AudioContext({ latencyHint: "interactive" });
+    const requestedFrames = savedRenderFrames();
+    const audio = new AudioContext({
+      latencyHint: "interactive",
+      ...(variableRenderQuantaSupported() ? { renderSizeHint: requestedFrames } : {}),
+    } as AudioContextOptions & { renderSizeHint?: number });
     bootAudioContext = audio;
     // A first tap can happen while the packaged filesystem is still being
     // downloaded. Listen before the first await so that gesture is not lost.
@@ -598,6 +625,11 @@ export async function startBrowserHost(): Promise<void> {
     await running(audio);
     console.info("BROWSER_BOOT audio_running");
     await ready;
+    // The hint is advisory. The first actual worklet callback, rather than
+    // the stored preference, determines the host and plugin buffer capacity.
+    const frames = readyRenderFrames;
+    activeRenderFrames = frames;
+    console.info(`BROWSER_BOOT render_frames=${frames} requested=${requestedFrames}`);
 
     node.port.postMessage(
       {
@@ -605,7 +637,7 @@ export async function startBrowserHost(): Promise<void> {
         wasm,
         files,
         packagedPaths: packagedFiles.map((file) => file.path),
-        maximumFrames: RENDER_FRAMES,
+        maximumFrames: frames,
         channels: OUTPUT_CHANNELS,
       },
       [wasm.buffer, ...files.map((file) => file.bytes.buffer)],
@@ -1316,6 +1348,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
   }
   if (path === "/api/v1/host/audio" && method === "GET") {
     const rate = context?.sampleRate ?? 48_000;
+    const requestedFrames = savedRenderFrames();
     return {
       status: "ok",
       host: "browser",
@@ -1329,7 +1362,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
             channels: OUTPUT_CHANNELS,
             default_sample_rate: rate,
             sample_rates: [rate],
-            buffer_frames: [RENDER_FRAMES],
+            buffer_frames: webBufferChoices(variableRenderQuantaSupported()),
           },
         ],
         midi_inputs: [...midiInputNames],
@@ -1339,7 +1372,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
         driver: "Web Audio",
         output_device: "Browser audio output",
         sample_rate_hz: rate,
-        buffer_frames: RENDER_FRAMES,
+        buffer_frames: requestedFrames,
         output_gain_db: 0,
         midi_inputs: [...midiInputNames],
       },
@@ -1347,7 +1380,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
         running: Boolean(engine),
         stream_health: engine ? "healthy" : "lost",
         sample_rate: rate,
-        buffer_size_frames: RENDER_FRAMES,
+        buffer_size_frames: engine ? activeRenderFrames : undefined,
         render_pool: (() => {
           const report = renderPoolReport();
           return {
@@ -1360,6 +1393,30 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
       },
       runtime_status: engine ? "running" : "stopped",
     } satisfies HostAudioSettings as T;
+  }
+  if (path === "/api/v1/host/audio" && method === "PUT") {
+    const preferences = JSON.parse(String(init.body ?? "{}")) as Partial<HostAudioSettings["preferences"]>;
+    const available = webBufferChoices(variableRenderQuantaSupported());
+    if (!validWebBufferFrames(preferences.buffer_frames) ||
+        !available.includes(preferences.buffer_frames)) {
+      throw new HostRequestError("This browser does not offer that audio buffer size.", 400);
+    }
+    if (preferences.driver !== "Web Audio" ||
+        preferences.output_device !== "Browser audio output" ||
+        preferences.output_gain_db !== 0) {
+      throw new HostRequestError("The browser controls the audio device and output gain.", 400);
+    }
+    if (JSON.stringify(preferences.midi_inputs) !== JSON.stringify([...midiInputNames]) ||
+        preferences.velocity_curve !== undefined ||
+        preferences.velocity_curves !== undefined) {
+      throw new HostRequestError("Browser MIDI settings cannot be changed here yet.", 400);
+    }
+    try {
+      localStorage.setItem(WEB_BUFFER_STORAGE_KEY, String(preferences.buffer_frames));
+    } catch {
+      throw new HostRequestError("The browser could not save this audio setting.", 507);
+    }
+    return browserHostJson<T>("/api/v1/host/audio");
   }
   if (path === "/api/v1/controllers" && method === "GET") {
     const answer = await requestControllerCatalog();

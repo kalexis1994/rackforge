@@ -294,6 +294,8 @@ export function SettingsPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      const webBufferChanged = IS_BROWSER_HOST &&
+        settings.preferences.buffer_frames !== audioSettings.preferences.buffer_frames;
       setAudioSettings(settings);
       // What this tab committed comes back from the host; what the other tab
       // has pending is left where the player put it.
@@ -310,7 +312,11 @@ export function SettingsPage({
             : { ...settings.preferences, midi_inputs: current.midi_inputs, velocity_curve: current.velocity_curve, velocity_curves: current.velocity_curves },
       );
       onAudioChange(settings);
-      setAudioMessage(settingsTab === "midi" ? "MIDI settings applied." : "Audio settings applied.");
+      setAudioMessage(settingsTab === "midi"
+        ? "MIDI settings applied."
+        : webBufferChanged && settings.runtime?.running
+          ? "Buffer preference saved. Reload RackForge to activate it; the current audio stays unchanged until then."
+          : "Audio settings applied.");
     } catch (error) {
       setAudioMessage(error instanceof Error ? error.message : "Audio settings failed.");
     } finally {
@@ -538,9 +544,17 @@ export function SettingsPage({
                     <label>
                       <span>Buffer</span>
                       <select value={audioDraft.buffer_frames ?? ""} onChange={(event) => setAudioDraft({ ...audioDraft, buffer_frames: event.target.value ? Number(event.target.value) : undefined })}>
-                        <option value="">System default</option>
+                        {!IS_BROWSER_HOST ? <option value="">System default</option> : null}
                         {output.buffer_frames.map((frames) => <option key={frames} value={frames}>{frames} samples · {(frames * 1000 / audioDraft.sample_rate_hz).toFixed(1)} ms</option>)}
                       </select>
+                      {IS_BROWSER_HOST ? <small>
+                        {output.buffer_frames.length === 1
+                          ? "This browser uses a fixed 128-frame render block."
+                          : audioSettings.runtime?.running &&
+                              audioSettings.runtime.buffer_size_frames !== audioSettings.preferences.buffer_frames
+                            ? "The active size differs from the saved choice. Reload to try it; if it still differs, this browser ignored the request."
+                            : "Available render sizes. The browser may choose a different size; check Active buffer below. Changing it requires a reload."}
+                      </small> : null}
                     </label>
                   </>
                 ) : null;

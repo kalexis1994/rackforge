@@ -180,6 +180,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #encoder = new TextEncoder();
   #channels = 2;
   #frames = 128;
+  #ready = false;
   #failed = false;
   #sessionRevision = 0;
   #storageRevision = 0;
@@ -194,7 +195,6 @@ class RackForgeEngine extends AudioWorkletProcessor {
         this.#reportFailure(event.data, error);
       }
     };
-    this.#post({ kind: "ready" });
   }
 
   #handle(command: EngineCommand) {
@@ -496,6 +496,10 @@ class RackForgeEngine extends AudioWorkletProcessor {
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
     const output = outputs[0];
+    if (!this.#ready && output?.[0]?.length) {
+      this.#ready = true;
+      this.#post({ kind: "ready", frames: output[0].length });
+    }
     const host = this.#host;
     if (!output || output.length === 0) {
       return !this.#failed;

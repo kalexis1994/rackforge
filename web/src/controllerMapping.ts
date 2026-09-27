@@ -818,17 +818,13 @@ function inputFromMapped(input: ControlMapping["input"]): ControllerInput {
   }
 }
 
-/**
- * Every controller worth showing: attached ones, enabled packages that are
- * not plugged in, and maps whose controller is neither -- so a map is never
- * out of reach of the player who made it. Attached first, then by name.
- */
 /** A controller RackForge ships from its maker's documentation: its own, and
  * with no driver. */
 export function isCatalogPackage(entry: ControllerPackageSummary): boolean {
   return entry.trust === "official" && entry.runtime === "DeclarativeV1";
 }
 
+/** Every available controller, attached first and then by name. */
 export function buildControllerDevices(
   packages: readonly ControllerPackageSummary[],
   registered: ReadonlyArray<{
@@ -838,21 +834,14 @@ export function buildControllerDevices(
     identified?: boolean;
   }>,
   maps: readonly ControllerMap[],
-  /** Controllers whose map is still RackForge's factory map, as offered. */
-  factoryUntouched: ReadonlySet<string> = new Set(),
 ): ControllerDevice[] {
-  const catalog = new Set(packages.filter(isCatalogPackage).map((entry) => entry.id));
   const ids = new Set<string>([
     ...registered.map((entry) => entry.controller_id),
-    // RackForge's catalog describes dozens of keyboards the player may never
-    // own: one of them shows once it is plugged in or has a map of the
-    // player's, not before. Every one comes with a factory map; that alone
-    // does not list it.
-    ...maps
-      .filter((map) => !(catalog.has(map.controller_id) && factoryUntouched.has(map.controller_id)))
-      .map((map) => map.controller_id),
+    ...maps.map((map) => map.controller_id),
+    // The picker is a catalog as well as a connection status. A supported
+    // model must be inspectable and selectable before it is plugged in.
     ...packages
-      .filter((entry) => entry.enabled && !isCatalogPackage(entry))
+      .filter((entry) => entry.enabled)
       .map((entry) => entry.id),
   ]);
   const devices = [...ids].map((id): ControllerDevice => {

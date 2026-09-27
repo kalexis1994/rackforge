@@ -19,9 +19,8 @@ const WEB_DEMO_URL = "https://kalexis1994.github.io/rackforge/";
 const LATEST_RELEASE_URL = `${PROJECT_URL}/releases/latest`;
 const latestAsset = (name: string) => `${LATEST_RELEASE_URL}/download/${name}`;
 
-/** One key per platform, each the Standard build as the release names it,
- *  with the processor it is built for. The Minimal builds and the checksums
- *  are on the release page. */
+/** One key per platform, with the processor it is built for. Checksums are
+ *  on the release page. */
 const DOWNLOADS: Array<{
   platform: string;
   file: string;
@@ -114,8 +113,7 @@ export function AboutPage() {
             <h2>Ready to play</h2>
             <p>
               Installed with RackForge: every one made of code rather than
-              samples, and the same on every platform. Minimal builds leave
-              them out.
+              samples, and the same on every platform.
             </p>
           </div>
           <ul className="about-plugin-list">
@@ -173,7 +171,7 @@ export function AboutPage() {
             target="_blank"
             rel="noopener noreferrer"
           >
-            Every download, Minimal builds and checksums
+            Every download and its checksums
           </a>
         </article>
 

@@ -19,6 +19,28 @@ export interface Bank {
   order?: number;
 }
 
+/** Host contexts are cloned across the iframe bridge, even when unchanged. */
+export function samePrograms(left: readonly Program[], right: readonly Program[]): boolean {
+  return left === right || (
+    left.length === right.length &&
+    left.every((program, index) => {
+      const other = right[index];
+      return program.id === other.id && program.name === other.name &&
+        program.bank === other.bank && program.detail === other.detail;
+    })
+  );
+}
+
+export function sameBanks(left: readonly Bank[], right: readonly Bank[]): boolean {
+  return left === right || (
+    left.length === right.length &&
+    left.every((bank, index) => {
+      const other = right[index];
+      return bank.id === other.id && bank.name === other.name && bank.order === other.order;
+    })
+  );
+}
+
 export interface ProgramMatch {
   program: Program;
   /** Its place in the plugin's own list, from 0: what "12/128" counts. */

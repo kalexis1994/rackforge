@@ -80,6 +80,8 @@ export function GraphWorkspaceHeader({
           value={name}
           maxLength={64}
           autoComplete="off"
+          placeholder={nameLabel}
+          aria-required="true"
           onChange={(event) => onName(event.target.value)}
         />
       </label>

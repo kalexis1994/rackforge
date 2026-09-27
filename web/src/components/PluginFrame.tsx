@@ -13,7 +13,7 @@ import { useResolvedLighting } from "../hooks/useResolvedLighting";
 import { bindNativePluginResource, hostJson, isDesktopHost, isNativeHost, selectNativePluginSound } from "../host";
 import { surfaceSettled, surfaceStarted } from "../bootReadiness";
 import { beginPluginOperation, refreshPluginCatalog, usePluginDescriptor } from "../pluginCatalog";
-import { pluginContextInstance } from "../pluginContext";
+import { pluginContextInstance, shouldPublishPluginContext } from "../pluginContext";
 import { synchronizePluginEnvironment } from "../pluginLifecycle";
 import { PluginRemovalOptions, PluginRemovalResult, pluginRemovalSummary } from "../pluginRemoval";
 import { findEditorField, isProgramEditorValue } from "../programEditor";
@@ -511,6 +511,7 @@ export function PluginFrame({
       protocol: "rackforge.plugin.web@1",
       kind: "context",
       surface,
+      isolated,
       instance: contextInstance,
       program_draft:
         snapshot?.program_draft?.instance_id === instance.instance_id
@@ -531,6 +532,22 @@ export function PluginFrame({
       },
     };
   }, [instance, isolated, isolatedContextState, lighting, snapshot, surface]);
+  const lastPublishedContext = useRef<{ identity: string; json: string } | null>(null);
+  const publishPluginContext = useCallback((force = false) => {
+    if (!pluginContextReady) return;
+    const target = frameRef.current?.contentWindow;
+    if (!target) return;
+    // Rack edits re-create their instance object as the canvas changes size
+    // or a slot is previewed. The data can be identical, but forwarding it
+    // again makes some plugin UIs replace their program selector and lose its
+    // open dialog and scroll position. The iframe still receives every real
+    // change and a forced context for each document load / ready handshake.
+    const json = JSON.stringify(pluginContext);
+    const next = { identity: surfaceIdentity, json };
+    if (!shouldPublishPluginContext(lastPublishedContext.current, next, force)) return;
+    target.postMessage(pluginContext, window.location.origin);
+    lastPublishedContext.current = next;
+  }, [pluginContext, pluginContextReady, surfaceIdentity]);
 
   // Parameter changes can originate outside the iframe (MIDI Learn links,
   // semantic .rfcontroller profiles, automation, or another RackForge
@@ -651,7 +668,7 @@ export function PluginFrame({
       if (event.data.kind === "ready") {
         setLoadedFrameIdentity(surfaceIdentity);
         setFrameDocumentGeneration((generation) => generation + 1);
-        if (pluginContextReady) send(pluginContext);
+        publishPluginContext(true);
         return;
       }
       if (
@@ -1165,15 +1182,10 @@ export function PluginFrame({
         respond(false, "Method is not available for this plugin surface.");
       }
     };
-    const onLoad = () => {
-      if (pluginContextReady) send(pluginContext);
-    };
     window.addEventListener("message", onMessage);
-    frame.addEventListener("load", onLoad);
-    if (pluginContextReady) send(pluginContext);
+    publishPluginContext();
     return () => {
       window.removeEventListener("message", onMessage);
-      frame.removeEventListener("load", onLoad);
     };
   }, [
     descriptor,
@@ -1189,8 +1201,7 @@ export function PluginFrame({
     snapshot,
     surface,
     surfaceIdentity,
-    pluginContext,
-    pluginContextReady,
+    publishPluginContext,
   ]);
 
   const editLease =
@@ -1323,12 +1334,7 @@ export function PluginFrame({
             // the message listener. The load event happens after the plugin
             // has installed its own listener, so publishing the idempotent
             // context here closes that race without plugin-specific timing.
-            if (pluginContextReady) {
-              frameRef.current?.contentWindow?.postMessage(
-                pluginContext,
-                window.location.origin,
-              );
-            }
+            publishPluginContext(true);
           }}
         />
         {!splashGone && (

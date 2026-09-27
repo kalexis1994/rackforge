@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canOpenInPlay,
+  declaresConfigSurface,
   derivePluginRuntimeStates,
   groupPluginsByKind,
   pluginKind,
@@ -156,6 +157,12 @@ describe("what a plugin is", () => {
     expect(canOpenInPlay(ofKind("piano", "instrument"))).toBe(true);
     expect(canOpenInPlay(ofKind("reverb", "effect"))).toBe(false);
     expect(canOpenInPlay(ofKind("arp", "midi_processor"))).toBe(false);
+  });
+
+  it("offers CONFIG only when the plugin declares a CONFIG surface", () => {
+    expect(declaresConfigSurface(plugin())).toBe(false);
+    expect(declaresConfigSurface({ ...plugin(), surfaces: [{ kind: "play", entry_url: "/play" }] })).toBe(false);
+    expect(declaresConfigSurface({ ...plugin(), surfaces: [{ kind: "config", entry_url: "/config" }] })).toBe(true);
   });
 
   it("groups the library by kind, in listing order", () => {

@@ -12,6 +12,8 @@ export interface ProgramContext {
   programs: Program[];
   banks: Bank[];
   selected: string | null;
+  /** A Rack/Song Part owns an isolated plugin state, unlike PLAY. */
+  isolated: boolean;
 }
 
 /** The programs in a host context, or null for any other message. */
@@ -51,6 +53,7 @@ export function readContext(message: unknown): ProgramContext | null {
     programs,
     banks: bankList,
     selected: typeof selected === "string" ? selected : null,
+    isolated: (message as { isolated?: unknown }).isolated === true,
   };
 }
 

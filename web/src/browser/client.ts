@@ -37,6 +37,7 @@ import {
   automaticWorkerCount,
   poolLayout,
   deviceIsMobile,
+  parallelPoolAllowed,
   poolSupported,
   type WorkerInit,
 } from "./renderPool";
@@ -392,6 +393,11 @@ function buildRenderPool(request: PoolRequestEvent) {
       "rackforge render pool: the page is not cross-origin isolated, so a"
         + " parallel instrument will render on the audio thread alone",
     );
+    return;
+  }
+  if (!parallelPoolAllowed(true, deviceIsMobile())) {
+    poolReason = "parallel rendering is disabled on mobile to prevent silent missed blocks";
+    console.warn(`rackforge render pool: ${poolReason}`);
     return;
   }
   poolReason = undefined;

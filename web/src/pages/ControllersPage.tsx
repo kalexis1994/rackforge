@@ -22,6 +22,7 @@ import {
   inputFromActivity,
   inputMessageLabel,
   isButtonInput,
+  isCatalogPackage,
   isModifierInput,
   isUserController,
   mappingsForInput,
@@ -73,8 +74,6 @@ interface Loaded {
   packages: ControllerPackageSummary[];
   registered: RegisteredController[];
   maps: ControllerMap[];
-  /** Controllers whose map is still RackForge's factory map, as offered. */
-  factoryUntouched: string[];
   /** Controllers whose Fn layer is open now, held or latched. */
   fnOpen: string[];
   sources: MidiSourceStatus[];
@@ -159,7 +158,6 @@ export function ControllersPage() {
       packages: packages ?? current?.packages ?? [],
       registered: maps.controllers,
       maps: maps.maps,
-      factoryUntouched: maps.factoryUntouched,
       fnOpen: maps.fnOpen,
       sources: sources ?? current?.sources ?? [],
     }));
@@ -190,7 +188,6 @@ export function ControllersPage() {
       loaded.packages,
       loaded.registered,
       loaded.maps,
-      new Set(loaded.factoryUntouched),
     );
     if (!keepsMaps) return known;
     const claimed = new Set(
@@ -340,8 +337,6 @@ export function ControllersPage() {
               // A map with a Fn button and nothing mapped yet is still kept.
               ...(map.plugins.length > 0 || map.modifier ? [map] : []),
             ],
-            // Saved by the player, it is theirs now.
-            factoryUntouched: current.factoryUntouched.filter((id) => id !== map.controller_id),
           }
         : current,
     );
@@ -571,6 +566,22 @@ export function ControllersPage() {
   const canEditControls = Boolean(
     keepsMaps && device && !device.unknown && isUserController(device.id) && device.package && device.source,
   );
+  const connectedDevices = devices.filter((candidate) => candidate.connected);
+  const catalogDevices = devices.filter((candidate) =>
+    !candidate.connected && candidate.package && isCatalogPackage(candidate.package),
+  );
+  const catalogIds = new Set(catalogDevices.map((candidate) => candidate.id));
+  const otherDevices = devices.filter((candidate) =>
+    !candidate.connected && !catalogIds.has(candidate.id),
+  );
+  const deviceOptions = (items: ControllerDevice[]) => items.map((candidate) => (
+    <option key={candidate.id} value={candidate.id}>
+      {candidate.name}
+      {candidate.unknown
+        ? " · new"
+        : candidate.connected ? "" : candidate.orphaned ? " · package removed" : " · not connected"}
+    </option>
+  ));
 
   return (
     <>
@@ -608,14 +619,9 @@ export function ControllersPage() {
             <label className="controllers-device">
               <span>Controller</span>
               <select value={device.id} disabled={busy === "controls"} onChange={(event) => selectDevice(event.target.value)}>
-                {devices.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                    {candidate.unknown
-                      ? " · new"
-                      : candidate.connected ? "" : candidate.orphaned ? " · package removed" : " · not connected"}
-                  </option>
-                ))}
+                {connectedDevices.length > 0 ? <optgroup label="Connected">{deviceOptions(connectedDevices)}</optgroup> : null}
+                {otherDevices.length > 0 ? <optgroup label="Other controllers">{deviceOptions(otherDevices)}</optgroup> : null}
+                {catalogDevices.length > 0 ? <optgroup label="Supported models">{deviceOptions(catalogDevices)}</optgroup> : null}
               </select>
             </label>
             <span className={`controllers-status${device.connected ? " connected" : ""}`}>

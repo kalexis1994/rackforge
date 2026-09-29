@@ -3510,7 +3510,6 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, REQUEST_SELECT_PLUGIN_RESOURCE);
     }
 
-    @Override
     /**
      * A WebView opens no picker for <input type="file"> unless the app does:
      * without this, a plugin's "open a file" button (RF-5's LOAD FROM TAPE)
@@ -3612,6 +3611,7 @@ public final class MainActivity extends Activity {
         callback.onReceiveValue(chosen);
     }
 
+    @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_WEB_FILE_CHOOSER) {

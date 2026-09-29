@@ -3,6 +3,7 @@ package org.rackforge.android;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -34,6 +35,8 @@ import android.provider.DocumentsContract;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
 import android.webkit.MimeTypeMap;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.view.View;
@@ -95,6 +98,9 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_SELECT_CLIENT_RESOURCE = 4103;
     private static final int REQUEST_READ_TEXT_FILE = 4104;
     private static final int REQUEST_WRITE_TEXT_FILE = 4105;
+    private static final int REQUEST_WEB_FILE_CHOOSER = 4106;
+    private static final int REQUEST_SAVE_DOWNLOAD = 4107;
+    private static final int MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
     private static final long MAX_PLUGIN_BYTES = 512L * 1024L * 1024L;
     private static final long MAX_CLIENT_RESOURCE_BYTES = 2L * 1024L * 1024L * 1024L;
     private static final long CLIENT_RESOURCE_TTL_MS = 30L * 60L * 1000L;
@@ -192,6 +198,12 @@ public final class MainActivity extends Activity {
     private String pendingTextReadRequestId;
     private String pendingTextWriteRequestId;
     private String pendingTextWriteContent;
+    // A page's <input type="file"> -- RackForge's own or a plugin's -- waiting
+    // for the system file picker.
+    private ValueCallback<Uri[]> pendingWebFileChooser;
+    // A file a plugin page saves, waiting for the player to choose where.
+    private byte[] pendingDownloadBytes;
+    private String pendingDownloadName;
     private final Map<String, ClientResourceSelection> clientResourceSelections =
             new ConcurrentHashMap<>();
     private String activePluginName = "No plugin";
@@ -417,6 +429,7 @@ public final class MainActivity extends Activity {
         webView.addJavascriptInterface(new PluginWebBridge(), "RackForgeAndroid");
         webView.addJavascriptInterface(new NativeHostBridge(), "RackForgeNativeHost");
         webView.setWebViewClient(pluginWebViewClient());
+        webView.setWebChromeClient(fileChoosingChromeClient());
         webView.setOnTouchListener((view, event) -> {
             int action = event.getActionMasked();
             if (action == MotionEvent.ACTION_UP
@@ -887,6 +900,30 @@ public final class MainActivity extends Activity {
     }
 
     private final class PluginWebBridge {
+        /**
+         * A file a plugin page saves for the player: the WebView downloads
+         * nothing a page makes itself (a blob: or data: link), so the plugin
+         * kit hands it over here, and the system's own dialog asks where.
+         */
+        @JavascriptInterface
+        public void saveDownload(String fileName, String mediaType, String base64) {
+            final byte[] bytes;
+            try {
+                if (base64 == null || base64.length() > (MAX_DOWNLOAD_BYTES / 3 + 1) * 4) {
+                    throw new IllegalArgumentException("The file is too large to save.");
+                }
+                bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+            } catch (Throwable error) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "Could not save the file.", Toast.LENGTH_LONG).show());
+                return;
+            }
+            String name = safeDownloadName(fileName);
+            String type = mediaType == null || mediaType.isEmpty()
+                    ? "application/octet-stream" : mediaType;
+            runOnUiThread(() -> chooseDownloadDestination(name, type, bytes));
+        }
+
         @JavascriptInterface
         public void postMessage(String payload) {
             try {
@@ -3474,8 +3511,117 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    /**
+     * A WebView opens no picker for <input type="file"> unless the app does:
+     * without this, a plugin's "open a file" button (RF-5's LOAD FROM TAPE)
+     * did nothing. Any type is offered -- a SysEx dump or a WAV recording often
+     * has no MIME type the system recognises -- and the page checks what it
+     * gets.
+     */
+    private WebChromeClient fileChoosingChromeClient() {
+        return new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(
+                    WebView view,
+                    ValueCallback<Uri[]> callback,
+                    FileChooserParams params) {
+                if (pendingWebFileChooser != null) {
+                    pendingWebFileChooser.onReceiveValue(null);
+                }
+                pendingWebFileChooser = callback;
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,
+                        params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                try {
+                    startActivityForResult(intent, REQUEST_WEB_FILE_CHOOSER);
+                } catch (android.content.ActivityNotFoundException missing) {
+                    pendingWebFileChooser = null;
+                    callback.onReceiveValue(null);
+                    Toast.makeText(MainActivity.this,
+                            "No app on this device can choose a file.", Toast.LENGTH_LONG).show();
+                }
+                return true;
+            }
+        };
+    }
+
+    private static String safeDownloadName(String fileName) {
+        String name = fileName == null ? "" : fileName.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
+        return name.isEmpty() ? "download" : name;
+    }
+
+    private void chooseDownloadDestination(String name, String type, byte[] bytes) {
+        pendingDownloadBytes = bytes;
+        pendingDownloadName = name;
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType(type);
+        intent.putExtra(Intent.EXTRA_TITLE, name);
+        try {
+            startActivityForResult(intent, REQUEST_SAVE_DOWNLOAD);
+        } catch (android.content.ActivityNotFoundException missing) {
+            pendingDownloadBytes = null;
+            pendingDownloadName = null;
+            Toast.makeText(this, "No app on this device can save a file.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void finishDownloadSave(int resultCode, Intent data) {
+        byte[] bytes = pendingDownloadBytes;
+        String name = pendingDownloadName;
+        pendingDownloadBytes = null;
+        pendingDownloadName = null;
+        if (bytes == null || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri destination = data.getData();
+        new Thread(() -> {
+            try (java.io.OutputStream output = getContentResolver().openOutputStream(destination, "wt")) {
+                if (output == null) throw new java.io.IOException("The destination cannot be written.");
+                output.write(bytes);
+                runOnUiThread(() -> Toast.makeText(this, "Saved " + name, Toast.LENGTH_SHORT).show());
+            } catch (Throwable error) {
+                Log.e("RackForge", "Could not save a plugin's file", error);
+                runOnUiThread(() -> Toast.makeText(this,
+                        "Could not save " + name, Toast.LENGTH_LONG).show());
+            }
+        }, "rackforge-save-download").start();
+    }
+
+    private void finishWebFileChooser(int resultCode, Intent data) {
+        ValueCallback<Uri[]> callback = pendingWebFileChooser;
+        pendingWebFileChooser = null;
+        if (callback == null) return;
+        if (resultCode != RESULT_OK || data == null) {
+            callback.onReceiveValue(null);
+            return;
+        }
+        ClipData clip = data.getClipData();
+        Uri[] chosen;
+        if (clip != null && clip.getItemCount() > 0) {
+            chosen = new Uri[clip.getItemCount()];
+            for (int index = 0; index < chosen.length; index++) {
+                chosen[index] = clip.getItemAt(index).getUri();
+            }
+        } else if (data.getData() != null) {
+            chosen = new Uri[] { data.getData() };
+        } else {
+            chosen = null;
+        }
+        callback.onReceiveValue(chosen);
+    }
+
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_WEB_FILE_CHOOSER) {
+            finishWebFileChooser(resultCode, data);
+            return;
+        }
+        if (requestCode == REQUEST_SAVE_DOWNLOAD) {
+            finishDownloadSave(resultCode, data);
+            return;
+        }
         if (requestCode == REQUEST_READ_TEXT_FILE) {
             finishTextFileRead(resultCode, data);
             return;

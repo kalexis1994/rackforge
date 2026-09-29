@@ -10,6 +10,8 @@ export interface Program {
   name: string;
   bank?: string;
   detail?: string;
+  /** One of the plugin's own (CUSTOM) programs, which can be saved over. */
+  editable?: true;
 }
 
 /** A bank as the host's context lists it (`instance.banks`). */

@@ -50,12 +50,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-5.rfplugin",
         "plugin_id": "org.rackforge.rf-5",
-        "version": "0.1.17",
+        "version": "0.1.19",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-5/"
-            "releases/download/v0.1.17/RF-5.rfplugin"
+            "releases/download/v0.1.19/RF-5.rfplugin"
         ),
-        "sha256": "d90e5252181b2da7a86a9a20aebd57d613068c99ac67fb6a40c7450a605622ba",
+        "sha256": "b5a6c915c6520a0d78e56ade3cce07f419107c514e13bc4283ecd4419f4a2b53",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -68,6 +68,7 @@ OFFICIAL_PLUGINS = (
             "branding/banner.png",
             "branding/splash.png",
             "web/play.html",
+            "web/config.html",
             "web/app.js",
             "web/app_bg.wasm",
             "web/styles.css",

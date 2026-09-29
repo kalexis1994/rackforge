@@ -4,7 +4,7 @@ import { Provider } from "react-redux";
 import { BrowserRouter, HashRouter } from "react-router";
 import { App } from "./App";
 import { BrowserStartGate } from "./BrowserStartGate";
-import { IS_BROWSER_HOST, isVstHost } from "./host";
+import { IS_BROWSER_HOST, isDesktopHost, isNativeHost, isVstHost } from "./host";
 import { store } from "./store";
 import {
   InteractionFeedbackRoot,
@@ -16,6 +16,7 @@ import "./styles.css";
 import "./faceplate.css";
 import { applyLighting, readLighting } from "./lighting";
 import { applyScreenGlass, readScreenGlass } from "./screen";
+import { lockViewportZoom } from "./viewport";
 
 // A RackForge serving its own interface answers every path, so it uses real
 // URLs. The published demo is a static site with no server to answer them, so
@@ -23,6 +24,12 @@ import { applyScreenGlass, readScreenGlass } from "./screen";
 const Router = IS_BROWSER_HOST || isVstHost() ? HashRouter : BrowserRouter;
 
 startExperienceMonitoring();
+
+// The Android app, the desktop window and the VST3 editor are applications:
+// a pinch does not zoom them. A browser keeps its zoom.
+if (isNativeHost() || isDesktopHost() || isVstHost()) {
+  lockViewportZoom(document);
+}
 
 if (IS_BROWSER_HOST && import.meta.env.PROD) {
   // A networked build never loads it. The browser host starts registration

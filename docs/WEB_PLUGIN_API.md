@@ -355,7 +355,92 @@ rf-program-select::part(item-selected) { background: #3a2a10; }
 ```
 
 The source is `web/src/plugin-kit/`. The build writes it unhashed to
-`rackforge-plugin-kit/program-select.js`.
+`rackforge-plugin-kit/program-select.js`, beside what the kit's elements
+share (`rackforge-plugin-kit/hostLink.js`).
+
+## Program save dialog
+
+`<rf-program-save>` saves what is playing as a program, with the program
+editing methods above. RackForge injects it beside the selector; a plugin
+places the element anywhere (it draws nothing until opened) and opens it
+from its own control, a RECORD key or a menu:
+
+```html
+<rf-program-save id="save"></rf-program-save>
+<script>
+  recordKey.addEventListener("click", () => save.open());
+</script>
+```
+
+It shows a name field, started with the current program's name, and offers
+to save a new program or, when the current program is the plugin's own
+(`editable` in `instance.sounds`), to save over it. Enter does the first of
+those, unless `primary` says otherwise; Escape and a tap outside cancel. A
+save asks `plugin.begin_program_edit` (with `program_id: null` for a new
+program), waits for the draft in the next context, then
+`plugin.set_program_name` and `plugin.save_program`; if a step fails it
+drops the draft with `plugin.cancel_program`, stays open and shows why.
+Names follow RackForge's rule: 1 to 64 characters, no control characters.
+
+Methods and properties: `open({ name?, mode? })`, `close()`,
+`save(mode?)` (`"new"` or `"replace"`), `done()` and `fail(error)` for a
+plugin's own path, `name` (the field), `isOpen`, `busy`, `canReplace`.
+
+Attributes:
+
+| attribute | effect |
+| --- | --- |
+| `primary="new"` / `"replace"` | what Enter does (replacing, when offered, by default) |
+| `source="manual"` | the element does not talk to the host; the plugin saves on `rf-program-save` and calls `done()` or `fail()`; `can-replace` then says whether replacing is offered |
+| `disabled` | nothing can be saved |
+| `hide-cancel`, `hide-title` | no Cancel button, no title row |
+| `heading`, `label`, `placeholder` | the title ("Save program"; not `title`, which browsers show as a tooltip), the field's label ("Name") and placeholder |
+| `save-label`, `replace-label`, `cancel-label` | the buttons ("Save as new", "Replace", "Cancel") |
+| `current-label` | before the current program's name ("Current program:") |
+| `default-name` | the name offered when there is no current program |
+| `busy-label` | the status while saving ("Saving…") |
+| `empty-error`, `long-error`, `control-error`, `error-label` | what a bad name, and a refused save, say |
+
+The element sets `busy` while saving and `can-replace` when the current
+program can be saved over, for styling (`rf-program-save[busy]`).
+
+Events (bubbling, composed): `rf-program-save` (cancelable; `detail`:
+`{ name, mode, programId }`; cancel it to save by your own path and call
+`done()` or `fail()`), `rf-program-saved` (the same `detail`),
+`rf-program-save-error` (`detail.error`), `rf-program-save-open`,
+`rf-program-save-close` (`detail.reason`: `"saved"` or `"cancel"`).
+
+It is styled as the plugin's own. Custom properties:
+
+| property | default |
+| --- | --- |
+| `--rf-save-font`, `--rf-save-color`, `--rf-save-muted` | inherited font, `#e8ebef`, and 60 % of it |
+| `--rf-save-accent`, `--rf-save-danger` | focus and the primary button; the error text |
+| `--rf-save-surface`, `--rf-save-border`, `--rf-save-radius` | the dialog |
+| `--rf-save-backdrop`, `--rf-save-width`, `--rf-save-padding`, `--rf-save-gap` | behind it, its width and spacing |
+| `--rf-save-field-height`, `--rf-save-field-font`, `--rf-save-field-color`, `--rf-save-field-background` | the name field |
+| `--rf-save-button-height`, `--rf-save-button-background`, `--rf-save-primary-background`, `--rf-save-primary-color` | the buttons |
+
+Parts: `dialog`, `form`, `header`, `title`, `body`, `label`, `name`,
+`current`, `error`, `actions`, `action` (every button), `cancel`,
+`replace`, `save`, `primary` (whichever Enter presses), `status`.
+Slots: `title`, `label`, `cancel`, `replace` and `save` replace those
+texts, so a button can hold a plugin's own key; `header-start`,
+`header-end`, `body-start`, `body-end` and `footer` add to the dialog:
+
+```html
+<rf-program-save primary="new" save-label="Record">
+  <span slot="save"><svg class="my-key">…</svg>RECORD</span>
+</rf-program-save>
+```
+
+```css
+rf-program-save { --rf-save-surface: #111; --rf-save-radius: 14px; }
+rf-program-save::part(name) { font-family: "Segment14"; color: #ff342f; }
+rf-program-save::part(action) { background: none; border: 0; }
+```
+
+The build writes it unhashed to `rackforge-plugin-kit/program-save.js`.
 
 ## Host-owned resource explorer
 

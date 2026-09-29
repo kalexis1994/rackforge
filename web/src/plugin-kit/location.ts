@@ -5,8 +5,11 @@
  */
 export const PLUGIN_KIT_DIRECTORY = "rackforge-plugin-kit";
 
+/** The kit's elements, by name: each is `src/plugin-kit/<name>.ts`, built to `<name>.js`. */
+export const PLUGIN_KIT_ELEMENTS = ["program-select", "program-save"] as const;
+
 /** The kit's scripts, by the path the build writes them to. */
-export const PLUGIN_KIT_SCRIPTS = ["program-select.js"] as const;
+export const PLUGIN_KIT_SCRIPTS = PLUGIN_KIT_ELEMENTS.map((name) => `${name}.js`);
 
 /**
  * A file the build puts at the root of the web UI, as a URL. It is resolved
@@ -24,6 +27,8 @@ export function hostAssetUrl(path: string, baseUri: string, appBase: string): st
  * app is built with base `appBase`. A dev server serves the sources themselves.
  */
 export function pluginKitUrls(baseUri: string, appBase: string, development: boolean): string[] {
-  if (development) return [new URL("/src/plugin-kit/program-select.ts", baseUri).href];
+  if (development) {
+    return PLUGIN_KIT_ELEMENTS.map((name) => new URL(`/src/plugin-kit/${name}.ts`, baseUri).href);
+  }
   return PLUGIN_KIT_SCRIPTS.map((script) => hostAssetUrl(`${PLUGIN_KIT_DIRECTORY}/${script}`, baseUri, appBase));
 }

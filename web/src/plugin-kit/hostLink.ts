@@ -1,7 +1,8 @@
 /**
- * What `<rf-program-select>` says to and hears from RackForge, over the
- * plugin web protocol (docs/WEB_PLUGIN_API.md). Pure: the element posts and
- * listens; this decides what the messages mean.
+ * What the plugin kit's elements (`<rf-program-select>`, `<rf-program-save>`)
+ * say to and hear from RackForge, over the plugin web protocol
+ * (docs/WEB_PLUGIN_API.md). Pure: the elements post and listen; this decides
+ * what the messages mean.
  */
 import type { Bank, Program } from "./programs";
 
@@ -27,7 +28,7 @@ export function readContext(message: unknown): ProgramContext | null {
   const programs = Array.isArray(sounds)
     ? sounds.flatMap((sound): Program[] => {
         if (!sound || typeof sound !== "object") return [];
-        const { id, name, bank, detail } = sound as Record<string, unknown>;
+        const { id, name, bank, detail, editable } = sound as Record<string, unknown>;
         if (typeof id !== "string" || typeof name !== "string") return [];
         return [
           {
@@ -35,6 +36,7 @@ export function readContext(message: unknown): ProgramContext | null {
             name,
             ...(typeof bank === "string" ? { bank } : {}),
             ...(typeof detail === "string" ? { detail } : {}),
+            ...(editable === true ? { editable: true as const } : {}),
           },
         ];
       })
@@ -52,6 +54,55 @@ export function readContext(message: unknown): ProgramContext | null {
     banks: bankList,
     selected: typeof selected === "string" ? selected : null,
   };
+}
+
+/** The program being edited, as a context carries it (`program_draft`). */
+export interface ProgramDraft {
+  draftId: number;
+  name: string;
+  /** The program it will be saved over; absent for a new one. */
+  originalProgramId?: string;
+}
+
+/**
+ * The draft a context carries: the draft, null when the context has none, or
+ * undefined when the message is not a context at all.
+ */
+export function readProgramDraft(message: unknown): ProgramDraft | null | undefined {
+  if (!isProtocolMessage(message) || message.kind !== "context") return undefined;
+  const draft = (message as { program_draft?: unknown }).program_draft;
+  if (!draft || typeof draft !== "object") return null;
+  const { draft_id: draftId, name, original_program_id: original } = draft as Record<string, unknown>;
+  if (typeof draftId !== "number" || !Number.isFinite(draftId)) return null;
+  return {
+    draftId,
+    name: typeof name === "string" ? name : "",
+    ...(typeof original === "string" ? { originalProgramId: original } : {}),
+  };
+}
+
+function request(requestId: string, method: string, params: Record<string, unknown>) {
+  return { protocol: PROTOCOL, kind: "request", request_id: requestId, method, params } as const;
+}
+
+/** Starts a draft: of a new program from what is playing (`null`), or of one of the plugin's own. */
+export function beginProgramEditRequest(requestId: string, programId: string | null) {
+  return request(requestId, "plugin.begin_program_edit", { program_id: programId });
+}
+
+/** Names the draft. */
+export function programNameRequest(requestId: string, draftId: number, name: string) {
+  return request(requestId, "plugin.set_program_name", { draft_id: draftId, name });
+}
+
+/** Saves the draft. */
+export function saveProgramRequest(requestId: string, draftId: number) {
+  return request(requestId, "plugin.save_program", { draft_id: draftId });
+}
+
+/** Drops the draft. */
+export function cancelProgramRequest(requestId: string, draftId: number) {
+  return request(requestId, "plugin.cancel_program", { draft_id: draftId });
 }
 
 /** Asks the host for a context: the element may load after the plugin's own `ready`. */

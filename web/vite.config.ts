@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { PLUGIN_KIT_DIRECTORY } from "./src/plugin-kit/location";
+import { PLUGIN_KIT_DIRECTORY, PLUGIN_KIT_ELEMENTS } from "./src/plugin-kit/location";
 
 // The UI carries the revision it was built from, and every deploy of this
 // dist writes the same stamp beside it (ui-revision.txt) so each host's
@@ -79,12 +79,21 @@ export default defineConfig({
         // The plugin kit: served at a stable path, unhashed, and injected
         // into every plugin frame (PluginFrame.tsx). Plugins only place its
         // elements; they never bundle it.
-        "program-select": "src/plugin-kit/program-select.ts",
+        ...Object.fromEntries(
+          PLUGIN_KIT_ELEMENTS.map((name) => [name, `src/plugin-kit/${name}.ts`]),
+        ),
       },
       output: {
         entryFileNames: (chunk) =>
-          chunk.name === "program-select"
-            ? `${PLUGIN_KIT_DIRECTORY}/program-select.js`
+          (PLUGIN_KIT_ELEMENTS as readonly string[]).includes(chunk.name)
+            ? `${PLUGIN_KIT_DIRECTORY}/${chunk.name}.js`
+            : "assets/[name]-[hash].js",
+        // What the kit's elements share stays beside them, unhashed: the kit
+        // is one directory a page can load or copy whole.
+        chunkFileNames: (chunk) =>
+          chunk.moduleIds.length > 0 &&
+          chunk.moduleIds.every((id) => /[\\/]src[\\/]plugin-kit[\\/]/.test(id))
+            ? `${PLUGIN_KIT_DIRECTORY}/[name].js`
             : "assets/[name]-[hash].js",
       },
     },

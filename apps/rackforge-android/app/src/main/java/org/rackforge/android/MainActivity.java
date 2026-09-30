@@ -409,6 +409,11 @@ public final class MainActivity extends Activity {
         // panel's module dies before it can even say hello -- the eternal
         // "Connecting to RackForge".
         settings.setDomStorageEnabled(true);
+        // An app, not a page: a pinch or a double tap must not zoom the
+        // controls away. The interface also fixes its own viewport scale.
+        settings.setSupportZoom(false);
+        settings.setBuiltInZoomControls(false);
+        settings.setDisplayZoomControls(false);
         webView.setBackgroundColor(0xFF050F16);
         // Chromium emits its own long-press vibration for selection/context
         // gestures. RackForge owns those gestures, so keep native automatic

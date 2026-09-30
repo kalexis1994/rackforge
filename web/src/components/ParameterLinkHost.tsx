@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import {
   type ControllerPackageSummary,
   defaultMode,
@@ -573,7 +574,10 @@ export function ParameterLinkHost({
           {menuError ? <p className="parameter-link-context-error" role="alert">{menuError}</p> : null}
         </div>
       ) : null}
-      {associationsFor ? (
+      {/* The dialogs are the window's, not the plugin area's: the area is
+          transformed, and a fixed backdrop inside it would centre on the
+          area -- above the screen when the area is taller or scrolled. */}
+      {associationsFor ? createPortal(
         <ParameterAssociationsDialog
           parameterName={associationsFor.name}
           parameter={associationsFor.parameter}
@@ -582,9 +586,10 @@ export function ParameterLinkHost({
           onEdit={(association) => openEditor({ parameterIndex: associationsFor.index, x: 0, y: 0 }, association)}
           onRemove={removeAssociations}
           onClose={() => setAssociationsFor(null)}
-        />
+        />,
+        document.body,
       ) : null}
-      {editing ? (
+      {editing ? createPortal(
         <ParameterLinkDialog
           instanceId={instanceId}
           parameterIndex={editing.parameterIndex}
@@ -595,7 +600,8 @@ export function ParameterLinkHost({
           mapped={editingMapped ?? undefined}
           onSaved={() => refreshControllers().catch(() => undefined)}
           onClose={() => setEditing(null)}
-        />
+        />,
+        document.body,
       ) : null}
     </>
   );

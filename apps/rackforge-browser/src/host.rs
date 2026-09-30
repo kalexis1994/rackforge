@@ -29,6 +29,8 @@ use rackforge_control_api::{
     VirtualMidiMessage,
 };
 use rackforge_controller_package::ControllerPackageManifest;
+use rackforge_core::controller_layouts::{control_layouts, factory_maps, slotted_controllers};
+use rackforge_core::parameter_link::{ControllerMapLinkContext, compile_controller_map_links};
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session::SessionStore;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
@@ -37,8 +39,9 @@ use rackforge_core::{
     PluginInstance, PluginPackage, PluginStateStore, PluginStorage, SemanticParameterLinkContext,
     compile_semantic_parameter_links, validate_state_reference,
 };
+use rackforge_midi_api::controller_map::ControllerMap;
 use rackforge_midi_api::{
-    IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
+    IngressMidiEvent, MapLayer, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
     ParameterLinkPassThrough,
 };
 use rackforge_performance_api::{
@@ -180,6 +183,13 @@ pub struct BrowserHost {
     next_audition_lease_id: u64,
     next_program_draft_id: u64,
     parameter_links: Vec<CompiledParameterLink>,
+    /// RackForge's factory map for every controller it ships: the installed
+    /// plugins' layouts on each controller's slots, as the native hosts offer
+    /// them. The browser keeps no map of the player's, so these are the maps
+    /// it shows, and the KeyLab's is the one it plays.
+    controller_maps: Vec<ControllerMap>,
+    /// The KeyLab's factory map, compiled for every loaded instrument.
+    controller_map_links: Vec<CompiledParameterLink>,
     live_parameter_store: LiveParameterStateStore,
     live_parameter_dirty_at: Option<Instant>,
     storage_revision: u32,
@@ -346,6 +356,8 @@ impl BrowserHost {
             next_audition_lease_id: 1,
             next_program_draft_id: 1,
             parameter_links: Vec::new(),
+            controller_maps: browser_factory_maps(&data_root),
+            controller_map_links: Vec::new(),
             live_parameter_store,
             live_parameter_dirty_at: None,
             storage_revision: 0,
@@ -598,14 +610,18 @@ impl BrowserHost {
                 ControlErrorCode::Unavailable,
                 "the browser host plays through the page's audio output, which it cannot reconfigure",
             )),
-            // No controller package is attached here yet, so there is no
-            // map to show: an empty answer, never a silence the interface
-            // would wait out.
+            // RackForge's factory maps, untouched: the browser keeps none of
+            // the player's, so what each controller does in each plugin is
+            // what RackForge offers it.
             ControlRequest::ControllerMaps => Ok(ControlResponse::ControllerMaps {
                 controllers: Vec::new(),
-                maps: Vec::new(),
+                maps: self.controller_maps.clone(),
                 takeover: Default::default(),
-                factory_untouched: Vec::new(),
+                factory_untouched: self
+                    .controller_maps
+                    .iter()
+                    .map(|map| map.controller_id.clone())
+                    .collect(),
                 fn_open: Vec::new(),
             }),
             ControlRequest::MidiActivity { .. } => Ok(ControlResponse::MidiActivity {
@@ -2517,6 +2533,8 @@ impl BrowserHost {
         self.audio.silence();
         self.plugins = plugins;
         self.store = SessionStore::new(session)?;
+        // A plugin installed or removed brings or takes its layout.
+        self.controller_maps = browser_factory_maps(&data_root);
         self.rebuild_parameter_links()?;
         self.sync_controller();
         self.save_checkpoint();
@@ -2573,11 +2591,23 @@ impl BrowserHost {
                 packet,
             };
             let active_instance_id = self.store.state().active_instance_id.clone();
-            for link in self.parameter_links.iter_mut().filter(|link| {
-                active_instance_id
-                    .as_ref()
-                    .is_some_and(|instance_id| link.link.instance_id == instance_id.as_str())
-            }) {
+            // A button the KeyLab's own screen and transport answer is
+            // theirs: the map does not also move a parameter with it.
+            let map_links: &mut [CompiledParameterLink] = if outcome.consumed {
+                &mut []
+            } else {
+                &mut self.controller_map_links
+            };
+            for link in self
+                .parameter_links
+                .iter_mut()
+                .chain(map_links)
+                .filter(|link| {
+                    active_instance_id
+                        .as_ref()
+                        .is_some_and(|instance_id| link.link.instance_id == instance_id.as_str())
+                })
+            {
                 // The browser demo cannot yet read a parameter from here, so
                 // a control takes over at once, as before.
                 let Some(mapped) = link.apply(ingress, |_| None) else {
@@ -2668,12 +2698,42 @@ impl BrowserHost {
         let controller = keylab_essential_mk3::controller::package_profile();
         let Some(profile) = controller.semantic_profile.as_ref() else {
             self.parameter_links.clear();
+            self.controller_map_links.clear();
             return Ok(());
         };
         let source_id = MidiSourceId::new(profile.source_id.clone()).map_err(anyhow::Error::msg)?;
         let explicit = &self.store.state().parameter_links;
+        let map = self
+            .controller_maps
+            .iter()
+            .find(|map| map.controller_id == controller.driver_id);
         let mut compiled = Vec::new();
+        let mut map_links = Vec::new();
         for plugin in &self.plugins {
+            // The factory map sits between the session's own links and the
+            // package's semantic defaults, as on the native hosts. The
+            // browser has no Fn layer yet, so only the base layer plays.
+            let mut beneath_semantics = explicit.clone();
+            if let Some(map) = map {
+                let mapped = compile_controller_map_links(ControllerMapLinkContext {
+                    map,
+                    plugin_id: &plugin.plugin_id,
+                    runtime_source_id: &source_id,
+                    source_name: controller.name.as_str(),
+                    source_key: BROWSER_KEYLAB_SOURCE_KEY,
+                    instance_id: plugin.instance_id.as_str(),
+                    schema: plugin.runtime.parameters(),
+                    explicit_links: explicit,
+                });
+                for link in mapped
+                    .links
+                    .into_iter()
+                    .filter(|link| link.layer() == MapLayer::Base)
+                {
+                    beneath_semantics.push(link.link.clone());
+                    map_links.push(link);
+                }
+            }
             compiled.extend(compile_semantic_parameter_links(
                 SemanticParameterLinkContext {
                     controller_id: controller.driver_id.as_str(),
@@ -2683,7 +2743,7 @@ impl BrowserHost {
                     source_key: BROWSER_KEYLAB_SOURCE_KEY,
                     instance_id: plugin.instance_id.as_str(),
                     schema: plugin.runtime.parameters(),
-                    explicit_links: explicit,
+                    explicit_links: &beneath_semantics,
                 },
             )?);
             for link in explicit.iter().filter(|link| {
@@ -2698,6 +2758,7 @@ impl BrowserHost {
             }
         }
         self.parameter_links = compiled;
+        self.controller_map_links = map_links;
         Ok(())
     }
 
@@ -3216,6 +3277,26 @@ fn all_package_roots(data_root: &Path) -> Result<Vec<PathBuf>> {
     Ok(roots)
 }
 
+/// RackForge's factory map for every controller it ships, made as the native
+/// hosts make theirs: each installed plugin's layout -- its package's own, or
+/// the one RackForge carries for it -- on the slots each controller names.
+fn browser_factory_maps(data_root: &Path) -> Vec<ControllerMap> {
+    let packages = package_roots(data_root)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|root| {
+            let package = PluginPackage::open(&root).ok()?;
+            Some((package.manifest().id.clone(), root))
+        })
+        .collect::<Vec<_>>();
+    let layouts = control_layouts(
+        packages
+            .iter()
+            .map(|(plugin_id, root)| (plugin_id.as_str(), root.as_path())),
+    );
+    factory_maps(&slotted_controllers(None), &layouts)
+}
+
 fn plugin_catalog_entry(
     manifest: &PluginManifest,
     package_root: &Path,
@@ -3589,6 +3670,36 @@ mod package_preview_tests {
                 && controller["enabled"] == true
                 && controller["inputs"].is_array()
         }));
+    }
+
+    /// Every controller the browser lists has the factory map a native host
+    /// offers it, under the id the list names it by, and the KeyLab's plays
+    /// RackForge's instruments as its layouts say.
+    #[test]
+    fn every_listed_controller_has_its_factory_map() {
+        let maps = browser_factory_maps(Path::new("/no-packages-here"));
+        let catalog = browser_controller_catalog();
+        for controller in catalog["controllers"].as_array().unwrap() {
+            let id = controller["id"].as_str().unwrap();
+            assert!(
+                maps.iter().any(|map| map.controller_id == id),
+                "{id} has no factory map"
+            );
+        }
+        let keylab = keylab_essential_mk3::controller::package_profile();
+        let map = maps
+            .iter()
+            .find(|map| map.controller_id == keylab.driver_id)
+            .unwrap();
+        let rf5 = map.plugin("org.rackforge.rf-5").unwrap();
+        for parameter in ["filter-cutoff", "filter-attack", "oscillator-b-detune"] {
+            assert!(
+                rf5.mappings
+                    .iter()
+                    .any(|mapping| mapping.parameter_id == parameter),
+                "the KeyLab does not reach RF-5's {parameter}"
+            );
+        }
     }
 
     #[test]

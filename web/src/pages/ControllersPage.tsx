@@ -589,11 +589,16 @@ export function ControllersPage() {
       {heading}
       {!keepsMaps || notice ? (
         <div className="controllers-notices">
-          {keepsMaps ? null : (
+          {keepsMaps ? null : IS_BROWSER_HOST ? (
+            <AsyncNotice tone="info" title="RackForge's factory maps">
+              Each control shows what it does in each plugin, as RackForge maps it. RackForge on a computer,
+              a phone or a Raspberry Pi lets you change them. In the browser, only KeyLab Essential mk3 has
+              active MIDI control; the other supported models are available to inspect.
+            </AsyncNotice>
+          ) : (
             <AsyncNotice tone="info" title="No maps kept here">
               This edition shows a controller's controls. RackForge on a computer, a phone or a Raspberry
               Pi keeps what you map them to.
-              {IS_BROWSER_HOST ? " In the browser, only KeyLab Essential mk3 has active MIDI control; the other supported models are available to inspect." : null}
             </AsyncNotice>
           )}
           {notice ? (

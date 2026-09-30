@@ -1,8 +1,10 @@
 import { useHostHealth } from "../hooks/useHostHealth";
 
-// Drift made visible: the revision this interface was built from, beside
-// the revision the host binary reports. When they disagree, someone shipped
-// half a deploy, and the mismatch says so before a behavior difference does.
+// The version a player knows RackForge by, under the navigation. The builds
+// behind it -- the revision this interface was built from, beside the one
+// the host binary reports -- are in its title and on About. When those
+// disagree, someone shipped half a deploy, and the footer says so before a
+// behavior difference does.
 export function RevisionFooter() {
   const host = useHostHealth();
   const mismatch =
@@ -10,11 +12,11 @@ export function RevisionFooter() {
     host.ui_revision !== "unknown" &&
     host.ui_revision !== __UI_REVISION__;
   const stale = host?.revision !== undefined && host.revision !== __UI_REVISION__;
+  const builds = `UI ${__UI_REVISION__}${host?.revision ? ` · host ${host.revision}` : ""}`;
   return (
-    <p className={`revision-footer${mismatch || stale ? " drift" : ""}`}>
-      UI {__UI_REVISION__}
-      {host?.revision ? ` · host ${host.revision}` : ""}
-      {mismatch || stale ? " · out of sync" : ""}
+    <p className={`revision-footer${mismatch || stale ? " drift" : ""}`} title={builds}>
+      v{__RACKFORGE_VERSION__}
+      {mismatch || stale ? ` · out of sync (${builds})` : ""}
     </p>
   );
 }

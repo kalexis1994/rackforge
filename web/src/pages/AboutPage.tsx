@@ -67,6 +67,12 @@ export function AboutPage() {
             player. */}
         <article className="settings-card about-card">
           <BrandMark />
+          {/* Which RackForge this is: the release's version, and the build
+              for whoever reports a problem. */}
+          <p className="about-version">
+            Version {__RACKFORGE_VERSION__}
+            <span> · build {__UI_REVISION__}</span>
+          </p>
           {/* What RackForge is, in a few lines, for whoever meets it here
               first -- the same promise the README opens with. */}
           <p className="about-synopsis">

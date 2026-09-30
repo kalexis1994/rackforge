@@ -118,8 +118,10 @@ export function AudioHealthReadout() {
       title={title}
       aria-label={title}
     >
-      <span className="audio-health-load">{load}%</span>
-      <span className="audio-health-lost" aria-hidden="true">{lost}</span>
+      {/* Each figure keeps one width, so a changing reading never moves
+          what is beside it; the title has the exact counts. */}
+      <span className="audio-health-load">{Math.min(load, 999)}%</span>
+      <span className="audio-health-lost" aria-hidden="true">{lost > 999 ? "999+" : lost}</span>
       {/* A click heard once, with every counter at zero, leaves only the
           audio as a witness. This keeps it: the last fifteen seconds of
           what went to the device and the MIDI that played them. */}

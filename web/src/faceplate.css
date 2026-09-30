@@ -218,6 +218,21 @@
   width: 164px !important;
 }
 
+/* Which RackForge: the release's version under the mark, the build after it
+   in the quieter ink. */
+.about-version {
+  margin: -4px 0 0;
+  color: var(--ink);
+  font-family: var(--mono, "Cascadia Mono", "Consolas", monospace);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.about-version span {
+  color: var(--muted, #8ca3ad);
+}
+
 /* What RackForge is, centred under the mark, a size above the card copy. */
 .about-synopsis {
   max-width: 58ch;

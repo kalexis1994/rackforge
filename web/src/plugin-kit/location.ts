@@ -6,7 +6,7 @@
 export const PLUGIN_KIT_DIRECTORY = "rackforge-plugin-kit";
 
 /** The kit's elements, by name: each is `src/plugin-kit/<name>.ts`, built to `<name>.js`. */
-export const PLUGIN_KIT_ELEMENTS = ["program-select", "program-save"] as const;
+export const PLUGIN_KIT_ELEMENTS = ["program-select", "program-save", "downloads"] as const;
 
 /** The kit's scripts, by the path the build writes them to. */
 export const PLUGIN_KIT_SCRIPTS = PLUGIN_KIT_ELEMENTS.map((name) => `${name}.js`);

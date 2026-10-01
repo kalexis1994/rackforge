@@ -1,0 +1,5 @@
+
+running 1 test
+
+thread 'tests::proximity_shelf_measures_the_expected_response_at_each_sample_rate' (12464) has overflowed its stack
+test tests::proximity_shelf_measures_the_expected_response_at_each_sample_rate ...

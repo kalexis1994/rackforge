@@ -1,0 +1,73 @@
+{
+  "binary_sha256": {
+    "A": "7529c753dd284a452274d0a4e449a6a7995ed0c9dcbf2871b916fe07d37423f9",
+    "B": "637e65186e5c7fc8bffdbc9aa9fac5fb7efb5c3b303c5f4cd934654b5ff20da9"
+  },
+  "notes": {
+    "rms_change_db": 0.4548487217993344,
+    "max_difference": 0.02003006637096405,
+    "bands_db": {
+      "20-120": 0.682007484361306,
+      "120-250": 0.6793060667782096,
+      "250-1000": 0.12101173022474059,
+      "1000-4000": -0.03687615968588029,
+      "4000-12000": 0.009479048920368717
+    }
+  },
+  "pieces": {
+    "Nocturne": {
+      "before": "C:\\SHARED\\Proximidad-120Hz\\Nocturne-A-actual.wav",
+      "after": {
+        "wav": "C:\\SHARED\\Proximidad-120Hz\\Nocturne-B-proximidad.wav",
+        "wav_sha256": "3e11c5b19e6b8c2dd943f1a2871bc66ee6c2f6efac6274eb0381a860ee44913f",
+        "frames": 10344264,
+        "peak": 0.3573470413684845
+      },
+      "measurement": {
+        "rms_change_db": 0.07852241047709779,
+        "max_difference": 0.013448849320411682,
+        "bands_db": {
+          "20-120": 0.6715318636638199,
+          "120-250": 0.40502163600773883,
+          "250-1000": 0.056302017081995656,
+          "1000-4000": 0.008185039070758373,
+          "4000-12000": 0.014043549788402788
+        }
+      },
+      "midi_sha256": "83ea472e303c1cbbd35c9a06cafb368a09be2fc5c4c793231b32816d0a91aa77",
+      "events_sha256": "6cb24b26dd33c887708c55bb6e791836c6d047e2202992b2993993cb348bd33b",
+      "raw_before_sha256": "89e9c9fadc1a080f1ff219aece5d04b80c71b5005ee2e5c782b1bbb3dcae3191",
+      "raw_after_sha256": "0aab9e90f43383b2deb8c5d58e1c488d5a31667e77f86fe2da559fae76536f19",
+      "note_attacks": 1498,
+      "frames": 10344264
+    },
+    "Campanella": {
+      "before": "C:\\SHARED\\Proximidad-120Hz\\Campanella-A-actual.wav",
+      "after": {
+        "wav": "C:\\SHARED\\Proximidad-120Hz\\Campanella-B-proximidad.wav",
+        "wav_sha256": "180d570eec151908ec101849f7953a345404cf74f33afc43549c768cbed667e7",
+        "frames": 12575505,
+        "peak": 0.5182449817657471
+      },
+      "measurement": {
+        "rms_change_db": 0.07206837925363722,
+        "max_difference": 0.02165824919939041,
+        "bands_db": {
+          "20-120": 0.6820897742699751,
+          "120-250": 0.40591392837497275,
+          "250-1000": 0.04821297736724471,
+          "1000-4000": 0.018814072486065724,
+          "4000-12000": 0.011895184388449713
+        }
+      },
+      "midi_sha256": "af07dbf66a65bbb761ca0ef261e3657267350f62bb963d6f298d2ea46684122a",
+      "events_sha256": "cc8ae2ab3bf4e81fc8144df1847b167ad6b1351c76bd848733c558ec65ec359a",
+      "raw_before_sha256": "600139b2eef4571d4ce837bbef5b8cef0c402249de7b41449efb9eb3972704e2",
+      "raw_after_sha256": "dafb347f27e8f598d6e917f652e28b73c85b4d6d52238bc68118aa089010dcf5",
+      "note_attacks": 4249,
+      "frames": 12575505
+    }
+  },
+  "policy": "A: released 0.172.0. B: proximity coefficient restored. Factory Concert Grand, stereo 44.1 kHz/24 bit, original velocities and pedal. Identical gain; no export normalization, EQ, fades or compression.",
+  "omni_control_max_difference": 0.0
+}

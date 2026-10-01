@@ -24,6 +24,7 @@
 //! no transcendental calls. Components below audibility retire at block
 //! boundaries.
 
+mod air;
 mod bridge;
 mod contact_pulse;
 mod math;
@@ -640,7 +641,7 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
         "MIC_REFERENCE_M",
         &MIC_REFERENCE_M,
-        "The distance the dry calibration was made at: the direct gain is 1 here.",
+        "Reference distance for inverse-range gain, before pattern and preamp.",
     ),
     (
         "MIC_NEAR_CAP",
@@ -655,23 +656,27 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
         "AIR_ABSORB_4K_PER_M",
         &AIR_ABSORB_4K_PER_M,
-        "Air absorption per metre at 4 kHz, ISO 9613 order of magnitude at",
+        "Relative absorption amount: the compiled value selects ISO air at 20 C and 50% RH.",
     ),
     (
         "MIC_SPACING_M",
         &MIC_SPACING_M,
-        "Where the proximity rise sits: the pressure-gradient term crosses the",
+        "The microphone pair's capsule spacing in metres.",
     ),
     (
         "MIC_PREAMP",
         &MIC_PREAMP,
         "The pair's preamplifier, and it is applied where the loss happened.",
     ),
-    ("PROXIMITY_STRENGTH", &PROXIMITY_STRENGTH, ""),
+    (
+        "PROXIMITY_STRENGTH",
+        &PROXIMITY_STRENGTH,
+        "Strength of the approximate 120 Hz proximity shelf; gain follows pattern and inverse range.",
+    ),
     (
         "SYMPATHY_RATE",
         &SYMPATHY_RATE,
-        "The spaced pair's maximum spacing in metres (Width at full), and how far",
+        "How strongly the bridge drives other free strings per sample.",
     ),
     (
         "IMPACT_CLANG",
@@ -1013,6 +1018,7 @@ pub fn apply_tuning(text: &str) -> (usize, Vec<(usize, f32)>, Vec<String>) {
             "RESTRIKE_PHASE_PRESERVE" => Some(&RESTRIKE_PHASE_PRESERVE),
             "CAUSAL_RADIATION_FIR" => Some(&CAUSAL_RADIATION_FIR),
             "FELT_RATE_MODEL" => Some(&FELT_RATE_MODEL),
+            "AIR_PROPAGATION" => Some(&AIR_PROPAGATION),
             _ => None,
         };
         if let Some(knob) = research {
@@ -4043,10 +4049,11 @@ pub static LID_CLOSED_HZ: Knob = Knob::new(1500.0);
 pub static LID_OPEN_HZ: Knob = Knob::new(12000.0);
 
 /// The chamber: a six-line feedback delay network with a Householder
-/// feedback matrix. Line lengths are mutually non-divisible so the tail is
-/// dense and colourless; each feedback path carries a one-pole low-pass so
-/// high frequencies die faster than lows, the way air and walls damp a real
-/// room. RT60 ≈ 1.4 s at the bottom, ~a third of that at the top.
+/// feedback matrix. Requested lengths spread around the mean free path;
+/// fixed storage can clamp several to 4095 samples in large rooms. The ISO
+/// path uses stored durations for wall feedback gain and travelled metres,
+/// preserving the midband wall target when a line clamps. The native air
+/// bypass retains the old requested-duration calibration for comparison.
 const ROOM_LINES: usize = 6;
 /// The lines' relative spread around the mean free path: mutually prime-ish
 /// ratios so the room's modes crowd instead of stacking.
@@ -4082,7 +4089,7 @@ pub static ROOM_VOLUME_MIN_M3: Knob = Knob::new(45.0);
 pub static ROOM_VOLUME_MAX_M3: Knob = Knob::new(45_000.0);
 pub static MIC_DISTANCE_MIN_M: Knob = Knob::new(0.5);
 pub static MIC_DISTANCE_MAX_M: Knob = Knob::new(16.0);
-/// The distance the dry calibration was made at: the direct gain is 1 here.
+/// Reference distance for inverse-range gain, before pattern and preamp.
 pub static MIC_REFERENCE_M: Knob = Knob::new(2.0);
 /// The most the direct sound may rise over its reference as the pair comes
 /// close: past the closest the fader reaches, so the fader is never clamped.
@@ -4090,11 +4097,12 @@ pub static MIC_NEAR_CAP: Knob = Knob::new(6.0);
 /// How far above the soundboard the pair stands at the reference distance
 /// and beyond (ear height); closer, it is lowered toward the strings.
 pub static MIC_HEIGHT_M: Knob = Knob::new(0.4);
-/// Air absorption per metre at 4 kHz, ISO 9613 order of magnitude at
-/// concert-hall humidity.
+/// Legacy absorption amount: compiled 0.0022 now selects unit-strength
+/// ISO 9613-1 propagation at 20 °C, 50% RH, 101.325 kPa. Other settings
+/// scale the absorption curve relative to that value, not the distance.
 pub static AIR_ABSORB_4K_PER_M: Knob = Knob::new(0.0022);
-/// Where the proximity rise sits: the pressure-gradient term crosses the
-/// pressure term at f = c/(2*pi*r); this scales its audible strength.
+/// Native audition bypass; no public parameter or saved-state slot.
+pub static AIR_PROPAGATION: Knob = Knob::new(1.0);
 /// The pair, as a pair: two capsules 17 cm apart, splayed 110 degrees.
 ///
 /// Every microphone quantity used to be a scalar computed at ONE point, and
@@ -4136,16 +4144,11 @@ pub static MIC_SPACING_M: Knob = Knob::new(0.17);
 /// makes on the fader, not something a refactor should decide for them.)
 pub static MIC_PREAMP: Knob = Knob::new(1.57);
 const MIC_HALF_ANGLE_RAD: f32 = 0.959_931; // 55 degrees, so 110 between them
+/// Strength of the approximate proximity shelf. The pressure-gradient term
+/// crosses the pressure term at c/(2*pi*r); the model uses a fixed 120 Hz
+/// low-pass added to the direct path, with its gain following b/r.
 pub static PROXIMITY_STRENGTH: Knob = Knob::new(0.35);
-/// The spaced pair's maximum spacing in metres (Width at full), and how far
-/// the piano's strings spread laterally as the pair sees them. A coincident
-/// pair (Width at zero) hears no time differences at all -- that is what
-/// coincident MEANS -- and a spaced AB pair hears each note earlier in the
-/// nearer microphone by S*x / (c*sqrt(x^2 + D^2)). That per-note arrival
-/// difference, not the level pan, is the air and width of real AB
-/// recordings.
-/// Per-voice delay line length: covers the worst-case interchannel delay
-/// (0.9 m spacing, source on axis end, close pair) at up to 96 kHz.
+const PROXIMITY_HZ: f32 = 120.0;
 /// How strongly the bridge's motion drives every OTHER free string, per
 /// sample, on top of each partial's own coupling weight.
 ///
@@ -4680,8 +4683,6 @@ struct Voice<const PARTIALS: usize = MAX_PARTIALS> {
     /// below its position and the share that goes to the one above.
     drive_index: usize,
     drive_frac: f32,
-    /// The spaced pair's per-channel arrival: this voice's mono output is
-    /// written here once and each microphone reads its own tap.
     /// This voice's previous output sample, so the sympathetic feed can be
     /// everyone-but-me without a second pass.
     last_out: f32,
@@ -6241,10 +6242,15 @@ pub struct ConcertGrand {
     room_low_coeff: f32,
     room_low_gain: f32,
     /// Early reflections: first-order mirror images of the piano in the six
-    /// surfaces, three read left and three right.
+    /// surfaces, all six read by both capsules.
     early: [f32; ROOM_BUFFER],
     early_write: usize,
     early_taps: [[(usize, f32); 6]; 2],
+    air_enabled: bool,
+    air_direct: [air::Path; 2],
+    air_early: [[air::Path; 6]; 2],
+    air_lid: [[air::Path; 4]; 2],
+    air_room: [air::Path; ROOM_LINES],
     /// The microphone chain, retuned whenever a room control moves.
     direct_gain: [f32; 2],
     /// What each capsule hears of the keyboard, by its own path. See
@@ -6438,6 +6444,11 @@ impl Default for ConcertGrand {
             early: [0.0; ROOM_BUFFER],
             early_write: 0,
             early_taps: [[(1, 0.0); 6]; 2],
+            air_enabled: false,
+            air_direct: [air::Path::default(); 2],
+            air_early: [[air::Path::default(); 6]; 2],
+            air_lid: [[air::Path::default(); 4]; 2],
+            air_room: [air::Path::default(); ROOM_LINES],
             direct_gain: [1.0; 2],
             keybed_gain: [1.0; 2],
             mechanical_keybed: mechanical::Path::default(),
@@ -11358,8 +11369,25 @@ impl ConcertGrand {
             1.0 - expf(-core::f32::consts::TAU * HALO_HP_HZ.get() / self.engine.sample_rate);
     }
 
+    /// H(z) = 1 + g*a/(1 - (1-a)*z^-1), independently per capsule.
+    /// Track the input even with g=0 so an omni-to-gradient edit cannot
+    /// resume a stale low-pass state. No allocation or tuning in this loop.
+    fn apply_proximity(&mut self, mut direct: [f32; 2]) -> [f32; 2] {
+        for (side, sample) in direct.iter_mut().enumerate() {
+            self.proximity[side] += self.proximity_coeff * (*sample - self.proximity[side]);
+            *sample += self.proximity_gain[side] * self.proximity[side];
+        }
+        direct
+    }
+
     /// Sizes the chamber's delay lines and feedback for the current rate.
     fn tune_room(&mut self) {
+        self.air_enabled = AIR_PROPAGATION.get() >= 0.5;
+        let atmosphere = air::Atmosphere::new(20.0, 50.0, 101.325);
+        // Retain the existing advanced absorption amount as a relative
+        // multiplier. Its compiled 0.0022 setting means the ISO atmosphere.
+        let air_strength = AIR_ABSORB_4K_PER_M.get() / AIR_ABSORB_4K_PER_M.compiled();
+        let air_kernel = atmosphere.kernel(self.engine.sample_rate, air_strength);
         self.mechanical_keybed.configure(
             MECHANICAL_EMISSION_GAIN.get(),
             MECHANICAL_CASE_CORNER.get(),
@@ -11394,16 +11422,39 @@ impl ConcertGrand {
             (0.161 * volume / (surface * alpha + 4.0 * air_per_m * volume)).clamp(0.10, 12.0)
         };
         let rt_low = rt(alpha_low, 0.0);
-        let rt_mid = rt(alpha_mid, 0.0002);
-        let rt_high = rt(alpha_high, AIR_ABSORB_4K_PER_M.get());
+        // When enabled, air is a separate travelled-distance filter in
+        // every FDN feedback path. These targets describe walls alone;
+        // counting the old air term here as well would damp it twice.
+        let rt_mid = rt(alpha_mid, if self.air_enabled { 0.0 } else { 0.0002 });
+        let rt_high = rt(
+            alpha_high,
+            if self.air_enabled {
+                0.0
+            } else {
+                AIR_ABSORB_4K_PER_M.get()
+            },
+        );
 
         for (line, spread) in ROOM_SPREAD.iter().copied().enumerate() {
             let seconds = mean_free_path / SOUND_SPEED.get() * spread;
             let samples = ((seconds * self.engine.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
             self.room_len[line] = samples;
             self.room_index[line] %= samples;
+            let stored_seconds = samples as f32 / self.engine.sample_rate;
+            self.air_room[line].configure(
+                &air_kernel,
+                stored_seconds * SOUND_SPEED.get(),
+                self.air_enabled,
+            );
             // Per-line gain so every path decays at the mid-band RT60.
-            self.room_gain[line] = powf(10.0, -3.0 * seconds / rt_mid);
+            self.room_gain[line] = powf(
+                10.0,
+                -3.0 * if self.air_enabled {
+                    stored_seconds
+                } else {
+                    seconds
+                } / rt_mid,
+            );
             // The in-loop lowpass takes the highs down to their own faster
             // RT60: its response at the damping corner supplies the extra
             // per-pass loss 10^(-3*seconds*(1/rt_high - 1/rt_mid)).
@@ -11411,7 +11462,12 @@ impl ConcertGrand {
         // The in-loop lowpass takes the highs down to their own faster RT60:
         // one shared corner, from the mean path's required extra loss at
         // 4 kHz.
-        let seconds_mean = mean_free_path / SOUND_SPEED.get();
+        let seconds_mean = if self.air_enabled {
+            self.room_len.iter().sum::<usize>() as f32
+                / (ROOM_LINES as f32 * self.engine.sample_rate)
+        } else {
+            mean_free_path / SOUND_SPEED.get()
+        };
         let extra_high = powf(10.0, -3.0 * seconds_mean * (1.0 / rt_high - 1.0 / rt_mid));
         let corner = (4200.0 * extra_high / (1.0 - extra_high + 1e-4)).clamp(300.0, 16_000.0);
         self.room_damp = 1.0 - expf(-core::f32::consts::TAU * corner / self.engine.sample_rate);
@@ -11442,6 +11498,13 @@ impl ConcertGrand {
         let b = self.engine.controls.mic_pattern;
         let random_energy = (1.0 - b) * (1.0 - b) + b * b / 3.0;
         self.reverb_gain = sqrtf(random_energy) / 0.577;
+        // Lost when the scalar microphone became a pair (8cb8562). Retune
+        // at prepare and on room edits, outside the sample loop.
+        self.proximity_coeff = 1.0
+            - expf(
+                -core::f32::consts::TAU * PROXIMITY_HZ.min(0.45 * self.engine.sample_rate)
+                    / self.engine.sample_rate,
+            );
 
         // The piano stands a third of the way down the hall, mid-width,
         // soundboard at 1 m; the pair faces it from `distance` away, ears at
@@ -11517,6 +11580,7 @@ impl ConcertGrand {
                 (range, (1.0 - b) + b * cosine)
             };
             let (direct_path, direct_response) = heard(piano);
+            self.air_direct[side].configure(&air_kernel, direct_path, self.air_enabled);
             // The direct sound falls as r_ref / r, and the cap sits well past
             // the closest the fader reaches. It used to sit at 3.0, which the
             // fader's whole bottom fifth (0.5 to 0.83 m, the default among it)
@@ -11563,7 +11627,11 @@ impl ConcertGrand {
             // follows b/r, and each capsule has its own r.
             self.proximity_gain[side] =
                 PROXIMITY_STRENGTH.get() * b * (1.0 / direct_path) * MIC_REFERENCE_M.get();
-            for (slot, image) in self.early_taps[side].iter_mut().zip(images) {
+            for ((slot, filter), image) in self.early_taps[side]
+                .iter_mut()
+                .zip(self.air_early[side].iter_mut())
+                .zip(images)
+            {
                 let (path, response) = heard(image);
                 let path = path.max(direct_path + 0.1);
                 let delay_s = (path - direct_path) / SOUND_SPEED.get();
@@ -11571,6 +11639,7 @@ impl ConcertGrand {
                     ((delay_s * self.engine.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
                 let gain = reflect * (direct_path / path) * response * near;
                 *slot = (samples, gain);
+                filter.configure(&air_kernel, path, self.air_enabled);
             }
             // The lid: hinged along the far side of the rim, raised by the
             // control, and the board's image in it heard like any other
@@ -11585,10 +11654,11 @@ impl ConcertGrand {
             let half_width = LID_HALF_WIDTH_M.get();
             let hinge_y = piano.1 + half_width;
             let leak = powf(LID_CLOSED_LEAK.get(), 1.0 - self.lid_fraction());
-            for ((along_hinge, across), tap) in
+            for (((along_hinge, across), tap), filter) in
                 [(-0.6f32, -0.45f32), (0.6, -0.45), (-0.6, 0.45), (0.6, 0.45)]
                     .into_iter()
                     .zip(self.lid_tap[side].iter_mut())
+                    .zip(self.air_lid[side].iter_mut())
             {
                 // Four points of the board: two along the hinge, two across
                 // it, because the lid's height above the board -- and so the
@@ -11641,6 +11711,7 @@ impl ConcertGrand {
                         * response
                         * near,
                 );
+                filter.configure(&air_kernel, path, self.air_enabled);
             }
         }
         let lid_corner = LID_CLOSED_HZ.get()
@@ -12493,7 +12564,7 @@ impl ConcertGrand {
             self.air_dc[1] += knob_air_highpass * (once - self.air_dc[1]);
             let staged = once - self.air_dc[1];
             // The early reflections: what the board radiates, mirrored in
-            // the six surfaces, three images read by each side of the pair.
+            // the six surfaces, all six read by each side of the pair.
             self.early[self.early_write] = staged;
             // Every surface reaches BOTH capsules, each by its own path and
             // at its own polar angle. The floor and the ceiling arrive almost
@@ -12502,9 +12573,10 @@ impl ConcertGrand {
             // here any more.
             let mut early = [0.0f32; 2];
             for (side, taps) in self.early_taps.iter().enumerate() {
-                for (offset, gain) in taps {
-                    early[side] +=
-                        self.early[(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER] * gain;
+                for (index, (offset, gain)) in taps.iter().enumerate() {
+                    let reflected =
+                        self.early[(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER];
+                    early[side] += self.air_early[side][index].tick(reflected) * gain;
                 }
             }
             let (early_left, early_right) = (early[0], early[1]);
@@ -12512,17 +12584,18 @@ impl ConcertGrand {
             // The lid's image, read from the same buffer (the write pointer
             // has already moved on by one), through its own darkening pole.
             let mut lid = [0.0f32; 2];
-            for ((taps, pole), out) in self
+            for (side, ((taps, pole), out)) in self
                 .lid_tap
                 .iter()
                 .zip(self.lid_lp.iter_mut())
                 .zip(lid.iter_mut())
+                .enumerate()
             {
                 let mut heard = 0.0;
-                for (offset, gain) in taps {
-                    heard += self.early
-                        [(self.early_write + ROOM_BUFFER - 1 - offset) % ROOM_BUFFER]
-                        * gain;
+                for (index, (offset, gain)) in taps.iter().enumerate() {
+                    let reflected =
+                        self.early[(self.early_write + ROOM_BUFFER - 1 - offset) % ROOM_BUFFER];
+                    heard += self.air_lid[side][index].tick(reflected) * gain;
                 }
                 *pole += self.lid_damp * (heard - *pole);
                 *out = *pole * self.early_gain;
@@ -12548,6 +12621,7 @@ impl ConcertGrand {
                 self.room_low[line] +=
                     self.room_low_coeff * (self.room_lp[line] - self.room_low[line]);
                 let shaped = self.room_lp[line] + self.room_low_gain * self.room_low[line];
+                let shaped = self.air_room[line].tick(shaped);
                 let index = self.room_index[line];
                 self.room[line][index] = staged * 0.25 + shaped * self.room_gain[line];
                 let next = index + 1;
@@ -12645,15 +12719,22 @@ impl ConcertGrand {
                 direct_left += pedal_knock;
                 direct_right += pedal_knock;
             }
+            if self.air_enabled {
+                // Lid images already crossed their full reflected paths.
+                // Filter the remaining near mix by the board-centre range;
+                // the staged source feeding reflections/FDN is unfiltered,
+                // so their full distances are not counted twice.
+                let lid = [
+                    lid_left * air * knob_headroom,
+                    lid_right * air * knob_headroom,
+                ];
+                direct_left = self.air_direct[0].tick(direct_left - lid[0]) + lid[0];
+                direct_right = self.air_direct[1].tick(direct_right - lid[1]) + lid[1];
+            }
             // Proximity: the pressure-gradient microphone's low end rises
             // with 1/r. A 120 Hz shelf whose gain follows the pattern and
             // the distance -- an omni has none, a ribbon up close blooms.
-            if self.proximity_gain[0] > 1e-3 || self.proximity_gain[1] > 1e-3 {
-                self.proximity[0] += self.proximity_coeff * (direct_left - self.proximity[0]);
-                self.proximity[1] += self.proximity_coeff * (direct_right - self.proximity[1]);
-                direct_left += self.proximity_gain[0] * self.proximity[0];
-                direct_right += self.proximity_gain[1] * self.proximity[1];
-            }
+            [direct_left, direct_right] = self.apply_proximity([direct_left, direct_right]);
             // The soft clip is a safety net on the output, not part of the
             // voice, so it belongs AFTER the level control -- and it was sitting
             // before it. Level is a gain of 0.518 by default (-5.7 dB), so
@@ -13360,6 +13441,23 @@ impl ConcertGrand {
     }
 
     pub fn reset(&mut self) {
+        self.proximity = [0.0; 2];
+        for filter in &mut self.air_direct {
+            filter.clear();
+        }
+        for filters in &mut self.air_early {
+            for filter in filters {
+                filter.clear();
+            }
+        }
+        for filters in &mut self.air_lid {
+            for filter in filters {
+                filter.clear();
+            }
+        }
+        for filter in &mut self.air_room {
+            filter.clear();
+        }
         self.sections = [StringUnit::default(); STRING_SECTIONS];
         self.summary = [VoiceSummary::default(); MAX_VOICES];
         self.halo_summary = [VoiceSummary::default(); STRING_SECTIONS * HALOS_PER_SECTION];
@@ -14812,6 +14910,141 @@ mod tests {
     impl Drop for TestKnob {
         fn drop(&mut self) {
             self.0.set(self.1);
+        }
+    }
+
+    #[test]
+    fn proximity_shelf_measures_the_expected_response_at_each_sample_rate() {
+        let mut piano = Box::new(ConcertGrand::default());
+        for rate in [44_100.0, 48_000.0, 96_000.0] {
+            assert!(piano.prepare(rate, 256, 0, 2));
+            let coefficient = 1.0 - (-std::f64::consts::TAU * 120.0 / rate).exp();
+            assert!((piano.proximity_coeff as f64 - coefficient).abs() < 1e-6);
+            for frequency in [20.0, 120.0, 1000.0, 6000.0] {
+                piano.proximity = [0.0; 2];
+                let mut input_energy = 0.0;
+                let mut output_energy = 0.0;
+                // 0.1 s settling, then integer cycles over 0.2 s. Measure
+                // the actual sample-loop filter, not a second recurrence.
+                for frame in 0..(rate * 0.3) as usize {
+                    let input = (std::f64::consts::TAU * frequency * frame as f64 / rate).sin()
+                        as f32
+                        * 0.001;
+                    let output = piano.apply_proximity([input, 0.0]);
+                    assert_eq!(output[1], 0.0, "capsules share filter state");
+                    if frame >= (rate * 0.1) as usize {
+                        input_energy += (input as f64).powi(2);
+                        output_energy += (output[0] as f64).powi(2);
+                    }
+                }
+                let measured = (output_energy / input_energy).sqrt();
+                // Independently evaluate the discrete transfer function.
+                let pole = 1.0 - coefficient;
+                let omega = std::f64::consts::TAU * frequency / rate;
+                let real = 1.0 - pole * omega.cos();
+                let imaginary = pole * omega.sin();
+                let denominator = real * real + imaginary * imaginary;
+                let gain = piano.proximity_gain[0] as f64;
+                let h_real = 1.0 + gain * coefficient * real / denominator;
+                let h_imaginary = -gain * coefficient * imaginary / denominator;
+                let expected = (h_real * h_real + h_imaginary * h_imaginary).sqrt();
+                let error_db = 20.0 * (measured / expected).log10();
+                assert!(
+                    error_db.abs() < 0.015,
+                    "rate={rate}, f={frequency}: measured={measured}, expected={expected}"
+                );
+                std::println!(
+                    "proximity_response rate={rate} frequency={frequency} gain_db={:.6}",
+                    20.0 * measured.log10()
+                );
+                if frequency == 20.0 {
+                    assert!(measured > 1.05);
+                }
+                if frequency == 6000.0 {
+                    assert!(measured < 1.01);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn proximity_follows_pattern_distance_and_strength_and_resets() {
+        let mut piano = prepared();
+        piano.engine.controls.mic_distance = 0.5;
+        piano.engine.controls.mic_pattern = 1.0;
+        piano.tune_room();
+        let close = piano.proximity_gain;
+        piano.engine.controls.mic_distance = 4.0;
+        piano.tune_room();
+        let far = piano.proximity_gain;
+        for side in 0..2 {
+            assert!(close[side] > far[side] * 4.0);
+        }
+        piano.engine.controls.mic_pattern = 0.5;
+        piano.tune_room();
+        for side in 0..2 {
+            assert!((piano.proximity_gain[side] - far[side] * 0.5).abs() < 1e-6);
+        }
+        {
+            let _strength = TestKnob::set(&PROXIMITY_STRENGTH, 0.0);
+            piano.tune_room();
+            assert_eq!(piano.apply_proximity([0.1, -0.2]), [0.1, -0.2]);
+        }
+        piano.engine.controls.mic_pattern = 0.0;
+        piano.tune_room();
+        assert_eq!(piano.proximity_gain, [0.0; 2]);
+        assert_eq!(piano.apply_proximity([0.1, -0.2]), [0.1, -0.2]);
+        piano.engine.controls.mic_pattern = 1.0;
+        piano.tune_room();
+        piano.apply_proximity([0.1, -0.2]);
+        assert_ne!(piano.proximity, [0.0; 2]);
+        piano.reset();
+        assert_eq!(piano.proximity, [0.0; 2]);
+        assert_eq!(piano.apply_proximity([0.0; 2]), [0.0; 2]);
+        piano.apply_proximity([0.1, -0.2]);
+        assert!(piano.prepare(96_000.0, 256, 0, 2));
+        assert_eq!(piano.proximity, [0.0; 2]);
+    }
+
+    #[test]
+    fn proximity_shelf_reaches_the_rendered_output() {
+        let enabled = {
+            let mut piano = prepared();
+            render(&mut piano, 24_000, &[note_on(30, 84)])
+        };
+        let bypassed = {
+            let _strength = TestKnob::set(&PROXIMITY_STRENGTH, 0.0);
+            let mut piano = prepared();
+            render(&mut piano, 24_000, &[note_on(30, 84)])
+        };
+        let difference: f64 = enabled
+            .iter()
+            .zip(&bypassed)
+            .map(|(on, off)| ((*on - *off) as f64).powi(2))
+            .sum();
+        let reference: f64 = bypassed.iter().map(|sample| (*sample as f64).powi(2)).sum();
+        assert!(difference > reference * 0.001, "shelf never reaches output");
+        assert!(
+            enabled
+                .iter()
+                .all(|sample| sample.is_finite() && sample.abs() < 1.0)
+        );
+    }
+
+    #[test]
+    fn clamped_room_lines_keep_the_same_midband_wall_decay_target() {
+        let mut piano = Box::new(ConcertGrand::default());
+        piano.engine.controls.room_size = ROOM_VOLUME_MAX_M3.compiled();
+        assert!(piano.prepare(96_000.0, 256, 0, 2));
+        assert_eq!(piano.room_len[5], ROOM_BUFFER - 1);
+        assert!(piano.room_len[0] < ROOM_BUFFER - 1);
+        let mut targets = [0.0; ROOM_LINES];
+        for (line, target) in targets.iter_mut().enumerate() {
+            let seconds = piano.room_len[line] as f64 / 96_000.0;
+            *target = -3.0 * seconds / (piano.room_gain[line] as f64).log10();
+        }
+        for target in targets {
+            assert!((target / targets[0] - 1.0).abs() < 1e-5);
         }
     }
 
@@ -20940,6 +21173,7 @@ mod bench {
             knob.set(knob.compiled());
         }
         MIDRANGE_BALANCE.set(MIDRANGE_BALANCE.compiled());
+        AIR_PROPAGATION.set(AIR_PROPAGATION.compiled());
         BOARD_COHERENT_SHAPE.set(BOARD_COHERENT_SHAPE.compiled());
         BOARD_PRESERVE_CANCELLATION.set(BOARD_PRESERVE_CANCELLATION.compiled());
         BOARD_CAUSAL_PAIR.set(BOARD_CAUSAL_PAIR.compiled());
@@ -20986,12 +21220,13 @@ mod bench {
     /// Nothing about the instrument's sound should move by accident, and
     /// until now nothing stopped it -- these two tests printed their hash and
     /// asserted nothing, so they passed whatever the instrument did.
-    // 0.172.0: selected physical bridge, bass transfer, coherent unison,
-    // finite duplex/restrike contact, wider capture and common output gain.
-    // Promotion parity against the frozen audition is sample-exact.
-    const RENDER_FINGERPRINT: u64 = 0x835c_f23d_2402_1cb0;
+    // Air + proximity candidate: ISO travelled-distance loss on near paths,
+    // every reflection and each stored FDN path. Proximity-only fingerprints
+    // were bf489fe94cfceda2 / fc689ced9f1f47aa. Air bypass must preserve that
+    // renderer; these new hashes deliberately include the acoustic change.
+    const RENDER_FINGERPRINT: u64 = 0x3c15_008f_4f34_9d6f;
     /// As `RENDER_FINGERPRINT`, for the pedalled scenario.
-    const RENDER_FINGERPRINT_PEDALS: u64 = 0x6042_f3d2_4fb9_4a91;
+    const RENDER_FINGERPRINT_PEDALS: u64 = 0xf5f7_192f_2b5a_e4c5;
 
     /// A fingerprint of rendered audio: what the instrument sounds like,
     /// as one number.

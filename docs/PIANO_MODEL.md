@@ -1647,33 +1647,104 @@ Hardness**, **Mic Distance**, **Mic Pattern** — and the ambience falls out:
   first; hard ones (concrete, sheet metal — a galpón) keep the highs ringing
   and let the lows boom (a low shelf inside the FDN loop carries RT_low ≠
   RT_mid). The air takes the top of big rooms no matter what the walls do.
-* The mean free path 4V/S sets the six delay lines, so a big room is
-  sparser and slower, not just longer.
+* The mean free path 4V/S sets the requested six delay-line lengths. Storage
+  limits each line to 4095 samples (`ROOM_BUFFER = 4096`), or 92.86 ms at
+  44.1 kHz and 42.66 ms at 96 kHz. Large rooms can therefore collapse
+  several lines to the same length. In the historical/native bypass,
+  feedback gains use the **requested**, unclamped duration, and shared
+  high/low damping uses the requested mean path. The ISO air
+  candidate instead derives wall feedback gain from the stored duration,
+  uses the mean stored duration for its shared wall-colouring filters,
+  and applies air loss separately per stored path. This fixes the midband
+  wall RT mismatch; it does not recover the room's missing modal spacing.
+  With the compiled maximum of 45000 m³, no FDN line clamps
+  at 44.1 kHz, one clamps at 48 kHz, and five clamp at 96 kHz; it is not
+  accurate to say all six always clamp in large rooms. Early and lid
+  reflection delays share this storage limit and can reach it separately.
 * Early reflections are first-order mirror images of the piano in the six
   surfaces: delays and levels are geometry (piano a third down the hall,
-  pair at `distance`), three images read left, three right.
+  pair at `distance`). Each capsule reads **all six** images, with its own
+  path, signed polar response and delay; floor and ceiling are not assigned
+  to opposite channels.
 * The pattern control is the physical omni→figure-8 axis, p(θ)=(1−b)+b·cosθ.
   Its random-energy efficiency (1−b)²+b²/3 sets how much room the pair
   hears (a cardioid takes ≈4.8 dB less reverb than an omni), and the
-  gradient term's 1/r rise IS the proximity effect — none on an omni, most
-  on a ribbon up close (rendered as a 120 Hz shelf whose gain follows b/r).
-* Distance divides the direct sound by r_ref/r while the reverberant field
-  stays put; the calibration reference (gain 1) sits at 2.5 m.
-* **The pair is spaced in time, not just level.** Width sets the spacing
-  (0 = coincident, up to 0.9 m AB), and each string's mono output reaches
-  each microphone through its own arrival tap: Δt = S·x/(c·√(x²+D²)) from
-  the note's lateral place on the bridge and the pair's distance. The bass
-  reaches the left microphone first, the treble the right, and a coincident
-  pair hears no time differences at all — which is what coincident means.
-  One write and two reads per voice per sample; the delay is geometry fixed
-  at note-on, so nothing interpolates and nothing zippers.
+  gradient contribution is approximated by a low shelf: none on an omni,
+  strongest for a figure-8 pattern up close. This is a voicing approximation,
+  not a complete microphone transfer function. Each capsule filters its own
+  near-path input with `a = 1-exp(-2*pi*120/fs)` and adds `g` times that
+  low-pass, where `g = PROXIMITY_STRENGTH*b*MIC_REFERENCE_M/direct_path`.
+  The transfer is `H(z) = 1 + g*a/(1-(1-a)*z^-1)`: DC gain `1+g`, a
+  low-pass pole near 120 Hz, and approximately unity high-frequency gain.
+  120 Hz is the pole frequency, not the midpoint of a gain-independent
+  shelving response. The diffuse FDN tail is added after this shelf.
+  The coefficient assignment was accidentally removed in `8cb8562`; the
+  October 2026 correction restores it and measures the sample-loop response
+  at 44.1, 48 and 96 kHz. Filter states clear on reset/reprepare.
+* Distance scales the direct sound by `r_ref/r` while the diffuse field
+  stays put. `MIC_REFERENCE_M` is **2.0 m**, before the capsule's polar
+  response, near cap and `MIC_PREAMP`; this is not an assertion of final
+  unity gain at 2 m.
+* **Stereo is formed by the board observer and the two room capsules.** The
+  room pair is 17 cm apart and splayed 110 degrees. Width scales the board
+  observer's lateral separation and the string pan weights. The former
+  per-voice AB arrival delay was removed: summing its two taps into the
+  mono bridge force created a comb, without delivering those taps as
+  stereo output. There is no 0.9 m AB delay line per voice in the current
+  model. The selected physical observer uses modal pressure/phase weights;
+  the unselected retarded FIR observer is a native research diagnostic.
 
-Rendered check — the same chord in four described spaces: the galpón comes
-out distant and bright (hard walls hold the top), the auditorium darker and
-fuller, the close ribbon loud and warm with proximity lows. Presets now
+Historical rendered check — the same chord in four described spaces: the
+galpón came out distant and bright (hard walls hold the top), the auditorium
+darker and fuller. The proximity claim needs the corrected coefficient;
+see `docs/concert-grand-proximity-2026-10-01/` for the before/after audition.
+Presets now
 carry a room and a pair, not just string settings. One test moved with the
 physics: the damper test now waits 0.2 s after release, because the hall is
 allowed its own tail.
+
+### Air propagation by travelled distance (October 2026 candidate, tested)
+
+`src/air.rs` calculates ISO 9613-1 pressure attenuation in Nepers/metre,
+including the classical and oxygen/nitrogen relaxation terms. The reference
+atmosphere is fixed at 20 °C, 50% relative humidity and 101.325 kPa; these are
+assumed recording conditions, not conditions inferred from reference samples.
+The existing `AIR_ABSORB_4K_PER_M` control scales the curve relative to its
+compiled 0.0022 setting. That historical number is now a reference amount,
+not the physical ISO coefficient at 4 kHz.
+
+Each room retune constructs a shared minimum-phase cepstrum from the ISO
+curve on a 128-point frequency grid. Each receiver path exponentiates it for
+its own distance into a 16-tap causal FIR, or 32 taps for longer effective
+paths. High advanced absorption amounts use cascaded shorter FIR paths. No
+allocation, frequency transforms or transcendental functions run per sample;
+silent FIR paths skip their empty histories. At the reference atmosphere,
+measured magnitude error over 20 Hz–16 kHz is below 0.11 dB through 32 m and
+below 0.5 dB through 100 m at 44.1/48/96 kHz, with no boost in the verified
+band. This is a finite minimum-phase approximation of absorption magnitude,
+not a full dispersive atmospheric wave solver.
+
+Routing:
+
+* The near mix uses one filter per capsule at the board-centre direct range.
+  The extended board and auxiliary mechanisms share that range approximation;
+  attenuation is not integrated independently at every Rayleigh quadrature
+  point. It is applied after the source has fed the reflection/room routes.
+* Each of the six early images per capsule and four lid images per capsule
+  filters by its **full geometrical reflected path**. Lid darkening remains
+  separate. These filtered images do not cross the direct filter again.
+* Each FDN feedback line filters by `stored_samples/fs * sound_speed` per
+  pass. Its wall RT target excludes the old air term, preventing double
+  counting. Wall high/low colouring remains a shared approximate model.
+  Spectral loss accumulates with travelled distance, while a held direct
+  note always crosses the same fixed source-to-capsule range.
+
+Reset/reprepare clears all air histories. The native `AIR_PROPAGATION=0`
+research switch preserves the proximity-only candidate sample for sample;
+it is not a new public parameter or saved-state slot. Existing sessions and
+program layouts keep their ABI. The reference `.rfplugin` has not been
+replaced by this audition. Measurements and full-piece A/B files are recorded
+in `docs/concert-grand-air-2026-10-01/` and `C:/SHARED/Aire-fisico/`.
 
 ### Sympathetic resonance (tested)
 
@@ -1920,7 +1991,7 @@ ambiguous or the measurement said no, it did not, and the reason is here.
 | Soundboard modal density | 0.06 /Hz below 1477 Hz, thinning above | 0.05 -> 0.01 /Hz, ribs confine above 1.1 kHz | Ege & Boutillon | Matches, and the knee differs on purpose: their 1.1 kHz is measured on an **upright**, and the knee runs 1355 (Steinway D) to 1589 Hz (Hohner) across instruments. 1477 is the Steinway B's, and a sweep against the render puts the optimum inside that published range rather than beyond it. Revisited 2026-09-19 against the same authors' later mobility paper and left alone. |
 | Radiation transition | first-order drive fall below 60 Hz; loss channel bell 200 Hz .. 5 kHz | efficiency smooth, transition 1-1.6 kHz, no sharp coincidence | Suzuki 1986 | Consistent: no sharp coincidence is modelled. |
 | Microphones | ORTF 17 cm, +-55 deg, ~1.7 m | ORTF 17 cm, 110 deg; in the curve, a couple of feet away | DPA, ORTF | Matches. |
-| Air absorption | 0.0022 /m amplitude at 4 kHz | ~5 dB/km at 1 kHz, 160 at 10 kHz (20 C, 50 % RH) | ISO 9613-1 | Within a factor of two; kept. |
+| Air absorption | ISO curve: 4.665 dB/km at 1 kHz, 29.666 at 4 kHz, 105.291 at 8 kHz; fixed 20 C, 50% RH, 101.325 kPa | Frequency-, distance- and atmosphere-dependent attenuation | ISO 9613-1 | Causal FIR approximation validated through 100 m; legacy 0.0022 control is a relative amount. |
 | Longitudinal ratio | 17.5 x pitch | c_L/c_T = ~5000 / (2 L f0): 16 at C4 on this scale, 30-50 on real bass strings | steel wave speed | Consistent with the model's constant-speed scale; a real bass string would place it higher. |
 | Prompt decay | bell: 20-30 s <100 Hz, 3 s at 1 kHz, 2 s at 2-5 kHz | up to 20 s low notes, <1 s top; prompt ~8 dB/s, aftersound <2 dB/s | Fletcher; Weinreich | Fitted to the two reference pianos partial by partial (step 1). |
 
@@ -2731,11 +2802,15 @@ Stated so nobody mistakes silence for coverage:
   can be watched asking for it: `chiff` sits pinned to its ceiling at the top
   three calibration anchors, because no multiplier can scale a source that
   is not there.
-* **Ambience and sympathetic resonance.** The undamped top octave, the
-  open-register shimmer, the lid and rim reflections and the room are all
-  written and all mixed at zero, and a test holds them there. A dry
-  direct-injected tone is what an electric piano is; a real grand's note
-  carries an aura of the whole instrument.
+* **Ambience and sympathetic resonance.** These were once written but mixed
+  at zero. That historical gap is closed: the undamped top, open strings,
+  sympathetic bed/halo, lid/rim and room have active routes in the current
+  model, controlled by their mixes and Sympathy/Air. The test
+  `the_staging_leaves_a_tail_that_dies` requires a nonzero early tail after
+  damping and a later tail at least 30 dB lower in energy; it does not hold
+  staging at zero. `sympathy_and_air_can_be_turned_off` checks that bypassing
+  those controls makes the instrument drier. The fixed-size FDN limitation
+  described in the recording-chain section remains.
 * **The longitudinal mixing itself.** Phantom partials are placed at the
   frequencies the mixing produces, but the mixing is not integrated, so their
   level tracks velocity by a stated rule rather than emerging.

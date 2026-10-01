@@ -1,0 +1,22 @@
+
+running 3 tests
+test air::tests::advanced_absorption_extreme_stays_finite_and_clears_all_stages ... ok
+test air::tests::causal_fir_matches_iso_loss_and_never_boosts_the_supported_paths ... air_fir rate=44100 metres=0.5 max_error_db=0.000970
+air_fir rate=44100 metres=2.64 max_error_db=0.005125
+air_fir rate=44100 metres=16 max_error_db=0.034074
+air_fir rate=44100 metres=32 max_error_db=0.071731
+air_fir rate=44100 metres=100 max_error_db=0.182026
+air_fir rate=48000 metres=0.5 max_error_db=0.001033
+air_fir rate=48000 metres=2.64 max_error_db=0.005454
+air_fir rate=48000 metres=16 max_error_db=0.035881
+air_fir rate=48000 metres=32 max_error_db=0.075279
+air_fir rate=48000 metres=100 max_error_db=0.199737
+air_fir rate=96000 metres=0.5 max_error_db=0.001275
+air_fir rate=96000 metres=2.64 max_error_db=0.006993
+air_fir rate=96000 metres=16 max_error_db=0.046370
+air_fir rate=96000 metres=32 max_error_db=0.095118
+air_fir rate=96000 metres=100 max_error_db=0.465334
+ok
+test air::tests::iso_reference_atmosphere_has_the_expected_units_and_values ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 194 filtered out; finished in 0.01s

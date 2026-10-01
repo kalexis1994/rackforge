@@ -1,0 +1,70 @@
+{
+  "binary_sha256": {
+    "A": "637e65186e5c7fc8bffdbc9aa9fac5fb7efb5c3b303c5f4cd934654b5ff20da9",
+    "B": "330ddcd62778ae52a4f9907a5ceb466daf71a54654e99af3b663ef73d69a0a93"
+  },
+  "bypass_max_difference": 0.0,
+  "notes": {
+    "wav": "C:\\SHARED\\Aire-fisico\\Notas-A-B.wav",
+    "sha256": "acb181f559c88c5f3678825193c27dc0cad9ba1dbff780a8681d8e0275ca422e",
+    "peak": 0.16659270226955414
+  },
+  "notes_band_change_db": {
+    "20-120": 0.0012683270083192276,
+    "120-250": -0.005060602268646618,
+    "250-1000": 0.017166041369850026,
+    "1000-4000": 0.05013191821784321,
+    "4000-8000": -0.06847261783626164,
+    "8000-16000": -0.3650338731073628
+  },
+  "pieces": {
+    "Nocturne": {
+      "before": "C:\\SHARED\\Aire-fisico\\Nocturne-A-sin-absorcion-fisica.wav",
+      "after": {
+        "wav": "C:\\SHARED\\Aire-fisico\\Nocturne-B-aire-fisico.wav",
+        "sha256": "168af624a92fe7066631da22433372aac5eef9738fe51ec04feaf3dd10bfb5e6",
+        "peak": 0.35658934712409973
+      },
+      "band_change_db": {
+        "20-120": 0.0007052972037247477,
+        "120-250": -0.0035411592662297165,
+        "250-1000": 0.006046018779216839,
+        "1000-4000": -0.024444165605851366,
+        "4000-8000": -0.16567579221666046,
+        "8000-16000": -0.6433678924063392
+      },
+      "raw_after_sha256": "b0acdcddf6febae1a3f58374dbb5f283fb2959b0264d031fbbeebf937f9b599f",
+      "midi_sha256": "83ea472e303c1cbbd35c9a06cafb368a09be2fc5c4c793231b32816d0a91aa77",
+      "events_sha256": "6cb24b26dd33c887708c55bb6e791836c6d047e2202992b2993993cb348bd33b",
+      "frames": 10344264,
+      "note_attacks": 1498
+    },
+    "Campanella": {
+      "before": "C:\\SHARED\\Aire-fisico\\Campanella-A-sin-absorcion-fisica.wav",
+      "after": {
+        "wav": "C:\\SHARED\\Aire-fisico\\Campanella-B-aire-fisico.wav",
+        "sha256": "7a485e43ab7d5965f4a57c62d88917b01b4bf7126aa32486efa91951141a4117",
+        "peak": 0.5179917812347412
+      },
+      "band_change_db": {
+        "20-120": 0.0007538438256691667,
+        "120-250": -0.001901707114112694,
+        "250-1000": 0.003722331679243766,
+        "1000-4000": -0.03999312942975382,
+        "4000-8000": -0.13637130090973015,
+        "8000-16000": -0.6017229436342768
+      },
+      "raw_after_sha256": "5ca8819491c97ff85e9705b41d3d035dddfb9f48b51d812f5450f842e6757477",
+      "midi_sha256": "af07dbf66a65bbb761ca0ef261e3657267350f62bb963d6f298d2ea46684122a",
+      "events_sha256": "cc8ae2ab3bf4e81fc8144df1847b167ad6b1351c76bd848733c558ec65ec359a",
+      "frames": 12575505,
+      "note_attacks": 4249
+    }
+  },
+  "environment": {
+    "temperature_c": 20,
+    "relative_humidity_percent": 50,
+    "pressure_kpa": 101.325
+  },
+  "policy": "A has the corrected proximity shelf. B adds ISO air propagation and corrects stored-duration FDN gain. Same factory profile, velocities, MIDI/pedal, 44.1 kHz stereo PCM24, 256 frames, 200 ms warmup, 10 s tail. No normalization, EQ or export compression."
+}

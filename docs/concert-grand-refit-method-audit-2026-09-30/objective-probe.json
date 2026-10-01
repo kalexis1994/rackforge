@@ -1,0 +1,22 @@
+{
+  "pair": "60:60",
+  "perturbation": "Single note render amplitude x10 (+20 dB), all windows scaled, derived relative fields remain identical.",
+  "before": {
+    "decay_db": 7.927021046514602,
+    "balance_db": 12.15208645248118,
+    "body_db": 3.3044438442755633,
+    "total": 8.712407358267047,
+    "observed_decay_terms": 10,
+    "observed_balance_terms": 12
+  },
+  "after": {
+    "decay_db": 7.927021046514602,
+    "balance_db": 12.15208645248118,
+    "body_db": 3.3044438442755633,
+    "total": 8.712407358267047,
+    "observed_decay_terms": 10,
+    "observed_balance_terms": 12
+  },
+  "interpretation": "This score does not penalize the initial absolute level of a note; one fitted common export gain cannot correct arbitrary note/velocity level deviations. No physical candidate was changed.",
+  "source": "local\\concert-grand-coherent-unison\\sustain-effective-board\\report.json"
+}

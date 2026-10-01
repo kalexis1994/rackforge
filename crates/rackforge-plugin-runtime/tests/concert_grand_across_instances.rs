@@ -26,6 +26,9 @@ use std::path::PathBuf;
 use rackforge_plugin_runtime::{MidiEvent, ParallelPlanEntry, PortableEngine, RuntimeLimits};
 
 fn wasm_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("RACKFORGE_CONCERT_GRAND_WASM") {
+        return path.into();
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm")
 }

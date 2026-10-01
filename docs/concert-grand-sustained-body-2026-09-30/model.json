@@ -1,0 +1,99 @@
+{
+  "label": "14 - shared soundboard calibration and effective asymmetric unison loss",
+  "tuning": {
+    "PHYSICAL_BRIDGE": 1,
+    "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+    "PHYSICAL_PRESSURE_SCALE": 3,
+    "PHYSICAL_BED_ROUTE": 1,
+    "BOARD_LOSS_FACTOR": 0.046,
+    "FELT_K_A0": 39200000,
+    "STULOV_TAU_S": 0.0001,
+    "BED_MIX": 2.5,
+    "FELT_TREBLE_DECADES": 2,
+    "CONTACT_BOARD_GAIN": 0.006,
+    "CONTACT_BOARD_CORNER": 180,
+    "UNISON_WIDTH": 1,
+    "POLARISATION_CENTS": 0,
+    "COHERENT_UNISON": 1,
+    "STRING_STIFFNESS_SPREAD": 0.005,
+    "REACTIVE_BRIDGE": 1,
+    "STRING_TUNING_CENTER": 0.5,
+    "SPATIAL_UNISON_GAP_M": 0,
+    "MECHANICAL_RADIATION": 1,
+    "MECHANICAL_EMISSION_GAIN": 0.125,
+    "MECHANICAL_CASE_CORNER": 1500,
+    "UNISON_TREBLE_WIDTH_RATIO": 1,
+    "UNISON_EXTRA_LOSS": 2
+  },
+  "params": {
+    "25": 2.64,
+    "31": 4.6
+  },
+  "training_gain_db": 26.491841803950358,
+  "common_trim_db": 0,
+  "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+  "selected_for_production": false,
+  "native_only": true,
+  "recording_condition_fit_gain_db": 32.94898673348874,
+  "audition_gain_policy": "One global gain matching the training ensemble initial 50-200ms median to previous C, keeping its export headroom. No per-note normalization.",
+  "coefficient_status": "Effective reduced-model losses, not identified measurements of individual Steinway strings.",
+  "training_pairs": [
+    [
+      60,
+      60
+    ],
+    [
+      60,
+      124
+    ],
+    [
+      66,
+      60
+    ],
+    [
+      66,
+      124
+    ],
+    [
+      72,
+      60
+    ],
+    [
+      72,
+      124
+    ],
+    [
+      78,
+      60
+    ],
+    [
+      78,
+      124
+    ],
+    [
+      84,
+      60
+    ],
+    [
+      84,
+      124
+    ],
+    [
+      90,
+      60
+    ],
+    [
+      90,
+      124
+    ],
+    [
+      96,
+      60
+    ],
+    [
+      96,
+      124
+    ]
+  ],
+  "legacy_contact_preserved": true
+}

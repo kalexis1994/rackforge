@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "exact_pairs": 480,
+  "mapped_probes": 12,
+  "control_renders": 48,
+  "complete_midis": 2,
+  "objective_plus20db_penalty": 20.0,
+  "identical_objective_error": 0.0,
+  "matching_control_prefixes": 24,
+  "previews": [
+    {
+      "file": "Modelo-14B-agudos-evaluacion.wav",
+      "frames": 2249100,
+      "seconds": 51.0,
+      "peak": 0.6468405723571777,
+      "sha256": "1c7b9941d21c1cba7dfe5b8ee57055cc2f57e96452527e7d91762429418e71a5"
+    },
+    {
+      "file": "Modelo-14B-liberacion-pedal-repeticion.wav",
+      "frames": 2143260,
+      "seconds": 48.6,
+      "peak": 0.5059480667114258,
+      "sha256": "9f0a48e30db28c7e77e8b61034230d1258ecbe9b4f837e6f6b98391191491b40"
+    },
+    {
+      "file": "Modelo-14B-medios-evaluacion.wav",
+      "frames": 1799280,
+      "seconds": 40.8,
+      "peak": 0.653702974319458,
+      "sha256": "1a5cdb80aabd9b97a38a8e7e22f3793f8ccc37c75f8f5ad116cb16d6ceeaa73d"
+    },
+    {
+      "file": "Steinway-agudos-evaluacion.wav",
+      "frames": 2249100,
+      "seconds": 51.0,
+      "peak": 0.488476037979126,
+      "sha256": "f21f2340c766723c6924b5bd32934b101d526ee4d2dbb2426ee66e3903f1c9b5"
+    },
+    {
+      "file": "Steinway-liberacion-pedal-repeticion.wav",
+      "frames": 2143260,
+      "seconds": 48.6,
+      "peak": 0.41890406608581543,
+      "sha256": "61f616e1e9ddb0b4f4cac3f96c109728037b23701ccb27640458ffc01146d532"
+    },
+    {
+      "file": "Steinway-medios-evaluacion.wav",
+      "frames": 1799280,
+      "seconds": 40.8,
+      "peak": 0.4994744062423706,
+      "sha256": "5411bd2192e351ea5758369baeef272fe94d9e912ef7da0dd19fdc87cc9a0f02"
+    }
+  ],
+  "native_binary_sha256": "583fa4a98a31531e3419b45fd2f3f3c8817a94e3475a9d71104ee442c6396601",
+  "release_reference_is_sampler": true
+}

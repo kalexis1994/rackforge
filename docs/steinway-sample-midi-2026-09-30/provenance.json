@@ -1,0 +1,17 @@
+{
+  "library": "https://bitklavier.com/the-bitklavier-grand/",
+  "license": "https://creativecommons.org/licenses/by/4.0/",
+  "engine": "https://github.com/sfztools/sfizz/releases/download/1.2.3/sfizz-1.2.3-win64.zip",
+  "source_reference_base": "https://raw.githubusercontent.com/Princeton-CDH/bitKlavier/main/bk_JUCE/bitKlavier/Source/",
+  "source_reference_sha256": {
+    "BKPianoSampler.cpp": "c63ff0a87fe20473e67cf02dad14c5b848022e8585f3946febc11d7ebe42c58d",
+    "BKPianoSampler.h": "e9e143a251e53c96fb968245a3e780992cc99ccda630c0ccf9bdf42404e6bc0a",
+    "BKSampleLoader.cpp": "840b61c64946538df3a9e6c77a461f10611e76b4e6df53296dc60c9846da371d",
+    "BKSynthesiser.cpp": "176fed827005ccd3a39d694f5c79925b3967fee55ab66cb60d1bb57d94bed533",
+    "BKUtilities.h": "99413d7b41a4f9eaec8a97735a7e538e9edb63bd64740c9b52da2a985d561676",
+    "Direct.cpp": "8bf08fc6db082b681c4b23348d69d2373e8ac029a05be55a30e4d9b36301482c",
+    "Direct.h": "1304d05c007c387389b97ab4e626bd5bd7e12d6bd3d472ef9926ad86fe54c382"
+  },
+  "engine_zip_sha256": "7431cbe9b7f2e71a9ff4b12fbbe82c766dbf75b1eedecca627e7506cb06a9fcc",
+  "verification_script_sha256": "fb933188eb07e46935b9b1843a19ed2a814cc5fd6485e8d1626ab6b592aa5213"
+}

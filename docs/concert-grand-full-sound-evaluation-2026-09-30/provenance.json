@@ -1,0 +1,25 @@
+{
+  "date": "2026-09-30",
+  "time_zone": "America/Buenos_Aires",
+  "source_tool_sha256": {
+    "tools\\evaluate-concert-grand-full-sound.py": "f4f1a3d87bad44292e94ddfe835ed9c2482f7a1128db1d2528c9eb9865b32c91",
+    "tools\\report-concert-grand-full-sound.py": "9e7c20cc44db923276d08a8287b06956bdb1a559618cb4ee9ec6455ee0a5fd15",
+    "tools\\audit-concert-grand-recording-reference.py": "f46d002e835ee42a9de6733db6797b3d2a5f91ad4362f709d2b55ed42430ad6f",
+    "tools\\audit-concert-grand-performance-reference.py": "9e87595a8d2d99aeed7d22632b28acb144d21d2b06724c749d2501ef5bbe1357",
+    "tools\\plot-concert-grand-full-sound.py": "44c261a3e8f895f34f4e6257296a96a4df5a22b437209bcba7c125554f51e05e",
+    "tools\\render-bitklavier-steinway-midi.py": "c51190cbd22136bfde7e8739b039a5a3aaab41b13b6d78fb47f56eeb9dfcf32c"
+  },
+  "frozen_model_sha256": "f6713dfc0537c480d4555e149e0bdac5804ae4541c5a700463bde26d3af0ef73",
+  "frozen_binary_sha256": "583fa4a98a31531e3419b45fd2f3f3c8817a94e3475a9d71104ee442c6396601",
+  "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+  "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+  "sfizz_dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+  "raw_recording_gain_db": 32.84336528013347,
+  "sampler_gain_db": 26.401176937389373,
+  "evaluation_sha256": "303d67b5f8a08fd78643d1ee018b8baf3ee7e667c7a4b5107b6683cd27e0a4db",
+  "raw_recordings_sha256": "126fb1ea44233312cf346f453b4a2e82aa6fa48496dc1a29dc07c75353bb8ee2",
+  "native_cache_directory": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-full-evaluation",
+  "python": "C:/Users/kalex/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe",
+  "analysis_packages": "C:/Users/kalex/.codex/worktrees/concert-grand-refit/rackforge/target/refit-venv/Lib/site-packages",
+  "plot_packages": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\evaluation-plot-deps"
+}

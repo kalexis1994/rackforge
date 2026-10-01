@@ -1,0 +1,21 @@
+{
+  "model_sha256": "f6713dfc0537c480d4555e149e0bdac5804ae4541c5a700463bde26d3af0ef73",
+  "binary_sha256": "583fa4a98a31531e3419b45fd2f3f3c8817a94e3475a9d71104ee442c6396601",
+  "source_sha256": {
+    "bridge.rs": "ed206ef92368f01267c35c582292e3d8078811df31c075950dd33291777fe9e6",
+    "contact_pulse.rs": "2ae423baa230ee233ea080f05caa84636bd786990acba5d1c87b87120ea02b2a",
+    "lib.rs": "2b90ab2803090a2e2b1b9bfed573278cdeee5b2983c57bab298af0d568ac1f72",
+    "math.rs": "8fcbef468ccce24de475503793ee778f715f419c31bb2300d0cc0ffd4bd472ee",
+    "mechanical.rs": "068021ffb035eca8a9a41a79fd1e8fb8353391759cbc2661cd45bc6d8c71b68c",
+    "midrange.rs": "7b6cf1725d6b623d49bf36a526771a5d722e4151555117e3efc684193d6a3d7b",
+    "radiation.rs": "558dd79c25e574285e7470b50ddf00045789930c0a0d21307a8d2ec2fac06393",
+    "spatial_unison.rs": "0923c5a817fdc47df4322e92d136e83fd96eb9154d780036697cc5e62051a8f6",
+    "trio_contact.rs": "9a3f5984b157523c3a1f65435296cc7746edc445f96a063d9effe0df7d47cc6e",
+    "unison.rs": "c99c86f5f7c634b9077aa44962cf6fa558f4aaf65592ac5006ee6af22cbd1b3d"
+  },
+  "cumulative_patch_base": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\plugins\\concert-grand\\src",
+  "research_patch_sha256": "196e879a96d55b99de606af2ada6df05cc305449a34c8f691ea29942d2e9044c",
+  "attack_source_tool_sha256": "b41cf0a75164a0a0f7ffcdae8944d6a658bf12fe429ba11153716b28a345f9ba",
+  "midi_tool": "C:/Users/kalex/.codex/worktrees/concert-grand-refit/rackforge/tools/render-concert-grand-midi.py",
+  "midi_tool_sha256": "1f49d80ea41673553f5b6f92d2817b616522ae3021e988208b395a9d2e88c11e"
+}

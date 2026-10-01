@@ -1,0 +1,352 @@
+{
+  "binary_sha256": "583fa4a98a31531e3419b45fd2f3f3c8817a94e3475a9d71104ee442c6396601",
+  "model_sha256": "f6713dfc0537c480d4555e149e0bdac5804ae4541c5a700463bde26d3af0ef73",
+  "unit_tests": {
+    "passed": 108,
+    "failed": 0,
+    "ignored": 74
+  },
+  "legacy_fingerprints": [
+    "0x243e622a8b59910d",
+    "0x706b728c4d0a6b06"
+  ],
+  "original14_off_switch_control_bit_identical": true,
+  "nocturne_prefix_before_first_restrike_bit_identical": true,
+  "fresh_parity": [
+    {
+      "note": 60,
+      "velocity": 60,
+      "bit_identical": true,
+      "sha256": "939e1f51b5501e467df8e5a8c3194647202e471167838c5fd1b5385a2ec836ad"
+    },
+    {
+      "note": 60,
+      "velocity": 124,
+      "bit_identical": true,
+      "sha256": "533fce7a15246e50bcaee92c5f16eb3a156abfef1c508106a2793716274a2d2d"
+    },
+    {
+      "note": 65,
+      "velocity": 60,
+      "bit_identical": true,
+      "sha256": "07d9cda426d1d2bee15518cfabf436092a7a270cdb85bee3a510a1ec9dd34517"
+    },
+    {
+      "note": 65,
+      "velocity": 124,
+      "bit_identical": true,
+      "sha256": "4dbcc925697165b3df3bb7407720f8bfb4a60fb9216374ebf2d09ab476871f0c"
+    },
+    {
+      "note": 67,
+      "velocity": 60,
+      "bit_identical": true,
+      "sha256": "f76e07adc54acc18feee18ebdcae89c804d212e5c9f3ef9dfcef1846c7b21802"
+    },
+    {
+      "note": 67,
+      "velocity": 124,
+      "bit_identical": true,
+      "sha256": "8397891335d65f35c82745c0a537612be5f239594a1d50dedf1b15d2a7e8e66b"
+    },
+    {
+      "note": 72,
+      "velocity": 60,
+      "bit_identical": true,
+      "sha256": "88451151e1a2a785fdcc0702dba7e794dfd7d77265b0dccb980b3097b488087a"
+    },
+    {
+      "note": 72,
+      "velocity": 124,
+      "bit_identical": true,
+      "sha256": "1fb63a88f14bac07c1f426a0b18ea3a9cde59e763e499d2d2866740b5dc7fbba"
+    },
+    {
+      "note": 79,
+      "velocity": 60,
+      "bit_identical": true,
+      "sha256": "4b30ae7fbb3ab2e55668cacb23ba510db16d512d8bf1296366f80128d7b870c0"
+    },
+    {
+      "note": 79,
+      "velocity": 124,
+      "bit_identical": true,
+      "sha256": "601647a048192125311eeb167d63a4e1d60c539c4f289d640990ac34165165ea"
+    },
+    {
+      "note": 84,
+      "velocity": 60,
+      "bit_identical": true,
+      "sha256": "17d193ed1337881ad2983b5dd65c3ec231ddb08dd0a9c069c82a98a01189846a"
+    },
+    {
+      "note": 84,
+      "velocity": 124,
+      "bit_identical": true,
+      "sha256": "7b6290570dc1ef3b89a3d3e4086eb3c10c8cf32cf81aeeddf21a35fae7aef5d0"
+    },
+    {
+      "note": 91,
+      "velocity": 60,
+      "bit_identical": true,
+      "sha256": "4ef2f6520fb780d8ddcf8d64e90066821f0e6cc19a80b90b2b634b118d8f9733"
+    },
+    {
+      "note": 91,
+      "velocity": 124,
+      "bit_identical": true,
+      "sha256": "c2da1f53af586de58a40a6ea48bf6419ea2bd97710fe4af5c8398928976f8588"
+    },
+    {
+      "note": 96,
+      "velocity": 60,
+      "bit_identical": true,
+      "sha256": "4ab1f8cf573df3c234544006b9fb8867eb986cd86e33816644ef9269418432ca"
+    },
+    {
+      "note": 96,
+      "velocity": 124,
+      "bit_identical": true,
+      "sha256": "f82c3db99fb1e9b20d3acfca58b231e5b8ac4ecb308918f0ef2de31b9ca66468"
+    }
+  ],
+  "stress": [
+    {
+      "rate": 44100,
+      "block": 256,
+      "events": 529,
+      "native_peak": 0.060102805495262146,
+      "tail_relative_db": -118.83388768059099,
+      "raw_sha256": "de7fae9ed9da623aee6ef78bfc2ba968249a018d85400853a9487ca59e017980"
+    },
+    {
+      "rate": 48000,
+      "block": 256,
+      "events": 529,
+      "native_peak": 0.06028313562273979,
+      "tail_relative_db": -118.60107882639632,
+      "raw_sha256": "3990744811831d209fb8a5e8017175a8a92f17c106e7a12d4b7c5b026251e31b"
+    }
+  ],
+  "performances": [
+    {
+      "stem": "chopin-nocturno-op9-2",
+      "seconds": 234.5638095238095,
+      "peak": 0.41179323196411133,
+      "gain_db": 25.323919153409303,
+      "additional_common_trim_db": -0.08913486376388341,
+      "midi_and_events_identical": true,
+      "notes": 1498,
+      "wav_sha256": "45b860279bb38b0c6964c2dccd277f13984aed1e5091109515996842b894fcdb"
+    },
+    {
+      "stem": "liszt-la-campanella",
+      "seconds": 285.15884353741495,
+      "peak": 0.8500000238418579,
+      "gain_db": 25.323919153409303,
+      "additional_common_trim_db": -0.08913486376388341,
+      "midi_and_events_identical": true,
+      "notes": 4249,
+      "wav_sha256": "d8b388b69388ccb13a9e9aaa6ba7b80fc948c06d756d80e6d9de06c8124521ba"
+    }
+  ],
+  "clips": [
+    {
+      "source_wav": "C:\\SHARED\\Modelo-14B\\Modelo-14B-chopin-nocturno-op9-2.wav",
+      "source_raw_sha256": "148f434f7d07f6007dff094fc46664555db5a2a2ca706b975112a21a6ddd8322",
+      "original_piece_seconds": [
+        0,
+        9.5
+      ],
+      "output_wav": "C:\\SHARED\\Modelo-14B\\Modelo-14B-nocturno-inicio.wav",
+      "wav_sha256": "5e6d2af21fc8fd8b46df5c5d9c782143e946ba3f846edc74c5b930d252c42ff2",
+      "gain_db": 25.323919153409303,
+      "policy": "Exact contiguous excerpt at full-piece gain; no fades, EQ, compression, or reset at excerpt start."
+    },
+    {
+      "source_wav": "C:\\SHARED\\Modelo-14B\\Modelo-14B-liszt-la-campanella.wav",
+      "source_raw_sha256": "91a3b9c64fd43aa99dcb97179d380fbdefa6bb852bc14c883d9a3d7f44be095d",
+      "original_piece_seconds": [
+        143,
+        153
+      ],
+      "output_wav": "C:\\SHARED\\Modelo-14B\\Modelo-14B-campanella-2m23s.wav",
+      "wav_sha256": "eb038eea3e36fde04b0a41c47110eda32ed065eb05c8be2e126c99c16c5ba44b",
+      "gain_db": 25.323919153409303,
+      "policy": "Exact contiguous excerpt at full-piece gain; no fades, EQ, compression, or reset at excerpt start."
+    }
+  ],
+  "attack_measures": [
+    {
+      "stem": "chopin-nocturno-op9-2",
+      "seconds": [
+        4,
+        4.01
+      ],
+      "onsets": [
+        {
+          "seconds": 4.005215419501134,
+          "note": 79,
+          "velocity": 78,
+          "hf_0_2ms_change_db": -4.6011197514296835
+        }
+      ],
+      "aggregate_hf_0_2ms_change_db": -4.6011197514296835
+    },
+    {
+      "stem": "liszt-la-campanella",
+      "seconds": [
+        146.7,
+        148.4
+      ],
+      "onsets": [
+        {
+          "seconds": 146.74609977324263,
+          "note": 95,
+          "velocity": 70,
+          "hf_0_2ms_change_db": -4.659433899314687
+        },
+        {
+          "seconds": 146.82031746031745,
+          "note": 94,
+          "velocity": 68,
+          "hf_0_2ms_change_db": -22.1113340262021
+        },
+        {
+          "seconds": 146.9309977324263,
+          "note": 95,
+          "velocity": 66,
+          "hf_0_2ms_change_db": 2.120880010652061
+        },
+        {
+          "seconds": 146.9726530612245,
+          "note": 94,
+          "velocity": 70,
+          "hf_0_2ms_change_db": -14.058187176917142
+        },
+        {
+          "seconds": 147.036462585034,
+          "note": 93,
+          "velocity": 71,
+          "hf_0_2ms_change_db": 5.766011340510522
+        },
+        {
+          "seconds": 147.11979591836734,
+          "note": 92,
+          "velocity": 70,
+          "hf_0_2ms_change_db": -2.0747316063117287
+        },
+        {
+          "seconds": 147.22136054421767,
+          "note": 93,
+          "velocity": 73,
+          "hf_0_2ms_change_db": -9.393741563162166
+        },
+        {
+          "seconds": 147.28124716553287,
+          "note": 92,
+          "velocity": 73,
+          "hf_0_2ms_change_db": -6.075834325303214
+        },
+        {
+          "seconds": 147.34895691609978,
+          "note": 91,
+          "velocity": 65,
+          "hf_0_2ms_change_db": -5.794549694355979
+        },
+        {
+          "seconds": 147.42839002267573,
+          "note": 90,
+          "velocity": 61,
+          "hf_0_2ms_change_db": -2.801064954150897
+        },
+        {
+          "seconds": 147.53124716553287,
+          "note": 91,
+          "velocity": 69,
+          "hf_0_2ms_change_db": -7.372228352379752
+        },
+        {
+          "seconds": 147.5768253968254,
+          "note": 90,
+          "velocity": 58,
+          "hf_0_2ms_change_db": -0.16198631908972597
+        },
+        {
+          "seconds": 147.6445351473923,
+          "note": 89,
+          "velocity": 64,
+          "hf_0_2ms_change_db": 0.3518594782012352
+        },
+        {
+          "seconds": 147.71875283446713,
+          "note": 88,
+          "velocity": 65,
+          "hf_0_2ms_change_db": -0.2928302480847165
+        },
+        {
+          "seconds": 147.79297052154195,
+          "note": 89,
+          "velocity": 60,
+          "hf_0_2ms_change_db": -10.220046298851797
+        },
+        {
+          "seconds": 147.85807256235827,
+          "note": 88,
+          "velocity": 63,
+          "hf_0_2ms_change_db": -2.5483713511312613
+        },
+        {
+          "seconds": 147.89975056689343,
+          "note": 87,
+          "velocity": 68,
+          "hf_0_2ms_change_db": 1.3356838640092275
+        },
+        {
+          "seconds": 147.9700453514739,
+          "note": 86,
+          "velocity": 69,
+          "hf_0_2ms_change_db": 0.8863550128848957
+        },
+        {
+          "seconds": 148.04426303854876,
+          "note": 87,
+          "velocity": 62,
+          "hf_0_2ms_change_db": -0.18774118353239386
+        },
+        {
+          "seconds": 148.0950566893424,
+          "note": 86,
+          "velocity": 52,
+          "hf_0_2ms_change_db": -2.7891317050925646
+        },
+        {
+          "seconds": 148.15625850340135,
+          "note": 85,
+          "velocity": 64,
+          "hf_0_2ms_change_db": -1.5835571324298643
+        },
+        {
+          "seconds": 148.2304761904762,
+          "note": 84,
+          "velocity": 67,
+          "hf_0_2ms_change_db": -0.03541162426483836
+        },
+        {
+          "seconds": 148.3073015873016,
+          "note": 85,
+          "velocity": 60,
+          "hf_0_2ms_change_db": 2.4310507654888323
+        },
+        {
+          "seconds": 148.37891156462584,
+          "note": 84,
+          "velocity": 56,
+          "hf_0_2ms_change_db": -6.35725062338204
+        }
+      ],
+      "aggregate_hf_0_2ms_change_db": -3.4325535261729634
+    }
+  ],
+  "limitations": "Diagnostic HF changes do not establish perceived pick removal. Linear finite modal reconstruction; no contact initialized from old moving strings. 4ms is a global audition calibration, not a measured physical contact duration. No desktop ASIO test."
+}

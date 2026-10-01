@@ -1,0 +1,20 @@
+{
+  "selected": "width0.8-mobility0.00025-pressure5.4",
+  "policy": "Evaluate coherent per-string tuning against frozen model 07.\n\nExploratory reused corpus; no claim of blind validation or physical identification.\nThe source tools directory is explicit because the historical research worktree\nmay be read-only. Outputs and executable must be in the writable project.\n",
+  "binary_sha256": "bbcfb2604b220e507b882b72af28cd12bed38b6594048ddd7fe2bf268a027e02",
+  "model_sha256": "8550932f2bccafe00bdb25faea166de94a6f8d854b57dacda1067fe1f56aad10",
+  "reference_sha256": {
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C4v8.wav": "8848a6d80c5d5224267fded56f69f42fc84b84884747112b3b0a6552292d51ce",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C4v11.wav": "28f48648d824c75b9cec1b053931b95b6075f4289af011e72926ba5722195aa4",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C4v16.wav": "fe91edcf580f3d1b055a87bf9911db52cccf934445f9e2b126ee1c3eb858b763",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\F#4v8.wav": "ab546f19151c6f9a1e844934bb639c1606c4ce06c3671c8ad929c262f68c048e",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\F#4v11.wav": "a47ee6b119523bf21991ec32ef39954153929c87f653c92e736669d60f05a2cd",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\F#4v16.wav": "8fa666ba8efb61c011d9e1373393d00fa55f494a6b8522c4183ef1e603784ecf",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\A4v8.wav": "91fbe9d4bca0820cb0643ea404332fe8ea1e56f4a13380d1d09724dd6eb8c916",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\A4v11.wav": "f27e66068e87356824c6e90bfbb4630f4f61e9b82baa88e65bd5488723196986",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\A4v16.wav": "f0c264cc4192ae0029464405dc15a57523d9e870e730d99fefe2fc8e7abb3deb",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C5v8.wav": "80b88181e6fb0a2bae411f1d3d50cfe8960b069cd57dd86fcd0307234eabb197",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C5v11.wav": "c1fb53ef3eaffb789d22b6d4879be19c04b5789f1cfbb44b624eb2fc61fd2fea",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C5v16.wav": "5555d9e684563ec5c471d65e9cab822457ca29fee46d188085e9395afac39cae"
+  }
+}

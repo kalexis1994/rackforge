@@ -1,0 +1,34 @@
+{
+  "base_source_sha256": "d8f5278a2ddabff03e93dbdc45fc4b5a8d1779d26300689f380e81e9e99f00cf",
+  "research_source_sha256": {
+    "lib.rs": "74a57e20810768a1c8cc2d81f538554379517b35f4440d1ea39b1684dead2999",
+    "bridge.rs": "ed206ef92368f01267c35c582292e3d8078811df31c075950dd33291777fe9e6",
+    "unison.rs": "00fbd261a3145ee1d9068a2d5785f675bcac4fda1fc99cbe3c69d01f6ebdd6e8",
+    "spatial_unison.rs": "0923c5a817fdc47df4322e92d136e83fd96eb9154d780036697cc5e62051a8f6",
+    "mechanical.rs": "068021ffb035eca8a9a41a79fd1e8fb8353391759cbc2661cd45bc6d8c71b68c"
+  },
+  "regular_tests_passed": 103,
+  "legacy_audio_fingerprints": [
+    "0x243e622a8b59910d",
+    "0x706b728c4d0a6b06"
+  ],
+  "native_only": true,
+  "performances": [
+    {
+      "piece": "chopin-nocturno-op9-2",
+      "duration_s": 234.5638095238095,
+      "peak": 0.393147349357605,
+      "events_preserved": true,
+      "gain_change_vs_previous_C_db": -0.020197899360002936,
+      "wav_sha256": "321cc9ec42700a6ca90478e0785e029eefa6b26bec67d1d3f94c21e2f54e7bd1"
+    },
+    {
+      "piece": "liszt-la-campanella",
+      "duration_s": 285.15884353741495,
+      "peak": 0.8500000238418579,
+      "events_preserved": true,
+      "gain_change_vs_previous_C_db": -0.020197899360002936,
+      "wav_sha256": "29563a5ab46377a7442f9bea84d863e85be9f25bf1dd420dd053b7adcf7065c8"
+    }
+  ]
+}

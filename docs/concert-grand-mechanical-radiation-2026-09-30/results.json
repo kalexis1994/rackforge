@@ -1,0 +1,255 @@
+{
+  "binary_sha256": "68eb85f1243128dc5a2bf4d453a39ad00ff69d7562bc6117ccb32c34d1335a51",
+  "model": {
+    "label": "C - separate acoustic radiation of mechanisms",
+    "tuning": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 0,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500
+    },
+    "params": {
+      "25": 2.64
+    },
+    "training_gain_db": 21.85313499438971,
+    "common_trim_db": 0,
+    "binary_sha256": "68eb85f1243128dc5a2bf4d453a39ad00ff69d7562bc6117ccb32c34d1335a51",
+    "original_C_provenance": {
+      "label": "C-sin-batimientos",
+      "pairs": [
+        [
+          60,
+          60
+        ],
+        [
+          65,
+          60
+        ],
+        [
+          67,
+          60
+        ],
+        [
+          72,
+          60
+        ]
+      ],
+      "duration_s": 18,
+      "initial_match_db": -0.040921363878897665,
+      "common_gain_db": 27.603604403138874,
+      "manifest": {
+        "binary": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\release\\deps\\rackforge_concert_grand-7275b6d0b6a905c6.exe",
+          "fd67a9f286bde7cffa2fd019958bb8b9e16c0034a2828725421580c8762f19b0"
+        ],
+        "pairs": [
+          [
+            60,
+            60
+          ],
+          [
+            60,
+            124
+          ],
+          [
+            65,
+            60
+          ],
+          [
+            65,
+            124
+          ],
+          [
+            67,
+            60
+          ],
+          [
+            67,
+            124
+          ],
+          [
+            69,
+            60
+          ],
+          [
+            69,
+            124
+          ],
+          [
+            72,
+            60
+          ],
+          [
+            72,
+            124
+          ]
+        ],
+        "params": {
+          "25": 2.64
+        },
+        "calibration": null,
+        "tuning": {
+          "PHYSICAL_BRIDGE": 1,
+          "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+          "PHYSICAL_PRESSURE_SCALE": 3,
+          "PHYSICAL_BED_ROUTE": 1,
+          "BOARD_LOSS_FACTOR": 0.046,
+          "FELT_K_A0": 39200000,
+          "STULOV_TAU_S": 0.0001,
+          "BED_MIX": 2.5,
+          "FELT_TREBLE_DECADES": 2,
+          "CONTACT_BOARD_GAIN": 0.006,
+          "CONTACT_BOARD_CORNER": 180,
+          "UNISON_WIDTH": 0,
+          "POLARISATION_CENTS": 0
+        },
+        "preset": "concert",
+        "rate": 44100,
+        "channel": "left",
+        "warmup_ms": 200
+      },
+      "wav_sha256": "3bab0e425d999a19dde2ad8439dfb1abcc7c6cd8293d1099976f171f0fb45a22",
+      "policy": "Diagnostic ablation, not a fitted piano. One fixed gain per variant matching median 50-150ms RMS; no per-note normalization. Held 4s, 20ms end fade, .5s gap."
+    },
+    "selected_for_production": false,
+    "acoustic_emission_calibration": "Provisional common amplitude factor; source amplitudes are synthetic, not measured forces. Reduced case/geometry receiver; room uses a common diffuse field and board-centred early reflection approximation."
+  },
+  "attack_rows": [
+    {
+      "note": 48,
+      "velocity": 60,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -7.739890373080993,
+      "total_attack_change_db": 0.00023300485745359435,
+      "sustain_change_db": 5.0589247420227e-06
+    },
+    {
+      "note": 48,
+      "velocity": 124,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -6.474251581561516,
+      "total_attack_change_db": -0.0006548790383461157,
+      "sustain_change_db": 3.720529402558661e-07
+    },
+    {
+      "note": 60,
+      "velocity": 60,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -14.292019161894892,
+      "total_attack_change_db": -0.0013387669903872335,
+      "sustain_change_db": -3.4785868769590364e-06
+    },
+    {
+      "note": 60,
+      "velocity": 124,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -13.643225541862867,
+      "total_attack_change_db": -0.0028319338937654813,
+      "sustain_change_db": -5.985080545061065e-06
+    },
+    {
+      "note": 72,
+      "velocity": 60,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -13.43559142329864,
+      "total_attack_change_db": 0.0004239623005427676,
+      "sustain_change_db": 9.147701025887768e-06
+    },
+    {
+      "note": 72,
+      "velocity": 124,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -13.27278496060022,
+      "total_attack_change_db": 0.02235393344352496,
+      "sustain_change_db": 1.2303163227156213e-06
+    },
+    {
+      "note": 84,
+      "velocity": 60,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -13.173167011406326,
+      "total_attack_change_db": -0.030617151462719806,
+      "sustain_change_db": -0.1621966931093458
+    },
+    {
+      "note": 84,
+      "velocity": 124,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -13.22448304027278,
+      "total_attack_change_db": -0.023346343854144243,
+      "sustain_change_db": -0.11539820546358509
+    },
+    {
+      "note": 96,
+      "velocity": 60,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -8.999115555280188,
+      "total_attack_change_db": -0.03512327448826375,
+      "sustain_change_db": -0.20351871653972672
+    },
+    {
+      "note": 96,
+      "velocity": 124,
+      "held_tone_counterfactual_identical": true,
+      "mechanical_reduction_db": -8.860061043815865,
+      "total_attack_change_db": -0.005938085079124538,
+      "sustain_change_db": -0.13041283408790072
+    }
+  ],
+  "pedal_rows": [
+    {
+      "profile": "legacy",
+      "microphone_m": 0.66,
+      "attack_rms_db": -78.50895327370372,
+      "peak": 0.0009608285618014634
+    },
+    {
+      "profile": "legacy",
+      "microphone_m": 2.64,
+      "attack_rms_db": -78.50895327370372,
+      "peak": 0.0009608285618014634
+    },
+    {
+      "profile": "legacy",
+      "microphone_m": 8.0,
+      "attack_rms_db": -78.50895327370372,
+      "peak": 0.0009608285618014634
+    },
+    {
+      "profile": "radiation",
+      "microphone_m": 0.66,
+      "attack_rms_db": -96.29725934845412,
+      "peak": 0.00013864721404388547
+    },
+    {
+      "profile": "radiation",
+      "microphone_m": 2.64,
+      "attack_rms_db": -97.76722697449134,
+      "peak": 0.00011443885887274519
+    },
+    {
+      "profile": "radiation",
+      "microphone_m": 8.0,
+      "attack_rms_db": -100.37478560507965,
+      "peak": 0.00010652056516846642
+    }
+  ],
+  "policy": "10 held probes; 300 ms attack and 1.5-3.5 s sustain; paired source ablations; pedal alone with identical CC64. Exploratory acoustic calibration, not a fitted radiation efficiency."
+}

@@ -1,0 +1,12 @@
+[package]
+name = "rackforge-concert-grand-research"
+version = "0.1.25"
+edition = "2024"
+license = "GPL-2.0-or-later"
+[workspace]
+[lib]
+crate-type = ["rlib"]
+[dependencies]
+rackforge-plugin-sdk = { path = "../../crates/rackforge-plugin-sdk" }
+[profile.release]
+opt-level = 3

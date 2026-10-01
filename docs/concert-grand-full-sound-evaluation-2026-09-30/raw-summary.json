@@ -1,0 +1,254 @@
+{
+  "policy": "Unmodified original Stage ORTF recordings, no SFZ velocity gain or onset envelope, no transposition. One separate common gain calibrated on the same 14 pairs. No raw-recording release comparison because original note-off times are unknown.",
+  "gain_db": 32.84336528013347,
+  "summary": {
+    "dynamics_28_to_124": {
+      "aggregate": {
+        "count": 30,
+        "median": -1.0224250850354633,
+        "mean_absolute": 2.319793048289826,
+        "min": -7.490353066615349,
+        "max": 5.72608629029823
+      },
+      "per_note": {
+        "21": {
+          "original_range_db": 20.995965649388992,
+          "model_range_db": 19.272647736686825,
+          "error_db": -1.7233179127021678
+        },
+        "24": {
+          "original_range_db": 19.47386586635135,
+          "model_range_db": 18.805627055615243,
+          "error_db": -0.6682388107361064
+        },
+        "27": {
+          "original_range_db": 18.09006061700723,
+          "model_range_db": 19.55031261161187,
+          "error_db": 1.46025199460464
+        },
+        "30": {
+          "original_range_db": 18.56508676753922,
+          "model_range_db": 19.39348559969377,
+          "error_db": 0.8283988321545479
+        },
+        "33": {
+          "original_range_db": 19.840065893344065,
+          "model_range_db": 19.04558485775114,
+          "error_db": -0.7944810355929235
+        },
+        "36": {
+          "original_range_db": 16.77151928043091,
+          "model_range_db": 18.624090955840387,
+          "error_db": 1.8525716754094788
+        },
+        "39": {
+          "original_range_db": 18.99615914008193,
+          "model_range_db": 18.965269399149484,
+          "error_db": -0.030889740932444454
+        },
+        "42": {
+          "original_range_db": 20.866781799328635,
+          "model_range_db": 18.62201025093083,
+          "error_db": -2.2447715483978037
+        },
+        "45": {
+          "original_range_db": 20.442697322800214,
+          "model_range_db": 19.16391831324124,
+          "error_db": -1.2787790095589742
+        },
+        "48": {
+          "original_range_db": 20.884178513523274,
+          "model_range_db": 19.231341246457006,
+          "error_db": -1.6528372670662677
+        },
+        "51": {
+          "original_range_db": 18.85830159697543,
+          "model_range_db": 19.424509909967068,
+          "error_db": 0.5662083129916375
+        },
+        "54": {
+          "original_range_db": 19.473219482439582,
+          "model_range_db": 19.941890347979065,
+          "error_db": 0.4686708655394831
+        },
+        "57": {
+          "original_range_db": 22.35958113158096,
+          "model_range_db": 20.484107807322133,
+          "error_db": -1.8754733242588273
+        },
+        "60": {
+          "original_range_db": 18.964341002349677,
+          "model_range_db": 20.17006859159325,
+          "error_db": 1.2057275892435726
+        },
+        "63": {
+          "original_range_db": 20.03742320264815,
+          "model_range_db": 21.652380297657306,
+          "error_db": 1.6149570950091565
+        },
+        "66": {
+          "original_range_db": 22.409753545165835,
+          "model_range_db": 18.88858284269474,
+          "error_db": -3.521170702471096
+        },
+        "69": {
+          "original_range_db": 21.35913700402363,
+          "model_range_db": 18.780739520154107,
+          "error_db": -2.578397483869523
+        },
+        "72": {
+          "original_range_db": 18.470525077148114,
+          "model_range_db": 19.43780852083971,
+          "error_db": 0.9672834436915956
+        },
+        "75": {
+          "original_range_db": 23.930102343766666,
+          "model_range_db": 20.916492866661837,
+          "error_db": -3.013609477104829
+        },
+        "78": {
+          "original_range_db": 20.648957159072022,
+          "model_range_db": 19.510193680315876,
+          "error_db": -1.1387634787561467
+        },
+        "81": {
+          "original_range_db": 23.063656977105367,
+          "model_range_db": 20.82040107566888,
+          "error_db": -2.2432559014364877
+        },
+        "84": {
+          "original_range_db": 21.972683601099167,
+          "model_range_db": 19.491270513285528,
+          "error_db": -2.481413087813639
+        },
+        "87": {
+          "original_range_db": 22.802663532301754,
+          "model_range_db": 20.131979009025933,
+          "error_db": -2.6706845232758205
+        },
+        "90": {
+          "original_range_db": 24.976245966234657,
+          "model_range_db": 19.958992643870165,
+          "error_db": -5.017253322364493
+        },
+        "93": {
+          "original_range_db": 27.054603799819716,
+          "model_range_db": 19.564250733204368,
+          "error_db": -7.490353066615349
+        },
+        "96": {
+          "original_range_db": 24.481762111461155,
+          "model_range_db": 19.43253531944778,
+          "error_db": -5.049226792013375
+        },
+        "99": {
+          "original_range_db": 21.1699382906433,
+          "model_range_db": 20.26385159932852,
+          "error_db": -0.9060866913147798
+        },
+        "102": {
+          "original_range_db": 20.70086842688682,
+          "model_range_db": 25.58581913882673,
+          "error_db": 4.884950711939908
+        },
+        "105": {
+          "original_range_db": 20.00469068440808,
+          "model_range_db": 23.644372145939553,
+          "error_db": 3.639681461531474
+        },
+        "108": {
+          "original_range_db": 18.151736277526673,
+          "model_range_db": 23.877822567824904,
+          "error_db": 5.72608629029823
+        }
+      },
+      "sampler_comparison": {
+        "count": 30,
+        "median": -4.130163462053934,
+        "mean": -3.907413715998809,
+        "mean_absolute": 4.355584186449472,
+        "p90_absolute": 6.664063510284923,
+        "min": -10.258758826483817,
+        "max": 2.7711982701811095
+      },
+      "interpretation": "The SFZ player extends layer dynamics by 4dB plus within-layer gain. Its range mismatch must not be attributed entirely to the physical model."
+    },
+    "registers": {
+      "bajos": {
+        "initial_level_delta": {
+          "count": 144,
+          "median": 11.917668080121182,
+          "mean_absolute": 13.318767136608734,
+          "min": 1.2024194283432443,
+          "max": 22.793748582475992
+        },
+        "body_level_delta": {
+          "count": 144,
+          "median": 15.659486082934901,
+          "mean_absolute": 16.024699075173153,
+          "min": 1.6702520938773944,
+          "max": 29.043850237618067
+        },
+        "strong_early_subfundamental_relative_total_error": {
+          "count": 36,
+          "median": 8.616839514991463,
+          "mean_absolute": 9.825309058093632,
+          "min": 4.223188918536923,
+          "max": 18.28410057648257
+        },
+        "late_modulation_reference": 48,
+        "late_modulation_model": 0
+      },
+      "medios": {
+        "initial_level_delta": {
+          "count": 128,
+          "median": 0.5862290234837992,
+          "mean_absolute": 3.6096407761520473,
+          "min": -6.246961660435396,
+          "max": 11.58716989665809
+        },
+        "body_level_delta": {
+          "count": 128,
+          "median": -1.062918980846348,
+          "mean_absolute": 3.700620449500615,
+          "min": -7.737549388399724,
+          "max": 9.246950085040943
+        },
+        "strong_early_subfundamental_relative_total_error": {
+          "count": 32,
+          "median": -3.1340113997024392,
+          "mean_absolute": 4.849612446393374,
+          "min": -10.053187284989392,
+          "max": 3.835442834904022
+        },
+        "late_modulation_reference": 50,
+        "late_modulation_model": 0
+      },
+      "agudos": {
+        "initial_level_delta": {
+          "count": 208,
+          "median": 2.023171224526166,
+          "mean_absolute": 4.186675716644289,
+          "min": -6.444661507560667,
+          "max": 16.138077603608007
+        },
+        "body_level_delta": {
+          "count": 208,
+          "median": 1.935153657996981,
+          "mean_absolute": 6.1900007080058055,
+          "min": -8.918938772353648,
+          "max": 28.17698166156587
+        },
+        "strong_early_subfundamental_relative_total_error": {
+          "count": 52,
+          "median": -10.704842737938668,
+          "mean_absolute": 10.587318286375877,
+          "min": -29.712468485937276,
+          "max": 3.7839747319472004
+        },
+        "late_modulation_reference": 35,
+        "late_modulation_model": 0
+      }
+    }
+  }
+}

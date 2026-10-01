@@ -1,0 +1,1701 @@
+{
+  "model_sha256": "8f811ad471aadba0ffd788f5af7e9711e9834a7218fd4051ec6a6825b213cf42",
+  "binary_sha256": "583fa4a98a31531e3419b45fd2f3f3c8817a94e3475a9d71104ee442c6396601",
+  "original_events_sha256": "6cb24b26dd33c887708c55bb6e791836c6d047e2202992b2993993cb348bd33b",
+  "clip_seconds": [
+    1.0,
+    8.0
+  ],
+  "gain_db": 25.413054017173184,
+  "profiles": {
+    "fase-1.5ms": {
+      "RESTRIKE_PHASE_PRESERVE": 1
+    },
+    "fase-4ms": {
+      "RESTRIKE_PHASE_PRESERVE": 1,
+      "MERGE_RAMP_S": 0.004
+    },
+    "velocidad-4ms": {
+      "RESTRIKE_PHASE_PRESERVE": 0,
+      "MERGE_RAMP_S": 0.004
+    }
+  },
+  "results": {
+    "14-original": {
+      "raw_sha256": "9b7f82f64a22eaad04c08ce793f9bc753effb5d1264450f5094601072d23a3f8",
+      "rows": [
+        {
+          "frame": 45363,
+          "seconds": 1.0286394557823129,
+          "note": 70,
+          "velocity": 58,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.099480104325695e-13,
+          "hf_crest_db": -13.769545954385027,
+          "attack_0_20ms_power": 1.7599834560742638e-06
+        },
+        {
+          "frame": 67930,
+          "seconds": 1.5403628117913832,
+          "note": 39,
+          "velocity": 40,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 4.909133106574875e-14,
+          "hf_crest_db": -0.026381068177675788,
+          "attack_0_20ms_power": 1.5194418717537648e-06
+        },
+        {
+          "frame": 73270,
+          "seconds": 1.661451247165533,
+          "note": 79,
+          "velocity": 67,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.1926015076148416e-12,
+          "hf_crest_db": -4.830206026597478,
+          "attack_0_20ms_power": 1.661225014304704e-05
+        },
+        {
+          "frame": 102670,
+          "seconds": 2.3281179138321995,
+          "note": 63,
+          "velocity": 41,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 6.44815846927939e-14,
+          "hf_crest_db": -7.253517590027975,
+          "attack_0_20ms_power": 8.965159113021823e-07
+        },
+        {
+          "frame": 103245,
+          "seconds": 2.341156462585034,
+          "note": 55,
+          "velocity": 39,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.448506981526425e-13,
+          "hf_crest_db": 0.08167348187559001,
+          "attack_0_20ms_power": 1.253139044350565e-06
+        },
+        {
+          "frame": 120701,
+          "seconds": 2.736984126984127,
+          "note": 67,
+          "velocity": 50,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.829610556450523e-13,
+          "hf_crest_db": -7.184195631847125,
+          "attack_0_20ms_power": 4.742685682113967e-06
+        },
+        {
+          "frame": 121792,
+          "seconds": 2.76172335600907,
+          "note": 63,
+          "velocity": 29,
+          "previous_same_note_seconds": 0.43360544217687075,
+          "hf_0_2ms_power": 1.9638979060679653e-12,
+          "hf_crest_db": 2.2246578750074804,
+          "attack_0_20ms_power": 6.582584549977973e-06
+        },
+        {
+          "frame": 122711,
+          "seconds": 2.782562358276644,
+          "note": 58,
+          "velocity": 41,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.109672432475973e-12,
+          "hf_crest_db": 0.33385055095749794,
+          "attack_0_20ms_power": 5.723353169301281e-06
+        },
+        {
+          "frame": 139593,
+          "seconds": 3.165374149659864,
+          "note": 51,
+          "velocity": 54,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.8651007107166197e-13,
+          "hf_crest_db": -1.1084288229977028,
+          "attack_0_20ms_power": 1.4796526007933012e-06
+        },
+        {
+          "frame": 156991,
+          "seconds": 3.5598866213151927,
+          "note": 77,
+          "velocity": 68,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.6212920005698375e-12,
+          "hf_crest_db": -6.05739246284895,
+          "attack_0_20ms_power": 2.1816229962136242e-06
+        },
+        {
+          "frame": 157393,
+          "seconds": 3.5690022675736963,
+          "note": 56,
+          "velocity": 42,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.747248433518249e-12,
+          "hf_crest_db": -0.8628921532590138,
+          "attack_0_20ms_power": 2.4739418370717502e-06
+        },
+        {
+          "frame": 157393,
+          "seconds": 3.5690022675736963,
+          "note": 62,
+          "velocity": 47,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.747248433518249e-12,
+          "hf_crest_db": -0.8628921532590138,
+          "attack_0_20ms_power": 2.4739418370717502e-06
+        },
+        {
+          "frame": 175539,
+          "seconds": 3.9804761904761903,
+          "note": 68,
+          "velocity": 47,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.0596661047419296e-12,
+          "hf_crest_db": -4.016260658452525,
+          "attack_0_20ms_power": 4.566801617823514e-06
+        },
+        {
+          "frame": 175768,
+          "seconds": 3.985668934240363,
+          "note": 59,
+          "velocity": 48,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.9702045886284032e-12,
+          "hf_crest_db": -1.7517504233036962,
+          "attack_0_20ms_power": 6.1130140068222004e-06
+        },
+        {
+          "frame": 176630,
+          "seconds": 4.005215419501134,
+          "note": 79,
+          "velocity": 78,
+          "previous_same_note_seconds": 2.343764172335601,
+          "hf_0_2ms_power": 9.330838708353659e-11,
+          "hf_crest_db": -1.237039968133682,
+          "attack_0_20ms_power": 2.567049498911155e-05
+        },
+        {
+          "frame": 194143,
+          "seconds": 4.40233560090703,
+          "note": 39,
+          "velocity": 50,
+          "previous_same_note_seconds": 2.8619727891156463,
+          "hf_0_2ms_power": 6.061246409497617e-12,
+          "hf_crest_db": 4.0870100917598755,
+          "attack_0_20ms_power": 1.762236490675609e-06
+        },
+        {
+          "frame": 197704,
+          "seconds": 4.483083900226758,
+          "note": 77,
+          "velocity": 72,
+          "previous_same_note_seconds": 0.9231972789115647,
+          "hf_0_2ms_power": 8.49922960367154e-11,
+          "hf_crest_db": 9.090859174590872,
+          "attack_0_20ms_power": 1.2265673303612293e-05
+        },
+        {
+          "frame": 220557,
+          "seconds": 5.001292517006803,
+          "note": 55,
+          "velocity": 46,
+          "previous_same_note_seconds": 2.660136054421769,
+          "hf_0_2ms_power": 3.4466478210657335e-12,
+          "hf_crest_db": 2.9257282348199674,
+          "attack_0_20ms_power": 1.2721106093956092e-06
+        },
+        {
+          "frame": 220672,
+          "seconds": 5.00390022675737,
+          "note": 63,
+          "velocity": 49,
+          "previous_same_note_seconds": 2.2421768707482994,
+          "hf_0_2ms_power": 2.5030712001003102e-12,
+          "hf_crest_db": 0.7561144893059719,
+          "attack_0_20ms_power": 1.2402295611009492e-06
+        },
+        {
+          "frame": 236521,
+          "seconds": 5.36328798185941,
+          "note": 67,
+          "velocity": 54,
+          "previous_same_note_seconds": 2.6263038548752835,
+          "hf_0_2ms_power": 3.3173012390247535e-12,
+          "hf_crest_db": 4.071053029614124,
+          "attack_0_20ms_power": 5.174150108524284e-06
+        },
+        {
+          "frame": 236865,
+          "seconds": 5.3710884353741495,
+          "note": 63,
+          "velocity": 44,
+          "previous_same_note_seconds": 0.36718820861678003,
+          "hf_0_2ms_power": 2.0962430785951092e-12,
+          "hf_crest_db": 1.340679407147078,
+          "attack_0_20ms_power": 6.728414360698102e-06
+        },
+        {
+          "frame": 237727,
+          "seconds": 5.390634920634921,
+          "note": 58,
+          "velocity": 49,
+          "previous_same_note_seconds": 2.608072562358277,
+          "hf_0_2ms_power": 1.2719797585622018e-11,
+          "hf_crest_db": 8.463791034751072,
+          "attack_0_20ms_power": 6.010017092541022e-06
+        },
+        {
+          "frame": 253058,
+          "seconds": 5.73827664399093,
+          "note": 38,
+          "velocity": 52,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.3468533638444823e-13,
+          "hf_crest_db": -22.151742420709844,
+          "attack_0_20ms_power": 3.6899629050011497e-06
+        },
+        {
+          "frame": 253173,
+          "seconds": 5.740884353741497,
+          "note": 75,
+          "velocity": 72,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.171823990895025e-12,
+          "hf_crest_db": -10.506109141459842,
+          "attack_0_20ms_power": 4.4906387238600745e-06
+        },
+        {
+          "frame": 269940,
+          "seconds": 6.1210884353741495,
+          "note": 63,
+          "velocity": 63,
+          "previous_same_note_seconds": 0.75,
+          "hf_0_2ms_power": 5.073988365217665e-12,
+          "hf_crest_db": -2.5396331414242006,
+          "attack_0_20ms_power": 3.3184233514036933e-06
+        },
+        {
+          "frame": 270227,
+          "seconds": 6.1275963718820865,
+          "note": 55,
+          "velocity": 54,
+          "previous_same_note_seconds": 1.1263038548752835,
+          "hf_0_2ms_power": 1.3430442513364679e-11,
+          "hf_crest_db": 1.9819844670574276,
+          "attack_0_20ms_power": 3.45375161242092e-06
+        },
+        {
+          "frame": 285674,
+          "seconds": 6.477868480725624,
+          "note": 67,
+          "velocity": 61,
+          "previous_same_note_seconds": 1.1145804988662131,
+          "hf_0_2ms_power": 8.889106939453472e-11,
+          "hf_crest_db": 11.460897440684022,
+          "attack_0_20ms_power": 6.1748223906282865e-06
+        },
+        {
+          "frame": 286018,
+          "seconds": 6.485668934240363,
+          "note": 63,
+          "velocity": 50,
+          "previous_same_note_seconds": 0.36458049886621313,
+          "hf_0_2ms_power": 6.910892755887474e-12,
+          "hf_crest_db": -5.68827836753552,
+          "attack_0_20ms_power": 1.0257897696512444e-05
+        },
+        {
+          "frame": 286305,
+          "seconds": 6.492176870748299,
+          "note": 58,
+          "velocity": 55,
+          "previous_same_note_seconds": 1.1015419501133787,
+          "hf_0_2ms_power": 2.692183599711041e-11,
+          "hf_crest_db": -6.1667225646469825,
+          "attack_0_20ms_power": 1.513664624771011e-05
+        },
+        {
+          "frame": 286420,
+          "seconds": 6.494784580498866,
+          "note": 70,
+          "velocity": 84,
+          "previous_same_note_seconds": 5.466145124716554,
+          "hf_0_2ms_power": 2.0499058075094787e-11,
+          "hf_crest_db": -7.992829302740418,
+          "attack_0_20ms_power": 1.437805441514667e-05
+        },
+        {
+          "frame": 306116,
+          "seconds": 6.94140589569161,
+          "note": 36,
+          "velocity": 59,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 5.936595199763466e-12,
+          "hf_crest_db": -0.2847540503782256,
+          "attack_0_20ms_power": 5.371585277837983e-06
+        },
+        {
+          "frame": 308355,
+          "seconds": 6.992176870748299,
+          "note": 79,
+          "velocity": 74,
+          "previous_same_note_seconds": 2.9869614512471654,
+          "hf_0_2ms_power": 4.6636647378337145e-11,
+          "hf_crest_db": 0.30305253810602706,
+          "attack_0_20ms_power": 2.36258398616886e-05
+        },
+        {
+          "frame": 327821,
+          "seconds": 7.433582766439909,
+          "note": 64,
+          "velocity": 49,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 7.961021472675279e-13,
+          "hf_crest_db": -3.2056228455913,
+          "attack_0_20ms_power": 3.6101284049685746e-06
+        },
+        {
+          "frame": 329544,
+          "seconds": 7.47265306122449,
+          "note": 55,
+          "velocity": 42,
+          "previous_same_note_seconds": 1.3450566893424036,
+          "hf_0_2ms_power": 1.800863603242734e-12,
+          "hf_crest_db": 0.5828334726614397,
+          "attack_0_20ms_power": 3.365112594061994e-06
+        },
+        {
+          "frame": 332588,
+          "seconds": 7.5416780045351475,
+          "note": 72,
+          "velocity": 61,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.4213138447288446e-12,
+          "hf_crest_db": -10.075418943101376,
+          "attack_0_20ms_power": 4.2869610561269185e-06
+        },
+        {
+          "frame": 337296,
+          "seconds": 7.64843537414966,
+          "note": 73,
+          "velocity": 67,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.916827312518738e-12,
+          "hf_crest_db": -10.43110769555656,
+          "attack_0_20ms_power": 3.845580976194717e-06
+        },
+        {
+          "frame": 341258,
+          "seconds": 7.73827664399093,
+          "note": 72,
+          "velocity": 65,
+          "previous_same_note_seconds": 0.19659863945578232,
+          "hf_0_2ms_power": 5.125146373456917e-11,
+          "hf_crest_db": -1.0059523199524856,
+          "attack_0_20ms_power": 4.779977529677048e-06
+        },
+        {
+          "frame": 345048,
+          "seconds": 7.82421768707483,
+          "note": 67,
+          "velocity": 50,
+          "previous_same_note_seconds": 1.3463492063492064,
+          "hf_0_2ms_power": 2.685986621886905e-11,
+          "hf_crest_db": 0.9702881477006224,
+          "attack_0_20ms_power": 6.035166953116789e-06
+        },
+        {
+          "frame": 345852,
+          "seconds": 7.842448979591837,
+          "note": 58,
+          "velocity": 47,
+          "previous_same_note_seconds": 1.3502721088435374,
+          "hf_0_2ms_power": 4.242069506765348e-11,
+          "hf_crest_db": 3.297338419394218,
+          "attack_0_20ms_power": 1.0757136752751713e-05
+        },
+        {
+          "frame": 345852,
+          "seconds": 7.842448979591837,
+          "note": 71,
+          "velocity": 71,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 4.242069506765348e-11,
+          "hf_crest_db": 3.297338419394218,
+          "attack_0_20ms_power": 1.0757136752751713e-05
+        },
+        {
+          "frame": 349125,
+          "seconds": 7.916666666666667,
+          "note": 72,
+          "velocity": 74,
+          "previous_same_note_seconds": 0.17839002267573695,
+          "hf_0_2ms_power": 5.424221362755644e-11,
+          "hf_crest_db": -0.7440708611672503,
+          "attack_0_20ms_power": 8.069649813354208e-06
+        }
+      ],
+      "clip_peak": 0.2960511860996185,
+      "hf_attack_power": 6.886317442430027e-10,
+      "median_hf_crest_db": -0.8628921532590138
+    },
+    "fase-1.5ms": {
+      "raw_sha256": "5092ba72f0eb3ebb78f2be820c20c61a8808fc4361c3765099fc0f8fade2fdc7",
+      "rows": [
+        {
+          "frame": 45363,
+          "seconds": 1.0286394557823129,
+          "note": 70,
+          "velocity": 58,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.099480104325695e-13,
+          "hf_crest_db": -13.769545954385027,
+          "attack_0_20ms_power": 1.7599834560742638e-06
+        },
+        {
+          "frame": 67930,
+          "seconds": 1.5403628117913832,
+          "note": 39,
+          "velocity": 40,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 4.909133106574875e-14,
+          "hf_crest_db": -0.026381068177675788,
+          "attack_0_20ms_power": 1.5194418717537648e-06
+        },
+        {
+          "frame": 73270,
+          "seconds": 1.661451247165533,
+          "note": 79,
+          "velocity": 67,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.1926015076148416e-12,
+          "hf_crest_db": -4.830206026597478,
+          "attack_0_20ms_power": 1.661225014304704e-05
+        },
+        {
+          "frame": 102670,
+          "seconds": 2.3281179138321995,
+          "note": 63,
+          "velocity": 41,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 6.44815846927939e-14,
+          "hf_crest_db": -7.253517590027975,
+          "attack_0_20ms_power": 8.965159113021823e-07
+        },
+        {
+          "frame": 103245,
+          "seconds": 2.341156462585034,
+          "note": 55,
+          "velocity": 39,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.448506981526425e-13,
+          "hf_crest_db": 0.08167348187559001,
+          "attack_0_20ms_power": 1.253139044350565e-06
+        },
+        {
+          "frame": 120701,
+          "seconds": 2.736984126984127,
+          "note": 67,
+          "velocity": 50,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.829610556450523e-13,
+          "hf_crest_db": -7.184195631847125,
+          "attack_0_20ms_power": 4.742685682113967e-06
+        },
+        {
+          "frame": 121792,
+          "seconds": 2.76172335600907,
+          "note": 63,
+          "velocity": 29,
+          "previous_same_note_seconds": 0.43360544217687075,
+          "hf_0_2ms_power": 1.1582383502796472e-12,
+          "hf_crest_db": -0.25718230548733556,
+          "attack_0_20ms_power": 6.572204656080696e-06
+        },
+        {
+          "frame": 122711,
+          "seconds": 2.782562358276644,
+          "note": 58,
+          "velocity": 41,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.1671375612578554e-12,
+          "hf_crest_db": 0.3502018499106626,
+          "attack_0_20ms_power": 5.866890406285702e-06
+        },
+        {
+          "frame": 139593,
+          "seconds": 3.165374149659864,
+          "note": 51,
+          "velocity": 54,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.7189868194182362e-13,
+          "hf_crest_db": -1.0508229934991327,
+          "attack_0_20ms_power": 1.4209370275548157e-06
+        },
+        {
+          "frame": 156991,
+          "seconds": 3.5598866213151927,
+          "note": 77,
+          "velocity": 68,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.60567342830773e-12,
+          "hf_crest_db": -6.078541414057618,
+          "attack_0_20ms_power": 2.202114829056895e-06
+        },
+        {
+          "frame": 157393,
+          "seconds": 3.5690022675736963,
+          "note": 56,
+          "velocity": 42,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.759482469064546e-12,
+          "hf_crest_db": -0.8514633500652884,
+          "attack_0_20ms_power": 2.481121687334523e-06
+        },
+        {
+          "frame": 157393,
+          "seconds": 3.5690022675736963,
+          "note": 62,
+          "velocity": 47,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.759482469064546e-12,
+          "hf_crest_db": -0.8514633500652884,
+          "attack_0_20ms_power": 2.481121687334523e-06
+        },
+        {
+          "frame": 175539,
+          "seconds": 3.9804761904761903,
+          "note": 68,
+          "velocity": 47,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.0675760503002091e-12,
+          "hf_crest_db": -3.997089591005816,
+          "attack_0_20ms_power": 4.583076773451045e-06
+        },
+        {
+          "frame": 175768,
+          "seconds": 3.985668934240363,
+          "note": 59,
+          "velocity": 48,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.9663189698390274e-12,
+          "hf_crest_db": -1.769339124086109,
+          "attack_0_20ms_power": 6.076390562699981e-06
+        },
+        {
+          "frame": 176630,
+          "seconds": 4.005215419501134,
+          "note": 79,
+          "velocity": 78,
+          "previous_same_note_seconds": 2.343764172335601,
+          "hf_0_2ms_power": 7.571071448820982e-11,
+          "hf_crest_db": -1.579011310300332,
+          "attack_0_20ms_power": 2.5920165747881958e-05
+        },
+        {
+          "frame": 194143,
+          "seconds": 4.40233560090703,
+          "note": 39,
+          "velocity": 50,
+          "previous_same_note_seconds": 2.8619727891156463,
+          "hf_0_2ms_power": 1.6511938502826271e-12,
+          "hf_crest_db": 1.2371199846087197,
+          "attack_0_20ms_power": 2.0034945272252118e-06
+        },
+        {
+          "frame": 197704,
+          "seconds": 4.483083900226758,
+          "note": 77,
+          "velocity": 72,
+          "previous_same_note_seconds": 0.9231972789115647,
+          "hf_0_2ms_power": 1.0608393930512717e-11,
+          "hf_crest_db": -3.008528915754323,
+          "attack_0_20ms_power": 1.1952414076094993e-05
+        },
+        {
+          "frame": 220557,
+          "seconds": 5.001292517006803,
+          "note": 55,
+          "velocity": 46,
+          "previous_same_note_seconds": 2.660136054421769,
+          "hf_0_2ms_power": 4.91989117878427e-13,
+          "hf_crest_db": -4.424014537168698,
+          "attack_0_20ms_power": 1.0464188650111681e-06
+        },
+        {
+          "frame": 220672,
+          "seconds": 5.00390022675737,
+          "note": 63,
+          "velocity": 49,
+          "previous_same_note_seconds": 2.2421768707482994,
+          "hf_0_2ms_power": 8.826223393208098e-13,
+          "hf_crest_db": -2.6386778598897505,
+          "attack_0_20ms_power": 1.0777555781822608e-06
+        },
+        {
+          "frame": 236521,
+          "seconds": 5.36328798185941,
+          "note": 67,
+          "velocity": 54,
+          "previous_same_note_seconds": 2.6263038548752835,
+          "hf_0_2ms_power": 2.2549359867139924e-12,
+          "hf_crest_db": 1.6907804907888186,
+          "attack_0_20ms_power": 4.361613746404473e-06
+        },
+        {
+          "frame": 236865,
+          "seconds": 5.3710884353741495,
+          "note": 63,
+          "velocity": 44,
+          "previous_same_note_seconds": 0.36718820861678003,
+          "hf_0_2ms_power": 1.6850229749696222e-12,
+          "hf_crest_db": -0.7058345900792613,
+          "attack_0_20ms_power": 5.960359883499034e-06
+        },
+        {
+          "frame": 237727,
+          "seconds": 5.390634920634921,
+          "note": 58,
+          "velocity": 49,
+          "previous_same_note_seconds": 2.608072562358277,
+          "hf_0_2ms_power": 3.122860995539906e-12,
+          "hf_crest_db": 1.443621439426899,
+          "attack_0_20ms_power": 5.922710256235294e-06
+        },
+        {
+          "frame": 253058,
+          "seconds": 5.73827664399093,
+          "note": 38,
+          "velocity": 52,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.1681875434383129e-13,
+          "hf_crest_db": -20.25687781247842,
+          "attack_0_20ms_power": 3.334193697781312e-06
+        },
+        {
+          "frame": 253173,
+          "seconds": 5.740884353741497,
+          "note": 75,
+          "velocity": 72,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.4528684227479367e-12,
+          "hf_crest_db": -10.092923789404464,
+          "attack_0_20ms_power": 4.316149128304146e-06
+        },
+        {
+          "frame": 269940,
+          "seconds": 6.1210884353741495,
+          "note": 63,
+          "velocity": 63,
+          "previous_same_note_seconds": 0.75,
+          "hf_0_2ms_power": 2.002786876627781e-12,
+          "hf_crest_db": -5.755126954227576,
+          "attack_0_20ms_power": 2.556530433539827e-06
+        },
+        {
+          "frame": 270227,
+          "seconds": 6.1275963718820865,
+          "note": 55,
+          "velocity": 54,
+          "previous_same_note_seconds": 1.1263038548752835,
+          "hf_0_2ms_power": 9.033367958936778e-12,
+          "hf_crest_db": 0.7112154103263602,
+          "attack_0_20ms_power": 3.300651852503678e-06
+        },
+        {
+          "frame": 285674,
+          "seconds": 6.477868480725624,
+          "note": 67,
+          "velocity": 61,
+          "previous_same_note_seconds": 1.1145804988662131,
+          "hf_0_2ms_power": 5.161728269943699e-12,
+          "hf_crest_db": 1.1505436894810315,
+          "attack_0_20ms_power": 7.315216940868656e-06
+        },
+        {
+          "frame": 286018,
+          "seconds": 6.485668934240363,
+          "note": 63,
+          "velocity": 50,
+          "previous_same_note_seconds": 0.36458049886621313,
+          "hf_0_2ms_power": 3.756773791497137e-12,
+          "hf_crest_db": -5.106797141399535,
+          "attack_0_20ms_power": 1.278857638915004e-05
+        },
+        {
+          "frame": 286305,
+          "seconds": 6.492176870748299,
+          "note": 58,
+          "velocity": 55,
+          "previous_same_note_seconds": 1.1015419501133787,
+          "hf_0_2ms_power": 5.0069262350434285e-12,
+          "hf_crest_db": -12.135281796566154,
+          "attack_0_20ms_power": 1.694237648389442e-05
+        },
+        {
+          "frame": 286420,
+          "seconds": 6.494784580498866,
+          "note": 70,
+          "velocity": 84,
+          "previous_same_note_seconds": 5.466145124716554,
+          "hf_0_2ms_power": 1.0376082586614251e-11,
+          "hf_crest_db": -9.853378285849994,
+          "attack_0_20ms_power": 1.64012160984899e-05
+        },
+        {
+          "frame": 306116,
+          "seconds": 6.94140589569161,
+          "note": 36,
+          "velocity": 59,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 5.548024717365319e-12,
+          "hf_crest_db": 0.8660474220520907,
+          "attack_0_20ms_power": 5.432373134993353e-06
+        },
+        {
+          "frame": 308355,
+          "seconds": 6.992176870748299,
+          "note": 79,
+          "velocity": 74,
+          "previous_same_note_seconds": 2.9869614512471654,
+          "hf_0_2ms_power": 4.336178894514059e-11,
+          "hf_crest_db": 0.7803490996395741,
+          "attack_0_20ms_power": 2.3626620721307996e-05
+        },
+        {
+          "frame": 327821,
+          "seconds": 7.433582766439909,
+          "note": 64,
+          "velocity": 49,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 6.848920566386021e-13,
+          "hf_crest_db": -2.709682407383,
+          "attack_0_20ms_power": 3.487308912777887e-06
+        },
+        {
+          "frame": 329544,
+          "seconds": 7.47265306122449,
+          "note": 55,
+          "velocity": 42,
+          "previous_same_note_seconds": 1.3450566893424036,
+          "hf_0_2ms_power": 1.511378579017981e-12,
+          "hf_crest_db": -0.1837750507523564,
+          "attack_0_20ms_power": 3.371412571752257e-06
+        },
+        {
+          "frame": 332588,
+          "seconds": 7.5416780045351475,
+          "note": 72,
+          "velocity": 61,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.5391664046044055e-12,
+          "hf_crest_db": -9.857094428176028,
+          "attack_0_20ms_power": 4.22555662453967e-06
+        },
+        {
+          "frame": 337296,
+          "seconds": 7.64843537414966,
+          "note": 73,
+          "velocity": 67,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.981751748393774e-12,
+          "hf_crest_db": -10.399853190606496,
+          "attack_0_20ms_power": 4.045742939457862e-06
+        },
+        {
+          "frame": 341258,
+          "seconds": 7.73827664399093,
+          "note": 72,
+          "velocity": 65,
+          "previous_same_note_seconds": 0.19659863945578232,
+          "hf_0_2ms_power": 4.972878425031074e-11,
+          "hf_crest_db": -1.6373052201461311,
+          "attack_0_20ms_power": 4.757593234319901e-06
+        },
+        {
+          "frame": 345048,
+          "seconds": 7.82421768707483,
+          "note": 67,
+          "velocity": 50,
+          "previous_same_note_seconds": 1.3463492063492064,
+          "hf_0_2ms_power": 2.6771514899287856e-11,
+          "hf_crest_db": 1.03333511644168,
+          "attack_0_20ms_power": 6.200697270145694e-06
+        },
+        {
+          "frame": 345852,
+          "seconds": 7.842448979591837,
+          "note": 58,
+          "velocity": 47,
+          "previous_same_note_seconds": 1.3502721088435374,
+          "hf_0_2ms_power": 3.348269718088489e-11,
+          "hf_crest_db": 2.346131692236758,
+          "attack_0_20ms_power": 1.0461679045160998e-05
+        },
+        {
+          "frame": 345852,
+          "seconds": 7.842448979591837,
+          "note": 71,
+          "velocity": 71,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.348269718088489e-11,
+          "hf_crest_db": 2.346131692236758,
+          "attack_0_20ms_power": 1.0461679045160998e-05
+        },
+        {
+          "frame": 349125,
+          "seconds": 7.916666666666667,
+          "note": 72,
+          "velocity": 74,
+          "previous_same_note_seconds": 0.17839002267573695,
+          "hf_0_2ms_power": 2.476226823240459e-11,
+          "hf_crest_db": -5.646252662666617,
+          "attack_0_20ms_power": 7.949899849988427e-06
+        }
+      ],
+      "clip_peak": 0.31091614385217553,
+      "hf_attack_power": 3.9696979294177543e-10,
+      "median_hf_crest_db": -1.6373052201461311,
+      "source_difference_rms_db_relative_total": -3.889877836132405
+    },
+    "fase-4ms": {
+      "raw_sha256": "59cfa380a6504bd7b1914ada78c27832c188dbf8709badc419c3ba7c27934478",
+      "rows": [
+        {
+          "frame": 45363,
+          "seconds": 1.0286394557823129,
+          "note": 70,
+          "velocity": 58,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.099480104325695e-13,
+          "hf_crest_db": -13.769545954385027,
+          "attack_0_20ms_power": 1.7599834560742638e-06
+        },
+        {
+          "frame": 67930,
+          "seconds": 1.5403628117913832,
+          "note": 39,
+          "velocity": 40,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 4.909133106574875e-14,
+          "hf_crest_db": -0.026381068177675788,
+          "attack_0_20ms_power": 1.5194418717537648e-06
+        },
+        {
+          "frame": 73270,
+          "seconds": 1.661451247165533,
+          "note": 79,
+          "velocity": 67,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.1926015076148416e-12,
+          "hf_crest_db": -4.830206026597478,
+          "attack_0_20ms_power": 1.661225014304704e-05
+        },
+        {
+          "frame": 102670,
+          "seconds": 2.3281179138321995,
+          "note": 63,
+          "velocity": 41,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 6.44815846927939e-14,
+          "hf_crest_db": -7.253517590027975,
+          "attack_0_20ms_power": 8.965159113021823e-07
+        },
+        {
+          "frame": 103245,
+          "seconds": 2.341156462585034,
+          "note": 55,
+          "velocity": 39,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.448506981526425e-13,
+          "hf_crest_db": 0.08167348187559001,
+          "attack_0_20ms_power": 1.253139044350565e-06
+        },
+        {
+          "frame": 120701,
+          "seconds": 2.736984126984127,
+          "note": 67,
+          "velocity": 50,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.829610556450523e-13,
+          "hf_crest_db": -7.184195631847125,
+          "attack_0_20ms_power": 4.742685682113967e-06
+        },
+        {
+          "frame": 121792,
+          "seconds": 2.76172335600907,
+          "note": 63,
+          "velocity": 29,
+          "previous_same_note_seconds": 0.43360544217687075,
+          "hf_0_2ms_power": 1.216745432743492e-12,
+          "hf_crest_db": 0.011544997469089779,
+          "attack_0_20ms_power": 6.261304244750228e-06
+        },
+        {
+          "frame": 122711,
+          "seconds": 2.782562358276644,
+          "note": 58,
+          "velocity": 41,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.1604854913457614e-12,
+          "hf_crest_db": 0.3514531389892308,
+          "attack_0_20ms_power": 5.931811508087957e-06
+        },
+        {
+          "frame": 139593,
+          "seconds": 3.165374149659864,
+          "note": 51,
+          "velocity": 54,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.7201132601221244e-13,
+          "hf_crest_db": -1.0481058543429784,
+          "attack_0_20ms_power": 1.4199905631000741e-06
+        },
+        {
+          "frame": 156991,
+          "seconds": 3.5598866213151927,
+          "note": 77,
+          "velocity": 68,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.6064325125911133e-12,
+          "hf_crest_db": -6.077599473613272,
+          "attack_0_20ms_power": 2.2044685317941117e-06
+        },
+        {
+          "frame": 157393,
+          "seconds": 3.5690022675736963,
+          "note": 56,
+          "velocity": 42,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.758603126120881e-12,
+          "hf_crest_db": -0.8518533813032093,
+          "attack_0_20ms_power": 2.4836168076865705e-06
+        },
+        {
+          "frame": 157393,
+          "seconds": 3.5690022675736963,
+          "note": 62,
+          "velocity": 47,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.758603126120881e-12,
+          "hf_crest_db": -0.8518533813032093,
+          "attack_0_20ms_power": 2.4836168076865705e-06
+        },
+        {
+          "frame": 175539,
+          "seconds": 3.9804761904761903,
+          "note": 68,
+          "velocity": 47,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.0675373032967659e-12,
+          "hf_crest_db": -3.997126969736839,
+          "attack_0_20ms_power": 4.582782375706232e-06
+        },
+        {
+          "frame": 175768,
+          "seconds": 3.985668934240363,
+          "note": 59,
+          "velocity": 48,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.9660829106234803e-12,
+          "hf_crest_db": -1.7698392552421904,
+          "attack_0_20ms_power": 6.075393403232143e-06
+        },
+        {
+          "frame": 176630,
+          "seconds": 4.005215419501134,
+          "note": 79,
+          "velocity": 78,
+          "previous_same_note_seconds": 2.343764172335601,
+          "hf_0_2ms_power": 3.234511556756933e-11,
+          "hf_crest_db": -5.786519778312993,
+          "attack_0_20ms_power": 2.412208050850311e-05
+        },
+        {
+          "frame": 194143,
+          "seconds": 4.40233560090703,
+          "note": 39,
+          "velocity": 50,
+          "previous_same_note_seconds": 2.8619727891156463,
+          "hf_0_2ms_power": 1.6530558976680626e-12,
+          "hf_crest_db": 1.2575873154257642,
+          "attack_0_20ms_power": 1.4622707780744085e-06
+        },
+        {
+          "frame": 197704,
+          "seconds": 4.483083900226758,
+          "note": 77,
+          "velocity": 72,
+          "previous_same_note_seconds": 0.9231972789115647,
+          "hf_0_2ms_power": 4.0582206821594506e-12,
+          "hf_crest_db": -6.983743515668966,
+          "attack_0_20ms_power": 1.15006928281483e-05
+        },
+        {
+          "frame": 220557,
+          "seconds": 5.001292517006803,
+          "note": 55,
+          "velocity": 46,
+          "previous_same_note_seconds": 2.660136054421769,
+          "hf_0_2ms_power": 4.811088665633849e-13,
+          "hf_crest_db": -2.8867606460063726,
+          "attack_0_20ms_power": 9.380851957058652e-07
+        },
+        {
+          "frame": 220672,
+          "seconds": 5.00390022675737,
+          "note": 63,
+          "velocity": 49,
+          "previous_same_note_seconds": 2.2421768707482994,
+          "hf_0_2ms_power": 8.328956607753304e-13,
+          "hf_crest_db": -1.202271287894917,
+          "attack_0_20ms_power": 1.0059410795160057e-06
+        },
+        {
+          "frame": 236521,
+          "seconds": 5.36328798185941,
+          "note": 67,
+          "velocity": 54,
+          "previous_same_note_seconds": 2.6263038548752835,
+          "hf_0_2ms_power": 2.251191755545747e-12,
+          "hf_crest_db": 2.1343163884484784,
+          "attack_0_20ms_power": 4.146222744449603e-06
+        },
+        {
+          "frame": 236865,
+          "seconds": 5.3710884353741495,
+          "note": 63,
+          "velocity": 44,
+          "previous_same_note_seconds": 0.36718820861678003,
+          "hf_0_2ms_power": 1.5469951391819474e-12,
+          "hf_crest_db": -0.5445214557562489,
+          "attack_0_20ms_power": 6.1415922382469006e-06
+        },
+        {
+          "frame": 237727,
+          "seconds": 5.390634920634921,
+          "note": 58,
+          "velocity": 49,
+          "previous_same_note_seconds": 2.608072562358277,
+          "hf_0_2ms_power": 2.9822975905216404e-12,
+          "hf_crest_db": 1.7241157973573689,
+          "attack_0_20ms_power": 6.083057080162644e-06
+        },
+        {
+          "frame": 253058,
+          "seconds": 5.73827664399093,
+          "note": 38,
+          "velocity": 52,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.7956464948558406e-13,
+          "hf_crest_db": -20.990694379435336,
+          "attack_0_20ms_power": 3.3276061861692617e-06
+        },
+        {
+          "frame": 253173,
+          "seconds": 5.740884353741497,
+          "note": 75,
+          "velocity": 72,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.459375132884752e-12,
+          "hf_crest_db": -10.005561997536525,
+          "attack_0_20ms_power": 4.297817717564664e-06
+        },
+        {
+          "frame": 269940,
+          "seconds": 6.1210884353741495,
+          "note": 63,
+          "velocity": 63,
+          "previous_same_note_seconds": 0.75,
+          "hf_0_2ms_power": 7.284279700680623e-13,
+          "hf_crest_db": -9.719563832951835,
+          "attack_0_20ms_power": 2.677281661130123e-06
+        },
+        {
+          "frame": 270227,
+          "seconds": 6.1275963718820865,
+          "note": 55,
+          "velocity": 54,
+          "previous_same_note_seconds": 1.1263038548752835,
+          "hf_0_2ms_power": 8.435777599499946e-12,
+          "hf_crest_db": 0.31419550382783246,
+          "attack_0_20ms_power": 3.4432877627339625e-06
+        },
+        {
+          "frame": 285674,
+          "seconds": 6.477868480725624,
+          "note": 67,
+          "velocity": 61,
+          "previous_same_note_seconds": 1.1145804988662131,
+          "hf_0_2ms_power": 4.429035553342276e-12,
+          "hf_crest_db": 0.7321961469004272,
+          "attack_0_20ms_power": 6.9728074622261355e-06
+        },
+        {
+          "frame": 286018,
+          "seconds": 6.485668934240363,
+          "note": 63,
+          "velocity": 50,
+          "previous_same_note_seconds": 0.36458049886621313,
+          "hf_0_2ms_power": 3.63465479088469e-12,
+          "hf_crest_db": -3.038265549794767,
+          "attack_0_20ms_power": 1.2986986977817538e-05
+        },
+        {
+          "frame": 286305,
+          "seconds": 6.492176870748299,
+          "note": 58,
+          "velocity": 55,
+          "previous_same_note_seconds": 1.1015419501133787,
+          "hf_0_2ms_power": 4.780835501636673e-12,
+          "hf_crest_db": -11.66082014958873,
+          "attack_0_20ms_power": 1.7742739630068137e-05
+        },
+        {
+          "frame": 286420,
+          "seconds": 6.494784580498866,
+          "note": 70,
+          "velocity": 84,
+          "previous_same_note_seconds": 5.466145124716554,
+          "hf_0_2ms_power": 7.467215899583233e-12,
+          "hf_crest_db": -11.021457720024637,
+          "attack_0_20ms_power": 1.7233697317836248e-05
+        },
+        {
+          "frame": 306116,
+          "seconds": 6.94140589569161,
+          "note": 36,
+          "velocity": 59,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 5.569134521588841e-12,
+          "hf_crest_db": 0.8632316853513998,
+          "attack_0_20ms_power": 5.3950998737750446e-06
+        },
+        {
+          "frame": 308355,
+          "seconds": 6.992176870748299,
+          "note": 79,
+          "velocity": 74,
+          "previous_same_note_seconds": 2.9869614512471654,
+          "hf_0_2ms_power": 2.7138167725175867e-11,
+          "hf_crest_db": -1.679145441988128,
+          "attack_0_20ms_power": 2.214236919918518e-05
+        },
+        {
+          "frame": 327821,
+          "seconds": 7.433582766439909,
+          "note": 64,
+          "velocity": 49,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 6.837610499293937e-13,
+          "hf_crest_db": -2.7234213347348963,
+          "attack_0_20ms_power": 3.482606719457841e-06
+        },
+        {
+          "frame": 329544,
+          "seconds": 7.47265306122449,
+          "note": 55,
+          "velocity": 42,
+          "previous_same_note_seconds": 1.3450566893424036,
+          "hf_0_2ms_power": 1.5126919417931288e-12,
+          "hf_crest_db": -0.15238483704643335,
+          "attack_0_20ms_power": 3.3016319676553383e-06
+        },
+        {
+          "frame": 332588,
+          "seconds": 7.5416780045351475,
+          "note": 72,
+          "velocity": 61,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.5430752830544436e-12,
+          "hf_crest_db": -9.849698499426209,
+          "attack_0_20ms_power": 4.235080824155935e-06
+        },
+        {
+          "frame": 337296,
+          "seconds": 7.64843537414966,
+          "note": 73,
+          "velocity": 67,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.979164578643096e-12,
+          "hf_crest_db": -10.401122889913143,
+          "attack_0_20ms_power": 4.073481667735877e-06
+        },
+        {
+          "frame": 341258,
+          "seconds": 7.73827664399093,
+          "note": 72,
+          "velocity": 65,
+          "previous_same_note_seconds": 0.19659863945578232,
+          "hf_0_2ms_power": 5.618299933564778e-11,
+          "hf_crest_db": -1.0376267063741202,
+          "attack_0_20ms_power": 4.5287696536524505e-06
+        },
+        {
+          "frame": 345048,
+          "seconds": 7.82421768707483,
+          "note": 67,
+          "velocity": 50,
+          "previous_same_note_seconds": 1.3463492063492064,
+          "hf_0_2ms_power": 2.3833670433759977e-11,
+          "hf_crest_db": 0.629436660489846,
+          "attack_0_20ms_power": 5.846385759798676e-06
+        },
+        {
+          "frame": 345852,
+          "seconds": 7.842448979591837,
+          "note": 58,
+          "velocity": 47,
+          "previous_same_note_seconds": 1.3502721088435374,
+          "hf_0_2ms_power": 3.213068623418985e-11,
+          "hf_crest_db": 2.242879511409402,
+          "attack_0_20ms_power": 1.062510639898066e-05
+        },
+        {
+          "frame": 345852,
+          "seconds": 7.842448979591837,
+          "note": 71,
+          "velocity": 71,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.213068623418985e-11,
+          "hf_crest_db": 2.242879511409402,
+          "attack_0_20ms_power": 1.062510639898066e-05
+        },
+        {
+          "frame": 349125,
+          "seconds": 7.916666666666667,
+          "note": 72,
+          "velocity": 74,
+          "previous_same_note_seconds": 0.17839002267573695,
+          "hf_0_2ms_power": 1.8138814801541373e-11,
+          "hf_crest_db": -6.9826123134033065,
+          "attack_0_20ms_power": 7.644209493764187e-06
+        }
+      ],
+      "clip_peak": 0.3167478377711265,
+      "hf_attack_power": 3.1885905581334193e-10,
+      "median_hf_crest_db": -1.679145441988128,
+      "source_difference_rms_db_relative_total": -3.8998644471156463
+    },
+    "velocidad-4ms": {
+      "raw_sha256": "1b940d403f3b2fa02b0e95b730f5da4e3f7eb11afcf937557ec949670832b10e",
+      "rows": [
+        {
+          "frame": 45363,
+          "seconds": 1.0286394557823129,
+          "note": 70,
+          "velocity": 58,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.099480104325695e-13,
+          "hf_crest_db": -13.769545954385027,
+          "attack_0_20ms_power": 1.7599834560742638e-06
+        },
+        {
+          "frame": 67930,
+          "seconds": 1.5403628117913832,
+          "note": 39,
+          "velocity": 40,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 4.909133106574875e-14,
+          "hf_crest_db": -0.026381068177675788,
+          "attack_0_20ms_power": 1.5194418717537648e-06
+        },
+        {
+          "frame": 73270,
+          "seconds": 1.661451247165533,
+          "note": 79,
+          "velocity": 67,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.1926015076148416e-12,
+          "hf_crest_db": -4.830206026597478,
+          "attack_0_20ms_power": 1.661225014304704e-05
+        },
+        {
+          "frame": 102670,
+          "seconds": 2.3281179138321995,
+          "note": 63,
+          "velocity": 41,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 6.44815846927939e-14,
+          "hf_crest_db": -7.253517590027975,
+          "attack_0_20ms_power": 8.965159113021823e-07
+        },
+        {
+          "frame": 103245,
+          "seconds": 2.341156462585034,
+          "note": 55,
+          "velocity": 39,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.448506981526425e-13,
+          "hf_crest_db": 0.08167348187559001,
+          "attack_0_20ms_power": 1.253139044350565e-06
+        },
+        {
+          "frame": 120701,
+          "seconds": 2.736984126984127,
+          "note": 67,
+          "velocity": 50,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.829610556450523e-13,
+          "hf_crest_db": -7.184195631847125,
+          "attack_0_20ms_power": 4.742685682113967e-06
+        },
+        {
+          "frame": 121792,
+          "seconds": 2.76172335600907,
+          "note": 63,
+          "velocity": 29,
+          "previous_same_note_seconds": 0.43360544217687075,
+          "hf_0_2ms_power": 1.2483943369120266e-12,
+          "hf_crest_db": 0.2557418171013377,
+          "attack_0_20ms_power": 6.398169634908011e-06
+        },
+        {
+          "frame": 122711,
+          "seconds": 2.782562358276644,
+          "note": 58,
+          "velocity": 41,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.1265056263627933e-12,
+          "hf_crest_db": 0.41108248811864156,
+          "attack_0_20ms_power": 5.7483668139111395e-06
+        },
+        {
+          "frame": 139593,
+          "seconds": 3.165374149659864,
+          "note": 51,
+          "velocity": 54,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.8668299887289423e-13,
+          "hf_crest_db": -1.1032973478445498,
+          "attack_0_20ms_power": 1.4796370753154718e-06
+        },
+        {
+          "frame": 156991,
+          "seconds": 3.5598866213151927,
+          "note": 77,
+          "velocity": 68,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.621200485689995e-12,
+          "hf_crest_db": -6.057444465444945,
+          "attack_0_20ms_power": 2.184147941817616e-06
+        },
+        {
+          "frame": 157393,
+          "seconds": 3.5690022675736963,
+          "note": 56,
+          "velocity": 42,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.747094208677926e-12,
+          "hf_crest_db": -0.8629451130929805,
+          "attack_0_20ms_power": 2.47567514453266e-06
+        },
+        {
+          "frame": 157393,
+          "seconds": 3.5690022675736963,
+          "note": 62,
+          "velocity": 47,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.747094208677926e-12,
+          "hf_crest_db": -0.8629451130929805,
+          "attack_0_20ms_power": 2.47567514453266e-06
+        },
+        {
+          "frame": 175539,
+          "seconds": 3.9804761904761903,
+          "note": 68,
+          "velocity": 47,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.0597144461099595e-12,
+          "hf_crest_db": -4.015845602651082,
+          "attack_0_20ms_power": 4.566816646235978e-06
+        },
+        {
+          "frame": 175768,
+          "seconds": 3.985668934240363,
+          "note": 59,
+          "velocity": 48,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.970071377371694e-12,
+          "hf_crest_db": -1.75189891244515,
+          "attack_0_20ms_power": 6.071507259219312e-06
+        },
+        {
+          "frame": 176630,
+          "seconds": 4.005215419501134,
+          "note": 79,
+          "velocity": 78,
+          "previous_same_note_seconds": 2.343764172335601,
+          "hf_0_2ms_power": 3.6055679510003166e-11,
+          "hf_crest_db": -5.966655630305679,
+          "attack_0_20ms_power": 2.2944315667118058e-05
+        },
+        {
+          "frame": 194143,
+          "seconds": 4.40233560090703,
+          "note": 39,
+          "velocity": 50,
+          "previous_same_note_seconds": 2.8619727891156463,
+          "hf_0_2ms_power": 3.014555195709048e-12,
+          "hf_crest_db": 1.1888798451225326,
+          "attack_0_20ms_power": 1.6535179547348702e-06
+        },
+        {
+          "frame": 197704,
+          "seconds": 4.483083900226758,
+          "note": 77,
+          "velocity": 72,
+          "previous_same_note_seconds": 0.9231972789115647,
+          "hf_0_2ms_power": 3.5960625808853676e-12,
+          "hf_crest_db": -4.214362428035001,
+          "attack_0_20ms_power": 1.2079024842986374e-05
+        },
+        {
+          "frame": 220557,
+          "seconds": 5.001292517006803,
+          "note": 55,
+          "velocity": 46,
+          "previous_same_note_seconds": 2.660136054421769,
+          "hf_0_2ms_power": 1.1124885354204609e-12,
+          "hf_crest_db": -1.4751461211796821,
+          "attack_0_20ms_power": 1.1488887118084783e-06
+        },
+        {
+          "frame": 220672,
+          "seconds": 5.00390022675737,
+          "note": 63,
+          "velocity": 49,
+          "previous_same_note_seconds": 2.2421768707482994,
+          "hf_0_2ms_power": 1.3267605783853516e-12,
+          "hf_crest_db": -1.611530472041277,
+          "attack_0_20ms_power": 1.1454695976787777e-06
+        },
+        {
+          "frame": 236521,
+          "seconds": 5.36328798185941,
+          "note": 67,
+          "velocity": 54,
+          "previous_same_note_seconds": 2.6263038548752835,
+          "hf_0_2ms_power": 2.356776068425568e-12,
+          "hf_crest_db": 2.168928858064148,
+          "attack_0_20ms_power": 4.364845668866036e-06
+        },
+        {
+          "frame": 236865,
+          "seconds": 5.3710884353741495,
+          "note": 63,
+          "velocity": 44,
+          "previous_same_note_seconds": 0.36718820861678003,
+          "hf_0_2ms_power": 1.2461876585536144e-12,
+          "hf_crest_db": -0.5473348901744493,
+          "attack_0_20ms_power": 6.220208548492142e-06
+        },
+        {
+          "frame": 237727,
+          "seconds": 5.390634920634921,
+          "note": 58,
+          "velocity": 49,
+          "previous_same_note_seconds": 2.608072562358277,
+          "hf_0_2ms_power": 2.3904375060674278e-12,
+          "hf_crest_db": 1.8753742451495157,
+          "attack_0_20ms_power": 6.191801342912413e-06
+        },
+        {
+          "frame": 253058,
+          "seconds": 5.73827664399093,
+          "note": 38,
+          "velocity": 52,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 1.2740214777074453e-13,
+          "hf_crest_db": -22.41260693833066,
+          "attack_0_20ms_power": 3.646860470406678e-06
+        },
+        {
+          "frame": 253173,
+          "seconds": 5.740884353741497,
+          "note": 75,
+          "velocity": 72,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.2439046264496526e-12,
+          "hf_crest_db": -10.386186495341601,
+          "attack_0_20ms_power": 4.424679386625672e-06
+        },
+        {
+          "frame": 269940,
+          "seconds": 6.1210884353741495,
+          "note": 63,
+          "velocity": 63,
+          "previous_same_note_seconds": 0.75,
+          "hf_0_2ms_power": 7.436766422464988e-13,
+          "hf_crest_db": -9.850176519901307,
+          "attack_0_20ms_power": 3.1035046726385875e-06
+        },
+        {
+          "frame": 270227,
+          "seconds": 6.1275963718820865,
+          "note": 55,
+          "velocity": 54,
+          "previous_same_note_seconds": 1.1263038548752835,
+          "hf_0_2ms_power": 8.716107693194354e-12,
+          "hf_crest_db": -0.06813288159014533,
+          "attack_0_20ms_power": 3.292412304681395e-06
+        },
+        {
+          "frame": 285674,
+          "seconds": 6.477868480725624,
+          "note": 67,
+          "velocity": 61,
+          "previous_same_note_seconds": 1.1145804988662131,
+          "hf_0_2ms_power": 4.230192385033256e-12,
+          "hf_crest_db": -0.7046988030272804,
+          "attack_0_20ms_power": 5.403002654003273e-06
+        },
+        {
+          "frame": 286018,
+          "seconds": 6.485668934240363,
+          "note": 63,
+          "velocity": 50,
+          "previous_same_note_seconds": 0.36458049886621313,
+          "hf_0_2ms_power": 3.975036199803889e-12,
+          "hf_crest_db": -3.55703750621997,
+          "attack_0_20ms_power": 1.0172004818584327e-05
+        },
+        {
+          "frame": 286305,
+          "seconds": 6.492176870748299,
+          "note": 58,
+          "velocity": 55,
+          "previous_same_note_seconds": 1.1015419501133787,
+          "hf_0_2ms_power": 4.655972374876375e-12,
+          "hf_crest_db": -12.968003011222159,
+          "attack_0_20ms_power": 1.6460485839638948e-05
+        },
+        {
+          "frame": 286420,
+          "seconds": 6.494784580498866,
+          "note": 70,
+          "velocity": 84,
+          "previous_same_note_seconds": 5.466145124716554,
+          "hf_0_2ms_power": 7.666272694481758e-12,
+          "hf_crest_db": -12.003412814597382,
+          "attack_0_20ms_power": 1.6016695354830106e-05
+        },
+        {
+          "frame": 306116,
+          "seconds": 6.94140589569161,
+          "note": 36,
+          "velocity": 59,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 5.950926763092002e-12,
+          "hf_crest_db": -0.2794109943924572,
+          "attack_0_20ms_power": 5.320525983512792e-06
+        },
+        {
+          "frame": 308355,
+          "seconds": 6.992176870748299,
+          "note": 79,
+          "velocity": 74,
+          "previous_same_note_seconds": 2.9869614512471654,
+          "hf_0_2ms_power": 2.798306134958642e-11,
+          "hf_crest_db": -2.456453800513134,
+          "attack_0_20ms_power": 2.1780901074471184e-05
+        },
+        {
+          "frame": 327821,
+          "seconds": 7.433582766439909,
+          "note": 64,
+          "velocity": 49,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 8.007854869816221e-13,
+          "hf_crest_db": -3.189103903684853,
+          "attack_0_20ms_power": 3.611267236612934e-06
+        },
+        {
+          "frame": 329544,
+          "seconds": 7.47265306122449,
+          "note": 55,
+          "velocity": 42,
+          "previous_same_note_seconds": 1.3450566893424036,
+          "hf_0_2ms_power": 1.345508136063224e-12,
+          "hf_crest_db": -0.677529941583578,
+          "attack_0_20ms_power": 3.3806951363658045e-06
+        },
+        {
+          "frame": 332588,
+          "seconds": 7.5416780045351475,
+          "note": 72,
+          "velocity": 61,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 2.5017895873578103e-12,
+          "hf_crest_db": -9.930964248072117,
+          "attack_0_20ms_power": 4.2595704494836665e-06
+        },
+        {
+          "frame": 337296,
+          "seconds": 7.64843537414966,
+          "note": 73,
+          "velocity": 67,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 9.947991768569745e-12,
+          "hf_crest_db": -10.421157809061237,
+          "attack_0_20ms_power": 3.854028544507386e-06
+        },
+        {
+          "frame": 341258,
+          "seconds": 7.73827664399093,
+          "note": 72,
+          "velocity": 65,
+          "previous_same_note_seconds": 0.19659863945578232,
+          "hf_0_2ms_power": 5.433455892023687e-11,
+          "hf_crest_db": -0.7589672586391123,
+          "attack_0_20ms_power": 4.6375989301051765e-06
+        },
+        {
+          "frame": 345048,
+          "seconds": 7.82421768707483,
+          "note": 67,
+          "velocity": 50,
+          "previous_same_note_seconds": 1.3463492063492064,
+          "hf_0_2ms_power": 2.472261982504399e-11,
+          "hf_crest_db": 0.5638314346071617,
+          "attack_0_20ms_power": 5.652350542330498e-06
+        },
+        {
+          "frame": 345852,
+          "seconds": 7.842448979591837,
+          "note": 58,
+          "velocity": 47,
+          "previous_same_note_seconds": 1.3502721088435374,
+          "hf_0_2ms_power": 3.061193317875995e-11,
+          "hf_crest_db": 1.839599918685067,
+          "attack_0_20ms_power": 1.0742594488510878e-05
+        },
+        {
+          "frame": 345852,
+          "seconds": 7.842448979591837,
+          "note": 71,
+          "velocity": 71,
+          "previous_same_note_seconds": null,
+          "hf_0_2ms_power": 3.061193317875995e-11,
+          "hf_crest_db": 1.839599918685067,
+          "attack_0_20ms_power": 1.0742594488510878e-05
+        },
+        {
+          "frame": 349125,
+          "seconds": 7.916666666666667,
+          "note": 72,
+          "velocity": 74,
+          "previous_same_note_seconds": 0.17839002267573695,
+          "hf_0_2ms_power": 2.526653111333551e-11,
+          "hf_crest_db": -4.194141277430389,
+          "attack_0_20ms_power": 7.746349587530782e-06
+        }
+      ],
+      "clip_peak": 0.301178255357963,
+      "hf_attack_power": 3.282858435813725e-10,
+      "median_hf_crest_db": -1.611530472041277,
+      "source_difference_rms_db_relative_total": -26.520305373724298
+    }
+  },
+  "policy": "Identical MIDI from frame zero, including pedal and voices before the excerpt; paired counterfactuals; same gain. HF onsets are diagnostic, not an audibility score."
+}

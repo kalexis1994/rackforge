@@ -1,0 +1,6 @@
+{
+  "policy": "Butterworth order4 bandpass, zero phase, filter 142-153s context before measuring 146.7-148.4s. Diagnostic crosscheck of Hann-window spectral results, not a DSP change.",
+  "250-600": -9.787733084511412,
+  "4000-8000": 31.575424293749954,
+  "8000-16000": 33.347788388929786
+}

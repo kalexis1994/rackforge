@@ -1,0 +1,34 @@
+{
+  "notes": [
+    60,
+    72,
+    84,
+    96
+  ],
+  "velocities": [
+    60,
+    124
+  ],
+  "profiles": {
+    "06-cached": {
+      "directory": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\body-audit\\low-transient-06\\base\\renders",
+      "provenance": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\body-audit\\low-transient-06\\base\\provenance.json"
+    },
+    "07-cached": {
+      "directory": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\body-audit\\beating-07\\baseline",
+      "provenance": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\body-audit\\beating-07\\baseline\\render-manifest.json"
+    },
+    "11": {
+      "directory": "local\\concert-grand-coherent-unison\\history-timbre-audit\\11"
+    },
+    "12": {
+      "directory": "local\\concert-grand-coherent-unison\\history-timbre-audit\\12"
+    },
+    "C": {
+      "directory": "local\\concert-grand-coherent-unison\\joint-calibrated-final-audit\\C"
+    },
+    "13": {
+      "directory": "local\\concert-grand-coherent-unison\\joint-calibrated-final-audit\\Modelo-13"
+    }
+  }
+}

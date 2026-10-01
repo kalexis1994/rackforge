@@ -1,0 +1,77 @@
+{
+  "order": [
+    [
+      60,
+      60
+    ],
+    [
+      60,
+      124
+    ],
+    [
+      72,
+      60
+    ],
+    [
+      72,
+      124
+    ],
+    [
+      84,
+      60
+    ],
+    [
+      84,
+      124
+    ],
+    [
+      90,
+      60
+    ],
+    [
+      90,
+      124
+    ],
+    [
+      96,
+      60
+    ],
+    [
+      96,
+      124
+    ]
+  ],
+  "held_seconds": 4,
+  "silence_seconds": 0.4,
+  "release": "Held fragments, no key release; 15ms end fade.",
+  "audios": {
+    "14B-anterior.wav": {
+      "sha256": "c62272a55de1d6f3de4106e7f70093aee9a85d13684b97bb539f421c28d6625f",
+      "peak": 0.85,
+      "seconds": 44.0,
+      "label": "14B",
+      "common_trim_db": -1.9172432858454644
+    },
+    "Fieltro-experimental.wav": {
+      "sha256": "758d2ee03c50f4529247ffd7e5b1f83f3775c404c1d67083b703fc5d914c982e",
+      "peak": 0.7868213967538737,
+      "seconds": 44.0,
+      "label": "rate-020",
+      "common_trim_db": -1.9172432858454644
+    },
+    "Radiacion-prueba-descartada.wav": {
+      "sha256": "b0dce59d4154d3bc94e24080c69bb5dce9a29a3fa89332cf3e7ed1ca7b869d11",
+      "peak": 0.6915168715861107,
+      "seconds": 44.0,
+      "label": "retarded",
+      "common_trim_db": -1.9172432858454644
+    },
+    "Steinway-original.wav": {
+      "sha256": "a74b9a23d2e0719dc9b7fb3711772bbb27a2c10fa23a0b990ff15b770838c78f",
+      "peak": 0.6977263394137874,
+      "seconds": 44.0,
+      "label": "Steinway",
+      "common_trim_db": -1.9172432858454644
+    }
+  }
+}

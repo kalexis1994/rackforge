@@ -1,0 +1,547 @@
+{
+  "user_evaluation": "13 rejected; user reports cumulative thinning over several revisions",
+  "selected_for_production": false,
+  "source_sha256": "18acdf3f2508c812162b7b65c5bdfe2e11b0e09d615764706095ffc98edf313b",
+  "manifests": {
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\body-audit\\low-transient-06\\base\\provenance.json": {
+      "sha256": "095e5371801c1ea6ceefd767b04e6c83454dcbba62dd043d4a2f85ee1b2d5ec8",
+      "data": {
+        "dt_us": 4,
+        "binary_sha256": "105a6845202b14eb692fa1881b11b906a921baed9e294ccd94c544f63992f1b8",
+        "tuning": "BED_MIX = 2.5\nBOARD_LOSS_FACTOR = 0.046\nFELT_K_A0 = 39200000.0\nFELT_TREBLE_DECADES = 2.0\nPHYSICAL_BED_ROUTE = 1.0\nPHYSICAL_BRIDGE = 1.0\nPHYSICAL_BRIDGE_MOBILITY = 0.0005\nPHYSICAL_PRESSURE_SCALE = 3.0\nSTULOV_TAU_S = 0.0001\n",
+        "window": "40-100ms after note-on; not onset-aligned",
+        "band_ratio": "1500-5000 Hz / 250-1500 Hz; stage gains and units differ; compare ratios, not absolute levels",
+        "aux": "difference between full direct sum and board contribution, before pedal noise, room and output"
+      }
+    },
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\body-audit\\beating-07\\baseline\\render-manifest.json": {
+      "sha256": "4b426073e850d58c6590fab81d3d03759458d6fb51cd97430ba6442b55e38cd9",
+      "data": {
+        "binary": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\release\\deps\\rackforge_concert_grand-7275b6d0b6a905c6.exe",
+          "666c5f6c2fa859580734346aa30ca91f84df5a1c2a4c7108f53035d63228a1c6"
+        ],
+        "pairs": [
+          [
+            60,
+            60
+          ],
+          [
+            60,
+            84
+          ],
+          [
+            60,
+            124
+          ],
+          [
+            66,
+            60
+          ],
+          [
+            66,
+            84
+          ],
+          [
+            66,
+            124
+          ],
+          [
+            69,
+            60
+          ],
+          [
+            69,
+            84
+          ],
+          [
+            69,
+            124
+          ],
+          [
+            72,
+            60
+          ],
+          [
+            72,
+            84
+          ],
+          [
+            72,
+            124
+          ],
+          [
+            75,
+            60
+          ],
+          [
+            75,
+            84
+          ],
+          [
+            75,
+            124
+          ],
+          [
+            78,
+            60
+          ],
+          [
+            78,
+            84
+          ],
+          [
+            78,
+            124
+          ]
+        ],
+        "params": {
+          "25": 2.64
+        },
+        "calibration": null,
+        "tuning": {
+          "PHYSICAL_BRIDGE": 1,
+          "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+          "PHYSICAL_PRESSURE_SCALE": 3,
+          "PHYSICAL_BED_ROUTE": 1,
+          "BOARD_LOSS_FACTOR": 0.046,
+          "FELT_K_A0": 39200000,
+          "STULOV_TAU_S": 0.0001,
+          "BED_MIX": 2.5,
+          "FELT_TREBLE_DECADES": 2,
+          "CONTACT_BOARD_GAIN": 0.006,
+          "CONTACT_BOARD_CORNER": 180
+        },
+        "preset": "concert",
+        "rate": 44100,
+        "channel": "left",
+        "warmup_ms": 200
+      }
+    },
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coherent-unison\\history-timbre-audit\\11\\render-manifest.json": {
+      "sha256": "27c45df77af6b0c9167e64e6e1f1ef41d1c09a5e7562f5e69847b2ed1501c83a",
+      "data": {
+        "binary": [
+          "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coherent-unison\\frozen-11\\renderer.exe",
+          "f30612fb839ac0e49dcb24843dcfa7ccf6df547f9ef64874b7bcdda575f71ebd"
+        ],
+        "pairs": [
+          [
+            60,
+            60
+          ],
+          [
+            60,
+            124
+          ],
+          [
+            72,
+            60
+          ],
+          [
+            72,
+            124
+          ],
+          [
+            84,
+            60
+          ],
+          [
+            84,
+            124
+          ],
+          [
+            96,
+            60
+          ],
+          [
+            96,
+            124
+          ]
+        ],
+        "params": {
+          "25": 2.64
+        },
+        "calibration": null,
+        "tuning": {
+          "PHYSICAL_BRIDGE": 1,
+          "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+          "PHYSICAL_PRESSURE_SCALE": 3,
+          "PHYSICAL_BED_ROUTE": 1,
+          "BOARD_LOSS_FACTOR": 0.046,
+          "FELT_K_A0": 39200000,
+          "STULOV_TAU_S": 0.0001,
+          "BED_MIX": 2.5,
+          "FELT_TREBLE_DECADES": 2,
+          "CONTACT_BOARD_GAIN": 0.006,
+          "CONTACT_BOARD_CORNER": 180,
+          "COHERENT_UNISON": 1,
+          "UNISON_WIDTH": 0.5,
+          "STRING_STIFFNESS_SPREAD": 0.02,
+          "REACTIVE_BRIDGE": 1,
+          "STRING_TUNING_CENTER": 0.25
+        },
+        "preset": "concert",
+        "rate": 44100,
+        "channel": "left",
+        "warmup_ms": 200
+      }
+    },
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coherent-unison\\history-timbre-audit\\12\\render-manifest.json": {
+      "sha256": "8d6e4afc4a7d0e89238e9528708a0515e85279e822e5936ec16ea22f4bfad369",
+      "data": {
+        "binary": [
+          "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coherent-unison\\frozen-unison-12\\renderer.exe",
+          "c6b3a70b50442d2de6faf1fd0ee6d30e5f402042e50027020e6fd0376f3e6f27"
+        ],
+        "pairs": [
+          [
+            60,
+            60
+          ],
+          [
+            60,
+            124
+          ],
+          [
+            72,
+            60
+          ],
+          [
+            72,
+            124
+          ],
+          [
+            84,
+            60
+          ],
+          [
+            84,
+            124
+          ],
+          [
+            96,
+            60
+          ],
+          [
+            96,
+            124
+          ]
+        ],
+        "params": {
+          "25": 2.64
+        },
+        "calibration": null,
+        "tuning": {
+          "PHYSICAL_BRIDGE": 1,
+          "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+          "PHYSICAL_PRESSURE_SCALE": 3,
+          "PHYSICAL_BED_ROUTE": 1,
+          "BOARD_LOSS_FACTOR": 0.046,
+          "FELT_K_A0": 39200000,
+          "STULOV_TAU_S": 0.0001,
+          "BED_MIX": 2.5,
+          "FELT_TREBLE_DECADES": 2,
+          "CONTACT_BOARD_GAIN": 0.006,
+          "CONTACT_BOARD_CORNER": 180,
+          "UNISON_WIDTH": 0.1,
+          "POLARISATION_CENTS": 0,
+          "COHERENT_UNISON": 1,
+          "STRING_STIFFNESS_SPREAD": 0,
+          "REACTIVE_BRIDGE": 0,
+          "STRING_TUNING_CENTER": 0.5,
+          "SPATIAL_UNISON_GAP_M": 0,
+          "MECHANICAL_RADIATION": 1,
+          "MECHANICAL_EMISSION_GAIN": 0.125,
+          "MECHANICAL_CASE_CORNER": 1500,
+          "UNISON_TREBLE_WIDTH_RATIO": 1
+        },
+        "preset": "concert",
+        "rate": 44100,
+        "channel": "left",
+        "warmup_ms": 200
+      }
+    },
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coherent-unison\\joint-calibrated-final-audit\\C\\render-manifest.json": {
+      "sha256": "df3ac5e58a223a2945b52edd2baed805d2729927ecb26ef96240bb739019cd5c",
+      "data": {
+        "binary": [
+          "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coherent-unison\\frozen-joint-13b\\renderer.exe",
+          "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d"
+        ],
+        "pairs": [
+          [
+            60,
+            60
+          ],
+          [
+            60,
+            84
+          ],
+          [
+            60,
+            124
+          ],
+          [
+            65,
+            60
+          ],
+          [
+            65,
+            84
+          ],
+          [
+            65,
+            124
+          ],
+          [
+            67,
+            60
+          ],
+          [
+            67,
+            84
+          ],
+          [
+            67,
+            124
+          ],
+          [
+            72,
+            60
+          ],
+          [
+            72,
+            84
+          ],
+          [
+            72,
+            124
+          ],
+          [
+            79,
+            60
+          ],
+          [
+            79,
+            84
+          ],
+          [
+            79,
+            124
+          ],
+          [
+            84,
+            60
+          ],
+          [
+            84,
+            84
+          ],
+          [
+            84,
+            124
+          ],
+          [
+            91,
+            60
+          ],
+          [
+            91,
+            84
+          ],
+          [
+            91,
+            124
+          ],
+          [
+            96,
+            60
+          ],
+          [
+            96,
+            84
+          ],
+          [
+            96,
+            124
+          ]
+        ],
+        "params": {
+          "25": 2.64
+        },
+        "calibration": null,
+        "tuning": {
+          "PHYSICAL_BRIDGE": 1,
+          "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+          "PHYSICAL_PRESSURE_SCALE": 3,
+          "PHYSICAL_BED_ROUTE": 1,
+          "BOARD_LOSS_FACTOR": 0.046,
+          "FELT_K_A0": 39200000,
+          "STULOV_TAU_S": 0.0001,
+          "BED_MIX": 2.5,
+          "FELT_TREBLE_DECADES": 2,
+          "CONTACT_BOARD_GAIN": 0.006,
+          "CONTACT_BOARD_CORNER": 180,
+          "UNISON_WIDTH": 0,
+          "POLARISATION_CENTS": 0,
+          "COHERENT_UNISON": 0,
+          "STRING_STIFFNESS_SPREAD": 0,
+          "REACTIVE_BRIDGE": 0,
+          "STRING_TUNING_CENTER": 0.5,
+          "SPATIAL_UNISON_GAP_M": 0,
+          "MECHANICAL_RADIATION": 1,
+          "MECHANICAL_EMISSION_GAIN": 0.125,
+          "MECHANICAL_CASE_CORNER": 1500
+        },
+        "preset": "concert",
+        "rate": 44100,
+        "channel": "left",
+        "warmup_ms": 200
+      }
+    },
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coherent-unison\\joint-calibrated-final-audit\\Modelo-13\\render-manifest.json": {
+      "sha256": "e6642bd72757b313f4fa01be35e24777f421343e4665e5a464b71613592ab955",
+      "data": {
+        "binary": [
+          "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coherent-unison\\frozen-joint-13b\\renderer.exe",
+          "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d"
+        ],
+        "pairs": [
+          [
+            60,
+            60
+          ],
+          [
+            60,
+            84
+          ],
+          [
+            60,
+            124
+          ],
+          [
+            65,
+            60
+          ],
+          [
+            65,
+            84
+          ],
+          [
+            65,
+            124
+          ],
+          [
+            67,
+            60
+          ],
+          [
+            67,
+            84
+          ],
+          [
+            67,
+            124
+          ],
+          [
+            72,
+            60
+          ],
+          [
+            72,
+            84
+          ],
+          [
+            72,
+            124
+          ],
+          [
+            79,
+            60
+          ],
+          [
+            79,
+            84
+          ],
+          [
+            79,
+            124
+          ],
+          [
+            84,
+            60
+          ],
+          [
+            84,
+            84
+          ],
+          [
+            84,
+            124
+          ],
+          [
+            91,
+            60
+          ],
+          [
+            91,
+            84
+          ],
+          [
+            91,
+            124
+          ],
+          [
+            96,
+            60
+          ],
+          [
+            96,
+            84
+          ],
+          [
+            96,
+            124
+          ]
+        ],
+        "params": {
+          "25": 2.64
+        },
+        "calibration": null,
+        "tuning": {
+          "PHYSICAL_BRIDGE": 1,
+          "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+          "PHYSICAL_PRESSURE_SCALE": 3,
+          "PHYSICAL_BED_ROUTE": 1,
+          "BOARD_LOSS_FACTOR": 0.046,
+          "FELT_K_A0": 39200000,
+          "STULOV_TAU_S": 0.0002,
+          "BED_MIX": 2.5,
+          "FELT_TREBLE_DECADES": 2,
+          "CONTACT_BOARD_GAIN": 0.006,
+          "CONTACT_BOARD_CORNER": 180,
+          "UNISON_WIDTH": 0.05,
+          "POLARISATION_CENTS": 0,
+          "COHERENT_UNISON": 1,
+          "STRING_STIFFNESS_SPREAD": 0.0,
+          "REACTIVE_BRIDGE": 0,
+          "STRING_TUNING_CENTER": 0.5,
+          "SPATIAL_UNISON_GAP_M": 0,
+          "MECHANICAL_RADIATION": 1,
+          "MECHANICAL_EMISSION_GAIN": 0.125,
+          "MECHANICAL_CASE_CORNER": 1500,
+          "JOINT_HAMMER_CONTACT": 1,
+          "JOINT_CONTACT_DT_S": 2e-06,
+          "JOINT_CONTACT_TOP_HZ": 8000.0,
+          "HAMMER_STRING_HEIGHT_SPREAD_M": 8e-05,
+          "UNISON_TREBLE_WIDTH_RATIO": 1
+        },
+        "preset": "concert",
+        "rate": 44100,
+        "channel": "left",
+        "warmup_ms": 200
+      }
+    }
+  }
+}

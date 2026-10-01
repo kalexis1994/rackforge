@@ -1,0 +1,83 @@
+{
+  "native_binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+  "regular_tests_passed": 107,
+  "regular_tests_ignored": 74,
+  "legacy_audio_fingerprints": [
+    "0x243e622a8b59910d",
+    "0x706b728c4d0a6b06"
+  ],
+  "physical_C_parity": [
+    {
+      "note": 60,
+      "velocity": 60,
+      "bit_identical": true
+    },
+    {
+      "note": 60,
+      "velocity": 124,
+      "bit_identical": true
+    },
+    {
+      "note": 72,
+      "velocity": 60,
+      "bit_identical": true
+    },
+    {
+      "note": 72,
+      "velocity": 124,
+      "bit_identical": true
+    },
+    {
+      "note": 84,
+      "velocity": 60,
+      "bit_identical": true
+    },
+    {
+      "note": 84,
+      "velocity": 124,
+      "bit_identical": true
+    },
+    {
+      "note": 96,
+      "velocity": 60,
+      "bit_identical": true
+    },
+    {
+      "note": 96,
+      "velocity": 124,
+      "bit_identical": true
+    }
+  ],
+  "performances": [
+    {
+      "piece": "chopin-nocturno-op9-2",
+      "events_preserved": true,
+      "gain_db": 21.85313499438971,
+      "peak": 0.45823254177124223,
+      "wav_sha256": "ac7c1fc536c752c892553af7cfebecdcb550ff569ff48e281717ee6520faebe7",
+      "duration_s": 234.5638095238095
+    },
+    {
+      "piece": "liszt-la-campanella",
+      "events_preserved": true,
+      "gain_db": 21.85313499438971,
+      "peak": 0.7804128364516829,
+      "wav_sha256": "07b19575c86096218e39c53e194f73084d9baca5c33a517053f0dbdba023bcfc",
+      "duration_s": 285.15884353741495
+    }
+  ],
+  "source_sha256": {
+    "bridge.rs": "ed206ef92368f01267c35c582292e3d8078811df31c075950dd33291777fe9e6",
+    "contact_pulse.rs": "2ae423baa230ee233ea080f05caa84636bd786990acba5d1c87b87120ea02b2a",
+    "lib.rs": "70631bd9507b169d5d2e67c66e9a50d6dc1f47766f893c1edd216a5bfe319f2c",
+    "math.rs": "8fcbef468ccce24de475503793ee778f715f419c31bb2300d0cc0ffd4bd472ee",
+    "mechanical.rs": "068021ffb035eca8a9a41a79fd1e8fb8353391759cbc2661cd45bc6d8c71b68c",
+    "midrange.rs": "7b6cf1725d6b623d49bf36a526771a5d722e4151555117e3efc684193d6a3d7b",
+    "radiation.rs": "558dd79c25e574285e7470b50ddf00045789930c0a0d21307a8d2ec2fac06393",
+    "spatial_unison.rs": "0923c5a817fdc47df4322e92d136e83fd96eb9154d780036697cc5e62051a8f6",
+    "trio_contact.rs": "9a3f5984b157523c3a1f65435296cc7746edc445f96a063d9effe0df7d47cc6e",
+    "unison.rs": "c99c86f5f7c634b9077aa44962cf6fa558f4aaf65592ac5006ee6af22cbd1b3d"
+  },
+  "native_only": true,
+  "selected_for_production": false
+}

@@ -1,0 +1,37 @@
+{
+  "midi": "C:\\Users\\kalex\\OneDrive\\Documents\\piano-comparacion\\09-midi\\chopin-nocturno-op9-2.mid",
+  "midi_sha256": "83ea472e303c1cbbd35c9a06cafb368a09be2fc5c4c793231b32816d0a91aa77",
+  "seconds": 224.56380208333377,
+  "total_frames": 10344264,
+  "message_counts": {
+    "program_change": 1,
+    "control_change": 3031,
+    "note_on": 2996
+  },
+  "events_sent": 6030,
+  "pedal_noise_cues": 1,
+  "max_active_voices": 243,
+  "raw_peak": 0.46488988399505615,
+  "raw_sha256": "03b61605ce28c17da15abe9c7fba21f73bdb4976d4e3fab382260e798850f972",
+  "engine": "sfizz 1.2.3 official Windows x64 release; native C API; quality 10, freewheeling, 512 voices, stereo 44100Hz.",
+  "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+  "wav": "C:\\SHARED\\SteinwayD-MIDI\\SteinwayD-StageORTF-chopin-nocturno-op9-2.wav",
+  "wav_sha256": "ac68289aae88faf3fab505739c9da507324a7c6dde6883bf4101ee3f224ba374",
+  "gain_db": 0.0,
+  "output_peak": 0.46488988399505615,
+  "sample_rate": 44100,
+  "channels": 2,
+  "subtype": "PCM_24",
+  "policy": {
+    "velocity": "16 equal MIDI bins, within-layer RMS based gain as in bitKlavier, +4dB extended range; no crossfade of different recorded attacks",
+    "pitch": "nearest recorded root +/-1 semitone; original roots not retuned",
+    "sustain": "CC64 >=64; native SFZ sustain. Intermediate sensor values delivered but no calibrated physical half-pedal model.",
+    "sostenuto": "Native SFZ CC66.",
+    "soft": "CC67 continuous volume reduction up to 3dB, not an actual una-corda recording.",
+    "release": "30ms sampler release for damped keys; original resonance samples -20dB, 4.34294dB/s elapsed-time attenuation.",
+    "hammer": "Original key-return samples per key, -40dB, release_key; velocity follows the sampler trigger.",
+    "pedal_noise": "Recorded D1/U1 samples -20dB at alternating full-travel endpoints (>=115 / <=10), independent of the >=64 damper threshold; extra CC20/21 are internal cues, original MIDI unmodified.",
+    "upper_keys": "F#6 and above play recorded decay to its end; no artificial loop.",
+    "envelope": "3ms onset envelope; sampler reproduction, not untouched standalone WAV or a new acoustic performance."
+  }
+}

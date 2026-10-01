@@ -1,0 +1,699 @@
+[
+  {
+    "path": "C:\\SHARED\\Modelo-13\\C-anterior-agudos-intensidades.wav",
+    "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+    "profile": "C",
+    "tuning": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 0,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500
+    },
+    "params": {
+      "25": 2.64
+    },
+    "gain_db": 21.85313499438971,
+    "channels": 1,
+    "rate": 44100,
+    "sequence": [
+      {
+        "note": 72,
+        "velocity": 60,
+        "start_s": 0.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 84,
+        "start_s": 4.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 124,
+        "start_s": 8.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 79,
+        "velocity": 60,
+        "start_s": 13.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 79,
+        "velocity": 84,
+        "start_s": 17.6,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 79,
+        "velocity": 124,
+        "start_s": 22.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 84,
+        "velocity": 60,
+        "start_s": 26.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 84,
+        "velocity": 84,
+        "start_s": 30.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 84,
+        "velocity": 124,
+        "start_s": 35.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 91,
+        "velocity": 60,
+        "start_s": 39.6,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 91,
+        "velocity": 84,
+        "start_s": 44.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 91,
+        "velocity": 124,
+        "start_s": 48.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 96,
+        "velocity": 60,
+        "start_s": 52.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 96,
+        "velocity": 84,
+        "start_s": 57.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 96,
+        "velocity": 124,
+        "start_s": 61.6,
+        "hold_s": 4,
+        "release_s": 0
+      }
+    ],
+    "peak": 0.5038931808900176,
+    "wav_sha256": "1134dede4e9133cd8445e14b53e8ac7e655179d5be0ab1c014864b49e2368c72",
+    "policy": "Mono left, common fixed gain across candidate and baseline; no per-note normalization. Intensity clips held throughout; long clips include note-off."
+  },
+  {
+    "path": "C:\\SHARED\\Modelo-13\\C-anterior-medios-intensidades.wav",
+    "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+    "profile": "C",
+    "tuning": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 0,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500
+    },
+    "params": {
+      "25": 2.64
+    },
+    "gain_db": 21.85313499438971,
+    "channels": 1,
+    "rate": 44100,
+    "sequence": [
+      {
+        "note": 60,
+        "velocity": 60,
+        "start_s": 0.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 60,
+        "velocity": 84,
+        "start_s": 4.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 60,
+        "velocity": 124,
+        "start_s": 8.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 65,
+        "velocity": 60,
+        "start_s": 13.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 65,
+        "velocity": 84,
+        "start_s": 17.6,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 65,
+        "velocity": 124,
+        "start_s": 22.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 67,
+        "velocity": 60,
+        "start_s": 26.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 67,
+        "velocity": 84,
+        "start_s": 30.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 67,
+        "velocity": 124,
+        "start_s": 35.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 60,
+        "start_s": 39.6,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 84,
+        "start_s": 44.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 124,
+        "start_s": 48.4,
+        "hold_s": 4,
+        "release_s": 0
+      }
+    ],
+    "peak": 0.472262350178395,
+    "wav_sha256": "333587ed587a4d888a5dbc64a3ac44bd02ebb3b60de178dd2a345f94c9bbca7d",
+    "policy": "Mono left, common fixed gain across candidate and baseline; no per-note normalization. Intensity clips held throughout; long clips include note-off."
+  },
+  {
+    "path": "C:\\SHARED\\Modelo-13\\C-anterior-agudos-sostenidas-12s.wav",
+    "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+    "profile": "C",
+    "tuning": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 0,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500
+    },
+    "params": {
+      "25": 2.64
+    },
+    "gain_db": 21.85313499438971,
+    "channels": 1,
+    "rate": 44100,
+    "sequence": [
+      {
+        "note": 72,
+        "velocity": 124,
+        "start_s": 0.0,
+        "hold_s": 12,
+        "release_s": 2
+      },
+      {
+        "note": 79,
+        "velocity": 124,
+        "start_s": 14.4,
+        "hold_s": 12,
+        "release_s": 2
+      },
+      {
+        "note": 84,
+        "velocity": 124,
+        "start_s": 28.8,
+        "hold_s": 12,
+        "release_s": 2
+      },
+      {
+        "note": 91,
+        "velocity": 124,
+        "start_s": 43.2,
+        "hold_s": 12,
+        "release_s": 2
+      },
+      {
+        "note": 96,
+        "velocity": 124,
+        "start_s": 57.6,
+        "hold_s": 12,
+        "release_s": 2
+      }
+    ],
+    "peak": 0.5038934946060181,
+    "wav_sha256": "3f188dbce61f7bfed00dfdc43245c490b42278835218a784441c09efdd4b8900",
+    "policy": "Mono left, common fixed gain across candidate and baseline; no per-note normalization. Intensity clips held throughout; long clips include note-off."
+  },
+  {
+    "path": "C:\\SHARED\\Modelo-13\\Modelo-13-agudos-intensidades.wav",
+    "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+    "profile": "Modelo-13",
+    "tuning": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0002,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0.05,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 1,
+      "STRING_STIFFNESS_SPREAD": 0.0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500,
+      "JOINT_HAMMER_CONTACT": 1,
+      "JOINT_CONTACT_DT_S": 2e-06,
+      "JOINT_CONTACT_TOP_HZ": 8000.0,
+      "HAMMER_STRING_HEIGHT_SPREAD_M": 8e-05,
+      "UNISON_TREBLE_WIDTH_RATIO": 1
+    },
+    "params": {
+      "25": 2.64
+    },
+    "gain_db": 21.85313499438971,
+    "channels": 1,
+    "rate": 44100,
+    "sequence": [
+      {
+        "note": 72,
+        "velocity": 60,
+        "start_s": 0.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 84,
+        "start_s": 4.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 124,
+        "start_s": 8.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 79,
+        "velocity": 60,
+        "start_s": 13.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 79,
+        "velocity": 84,
+        "start_s": 17.6,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 79,
+        "velocity": 124,
+        "start_s": 22.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 84,
+        "velocity": 60,
+        "start_s": 26.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 84,
+        "velocity": 84,
+        "start_s": 30.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 84,
+        "velocity": 124,
+        "start_s": 35.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 91,
+        "velocity": 60,
+        "start_s": 39.6,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 91,
+        "velocity": 84,
+        "start_s": 44.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 91,
+        "velocity": 124,
+        "start_s": 48.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 96,
+        "velocity": 60,
+        "start_s": 52.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 96,
+        "velocity": 84,
+        "start_s": 57.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 96,
+        "velocity": 124,
+        "start_s": 61.6,
+        "hold_s": 4,
+        "release_s": 0
+      }
+    ],
+    "peak": 0.5249115403160463,
+    "wav_sha256": "5fee8fc370c9649964500fcff07210c98ea37d3b02f176ebc1d9f5462aa9bd8c",
+    "policy": "Mono left, common fixed gain across candidate and baseline; no per-note normalization. Intensity clips held throughout; long clips include note-off."
+  },
+  {
+    "path": "C:\\SHARED\\Modelo-13\\Modelo-13-medios-intensidades.wav",
+    "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+    "profile": "Modelo-13",
+    "tuning": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0002,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0.05,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 1,
+      "STRING_STIFFNESS_SPREAD": 0.0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500,
+      "JOINT_HAMMER_CONTACT": 1,
+      "JOINT_CONTACT_DT_S": 2e-06,
+      "JOINT_CONTACT_TOP_HZ": 8000.0,
+      "HAMMER_STRING_HEIGHT_SPREAD_M": 8e-05,
+      "UNISON_TREBLE_WIDTH_RATIO": 1
+    },
+    "params": {
+      "25": 2.64
+    },
+    "gain_db": 21.85313499438971,
+    "channels": 1,
+    "rate": 44100,
+    "sequence": [
+      {
+        "note": 60,
+        "velocity": 60,
+        "start_s": 0.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 60,
+        "velocity": 84,
+        "start_s": 4.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 60,
+        "velocity": 124,
+        "start_s": 8.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 65,
+        "velocity": 60,
+        "start_s": 13.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 65,
+        "velocity": 84,
+        "start_s": 17.6,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 65,
+        "velocity": 124,
+        "start_s": 22.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 67,
+        "velocity": 60,
+        "start_s": 26.4,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 67,
+        "velocity": 84,
+        "start_s": 30.8,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 67,
+        "velocity": 124,
+        "start_s": 35.2,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 60,
+        "start_s": 39.6,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 84,
+        "start_s": 44.0,
+        "hold_s": 4,
+        "release_s": 0
+      },
+      {
+        "note": 72,
+        "velocity": 124,
+        "start_s": 48.4,
+        "hold_s": 4,
+        "release_s": 0
+      }
+    ],
+    "peak": 0.48406710133033476,
+    "wav_sha256": "b9f0373c52df6950c44169fb6110b354976c968eec1f999e9ac6cf86814eb401",
+    "policy": "Mono left, common fixed gain across candidate and baseline; no per-note normalization. Intensity clips held throughout; long clips include note-off."
+  },
+  {
+    "path": "C:\\SHARED\\Modelo-13\\Modelo-13-agudos-sostenidas-12s.wav",
+    "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+    "profile": "Modelo-13",
+    "tuning": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0002,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0.05,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 1,
+      "STRING_STIFFNESS_SPREAD": 0.0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500,
+      "JOINT_HAMMER_CONTACT": 1,
+      "JOINT_CONTACT_DT_S": 2e-06,
+      "JOINT_CONTACT_TOP_HZ": 8000.0,
+      "HAMMER_STRING_HEIGHT_SPREAD_M": 8e-05,
+      "UNISON_TREBLE_WIDTH_RATIO": 1
+    },
+    "params": {
+      "25": 2.64
+    },
+    "gain_db": 21.85313499438971,
+    "channels": 1,
+    "rate": 44100,
+    "sequence": [
+      {
+        "note": 72,
+        "velocity": 124,
+        "start_s": 0.0,
+        "hold_s": 12,
+        "release_s": 2
+      },
+      {
+        "note": 79,
+        "velocity": 124,
+        "start_s": 14.4,
+        "hold_s": 12,
+        "release_s": 2
+      },
+      {
+        "note": 84,
+        "velocity": 124,
+        "start_s": 28.8,
+        "hold_s": 12,
+        "release_s": 2
+      },
+      {
+        "note": 91,
+        "velocity": 124,
+        "start_s": 43.2,
+        "hold_s": 12,
+        "release_s": 2
+      },
+      {
+        "note": 96,
+        "velocity": 124,
+        "start_s": 57.6,
+        "hold_s": 12,
+        "release_s": 2
+      }
+    ],
+    "peak": 0.5249121189117432,
+    "wav_sha256": "7da7f1de63cf9a1ece9def07caa8451512b7a2d251d0cb66fcd3204218ae1ac9",
+    "policy": "Mono left, common fixed gain across candidate and baseline; no per-note normalization. Intensity clips held throughout; long clips include note-off."
+  }
+]

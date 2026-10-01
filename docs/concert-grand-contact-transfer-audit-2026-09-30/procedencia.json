@@ -1,0 +1,101 @@
+{
+  "commit": "2574bc3825bec08eb8895e9a054612474773d169",
+  "raw_reference_report_sha256": "126fb1ea44233312cf346f453b4a2e82aa6fa48496dc1a29dc07c75353bb8ee2",
+  "files_sha256": {
+    "tools/probe-concert-grand-transfer.py": "3044a1a02335992a40d18502ce30beba85c11ab42ed4b429a40f23235fb0abff",
+    "tools/audit-concert-grand-pressure-observer.py": "4c1c3ec619f52cfbda4af1c60591feb471ed5736d27bc31c0949409211dc30ae",
+    "tools/report-concert-grand-transfer-audit.py": "f438e41447c1749a043f2dc6fb7ce3ccbb7c631330cad6ae42bb1c7e98620c63",
+    "tools/validate-concert-grand-contact-candidate.py": "f8bf7894b8117c212a2f914a8ce212aa99a1cda9274a691a231376449dc068bb",
+    "tools/render-concert-grand-contact-middles.py": "74e459128ae092dc0b9a5857d43ba89c65400ca88e1253c603cac1ea3cb678b5",
+    "tools/plot-concert-grand-contact-validation.py": "6a5c709ded7480a828a534fd365a4710654dcaac535fd0402cb7b934512e4dc8",
+    "tools/evaluate-concert-grand-full-sound.py": "f4f1a3d87bad44292e94ddfe835ed9c2482f7a1128db1d2528c9eb9865b32c91",
+    "local/concert-grand-coherent-unison/src/bridge.rs": "ed206ef92368f01267c35c582292e3d8078811df31c075950dd33291777fe9e6",
+    "local/concert-grand-coherent-unison/src/contact_pulse.rs": "2ae423baa230ee233ea080f05caa84636bd786990acba5d1c87b87120ea02b2a",
+    "local/concert-grand-coherent-unison/src/lib.rs": "f425162909c17411eb08da7718964c866aadec41c68d2d88408ad2965fd997dc",
+    "local/concert-grand-coherent-unison/src/math.rs": "8fcbef468ccce24de475503793ee778f715f419c31bb2300d0cc0ffd4bd472ee",
+    "local/concert-grand-coherent-unison/src/mechanical.rs": "068021ffb035eca8a9a41a79fd1e8fb8353391759cbc2661cd45bc6d8c71b68c",
+    "local/concert-grand-coherent-unison/src/midrange.rs": "7b6cf1725d6b623d49bf36a526771a5d722e4151555117e3efc684193d6a3d7b",
+    "local/concert-grand-coherent-unison/src/radiation.rs": "b99a222229f7d2688b049824ef3c46fbfcdde393da4a245c595cb9f18fab032a",
+    "local/concert-grand-coherent-unison/src/spatial_unison.rs": "0923c5a817fdc47df4322e92d136e83fd96eb9154d780036697cc5e62051a8f6",
+    "local/concert-grand-coherent-unison/src/trio_contact.rs": "9a3f5984b157523c3a1f65435296cc7746edc445f96a063d9effe0df7d47cc6e",
+    "local/concert-grand-coherent-unison/src/unison.rs": "c99c86f5f7c634b9077aa44962cf6fa558f4aaf65592ac5006ee6af22cbd1b3d",
+    "local/concert-grand-coherent-unison/Cargo.toml": "0800d3072ec9d437b8b3989e292bd334a4ecf1622304a2add783e8ef153c7db5",
+    "local/concert-grand-coherent-unison/Cargo.lock": "428eaf9992e9cd74570aca732341b6b28adebe2219f0b48ae23502336ef23de4",
+    "crates/rackforge-plugin-sdk/src/lib.rs": "c867bdf9fb97eee1267442ebcce0a3f47e3b5aba68d28fcc05244ec5bdd89787",
+    "crates/rackforge-plugin-sdk/src/wide_midi_probe_test.rs": "37bb6f0e0dcd35bb559b5326dafe7b47b3e291336962363bacac989d71048cf4",
+    "crates/rackforge-plugin-sdk/Cargo.toml": "e0186c4710ea2697f96d55dac8532db3711407450a220c401ec86cc5745b0b56",
+    "local/concert-grand-transfer-audit/rate-felt/renderer.exe": "546a4b45f8e1b819ed7128a1d510389bf8bcb1bce60408be26d76ff2eae41ffb",
+    "local/concert-grand-transfer-audit/rate-felt/model.json": "331000ab918f99a0282d75307a2c91df6e3eb04ce95dd8e642fea6b5bc938547",
+    "local/concert-grand-transfer-audit/rate-felt/profiles.json": "caa509ec89c25f09a26405cbbad05abdf96978b9b32d160f6cb37b1a98c5b44c"
+  },
+  "archive_sha256": "5281c58998deae597a4664a7d31b0822d27471649e735e439a86c8ffc2a7dab4",
+  "production_selected": false,
+  "native_tests": {
+    "passed": 111,
+    "failed": 0,
+    "ignored": 75
+  },
+  "candidate_source_parity": {
+    "60:60": 0.0,
+    "60:124": 0.0,
+    "67:124": 0.0,
+    "96:124": 0.0
+  },
+  "baseline_parity": {
+    "60:60": 0.0,
+    "60:124": 0.0,
+    "72:124": 0.0,
+    "96:124": 0.0
+  },
+  "audio_checks": {
+    "14B-anterior-medios.wav": {
+      "sha256": "1a5cdb80aabd9b97a38a8e7e22f3793f8ccc37c75f8f5ad116cb16d6ceeaa73d",
+      "rate": 44100,
+      "channels": 2,
+      "frames": 1799280,
+      "peak": 0.653702974319458
+    },
+    "14B-anterior.wav": {
+      "sha256": "c62272a55de1d6f3de4106e7f70093aee9a85d13684b97bb539f421c28d6625f",
+      "rate": 44100,
+      "channels": 2,
+      "frames": 1940400,
+      "peak": 0.8499999046325684
+    },
+    "Fieltro-experimental-medios.wav": {
+      "sha256": "6eedf20951b9938786527cd337eb9f58609cfc4d806def80c7ea2483ff6ab92b",
+      "rate": 44100,
+      "channels": 2,
+      "frames": 1799280,
+      "peak": 0.6574496030807495
+    },
+    "Fieltro-experimental.wav": {
+      "sha256": "758d2ee03c50f4529247ffd7e5b1f83f3775c404c1d67083b703fc5d914c982e",
+      "rate": 44100,
+      "channels": 2,
+      "frames": 1940400,
+      "peak": 0.7868213653564453
+    },
+    "Radiacion-prueba-descartada.wav": {
+      "sha256": "b0dce59d4154d3bc94e24080c69bb5dce9a29a3fa89332cf3e7ed1ca7b869d11",
+      "rate": 44100,
+      "channels": 2,
+      "frames": 1940400,
+      "peak": 0.6915168762207031
+    },
+    "Steinway-original.wav": {
+      "sha256": "a74b9a23d2e0719dc9b7fb3711772bbb27a2c10fa23a0b990ff15b770838c78f",
+      "rate": 44100,
+      "channels": 2,
+      "frames": 1940400,
+      "peak": 0.6977263689041138
+    },
+    "Steinway-sampler-medios.wav": {
+      "sha256": "5411bd2192e351ea5758369baeef272fe94d9e912ef7da0dd19fdc87cc9a0f02",
+      "rate": 44100,
+      "channels": 2,
+      "frames": 1799280,
+      "peak": 0.4994744062423706
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "version": "0.172.0",
+  "max_absolute_error": 0.0,
+  "reference_binary_sha256": "5c38ff38cff1e597462a602b5dc5185fa1ae7738217e319295c4612066c0dc1f",
+  "production_binary_sha256": "7529c753dd284a452274d0a4e449a6a7995ed0c9dcbf2871b916fe07d37423f9",
+  "profile_sha256": "afce0a5938de8d3814d3570b918be42414fc4a5050ecc1ecd2b4bca68f428a12",
+  "frames": 176400,
+  "rate": 44100,
+  "peak": 0.2634373605251312,
+  "gain_db": 25.120884443707872,
+  "scope": "Factory default, same MIDI with pedal and restrikes at 256 frames. Existing ceiling only above 0.9."
+}

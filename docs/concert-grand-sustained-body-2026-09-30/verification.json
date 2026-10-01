@@ -1,0 +1,212 @@
+{
+  "stress": [
+    {
+      "rate": 44100,
+      "block_frames": 256,
+      "event_count": 529,
+      "finite": true,
+      "raw_peak": 0.06270543485879898,
+      "late_to_active_power_db": -119.65017101125662
+    },
+    {
+      "rate": 48000,
+      "block_frames": 256,
+      "event_count": 529,
+      "finite": true,
+      "raw_peak": 0.0627182275056839,
+      "late_to_active_power_db": -119.37751081444185
+    }
+  ],
+  "files": {
+    "agudos-intensidades": {
+      "path": "C:\\SHARED\\Modelo-14\\Modelo-14-agudos-intensidades.wav",
+      "sha256": "54197cfef26762a753046a88bb481f2080d53f015c73ec57b62fe924b3160c4f",
+      "duration_s": 66.0,
+      "rate": 44100,
+      "channels": 1,
+      "channel": "native left",
+      "subtype": "PCM_24",
+      "pairs": [
+        [
+          72,
+          60
+        ],
+        [
+          72,
+          84
+        ],
+        [
+          72,
+          124
+        ],
+        [
+          79,
+          60
+        ],
+        [
+          79,
+          84
+        ],
+        [
+          79,
+          124
+        ],
+        [
+          84,
+          60
+        ],
+        [
+          84,
+          84
+        ],
+        [
+          84,
+          124
+        ],
+        [
+          91,
+          60
+        ],
+        [
+          91,
+          84
+        ],
+        [
+          91,
+          124
+        ],
+        [
+          96,
+          60
+        ],
+        [
+          96,
+          84
+        ],
+        [
+          96,
+          124
+        ]
+      ],
+      "hold_s": 2.5,
+      "release_s": 1.5,
+      "gap_s": 0.4,
+      "gain_db": 26.491841803950358,
+      "common_trim_db": 0.0,
+      "peak": 0.6536277391529969,
+      "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+      "model_sha256": "db24d0406358207a537d7f06af4fb3631d7653ddc111bf621a6ba2ba2e5e4ed7",
+      "note_off_policy": "Actual MIDI note-off; high keys without dampers continue their natural decay."
+    },
+    "medios-intensidades": {
+      "path": "C:\\SHARED\\Modelo-14\\Modelo-14-medios-intensidades.wav",
+      "sha256": "5d6b984af770772f542dab8a1dd43ae379c70b9dde342821304dea7194150daf",
+      "duration_s": 52.8,
+      "rate": 44100,
+      "channels": 1,
+      "channel": "native left",
+      "subtype": "PCM_24",
+      "pairs": [
+        [
+          60,
+          60
+        ],
+        [
+          60,
+          84
+        ],
+        [
+          60,
+          124
+        ],
+        [
+          65,
+          60
+        ],
+        [
+          65,
+          84
+        ],
+        [
+          65,
+          124
+        ],
+        [
+          67,
+          60
+        ],
+        [
+          67,
+          84
+        ],
+        [
+          67,
+          124
+        ],
+        [
+          72,
+          60
+        ],
+        [
+          72,
+          84
+        ],
+        [
+          72,
+          124
+        ]
+      ],
+      "hold_s": 2.5,
+      "release_s": 1.5,
+      "gap_s": 0.4,
+      "gain_db": 26.491841803950358,
+      "common_trim_db": 0.0,
+      "peak": 0.6495039264245639,
+      "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+      "model_sha256": "db24d0406358207a537d7f06af4fb3631d7653ddc111bf621a6ba2ba2e5e4ed7",
+      "note_off_policy": "Actual MIDI note-off; high keys without dampers continue their natural decay."
+    },
+    "agudos-sostenidas-12s": {
+      "path": "C:\\SHARED\\Modelo-14\\Modelo-14-agudos-sostenidas-12s.wav",
+      "sha256": "a29586172203fc6c2f4bea0b19b797b9d0628562087e75895d0c3633d08bde55",
+      "duration_s": 72.0,
+      "rate": 44100,
+      "channels": 1,
+      "channel": "native left",
+      "subtype": "PCM_24",
+      "pairs": [
+        [
+          72,
+          124
+        ],
+        [
+          79,
+          124
+        ],
+        [
+          84,
+          124
+        ],
+        [
+          91,
+          124
+        ],
+        [
+          96,
+          124
+        ]
+      ],
+      "hold_s": 12,
+      "release_s": 2,
+      "gap_s": 0.4,
+      "gain_db": 26.491841803950358,
+      "common_trim_db": 0.0,
+      "peak": 0.6536277391529969,
+      "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+      "model_sha256": "db24d0406358207a537d7f06af4fb3631d7653ddc111bf621a6ba2ba2e5e4ed7",
+      "note_off_policy": "Actual MIDI note-off; high keys without dampers continue their natural decay."
+    }
+  },
+  "global_trim_db": 0.0,
+  "production_plugin_modified": false
+}

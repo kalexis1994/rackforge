@@ -1,0 +1,137 @@
+{
+  "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+  "profile": {
+    "PHYSICAL_BRIDGE": 1,
+    "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+    "PHYSICAL_PRESSURE_SCALE": 3,
+    "PHYSICAL_BED_ROUTE": 1,
+    "BOARD_LOSS_FACTOR": 0.046,
+    "FELT_K_A0": 39200000,
+    "STULOV_TAU_S": 0.0002,
+    "BED_MIX": 2.5,
+    "FELT_TREBLE_DECADES": 2,
+    "CONTACT_BOARD_GAIN": 0.006,
+    "CONTACT_BOARD_CORNER": 180,
+    "UNISON_WIDTH": 0.05,
+    "POLARISATION_CENTS": 0,
+    "COHERENT_UNISON": 1,
+    "STRING_STIFFNESS_SPREAD": 0.0,
+    "REACTIVE_BRIDGE": 0,
+    "STRING_TUNING_CENTER": 0.5,
+    "SPATIAL_UNISON_GAP_M": 0,
+    "MECHANICAL_RADIATION": 1,
+    "MECHANICAL_EMISSION_GAIN": 0.125,
+    "MECHANICAL_CASE_CORNER": 1500,
+    "JOINT_HAMMER_CONTACT": 1,
+    "JOINT_CONTACT_DT_S": 2e-06,
+    "JOINT_CONTACT_TOP_HZ": 8000.0,
+    "HAMMER_STRING_HEIGHT_SPREAD_M": 8e-05,
+    "UNISON_TREBLE_WIDTH_RATIO": 1
+  },
+  "reference_step_us": 1,
+  "candidate_step_us": 2,
+  "window_s": [
+    0,
+    0.3
+  ],
+  "bands_hz": [
+    [
+      60,
+      300
+    ],
+    [
+      300,
+      1200
+    ],
+    [
+      1200,
+      6000
+    ],
+    [
+      6000,
+      11000
+    ]
+  ],
+  "rows": [
+    {
+      "note": 60,
+      "velocity": 60,
+      "band_delta_db": [
+        -0.0018620263077325655,
+        0.0038851648317747315,
+        -0.01740785518607541,
+        -0.012176923087900065
+      ]
+    },
+    {
+      "note": 60,
+      "velocity": 124,
+      "band_delta_db": [
+        -0.005538831886155301,
+        0.0014540024556729603,
+        0.007627654327049898,
+        -0.06579261271785017
+      ]
+    },
+    {
+      "note": 72,
+      "velocity": 60,
+      "band_delta_db": [
+        0.00026835070399550435,
+        -0.0005697336852519643,
+        0.01277982579116949,
+        -0.07717063028381277
+      ]
+    },
+    {
+      "note": 72,
+      "velocity": 124,
+      "band_delta_db": [
+        -0.0014687578592588162,
+        -0.0010364563189791368,
+        0.005375683199906338,
+        0.07605815602694418
+      ]
+    },
+    {
+      "note": 84,
+      "velocity": 60,
+      "band_delta_db": [
+        0.0023734232958316846,
+        0.00035145488069026617,
+        0.002719902204979278,
+        0.010283277523245836
+      ]
+    },
+    {
+      "note": 84,
+      "velocity": 124,
+      "band_delta_db": [
+        -0.0005654456044448036,
+        0.0004125710499626982,
+        -0.011818457981866532,
+        0.02699094120300266
+      ]
+    },
+    {
+      "note": 96,
+      "velocity": 60,
+      "band_delta_db": [
+        0.006902794127401171,
+        0.001273056028702254,
+        -0.0027201257644979193,
+        -0.07296697203408245
+      ]
+    },
+    {
+      "note": 96,
+      "velocity": 124,
+      "band_delta_db": [
+        -0.0009466661055983776,
+        0.00028951971138675627,
+        -0.002483181190565264,
+        -0.1029271233861196
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1805 @@
+{
+  "policy": "Audit long unison tails, including treble partials up to 10 kHz.\n\nDemodulate before downsampling: decimating the audio first would hide the\nupper partials of C6/C7. A common baseline mask and fixed gain are used.\nRecovered envelope dips are diagnostics, not independent audible defects.\n",
+  "audition": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coherent-unison\\sustain14-final\\audition-audit.json",
+  "binary_sha256": "e0201aa2a39b844717daf6b963bfc144c2079498e3b92662a3d5b0750e242d2d",
+  "profiles": {
+    "C": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 0,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500
+    },
+    "E2": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 1,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 1,
+      "STRING_STIFFNESS_SPREAD": 0.005,
+      "REACTIVE_BRIDGE": 1,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500,
+      "UNISON_TREBLE_WIDTH_RATIO": 1,
+      "UNISON_EXTRA_LOSS": 2
+    }
+  },
+  "notes": [
+    60,
+    65,
+    67,
+    72,
+    79,
+    84,
+    91,
+    96
+  ],
+  "velocity": 124,
+  "gain_db": 26.491841803950358,
+  "results": {
+    "C": {
+      "60": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 261.4265441894531,
+            "initial_db": -18.709898883695256,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.3577728271484,
+            "initial_db": -22.647183669169557,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.2890014648438,
+            "initial_db": -27.182117854303733,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1047.5566864013672,
+            "initial_db": -35.31622660492011,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1310.665512084961,
+            "initial_db": -40.99488099724179,
+            "notches": [
+              {
+                "time_s": 0.5786848072562358,
+                "depth_db": 5.58469562027733
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 1573.6061096191406,
+            "initial_db": -36.8807027864642,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 1837.5560760498047,
+            "initial_db": -32.31674829916837,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2102.347183227539,
+            "initial_db": -44.33759017172919,
+            "notches": []
+          },
+          {
+            "harmonic": 9,
+            "frequency_hz": 2368.147659301758,
+            "initial_db": -41.409097818314436,
+            "notches": []
+          },
+          {
+            "harmonic": 11,
+            "frequency_hz": 2902.6084899902344,
+            "initial_db": -45.3425822590531,
+            "notches": []
+          },
+          {
+            "harmonic": 12,
+            "frequency_hz": 3171.268844604492,
+            "initial_db": -48.34330398855084,
+            "notches": []
+          },
+          {
+            "harmonic": 13,
+            "frequency_hz": 3441.9479370117188,
+            "initial_db": -46.64754382273006,
+            "notches": []
+          },
+          {
+            "harmonic": 14,
+            "frequency_hz": 3713.8046264648438,
+            "initial_db": -38.27521806759893,
+            "notches": []
+          },
+          {
+            "harmonic": 15,
+            "frequency_hz": 3987.0071411132812,
+            "initial_db": -48.16642977852004,
+            "notches": []
+          },
+          {
+            "harmonic": 16,
+            "frequency_hz": 4262.2283935546875,
+            "initial_db": -48.927028884993206,
+            "notches": []
+          }
+        ],
+        "notches_by_interval": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -13.994407814484182,
+          -24.625917612312872,
+          -35.27088587472205,
+          -53.07085503296975,
+          -79.0965363199411
+        ]
+      },
+      "65": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 349.24163818359375,
+            "initial_db": -22.825968453460362,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 698.6515045166016,
+            "initial_db": -25.463981506850967,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1048.3978271484375,
+            "initial_db": -36.896386115239665,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1398.8170623779297,
+            "initial_db": -32.16619845820023,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1749.9092102050781,
+            "initial_db": -28.90604430616834,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2101.842498779297,
+            "initial_db": -38.29033097196812,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2454.953384399414,
+            "initial_db": -42.46006501367992,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2809.4100952148438,
+            "initial_db": -47.093254524418526,
+            "notches": []
+          },
+          {
+            "harmonic": 9,
+            "frequency_hz": 3165.044403076172,
+            "initial_db": -47.52980851570443,
+            "notches": []
+          },
+          {
+            "harmonic": 10,
+            "frequency_hz": 3522.6974487304688,
+            "initial_db": -44.60244958248381,
+            "notches": []
+          },
+          {
+            "harmonic": 11,
+            "frequency_hz": 3882.0327758789062,
+            "initial_db": -37.99017884667282,
+            "notches": []
+          },
+          {
+            "harmonic": 12,
+            "frequency_hz": 4243.218612670898,
+            "initial_db": -51.25746235193459,
+            "notches": []
+          },
+          {
+            "harmonic": 13,
+            "frequency_hz": 4606.7596435546875,
+            "initial_db": -36.3501181839098,
+            "notches": []
+          },
+          {
+            "harmonic": 14,
+            "frequency_hz": 4972.487640380859,
+            "initial_db": -51.677473645798045,
+            "notches": []
+          },
+          {
+            "harmonic": 15,
+            "frequency_hz": 5340.907287597656,
+            "initial_db": -51.22286725769215,
+            "notches": []
+          },
+          {
+            "harmonic": 16,
+            "frequency_hz": 5709.831619262695,
+            "initial_db": -39.22411529231909,
+            "notches": []
+          }
+        ],
+        "notches_by_interval": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -16.860232703568528,
+          -24.739282402837738,
+          -33.21244165596089,
+          -45.57619233600394,
+          -64.70655860918956
+        ]
+      },
+      "67": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 391.9715881347656,
+            "initial_db": -16.801386913908267,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 784.2796325683594,
+            "initial_db": -18.838287961275036,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1176.9241333007812,
+            "initial_db": -33.89640908281049,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1569.400405883789,
+            "initial_db": -44.58538939497578,
+            "notches": [
+              {
+                "time_s": 0.17959183673469387,
+                "depth_db": 3.565839725555449
+              },
+              {
+                "time_s": 1.127437641723356,
+                "depth_db": 8.08636721426788
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1964.5683288574219,
+            "initial_db": -39.20476386334411,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2360.072708129883,
+            "initial_db": -35.61888653300444,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2756.9229125976562,
+            "initial_db": -36.62913224818705,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 3155.118942260742,
+            "initial_db": -41.17589022485575,
+            "notches": []
+          },
+          {
+            "harmonic": 9,
+            "frequency_hz": 3555.333709716797,
+            "initial_db": -46.71692441420345,
+            "notches": []
+          },
+          {
+            "harmonic": 13,
+            "frequency_hz": 5178.230667114258,
+            "initial_db": -48.91732685301668,
+            "notches": []
+          },
+          {
+            "harmonic": 15,
+            "frequency_hz": 6006.586074829102,
+            "initial_db": -49.193685846722694,
+            "notches": []
+          }
+        ],
+        "notches_by_interval": [
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -11.715119471593685,
+          -25.44515492789904,
+          -45.817803941307716,
+          -79.74343209018707,
+          -119.6932064324053
+        ]
+      },
+      "72": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.3577728271484,
+            "initial_db": -28.992540935866135,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1047.220230102539,
+            "initial_db": -32.44203387521247,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1571.755599975586,
+            "initial_db": -44.67841434691132,
+            "notches": [
+              {
+                "time_s": 0.13968253968253969,
+                "depth_db": 4.217424235682714
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 2095.9545135498047,
+            "initial_db": -47.77692300688139,
+            "notches": [
+              {
+                "time_s": 0.16961451247165532,
+                "depth_db": 5.553664438041366
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 2624.190902709961,
+            "initial_db": -50.82528392398049,
+            "notches": [
+              {
+                "time_s": 0.4639455782312925,
+                "depth_db": 3.8975158575299957
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 3154.109573364258,
+            "initial_db": -39.823553616637945,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 3685.7105255126953,
+            "initial_db": -48.48687600433926,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 4220.5078125,
+            "initial_db": -45.18976346417459,
+            "notches": []
+          },
+          {
+            "harmonic": 9,
+            "frequency_hz": 4758.164978027344,
+            "initial_db": -53.23446852397984,
+            "notches": []
+          },
+          {
+            "harmonic": 10,
+            "frequency_hz": 5299.354934692383,
+            "initial_db": -52.03874591010347,
+            "notches": []
+          },
+          {
+            "harmonic": 11,
+            "frequency_hz": 5844.414138793945,
+            "initial_db": -45.075873351287605,
+            "notches": []
+          },
+          {
+            "harmonic": 12,
+            "frequency_hz": 6393.847274780273,
+            "initial_db": -43.37444733242644,
+            "notches": []
+          },
+          {
+            "harmonic": 13,
+            "frequency_hz": 6947.990798950195,
+            "initial_db": -60.74022755385155,
+            "notches": []
+          },
+          {
+            "harmonic": 14,
+            "frequency_hz": 7507.181167602539,
+            "initial_db": -51.590669733750346,
+            "notches": []
+          }
+        ],
+        "notches_by_interval": [
+          3,
+          0,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -23.85273325481302,
+          -30.76891284743447,
+          -39.43647149962067,
+          -54.59113693294641,
+          -79.3162885063553
+        ]
+      },
+      "79": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 784.4478607177734,
+            "initial_db": -14.078971709274398,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1569.400405883789,
+            "initial_db": -34.224814182105035,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 2356.8763732910156,
+            "initial_db": -36.330273544408136,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 3147.043991088867,
+            "initial_db": -39.51332463653766,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 3941.2490844726562,
+            "initial_db": -48.888895053889485,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 4740.332794189453,
+            "initial_db": -41.29873881025458,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 5544.631576538086,
+            "initial_db": -37.23019961382214,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 6356.164169311523,
+            "initial_db": -39.719997491718544,
+            "notches": []
+          }
+        ],
+        "notches_by_interval": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -11.486491076469328,
+          -36.329743776982006,
+          -62.59082575668191,
+          -102.93717478877534,
+          -133.45027250766884
+        ]
+      },
+      "84": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.3884582519531,
+            "initial_db": -22.134519793301294,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2096.795654296875,
+            "initial_db": -43.912333952367476,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3149.735641479492,
+            "initial_db": -45.38011906694091,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 4208.731842041016,
+            "initial_db": -49.40262257371938,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 5275.298309326172,
+            "initial_db": -55.57417786467023,
+            "notches": [
+              {
+                "time_s": 0.528798185941043,
+                "depth_db": 9.369201330609243
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 7440.394592285156,
+            "initial_db": -55.993829948865795,
+            "notches": [
+              {
+                "time_s": 0.5736961451247166,
+                "depth_db": 3.2194140650108523
+              }
+            ]
+          }
+        ],
+        "notches_by_interval": [
+          0,
+          2,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -19.091100326169762,
+          -40.60264055993609,
+          -74.74707779463725,
+          -121.6854568731028,
+          -138.32532916955748
+        ]
+      },
+      "91": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1570.4097747802734,
+            "initial_db": -34.02321008764299,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 3146.539306640625,
+            "initial_db": -43.679918126547676,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 4734.108352661133,
+            "initial_db": -46.67893736247437,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 6338.668441772461,
+            "initial_db": -44.64193459057361,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 7966.107559204102,
+            "initial_db": -46.88157102387034,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 9621.472549438477,
+            "initial_db": -63.06585238731014,
+            "notches": []
+          }
+        ],
+        "notches_by_interval": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -30.026372082890745,
+          -59.66289339474848,
+          -92.31335585168677,
+          -144.4651608937129,
+          -174.01809094262853
+        ]
+      },
+      "96": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 2095.2816009521484,
+            "initial_db": -27.26131944691089,
+            "notches": [
+              {
+                "time_s": 0.2494331065759637,
+                "depth_db": 22.37476888917309
+              }
+            ]
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 4210.414123535156,
+            "initial_db": -45.81900213035255,
+            "notches": [
+              {
+                "time_s": 0.29931972789115646,
+                "depth_db": 8.995222112197013
+              },
+              {
+                "time_s": 0.44399092970521536,
+                "depth_db": 7.379398542060926
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 6349.266815185547,
+            "initial_db": -58.07896240672101,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 8527.316665649414,
+            "initial_db": -45.27940048039164,
+            "notches": []
+          }
+        ],
+        "notches_by_interval": [
+          3,
+          0,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -25.435537673392233,
+          -48.53953947433979,
+          -80.46643510833118,
+          -137.30386520658615,
+          -194.3110930539827
+        ]
+      }
+    },
+    "E2": {
+      "60": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 261.4265441894531,
+            "initial_db": -25.968972253800352,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.3577728271484,
+            "initial_db": -25.2801793610378,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.2890014648438,
+            "initial_db": -29.830552822334532,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1047.5566864013672,
+            "initial_db": -40.937071367222615,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1310.665512084961,
+            "initial_db": -41.879946548938285,
+            "notches": [
+              {
+                "time_s": 0.3691609977324263,
+                "depth_db": 9.547162638287354
+              },
+              {
+                "time_s": 1.077551020408163,
+                "depth_db": 6.522574373500795
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 1573.6061096191406,
+            "initial_db": -38.55391730178026,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 1837.5560760498047,
+            "initial_db": -34.034521762931426,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2102.347183227539,
+            "initial_db": -47.37545047295009,
+            "notches": [
+              {
+                "time_s": 0.49387755102040815,
+                "depth_db": 3.057821697317422
+              }
+            ]
+          },
+          {
+            "harmonic": 9,
+            "frequency_hz": 2368.147659301758,
+            "initial_db": -44.618931382092214,
+            "notches": [
+              {
+                "time_s": 0.364172335600907,
+                "depth_db": 9.091102977666864
+              }
+            ]
+          },
+          {
+            "harmonic": 11,
+            "frequency_hz": 2902.6084899902344,
+            "initial_db": -49.21448502410874,
+            "notches": [
+              {
+                "time_s": 0.30430839002267573,
+                "depth_db": 7.68901588099834
+              }
+            ]
+          },
+          {
+            "harmonic": 12,
+            "frequency_hz": 3171.268844604492,
+            "initial_db": -45.13083492913891,
+            "notches": [
+              {
+                "time_s": 0.31927437641723355,
+                "depth_db": 3.0635662641171635
+              }
+            ]
+          },
+          {
+            "harmonic": 13,
+            "frequency_hz": 3441.9479370117188,
+            "initial_db": -46.88425959306909,
+            "notches": [
+              {
+                "time_s": 0.27936507936507937,
+                "depth_db": 8.831908751215828
+              }
+            ]
+          },
+          {
+            "harmonic": 14,
+            "frequency_hz": 3713.8046264648438,
+            "initial_db": -41.74633226620119,
+            "notches": [
+              {
+                "time_s": 0.26938775510204077,
+                "depth_db": 11.5539586858674
+              }
+            ]
+          },
+          {
+            "harmonic": 15,
+            "frequency_hz": 3987.0071411132812,
+            "initial_db": -53.723536860149665,
+            "notches": [
+              {
+                "time_s": 0.24444444444444444,
+                "depth_db": 8.111163395736547
+              }
+            ]
+          },
+          {
+            "harmonic": 16,
+            "frequency_hz": 4262.2283935546875,
+            "initial_db": -52.06025204076103,
+            "notches": [
+              {
+                "time_s": 0.2494331065759637,
+                "depth_db": 12.796809854022975
+              }
+            ]
+          }
+        ],
+        "notches_by_interval": [
+          9,
+          1,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -18.84345083014447,
+          -32.88833878199679,
+          -39.61358667289008,
+          -48.984183364992475,
+          -65.39178180331447
+        ]
+      },
+      "65": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 349.24163818359375,
+            "initial_db": -27.462204000895035,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 698.6515045166016,
+            "initial_db": -28.441205770316337,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1048.3978271484375,
+            "initial_db": -42.02190450666012,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1398.8170623779297,
+            "initial_db": -35.13460193141717,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1749.9092102050781,
+            "initial_db": -31.17469249447194,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2101.842498779297,
+            "initial_db": -42.010721665249264,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2454.953384399414,
+            "initial_db": -44.28336712201383,
+            "notches": [
+              {
+                "time_s": 0.4390022675736961,
+                "depth_db": 3.62660278440746
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2809.4100952148438,
+            "initial_db": -51.746048051120496,
+            "notches": [
+              {
+                "time_s": 0.39410430839002264,
+                "depth_db": 8.26125305383124
+              }
+            ]
+          },
+          {
+            "harmonic": 9,
+            "frequency_hz": 3165.044403076172,
+            "initial_db": -57.37397019473658,
+            "notches": [
+              {
+                "time_s": 0.2643990929705215,
+                "depth_db": 4.898793349171271
+              },
+              {
+                "time_s": 0.4340136054421768,
+                "depth_db": 9.298028404591491
+              },
+              {
+                "time_s": 0.6435374149659864,
+                "depth_db": 4.405680721808267
+              }
+            ]
+          },
+          {
+            "harmonic": 10,
+            "frequency_hz": 3522.6974487304688,
+            "initial_db": -48.192023556956876,
+            "notches": [
+              {
+                "time_s": 0.29931972789115646,
+                "depth_db": 3.2494003802474225
+              }
+            ]
+          },
+          {
+            "harmonic": 11,
+            "frequency_hz": 3882.0327758789062,
+            "initial_db": -41.583485809136896,
+            "notches": [
+              {
+                "time_s": 0.3292517006802721,
+                "depth_db": 5.116395616105898
+              }
+            ]
+          },
+          {
+            "harmonic": 12,
+            "frequency_hz": 4243.218612670898,
+            "initial_db": -54.99515741914662,
+            "notches": [
+              {
+                "time_s": 0.3142857142857143,
+                "depth_db": 5.960829162892949
+              }
+            ]
+          },
+          {
+            "harmonic": 13,
+            "frequency_hz": 4606.7596435546875,
+            "initial_db": -40.94951441416717,
+            "notches": [
+              {
+                "time_s": 0.2893424036281179,
+                "depth_db": 14.363227290128698
+              }
+            ]
+          },
+          {
+            "harmonic": 14,
+            "frequency_hz": 4972.487640380859,
+            "initial_db": -52.834102085237035,
+            "notches": [
+              {
+                "time_s": 0.2594104308390022,
+                "depth_db": 10.484175623240631
+              }
+            ]
+          },
+          {
+            "harmonic": 15,
+            "frequency_hz": 5340.907287597656,
+            "initial_db": -53.216076568253825,
+            "notches": [
+              {
+                "time_s": 0.27936507936507937,
+                "depth_db": 21.472314820154224
+              }
+            ]
+          },
+          {
+            "harmonic": 16,
+            "frequency_hz": 5709.831619262695,
+            "initial_db": -48.07085537330391,
+            "notches": [
+              {
+                "time_s": 0.23945578231292516,
+                "depth_db": 14.330564979646653
+              }
+            ]
+          }
+        ],
+        "notches_by_interval": [
+          11,
+          1,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -20.64457365254809,
+          -34.09308701284482,
+          -40.7749618036775,
+          -49.63859028677259,
+          -62.78745698106568
+        ]
+      },
+      "67": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 391.9715881347656,
+            "initial_db": -19.83850107392843,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 784.2796325683594,
+            "initial_db": -20.737156661392607,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1176.9241333007812,
+            "initial_db": -36.38311188734131,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1569.400405883789,
+            "initial_db": -42.84624469822588,
+            "notches": [
+              {
+                "time_s": 0.1895691609977324,
+                "depth_db": 7.806968692597735
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1964.5683288574219,
+            "initial_db": -38.98440495498233,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2360.072708129883,
+            "initial_db": -41.32287999710097,
+            "notches": [
+              {
+                "time_s": 0.6585034013605442,
+                "depth_db": 4.134874053961333
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2756.9229125976562,
+            "initial_db": -38.7670356785429,
+            "notches": [
+              {
+                "time_s": 0.5487528344671202,
+                "depth_db": 4.778764619266248
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 3155.118942260742,
+            "initial_db": -49.57083800527556,
+            "notches": []
+          },
+          {
+            "harmonic": 9,
+            "frequency_hz": 3555.333709716797,
+            "initial_db": -55.56425716989574,
+            "notches": [
+              {
+                "time_s": 0.14467120181405896,
+                "depth_db": 3.529261699411258
+              },
+              {
+                "time_s": 0.45396825396825397,
+                "depth_db": 6.121690679066191
+              }
+            ]
+          },
+          {
+            "harmonic": 13,
+            "frequency_hz": 5178.230667114258,
+            "initial_db": -57.769116623148136,
+            "notches": [
+              {
+                "time_s": 0.28435374149659864,
+                "depth_db": 21.62373081381159
+              },
+              {
+                "time_s": 0.7333333333333333,
+                "depth_db": 11.382966978466655
+              },
+              {
+                "time_s": 1.2321995464852606,
+                "depth_db": 5.334597568007368
+              }
+            ]
+          },
+          {
+            "harmonic": 15,
+            "frequency_hz": 6006.586074829102,
+            "initial_db": -58.29253147934622,
+            "notches": [
+              {
+                "time_s": 0.2594104308390022,
+                "depth_db": 23.250827175755987
+              },
+              {
+                "time_s": 0.5537414965986395,
+                "depth_db": 7.263241304228458
+              },
+              {
+                "time_s": 0.7083900226757369,
+                "depth_db": 3.6008699165589917
+              },
+              {
+                "time_s": 0.9578231292517007,
+                "depth_db": 4.926358058571637
+              }
+            ]
+          }
+        ],
+        "notches_by_interval": [
+          5,
+          7,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -14.517609291874427,
+          -30.973760107585434,
+          -39.63429662794879,
+          -52.28103702565854,
+          -67.61431615016375
+        ]
+      },
+      "72": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.3577728271484,
+            "initial_db": -29.70079161282709,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1047.220230102539,
+            "initial_db": -35.70939933385914,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1571.755599975586,
+            "initial_db": -46.27552384386397,
+            "notches": [
+              {
+                "time_s": 0.7383219954648526,
+                "depth_db": 3.6575340681559325
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 2095.9545135498047,
+            "initial_db": -45.69656148269232,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 2624.190902709961,
+            "initial_db": -56.37780288991035,
+            "notches": [
+              {
+                "time_s": 0.14965986394557823,
+                "depth_db": 9.312229763687228
+              },
+              {
+                "time_s": 0.4988662131519274,
+                "depth_db": 3.371067697982454
+              },
+              {
+                "time_s": 0.6285714285714286,
+                "depth_db": 6.817266380291997
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 3154.109573364258,
+            "initial_db": -44.83441338677331,
+            "notches": [
+              {
+                "time_s": 0.309297052154195,
+                "depth_db": 3.1497859157291117
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 3685.7105255126953,
+            "initial_db": -52.53223697722382,
+            "notches": [
+              {
+                "time_s": 0.41405895691609973,
+                "depth_db": 4.721650435662369
+              },
+              {
+                "time_s": 0.5337868480725623,
+                "depth_db": 3.410680355145999
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 4220.5078125,
+            "initial_db": -51.00025671425945,
+            "notches": [
+              {
+                "time_s": 0.2095238095238095,
+                "depth_db": 23.263759155388612
+              },
+              {
+                "time_s": 0.45396825396825397,
+                "depth_db": 10.57976276807527
+              }
+            ]
+          },
+          {
+            "harmonic": 9,
+            "frequency_hz": 4758.164978027344,
+            "initial_db": -63.94931819096073,
+            "notches": [
+              {
+                "time_s": 0.19954648526077096,
+                "depth_db": 17.7454850022435
+              },
+              {
+                "time_s": 0.419047619047619,
+                "depth_db": 9.748305375420898
+              }
+            ]
+          },
+          {
+            "harmonic": 10,
+            "frequency_hz": 5299.354934692383,
+            "initial_db": -57.870562090689845,
+            "notches": [
+              {
+                "time_s": 0.1895691609977324,
+                "depth_db": 20.0095420175072
+              },
+              {
+                "time_s": 0.3292517006802721,
+                "depth_db": 3.815330385491336
+              }
+            ]
+          },
+          {
+            "harmonic": 11,
+            "frequency_hz": 5844.414138793945,
+            "initial_db": -56.18717943034629,
+            "notches": [
+              {
+                "time_s": 0.14965986394557823,
+                "depth_db": 13.724917152941728
+              },
+              {
+                "time_s": 0.3292517006802721,
+                "depth_db": 4.659143500541852
+              }
+            ]
+          },
+          {
+            "harmonic": 12,
+            "frequency_hz": 6393.847274780273,
+            "initial_db": -58.14162927117364,
+            "notches": [
+              {
+                "time_s": 0.13968253968253969,
+                "depth_db": 23.39452313320581
+              },
+              {
+                "time_s": 0.2643990929705215,
+                "depth_db": 4.516475219612325
+              }
+            ]
+          },
+          {
+            "harmonic": 13,
+            "frequency_hz": 6947.990798950195,
+            "initial_db": -75.26260844202166,
+            "notches": [
+              {
+                "time_s": 0.13469387755102039,
+                "depth_db": 6.389715820794308
+              },
+              {
+                "time_s": 0.2594104308390022,
+                "depth_db": 12.547676502997263
+              }
+            ]
+          },
+          {
+            "harmonic": 14,
+            "frequency_hz": 7507.181167602539,
+            "initial_db": -65.97073434046065,
+            "notches": [
+              {
+                "time_s": 0.10476190476190475,
+                "depth_db": 17.34132729879491
+              },
+              {
+                "time_s": 0.25442176870748295,
+                "depth_db": 10.686290878941662
+              },
+              {
+                "time_s": 0.61859410430839,
+                "depth_db": 4.867540387061936
+              }
+            ]
+          }
+        ],
+        "notches_by_interval": [
+          18,
+          4,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -25.093451267030215,
+          -35.84402336916905,
+          -43.002684717998314,
+          -54.56346934641883,
+          -72.01559011352857
+        ]
+      },
+      "79": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 784.4478607177734,
+            "initial_db": -16.181737418110355,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1569.400405883789,
+            "initial_db": -36.08656860963918,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 2356.8763732910156,
+            "initial_db": -43.64165917232769,
+            "notches": [
+              {
+                "time_s": 0.23945578231292516,
+                "depth_db": 16.405955501108878
+              },
+              {
+                "time_s": 0.6485260770975056,
+                "depth_db": 12.435660629624152
+              },
+              {
+                "time_s": 0.982766439909297,
+                "depth_db": 5.232737156270289
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 3147.043991088867,
+            "initial_db": -48.78875038471578,
+            "notches": [
+              {
+                "time_s": 0.1546485260770975,
+                "depth_db": 3.6837989465406196
+              },
+              {
+                "time_s": 0.42902494331065755,
+                "depth_db": 24.40587328304113
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 3941.2490844726562,
+            "initial_db": -59.06653751150056,
+            "notches": [
+              {
+                "time_s": 0.35918367346938773,
+                "depth_db": 8.803107794331467
+              },
+              {
+                "time_s": 0.5986394557823129,
+                "depth_db": 3.059878040266028
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 4740.332794189453,
+            "initial_db": -51.28287464857296,
+            "notches": [
+              {
+                "time_s": 0.11972789115646258,
+                "depth_db": 7.29042438937411
+              },
+              {
+                "time_s": 0.29931972789115646,
+                "depth_db": 15.772858855745973
+              },
+              {
+                "time_s": 0.7383219954648526,
+                "depth_db": 5.838423618120416
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 5544.631576538086,
+            "initial_db": -49.3781648288151,
+            "notches": [
+              {
+                "time_s": 0.2943310657596372,
+                "depth_db": 13.926083294359167
+              },
+              {
+                "time_s": 0.4390022675736961,
+                "depth_db": 3.6422252650041216
+              },
+              {
+                "time_s": 0.8430839002267573,
+                "depth_db": 3.645118353939395
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 6356.164169311523,
+            "initial_db": -46.518359521665566,
+            "notches": [
+              {
+                "time_s": 0.24444444444444444,
+                "depth_db": 6.338343997753142
+              },
+              {
+                "time_s": 0.5487528344671202,
+                "depth_db": 3.3982004253189615
+              },
+              {
+                "time_s": 0.6684807256235827,
+                "depth_db": 3.957476145039891
+              }
+            ]
+          }
+        ],
+        "notches_by_interval": [
+          9,
+          7,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -13.70921846263634,
+          -35.61188070712206,
+          -44.53241782408223,
+          -62.934464479477946,
+          -71.15139669015524
+        ]
+      },
+      "84": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.3884582519531,
+            "initial_db": -24.945494400288478,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2096.795654296875,
+            "initial_db": -45.48770313614854,
+            "notches": [
+              {
+                "time_s": 0.9229024943310657,
+                "depth_db": 19.457213352172573
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3149.735641479492,
+            "initial_db": -49.478430045859895,
+            "notches": [
+              {
+                "time_s": 0.42902494331065755,
+                "depth_db": 3.2149660565175537
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 4208.731842041016,
+            "initial_db": -53.52763949881527,
+            "notches": [
+              {
+                "time_s": 0.3791383219954648,
+                "depth_db": 4.732616576041451
+              },
+              {
+                "time_s": 0.8580498866213151,
+                "depth_db": 3.049991508165789
+              },
+              {
+                "time_s": 1.037641723356009,
+                "depth_db": 3.685587924737632
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 5275.298309326172,
+            "initial_db": -58.62709067821761,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 7440.394592285156,
+            "initial_db": -63.60861773389573,
+            "notches": [
+              {
+                "time_s": 0.14467120181405896,
+                "depth_db": 14.155564384228967
+              },
+              {
+                "time_s": 0.2893424036281179,
+                "depth_db": 3.052663961111307
+              }
+            ]
+          }
+        ],
+        "notches_by_interval": [
+          4,
+          3,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -21.90278512517748,
+          -45.16100904130482,
+          -53.08567009718716,
+          -73.45496319696157,
+          -87.46257125321813
+        ]
+      },
+      "91": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1570.4097747802734,
+            "initial_db": -32.26603242585669,
+            "notches": [
+              {
+                "time_s": 0.3242630385487528,
+                "depth_db": 5.297869450226727
+              }
+            ]
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 3146.539306640625,
+            "initial_db": -49.8747316714247,
+            "notches": [
+              {
+                "time_s": 0.2743764172335601,
+                "depth_db": 6.969501783647516
+              },
+              {
+                "time_s": 0.5736961451247166,
+                "depth_db": 4.860687341439245
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 4734.108352661133,
+            "initial_db": -54.804832294917986,
+            "notches": [
+              {
+                "time_s": 0.15963718820861678,
+                "depth_db": 10.72629316875252
+              },
+              {
+                "time_s": 0.3242630385487528,
+                "depth_db": 6.769175194810046
+              },
+              {
+                "time_s": 0.5786848072562358,
+                "depth_db": 3.5321064143413565
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 6338.668441772461,
+            "initial_db": -57.10212078729677,
+            "notches": [
+              {
+                "time_s": 0.2494331065759637,
+                "depth_db": 11.874278122774385
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 7966.107559204102,
+            "initial_db": -64.16826682448787,
+            "notches": [
+              {
+                "time_s": 0.22947845804988662,
+                "depth_db": 12.875675802708884
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 9621.472549438477,
+            "initial_db": -76.70314465167252,
+            "notches": []
+          }
+        ],
+        "notches_by_interval": [
+          6,
+          2,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -29.537934664879053,
+          -53.40663643652349,
+          -66.77099037528666,
+          -89.93753089310003,
+          -107.60643907239606
+        ]
+      },
+      "96": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 2095.2816009521484,
+            "initial_db": -32.57585663935377,
+            "notches": [
+              {
+                "time_s": 0.17959183673469387,
+                "depth_db": 5.645827886393796
+              }
+            ]
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 4210.414123535156,
+            "initial_db": -47.024823396155355,
+            "notches": [
+              {
+                "time_s": 0.3492063492063492,
+                "depth_db": 12.871459423375526
+              },
+              {
+                "time_s": 0.4689342403628118,
+                "depth_db": 9.482207043931751
+              },
+              {
+                "time_s": 0.6784580498866213,
+                "depth_db": 3.878166765888949
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 6349.266815185547,
+            "initial_db": -64.33061340512006,
+            "notches": [
+              {
+                "time_s": 0.12471655328798185,
+                "depth_db": 15.052267672822396
+              },
+              {
+                "time_s": 0.37414965986394555,
+                "depth_db": 10.160814107385136
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 8527.316665649414,
+            "initial_db": -50.04130650036373,
+            "notches": [
+              {
+                "time_s": 0.1746031746031746,
+                "depth_db": 8.395697878192166
+              }
+            ]
+          }
+        ],
+        "notches_by_interval": [
+          6,
+          1,
+          0,
+          0,
+          0
+        ],
+        "levels_db": [
+          -30.732966618931027,
+          -51.629794650313315,
+          -76.48569955284559,
+          -106.06126030101544,
+          -156.99226335321077
+        ]
+      }
+    }
+  }
+}

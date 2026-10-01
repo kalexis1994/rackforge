@@ -1,0 +1,674 @@
+--- a/plugins/concert-grand/src/lib.rs
++++ b/plugins/concert-grand/src/lib.rs
+@@ -28,6 +28,8 @@
+ mod radiation;
+ mod contact_pulse;
+ mod bridge;
++mod unison;
++mod spatial_unison;
+ 
+ use math::{exp2f, expf, log2f, powf, roundf, sincosf, sqrtf};
+ 
+@@ -1004,6 +1006,7 @@
+             "BOARD_CAUSAL_PAIR" => Some(&BOARD_CAUSAL_PAIR),
+             "PHYSICAL_BRIDGE" => Some(&PHYSICAL_BRIDGE),
+             "PHYSICAL_BED_ROUTE" => Some(&PHYSICAL_BED_ROUTE),
++            "COHERENT_UNISON" => Some(&COHERENT_UNISON),
+             _ => None,
+         };
+         if let Some(knob) = research {
+@@ -1013,6 +1016,26 @@
+             } else {
+                 complaints.push(format!("line {}: research switch must be 0 or 1", number + 1));
+             }
++            continue;
++        }
++        if name == "STRING_STIFFNESS_SPREAD" {
++            if (0.0..=0.25).contains(&value) { STRING_STIFFNESS_SPREAD.set(value); set+=1; }
++            else { complaints.push(format!("line {}: stiffness spread outside 0..0.25",number+1)); }
++            continue;
++        }
++        if name == "REACTIVE_BRIDGE" {
++            if (0.0..=1.0).contains(&value) { REACTIVE_BRIDGE.set(value); set+=1; }
++            else { complaints.push(format!("line {}: reactive bridge outside 0..1",number+1)); }
++            continue;
++        }
++        if name == "SPATIAL_UNISON_GAP_M" {
++            if (0.0..=0.012).contains(&value) { SPATIAL_UNISON_GAP_M.set(value); set+=1; }
++            else { complaints.push(format!("line {}: spatial pin gap outside 0..0.012 m",number+1)); }
++            continue;
++        }
++        if name == "STRING_TUNING_CENTER" {
++            if (0.0..=1.0).contains(&value) { STRING_TUNING_CENTER.set(value); set+=1; }
++            else { complaints.push(format!("line {}: tuning center outside 0..1",number+1)); }
+             continue;
+         }
+         if name == "UNISON_EXTRA_LOSS" {
+@@ -1116,6 +1139,10 @@
+     out.push_str(&format!("CONTACT_BOARD_GAIN = {}\nCONTACT_BOARD_CORNER = {}\n", CONTACT_BOARD_GAIN.get(), CONTACT_BOARD_CORNER.get()));
+     out.push_str(&format!("DIAGNOSTIC_STRING_DRAIN = {}\n",DIAGNOSTIC_STRING_DRAIN.get()));
+     out.push_str(&format!("UNISON_EXTRA_LOSS = {}\n",UNISON_EXTRA_LOSS.get()));
++    out.push_str(&format!("COHERENT_UNISON = {}\nSTRING_STIFFNESS_SPREAD = {}\n",COHERENT_UNISON.get(),STRING_STIFFNESS_SPREAD.get()));
++    out.push_str(&format!("REACTIVE_BRIDGE = {}\n",REACTIVE_BRIDGE.get()));
++    out.push_str(&format!("SPATIAL_UNISON_GAP_M = {}\n",SPATIAL_UNISON_GAP_M.get()));
++    out.push_str(&format!("STRING_TUNING_CENTER = {}\n",STRING_TUNING_CENTER.get()));
+     out
+ }
+ 
+@@ -1941,6 +1968,10 @@
+     /// string lane loses this fraction of the weighted lane sum every tick,
+     /// the horizontal lane `HORIZONTAL_BRIDGE` times it. See `Partial::tick`.
+     drain: f32,
++    /// Imaginary coefficient of a passive complex projection (research only).
++    bridge_phase: f32,
++    spatial: spatial_unison::Loading,
++    moment_out: f32,
+     /// Zero retains the legacy renderer; bits 0..2 select physical vertical
+     /// strings. The horizontal projection is shared by radiation and loading.
+     bridge_mask: u8,
+@@ -2019,11 +2050,19 @@
+             self.c[lane] = c;
+             *output = s;
+         }
+-        if self.drain > 0.0 {
++        self.moment_out=0.0;
++        if self.spatial.active() {
++            self.moment_out=self.spatial.moment(&out);
++            self.spatial.apply(&mut self.s,&mut self.c,self.bridge_mask,horizontal);
++        } else if self.drain > 0.0 || self.bridge_phase != 0.0 {
+             let sum_s = self.s[0] + self.s[1] + self.s[2] + horizontal * self.s[LANE_HORIZONTAL];
+             let sum_c = self.c[0] + self.c[1] + self.c[2] + horizontal * self.c[LANE_HORIZONTAL];
+-            let take_s = self.drain * sum_s;
+-            let take_c = self.drain * sum_c;
++            let mut take_s = self.drain * sum_s;
++            let mut take_c = self.drain * sum_c;
++            if self.bridge_phase != 0.0 {
++                take_s += self.bridge_phase * sum_c;
++                take_c -= self.bridge_phase * sum_s;
++            }
+             if self.bridge_mask == 0 {
+                 self.s[0] -= take_s;
+                 self.s[1] -= take_s;
+@@ -3160,6 +3199,12 @@
+ pub static DIAGNOSTIC_STRING_DRAIN: Knob = Knob::new(1.0);
+ // Effective positive per-string loss asymmetry, research only. Not identified material data.
+ pub static UNISON_EXTRA_LOSS: Knob = Knob::new(0.0);
++pub static COHERENT_UNISON: Knob = Knob::new(0.0);
++pub static STRING_STIFFNESS_SPREAD: Knob = Knob::new(0.0);
++pub static REACTIVE_BRIDGE: Knob = Knob::new(0.0);
++/// Assumed adjacent pin spacing for local-gradient research, not a measurement.
++pub static SPATIAL_UNISON_GAP_M: Knob = Knob::new(0.0);
++pub static STRING_TUNING_CENTER: Knob = Knob::new(0.5);
+ pub static CONTACT_BOARD_CORNER: Knob = Knob::new(350.0);
+ /// The bridge from A0 to C8, in metres, as the pair looks down on it.
+ const BRIDGE_LENGTH_M: f32 = 1.4;
+@@ -4156,6 +4201,7 @@
+     keybed_left: f32,
+     keybed_right: f32,
+     force: f32,
++    spatial_moment: f32,
+     drive_index: usize,
+     drive_frac: f32,
+     culled: usize,
+@@ -4245,6 +4291,7 @@
+     /// This voice's previous output sample, so the sympathetic feed can be
+     /// everyone-but-me without a second pass.
+     last_out: f32,
++    spatial_moment: f32,
+     /// Duplex-scale components: the string segments behind the bridge have
+     /// no dampers, so these ring on after damp() silences the partials.
+     duplex: [Component; 2],
+@@ -4366,6 +4413,7 @@
+             drive_frac: 0.0,
+             pan_right: 0.0,
+             last_out: 0.0,
++            spatial_moment: 0.0,
+             duplex: [Component::default(); 2],
+             cull_in: CULL_INTERVAL,
+             damper_phase: 0,
+@@ -4408,6 +4456,7 @@
+     #[inline(always)]
+     fn tick(&mut self, sympathy: f32) -> f32 {
+         let mut sum = 0.0;
++        self.spatial_moment=0.0;
+         self.keybed_out = 0.0;
+         // A merged blow's momentum, arriving over the contact.
+         let pushing = self.push_in > 0;
+@@ -4451,6 +4500,7 @@
+                 }
+             }
+             let voice = partial.tick(knob_horizontal_bridge);
++            self.spatial_moment+=partial.moment_out;
+             slope += voice * partial.slope;
+             sum += voice;
+         }
+@@ -4552,6 +4602,7 @@
+         if self.onset < 1.0 {
+             let x = self.onset;
+             self.onset = (x + self.onset_step).min(1.0);
++            self.spatial_moment*=x*x*(3.0-2.0*x);
+             return sum * (x * x * (3.0 - 2.0 * x));
+         }
+         sum
+@@ -4725,6 +4776,7 @@
+             keybed_left,
+             keybed_right,
+             force,
++            spatial_moment: self.spatial_moment*(self.pan_left+self.pan_right),
+             drive_index: self.drive_index,
+             drive_frac: self.drive_frac,
+             culled,
+@@ -6744,6 +6796,57 @@
+         self.controls.tension_newtons()/self.string_length(position).max(0.01)*conductance
+     }
+ 
++    fn projected_bridge_reactivity(&self, frequency: f32, position: f32, projections:&[f32;BOARD_MODES]) -> f32 {
++        let omega=bridge::warped_omega(frequency,self.sample_rate);
++        let mut susceptance=0.0;
++        for (mode,projection) in self.bridge_modes.iter().zip(projections.iter()).take(self.bridge_count) {
++            susceptance+=mode.susceptance(omega,*projection);
++        }
++        self.controls.tension_newtons()/self.string_length(position).max(0.01)*susceptance
++    }
++
++    fn bridge_gradients(&self,position:f32)->[f32;BOARD_MODES] {
++        let along=position.clamp(0.0,1.0)*(BOARD_DRIVE_POINTS-1) as f32;
++        let index=(along as usize).min(BOARD_DRIVE_POINTS-2);
++        let mut dc=[0.0;BOARD_DRIVE_POINTS];let mut ds=[0.0;BOARD_DRIVE_POINTS];
++        for q in 0..BOARD_DRIVE_POINTS {
++            let angle=core::f32::consts::PI*q as f32/(BOARD_DRIVE_POINTS-1) as f32;
++            let (s0,c0)=sincosf(angle*index as f32);let (s1,c1)=sincosf(angle*(index+1) as f32);
++            dc[q]=(c1-c0)*(BOARD_DRIVE_POINTS-1) as f32;
++            ds[q]=(s1-s0)*(BOARD_DRIVE_POINTS-1) as f32;
++        }
++        let mut result=[0.0;BOARD_MODES];
++        for (slope,mode) in result.iter_mut().zip(self.bridge_modes.iter()).take(self.bridge_count) {
++            *slope=mode.b*dc[mode.q as usize]+mode.c*ds[mode.q as usize];
++        }
++        result
++    }
++
++    fn spatial_bridge_loading(&self,frequency:f32,position:f32,projections:&[f32;BOARD_MODES],
++        gradients:&[f32;BOARD_MODES],mask:u8,horizontal:f32,gap:f32)->spatial_unison::Loading {
++        let count=mask.count_ones() as usize;
++        if gap<=0.0 || count<2 {return spatial_unison::Loading::default();}
++        let mut offsets=[0.0;3];let mut rank=0;
++        for lane in 0..3 {if mask&(1<<lane)!=0 {offsets[lane]=rank as f32-0.5*(count-1) as f32;rank+=1;}}
++        let offset_norm=sqrtf(offsets.iter().map(|x|x*x).sum::<f32>());
++        let weights=offsets.map(|x|x/offset_norm);
++        // First-order geometry over the existing assumed 1.4 m bridge line.
++        let radius=gap/1.4*offset_norm;
++        let norm=count as f32+horizontal*horizontal;let root=sqrtf(norm);
++        let omega=bridge::warped_omega(frequency,self.sample_rate);
++        let mut g=[0.0;3];let mut h=[0.0;3];
++        let scale=self.controls.tension_newtons()/self.string_length(position).max(0.01)
++            /((0.5+1.5*self.controls.decay)*self.controls.lab(11)).max(0.05);
++        for (i,mode) in self.bridge_modes.iter().take(self.bridge_count).enumerate() {
++            let v=projections[i]*root;let t=gradients[i]*radius;
++            let shapes=[v*v,v*t,t*t];
++            let conductance=mode.conductance(omega,1.0)*scale*DIAGNOSTIC_STRING_DRAIN.get();
++            let susceptance=mode.susceptance(omega,1.0)*scale*REACTIVE_BRIDGE.get();
++            for j in 0..3 {g[j]+=conductance*shapes[j];h[j]+=susceptance*shapes[j];}
++        }
++        spatial_unison::Loading::new(g,h,norm,weights,radius,self.sample_rate)
++    }
++
+     fn physical_intrinsic_t60(&self, frequency: f32, f0: f32, string_scale: f32) -> f32 {
+         let partial=(frequency/f0.max(1.0)).max(1.0);
+         let scaled=frequency*string_scale;
+@@ -7791,6 +7894,8 @@
+         // bass the cap is above the law and changes nothing.
+         let beat_cap_cents = UNISON_BEAT_CAP_HZ.get() * 1731.0 / f0.max(1.0);
+         let detune_cents = detune_cents.min(beat_cap_cents);
++        let coherent_unison = COHERENT_UNISON.get() >= 0.5;
++        let unison_profile = unison::Unison::with_center(note,b,detune_cents,STRING_STIFFNESS_SPREAD.get(),STRING_TUNING_CENTER.get());
+ 
+         // First pass: partial frequencies and unnormalised amplitudes. The
+         // comb keeps the sign of sin(n·π·x0): a struck string's partials
+@@ -8329,6 +8434,8 @@
+         let prompt_measured_power = PROMPT_MEASURED_POWER.get();
+         // One spatial projection per note-on, reused for every partial.
+         let bridge_projections=if self.engine.bridge_count>0 {self.engine.bridge_projections(position)} else {[0.0;BOARD_MODES]};
++        let spatial_gap=SPATIAL_UNISON_GAP_M.get();
++        let bridge_gradients=if self.engine.bridge_count>0 && spatial_gap>0.0 {self.engine.bridge_gradients(position)} else {[0.0;BOARD_MODES]};
+         let mut partials = [Partial::default(); MAX_PARTIALS];
+         let mut placed = 0;
+         phase!(6, mark);
+@@ -8404,13 +8511,13 @@
+             let third_string = third_string * unbalance_b;
+             let split = 1.0 / (1.0 + second + third_string);
+             let shares = [split, split * second, split * third_string];
+-            let ratios = [
++            let ratios = if coherent_unison { unison_profile.ratios(n+1) } else { [
+                 exp2f(-cents / 2400.0),
+                 exp2f(cents / 2400.0),
+                 exp2f(
+                     cents * (0.9 + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3)) / 1200.0,
+                 ),
+-            ];
++            ] };
+             // THE TWO-STAGE DECAY, WITHOUT A SCRIPT.
+             //
+             // Each component's own rotation carries only the string's
+@@ -8535,6 +8642,16 @@
+                 built.bridge_mask = shares.iter().enumerate().fold(0u8, |mask,(lane,share)|
+                     mask | if *share>0.0 {1<<lane} else {0});
+                 built.drain = bridge::drain_coefficient(bridge_rate,mechanical_norm,sample_rate);
++                if REACTIVE_BRIDGE.get()>0.0 {
++                    let beta=self.engine.projected_bridge_reactivity(frequency,position,&bridge_projections)
++                        *REACTIVE_BRIDGE.get()
++                        /((0.5+1.5*self.engine.controls.decay)*self.engine.controls.lab(11)).max(0.05);
++                    (built.drain,built.bridge_phase)=bridge::complex_loading(bridge_rate,beta,mechanical_norm,sample_rate);
++                }
++                if spatial_gap>0.0 {
++                    built.spatial=self.engine.spatial_bridge_loading(frequency,position,&bridge_projections,
++                        &bridge_gradients,built.bridge_mask,horizontal_bridge,spatial_gap);
++                }
+             } else {
+                 built.drain = Partial::drain_per_sample(coupling, horizontal_bridge);
+             }
+@@ -8932,6 +9049,8 @@
+                     existing.coupling = fresh.coupling;
+                     existing.bridge_mask = fresh.bridge_mask;
+                     existing.drain = fresh.drain;
++                    existing.bridge_phase = fresh.bridge_phase;
++                    existing.spatial = fresh.spatial;
+                 } else if voice.partial_count < MAX_PARTIALS {
+                     // A partial the living voice did not have arrives over
+                     // the contact too: its velocity quadrature pushed in
+@@ -9536,6 +9655,11 @@
+                 let board_force = one.force + one.structural_force;
+                 made.drive_points[one.drive_index] += board_force * (1.0 - one.drive_frac);
+                 made.drive_points[one.drive_index + 1] += board_force * one.drive_frac;
++                if one.spatial_moment!=0.0 {
++                    let moment=one.spatial_moment*(BOARD_DRIVE_POINTS-1) as f32;
++                    made.drive_points[one.drive_index]-=moment;
++                    made.drive_points[one.drive_index+1]+=moment;
++                }
+                 culled += one.culled;
+             }};
+         }
+@@ -13358,6 +13482,47 @@
+     }
+ 
+     #[test]
++    fn complex_bridge_preserves_dark_states_and_contracts_coherent_states() {
++        for count in 1..=3 {
++            for rate in [44100.0,48000.0,96000.0] {
++                for beta in [-20000.0,-50.0,0.0,50.0,20000.0] {
++                    let h=0.12;
++                    let norm=count as f32+h*h;
++                    let mut p=Partial::default();p.bridge_mask=(1<<count)-1;
++                    for lane in 0..count {p.s[lane]=1.0;p.rc[lane]=1.0;}
++                    p.s[LANE_HORIZONTAL]=h;p.rc[LANE_HORIZONTAL]=1.0;
++                    (p.drain,p.bridge_phase)=bridge::complex_loading(5.0,beta,norm,rate);
++                    for _ in 0..256 {p.tick(h);}
++                    let radius=expf(-5.0*norm*256.0/rate);
++                    let angle=beta as f64*norm as f64*256.0/rate as f64;
++                    let (sin,cos)=(angle.sin() as f32,angle.cos() as f32);
++                    assert!((p.s[0]-radius*cos).abs()<1e-4,"count={count} rate={rate} beta={beta} s={} expected={}",p.s[0],radius*cos);
++                    assert!((p.c[0]-radius*sin).abs()<1e-4,"count={count} rate={rate} beta={beta} c={} expected={}",p.c[0],radius*sin);
++                    for lane in count..3 {assert_eq!(p.s[lane],0.0);assert_eq!(p.c[lane],0.0);}
++                    // A dark state has zero bridge projection and must not change.
++                    let mut dark=Partial::default();dark.bridge_mask=(1<<count)-1;
++                    dark.rc=[1.0;LANES];dark.s[0]=h;dark.s[LANE_HORIZONTAL]=-1.0;
++                    (dark.drain,dark.bridge_phase)=(p.drain,p.bridge_phase);
++                    let before=dark.s;dark.tick(h);
++                    assert_eq!(dark.s,before);assert_eq!(dark.c,[0.0;LANES]);
++                    // A general complex state loses only its coherent energy.
++                    let mut general=Partial::default();general.bridge_mask=(1<<count)-1;
++                    general.rc=[1.0;LANES];general.s[LANE_HORIZONTAL]=0.42;general.c[LANE_HORIZONTAL]=-0.18;
++                    for lane in 0..count {general.s[lane]=0.1+lane as f32*0.23;general.c[lane]=0.4-lane as f32*0.13;}
++                    (general.drain,general.bridge_phase)=(p.drain,p.bridge_phase);
++                    let energy:f32=general.s.iter().chain(general.c.iter()).map(|x|x*x).sum();
++                    let zs=general.s[..count].iter().sum::<f32>()+h*general.s[LANE_HORIZONTAL];
++                    let zc=general.c[..count].iter().sum::<f32>()+h*general.c[LANE_HORIZONTAL];
++                    let expected=energy-(1.0-expf(-10.0*norm/rate))*(zs*zs+zc*zc)/norm;
++                    general.tick(h);
++                    let after:f32=general.s.iter().chain(general.c.iter()).map(|x|x*x).sum();
++                    assert!((after-expected).abs()<2e-6);
++                }
++            }
++        }
++    }
++
++    #[test]
+     #[ignore = "physical microphone boundary regression; process-wide probes"]
+     fn physical_pressure_has_one_distance_and_polar_response() {
+         PHYSICAL_BRIDGE.set(1.0);
+@@ -19305,6 +19470,11 @@
+         CONTACT_BOARD_GAIN.set(CONTACT_BOARD_GAIN.compiled());
+         DIAGNOSTIC_STRING_DRAIN.set(DIAGNOSTIC_STRING_DRAIN.compiled());
+         UNISON_EXTRA_LOSS.set(UNISON_EXTRA_LOSS.compiled());
++        COHERENT_UNISON.set(COHERENT_UNISON.compiled());
++        STRING_STIFFNESS_SPREAD.set(STRING_STIFFNESS_SPREAD.compiled());
++        REACTIVE_BRIDGE.set(REACTIVE_BRIDGE.compiled());
++        SPATIAL_UNISON_GAP_M.set(SPATIAL_UNISON_GAP_M.compiled());
++        STRING_TUNING_CENTER.set(STRING_TUNING_CENTER.compiled());
+         CONTACT_BOARD_CORNER.set(CONTACT_BOARD_CORNER.compiled());
+     }
+ 
+--- a/plugins/concert-grand/src/bridge.rs
++++ b/plugins/concert-grand/src/bridge.rs
+@@ -1,6 +1,6 @@
+ //! Passive modal velocity admittance, discretized by the trapezoidal rule.
+ //! Radiation is a separate observation of these same mechanical modes.
+-use crate::math::{sincosf, expf};
++use crate::math::{sincosf, expf, roundf};
+ 
+ pub(crate) fn warped_omega(frequency: f32, rate: f32) -> f32 {
+     let (s, c) = sincosf(core::f32::consts::PI * frequency.clamp(0.01, 0.45 * rate) / rate);
+@@ -13,6 +13,33 @@
+     let x = rate.max(0.0) * norm / sample_rate;
+     let lost = if x < 0.001 { x * (1.0 - 0.5*x + x*x/6.0) } else { 1.0-expf(-x) };
+     lost / norm.max(1e-12)
++}
++
++/// Frozen-frequency, weak-coupling approximation to complex bridge loading.
++/// With z=s+i*c rotating as exp(-i*omega*t), positive Im(Y) lowers frequency.
++/// The coherent subspace contracts by exp(-gamma*norm*dt) and rotates;
++/// the orthogonal subspace is unchanged. This does not add board memory.
++pub(crate) fn complex_loading(gamma: f32, beta: f32, norm: f32, rate: f32) -> (f32,f32) {
++    let norm=norm.max(1e-12);
++    let drain=drain_coefficient(gamma,norm,rate);
++    let radius=1.0-drain*norm;
++    let (sin,cos)=loading_sincos(beta*norm/rate);
++    // Retain accuracy when the phase increment is much smaller than one.
++    let phase_loss=if cos>0.5 {sin*sin/(1.0+cos)} else {1.0-cos};
++    (drain+radius*phase_loss/norm,radius*sin/norm)
++}
++
++pub(crate) fn loading_sincos(angle: f32) -> (f32,f32) {
++    // Higher-order coefficients here avoid accumulated phase error in a
++    // conservative projection. Computed once per partial, not per sample.
++    let quadrant=roundf(angle*core::f32::consts::FRAC_2_PI);
++    let r=angle-quadrant*core::f32::consts::FRAC_PI_2;
++    let r2=r*r;
++    let sin=r*(1.0-r2/6.0*(1.0-r2/20.0*(1.0-r2/42.0*(1.0-r2/72.0))));
++    let cos=1.0-r2/2.0*(1.0-r2/12.0*(1.0-r2/30.0*(1.0-r2/56.0*(1.0-r2/90.0))));
++    match (quadrant as i32).rem_euclid(4) {
++        0=>(sin,cos),1=>(cos,-sin),2=>(-sin,-cos),_=>(-cos,sin)
++    }
+ }
+ 
+ #[derive(Clone, Copy, Default)]
+@@ -32,6 +59,13 @@
+         let loss = 2.0 * self.sigma * omega;
+         self.inverse_mass * 2.0 * self.sigma * omega * omega * projection * projection
+             / (detuning * detuning + loss * loss).max(1e-20)
++    }
++
++    pub fn susceptance(self, omega: f32, projection: f32) -> f32 {
++        let detuning=self.omega2-omega*omega;
++        let loss=2.0*self.sigma*omega;
++        self.inverse_mass*omega*detuning*projection*projection
++            /(detuning*detuning+loss*loss).max(1e-20)
+     }
+ }
+ 
+@@ -69,6 +103,25 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    #[test]
++    fn reactive_mobility_matches_velocity_phase() {
++        for rate in [44100.0,96000.0] {
++            let coeff=Coefficients::new(440.0,0.04,12.0,rate);
++            for frequency in [220.0,370.0,510.0,900.0] {
++                let (mut q,mut v,mut previous)=(0.0,0.0,0.0);
++                let (mut cross,mut sine2)=(0.0f64,0.0f64);
++                for n in 0..192000 {
++                    let (sin,cos)=sincosf(core::f32::consts::TAU*frequency*n as f32/rate);
++                    let next=coeff.av*v+coeff.aq*q+coeff.force*(cos+previous);
++                    q+=coeff.half_step*(v+next);v=next;previous=cos;
++                    if n>=96000 {cross+=v as f64*sin as f64;sine2+=(sin as f64).powi(2);}
++                }
++                let predicted=coeff.mobility.susceptance(warped_omega(frequency,rate),1.0) as f64;
++                assert!(((-cross/sine2)/predicted-1.0).abs()<0.01);
++            }
++        }
++    }
+ 
+     #[test]
+     fn loading_matches_the_time_domain_velocity_response() {
+--- /dev/null
++++ b/plugins/concert-grand/src/unison.rs
+@@ -0,0 +1,94 @@
++//! Experimental per-string tuning and stiffness, fixed across the partial ladder.
++//! These are effective parameters, not measured properties of the reference piano.
++use crate::math::{exp2f, sqrtf};
++
++#[derive(Clone, Copy)]
++pub struct Unison {
++    pub pitch: [f32; 3],
++    pub stiffness: [f32; 3],
++    base: f32,
++}
++
++impl Unison {
++    pub fn new(note: u8, base: f32, cents: f32, spread: f32) -> Self {
++        Self::with_center(note,base,cents,spread,0.5)
++    }
++
++    pub fn with_center(note:u8,base:f32,cents:f32,spread:f32,center:f32)->Self {
++        let seed = (note as u32).wrapping_mul(0x9e3779b9);
++        // One instrument-wide tuning pattern with the same small per-key
++        // imperfection. Center 0.5 preserves the previous renderer exactly.
++        let middle=(center-0.5+0.25*(crate::hash01(seed^0x41)-0.5)).clamp(-0.5,0.5);
++        let mut offsets = [-0.5, middle, 0.5];
++        let mean = offsets.iter().sum::<f32>() / 3.0;
++        for value in &mut offsets { *value -= mean; }
++        let mut variations = core::array::from_fn::<_, 3, _>(|i|
++            2.0 * crate::hash01(seed ^ (i as u32 + 1).wrapping_mul(0x85ebca6b)) - 1.0);
++        let mean = variations.iter().sum::<f32>() / 3.0;
++        for value in &mut variations { *value -= mean; }
++        Self {
++            pitch: offsets.map(|x| exp2f(x * cents / 1200.0)),
++            stiffness: variations.map(|x| base * (1.0 + x * spread)),
++            base,
++        }
++    }
++
++    pub fn ratios(&self, harmonic: usize) -> [f32; 3] {
++        let h2 = (harmonic * harmonic) as f32;
++        core::array::from_fn(|i| {
++            if self.stiffness[i] == self.base { return self.pitch[i]; }
++            // Hold each fundamental fixed while changing its inharmonicity.
++            self.pitch[i] * sqrtf(
++                ((1.0 + self.stiffness[i] * h2) / (1.0 + self.base * h2))
++                * ((1.0 + self.base) / (1.0 + self.stiffness[i])))
++        })
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn one_tuning_per_string_without_stiffness_spread() {
++        let u = Unison::new(60, 0.0002, 0.7, 0.0);
++        for h in 1..=144 { assert_eq!(u.ratios(h), u.pitch); }
++        assert!((u.pitch.iter().product::<f32>() - 1.0).abs() < 2e-6);
++    }
++
++    #[test]
++    fn each_ladder_obeys_its_own_stiff_string_law() {
++        let u = Unison::new(72, 0.0005, 0.5, 0.02);
++        for h in 1..=100 {
++            let ratios = u.ratios(h);
++            for i in 0..3 {
++                let actual = (1.0 + u.base * (h*h) as f32) / (1.0 + u.base)
++                    * (ratios[i] / u.pitch[i]).powi(2);
++                let expected = (1.0 + u.stiffness[i] * (h*h) as f32) / (1.0 + u.stiffness[i]);
++                assert!((actual / expected - 1.0).abs() < 5e-6);
++            }
++        }
++    }
++
++    #[test]
++    fn profiles_are_positive_and_repeatable_across_keyboard() {
++        for note in 21..=108 {
++            let a = Unison::new(note, 0.001, 2.0, 0.25);
++            let b = Unison::new(note, 0.001, 2.0, 0.25);
++            assert_eq!(a.pitch, b.pitch); assert_eq!(a.stiffness, b.stiffness);
++            for h in 1..=144 { assert!(a.ratios(h).iter().all(|r| r.is_finite() && *r > 0.0)); }
++        }
++    }
++
++    #[test]
++    fn skewed_tunings_preserve_center_pitch_and_outer_span() {
++        for note in 21..=108 {for center in [0.0,0.15,0.35,0.5,0.65,0.85,1.0] {
++            let a=Unison::with_center(note,0.001,2.0,0.0,center);
++            assert!((a.pitch.iter().product::<f32>()-1.0).abs()<2e-6);
++            assert!((a.pitch[2]/a.pitch[0]-exp2f(2.0/1200.0)).abs()<2e-6);
++            assert!(a.pitch[0]<=a.pitch[1] && a.pitch[1]<=a.pitch[2]);
++            if center==0.5 {assert_eq!(a.pitch,Unison::new(note,0.001,2.0,0.0).pitch);}
++            for harmonic in 1..=144 {assert_eq!(a.ratios(harmonic),a.pitch);}
++        }}
++    }
++}
+--- /dev/null
++++ b/plugins/concert-grand/src/spatial_unison.rs
+@@ -0,0 +1,140 @@
++//! First-order local spatial mobility of the existing bridge interpolation.
++//! Two orthogonal coordinates: common force and the first moment of pin forces.
++//! Not a full reciprocal time-domain string/soundboard solver.
++use crate::math::{expf,sqrtf};
++
++#[derive(Clone,Copy,Default)]
++pub(crate) struct Loading {
++    // Real deltas from identity and imaginary parts, symmetric 2x2 matrices.
++    re:[f32;3],
++    im:[f32;3],
++    inv_norm:f32,
++    weights:[f32;3],
++    pub radius:f32,
++}
++
++impl Loading {
++    pub fn active(&self)->bool {self.inv_norm>0.0}
++
++    pub fn new(g:[f32;3],h:[f32;3],norm:f32,weights:[f32;3],radius:f32,rate:f32)->Self {
++        // Strang splitting D*U*D: each D is positive/contractive, U unitary.
++        // Frozen-frequency approximation; splitting error is O(dt^3).
++        let e=real_decay(g,0.5/rate);
++        let d=[1.0+e[0],e[1],1.0+e[2]];
++        let (u,v)=unitary(h,1.0/rate);
++        let f=multiply_symmetric(d,u);
++        // D*U*D-I = 2E+E² + D*(U-I)*D. Avoid subtracting nearly equal
++        // values around one: weak losses must survive f32 coefficient storage.
++        let re=[2.0*e[0]+e[0]*e[0]+e[1]*e[1]+f[0],
++            2.0*e[1]+e[1]*(e[0]+e[2])+f[1],
++            2.0*e[2]+e[1]*e[1]+e[2]*e[2]+f[2]];
++        let im=multiply_symmetric(d,v);
++        Self {re,im,inv_norm:1.0/sqrtf(norm),weights,radius}
++    }
++
++    pub fn moment(&self,s:&[f32;5])->f32 {
++        self.radius*(self.weights[0]*s[0]+self.weights[1]*s[1]+self.weights[2]*s[2])
++    }
++
++    pub fn apply(&self,s:&mut[f32;5],c:&mut[f32;5],mask:u8,horizontal:f32) {
++        let mut a=[horizontal*s[3],horizontal*c[3]];
++        let mut b=[0.0,0.0];
++        for lane in 0..3 {
++            if mask&(1<<lane)!=0 {a[0]+=s[lane];a[1]+=c[lane];}
++            b[0]+=self.weights[lane]*s[lane];b[1]+=self.weights[lane]*c[lane];
++        }
++        a[0]*=self.inv_norm;a[1]*=self.inv_norm;
++        let da=[self.re[0]*a[0]+self.re[1]*b[0]-self.im[0]*a[1]-self.im[1]*b[1],
++                self.re[0]*a[1]+self.re[1]*b[1]+self.im[0]*a[0]+self.im[1]*b[0]];
++        let db=[self.re[1]*a[0]+self.re[2]*b[0]-self.im[1]*a[1]-self.im[2]*b[1],
++                self.re[1]*a[1]+self.re[2]*b[1]+self.im[1]*a[0]+self.im[2]*b[0]];
++        for lane in 0..3 {
++            if mask&(1<<lane)!=0 {
++                s[lane]+=self.inv_norm*da[0]+self.weights[lane]*db[0];
++                c[lane]+=self.inv_norm*da[1]+self.weights[lane]*db[1];
++            }
++        }
++        s[3]+=horizontal*self.inv_norm*da[0];c[3]+=horizontal*self.inv_norm*da[1];
++    }
++}
++
++/// Delta from identity of exp(-G*dt), computed from accurate small losses.
++fn real_decay(g:[f32;3],dt:f32)->[f32;3] {
++    let mean=0.5*(g[0]+g[2]);let diff=0.5*(g[0]-g[2]);
++    let radius=sqrtf(diff*diff+g[1]*g[1]);
++    if radius<1e-20 {let x=-crate::bridge::drain_coefficient(mean,1.0,1.0/dt);return [x,0.0,x];}
++    // A sum of collocated conductances is PSD; clamp roundoff at zero.
++    let lo=-crate::bridge::drain_coefficient((mean-radius).max(0.0),1.0,1.0/dt);
++    let hi=-crate::bridge::drain_coefficient((mean+radius).max(0.0),1.0,1.0/dt);
++    let a=0.5*(hi+lo);let b=0.5*(hi-lo)/radius;
++    [a+b*diff,b*g[1],a-b*diff]
++}
++
++fn unitary(h:[f32;3],dt:f32)->([f32;3],[f32;3]) {
++    let mean=0.5*(h[0]+h[2]);let diff=0.5*(h[0]-h[2]);
++    let radius=sqrtf(diff*diff+h[1]*h[1]);
++    let (sin,cos)=crate::bridge::loading_sincos(mean*dt);
++    let (sr,cr)=crate::bridge::loading_sincos(radius*dt);
++    let scale=if radius>1e-20 {sr/radius} else {dt};
++    let b=[scale*diff,scale*h[1],-scale*diff];
++    let loss=|s:f32,c:f32| if c>0.5 {s*s/(1.0+c)} else {1.0-c};
++    let lm=loss(sin,cos);let lr=loss(sr,cr);let delta=-lm-lr+lm*lr;
++    ([delta-sin*b[0],-sin*b[1],delta-sin*b[2]],
++     [sin*cr+cos*b[0],cos*b[1],sin*cr+cos*b[2]])
++}
++
++/// D*U*D, preserving symmetry without a general matrix allocation.
++fn multiply_symmetric(d:[f32;3],u:[f32;3])->[f32;3] {
++    [d[0]*d[0]*u[0]+2.0*d[0]*d[1]*u[1]+d[1]*d[1]*u[2],
++     d[0]*d[1]*u[0]+(d[0]*d[2]+d[1]*d[1])*u[1]+d[1]*d[2]*u[2],
++     d[1]*d[1]*u[0]+2.0*d[1]*d[2]*u[1]+d[2]*d[2]*u[2]]
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn matrix_loading_is_contractive_for_arbitrary_complex_states() {
++        for rate in [16000.0,44100.0,96000.0] {
++            for g in [[0.0,0.0,0.0],[500.0,50.0,20.0],[5.0,-2.0,1.0],[10000.0,1000.0,200.0]] {
++                for h in [[0.0,0.0,0.0],[-1000.0,20.0,80.0],[5000.0,-1700.0,-500.0]] {
++                    let l=Loading::new(g,h,3.0144,[-core::f32::consts::FRAC_1_SQRT_2,0.0,core::f32::consts::FRAC_1_SQRT_2],0.01,rate);
++                    for seed in 0..32 {
++                        let mut s=core::array::from_fn(|i|crate::hash01(seed*31+i as u32)-0.5);
++                        let mut c=core::array::from_fn(|i|crate::hash01(seed*79+i as u32)-0.5);
++                        let before:f32=s.iter().chain(c.iter()).map(|x|x*x).sum();
++                        l.apply(&mut s,&mut c,7,0.12);
++                        let after:f32=s.iter().chain(c.iter()).map(|x|x*x).sum();
++                        assert!(after<=before+2e-6,"{g:?}/{h:?}/{rate}: {before} -> {after}");
++                    }
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn common_coordinate_matches_existing_loading_without_spatial_gradient() {
++        let norm=3.0144;
++        let l=Loading::new([5.0*norm,0.0,0.0],[40.0*norm,0.0,0.0],norm,
++            [-core::f32::consts::FRAC_1_SQRT_2,0.0,core::f32::consts::FRAC_1_SQRT_2],0.0,44100.0);
++        let mut s=[1.0,1.0,1.0,0.12,0.0];let mut c=[0.0;5];
++        for _ in 0..256 {l.apply(&mut s,&mut c,7,0.12);}
++        let radius=expf(-5.0*norm*256.0/44100.0);
++        let phase=40.0*norm*256.0/44100.0;
++        assert!((s[0]-radius*phase.cos()).abs()<3e-5,"{} expected {}",s[0],radius*phase.cos());
++        assert!((c[0]-radius*phase.sin()).abs()<3e-5,"{} expected {}",c[0],radius*phase.sin());
++    }
++
++    #[test]
++    fn force_moment_is_work_conjugate_to_modal_gradient() {
++        let gap=0.006/1.4;let w=[-1.0,0.0,1.0];let s=[0.21,-0.4,0.72,0.0,0.0];
++        let weights=w.map(|v|v*core::f32::consts::FRAC_1_SQRT_2);
++        let l=Loading::new([1.0,0.0,1.0],[0.0;3],3.0,weights,gap*sqrtf(2.0),44100.0);
++        for phi in [-0.3,0.0,1.4] {for derivative in [-20.0,0.0,20.0] {
++            let separate:f32=(0..3).map(|i|(phi+gap*w[i]*derivative)*s[i]).sum();
++            let combined=phi*(s[0]+s[1]+s[2])+derivative*l.moment(&s);
++            assert!((separate-combined).abs()<2e-7);
++        }}
++    }
++}

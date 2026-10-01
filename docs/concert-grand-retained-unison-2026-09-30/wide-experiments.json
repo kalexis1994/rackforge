@@ -1,0 +1,3284 @@
+{
+  "profiles": {
+    "C": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 0,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500
+    },
+    "U10": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0.1,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 1,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 1,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500,
+      "UNISON_TREBLE_WIDTH_RATIO": 1
+    },
+    "U25": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0.25,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 1,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 1,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500,
+      "UNISON_TREBLE_WIDTH_RATIO": 1
+    },
+    "U40": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0.4,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 1,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 1,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500,
+      "UNISON_TREBLE_WIDTH_RATIO": 1
+    },
+    "U25-resistivo": {
+      "PHYSICAL_BRIDGE": 1,
+      "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+      "PHYSICAL_PRESSURE_SCALE": 3,
+      "PHYSICAL_BED_ROUTE": 1,
+      "BOARD_LOSS_FACTOR": 0.046,
+      "FELT_K_A0": 39200000,
+      "STULOV_TAU_S": 0.0001,
+      "BED_MIX": 2.5,
+      "FELT_TREBLE_DECADES": 2,
+      "CONTACT_BOARD_GAIN": 0.006,
+      "CONTACT_BOARD_CORNER": 180,
+      "UNISON_WIDTH": 0.25,
+      "POLARISATION_CENTS": 0,
+      "COHERENT_UNISON": 1,
+      "STRING_STIFFNESS_SPREAD": 0,
+      "REACTIVE_BRIDGE": 0,
+      "STRING_TUNING_CENTER": 0.5,
+      "SPATIAL_UNISON_GAP_M": 0,
+      "MECHANICAL_RADIATION": 1,
+      "MECHANICAL_EMISSION_GAIN": 0.125,
+      "MECHANICAL_CASE_CORNER": 1500,
+      "UNISON_TREBLE_WIDTH_RATIO": 1
+    }
+  },
+  "params": {
+    "25": 2.64
+  },
+  "binary_sha256": "c6b3a70b50442d2de6faf1fd0ee6d30e5f402042e50027020e6fd0376f3e6f27",
+  "model_sha256": "e2999f66cb1df05e034d3398e75dec9f405d1dd2efb4802703934d83f6c8b748",
+  "notes": [
+    60,
+    65,
+    67,
+    72,
+    79,
+    84,
+    91,
+    96
+  ],
+  "velocities": [
+    60,
+    84,
+    124
+  ],
+  "long_velocity": 124,
+  "gain_db": 21.85313499438971,
+  "common_trim_db": 0.0,
+  "policy": "Exploratory mono left-channel comparison; common C partial mask. Counts are diagnostics, not independent audible defects. No original F4/G4 comparison.",
+  "audit": {
+    "C": {
+      "60": {
+        "partials": [
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.3577728271484,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.2890014648438,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1310.3290557861328,
+            "notches": [
+              {
+                "time_s": 0.5786848072562358,
+                "depth_db": 5.585856699620287
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 1573.6061096191406,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 1837.5560760498047,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2102.347183227539,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -18.63311462404483,
+          -29.26462442187352,
+          -39.90959268428269,
+          -57.709561842530405,
+          -83.73524312950174,
+          -88.86671856214713
+        ],
+        "mask": [
+          false,
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "65": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 349.24163818359375,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 698.6515045166016,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1048.4819412231445,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1398.8170623779297,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1749.9092102050781,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2101.842498779297,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2454.953384399414,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2809.3259811401367,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -21.49893951312918,
+          -29.377989212398386,
+          -37.85114846552153,
+          -50.21489914556459,
+          -69.34526541875022,
+          -89.38688314798952
+        ],
+        "mask": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "67": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 392.05570220947266,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 784.2796325683594,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1177.0082473754883,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1570.7462310791016,
+            "notches": [
+              {
+                "time_s": 0.1746031746031746,
+                "depth_db": 3.6149376839940714
+              },
+              {
+                "time_s": 1.127437641723356,
+                "depth_db": 8.06938589972792
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1964.652442932129,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2360.072708129883,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2756.838798522949,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 3155.2871704101562,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.353826281154337,
+          -30.08386173745969,
+          -50.45651075086837,
+          -84.38213889974773,
+          -124.33191324196596,
+          -88.34383244286107
+        ],
+        "mask": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "72": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.3577728271484,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1047.136116027832,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 3154.193687438965,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 4220.423698425293,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -28.49144006437367,
+          -35.407619656995124,
+          -44.07517830918132,
+          -59.229843742507065,
+          -83.95499531591595,
+          -89.84805813641499
+        ],
+        "mask": [
+          true,
+          true,
+          false,
+          false,
+          false,
+          true,
+          false,
+          true
+        ]
+      },
+      "79": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 784.3637466430664,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1569.7368621826172,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 2356.9604873657227,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 3941.2490844726562,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.125197886029977,
+          -40.96845058654266,
+          -67.22953256624255,
+          -107.575881598336,
+          -138.08897931722947,
+          -86.93116078573277
+        ],
+        "mask": [
+          true,
+          true,
+          true,
+          false,
+          true,
+          false
+        ]
+      },
+      "84": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.3884582519531,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2096.627426147461,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3149.9038696289062,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 4209.488868713379,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -23.72980713573041,
+          -45.24134736949674,
+          -79.3857846041979,
+          -126.32416368266345,
+          -142.96403597911814,
+          -89.01851511025426
+        ],
+        "mask": [
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "91": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1570.4938888549805,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 3146.539306640625,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 4733.940124511719,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -34.66507889245139,
+          -64.30160020430912,
+          -96.95206266124741,
+          -149.10386770327355,
+          -178.65679775218916,
+          -92.41584041423222
+        ],
+        "mask": [
+          true,
+          true,
+          true
+        ]
+      },
+      "96": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 2096.543312072754,
+            "notches": [
+              {
+                "time_s": 0.2494331065759637,
+                "depth_db": 21.745387076445617
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -30.07424448295289,
+          -53.178246283900435,
+          -85.10514191789183,
+          -141.9425720161468,
+          -198.94979986354332,
+          -240.0
+        ],
+        "mask": [
+          true,
+          false
+        ]
+      }
+    },
+    "U10": {
+      "60": {
+        "partials": [
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.4418869018555,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.5413436889648,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1310.4131698608398,
+            "notches": [
+              {
+                "time_s": 0.7383219954648526,
+                "depth_db": 4.491701175158681
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 1573.6902236938477,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 1837.5560760498047,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2102.683639526367,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -18.854227125443952,
+          -29.378029960930654,
+          -40.55060220001281,
+          -58.97076634743304,
+          -71.2205668998373,
+          -86.3078071905192
+        ]
+      },
+      "65": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 348.8210678100586,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 698.6515045166016,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1048.7342834472656,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1398.7329483032227,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1749.9092102050781,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2102.010726928711,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2455.205726623535,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2809.578323364258,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -21.670479129023526,
+          -29.583165698206642,
+          -38.20192040242442,
+          -51.849388865215936,
+          -65.90475875693116,
+          -83.6912670987502
+        ]
+      },
+      "67": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 391.8874740600586,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 784.1955184936523,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1177.1764755249023,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1570.8303451538086,
+            "notches": [
+              {
+                "time_s": 0.1746031746031746,
+                "depth_db": 3.9576871545924774
+              },
+              {
+                "time_s": 1.0975056689342404,
+                "depth_db": 7.006538196254468
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1964.90478515625,
+            "notches": [
+              {
+                "time_s": 1.9405895691609976,
+                "depth_db": 4.7363504035678545
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2360.409164428711,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2756.670570373535,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 3155.118942260742,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 1
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.41341530781659,
+          -30.334992304207617,
+          -50.93578136815261,
+          -66.82923201646796,
+          -75.72852433853708,
+          -87.05188207906959
+        ]
+      },
+      "72": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.1895446777344,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1047.220230102539,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 3153.8572311401367,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 4220.760154724121,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -28.510231730601056,
+          -35.54174277921392,
+          -44.134215955142665,
+          -58.941111493232896,
+          -81.7670897916996,
+          -89.78363260543965
+        ]
+      },
+      "79": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 784.7002029418945,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1569.400405883789,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 2357.465171813965,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 3941.6696548461914,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.121489579261343,
+          -41.739541896532444,
+          -63.5849131970567,
+          -73.1894514810352,
+          -78.27340070965745,
+          -86.31481687998965
+        ]
+      },
+      "84": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.8090286254883,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2096.459197998047,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3149.9038696289062,
+            "notches": [
+              {
+                "time_s": 0.8879818594104307,
+                "depth_db": 3.4637870410341662
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 4208.984184265137,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -23.569465653749496,
+          -45.5708620099403,
+          -68.37235047824801,
+          -76.39303178655642,
+          -87.85021189580029,
+          -88.99366132486358
+        ]
+      },
+      "91": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1570.4938888549805,
+            "notches": [
+              {
+                "time_s": 0.7532879818594104,
+                "depth_db": 3.571548420445012
+              }
+            ]
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 3146.034622192383,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 4734.444808959961,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -34.615012958960925,
+          -65.1267928688382,
+          -89.21924300714028,
+          -106.01238779333161,
+          -122.08855850579623,
+          -92.41546033703445
+        ]
+      },
+      "96": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 2096.543312072754,
+            "notches": [
+              {
+                "time_s": 0.1746031746031746,
+                "depth_db": 5.862523448263033
+              },
+              {
+                "time_s": 0.47392290249433106,
+                "depth_db": 14.03144642029963
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 2
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -31.632509618101224,
+          -56.5475721648052,
+          -86.9854806670715,
+          -113.92460476546091,
+          -153.92706907238903,
+          -240.0
+        ]
+      }
+    },
+    "U25": {
+      "60": {
+        "partials": [
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.4418869018555,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.5413436889648,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1310.581398010254,
+            "notches": [
+              {
+                "time_s": 0.7582766439909296,
+                "depth_db": 4.99949527724884
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 1573.9425659179688,
+            "notches": [
+              {
+                "time_s": 1.6263038548752833,
+                "depth_db": 4.656091680537955
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 1837.3878479003906,
+            "notches": [
+              {
+                "time_s": 3.7215419501133784,
+                "depth_db": 11.22684299482465
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2102.683639526367,
+            "notches": [
+              {
+                "time_s": 3.0231292517006803,
+                "depth_db": 4.085487869231045
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 2
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 1
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -18.86094516021412,
+          -29.844993573194483,
+          -42.01796908391573,
+          -52.21269846640609,
+          -65.74915167803513,
+          -85.8734927742137
+        ]
+      },
+      "65": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 348.8210678100586,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 698.7356185913086,
+            "notches": [
+              {
+                "time_s": 4.015873015873016,
+                "depth_db": 3.4535624913538996
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1048.8183975219727,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1398.5647201538086,
+            "notches": [
+              {
+                "time_s": 1.85578231292517,
+                "depth_db": 7.907125388903438
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1750.0774383544922,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2102.178955078125,
+            "notches": [
+              {
+                "time_s": 3.676643990929705,
+                "depth_db": 6.234871200041226
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2455.373954772949,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2809.746551513672,
+            "notches": [
+              {
+                "time_s": 2.6839002267573693,
+                "depth_db": 4.07126531904467
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 2
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 2
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -21.664676594857866,
+          -29.996649638546195,
+          -40.18247875685856,
+          -52.054317083531494,
+          -59.75457730273192,
+          -83.78091896063012
+        ]
+      },
+      "67": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 391.8874740600586,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 784.0272903442383,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1177.3447036743164,
+            "notches": [
+              {
+                "time_s": 1.491609977324263,
+                "depth_db": 3.2674794586859903
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1570.8303451538086,
+            "notches": [
+              {
+                "time_s": 0.1746031746031746,
+                "depth_db": 4.105758167171004
+              },
+              {
+                "time_s": 2.5192743764172336,
+                "depth_db": 3.030777149304427
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1965.073013305664,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2360.325050354004,
+            "notches": [
+              {
+                "time_s": 0.8480725623582765,
+                "depth_db": 12.639397312520181
+              },
+              {
+                "time_s": 2.6290249433106574,
+                "depth_db": 3.173241080081752
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2756.9229125976562,
+            "notches": [
+              {
+                "time_s": 2.075283446712018,
+                "depth_db": 7.488473885050766
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 3155.5395126342773,
+            "notches": [
+              {
+                "time_s": 1.8458049886621315,
+                "depth_db": 5.841175049124388
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 2
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 4
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.43270401315256,
+          -30.687843404431312,
+          -49.378294310976415,
+          -58.015388877252114,
+          -63.08016650976101,
+          -82.81442295955421
+        ]
+      },
+      "72": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.1895446777344,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1047.4725723266602,
+            "notches": [
+              {
+                "time_s": 1.5764172335600906,
+                "depth_db": 4.422745858332291
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 3153.7731170654297,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 4220.928382873535,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 1
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -28.547307893778093,
+          -35.777877049060216,
+          -44.31953935661638,
+          -57.159436574891,
+          -74.57895943575132,
+          -89.45751394466848
+        ]
+      },
+      "79": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 784.7002029418945,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1569.484519958496,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 2357.381057739258,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 3941.6696548461914,
+            "notches": [
+              {
+                "time_s": 0.4340136054421768,
+                "depth_db": 3.679875327029464
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.14564219179678,
+          -42.97134699060134,
+          -54.97851545269054,
+          -60.05611088397164,
+          -67.76749492784138,
+          -85.82832567704054
+        ]
+      },
+      "84": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.7249145507812,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2096.543312072754,
+            "notches": [
+              {
+                "time_s": 0.9328798185941043,
+                "depth_db": 9.293072889646652
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3149.9879837036133,
+            "notches": [
+              {
+                "time_s": 0.6884353741496598,
+                "depth_db": 3.0308677127766117
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 4209.320640563965,
+            "notches": [
+              {
+                "time_s": 0.4390022675736961,
+                "depth_db": 14.799019138271731
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 2
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -23.575546157851228,
+          -46.34669389242697,
+          -61.272044449605794,
+          -70.891093248904,
+          -78.1292399926963,
+          -88.9315905505069
+        ]
+      },
+      "91": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1570.5780029296875,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 3145.950508117676,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 4734.865379333496,
+            "notches": [
+              {
+                "time_s": 0.4390022675736961,
+                "depth_db": 4.608688149081473
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -34.5997765557713,
+          -67.00027205734044,
+          -86.69164436591926,
+          -98.23191492418168,
+          -116.96329667018183,
+          -92.4157425201853
+        ]
+      },
+      "96": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 2096.543312072754,
+            "notches": [
+              {
+                "time_s": 0.1746031746031746,
+                "depth_db": 5.934059201248424
+              },
+              {
+                "time_s": 0.4689342403628118,
+                "depth_db": 14.19531825520395
+              },
+              {
+                "time_s": 0.7981859410430838,
+                "depth_db": 4.732083293784008
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 2
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -31.602408811922334,
+          -55.98424638048377,
+          -84.02912913281371,
+          -105.5796684907634,
+          -146.3831105404658,
+          -240.0
+        ]
+      }
+    },
+    "U40": {
+      "60": {
+        "partials": [
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.4418869018555,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.6254577636719,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1310.665512084961,
+            "notches": [
+              {
+                "time_s": 1.292063492063492,
+                "depth_db": 6.503805252797136
+              },
+              {
+                "time_s": 2.8984126984126983,
+                "depth_db": 3.5445267837077807
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 1573.9425659179688,
+            "notches": [
+              {
+                "time_s": 1.107482993197279,
+                "depth_db": 8.926157952535164
+              },
+              {
+                "time_s": 2.838548752834467,
+                "depth_db": 14.213703793018595
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 1837.1355056762695,
+            "notches": [
+              {
+                "time_s": 1.346938775510204,
+                "depth_db": 4.497440585511619
+              },
+              {
+                "time_s": 2.424489795918367,
+                "depth_db": 16.33014707595266
+              },
+              {
+                "time_s": 5.447619047619047,
+                "depth_db": 3.320134718425919
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2102.8518676757812,
+            "notches": [
+              {
+                "time_s": 2.070294784580499,
+                "depth_db": 5.684283560398029
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 3
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 4
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 1
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -18.87408786049097,
+          -30.41539301081687,
+          -42.33124637868818,
+          -48.90280555826395,
+          -60.87162587989133,
+          -76.37316653219442
+        ]
+      },
+      "65": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 348.8210678100586,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 698.7356185913086,
+            "notches": [
+              {
+                "time_s": 2.7637188208616776,
+                "depth_db": 7.4154040710287035
+              },
+              {
+                "time_s": 7.168707482993197,
+                "depth_db": 7.838559360332276
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1048.8183975219727,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1398.4806060791016,
+            "notches": [
+              {
+                "time_s": 1.3369614512471655,
+                "depth_db": 10.313835967423856
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1750.3297805786133,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2102.263069152832,
+            "notches": [
+              {
+                "time_s": 1.1523809523809523,
+                "depth_db": 6.515063115636956
+              },
+              {
+                "time_s": 2.40453514739229,
+                "depth_db": 9.27519865442418
+              },
+              {
+                "time_s": 4.804081632653061,
+                "depth_db": 4.672458739907597
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2455.5421829223633,
+            "notches": [
+              {
+                "time_s": 1.1922902494331065,
+                "depth_db": 6.161390545926807
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2809.914779663086,
+            "notches": [
+              {
+                "time_s": 0.8680272108843536,
+                "depth_db": 3.7322277812366593
+              },
+              {
+                "time_s": 1.7609977324263038,
+                "depth_db": 7.727824379465929
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 4
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 3
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 2
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -21.67550125027956,
+          -30.63986082464875,
+          -42.68952245553996,
+          -48.141353470370085,
+          -55.149814788303686,
+          -75.48925162279976
+        ]
+      },
+      "67": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 391.80335998535156,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 783.9431762695312,
+            "notches": [
+              {
+                "time_s": 2.9931972789115644,
+                "depth_db": 6.305214210315647
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1177.3447036743164,
+            "notches": [
+              {
+                "time_s": 1.1174603174603175,
+                "depth_db": 7.091841692521399
+              },
+              {
+                "time_s": 2.963265306122449,
+                "depth_db": 3.8862985605577975
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1569.9050903320312,
+            "notches": [
+              {
+                "time_s": 0.1746031746031746,
+                "depth_db": 4.31414805174267
+              },
+              {
+                "time_s": 1.0077097505668933,
+                "depth_db": 11.540750579727003
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1964.988899230957,
+            "notches": [
+              {
+                "time_s": 0.7882086167800453,
+                "depth_db": 11.805501873824625
+              },
+              {
+                "time_s": 1.8308390022675736,
+                "depth_db": 4.898314417258369
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2360.493278503418,
+            "notches": [
+              {
+                "time_s": 0.61859410430839,
+                "depth_db": 27.13245965653163
+              },
+              {
+                "time_s": 1.6662131519274375,
+                "depth_db": 6.531486403861486
+              },
+              {
+                "time_s": 3.4920634920634916,
+                "depth_db": 4.322637628811876
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2757.0911407470703,
+            "notches": [
+              {
+                "time_s": 1.3419501133786846,
+                "depth_db": 11.08775583629322
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 3155.5395126342773,
+            "notches": [
+              {
+                "time_s": 0.4689342403628118,
+                "depth_db": 3.133415860683229
+              },
+              {
+                "time_s": 1.1972789115646258,
+                "depth_db": 16.20976751202563
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 2
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 6
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 5
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.456101768482835,
+          -31.090131094333774,
+          -46.84292832623622,
+          -52.383985874279055,
+          -62.26117535793073,
+          -78.61026573686402
+        ]
+      },
+      "72": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.1054306030273,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1047.4725723266602,
+            "notches": [
+              {
+                "time_s": 1.2571428571428571,
+                "depth_db": 5.794952374708075
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 3153.6890029907227,
+            "notches": [
+              {
+                "time_s": 0.7632653061224489,
+                "depth_db": 3.4847935906658662
+              },
+              {
+                "time_s": 3.0730158730158728,
+                "depth_db": 5.088671984544888
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 4221.012496948242,
+            "notches": [
+              {
+                "time_s": 0.4689342403628118,
+                "depth_db": 7.425933398291619
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 2
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 1
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -28.607856873198617,
+          -36.12309326348967,
+          -44.614332066785735,
+          -55.43689865235155,
+          -74.52948614988802,
+          -86.39585238905035
+        ]
+      },
+      "79": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 784.5319747924805,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1569.232177734375,
+            "notches": [
+              {
+                "time_s": 0.7083900226757369,
+                "depth_db": 3.005216726391417
+              },
+              {
+                "time_s": 1.950566893424036,
+                "depth_db": 12.046321639185578
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 2357.296943664551,
+            "notches": [
+              {
+                "time_s": 0.5238095238095237,
+                "depth_db": 4.587156060604727
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 3942.1743392944336,
+            "notches": [
+              {
+                "time_s": 0.29931972789115646,
+                "depth_db": 22.558587200347546
+              },
+              {
+                "time_s": 0.7582766439909296,
+                "depth_db": 3.5354674456930724
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 3
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 1
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.18552209536722,
+          -43.3625651402904,
+          -50.30841561164367,
+          -54.01612331560541,
+          -64.98851423828815,
+          -85.72793874738574
+        ]
+      },
+      "84": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.6408004760742,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2096.879768371582,
+            "notches": [
+              {
+                "time_s": 0.8331065759637187,
+                "depth_db": 10.304916761764886
+              },
+              {
+                "time_s": 1.9006802721088434,
+                "depth_db": 3.101843954132832
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3149.735641479492,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 4209.320640563965,
+            "notches": [
+              {
+                "time_s": 0.4240362811791383,
+                "depth_db": 8.80108836463971
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 1
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -23.593582807319642,
+          -46.92862896002702,
+          -59.13502892255687,
+          -63.413964517399684,
+          -76.80605532101765,
+          -88.81261846263548
+        ]
+      },
+      "91": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1570.6621170043945,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 3145.8663940429688,
+            "notches": [
+              {
+                "time_s": 0.5138321995464852,
+                "depth_db": 3.2962485754641477
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 4735.03360748291,
+            "notches": [
+              {
+                "time_s": 0.35419501133786846,
+                "depth_db": 6.450560886647068
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -34.6931429232188,
+          -65.42464919885647,
+          -77.28551959619321,
+          -90.60890178002674,
+          -112.94568415220012,
+          -92.41426934841228
+        ]
+      },
+      "96": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 2096.543312072754,
+            "notches": [
+              {
+                "time_s": 0.1746031746031746,
+                "depth_db": 6.185150800264388
+              },
+              {
+                "time_s": 0.4639455782312925,
+                "depth_db": 15.31463351898077
+              },
+              {
+                "time_s": 0.7981859410430838,
+                "depth_db": 7.402975800382848
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 2
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -31.611527283618624,
+          -55.155640431142245,
+          -82.69948541135565,
+          -98.9644510911854,
+          -139.69813041663565,
+          -240.0
+        ]
+      }
+    },
+    "U25-resistivo": {
+      "60": {
+        "partials": [
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.3577728271484,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.2048873901367,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1310.2449417114258,
+            "notches": [
+              {
+                "time_s": 0.5786848072562358,
+                "depth_db": 6.141650815488362
+              },
+              {
+                "time_s": 2.459410430839002,
+                "depth_db": 3.581421465264768
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 1573.2696533203125,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 1837.4719619750977,
+            "notches": [
+              {
+                "time_s": 2.0104308390022676,
+                "depth_db": 15.784392349285866
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2102.010726928711,
+            "notches": [
+              {
+                "time_s": 1.2870748299319728,
+                "depth_db": 18.963411770273098
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 2
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 2
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -18.64027151083022,
+          -29.880395779910526,
+          -42.75800496252085,
+          -52.631213616482114,
+          -62.366378207349086,
+          -85.14722486325783
+        ]
+      },
+      "65": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 349.24163818359375,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 698.6515045166016,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1048.3137130737305,
+            "notches": []
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1398.5647201538086,
+            "notches": []
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1750.0774383544922,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2102.178955078125,
+            "notches": []
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2454.616928100586,
+            "notches": []
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 2809.746551513672,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -21.481288674678176,
+          -29.829320925765742,
+          -40.386474189972816,
+          -53.12570076639341,
+          -59.231966844548516,
+          -85.18794091744851
+        ]
+      },
+      "67": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 391.9715881347656,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 784.0272903442383,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1176.6717910766602,
+            "notches": [
+              {
+                "time_s": 1.5564625850340135,
+                "depth_db": 4.831063738604655
+              },
+              {
+                "time_s": 4.33015873015873,
+                "depth_db": 7.646406809772671
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 1569.9892044067383,
+            "notches": [
+              {
+                "time_s": 0.1746031746031746,
+                "depth_db": 3.7753644880766473
+              },
+              {
+                "time_s": 1.0625850340136054,
+                "depth_db": 13.371833641783027
+              },
+              {
+                "time_s": 2.459410430839002,
+                "depth_db": 6.188491962194789
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 1964.4001007080078,
+            "notches": [
+              {
+                "time_s": 1.1424036281179137,
+                "depth_db": 3.968433593843031
+              },
+              {
+                "time_s": 2.7337868480725622,
+                "depth_db": 7.014080983448963
+              }
+            ]
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 2359.988594055176,
+            "notches": [
+              {
+                "time_s": 0.9129251700680272,
+                "depth_db": 8.701068934005406
+              },
+              {
+                "time_s": 2.5741496598639455,
+                "depth_db": 9.198812606222234
+              }
+            ]
+          },
+          {
+            "harmonic": 7,
+            "frequency_hz": 2756.9229125976562,
+            "notches": [
+              {
+                "time_s": 2.075283446712018,
+                "depth_db": 7.350616343470762
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 3155.5395126342773,
+            "notches": [
+              {
+                "time_s": 1.7959183673469385,
+                "depth_db": 8.668806142922705
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 3
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 6
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 1
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.382775252922098,
+          -30.63349566403824,
+          -50.5166961802939,
+          -57.4529569843036,
+          -62.846586558965036,
+          -82.77377175065843
+        ]
+      },
+      "72": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.3577728271484,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1046.799659729004,
+            "notches": []
+          },
+          {
+            "harmonic": 6,
+            "frequency_hz": 3153.7731170654297,
+            "notches": [
+              {
+                "time_s": 2.529251700680272,
+                "depth_db": 6.198983278887297
+              }
+            ]
+          },
+          {
+            "harmonic": 8,
+            "frequency_hz": 4220.003128051758,
+            "notches": [
+              {
+                "time_s": 0.7482993197278911,
+                "depth_db": 19.771327781938965
+              },
+              {
+                "time_s": 1.8408163265306121,
+                "depth_db": 4.45915494054708
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 2
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -28.539564323901438,
+          -35.80077744175617,
+          -45.773983884627626,
+          -61.35372086714984,
+          -64.4357176708436,
+          -87.65395281999983
+        ]
+      },
+      "79": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 784.7002029418945,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1569.484519958496,
+            "notches": [
+              {
+                "time_s": 3.237641723356009,
+                "depth_db": 3.864120105877717
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 2357.0446014404297,
+            "notches": [
+              {
+                "time_s": 2.0253968253968253,
+                "depth_db": 3.4718323414620613
+              }
+            ]
+          },
+          {
+            "harmonic": 5,
+            "frequency_hz": 3941.5855407714844,
+            "notches": [
+              {
+                "time_s": 0.42902494331065755,
+                "depth_db": 16.51788087756728
+              },
+              {
+                "time_s": 1.0825396825396825,
+                "depth_db": 5.275385832109649
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 2
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -16.15331129004381,
+          -42.73286817713853,
+          -54.93923208937804,
+          -60.04302918835303,
+          -67.70947114484964,
+          -85.87936802476366
+        ]
+      },
+      "84": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.220230102539,
+            "notches": []
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2096.543312072754,
+            "notches": [
+              {
+                "time_s": 2.299773242630385,
+                "depth_db": 3.8869875452356553
+              }
+            ]
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3150.0720977783203,
+            "notches": [
+              {
+                "time_s": 0.8829931972789115,
+                "depth_db": 5.020907555523237
+              }
+            ]
+          },
+          {
+            "harmonic": 4,
+            "frequency_hz": 4209.236526489258,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 1
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -23.717921583892206,
+          -45.55674290133261,
+          -64.40889325320023,
+          -68.66867380850003,
+          -78.6262038201373,
+          -88.93555363864577
+        ]
+      },
+      "91": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1570.5780029296875,
+            "notches": [
+              {
+                "time_s": 0.6585034013605442,
+                "depth_db": 4.359343671188
+              }
+            ]
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 3146.95987701416,
+            "notches": []
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 4734.19246673584,
+            "notches": []
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 0
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 1
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -34.57819329783167,
+          -68.26903754006453,
+          -85.41213183147482,
+          -96.82540331804725,
+          -115.72073653845807,
+          -92.4157044080866
+        ]
+      },
+      "96": {
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 2096.543312072754,
+            "notches": [
+              {
+                "time_s": 0.2494331065759637,
+                "depth_db": 21.410177303779278
+              }
+            ]
+          }
+        ],
+        "intervals": [
+          {
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "count": 1
+          },
+          {
+            "start_s": 0.5,
+            "end_s": 1.5,
+            "count": 0
+          },
+          {
+            "start_s": 1.5,
+            "end_s": 3.5,
+            "count": 0
+          },
+          {
+            "start_s": 3.5,
+            "end_s": 7.5,
+            "count": 0
+          },
+          {
+            "start_s": 7.5,
+            "end_s": 11.5,
+            "count": 0
+          }
+        ],
+        "levels_db": [
+          -29.986681656381222,
+          -53.253505660615936,
+          -81.81179952564834,
+          -105.32288844102987,
+          -153.60323498435835,
+          -240.0
+        ]
+      }
+    }
+  },
+  "files": {
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\C-UNISONO-intensidades.wav": {
+      "sha256": "9c51c03ecf1ba0cb8af4725d1cfb23e2073047d32dae7d8c2bdc5095fbfb87ab",
+      "duration_s": 105.6
+    },
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\C-UNISONO-sostenidas-12s.wav": {
+      "sha256": "600455881e13153c3ae3aedd88bfdee95b82b7435dd1dee379404b218064ec30",
+      "duration_s": 115.2
+    },
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\U10-UNISONO-intensidades.wav": {
+      "sha256": "82567227198acf15727334c6af7e9f473017a6890607b2bbc7e5306e1a15da61",
+      "duration_s": 105.6
+    },
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\U10-UNISONO-sostenidas-12s.wav": {
+      "sha256": "e1f75c096d582e608e5fd187f4d6f0d676b53d9075cc5ecb5781a92e648fcb63",
+      "duration_s": 115.2
+    },
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\U25-UNISONO-intensidades.wav": {
+      "sha256": "0d1a0e466ac23b2045171d610735be2c2e9a49942e2564d1ff0fcfea46f10e35",
+      "duration_s": 105.6
+    },
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\U25-UNISONO-sostenidas-12s.wav": {
+      "sha256": "f5b7f46db7bb6cdd076d0ce63f0e35104323a1ed5035d5e4cf04cbdee6658e32",
+      "duration_s": 115.2
+    },
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\U40-UNISONO-intensidades.wav": {
+      "sha256": "e3d89a46799244b82c19bcf898e5623a70034d73dc316442380b6d3a374ef672",
+      "duration_s": 105.6
+    },
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\U40-UNISONO-sostenidas-12s.wav": {
+      "sha256": "7ba127ead2579d3bccb3b8eefea3c5800a5a99a158bc9295b2bad16ca5865932",
+      "duration_s": 115.2
+    },
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\U25-resistivo-UNISONO-intensidades.wav": {
+      "sha256": "1d7a12010398c37c2d94cf2f3ae28a66c15ea97e30e4d94a28a1bf548875d767",
+      "duration_s": 105.6
+    },
+    "local\\concert-grand-coherent-unison\\unison-retained-audio\\U25-resistivo-UNISONO-sostenidas-12s.wav": {
+      "sha256": "ffc1b69d44e4c8a08ab0c539fdc83778eeb826cd7ef6a2625713b5082da2fe3f",
+      "duration_s": 115.2
+    }
+  }
+}

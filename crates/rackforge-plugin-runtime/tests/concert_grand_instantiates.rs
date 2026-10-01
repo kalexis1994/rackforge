@@ -26,6 +26,9 @@ use std::path::PathBuf;
 use rackforge_plugin_runtime::{PortableEngine, RuntimeLimits};
 
 fn wasm_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("RACKFORGE_CONCERT_GRAND_WASM") {
+        return path.into();
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm")
 }
@@ -71,4 +74,42 @@ fn the_packaged_instrument_can_start() {
         (felt_corner - 0.52).abs() < 1e-6,
         "wasm default for felt corner is {felt_corner}, expected 0.52"
     );
+    for (index, expected) in [(4, 1.0), (25, 2.64), (31, 4.6)] {
+        let actual = instance.get_parameter(index).expect("factory parameter");
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "stale factory capture at {index}: {actual}, expected {expected}"
+        );
+    }
+
+    // Exercise the user's 44.1 kHz/256-frame repeated-key configuration in
+    // the actual portable component, including key releases between blows.
+    instance
+        .prepare(44_100.0, 256, 0, 2)
+        .expect("prepare at 256");
+    let mut audio = vec![0.0; 512];
+    let mut energy = 0.0f64;
+    for block in 0..80 {
+        let midi = if block % 8 == 0 {
+            vec![rackforge_plugin_runtime::MidiEvent {
+                frame: 0,
+                data: [0x90, 75, 110],
+                length: 3,
+            }]
+        } else if block % 8 == 3 {
+            vec![rackforge_plugin_runtime::MidiEvent {
+                frame: 0,
+                data: [0x80, 75, 64],
+                length: 3,
+            }]
+        } else {
+            vec![]
+        };
+        instance
+            .process_interleaved_with_midi(&[], &mut audio, 256, &midi)
+            .expect("repeated keys at 256 must not trap");
+        assert!(audio.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+        energy += audio.iter().map(|x| (*x as f64).powi(2)).sum::<f64>();
+    }
+    assert!(energy > 1e-5, "the packaged piano was silent");
 }

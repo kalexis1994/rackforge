@@ -1,0 +1,159 @@
+--- a/plugins/concert-grand/src/lib.rs
++++ b/plugins/concert-grand/src/lib.rs
+@@ -28,6 +28,7 @@
+ mod radiation;
+ mod contact_pulse;
+ mod bridge;
++mod unison;
+ 
+ use math::{exp2f, expf, log2f, powf, roundf, sincosf, sqrtf};
+ 
+@@ -1004,6 +1005,7 @@
+             "BOARD_CAUSAL_PAIR" => Some(&BOARD_CAUSAL_PAIR),
+             "PHYSICAL_BRIDGE" => Some(&PHYSICAL_BRIDGE),
+             "PHYSICAL_BED_ROUTE" => Some(&PHYSICAL_BED_ROUTE),
++            "COHERENT_UNISON" => Some(&COHERENT_UNISON),
+             _ => None,
+         };
+         if let Some(knob) = research {
+@@ -1013,6 +1015,11 @@
+             } else {
+                 complaints.push(format!("line {}: research switch must be 0 or 1", number + 1));
+             }
++            continue;
++        }
++        if name == "STRING_STIFFNESS_SPREAD" {
++            if (0.0..=0.25).contains(&value) { STRING_STIFFNESS_SPREAD.set(value); set+=1; }
++            else { complaints.push(format!("line {}: stiffness spread outside 0..0.25",number+1)); }
+             continue;
+         }
+         if name == "UNISON_EXTRA_LOSS" {
+@@ -1116,6 +1123,7 @@
+     out.push_str(&format!("CONTACT_BOARD_GAIN = {}\nCONTACT_BOARD_CORNER = {}\n", CONTACT_BOARD_GAIN.get(), CONTACT_BOARD_CORNER.get()));
+     out.push_str(&format!("DIAGNOSTIC_STRING_DRAIN = {}\n",DIAGNOSTIC_STRING_DRAIN.get()));
+     out.push_str(&format!("UNISON_EXTRA_LOSS = {}\n",UNISON_EXTRA_LOSS.get()));
++    out.push_str(&format!("COHERENT_UNISON = {}\nSTRING_STIFFNESS_SPREAD = {}\n",COHERENT_UNISON.get(),STRING_STIFFNESS_SPREAD.get()));
+     out
+ }
+ 
+@@ -3160,6 +3168,8 @@
+ pub static DIAGNOSTIC_STRING_DRAIN: Knob = Knob::new(1.0);
+ // Effective positive per-string loss asymmetry, research only. Not identified material data.
+ pub static UNISON_EXTRA_LOSS: Knob = Knob::new(0.0);
++pub static COHERENT_UNISON: Knob = Knob::new(0.0);
++pub static STRING_STIFFNESS_SPREAD: Knob = Knob::new(0.0);
+ pub static CONTACT_BOARD_CORNER: Knob = Knob::new(350.0);
+ /// The bridge from A0 to C8, in metres, as the pair looks down on it.
+ const BRIDGE_LENGTH_M: f32 = 1.4;
+@@ -7791,6 +7801,8 @@
+         // bass the cap is above the law and changes nothing.
+         let beat_cap_cents = UNISON_BEAT_CAP_HZ.get() * 1731.0 / f0.max(1.0);
+         let detune_cents = detune_cents.min(beat_cap_cents);
++        let coherent_unison = COHERENT_UNISON.get() >= 0.5;
++        let unison_profile = unison::Unison::new(note, b, detune_cents, STRING_STIFFNESS_SPREAD.get());
+ 
+         // First pass: partial frequencies and unnormalised amplitudes. The
+         // comb keeps the sign of sin(n·π·x0): a struck string's partials
+@@ -8404,13 +8416,13 @@
+             let third_string = third_string * unbalance_b;
+             let split = 1.0 / (1.0 + second + third_string);
+             let shares = [split, split * second, split * third_string];
+-            let ratios = [
++            let ratios = if coherent_unison { unison_profile.ratios(n+1) } else { [
+                 exp2f(-cents / 2400.0),
+                 exp2f(cents / 2400.0),
+                 exp2f(
+                     cents * (0.9 + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3)) / 1200.0,
+                 ),
+-            ];
++            ] };
+             // THE TWO-STAGE DECAY, WITHOUT A SCRIPT.
+             //
+             // Each component's own rotation carries only the string's
+@@ -19305,6 +19317,8 @@
+         CONTACT_BOARD_GAIN.set(CONTACT_BOARD_GAIN.compiled());
+         DIAGNOSTIC_STRING_DRAIN.set(DIAGNOSTIC_STRING_DRAIN.compiled());
+         UNISON_EXTRA_LOSS.set(UNISON_EXTRA_LOSS.compiled());
++        COHERENT_UNISON.set(COHERENT_UNISON.compiled());
++        STRING_STIFFNESS_SPREAD.set(STRING_STIFFNESS_SPREAD.compiled());
+         CONTACT_BOARD_CORNER.set(CONTACT_BOARD_CORNER.compiled());
+     }
+ 
+--- /dev/null
++++ b/plugins/concert-grand/src/unison.rs
+@@ -0,0 +1,75 @@
++//! Experimental per-string tuning and stiffness, fixed across the partial ladder.
++//! These are effective parameters, not measured properties of the reference piano.
++use crate::math::{exp2f, sqrtf};
++
++#[derive(Clone, Copy)]
++pub struct Unison {
++    pub pitch: [f32; 3],
++    pub stiffness: [f32; 3],
++    base: f32,
++}
++
++impl Unison {
++    pub fn new(note: u8, base: f32, cents: f32, spread: f32) -> Self {
++        let seed = (note as u32).wrapping_mul(0x9e3779b9);
++        let mut offsets = [-0.5, 0.25 * (crate::hash01(seed ^ 0x41) - 0.5), 0.5];
++        let mean = offsets.iter().sum::<f32>() / 3.0;
++        for value in &mut offsets { *value -= mean; }
++        let mut variations = core::array::from_fn::<_, 3, _>(|i|
++            2.0 * crate::hash01(seed ^ (i as u32 + 1).wrapping_mul(0x85ebca6b)) - 1.0);
++        let mean = variations.iter().sum::<f32>() / 3.0;
++        for value in &mut variations { *value -= mean; }
++        Self {
++            pitch: offsets.map(|x| exp2f(x * cents / 1200.0)),
++            stiffness: variations.map(|x| base * (1.0 + x * spread)),
++            base,
++        }
++    }
++
++    pub fn ratios(&self, harmonic: usize) -> [f32; 3] {
++        let h2 = (harmonic * harmonic) as f32;
++        core::array::from_fn(|i| {
++            if self.stiffness[i] == self.base { return self.pitch[i]; }
++            // Hold each fundamental fixed while changing its inharmonicity.
++            self.pitch[i] * sqrtf(
++                ((1.0 + self.stiffness[i] * h2) / (1.0 + self.base * h2))
++                * ((1.0 + self.base) / (1.0 + self.stiffness[i])))
++        })
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn one_tuning_per_string_without_stiffness_spread() {
++        let u = Unison::new(60, 0.0002, 0.7, 0.0);
++        for h in 1..=144 { assert_eq!(u.ratios(h), u.pitch); }
++        assert!((u.pitch.iter().product::<f32>() - 1.0).abs() < 2e-6);
++    }
++
++    #[test]
++    fn each_ladder_obeys_its_own_stiff_string_law() {
++        let u = Unison::new(72, 0.0005, 0.5, 0.02);
++        for h in 1..=100 {
++            let ratios = u.ratios(h);
++            for i in 0..3 {
++                let actual = (1.0 + u.base * (h*h) as f32) / (1.0 + u.base)
++                    * (ratios[i] / u.pitch[i]).powi(2);
++                let expected = (1.0 + u.stiffness[i] * (h*h) as f32) / (1.0 + u.stiffness[i]);
++                assert!((actual / expected - 1.0).abs() < 5e-6);
++            }
++        }
++    }
++
++    #[test]
++    fn profiles_are_positive_and_repeatable_across_keyboard() {
++        for note in 21..=108 {
++            let a = Unison::new(note, 0.001, 2.0, 0.25);
++            let b = Unison::new(note, 0.001, 2.0, 0.25);
++            assert_eq!(a.pitch, b.pitch); assert_eq!(a.stiffness, b.stiffness);
++            for h in 1..=144 { assert!(a.ratios(h).iter().all(|r| r.is_finite() && *r > 0.0)); }
++        }
++    }
++}

@@ -1,0 +1,10 @@
+
+running 1 test
+test bench::bench_note_onset ... 0 note-on(s) in a block: mean 188 us | worst 822 us |                  worst is 31% of the 2667 us deadline
+1 note-on(s) in a block: mean 1100 us | worst 1377 us |                  worst is 52% of the 2667 us deadline
+2 note-on(s) in a block: mean 1274 us | worst 1542 us |                  worst is 58% of the 2667 us deadline
+4 note-on(s) in a block: mean 1510 us | worst 2278 us |                  worst is 85% of the 2667 us deadline
+8 note-on(s) in a block: mean 1904 us | worst 2664 us |                  worst is 100% of the 2667 us deadline
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 180 filtered out; finished in 0.72s

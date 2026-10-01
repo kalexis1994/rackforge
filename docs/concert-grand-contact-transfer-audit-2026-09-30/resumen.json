@@ -1,0 +1,160 @@
+{
+  "policy": "18 exact recorded pairs; 9 roots C3..F#7, velocity60/124. No per-note gain, no EQ, no production selection.",
+  "common_gain_db": 32.84336528013347,
+  "profiles": {
+    "14B": {
+      "mean_early_spectral_error_db": 12.723992181593852,
+      "mean_change_vs_baseline_db": 0.0,
+      "worse_pairs": 0,
+      "improved_pairs": 0,
+      "max_change_db": 0.0,
+      "contact_energy_max_fraction": 0.9025666352120555,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "contact-all": {
+      "mean_early_spectral_error_db": 12.508783021777454,
+      "mean_change_vs_baseline_db": -0.21520915981639607,
+      "worse_pairs": 0,
+      "improved_pairs": 3,
+      "max_change_db": 0.2348315402467378,
+      "contact_energy_max_fraction": 0.9031319780799718,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "hysteresis-only-off": {
+      "mean_early_spectral_error_db": 12.270216467179118,
+      "mean_change_vs_baseline_db": -0.45377571441473363,
+      "worse_pairs": 10,
+      "improved_pairs": 8,
+      "max_change_db": 0.947361766946285,
+      "contact_energy_max_fraction": 1.0022045653144092,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "stiffness-only-half": {
+      "mean_early_spectral_error_db": 12.460394034552708,
+      "mean_change_vs_baseline_db": -0.26359814704114415,
+      "worse_pairs": 6,
+      "improved_pairs": 9,
+      "max_change_db": 2.412206304741435,
+      "contact_energy_max_fraction": 0.891219509121035,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "no-hysteresis": {
+      "mean_early_spectral_error_db": 12.227560114401697,
+      "mean_change_vs_baseline_db": -0.4964320671921535,
+      "worse_pairs": 7,
+      "improved_pairs": 10,
+      "max_change_db": 1.6701433392626281,
+      "contact_energy_max_fraction": 1.0032381986469203,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "relaxation": {
+      "mean_early_spectral_error_db": 12.930569636946153,
+      "mean_change_vs_baseline_db": 0.20657745535230093,
+      "worse_pairs": 9,
+      "improved_pairs": 6,
+      "max_change_db": 3.230150814169054,
+      "contact_energy_max_fraction": 0.9197904434117216,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "soft-treble": {
+      "mean_early_spectral_error_db": 12.49989995418592,
+      "mean_change_vs_baseline_db": -0.22409222740793103,
+      "worse_pairs": 3,
+      "improved_pairs": 9,
+      "max_change_db": 0.913251346507348,
+      "contact_energy_max_fraction": 0.9031093110112743,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "contact-gate-only": {
+      "mean_early_spectral_error_db": 12.538523307564681,
+      "mean_change_vs_baseline_db": -0.18546887402917062,
+      "worse_pairs": 1,
+      "improved_pairs": 3,
+      "max_change_db": 0.45341991117313185,
+      "contact_energy_max_fraction": 0.9025666352120555,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "14B-instrumented": {
+      "mean_early_spectral_error_db": 12.723992181593852,
+      "mean_change_vs_baseline_db": 0.0,
+      "worse_pairs": 0,
+      "improved_pairs": 0,
+      "max_change_db": 0.0,
+      "contact_energy_max_fraction": 0.9025666352120555,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "no-drain": {
+      "mean_early_spectral_error_db": 13.446680949997297,
+      "mean_change_vs_baseline_db": 0.7226887684034455,
+      "worse_pairs": 14,
+      "improved_pairs": 2,
+      "max_change_db": 2.3637824945338526,
+      "contact_energy_max_fraction": 0.9025666352120555,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "grid-2": {
+      "mean_early_spectral_error_db": 12.719755732415745,
+      "mean_change_vs_baseline_db": -0.0042364491781080715,
+      "worse_pairs": 0,
+      "improved_pairs": 0,
+      "max_change_db": 0.008647578574848325,
+      "contact_energy_max_fraction": 0.9025666352120555,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "grid-4": {
+      "mean_early_spectral_error_db": 12.721525497801654,
+      "mean_change_vs_baseline_db": -0.0024666837921989426,
+      "worse_pairs": 0,
+      "improved_pairs": 0,
+      "max_change_db": 0.01923746406662019,
+      "contact_energy_max_fraction": 0.9025666352120555,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "rate-005": {
+      "mean_early_spectral_error_db": 12.020224132848924,
+      "mean_change_vs_baseline_db": -0.7037680487449295,
+      "worse_pairs": 6,
+      "improved_pairs": 11,
+      "max_change_db": 1.2522083174066534,
+      "contact_energy_max_fraction": 0.9849443578279352,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "rate-010": {
+      "mean_early_spectral_error_db": 11.824055845720713,
+      "mean_change_vs_baseline_db": -0.8999363358731406,
+      "worse_pairs": 3,
+      "improved_pairs": 13,
+      "max_change_db": 1.1704785300742042,
+      "contact_energy_max_fraction": 0.9694377432207727,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "rate-020": {
+      "mean_early_spectral_error_db": 11.821760270483711,
+      "mean_change_vs_baseline_db": -0.9022319111101401,
+      "worse_pairs": 2,
+      "improved_pairs": 13,
+      "max_change_db": 0.8437228815149158,
+      "contact_energy_max_fraction": 0.9412184157009738,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "retarded": {
+      "mean_early_spectral_error_db": 12.516317072877653,
+      "mean_change_vs_baseline_db": -0.2076751087161992,
+      "worse_pairs": 4,
+      "improved_pairs": 12,
+      "max_change_db": 1.6817667299892634,
+      "contact_energy_max_fraction": 0.9025666352120555,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    },
+    "retarded-contact": {
+      "mean_early_spectral_error_db": 12.278870797690196,
+      "mean_change_vs_baseline_db": -0.4451213839036561,
+      "worse_pairs": 4,
+      "improved_pairs": 14,
+      "max_change_db": 1.6338167291156793,
+      "contact_energy_max_fraction": 0.9031319780799718,
+      "interpreted": "Lower error is diagnostic, not a perceptual fidelity rating. Same 18 pairs and frozen gain; no fit or independent holdout."
+    }
+  },
+  "notes": "Body decay and radiation transfer are independent failures; turning off all drain is diagnostic only."
+}

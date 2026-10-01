@@ -1,0 +1,133 @@
+{
+  "label": "Unisono 12 - coherent narrow tuning, treble width retained",
+  "tuning": {
+    "PHYSICAL_BRIDGE": 1,
+    "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+    "PHYSICAL_PRESSURE_SCALE": 3,
+    "PHYSICAL_BED_ROUTE": 1,
+    "BOARD_LOSS_FACTOR": 0.046,
+    "FELT_K_A0": 39200000,
+    "STULOV_TAU_S": 0.0001,
+    "BED_MIX": 2.5,
+    "FELT_TREBLE_DECADES": 2,
+    "CONTACT_BOARD_GAIN": 0.006,
+    "CONTACT_BOARD_CORNER": 180,
+    "UNISON_WIDTH": 0.1,
+    "POLARISATION_CENTS": 0,
+    "COHERENT_UNISON": 1,
+    "STRING_STIFFNESS_SPREAD": 0,
+    "REACTIVE_BRIDGE": 0,
+    "STRING_TUNING_CENTER": 0.5,
+    "SPATIAL_UNISON_GAP_M": 0,
+    "MECHANICAL_RADIATION": 1,
+    "MECHANICAL_EMISSION_GAIN": 0.125,
+    "MECHANICAL_CASE_CORNER": 1500,
+    "UNISON_TREBLE_WIDTH_RATIO": 1
+  },
+  "params": {
+    "25": 2.64
+  },
+  "training_gain_db": 21.85313499438971,
+  "common_trim_db": 0,
+  "binary_sha256": "c6b3a70b50442d2de6faf1fd0ee6d30e5f402042e50027020e6fd0376f3e6f27",
+  "original_C_provenance": {
+    "label": "C-sin-batimientos",
+    "pairs": [
+      [
+        60,
+        60
+      ],
+      [
+        65,
+        60
+      ],
+      [
+        67,
+        60
+      ],
+      [
+        72,
+        60
+      ]
+    ],
+    "duration_s": 18,
+    "initial_match_db": -0.040921363878897665,
+    "common_gain_db": 27.603604403138874,
+    "manifest": {
+      "binary": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\release\\deps\\rackforge_concert_grand-7275b6d0b6a905c6.exe",
+        "fd67a9f286bde7cffa2fd019958bb8b9e16c0034a2828725421580c8762f19b0"
+      ],
+      "pairs": [
+        [
+          60,
+          60
+        ],
+        [
+          60,
+          124
+        ],
+        [
+          65,
+          60
+        ],
+        [
+          65,
+          124
+        ],
+        [
+          67,
+          60
+        ],
+        [
+          67,
+          124
+        ],
+        [
+          69,
+          60
+        ],
+        [
+          69,
+          124
+        ],
+        [
+          72,
+          60
+        ],
+        [
+          72,
+          124
+        ]
+      ],
+      "params": {
+        "25": 2.64
+      },
+      "calibration": null,
+      "tuning": {
+        "PHYSICAL_BRIDGE": 1,
+        "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+        "PHYSICAL_PRESSURE_SCALE": 3,
+        "PHYSICAL_BED_ROUTE": 1,
+        "BOARD_LOSS_FACTOR": 0.046,
+        "FELT_K_A0": 39200000,
+        "STULOV_TAU_S": 0.0001,
+        "BED_MIX": 2.5,
+        "FELT_TREBLE_DECADES": 2,
+        "CONTACT_BOARD_GAIN": 0.006,
+        "CONTACT_BOARD_CORNER": 180,
+        "UNISON_WIDTH": 0,
+        "POLARISATION_CENTS": 0
+      },
+      "preset": "concert",
+      "rate": 44100,
+      "channel": "left",
+      "warmup_ms": 200
+    },
+    "wav_sha256": "3bab0e425d999a19dde2ad8439dfb1abcc7c6cd8293d1099976f171f0fb45a22",
+    "policy": "Diagnostic ablation, not a fitted piano. One fixed gain per variant matching median 50-150ms RMS; no per-note normalization. Held 4s, 20ms end fade, .5s gap."
+  },
+  "selected_for_production": false,
+  "acoustic_emission_calibration": "Provisional common amplitude factor; source amplitudes are synthetic, not measured forces. Reduced case/geometry receiver; room uses a common diffuse field and board-centred early reflection approximation.",
+  "selection_policy": "Provisional audition candidate U10-resistivo. One tuning per string, no independent stiffness scatter, no extra damping, legacy resistive physical bridge. Perceptual acceptance pending."
+}

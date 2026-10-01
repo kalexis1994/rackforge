@@ -1,0 +1,58 @@
+{
+  "version": "0.172.0",
+  "label": "Graves con ataque, contacto 70 y apertura 100",
+  "tuning": {
+    "PHYSICAL_BRIDGE": 1,
+    "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+    "PHYSICAL_PRESSURE_SCALE": 3,
+    "PHYSICAL_BED_ROUTE": 1,
+    "BOARD_LOSS_FACTOR": 0.046,
+    "FELT_K_A0": 58800000,
+    "STULOV_TAU_S": 0.0001,
+    "BED_MIX": 2.5,
+    "FELT_TREBLE_DECADES": 0.6702945361198906,
+    "CONTACT_BOARD_GAIN": 0.006,
+    "CONTACT_BOARD_CORNER": 180,
+    "UNISON_WIDTH": 0,
+    "POLARISATION_CENTS": 0,
+    "COHERENT_UNISON": 1,
+    "STRING_STIFFNESS_SPREAD": 0,
+    "REACTIVE_BRIDGE": 1,
+    "STRING_TUNING_CENTER": 0.5,
+    "SPATIAL_UNISON_GAP_M": 0,
+    "MECHANICAL_RADIATION": 1,
+    "MECHANICAL_EMISSION_GAIN": 0.125,
+    "MECHANICAL_CASE_CORNER": 1500,
+    "UNISON_TREBLE_WIDTH_RATIO": 1,
+    "UNISON_EXTRA_LOSS": 2,
+    "RESTRIKE_PHASE_PRESERVE": 1,
+    "MERGE_RAMP_S": 0.004,
+    "SIM_MIN_MODES": 1,
+    "SIM_TOP_HZ": 19000,
+    "FELT_RATE_MODEL": 1,
+    "FELT_RATE_DAMPING": 0.2,
+    "FELT_K_DECADES": 1.5911132900722662,
+    "KNOCK_LEVEL": 0,
+    "THUMP_BASE": 0,
+    "BASS_BRIDGE_CORNER_HZ": 400,
+    "RESTRIKE_OLD_RETENTION": 0.7
+  },
+  "params": {
+    "4": 1.0,
+    "25": 2.64,
+    "31": 4.6
+  },
+  "controls": {
+    "width": 1.0,
+    "mic_distance": 2.64,
+    "board_damping": 4.6
+  },
+  "output_gain_db": 25.120884443707872,
+  "output_gain": 18.032013431103557,
+  "source_candidate_sha256": "bc82021ce872fc52de5809f23398ee4408832ee6e684a063f622d90bd0b5a11b",
+  "notes": "Effective reduced-model calibration; no measured full hammer/moving-string collision. Common coefficients for all factory programs; each program retains its controls. Output calibration is after preamp, before existing safety ceiling.",
+  "factory_program_level_offsets_db": {
+    "other_programs": -12.044,
+    "bright_additional": -2.0
+  }
+}

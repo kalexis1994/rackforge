@@ -1,0 +1,47 @@
+{
+  "passed": true,
+  "mapping": {
+    "region_count": 658,
+    "main_regions": 496,
+    "release_regions": 72,
+    "keys": 88,
+    "velocities": 127,
+    "checks": "One main region per key/velocity; closest root <=1 semitone; all damped keys covered by release; F6 damped, F#6 undamped."
+  },
+  "pieces": [
+    {
+      "file": "C:\\SHARED\\SteinwayD-MIDI\\SteinwayD-StageORTF-chopin-nocturno-op9-2.wav",
+      "sha256": "ac68289aae88faf3fab505739c9da507324a7c6dde6883bf4101ee3f224ba374",
+      "duration_seconds": 234.5638095238095,
+      "notes": 1498,
+      "untransposed_note_events": 510,
+      "transposed_note_events": 988,
+      "peak": 0.46488988399505615,
+      "gain_db": 0.0,
+      "max_active_voices": 243,
+      "pedal_noise_cues": 1,
+      "message_counts": {
+        "program_change": 1,
+        "control_change": 3031,
+        "note_on": 2996
+      }
+    },
+    {
+      "file": "C:\\SHARED\\SteinwayD-MIDI\\SteinwayD-StageORTF-liszt-la-campanella.wav",
+      "sha256": "a0b3ffaaf2092ebdabe529cbb132ec01a6079f8bf9c0834129588a712c2ef68a",
+      "duration_seconds": 285.15884353741495,
+      "notes": 4249,
+      "untransposed_note_events": 1785,
+      "transposed_note_events": 2464,
+      "peak": 0.8242795467376709,
+      "gain_db": 0.0,
+      "max_active_voices": 251,
+      "pedal_noise_cues": 160,
+      "message_counts": {
+        "program_change": 1,
+        "control_change": 2883,
+        "note_on": 8498
+      }
+    }
+  ]
+}

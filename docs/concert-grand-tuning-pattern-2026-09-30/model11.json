@@ -1,0 +1,28 @@
+{
+  "label": "11 - experimental asymmetric coherent tuning",
+  "tuning": {
+    "PHYSICAL_BRIDGE": 1,
+    "PHYSICAL_BRIDGE_MOBILITY": 0.0005,
+    "PHYSICAL_PRESSURE_SCALE": 3,
+    "PHYSICAL_BED_ROUTE": 1,
+    "BOARD_LOSS_FACTOR": 0.046,
+    "FELT_K_A0": 39200000,
+    "STULOV_TAU_S": 0.0001,
+    "BED_MIX": 2.5,
+    "FELT_TREBLE_DECADES": 2,
+    "CONTACT_BOARD_GAIN": 0.006,
+    "CONTACT_BOARD_CORNER": 180,
+    "COHERENT_UNISON": 1,
+    "UNISON_WIDTH": 0.5,
+    "STRING_STIFFNESS_SPREAD": 0.02,
+    "REACTIVE_BRIDGE": 1,
+    "STRING_TUNING_CENTER": 0.25
+  },
+  "params": {
+    "25": 2.64
+  },
+  "training_gain_db": 27.603604403138874,
+  "binary_sha256": "f30612fb839ac0e49dcb24843dcfa7ccf6df547f9ef64874b7bcdda575f71ebd",
+  "selected_for_production": false,
+  "source_audition_sha256": "a1ba30b9f4bc231920df966b505d23b658e42bb6377ceb5f5e1b1287ddf5a5b6"
+}

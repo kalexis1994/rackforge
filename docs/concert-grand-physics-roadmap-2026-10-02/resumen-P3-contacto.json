@@ -1,0 +1,2320 @@
+{
+  "date": "2026-10-02",
+  "status": "P3 partial: physical coordinates/contact mapping and absolute-reference poles measured",
+  "selection": null,
+  "factory_changed": false,
+  "package_sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+  "fingerprints": [
+    "232b085ed4248398",
+    "4371ab4adc1542ab"
+  ],
+  "validation": {
+    "algebraic_tests_passed": 6,
+    "ignored_tests": 3,
+    "production_cargo_check": "passed with two existing dead-code warnings",
+    "process_isolated_contact_cases": 10,
+    "process_isolated_precision_cases": 40,
+    "off_audio_bit_exact_cases": [
+      {
+        "profile": "Actual",
+        "case": "42:60",
+        "raw_sha256": "0a615f88aba1d813ff9ccc6092e947fe7023764c778318c63faba203840e5dc6"
+      },
+      {
+        "profile": "Actual",
+        "case": "42:124",
+        "raw_sha256": "9927d76104c09f58ad7a7d2403b7075fa87f53db17e3f5488a4f5e9340bc3182"
+      },
+      {
+        "profile": "Actual",
+        "case": "60:60",
+        "raw_sha256": "3c53eac2420cb8ec399d76cfa2d88e4482c6f8d3023be8136128c72d8270f186"
+      },
+      {
+        "profile": "Actual",
+        "case": "60:124",
+        "raw_sha256": "6c20fb7a6082e353e42bf3fc362183bfeb84f278748618e37944af3cdca14459"
+      },
+      {
+        "profile": "Actual",
+        "case": "72:60",
+        "raw_sha256": "f61f49d27a217b2db9381d2ba77c830150c59602910483a4993d685f1191e646"
+      },
+      {
+        "profile": "Actual",
+        "case": "72:124",
+        "raw_sha256": "54025f2cba5c2b98943128fea56b9b6d67fdf03184088498d202c3459c5c6462"
+      },
+      {
+        "profile": "Actual",
+        "case": "84:60",
+        "raw_sha256": "c514e735b5897f18f426d57fd3a0e69cbf57277e62599a04cdff7260701373c3"
+      },
+      {
+        "profile": "Actual",
+        "case": "84:124",
+        "raw_sha256": "c3d37032a5dd46012b327c78a4a44a60e171fdc279138a9027a023e393036261"
+      },
+      {
+        "profile": "Actual",
+        "case": "90:60",
+        "raw_sha256": "8268be9822bb76a457111395880c93ef1c302fcff981ab9d32f2a952aa32578c"
+      },
+      {
+        "profile": "Actual",
+        "case": "90:124",
+        "raw_sha256": "94b0bc08977503364b16ff4e44052166b5eb5129f2de77db452b161276761bb8"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "42:60",
+        "raw_sha256": "6738aecc94b7c7a2270e3335dcebd5f857370722dd733e41c4f1a240c6649b72"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "42:124",
+        "raw_sha256": "b3e8e03b33ce66d6160e1b352c438eea064671c6baef60dd0c8ae46e77dd88cb"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "60:60",
+        "raw_sha256": "3834c4ca1327cfe4e703c36a90bd71acea51095ac5d4ce244650eec9d04bba82"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "60:124",
+        "raw_sha256": "f3b7394e3cf7322f031aa8fca9991c478d5003b248a1c19d835f5d84bf3e37c5"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "72:60",
+        "raw_sha256": "3e066b0b16d8dacca136d315bd65dfc88827861885511f12a3a8e26f425120e5"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "72:124",
+        "raw_sha256": "6e1bd051b720b70d7ac1468d3227e4265d3bda6967228d0e07186d93908cbbe6"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "84:60",
+        "raw_sha256": "b7d74ae110ff950a122910cecd0977d48cfe7433ff5d754cb4f456e52b6741cd"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "84:124",
+        "raw_sha256": "4a897878ef8504ef9f27c0c0c5c6b83c0d166a296af5bee9a6888bbcef462278"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "90:60",
+        "raw_sha256": "682053ce1800f4e0003af4742cc909109a52ddd0b3be7dbfc5ccccbb93c0684d"
+      },
+      {
+        "profile": "Geometria-promediada",
+        "case": "90:124",
+        "raw_sha256": "34e03d8c2656589086df648121bd4c687e255eaa3a407acedd4553aec67af6ec"
+      }
+    ],
+    "coordinate_gates": {
+      "spatial_energy_relative_error": 1.0072106133302611e-14,
+      "cycle_and_spatial_strain_relative_error": 3.762285738269773e-15,
+      "endpoint_virtual_work_relative_error": 5.643529410530358e-15
+    }
+  },
+  "contact": {
+    "42:60": {
+      "modes": 87,
+      "built_modes": 35,
+      "length_m": 1.3742163181304932,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.009044084697961807,
+      "contact_linear_energy_per_representative_wire_j": 0.0035359798783018968,
+      "head_initial_energy_per_string_j": 0.005302611203952756,
+      "mean_excess_length_fraction": 1.511222464173196e-06,
+      "plain_steel_quasistatic_mean_tension_rise_n": 0.5067902545177279,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 0.5159477018027083,
+      "material_interpretation": "wound bass: inferred EA is not a valid core identification",
+      "leading_tension_force_to_native_median_gain": 0.005897331695570597,
+      "leading_tension_force_to_native_gain_range": [
+        0.0016350709387530306,
+        0.007111940471262405
+      ],
+      "fundamental_native_units_per_meter": 3.177242013711392,
+      "first_contact_frequency_hz": 92.46564483642578,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 805.0,
+        "positive_compression_steps": 804.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.0032159999918803805,
+        "string_energy_j": 0.0035359802535045973,
+        "initial_hammer_energy_j": 0.005302611203952756,
+        "final_hammer_energy_j": 0.0013515544948991625
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87
+      ],
+      "native_units_per_meter": [
+        3.177242013711392,
+        11.32587411749648,
+        22.963284057949135,
+        34.96677845163304,
+        53.51208608997919,
+        65.87584526775906,
+        80.21716190720115,
+        90.857604467031,
+        88.2980553942415,
+        107.12096924659448,
+        132.92239708781676,
+        159.38194276016603,
+        135.69982077351105,
+        157.89662893854455,
+        189.5139489714968,
+        221.0703852957778,
+        205.54618681172886,
+        192.6526444063078,
+        222.28298107602086,
+        207.87356763234925,
+        257.2086484394237,
+        238.10281071333483,
+        271.8097355322577,
+        251.6617932251677,
+        302.00258184459454,
+        294.29894211470673,
+        314.5267420605655,
+        306.3014836816242,
+        350.63265701821194,
+        344.5041718163749,
+        361.22144388666214,
+        0.0,
+        456.0534545925525,
+        449.8862157779031,
+        483.52194454374506,
+        476.16865915458703,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "42:124": {
+      "modes": 87,
+      "built_modes": 69,
+      "length_m": 1.3742163181304932,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.00900860782712698,
+      "contact_linear_energy_per_representative_wire_j": 0.04405962378437345,
+      "head_initial_energy_per_string_j": 0.06557500437678111,
+      "mean_excess_length_fraction": 1.8800610134180266e-05,
+      "plain_steel_quasistatic_mean_tension_rise_n": 6.2800754007158295,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 6.371948905443738,
+      "material_interpretation": "wound bass: inferred EA is not a valid core identification",
+      "leading_tension_force_to_native_median_gain": 0.007725847059323158,
+      "leading_tension_force_to_native_gain_range": [
+        0.002099148341394773,
+        0.010503411146811283
+      ],
+      "fundamental_native_units_per_meter": 4.079029322347618,
+      "first_contact_frequency_hz": 92.64753723144531,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 655.0,
+        "positive_compression_steps": 654.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.002615999993395235,
+        "string_energy_j": 0.044059627790336356,
+        "initial_hammer_energy_j": 0.06557500437678111,
+        "final_hammer_energy_j": 0.012447639157006123
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87
+      ],
+      "native_units_per_meter": [
+        4.079029322347618,
+        14.53687553110887,
+        29.46497846138488,
+        44.85504737345324,
+        68.62979110010819,
+        84.4721266903121,
+        102.8485763027839,
+        116.47945191675964,
+        113.18953283479969,
+        137.3105366933019,
+        170.3755500559508,
+        204.2829552843419,
+        173.92388622279424,
+        202.36811488088895,
+        242.8854398414829,
+        283.3240676433639,
+        263.42450213634345,
+        246.89728684672306,
+        284.8675412099062,
+        266.39874426725123,
+        329.62110116792695,
+        305.13425356859335,
+        348.32837140222944,
+        322.5067524629361,
+        387.01713959830226,
+        377.14342310519953,
+        403.06372306718254,
+        392.52176529324026,
+        449.33028034161083,
+        441.4755551358242,
+        462.8972367772774,
+        454.6396616794543,
+        584.4199543356038,
+        576.515774849835,
+        619.6176492813797,
+        610.193760061227,
+        606.9747514701752,
+        775.5818899934671,
+        639.4454840311776,
+        815.6923449603987,
+        594.0378030610799,
+        667.3646641219062,
+        622.663958084767,
+        698.6559864099632,
+        695.5452782949793,
+        640.2054111298552,
+        725.9112222976141,
+        667.5974926236454,
+        669.0046816255367,
+        744.3392766943484,
+        748.5335290840789,
+        837.7998715845189,
+        836.6749146837371,
+        753.0182743659731,
+        944.2849586312997,
+        840.7131311857283,
+        819.3436504666435,
+        866.6085457235977,
+        953.1018481901166,
+        1012.4116031773495,
+        945.0447846385397,
+        876.6005732435607,
+        1107.443339020128,
+        0.0,
+        1143.4012509362688,
+        1111.728158023937,
+        1123.363623163432,
+        1093.9271772870377,
+        1346.754132716714,
+        1302.2469861666104,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "60:60": {
+      "modes": 38,
+      "built_modes": 14,
+      "length_m": 0.619020402431488,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.002508375560864806,
+      "contact_linear_energy_per_representative_wire_j": 0.00150742509936996,
+      "head_initial_energy_per_string_j": 0.003795215369200496,
+      "mean_excess_length_fraction": 1.431837310582905e-06,
+      "plain_steel_quasistatic_mean_tension_rise_n": 0.29564572743183176,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 0.3010252694790301,
+      "material_interpretation": "assumed solid steel, not an identified real string",
+      "leading_tension_force_to_native_median_gain": 0.007196058299212528,
+      "leading_tension_force_to_native_gain_range": [
+        0.00626069430868389,
+        0.007529151477834525
+      ],
+      "fundamental_native_units_per_meter": 32.436896071099476,
+      "first_contact_frequency_hz": 261.6056213378906,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 592.0,
+        "positive_compression_steps": 591.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.0023639999940314738,
+        "string_energy_j": 0.0015074252050197104,
+        "initial_hammer_energy_j": 0.003795215369200496,
+        "final_hammer_energy_j": 0.0019308113811674055
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38
+      ],
+      "native_units_per_meter": [
+        32.436896071099476,
+        63.104754798743166,
+        97.43862001628675,
+        126.37095792102703,
+        135.03810612609954,
+        189.7992278963524,
+        189.26027741767285,
+        253.39017212183265,
+        274.45657104764945,
+        294.1477469433448,
+        335.86170822793736,
+        353.3983439979646,
+        416.10538334500933,
+        416.9756602255744,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "60:124": {
+      "modes": 38,
+      "built_modes": 31,
+      "length_m": 0.619020402431488,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.002508375560864806,
+      "contact_linear_energy_per_representative_wire_j": 0.024093736422776478,
+      "head_initial_energy_per_string_j": 0.04693371904404983,
+      "mean_excess_length_fraction": 2.2878102695231235e-05,
+      "plain_steel_quasistatic_mean_tension_rise_n": 4.723869998078358,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 4.797343229905566,
+      "material_interpretation": "assumed solid steel, not an identified real string",
+      "leading_tension_force_to_native_median_gain": 0.007181210517694192,
+      "leading_tension_force_to_native_gain_range": [
+        0.006429243467331387,
+        0.008513362492068634
+      ],
+      "fundamental_native_units_per_meter": 36.67705504074391,
+      "first_contact_frequency_hz": 261.6056213378906,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 474.0,
+        "positive_compression_steps": 473.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.0018919999952231592,
+        "string_energy_j": 0.02409373709948177,
+        "initial_hammer_energy_j": 0.04693371904404983,
+        "final_hammer_energy_j": 0.016399882179655816
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38
+      ],
+      "native_units_per_meter": [
+        36.67705504074391,
+        71.35382360406952,
+        110.17580073500747,
+        142.89019385461103,
+        152.6903306277362,
+        214.60980166457622,
+        214.000400401084,
+        286.51337777267986,
+        310.33362804857484,
+        332.59880327579504,
+        379.76561810249893,
+        399.59453094253496,
+        470.4987494656351,
+        471.48280245220565,
+        543.5877358674556,
+        539.4882057071532,
+        484.48177712136044,
+        556.3802964074574,
+        542.0325558868625,
+        618.8850942850717,
+        617.3039714500529,
+        681.5287392792171,
+        676.8071886204189,
+        744.311249041405,
+        763.3343149383688,
+        730.4925936687663,
+        825.3031834131875,
+        787.476421665804,
+        804.3067348931654,
+        851.7861610459742,
+        860.6305364511553,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "72:60": {
+      "modes": 20,
+      "built_modes": 7,
+      "length_m": 0.3732026219367981,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.0010396663565188646,
+      "contact_linear_energy_per_representative_wire_j": 0.0005074236867048759,
+      "head_initial_energy_per_string_j": 0.003159954058176257,
+      "mean_excess_length_fraction": 7.995665412409138e-07,
+      "plain_steel_quasistatic_mean_tension_rise_n": 0.11349957913280775,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 0.1155771872229831,
+      "material_interpretation": "assumed solid steel, not an identified real string",
+      "leading_tension_force_to_native_median_gain": 0.009599779366846285,
+      "leading_tension_force_to_native_gain_range": [
+        0.008732184236712843,
+        0.010726563251224772
+      ],
+      "fundamental_native_units_per_meter": 73.00867948940295,
+      "first_contact_frequency_hz": 523.360107421875,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 556.0,
+        "positive_compression_steps": 555.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.002219999994395039,
+        "string_energy_j": 0.0005074237296002489,
+        "initial_hammer_energy_j": 0.003159954058176257,
+        "final_hammer_energy_j": 0.002105516797953874
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "native_units_per_meter": [
+        73.00867948940295,
+        131.3515024678162,
+        230.25335390262373,
+        274.7548423072263,
+        312.404302650118,
+        431.9509981194239,
+        456.4119119716394,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "72:124": {
+      "modes": 20,
+      "built_modes": 16,
+      "length_m": 0.3732026219367981,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.0010396663565188646,
+      "contact_linear_energy_per_representative_wire_j": 0.011609773322164528,
+      "head_initial_energy_per_string_j": 0.039077728542660374,
+      "mean_excess_length_fraction": 1.829010020375501e-05,
+      "plain_steel_quasistatic_mean_tension_rise_n": 2.596305083253339,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 2.6399770940884544,
+      "material_interpretation": "assumed solid steel, not an identified real string",
+      "leading_tension_force_to_native_median_gain": 0.008952482039603072,
+      "leading_tension_force_to_native_gain_range": [
+        0.007380854054649187,
+        0.010136735935410614
+      ],
+      "fundamental_native_units_per_meter": 68.99410426490326,
+      "first_contact_frequency_hz": 523.360107421875,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 387.0,
+        "positive_compression_steps": 386.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.0015439999961017747,
+        "string_energy_j": 0.011609773654952523,
+        "initial_hammer_energy_j": 0.039077728542660374,
+        "final_hammer_energy_j": 0.018311971643138625
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "native_units_per_meter": [
+        68.99410426490326,
+        124.12877907053615,
+        217.5922886099649,
+        259.6466919672549,
+        295.2258768140088,
+        408.1990266349951,
+        431.314785367644,
+        571.7566480671812,
+        583.2888341953407,
+        528.1177083302078,
+        755.4490688834112,
+        664.2201118694832,
+        720.8548278289503,
+        886.2618410756354,
+        873.8573614274719,
+        1071.8248602207454,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "84:60": {
+      "modes": 10,
+      "built_modes": 4,
+      "length_m": 0.20859314501285553,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.0004646342131309211,
+      "contact_linear_energy_per_representative_wire_j": 6.706276040162718e-06,
+      "head_initial_energy_per_string_j": 0.0027755197735159273,
+      "mean_excess_length_fraction": 1.8899943045666212e-08,
+      "plain_steel_quasistatic_mean_tension_rise_n": 0.0021451713279941284,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 0.002184581739982275,
+      "material_interpretation": "assumed solid steel, not an identified real string",
+      "leading_tension_force_to_native_median_gain": 0.06120262743387375,
+      "leading_tension_force_to_native_gain_range": [
+        0.06068006330947892,
+        0.06172754002147691
+      ],
+      "fundamental_native_units_per_meter": 789.2420176091458,
+      "first_contact_frequency_hz": 1047.356201171875,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 530.0,
+        "positive_compression_steps": 529.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.0021159999946576136,
+        "string_energy_j": 6.706276682276099e-06,
+        "initial_hammer_energy_j": 0.0027755197735159273,
+        "final_hammer_energy_j": 0.0019982083762326392
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "native_units_per_meter": [
+        789.2420176091458,
+        1553.6199421661036,
+        2370.658464933785,
+        3111.0295095445213,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "84:124": {
+      "modes": 10,
+      "built_modes": 8,
+      "length_m": 0.20859314501285553,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.0004646342131309211,
+      "contact_linear_energy_per_representative_wire_j": 0.002498241057194585,
+      "head_initial_energy_per_string_j": 0.03432360289973299,
+      "mean_excess_length_fraction": 7.040504791776041e-06,
+      "plain_steel_quasistatic_mean_tension_rise_n": 0.7991076469083009,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 0.8134073346911432,
+      "material_interpretation": "assumed solid steel, not an identified real string",
+      "leading_tension_force_to_native_median_gain": 0.014332321827340292,
+      "leading_tension_force_to_native_gain_range": [
+        0.014011960559857106,
+        0.015621937154632752
+      ],
+      "fundamental_native_units_per_meter": 184.82328286178733,
+      "first_contact_frequency_hz": 1047.356201171875,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 346.0,
+        "positive_compression_steps": 345.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.001379999996515835,
+        "string_energy_j": 0.0024982412213698344,
+        "initial_hammer_energy_j": 0.03432360289973299,
+        "final_hammer_energy_j": 0.017020960848117956
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "native_units_per_meter": [
+        184.82328286178733,
+        363.82394018338124,
+        555.1565036027198,
+        728.5353310864455,
+        896.8868919768544,
+        1198.3228232278273,
+        1257.1510433562785,
+        1599.9029516445282,
+        0.0,
+        0.0
+      ]
+    },
+    "90:60": {
+      "modes": 7,
+      "built_modes": 6,
+      "length_m": 0.15158137679100037,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.00031946273520588875,
+      "contact_linear_energy_per_representative_wire_j": 1.1170483228472975e-07,
+      "head_initial_energy_per_string_j": 0.002663220138511641,
+      "mean_excess_length_fraction": 4.3300630703214926e-10,
+      "plain_steel_quasistatic_mean_tension_rise_n": 4.650063838171858e-05,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 4.735499184888069e-05,
+      "material_interpretation": "assumed solid steel, not an identified real string",
+      "leading_tension_force_to_native_median_gain": 0.3613262138234039,
+      "leading_tension_force_to_native_gain_range": [
+        0.3540948862260323,
+        0.38964439189807676
+      ],
+      "fundamental_native_units_per_meter": 6407.055953290344,
+      "first_contact_frequency_hz": 1482.07666015625,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 550.0,
+        "positive_compression_steps": 549.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.002195999994455633,
+        "string_energy_j": 1.1170482910033119e-07,
+        "initial_hammer_energy_j": 0.002663220138511641,
+        "final_hammer_energy_j": 0.0018238035163529545
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "native_units_per_meter": [
+        6407.055953290344,
+        12633.518852416155,
+        19242.420190674333,
+        25294.591772176584,
+        31189.80145426887,
+        41185.337694979295,
+        0.0
+      ]
+    },
+    "90:124": {
+      "modes": 7,
+      "built_modes": 6,
+      "length_m": 0.15158137679100037,
+      "tension_n": 850.0,
+      "modal_mass_kg": 0.00031946273520588875,
+      "contact_linear_energy_per_representative_wire_j": 0.00047812621859910854,
+      "head_initial_energy_per_string_j": 0.03293484389522072,
+      "mean_excess_length_fraction": 1.8533794082540558e-06,
+      "plain_steel_quasistatic_mean_tension_rise_n": 0.1990348044536603,
+      "plain_steel_quasistatic_ideal_pitch_offset_cents": 0.202667937658985,
+      "material_interpretation": "assumed solid steel, not an identified real string",
+      "leading_tension_force_to_native_median_gain": 0.024962189264921997,
+      "leading_tension_force_to_native_gain_range": [
+        0.02446261129996217,
+        0.026918548376267937
+      ],
+      "fundamental_native_units_per_meter": 442.6308840540607,
+      "first_contact_frequency_hz": 1482.07666015625,
+      "termination": {
+        "dt_s": 3.999999989900971e-06,
+        "processed_steps": 334.0,
+        "positive_compression_steps": 333.0,
+        "cap_steps": 5000.0,
+        "cap_reached": false,
+        "contact_time_s": 0.0013319999966370233,
+        "string_energy_j": 0.0004781262011833704,
+        "initial_hammer_energy_j": 0.03293484389522072,
+        "final_hammer_energy_j": 0.014265659961224744
+      },
+      "harmonic": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "native_units_per_meter": [
+        442.6308840540607,
+        872.7854642692714,
+        1329.360983663582,
+        1747.4746380462827,
+        2154.744446130556,
+        2845.285414566501,
+        0.0
+      ]
+    }
+  },
+  "precision": {
+    "42:0:0": {
+      "maximum_requested_offset": 8.701176e-06,
+      "maximum_fundamental_pole_shift_cents": 0.015268130908720907,
+      "maximum_physical_vertical_pole_shift_cents": 0.015268130908720907,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "42:0:1": {
+      "maximum_requested_offset": 8.696332e-06,
+      "maximum_fundamental_pole_shift_cents": 0.015023841874618667,
+      "maximum_physical_vertical_pole_shift_cents": 0.015172916946682009,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "42:1:0": {
+      "maximum_requested_offset": 8.949254e-07,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0007773675934951845,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "42:1:1": {
+      "maximum_requested_offset": 8.949463e-07,
+      "maximum_fundamental_pole_shift_cents": 0.001587769546396545,
+      "maximum_physical_vertical_pole_shift_cents": 0.001632143111378668,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "42:2:0": {
+      "maximum_requested_offset": 8.8421564e-07,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0006608227670386957,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "42:2:1": {
+      "maximum_requested_offset": 8.842439e-07,
+      "maximum_fundamental_pole_shift_cents": 0.001587769546396545,
+      "maximum_physical_vertical_pole_shift_cents": 0.0016260967047695616,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "42:3:0": {
+      "maximum_requested_offset": 8.8421564e-07,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0006608227670386957,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "42:3:1": {
+      "maximum_requested_offset": 8.842439e-07,
+      "maximum_fundamental_pole_shift_cents": 0.001587769546396545,
+      "maximum_physical_vertical_pole_shift_cents": 0.0016260967047695616,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "60:0:0": {
+      "maximum_requested_offset": 6.222964e-07,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0004343326058897085,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "60:0:1": {
+      "maximum_requested_offset": 6.223012e-07,
+      "maximum_fundamental_pole_shift_cents": 0.0010375566205162077,
+      "maximum_physical_vertical_pole_shift_cents": 0.0011742335766838363,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "60:1:0": {
+      "maximum_requested_offset": 7.605031e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "60:1:1": {
+      "maximum_requested_offset": 7.605104e-08,
+      "maximum_fundamental_pole_shift_cents": 0.00017292614653756187,
+      "maximum_physical_vertical_pole_shift_cents": 0.00021157019018538085,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "60:2:0": {
+      "maximum_requested_offset": 7.422872e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "60:2:1": {
+      "maximum_requested_offset": 7.422941e-08,
+      "maximum_fundamental_pole_shift_cents": 0.00017292614653756187,
+      "maximum_physical_vertical_pole_shift_cents": 0.00021157019018538085,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "60:3:0": {
+      "maximum_requested_offset": 7.422872e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "60:3:1": {
+      "maximum_requested_offset": 7.422941e-08,
+      "maximum_fundamental_pole_shift_cents": 0.00017292614653756187,
+      "maximum_physical_vertical_pole_shift_cents": 0.00021157019018538085,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "72:0:0": {
+      "maximum_requested_offset": 9.883075e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "72:0:1": {
+      "maximum_requested_offset": 9.883145e-08,
+      "maximum_fundamental_pole_shift_cents": 0.00017251644037348307,
+      "maximum_physical_vertical_pole_shift_cents": 0.00023861435545924356,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "72:1:0": {
+      "maximum_requested_offset": 1.3184689e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "72:1:1": {
+      "maximum_requested_offset": 1.3184689e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 3.951462310414032e-05,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "72:2:0": {
+      "maximum_requested_offset": 1.2915968e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "72:2:1": {
+      "maximum_requested_offset": 1.2915968e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 3.951462310414032e-05,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "72:3:0": {
+      "maximum_requested_offset": 1.2915968e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "72:3:1": {
+      "maximum_requested_offset": 1.2915968e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 3.951462310414032e-05,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "84:0:0": {
+      "maximum_requested_offset": 1.5986693e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "84:0:1": {
+      "maximum_requested_offset": 1.5986693e-08,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 3.977885158267755e-05,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "84:1:0": {
+      "maximum_requested_offset": 2.1436133e-09,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "84:1:1": {
+      "maximum_requested_offset": 2.1436133e-09,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "84:2:0": {
+      "maximum_requested_offset": 2.1014723e-09,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "84:2:1": {
+      "maximum_requested_offset": 2.1014723e-09,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "84:3:0": {
+      "maximum_requested_offset": 2.1014723e-09,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "84:3:1": {
+      "maximum_requested_offset": 2.1014723e-09,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "90:0:0": {
+      "maximum_requested_offset": 7.03045e-09,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "90:0:1": {
+      "maximum_requested_offset": 7.03045e-09,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "90:1:0": {
+      "maximum_requested_offset": 8.776592e-10,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "90:1:1": {
+      "maximum_requested_offset": 8.776592e-10,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "90:2:0": {
+      "maximum_requested_offset": 8.602599e-10,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "90:2:1": {
+      "maximum_requested_offset": 8.602599e-10,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "90:3:0": {
+      "maximum_requested_offset": 8.602599e-10,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    },
+    "90:3:1": {
+      "maximum_requested_offset": 8.602599e-10,
+      "maximum_fundamental_pole_shift_cents": 0.0,
+      "maximum_physical_vertical_pole_shift_cents": 0.0,
+      "warning": "First 120 ms, velocity124; stored poles, not complete audio pitch"
+    }
+  },
+  "velocity_gain_ratios": {
+    "42": 1.28382707541464,
+    "60": 1.1307202440193505,
+    "72": 0.9450123567146232,
+    "84": 0.23417820990027025,
+    "90": 0.06908491002435331
+  },
+  "velocity_mass_and_initial_pitch_changes": {
+    "42": {
+      "contact_modal_mass_ratio": 0.996077339828228,
+      "first_frequency_change_cents": 3.402225658397295
+    },
+    "60": {
+      "contact_modal_mass_ratio": 1.0,
+      "first_frequency_change_cents": 0.0
+    },
+    "72": {
+      "contact_modal_mass_ratio": 1.0,
+      "first_frequency_change_cents": 0.0
+    },
+    "84": {
+      "contact_modal_mass_ratio": 1.0,
+      "first_frequency_change_cents": 0.0
+    },
+    "90": {
+      "contact_modal_mass_ratio": 1.0,
+      "first_frequency_change_cents": 0.0
+    }
+  },
+  "one_global_force_gain_control": {
+    "gain_native_per_n": 0.008678663864998302,
+    "relative_rms_mapping_error": 0.4301517374395114,
+    "warning": "Diagnostic leading-tension force, no bending shear; not an audio fit"
+  },
+  "material_assumptions": {
+    "young_pa": 200000000000.0,
+    "density_kg_m3": 7850
+  },
+  "audio": {
+    "profiles": {
+      "Referencia-fabrica": {
+        "paired_control": "Actual",
+        "tuning": {
+          "TENSION_REFERENCE": 1
+        },
+        "rows": {
+          "42:60": {
+            "h1_db": 0.9487306156515652,
+            "h1_late_db": 0.9400350393723471,
+            "decay_db": 2.5150261179382607,
+            "balance_db": 9.578344884159284,
+            "attack_body_bands_db": 4.596877472014455,
+            "h1_signed_db": [
+              1.851476641557774,
+              0.05468016602457482,
+              -0.9400350393723471
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.6035240086302034,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.5765559816121097,
+            "legacy_total": 4.0449300868046025,
+            "total": 3.9345785672610027
+          },
+          "42:124": {
+            "h1_db": 0.7445085043246765,
+            "h1_late_db": 0.5212284643373195,
+            "decay_db": 2.4872283384756755,
+            "balance_db": 9.284413198072253,
+            "attack_body_bands_db": 4.2365358010979595,
+            "h1_signed_db": [
+              1.6237690705094998,
+              -0.08852797812721036,
+              -0.5212284643373195
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.8271051189746927,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.2266451627607573,
+            "legacy_total": 3.8389687308153126,
+            "total": 3.8360028278551574
+          },
+          "60:60": {
+            "h1_db": 12.20393584341347,
+            "h1_late_db": 21.27892353249262,
+            "decay_db": 4.973255600480397,
+            "balance_db": 12.977623072575959,
+            "attack_body_bands_db": 2.559739089244516,
+            "h1_signed_db": [
+              -3.7793617385108007,
+              -11.553522259236992,
+              -21.27892353249262
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 6.342258440181968,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 4.100714507061241,
+            "legacy_total": 9.143058076845481,
+            "total": 8.442858167679603
+          },
+          "60:124": {
+            "h1_db": 11.384968447317211,
+            "h1_late_db": 19.907053063753473,
+            "decay_db": 5.488297654693543,
+            "balance_db": 14.601719107330416,
+            "attack_body_bands_db": 2.075129316037242,
+            "h1_signed_db": [
+              -4.005130849968705,
+              -10.242721428229451,
+              -19.907053063753473
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 8.307739222685253,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 5.54412375045349,
+            "legacy_total": 9.3185125444726,
+            "total": 9.065819214025764
+          },
+          "72:60": {
+            "h1_db": 6.316921653935155,
+            "h1_late_db": 3.7536741073217286,
+            "decay_db": 2.5039890528024777,
+            "balance_db": 2.937441985047106,
+            "attack_body_bands_db": 7.23309448977595,
+            "h1_signed_db": [
+              -6.387186872845124,
+              -8.809903981638612,
+              -3.7536741073217286
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 2.6946739398910386,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -3.524170202132936,
+            "legacy_total": 4.656244511806093,
+            "total": 4.165851868827329
+          },
+          "72:124": {
+            "h1_db": 5.68030794780654,
+            "h1_late_db": 2.8516598790459042,
+            "decay_db": 3.553029687119443,
+            "balance_db": 3.9153511843828013,
+            "attack_body_bands_db": 4.051773974123994,
+            "h1_signed_db": [
+              -6.2379369674262115,
+              -7.951326996947504,
+              -2.8516598790459042
+            ],
+            "observed_partial_terms": 13,
+            "impact_body_db": 2.404910909998294,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 1.7937238644522324,
+            "legacy_total": 4.462969095726449,
+            "total": 3.9484545492944103
+          },
+          "84:60": {
+            "h1_db": 6.336368294684408,
+            "h1_late_db": 9.682061434601827,
+            "decay_db": 6.605062900982826,
+            "balance_db": 7.968965780753453,
+            "attack_body_bands_db": 4.81570108118467,
+            "h1_signed_db": [
+              -4.127347581414163,
+              5.199695868037232,
+              -9.682061434601827
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 11.725885034522067,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -14.459049041060752,
+            "legacy_total": 6.583591235751313,
+            "total": 7.869164685444002
+          },
+          "84:124": {
+            "h1_db": 4.020101872369246,
+            "h1_late_db": 5.072874763054308,
+            "decay_db": 4.92796858425597,
+            "balance_db": 6.089606884666033,
+            "attack_body_bands_db": 8.104415966043332,
+            "h1_signed_db": [
+              -4.016494739371218,
+              -2.9709361146822104,
+              -5.072874763054308
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 9.933170429655803,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -12.123046902974345,
+            "legacy_total": 5.3770919174662355,
+            "total": 6.516111545513628
+          },
+          "90:60": {
+            "h1_db": 9.761268855795434,
+            "h1_late_db": 9.694674858909856,
+            "decay_db": 9.327507509241325,
+            "balance_db": 10.484347313559331,
+            "attack_body_bands_db": 7.2033157239847,
+            "h1_signed_db": [
+              6.396707735971354,
+              13.19242397250509,
+              9.694674858909856
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 4.999909686429769,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": 5.963659002282213,
+            "legacy_total": 9.449905163826271,
+            "total": 8.337406294477145
+          },
+          "90:124": {
+            "h1_db": 7.250707320513083,
+            "h1_late_db": 9.152020630344872,
+            "decay_db": 8.68355571147475,
+            "balance_db": 19.095301181108763,
+            "attack_body_bands_db": 7.629255619591663,
+            "h1_signed_db": [
+              3.062107493888732,
+              9.537993837305645,
+              9.152020630344872
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 4.1807634380988095,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -4.765278448718799,
+            "legacy_total": 10.626850128264206,
+            "total": 9.015328455722857
+          }
+        },
+        "attacks": {
+          "42:60": {
+            "envelope_shape_error_db": 0.5451551652647925,
+            "attack_level_error_db": 2.7944743535842953,
+            "peak_time_error_ms": 14.308390022675736,
+            "peak_level_error_db": 0.33326783517554404,
+            "rise_error_db": null
+          },
+          "42:124": {
+            "envelope_shape_error_db": 0.5595074913127479,
+            "attack_level_error_db": 3.772380110725153,
+            "peak_time_error_ms": 12.811791383219955,
+            "peak_level_error_db": 2.1019353169986417,
+            "rise_error_db": null
+          },
+          "60:60": {
+            "envelope_shape_error_db": 1.5848810257265422,
+            "attack_level_error_db": 0.7963769215254596,
+            "peak_time_error_ms": 9.04761904761905,
+            "peak_level_error_db": 1.6987208015200927,
+            "rise_error_db": null
+          },
+          "60:124": {
+            "envelope_shape_error_db": 1.3319870728077572,
+            "attack_level_error_db": 0.9175656160238562,
+            "peak_time_error_ms": 12.312925170068029,
+            "peak_level_error_db": 1.3473916737792244,
+            "rise_error_db": null
+          },
+          "72:60": {
+            "envelope_shape_error_db": 1.3392785065073984,
+            "attack_level_error_db": 2.6736302332771325,
+            "peak_time_error_ms": 32.94784580498867,
+            "peak_level_error_db": 4.110719073881107,
+            "rise_error_db": 2.897047673242433
+          },
+          "72:124": {
+            "envelope_shape_error_db": 1.0675468362937428,
+            "attack_level_error_db": 3.224832802494774,
+            "peak_time_error_ms": 33.31065759637188,
+            "peak_level_error_db": 3.32038459895972,
+            "rise_error_db": 4.519237229100774
+          },
+          "84:60": {
+            "envelope_shape_error_db": 0.7701144414031564,
+            "attack_level_error_db": 1.4789498942146377,
+            "peak_time_error_ms": 28.2312925170068,
+            "peak_level_error_db": 1.7501555429215614,
+            "rise_error_db": 0.9717752489701965
+          },
+          "84:124": {
+            "envelope_shape_error_db": 0.5498911132117492,
+            "attack_level_error_db": 2.66989188397204,
+            "peak_time_error_ms": 3.741496598639456,
+            "peak_level_error_db": 2.1235993461614218,
+            "rise_error_db": 0.4731580291068944
+          },
+          "90:60": {
+            "envelope_shape_error_db": 3.292081200020301,
+            "attack_level_error_db": 4.8162660757173725,
+            "peak_time_error_ms": 0.04535147392290284,
+            "peak_level_error_db": 1.849734053182054,
+            "rise_error_db": 6.931175445047231
+          },
+          "90:124": {
+            "envelope_shape_error_db": 3.836626442115608,
+            "attack_level_error_db": 3.387531876397985,
+            "peak_time_error_ms": 1.6326530612244916,
+            "peak_level_error_db": 4.810415524604412,
+            "rise_error_db": 7.20419793223309
+          }
+        },
+        "mean_score": 6.513157617610089,
+        "worst_score": 9.065819214025764,
+        "raw_sha256": {
+          "42:60": "c730113bfddaaebc8147f5265da7546674605aee6b0e1c3517b0b487fa0895fb",
+          "42:124": "539fd6cc5be80ace77de3b6b3d275fd0c52f50a2e6d7cfa4b27ff433cb7e39c8",
+          "60:60": "e5cad30d2865ad5227885b7c19da6629918aac5436e4505a0c2c5901a6c07d46",
+          "60:124": "c4d360e859aec116fd2498a605c321533d6118074232fc7ff6ed30dae36687e3",
+          "72:60": "c26888fa88fcd031e04dfc2c3c4865fbebe2de5a375647a349f077727190e6ea",
+          "72:124": "e12f22bc0ba4de1317179c362fe1d832d71c08c721682725684fa7766a48e58b",
+          "84:60": "47c9d77e9ee876d0eae38ed28f4dc7a83bf36c82a32fb7534dd88f998770439e",
+          "84:124": "c87263cf2e0c558894a104a020017116d30e8a54a00ad80ea1b9df1ed2491758",
+          "90:60": "8268be9822bb76a457111395880c93ef1c302fcff981ab9d32f2a952aa32578c",
+          "90:124": "94b0bc08977503364b16ff4e44052166b5eb5129f2de77db452b161276761bb8"
+        },
+        "delta_to_actual": {
+          "42:60": {
+            "maximum_sample_error": 1.8115388229489326e-05,
+            "relative_rms_error_db": -72.95213982299471
+          },
+          "42:124": {
+            "maximum_sample_error": 0.001353179570287466,
+            "relative_rms_error_db": -45.46149446098347
+          },
+          "60:60": {
+            "maximum_sample_error": 6.387708708643913e-07,
+            "relative_rms_error_db": -104.86709946893485
+          },
+          "60:124": {
+            "maximum_sample_error": 0.00012667381088249385,
+            "relative_rms_error_db": -66.55266941584709
+          },
+          "72:60": {
+            "maximum_sample_error": 4.203466232866049e-07,
+            "relative_rms_error_db": -105.40415541966811
+          },
+          "72:124": {
+            "maximum_sample_error": 4.852563142776489e-05,
+            "relative_rms_error_db": -72.53620770261188
+          },
+          "84:60": {
+            "maximum_sample_error": 1.9927392713725567e-07,
+            "relative_rms_error_db": -113.20229840002827
+          },
+          "84:124": {
+            "maximum_sample_error": 5.671381950378418e-05,
+            "relative_rms_error_db": -73.5730264135233
+          },
+          "90:60": {
+            "maximum_sample_error": 0.0,
+            "relative_rms_error_db": -253.2146601166045
+          },
+          "90:124": {
+            "maximum_sample_error": 0.0,
+            "relative_rms_error_db": -266.39618633502266
+          }
+        },
+        "delta_to_paired_control": {
+          "42:60": {
+            "maximum_sample_error": 1.8115388229489326e-05,
+            "relative_rms_error_db": -72.95213982299471
+          },
+          "42:124": {
+            "maximum_sample_error": 0.001353179570287466,
+            "relative_rms_error_db": -45.46149446098347
+          },
+          "60:60": {
+            "maximum_sample_error": 6.387708708643913e-07,
+            "relative_rms_error_db": -104.86709946893485
+          },
+          "60:124": {
+            "maximum_sample_error": 0.00012667381088249385,
+            "relative_rms_error_db": -66.55266941584709
+          },
+          "72:60": {
+            "maximum_sample_error": 4.203466232866049e-07,
+            "relative_rms_error_db": -105.40415541966811
+          },
+          "72:124": {
+            "maximum_sample_error": 4.852563142776489e-05,
+            "relative_rms_error_db": -72.53620770261188
+          },
+          "84:60": {
+            "maximum_sample_error": 1.9927392713725567e-07,
+            "relative_rms_error_db": -113.20229840002827
+          },
+          "84:124": {
+            "maximum_sample_error": 5.671381950378418e-05,
+            "relative_rms_error_db": -73.5730264135233
+          },
+          "90:60": {
+            "maximum_sample_error": 0.0,
+            "relative_rms_error_db": -253.2146601166045
+          },
+          "90:124": {
+            "maximum_sample_error": 0.0,
+            "relative_rms_error_db": -266.39618633502266
+          }
+        },
+        "reiterations": {
+          "peak": 0.39161503314971924,
+          "finite": true,
+          "raw_sha256": "d517380836064e958cbfc74aace4e7d38da5fcd609d4882b316a59ec127760e7",
+          "delta_to_paired_control": {
+            "maximum_sample_error": 0.00010937266051769257,
+            "relative_rms_error_db": -71.33290845317632
+          }
+        }
+      },
+      "Referencia-por-cuerda": {
+        "paired_control": "Geometria-promediada",
+        "tuning": {
+          "PER_STRING_POLARIZATIONS": 1,
+          "NONLINEAR_WIRE_GEOMETRY": 2,
+          "TENSION_REFERENCE": 1
+        },
+        "rows": {
+          "42:60": {
+            "h1_db": 0.9487789581794625,
+            "h1_late_db": 0.9400153317482207,
+            "decay_db": 2.5150269430085888,
+            "balance_db": 9.578422559222345,
+            "attack_body_bands_db": 4.596938082012438,
+            "h1_signed_db": [
+              1.8514712872972297,
+              0.054850255492937094,
+              -0.9400153317482207
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.6035858947417587,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.5766961083870257,
+            "legacy_total": 4.044975723222411,
+            "total": 3.934628266102248
+          },
+          "42:124": {
+            "h1_db": 0.7445820790109821,
+            "h1_late_db": 0.5213892879307451,
+            "decay_db": 2.487088012928548,
+            "balance_db": 9.285101736631175,
+            "attack_body_bands_db": 4.236453004210082,
+            "h1_signed_db": [
+              1.6236364623011603,
+              -0.08872048680104072,
+              -0.5213892879307451
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.8263281994132012,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.2262744221164965,
+            "legacy_total": 3.839119115675287,
+            "total": 3.8359213866097654
+          },
+          "60:60": {
+            "h1_db": 12.203940191186646,
+            "h1_late_db": 21.278987395025034,
+            "decay_db": 4.973276595481281,
+            "balance_db": 12.977642055691593,
+            "attack_body_bands_db": 2.5595735366895225,
+            "h1_signed_db": [
+              -3.779333268218025,
+              -11.55349991031688,
+              -21.278987395025034
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 6.342253911987417,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 4.100707878352843,
+            "legacy_total": 9.143044760211971,
+            "total": 8.442847048155834
+          },
+          "60:124": {
+            "h1_db": 11.384899891335658,
+            "h1_late_db": 19.907117598463913,
+            "decay_db": 5.488132445030092,
+            "balance_db": 14.601149851249795,
+            "attack_body_bands_db": 2.075387231818934,
+            "h1_signed_db": [
+              -4.004986661782894,
+              -10.24259541376017,
+              -19.907117598463913
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 8.307382842955555,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 5.543807399920617,
+            "legacy_total": 9.318343620810293,
+            "total": 9.065603426346609
+          },
+          "72:60": {
+            "h1_db": 6.316920764656505,
+            "h1_late_db": 3.753676679537115,
+            "decay_db": 2.5040217551521113,
+            "balance_db": 2.93741519688824,
+            "attack_body_bands_db": 7.233220534646192,
+            "h1_signed_db": [
+              -6.3871844672947695,
+              -8.80990114713763,
+              -3.753676679537115
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 2.6946743120427934,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -3.524184594432114,
+            "legacy_total": 4.6562645858367935,
+            "total": 4.165867017388293
+          },
+          "72:124": {
+            "h1_db": 5.680327559990487,
+            "h1_late_db": 2.851685127597527,
+            "decay_db": 3.5529644682949355,
+            "balance_db": 3.9151969187962643,
+            "attack_body_bands_db": 4.05188243605201,
+            "h1_signed_db": [
+              -6.237961925102514,
+              -7.951335627271419,
+              -2.851685127597527
+            ],
+            "observed_partial_terms": 13,
+            "impact_body_db": 2.404893303272845,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 1.7936706611575275,
+            "legacy_total": 4.462937358177272,
+            "total": 3.9484263444511654
+          },
+          "84:60": {
+            "h1_db": 6.336330872250798,
+            "h1_late_db": 9.681967212428845,
+            "decay_db": 6.605027946141117,
+            "balance_db": 7.968973245658243,
+            "attack_body_bands_db": 4.814937897986331,
+            "h1_signed_db": [
+              -4.127348465530474,
+              5.1996769387930755,
+              -9.681967212428845
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 11.725891296911898,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -14.459056641792792,
+            "legacy_total": 6.583456787935569,
+            "total": 7.8690654151796515
+          },
+          "84:124": {
+            "h1_db": 4.020083430449457,
+            "h1_late_db": 5.072829241577402,
+            "decay_db": 4.927975156786296,
+            "balance_db": 6.089627462847367,
+            "attack_body_bands_db": 8.103922483330768,
+            "h1_signed_db": [
+              -4.016496728621949,
+              -2.9709243211490204,
+              -5.072829241577402
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 9.933182397864876,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -12.123063423694056,
+            "legacy_total": 5.377018228065341,
+            "total": 6.516059270515225
+          },
+          "90:60": {
+            "h1_db": 9.761275255730256,
+            "h1_late_db": 9.694682987615913,
+            "decay_db": 9.32751663127515,
+            "balance_db": 10.48435986953301,
+            "attack_body_bands_db": 7.203447953114792,
+            "h1_signed_db": [
+              6.396707929575129,
+              13.192434849999728,
+              9.694682987615913
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 4.999909226636129,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": 5.963658071465886,
+            "legacy_total": 9.449932657674848,
+            "total": 8.337426799915168
+          },
+          "90:124": {
+            "h1_db": 7.250725955415785,
+            "h1_late_db": 9.152091766310583,
+            "decay_db": 8.683546294491084,
+            "balance_db": 19.095290924681347,
+            "attack_body_bands_db": 7.629703902285916,
+            "h1_signed_db": [
+              3.062110764247297,
+              9.537975335689474,
+              9.152091766310583
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 4.180761297301256,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -4.7652745722101315,
+            "legacy_total": 10.626918974531518,
+            "total": 9.015379555223952
+          }
+        },
+        "attacks": {
+          "42:60": {
+            "envelope_shape_error_db": 0.5451449115619829,
+            "attack_level_error_db": 2.7943013958015492,
+            "peak_time_error_ms": 14.308390022675736,
+            "peak_level_error_db": 0.33348318804502597,
+            "rise_error_db": null
+          },
+          "42:124": {
+            "envelope_shape_error_db": 0.5595718817065878,
+            "attack_level_error_db": 3.7723887208101594,
+            "peak_time_error_ms": 12.811791383219955,
+            "peak_level_error_db": 2.1021264720746373,
+            "rise_error_db": null
+          },
+          "60:60": {
+            "envelope_shape_error_db": 1.5849596162931425,
+            "attack_level_error_db": 0.7963987654177878,
+            "peak_time_error_ms": 9.04761904761905,
+            "peak_level_error_db": 1.698647012132799,
+            "rise_error_db": null
+          },
+          "60:124": {
+            "envelope_shape_error_db": 1.3320004088344013,
+            "attack_level_error_db": 0.9175474830162974,
+            "peak_time_error_ms": 12.312925170068029,
+            "peak_level_error_db": 1.3472844607208394,
+            "rise_error_db": null
+          },
+          "72:60": {
+            "envelope_shape_error_db": 1.339301620699493,
+            "attack_level_error_db": 2.673585855192281,
+            "peak_time_error_ms": 32.94784580498867,
+            "peak_level_error_db": 4.110720979498922,
+            "rise_error_db": 2.89699672024382
+          },
+          "72:124": {
+            "envelope_shape_error_db": 1.0676102367726277,
+            "attack_level_error_db": 3.2246118858651855,
+            "peak_time_error_ms": 33.31065759637188,
+            "peak_level_error_db": 3.3204979722726193,
+            "rise_error_db": 4.518832476592614
+          },
+          "84:60": {
+            "envelope_shape_error_db": 0.7701216530328624,
+            "attack_level_error_db": 1.4789962688534584,
+            "peak_time_error_ms": 28.2312925170068,
+            "peak_level_error_db": 1.7501675768130625,
+            "rise_error_db": 0.9718721374962058
+          },
+          "84:124": {
+            "envelope_shape_error_db": 0.5498764539406262,
+            "attack_level_error_db": 2.6698993036199226,
+            "peak_time_error_ms": 3.741496598639456,
+            "peak_level_error_db": 2.1235798296217627,
+            "rise_error_db": 0.47311675220435845
+          },
+          "90:60": {
+            "envelope_shape_error_db": 3.292069319414163,
+            "attack_level_error_db": 4.8163041585143676,
+            "peak_time_error_ms": 0.04535147392290284,
+            "peak_level_error_db": 1.850285247228868,
+            "rise_error_db": 6.931129564772682
+          },
+          "90:124": {
+            "envelope_shape_error_db": 3.836624019309471,
+            "attack_level_error_db": 3.3875435602368107,
+            "peak_time_error_ms": 1.6326530612244916,
+            "peak_level_error_db": 4.810300355891211,
+            "rise_error_db": 7.204260773403394
+          }
+        },
+        "mean_score": 6.513122452988791,
+        "worst_score": 9.065603426346609,
+        "raw_sha256": {
+          "42:60": "27d4a23e2e75183e225b1e9fa8e0f1fd9a16077a5b3c179f7aacdfce1b196458",
+          "42:124": "4865c4f87f136094570d421adb38f3a4b332323e72ee931320bee6eb4907ac44",
+          "60:60": "a481715ef99f6a46b9104823ae6ca7607e18d856ec40256546c88068d8082597",
+          "60:124": "e1d8368a3a1ecd4287aecd0df35d281d02674e73dee2bf9c3541a3b739804002",
+          "72:60": "6898fb469a13c230fdee567955680f9d03f6db116936b9a1a3f6d5f512398649",
+          "72:124": "c9b0a2c3b275dddb1082a31c43e5f05f41d71f3c461fbdb70270e5b5c77c7a39",
+          "84:60": "4b8ffe8230f9dbf1e4515b359c3b836f5399320e56b537c8ce6f7a51962edadf",
+          "84:124": "63c4d78098986f93135978384317e3be65576c78110d964546b6a0fdf45101da",
+          "90:60": "682053ce1800f4e0003af4742cc909109a52ddd0b3be7dbfc5ccccbb93c0684d",
+          "90:124": "34e03d8c2656589086df648121bd4c687e255eaa3a407acedd4553aec67af6ec"
+        },
+        "delta_to_actual": {
+          "42:60": {
+            "maximum_sample_error": 1.2871809303760529e-05,
+            "relative_rms_error_db": -73.02108504027032
+          },
+          "42:124": {
+            "maximum_sample_error": 0.001863553887233138,
+            "relative_rms_error_db": -40.727221516969514
+          },
+          "60:60": {
+            "maximum_sample_error": 1.5042722225189209e-05,
+            "relative_rms_error_db": -73.08811521711796
+          },
+          "60:124": {
+            "maximum_sample_error": 8.077546954154968e-05,
+            "relative_rms_error_db": -72.9564147750619
+          },
+          "72:60": {
+            "maximum_sample_error": 8.671893738210201e-06,
+            "relative_rms_error_db": -74.24317635513829
+          },
+          "72:124": {
+            "maximum_sample_error": 4.987698048353195e-05,
+            "relative_rms_error_db": -72.99695406694669
+          },
+          "84:60": {
+            "maximum_sample_error": 1.5679746866226196e-05,
+            "relative_rms_error_db": -72.47190972204152
+          },
+          "84:124": {
+            "maximum_sample_error": 5.4776668548583984e-05,
+            "relative_rms_error_db": -71.78966423372515
+          },
+          "90:60": {
+            "maximum_sample_error": 1.3772398233413696e-05,
+            "relative_rms_error_db": -74.74576267951531
+          },
+          "90:124": {
+            "maximum_sample_error": 4.7437846660614014e-05,
+            "relative_rms_error_db": -77.68250767216828
+          }
+        },
+        "delta_to_paired_control": {
+          "42:60": {
+            "maximum_sample_error": 2.0298175513744354e-06,
+            "relative_rms_error_db": -94.60693562323584
+          },
+          "42:124": {
+            "maximum_sample_error": 0.00019430369138717651,
+            "relative_rms_error_db": -60.85217825198839
+          },
+          "60:60": {
+            "maximum_sample_error": 1.321663148701191e-06,
+            "relative_rms_error_db": -102.79644745406308
+          },
+          "60:124": {
+            "maximum_sample_error": 8.314475417137146e-05,
+            "relative_rms_error_db": -73.07807611922159
+          },
+          "72:60": {
+            "maximum_sample_error": 7.305643521249294e-07,
+            "relative_rms_error_db": -103.64429344866218
+          },
+          "72:124": {
+            "maximum_sample_error": 3.1694769859313965e-05,
+            "relative_rms_error_db": -75.80529515777069
+          },
+          "84:60": {
+            "maximum_sample_error": 1.076405169442296e-07,
+            "relative_rms_error_db": -117.2723932003012
+          },
+          "84:124": {
+            "maximum_sample_error": 5.736510502174497e-07,
+            "relative_rms_error_db": -115.84807602305091
+          },
+          "90:60": {
+            "maximum_sample_error": 0.0,
+            "relative_rms_error_db": -253.214676248542
+          },
+          "90:124": {
+            "maximum_sample_error": 0.0,
+            "relative_rms_error_db": -266.3961963359719
+          }
+        },
+        "reiterations": {
+          "peak": 0.3916422724723816,
+          "finite": true,
+          "raw_sha256": "d0dbf0b9b1a9ad9754537ba4be7b4666eb7aea3e4b589361c700e158c4bc0f1f",
+          "delta_to_paired_control": {
+            "maximum_sample_error": 0.00011742115020751953,
+            "relative_rms_error_db": -70.49373192860192
+          }
+        }
+      }
+    },
+    "references": {
+      "42:60": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\F#2v8.wav",
+            "sha256": "b7ed682f93cfc5838213e658c39963d19bf493068522fea3e3e392812e53baaa",
+            "layer": 8,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "ffd8e338071a56972f77fbf23a0e63b307f916ac4ffa709d3c11401fff47fee0"
+      },
+      "42:124": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\F#2v16.wav",
+            "sha256": "572ec0810c07d51a60a4022273ba4754ea28d0ed235c41e60e499b0b17c3a120",
+            "layer": 16,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "adf9e35091591093ed95f7b4f287e420c453d1d62b4121cbc379c4d2189691eb"
+      },
+      "60:60": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C4v8.wav",
+            "sha256": "8848a6d80c5d5224267fded56f69f42fc84b84884747112b3b0a6552292d51ce",
+            "layer": 8,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "9ccd7ffbe8343a7c85e20f955070186e8339b368d12991a4c63caf4103339d87"
+      },
+      "60:124": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C4v16.wav",
+            "sha256": "fe91edcf580f3d1b055a87bf9911db52cccf934445f9e2b126ee1c3eb858b763",
+            "layer": 16,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "8175d1b2c9b54fb51b5234f67dbf07329a2eb41f4a37d332c45617f0a365ce8b"
+      },
+      "72:60": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C5v8.wav",
+            "sha256": "80b88181e6fb0a2bae411f1d3d50cfe8960b069cd57dd86fcd0307234eabb197",
+            "layer": 8,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "a3fc6b8bf8cef32f9eaf4710739585a2ce264b961301597a016646a5b15f31ec"
+      },
+      "72:124": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C5v16.wav",
+            "sha256": "5555d9e684563ec5c471d65e9cab822457ca29fee46d188085e9395afac39cae",
+            "layer": 16,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "682d69c2f3b090501e7c7d3eb0f4d56ae86b3fe5acdc09ade4b8457555fe798f"
+      },
+      "84:60": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C6v8.wav",
+            "sha256": "25c7b37efb6b04fe6c2052d2644e6200c4b60cd61978459f49447e52036cef30",
+            "layer": 8,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "2a22ffd277d8c524e19dd10174deb2b875e2b1893e8cadfac259871a05dbb9a1"
+      },
+      "84:124": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C6v16.wav",
+            "sha256": "3a4d437f587a4af0df6dcef05589829412f73a089e4826d9abfd5c5ebcfb3cf4",
+            "layer": 16,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "95edffb7262b652d287af8e921267b66143ea1f4ee005dd40e9802e4f7892b83"
+      },
+      "90:60": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\F#6v8.wav",
+            "sha256": "1755ffe4b4c782195bb85f69dc43c2f493ef7e459b99ea1337b622254a0c7016",
+            "layer": 8,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "ced0d974f354c562d97ac419a347753161ae74d9d142bfe0bafdfbfb69f54f69"
+      },
+      "90:124": {
+        "metadata": {
+          "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+          "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+          "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+          "source": {
+            "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\F#6v16.wav",
+            "sha256": "ab2b86c78955e2f02a5740c1007b45c0cd4312e57a93f4001d966db2b16635de",
+            "layer": 16,
+            "transposition": 0
+          }
+        },
+        "wav_sha256": "3bdf7f82013ef03308a48cb1979a7895d691c29d0b49f7100852f9c70a21e029"
+      }
+    },
+    "export_gain_db": 0
+  },
+  "artifacts": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P3-contacto-unidades\\report.json": "f7116fbd6df3d48508064c06eaa63a4e06e6da493730de5766a5a19f077b9707",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P3-tension-audio\\report.json": "6202792c63673fa44e98b8936e9b51e3723878a2e198bb7f8a3ae0b7406b65d8",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P3-contacto-unidades\\transfer.csv": "c262f5214ca784744ad30a9b16607f57c6be2fdd4950bf89b36b0f40c92e2075",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P3-contacto-unidades\\contact-end.csv": "831fc9c3b11fb407b33c590fc25b2e4728195ffce6b6a8fbc3e4a737d860d58c",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P3-tension-referencia\\precision.csv": "6db718369117c907b991ad3ec45ca4b8e742b8b55282a69819db6f59577caaea",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-tension-reference\\build\\renderer.exe": "1b1c6dd2b18cce8b91a55e45122160f02d838573371276be3c5b7f62aed1f46e",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-tension-reference\\build\\inspector.exe": "ed0854b5633ec908088643a26f50f851345826d41a956a9355e74db4c47f7a03",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-tension-reference\\build\\source-audio.zip": "b8e69c4838a4524bef414c767a5a2597db753055310e87ee76faa40c98777f59",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-tension-reference\\build\\source-inspector.zip": "1e877f7ee73cfce5952e7b9501707ffcd6d586984e2645e78d2551cd986bb1d4",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-tension-reference\\build\\unit-tests.log": "f7733e9023ea254f1a73dc21873503cb0f808e9b90108ac373a0a885a627ffed",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-tension-reference\\build\\inspector-unit-tests.log": "f7733e9023ea254f1a73dc21873503cb0f808e9b90108ac373a0a885a627ffed",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-tension-reference\\build\\inspector-fingerprints.log": "e064e23f0e7b52c51b2e9fcaa2a693176329a68cc859ad531207bcd0e6fb8f95",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\tools\\concert_grand_physical_coordinates.py": "5e71e1f432b186b6520d6d7984283ad7ee1e4dce01fcb90111e6b81f80b6c04b",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\tools\\audit-concert-grand-contact-units.py": "dff1daf5759ac293e33e66d0d3c7dbf20714e611cddb31bd1fd4347230994f0e",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\tools\\audit-concert-grand-tension-reference.py": "d3a27f0ae650b253a9f17e72c743fe3c3d5a5e00e57c5d833c419c6d3bcda829"
+  },
+  "limitations": [
+    "Native attribution only; not an SI nonlinear audible engine",
+    "Final pole coefficients still f32; other live pole phase editors unsupported",
+    "Leading tension endpoint force excludes bending shear and moving real bridge",
+    "Plain steel material assumptions do not identify wound-bass axial stiffness",
+    "Contact convergence and real dynamic energy transfer remain unvalidated",
+    "WASM budget and live program switches untested"
+  ],
+  "next": [
+    "Preserve contact q/v before audible normalization",
+    "Separate base scale and material mass from scripted bass initial pitch shift",
+    "Account for contact work and initial axial/stretch energy consistently",
+    "Keep microphone conversion independent of mechanical nonlinear state",
+    "Validate bidirectional SI exchange and temporal convergence before refit"
+  ]
+}

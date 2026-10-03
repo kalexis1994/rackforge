@@ -3081,11 +3081,10 @@
       "order": 29,
       "kind": {
         "type": "float",
-        "minimum": 0.0011249999515712261,
-        "maximum": 0.2879999876022339,
+        "minimum": 0.0,
+        "maximum": 1.0,
         "step": 0.00017999999999999998,
-        "default": 0.017999999225139618,
-        "taper": "logarithmic"
+        "default": 0.0
       },
       "flags": {
         "automatable": true,

@@ -1,0 +1,6 @@
+{
+  "Tabla-perdida-7": {"tuning": {}, "params": {"31": 7.0}},
+  "Tabla-perdida-7-movilidad-035": {"tuning": {"PHYSICAL_BRIDGE_MOBILITY": 0.00035}, "params": {"31": 7.0}},
+  "Tabla-perdida-7-bajo-008": {"tuning": {"BOARD_LOW_LOSS": 0.08}, "params": {"31": 7.0}},
+  "Tabla-perdida-7-bajo-008-movilidad-035": {"tuning": {"BOARD_LOW_LOSS": 0.08, "PHYSICAL_BRIDGE_MOBILITY": 0.00035}, "params": {"31": 7.0}}
+}

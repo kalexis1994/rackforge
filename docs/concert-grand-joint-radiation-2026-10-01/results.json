@@ -1,0 +1,947 @@
+{
+  "selection": {
+    "selected": "joint-radiation-013",
+    "eligible": [],
+    "selected_for_factory": false,
+    "reason": "Lowest training objective among experimental profiles; if guards fail, diagnostic audition only.",
+    "training_report_sha256": "559fd7dcbed52a15c925997f9d02b19b002bfeb34a6801f3a45e1b7178eff1da",
+    "profile": {
+      "params": {
+        "25": 0.5174643621076885,
+        "31": 3.3771056657657024,
+        "32": 1.0
+      },
+      "tuning": {
+        "PHYSICAL_PRESSURE_SCALE": 0.5052903952974634,
+        "PHYSICAL_BRIDGE_MOBILITY": 0.0005281713974201078,
+        "UNISON_EXTRA_LOSS": 2.6646120296791196,
+        "PHYSICAL_BRIDGE_TREBLE_RATIO": 1.351975207558259,
+        "PHYSICAL_BRIDGE_BASS_RATIO": 0.7916482009141075,
+        "CAUSAL_RADIATION_FIR": 1,
+        "BOARD_ROOM_GEOMETRY": 1,
+        "BOARD_SHAPE": 0.9474249012768269,
+        "SHARED_RADIATION_FIR": 1,
+        "RADIATION_QUADRATURE_SCALE": 2
+      }
+    },
+    "reserved_velocities": [
+      28,
+      92,
+      124
+    ],
+    "reserved_notes": [
+      36,
+      39,
+      42,
+      45,
+      48,
+      51,
+      54,
+      57,
+      60,
+      63,
+      66,
+      69,
+      72,
+      75,
+      78,
+      81,
+      84,
+      87,
+      90,
+      93,
+      96
+    ]
+  },
+  "training": {
+    "actual": {
+      "metrics": {
+        "h1_db": 4.583526631075403,
+        "h1_late_db": 4.962847216856887,
+        "decay_db": 4.28875119879314,
+        "balance_db": 7.477478078364251,
+        "attack_body_bands_db": 5.182037898163383,
+        "total": 5.516498878134235,
+        "impact_body_db": 6.096703537866199,
+        "worst_h1_db": 12.20393584341347,
+        "worst_h1_late_db": 21.27892353249262,
+        "worst_decay_db": 9.327507509241325,
+        "worst_balance_db": 19.052834853369816,
+        "worst_attack_body_bands_db": 10.84108857709257,
+        "worst_total": 9.07771432882761,
+        "worst_impact_body_db": 13.209040446148647,
+        "register_total": {
+          "grave": 4.743958828054225,
+          "medio": 5.686291035383526,
+          "agudo": 6.253865657726281
+        },
+        "objective": 16.71168221716748
+      },
+      "acceptance": null
+    },
+    "causal-sin-refit": {
+      "metrics": {
+        "h1_db": 6.648775893124572,
+        "h1_late_db": 7.732070599485173,
+        "decay_db": 5.153532605811265,
+        "balance_db": 9.866189478724598,
+        "attack_body_bands_db": 10.887861438276357,
+        "total": 8.002288043122272,
+        "impact_body_db": 8.863608274082033,
+        "worst_h1_db": 16.90694189910231,
+        "worst_h1_late_db": 20.424932609634816,
+        "worst_decay_db": 11.654910097227061,
+        "worst_balance_db": 22.49050290007732,
+        "worst_attack_body_bands_db": 18.12957718569306,
+        "worst_total": 12.293658861930515,
+        "worst_impact_body_db": 21.150279337663697,
+        "register_total": {
+          "grave": 7.137349103332315,
+          "medio": 7.500266289528092,
+          "agudo": 9.421094048820095
+        },
+        "objective": 32.756650023651076
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": true,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": false,
+          "worst_attack_body_within_0_5db": false,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 6.461682396887712,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-000": {
+      "metrics": {
+        "h1_db": 6.17709994881013,
+        "h1_late_db": 7.25878465196131,
+        "decay_db": 5.142200946901634,
+        "balance_db": 9.304974935641392,
+        "attack_body_bands_db": 7.4815055750523705,
+        "total": 7.472772018799981,
+        "impact_body_db": 9.203073708268455,
+        "worst_h1_db": 20.99721446870911,
+        "worst_h1_late_db": 27.19458576239402,
+        "worst_decay_db": 12.203448310881916,
+        "worst_balance_db": 20.883681479463583,
+        "worst_attack_body_bands_db": 12.478116456273252,
+        "worst_total": 16.09090093482992,
+        "worst_impact_body_db": 24.30411267286473,
+        "register_total": {
+          "grave": 7.936030680408404,
+          "medio": 6.388526995768381,
+          "agudo": 7.872686425274585
+        },
+        "objective": 38.4954721682157
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": false,
+          "worst_attack_body_within_0_5db": false,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 10.477536505262206,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-001": {
+      "metrics": {
+        "h1_db": 6.012388335572002,
+        "h1_late_db": 7.036066101539835,
+        "decay_db": 4.056028633894797,
+        "balance_db": 8.360232547758494,
+        "attack_body_bands_db": 6.04930104323446,
+        "total": 6.318874810031547,
+        "impact_body_db": 6.928110132080113,
+        "worst_h1_db": 15.62661543843848,
+        "worst_h1_late_db": 22.383666306019713,
+        "worst_decay_db": 9.041650024809476,
+        "worst_balance_db": 19.193277424126617,
+        "worst_attack_body_bands_db": 10.589418363328198,
+        "worst_total": 13.094832821357198,
+        "worst_impact_body_db": 19.280217372236212,
+        "register_total": {
+          "grave": 7.057137646282051,
+          "medio": 5.435113052432279,
+          "agudo": 6.232655932258917
+        },
+        "objective": 29.40299690282625
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": true,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 7.481468391789482,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-002": {
+      "metrics": {
+        "h1_db": 5.935057040096824,
+        "h1_late_db": 7.157588621117289,
+        "decay_db": 4.617439862191039,
+        "balance_db": 8.623210006283003,
+        "attack_body_bands_db": 6.406824627300897,
+        "total": 6.49369944141722,
+        "impact_body_db": 6.92942938992628,
+        "worst_h1_db": 14.943304758191204,
+        "worst_h1_late_db": 21.26310878418642,
+        "worst_decay_db": 10.487829698908518,
+        "worst_balance_db": 17.055452112497974,
+        "worst_attack_body_bands_db": 10.657400759803629,
+        "worst_total": 12.580680877678216,
+        "worst_impact_body_db": 19.096979264990914,
+        "register_total": {
+          "grave": 7.224866004959702,
+          "medio": 5.274409448629517,
+          "agudo": 6.703186219758126
+        },
+        "objective": 28.785320274133696
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": true,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 6.9673164481105,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-003": {
+      "metrics": {
+        "h1_db": 5.909840323065113,
+        "h1_late_db": 6.8779889650048025,
+        "decay_db": 4.424423047637227,
+        "balance_db": 8.457950882131817,
+        "attack_body_bands_db": 6.571207432534762,
+        "total": 6.617977905288886,
+        "impact_body_db": 7.647755489969749,
+        "worst_h1_db": 17.81249782120631,
+        "worst_h1_late_db": 23.065198404415703,
+        "worst_decay_db": 10.829209708833986,
+        "worst_balance_db": 16.914196759234674,
+        "worst_attack_body_bands_db": 10.570433475849041,
+        "worst_total": 13.861813564276416,
+        "worst_impact_body_db": 19.360317143021852,
+        "register_total": {
+          "grave": 7.293540554310189,
+          "medio": 5.786212912806962,
+          "agudo": 6.558847728534761
+        },
+        "objective": 31.75955742539017
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 8.2484491347087,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-004": {
+      "metrics": {
+        "h1_db": 5.675289198951891,
+        "h1_late_db": 6.701593043468829,
+        "decay_db": 4.197607489767016,
+        "balance_db": 8.353684399672415,
+        "attack_body_bands_db": 7.06418589240068,
+        "total": 6.427247136971313,
+        "impact_body_db": 7.157582320325888,
+        "worst_h1_db": 17.642683975002043,
+        "worst_h1_late_db": 23.351039721459742,
+        "worst_decay_db": 9.47338965479937,
+        "worst_balance_db": 18.133426742565565,
+        "worst_attack_body_bands_db": 10.998796214988971,
+        "worst_total": 13.98381040967787,
+        "worst_impact_body_db": 20.106150000283684,
+        "register_total": {
+          "grave": 7.423953377354152,
+          "medio": 5.55294409796488,
+          "agudo": 6.037556895682154
+        },
+        "objective": 31.939620082747265
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": true,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 8.370445980110155,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-005": {
+      "metrics": {
+        "h1_db": 6.342102375674973,
+        "h1_late_db": 7.841671302755507,
+        "decay_db": 4.7876233994636115,
+        "balance_db": 8.750459529111897,
+        "attack_body_bands_db": 5.94804953512207,
+        "total": 6.602207838310305,
+        "impact_body_db": 6.919439371545941,
+        "worst_h1_db": 18.223164599584944,
+        "worst_h1_late_db": 23.274851216136007,
+        "worst_decay_db": 11.420706677815767,
+        "worst_balance_db": 18.276530485596798,
+        "worst_attack_body_bands_db": 9.630907160260954,
+        "worst_total": 14.612017568325381,
+        "worst_impact_body_db": 21.553728360388366,
+        "register_total": {
+          "grave": 6.955101736807164,
+          "medio": 5.7521899559181096,
+          "agudo": 6.927487282078638
+        },
+        "objective": 31.92974908992914
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 8.998653138757666,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-006": {
+      "metrics": {
+        "h1_db": 6.42007964368838,
+        "h1_late_db": 7.382621348125029,
+        "decay_db": 4.5291368883684235,
+        "balance_db": 8.828149769038882,
+        "attack_body_bands_db": 6.8279557070830155,
+        "total": 6.784395741678636,
+        "impact_body_db": 7.3059542795988985,
+        "worst_h1_db": 17.40140634459563,
+        "worst_h1_late_db": 23.865391987120418,
+        "worst_decay_db": 10.503565810375767,
+        "worst_balance_db": 17.744038974232925,
+        "worst_attack_body_bands_db": 12.090261102884517,
+        "worst_total": 13.714442554672786,
+        "worst_impact_body_db": 19.47802980994999,
+        "register_total": {
+          "grave": 7.268657349402671,
+          "medio": 6.108605407352505,
+          "agudo": 6.8102027622735575
+        },
+        "objective": 31.790698531449213
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": false,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 8.10107812510507,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-007": {
+      "metrics": {
+        "h1_db": 5.753236585188629,
+        "h1_late_db": 7.165358296564932,
+        "decay_db": 4.497600207455368,
+        "balance_db": 8.350213948896522,
+        "attack_body_bands_db": 6.1619854356019506,
+        "total": 6.4941308311466015,
+        "impact_body_db": 7.526870846853545,
+        "worst_h1_db": 16.262233445651535,
+        "worst_h1_late_db": 21.955566128865414,
+        "worst_decay_db": 10.706276770094817,
+        "worst_balance_db": 17.815403019720968,
+        "worst_attack_body_bands_db": 10.74547855819203,
+        "worst_total": 14.01072455072022,
+        "worst_impact_body_db": 21.773050598986817,
+        "register_total": {
+          "grave": 7.158936709632881,
+          "medio": 5.606147423927349,
+          "agudo": 6.495481319064494
+        },
+        "objective": 31.63984352073639
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 8.397360121152504,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-008": {
+      "metrics": {
+        "h1_db": 6.13739072485604,
+        "h1_late_db": 6.999338535213507,
+        "decay_db": 4.521197142959049,
+        "balance_db": 8.900584837429088,
+        "attack_body_bands_db": 6.744182165136576,
+        "total": 6.939139166616771,
+        "impact_body_db": 8.211077945765677,
+        "worst_h1_db": 18.220338887633613,
+        "worst_h1_late_db": 24.956771919528258,
+        "worst_decay_db": 11.251653797577339,
+        "worst_balance_db": 22.770533700910892,
+        "worst_attack_body_bands_db": 10.759309769813978,
+        "worst_total": 14.49209121682728,
+        "worst_impact_body_db": 21.32333123492517,
+        "register_total": {
+          "grave": 7.213063313474509,
+          "medio": 5.96986042978384,
+          "agudo": 7.456893344636152
+        },
+        "objective": 33.943438663266015
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": false,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 8.878726787259565,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-009": {
+      "metrics": {
+        "h1_db": 6.074484724259928,
+        "h1_late_db": 7.778898767856943,
+        "decay_db": 4.657887052956781,
+        "balance_db": 8.729861397873865,
+        "attack_body_bands_db": 6.1243564810288875,
+        "total": 6.538662107571577,
+        "impact_body_db": 6.979667715227405,
+        "worst_h1_db": 15.320714338562922,
+        "worst_h1_late_db": 27.50133557230417,
+        "worst_decay_db": 11.49187409111473,
+        "worst_balance_db": 17.03774402422613,
+        "worst_attack_body_bands_db": 10.781172194219616,
+        "worst_total": 12.90369638325843,
+        "worst_impact_body_db": 19.015048849797864,
+        "register_total": {
+          "grave": 7.190034633108555,
+          "medio": 5.378506288662231,
+          "agudo": 6.7886556374516145
+        },
+        "objective": 29.689514006065934
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 7.290331953690714,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-010": {
+      "metrics": {
+        "h1_db": 6.007867594624906,
+        "h1_late_db": 7.607197584458369,
+        "decay_db": 4.805950217182111,
+        "balance_db": 8.872936734443485,
+        "attack_body_bands_db": 6.3868106274358825,
+        "total": 6.6137025942897525,
+        "impact_body_db": 7.013319406737511,
+        "worst_h1_db": 17.090790208690912,
+        "worst_h1_late_db": 23.376103975302037,
+        "worst_decay_db": 10.850335291950728,
+        "worst_balance_db": 18.270643860024723,
+        "worst_attack_body_bands_db": 10.332238659197067,
+        "worst_total": 13.598519036711952,
+        "worst_impact_body_db": 20.212154253716044,
+        "register_total": {
+          "grave": 7.063717387736386,
+          "medio": 5.689298156447861,
+          "agudo": 6.891746634215222
+        },
+        "objective": 31.06727758224141
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 7.985154607144237,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-011": {
+      "metrics": {
+        "h1_db": 5.642585703126962,
+        "h1_late_db": 6.74940141284604,
+        "decay_db": 4.007318573139773,
+        "balance_db": 8.163865626183187,
+        "attack_body_bands_db": 6.446877595869089,
+        "total": 6.235720659577491,
+        "impact_body_db": 6.988684582393343,
+        "worst_h1_db": 16.46694935582035,
+        "worst_h1_late_db": 22.657180535217307,
+        "worst_decay_db": 9.0360709976398,
+        "worst_balance_db": 18.499659368729297,
+        "worst_attack_body_bands_db": 11.037941110627093,
+        "worst_total": 13.603487900332485,
+        "worst_impact_body_db": 19.920933839043183,
+        "register_total": {
+          "grave": 7.122168700535025,
+          "medio": 5.428904837307144,
+          "agudo": 5.9141936032863205
+        },
+        "objective": 30.442014032866112
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": true,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 7.99012347076477,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-012": {
+      "metrics": {
+        "h1_db": 6.533767553883078,
+        "h1_late_db": 6.9382519975700765,
+        "decay_db": 4.390017330948605,
+        "balance_db": 8.585622300727884,
+        "attack_body_bands_db": 7.092478267632434,
+        "total": 6.902981205471161,
+        "impact_body_db": 7.828123946115447,
+        "worst_h1_db": 20.099931879056395,
+        "worst_h1_late_db": 26.25801282882034,
+        "worst_decay_db": 10.81724894104776,
+        "worst_balance_db": 18.173193814433557,
+        "worst_attack_body_bands_db": 11.378374773737512,
+        "worst_total": 14.720830106661406,
+        "worst_impact_body_db": 20.752304190991527,
+        "register_total": {
+          "grave": 7.474148274731118,
+          "medio": 6.333832753304189,
+          "agudo": 6.73806037103147
+        },
+        "objective": 34.54736999614643
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": false,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 9.10746567709369,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-013": {
+      "metrics": {
+        "h1_db": 5.889132190798428,
+        "h1_late_db": 7.5819627638069464,
+        "decay_db": 4.255613309758267,
+        "balance_db": 8.333642707102788,
+        "attack_body_bands_db": 5.563520870881719,
+        "total": 6.241415853066206,
+        "impact_body_db": 6.8365482073839114,
+        "worst_h1_db": 14.5462643612718,
+        "worst_h1_late_db": 20.696104099034223,
+        "worst_decay_db": 9.701911948428878,
+        "worst_balance_db": 17.940296494330696,
+        "worst_attack_body_bands_db": 9.766418654894053,
+        "worst_total": 12.826001960352087,
+        "worst_impact_body_db": 19.792048876603364,
+        "register_total": {
+          "grave": 6.9866027599327865,
+          "medio": 5.056556142731348,
+          "agudo": 6.405367711219992
+        },
+        "objective": 28.609956635284526
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": true,
+          "worst_decay_within_0_5db": true,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 7.212637530784372,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-014": {
+      "metrics": {
+        "h1_db": 5.725996176486736,
+        "h1_late_db": 6.926961097187363,
+        "decay_db": 4.365028289371084,
+        "balance_db": 8.275982108267074,
+        "attack_body_bands_db": 6.993942251288238,
+        "total": 6.409062258103017,
+        "impact_body_db": 6.995921235792671,
+        "worst_h1_db": 16.03917774361921,
+        "worst_h1_late_db": 21.104149520107164,
+        "worst_decay_db": 10.010757690238771,
+        "worst_balance_db": 16.591007590320515,
+        "worst_attack_body_bands_db": 11.409902955978733,
+        "worst_total": 12.923994650112515,
+        "worst_impact_body_db": 18.803799802093305,
+        "register_total": {
+          "grave": 7.378759610236261,
+          "medio": 5.41953909856149,
+          "agudo": 6.148999420986329
+        },
+        "objective": 29.717358066482873
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": true,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": false,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 7.3106302205448,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "joint-radiation-015": {
+      "metrics": {
+        "h1_db": 7.107390620934141,
+        "h1_late_db": 7.374721196661457,
+        "decay_db": 4.6051349196899025,
+        "balance_db": 9.341100498439577,
+        "attack_body_bands_db": 7.100977161280836,
+        "total": 7.453911771517782,
+        "impact_body_db": 8.697770647916794,
+        "worst_h1_db": 20.789357394496268,
+        "worst_h1_late_db": 26.517137788132906,
+        "worst_decay_db": 11.64514011929458,
+        "worst_balance_db": 22.596699692955198,
+        "worst_attack_body_bands_db": 11.59935223452746,
+        "worst_total": 16.064779219648575,
+        "worst_impact_body_db": 22.45311006998355,
+        "register_total": {
+          "grave": 7.618148295254379,
+          "medio": 6.954038461568227,
+          "agudo": 7.694675724347003
+        },
+        "objective": 37.835205898836556
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": false,
+          "worst_attack_body_within_0_5db": false,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 10.45141479008086,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    },
+    "center": {
+      "metrics": {
+        "h1_db": 5.984141884280467,
+        "h1_late_db": 7.043251094279585,
+        "decay_db": 4.224511471426466,
+        "balance_db": 8.376297474022705,
+        "attack_body_bands_db": 6.495572576529438,
+        "total": 6.4550726754329135,
+        "impact_body_db": 7.1633273547120435,
+        "worst_h1_db": 17.568317882791224,
+        "worst_h1_late_db": 23.65461295918262,
+        "worst_decay_db": 9.853988415382602,
+        "worst_balance_db": 19.21155187840539,
+        "worst_attack_body_bands_db": 10.398244077048597,
+        "worst_total": 13.856871372252836,
+        "worst_impact_body_db": 20.2668210357328,
+        "register_total": {
+          "grave": 7.188972437473864,
+          "medio": 5.726002262447845,
+          "agudo": 6.241247587087604
+        },
+        "objective": 31.506049916009296
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": true,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 8.243506942685121,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    }
+  },
+  "validation": {
+    "actual": {
+      "metrics": {
+        "h1_db": 4.6983215163209815,
+        "h1_late_db": 4.924135712473317,
+        "decay_db": 4.062925901976014,
+        "balance_db": 7.639150072510464,
+        "attack_body_bands_db": 5.233343264684963,
+        "total": 5.409627311439275,
+        "impact_body_db": 5.5737102036469715,
+        "worst_h1_db": 12.78792844491649,
+        "worst_h1_late_db": 21.187119158169217,
+        "worst_decay_db": 8.811573294035192,
+        "worst_balance_db": 19.095301181108763,
+        "worst_attack_body_bands_db": 13.29436231297995,
+        "worst_total": 9.065591321312134,
+        "worst_impact_body_db": 12.14557461017722,
+        "register_total": {
+          "grave": 4.80050042678503,
+          "medio": 5.851907547726967,
+          "agudo": 5.726674977083243
+        },
+        "objective": 16.632399549791728
+      },
+      "acceptance": null
+    },
+    "Experimental": {
+      "metrics": {
+        "h1_db": 6.141872702752237,
+        "h1_late_db": 7.482967736397564,
+        "decay_db": 4.275420258089904,
+        "balance_db": 9.109795734919825,
+        "attack_body_bands_db": 6.040310997212764,
+        "total": 6.483368522633593,
+        "impact_body_db": 6.727455809141483,
+        "worst_h1_db": 17.40939301922356,
+        "worst_h1_late_db": 22.42046010838248,
+        "worst_decay_db": 9.48623959382415,
+        "worst_balance_db": 26.196904368301443,
+        "worst_attack_body_bands_db": 11.650285944870916,
+        "worst_total": 14.151704837181281,
+        "worst_impact_body_db": 20.373893648867256,
+        "register_total": {
+          "grave": 6.92902879866624,
+          "medio": 5.712815275556527,
+          "agudo": 6.634516704662339
+        },
+        "objective": 31.02316327479913
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": false,
+          "worst_balance_within_0_5db": false,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false
+        },
+        "maximum_pair_regression_db": 7.775281637576668,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      }
+    }
+  },
+  "training_C6_110": {
+    "actual": {
+      "h1_db": 5.614888753780316,
+      "h1_late_db": 8.243730056296194,
+      "decay_db": 6.6661012712509695,
+      "balance_db": 5.106675884130934,
+      "attack_body_bands_db": 7.824658387019315,
+      "h1_signed_db": [
+        -3.9427955040573437,
+        4.65814070098741,
+        -8.243730056296194
+      ],
+      "observed_partial_terms": 6,
+      "impact_body_db": 10.72377029434737,
+      "observed_impact_balance_terms": 1,
+      "impact_H2_H1_error_db": -13.194514071492321,
+      "legacy_total": 6.082104110721483,
+      "total": 7.2425206566279545
+    },
+    "joint-radiation-013": {
+      "h1_db": 8.016221509682106,
+      "h1_late_db": 12.965360091546742,
+      "decay_db": 5.021466886135977,
+      "balance_db": 11.833256295794763,
+      "attack_body_bands_db": 6.568448758101002,
+      "h1_signed_db": [
+        -9.185870738547802,
+        -1.8974336989517724,
+        -12.965360091546742
+      ],
+      "observed_partial_terms": 6,
+      "impact_body_db": 5.713855785535699,
+      "observed_impact_balance_terms": 1,
+      "impact_H2_H1_error_db": 4.940661862778018,
+      "legacy_total": 8.004625637586573,
+      "total": 7.431933174573855
+    }
+  },
+  "reserved_C6_124": {
+    "actual": {
+      "h1_db": 4.020102239513136,
+      "h1_late_db": 5.072874355651628,
+      "decay_db": 4.927965525129128,
+      "balance_db": 6.089626207252543,
+      "attack_body_bands_db": 8.104451385363706,
+      "h1_signed_db": [
+        -4.016496655556004,
+        -2.970935707331776,
+        -5.072874355651628
+      ],
+      "observed_partial_terms": 6,
+      "impact_body_db": 9.933180847164541,
+      "observed_impact_balance_terms": 1,
+      "impact_H2_H1_error_db": -12.123061004241087,
+      "legacy_total": 5.377101424729571,
+      "total": 6.516121280338314
+    },
+    "Experimental": {
+      "h1_db": 9.52292198918058,
+      "h1_late_db": 9.782475237971447,
+      "decay_db": 1.8844129085016448,
+      "balance_db": 15.772797294862064,
+      "attack_body_bands_db": 7.883085916556534,
+      "h1_signed_db": [
+        -9.257521054826306,
+        -9.528769674743984,
+        -9.782475237971447
+      ],
+      "observed_partial_terms": 6,
+      "impact_body_db": 6.527803159563524,
+      "observed_impact_balance_terms": 1,
+      "impact_H2_H1_error_db": 6.009455648183316,
+      "legacy_total": 8.92978813453761,
+      "total": 8.329291890794089
+    }
+  },
+  "policy": "Internal reserved velocities, same recording corpus. No per-note normalization. Experimental audio is not an accepted factory change."
+}

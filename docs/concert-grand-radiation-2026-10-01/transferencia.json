@@ -1,0 +1,385 @@
+{
+  "policy": "Compare the frozen board observer with a frequency-dependent Rayleigh integral.\n\nReads coefficients from bench::export_physical_transfer. The comparison holds\nmechanical masses, modes, bridge projections and microphone geometry fixed.\nThis diagnoses the observer approximation; it does not identify a real piano's\ngeometry or predict perceived fidelity from steady-state pressure alone.\n",
+  "sample_rate": 44100,
+  "mechanical_modes": 167,
+  "bank_sha256": "a23eeeb30b89b14b29ed5192201c780c3d511307d8e489a4d189e4803a996852",
+  "common_path_seconds": 0.007696793002915452,
+  "mechanical_recurrence_max_relative_error": 2.273979882004523e-13,
+  "native_observer_at_modal_relative_error": 2.2259117108578255e-05,
+  "maximum_dense_grid_level_change_db": 0.11565833142485792,
+  "maximum_discrete_vs_continuous_level_change_db": 0.8341294348389579,
+  "rows": [
+    {
+      "note": 42,
+      "partial": 1,
+      "frequency": 92.4986056779086,
+      "pressure_db": {
+        "current_two_tap": -18.502088498024982,
+        "common_path_removed_two_tap": -19.615652799030126,
+        "rayleigh_continuous": -19.689291801428034,
+        "retarded_discrete": -19.689479290126485,
+        "rayleigh_dense": -19.689486433553768
+      },
+      "dense_minus_base_db": -0.00019463212573223227,
+      "fir_minus_continuous_db": -0.0001874886984511536
+    },
+    {
+      "note": 42,
+      "partial": 2,
+      "frequency": 184.9972113558172,
+      "pressure_db": {
+        "current_two_tap": -36.96628820399373,
+        "common_path_removed_two_tap": -32.93200566815037,
+        "rayleigh_continuous": -32.884030145047895,
+        "retarded_discrete": -32.88477874189169,
+        "rayleigh_dense": -32.88454048392469
+      },
+      "dense_minus_base_db": -0.0005103388767950308,
+      "fir_minus_continuous_db": -0.0007485968437923574
+    },
+    {
+      "note": 42,
+      "partial": 3,
+      "frequency": 277.4958170337258,
+      "pressure_db": {
+        "current_two_tap": -40.01081067714778,
+        "common_path_removed_two_tap": -28.198535513697507,
+        "rayleigh_continuous": -28.442362783104123,
+        "retarded_discrete": -28.444052252413762,
+        "rayleigh_dense": -28.45014993873384
+      },
+      "dense_minus_base_db": -0.007787155629717303,
+      "fir_minus_continuous_db": -0.0016894693096405232
+    },
+    {
+      "note": 48,
+      "partial": 1,
+      "frequency": 130.8127826502993,
+      "pressure_db": {
+        "current_two_tap": -33.35851008710041,
+        "common_path_removed_two_tap": -33.678050661408825,
+        "rayleigh_continuous": -33.744056986390035,
+        "retarded_discrete": -33.74443261281645,
+        "rayleigh_dense": -33.74376901756685
+      },
+      "dense_minus_base_db": 0.0002879688231889171,
+      "fir_minus_continuous_db": -0.00037562642641809
+    },
+    {
+      "note": 48,
+      "partial": 2,
+      "frequency": 261.6255653005986,
+      "pressure_db": {
+        "current_two_tap": -30.559867030642597,
+        "common_path_removed_two_tap": -27.41037155061383,
+        "rayleigh_continuous": -27.802084234215016,
+        "retarded_discrete": -27.803601675638063,
+        "rayleigh_dense": -27.813311783769134
+      },
+      "dense_minus_base_db": -0.011227549554120196,
+      "fir_minus_continuous_db": -0.0015174414230481768
+    },
+    {
+      "note": 48,
+      "partial": 3,
+      "frequency": 392.43834795089793,
+      "pressure_db": {
+        "current_two_tap": -34.80480620927908,
+        "common_path_removed_two_tap": -30.099483973292593,
+        "rayleigh_continuous": -30.61180210263387,
+        "retarded_discrete": -30.61521151985973,
+        "rayleigh_dense": -30.619579316327247
+      },
+      "dense_minus_base_db": -0.007777213693378055,
+      "fir_minus_continuous_db": -0.0034094172258590074
+    },
+    {
+      "note": 60,
+      "partial": 1,
+      "frequency": 261.6255653005986,
+      "pressure_db": {
+        "current_two_tap": -38.7868902800532,
+        "common_path_removed_two_tap": -28.01200755933866,
+        "rayleigh_continuous": -28.065134209771397,
+        "retarded_discrete": -28.06665421132857,
+        "rayleigh_dense": -28.076752961742315
+      },
+      "dense_minus_base_db": -0.01161875197091884,
+      "fir_minus_continuous_db": -0.0015200015571712896
+    },
+    {
+      "note": 60,
+      "partial": 2,
+      "frequency": 523.2511306011972,
+      "pressure_db": {
+        "current_two_tap": -34.149064211009296,
+        "common_path_removed_two_tap": -37.86780280087841,
+        "rayleigh_continuous": -38.98560177393881,
+        "retarded_discrete": -38.99154259804236,
+        "rayleigh_dense": -38.981675430153494
+      },
+      "dense_minus_base_db": 0.003926343785319202,
+      "fir_minus_continuous_db": -0.005940824103549193
+    },
+    {
+      "note": 60,
+      "partial": 3,
+      "frequency": 784.8766959017959,
+      "pressure_db": {
+        "current_two_tap": -36.040053236770376,
+        "common_path_removed_two_tap": -40.33330930163313,
+        "rayleigh_continuous": -44.64446471571012,
+        "retarded_discrete": -44.65734953212065,
+        "rayleigh_dense": -44.63986667041312
+      },
+      "dense_minus_base_db": 0.004598045296998469,
+      "fir_minus_continuous_db": -0.01288481641053145
+    },
+    {
+      "note": 72,
+      "partial": 1,
+      "frequency": 523.2511306011972,
+      "pressure_db": {
+        "current_two_tap": -40.51945817732716,
+        "common_path_removed_two_tap": -32.502354133267595,
+        "rayleigh_continuous": -32.84110492483107,
+        "retarded_discrete": -32.84719021843103,
+        "rayleigh_dense": -32.85218681996024
+      },
+      "dense_minus_base_db": -0.01108189512916552,
+      "fir_minus_continuous_db": -0.006085293599956829
+    },
+    {
+      "note": 72,
+      "partial": 2,
+      "frequency": 1046.5022612023945,
+      "pressure_db": {
+        "current_two_tap": -37.60040840895671,
+        "common_path_removed_two_tap": -40.020489917590865,
+        "rayleigh_continuous": -43.40523941489366,
+        "retarded_discrete": -43.43016246897788,
+        "rayleigh_dense": -43.37029925352594
+      },
+      "dense_minus_base_db": 0.03494016136772086,
+      "fir_minus_continuous_db": -0.0249230540842235
+    },
+    {
+      "note": 72,
+      "partial": 3,
+      "frequency": 1569.7533918035917,
+      "pressure_db": {
+        "current_two_tap": -39.85627928501018,
+        "common_path_removed_two_tap": -38.901876686312114,
+        "rayleigh_continuous": -41.37129321886272,
+        "retarded_discrete": -41.42605706908728,
+        "rayleigh_dense": -41.371347178577594
+      },
+      "dense_minus_base_db": -5.395971487428681e-05,
+      "fir_minus_continuous_db": -0.05476385022455135
+    },
+    {
+      "note": 84,
+      "partial": 1,
+      "frequency": 1046.5022612023945,
+      "pressure_db": {
+        "current_two_tap": -33.31453535825184,
+        "common_path_removed_two_tap": -36.084699211179434,
+        "rayleigh_continuous": -43.925750525248155,
+        "retarded_discrete": -43.947917125771525,
+        "rayleigh_dense": -43.92373260433886
+      },
+      "dense_minus_base_db": 0.002017920909300115,
+      "fir_minus_continuous_db": -0.022166600523370102
+    },
+    {
+      "note": 84,
+      "partial": 2,
+      "frequency": 2093.004522404789,
+      "pressure_db": {
+        "current_two_tap": -39.7543086290879,
+        "common_path_removed_two_tap": -36.519161447846166,
+        "rayleigh_continuous": -37.404552070115,
+        "retarded_discrete": -37.48934172886647,
+        "rayleigh_dense": -37.475400526715916
+      },
+      "dense_minus_base_db": -0.07084845660091607,
+      "fir_minus_continuous_db": -0.08478965875146793
+    },
+    {
+      "note": 84,
+      "partial": 3,
+      "frequency": 3139.5067836071835,
+      "pressure_db": {
+        "current_two_tap": -33.337177866267965,
+        "common_path_removed_two_tap": -31.81716544257145,
+        "rayleigh_continuous": -33.263924424746605,
+        "retarded_discrete": -33.48110378809772,
+        "rayleigh_dense": -33.27475175513528
+      },
+      "dense_minus_base_db": -0.010827330388669953,
+      "fir_minus_continuous_db": -0.21717936335110982
+    },
+    {
+      "note": 90,
+      "partial": 1,
+      "frequency": 1479.9776908465376,
+      "pressure_db": {
+        "current_two_tap": -38.19877841394172,
+        "common_path_removed_two_tap": -37.333175559499864,
+        "rayleigh_continuous": -35.49087775507148,
+        "retarded_discrete": -35.539086096077355,
+        "rayleigh_dense": -35.50229655672642
+      },
+      "dense_minus_base_db": -0.011418801654941056,
+      "fir_minus_continuous_db": -0.04820834100587387
+    },
+    {
+      "note": 90,
+      "partial": 2,
+      "frequency": 2959.955381693075,
+      "pressure_db": {
+        "current_two_tap": -25.33462118773172,
+        "common_path_removed_two_tap": -26.625745589154658,
+        "rayleigh_continuous": -29.210427468669806,
+        "retarded_discrete": -29.350422471315927,
+        "rayleigh_dense": -29.110089940040417
+      },
+      "dense_minus_base_db": 0.10033752862939128,
+      "fir_minus_continuous_db": -0.13999500264611672
+    },
+    {
+      "note": 90,
+      "partial": 3,
+      "frequency": 4439.933072539613,
+      "pressure_db": {
+        "current_two_tap": -28.788117904061032,
+        "common_path_removed_two_tap": -44.412406254897974,
+        "rayleigh_continuous": -28.234995129957653,
+        "retarded_discrete": -28.697885168860346,
+        "rayleigh_dense": -28.119336798532792
+      },
+      "dense_minus_base_db": 0.11565833142485792,
+      "fir_minus_continuous_db": -0.4628900389026943
+    },
+    {
+      "note": 96,
+      "partial": 1,
+      "frequency": 2093.004522404789,
+      "pressure_db": {
+        "current_two_tap": -35.32848540911765,
+        "common_path_removed_two_tap": -35.350444012769046,
+        "rayleigh_continuous": -37.55944755786215,
+        "retarded_discrete": -37.660940750590626,
+        "rayleigh_dense": -37.587012208567984
+      },
+      "dense_minus_base_db": -0.027564650705833336,
+      "fir_minus_continuous_db": -0.10149319272847479
+    },
+    {
+      "note": 96,
+      "partial": 2,
+      "frequency": 4186.009044809578,
+      "pressure_db": {
+        "current_two_tap": -32.42466712396017,
+        "common_path_removed_two_tap": -30.17903703475783,
+        "rayleigh_continuous": -29.97437214449559,
+        "retarded_discrete": -30.29479163518575,
+        "rayleigh_dense": -29.870324668593287
+      },
+      "dense_minus_base_db": 0.10404747590230759,
+      "fir_minus_continuous_db": -0.3204194906901558
+    },
+    {
+      "note": 96,
+      "partial": 3,
+      "frequency": 6279.013567214367,
+      "pressure_db": {
+        "current_two_tap": -22.94277157143508,
+        "common_path_removed_two_tap": -24.330012680728217,
+        "rayleigh_continuous": -23.49774238654897,
+        "retarded_discrete": -24.33187182138793,
+        "rayleigh_dense": -23.54993224076367
+      },
+      "dense_minus_base_db": -0.05218985421469694,
+      "fir_minus_continuous_db": -0.8341294348389579
+    }
+  ],
+  "ratios": [
+    {
+      "note": 42,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -18.464199705968745,
+        "common_path_removed_two_tap": -13.31635286912024,
+        "rayleigh_continuous": -13.19473834361986,
+        "retarded_discrete": -13.195299451765202,
+        "rayleigh_dense": -13.19505405037092
+      }
+    },
+    {
+      "note": 48,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 2.7986430564578164,
+        "common_path_removed_two_tap": 6.267679110794994,
+        "rayleigh_continuous": 5.941972752175019,
+        "retarded_discrete": 5.94083093717839,
+        "rayleigh_dense": 5.930457233797714
+      }
+    },
+    {
+      "note": 60,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 4.6378260690439035,
+        "common_path_removed_two_tap": -9.855795241539749,
+        "rayleigh_continuous": -10.920467564167414,
+        "retarded_discrete": -10.92488838671379,
+        "rayleigh_dense": -10.90492246841118
+      }
+    },
+    {
+      "note": 72,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 2.9190497683704493,
+        "common_path_removed_two_tap": -7.51813578432327,
+        "rayleigh_continuous": -10.564134490062585,
+        "retarded_discrete": -10.582972250546852,
+        "rayleigh_dense": -10.518112433565705
+      }
+    },
+    {
+      "note": 84,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -6.4397732708360635,
+        "common_path_removed_two_tap": -0.43446223666673234,
+        "rayleigh_continuous": 6.5211984551331525,
+        "retarded_discrete": 6.458575396905054,
+        "rayleigh_dense": 6.448332077622943
+      }
+    },
+    {
+      "note": 90,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 12.864157226209997,
+        "common_path_removed_two_tap": 10.707429970345206,
+        "rayleigh_continuous": 6.280450286401674,
+        "retarded_discrete": 6.188663624761428,
+        "rayleigh_dense": 6.392206616686003
+      }
+    },
+    {
+      "note": 96,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 2.9038182851574774,
+        "common_path_removed_two_tap": 5.171406978011216,
+        "rayleigh_continuous": 7.58507541336656,
+        "retarded_discrete": 7.366149115404877,
+        "rayleigh_dense": 7.716687539974696
+      }
+    }
+  ],
+  "caveats": [
+    "Unit sinusoidal force, no strings, envelopes, rim, auxiliary routes or room.",
+    "Common height/c removed identically for every mode in the causal observer.",
+    "Steady-state transfer ratios are not measured note attack ratios.",
+    "Positive mechanical masses and drive projections are held fixed."
+  ]
+}

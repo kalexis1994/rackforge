@@ -1,0 +1,6 @@
+{
+  "A-actual": {},
+  "Sin-carga-reactiva": {"tuning":{"REACTIVE_BRIDGE":0}},
+  "Perdida-extra-intermedia": {"tuning":{"UNISON_EXTRA_LOSS":1}},
+  "Sin-carga-reactiva-perdida-intermedia": {"tuning":{"REACTIVE_BRIDGE":0,"UNISON_EXTRA_LOSS":1}}
+}

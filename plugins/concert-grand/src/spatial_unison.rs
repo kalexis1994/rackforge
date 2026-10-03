@@ -51,11 +51,26 @@ impl Loading {
         }
     }
 
-    pub fn moment(&self, s: &[f32; 5]) -> f32 {
+    pub fn moment(&self, s: &[f32]) -> f32 {
         self.radius * (self.weights[0] * s[0] + self.weights[1] * s[1] + self.weights[2] * s[2])
     }
 
-    pub fn apply(&self, s: &mut [f32; 5], c: &mut [f32; 5], mask: u8, horizontal: f32) {
+    /// Deltas in the two orthonormal mechanical coordinates. Reused by the
+    /// native directional diagnostic; pin moments and polarizations are
+    /// different choices of coordinates, not the same physical hypothesis.
+    fn coordinate_delta(&self, a: [f32; 2], b: [f32; 2]) -> ([f32; 2], [f32; 2]) {
+        let da = [
+            self.re[0] * a[0] + self.re[1] * b[0] - self.im[0] * a[1] - self.im[1] * b[1],
+            self.re[0] * a[1] + self.re[1] * b[1] + self.im[0] * a[0] + self.im[1] * b[0],
+        ];
+        let db = [
+            self.re[1] * a[0] + self.re[2] * b[0] - self.im[1] * a[1] - self.im[2] * b[1],
+            self.re[1] * a[1] + self.re[2] * b[1] + self.im[1] * a[0] + self.im[2] * b[0],
+        ];
+        (da, db)
+    }
+
+    pub fn apply(&self, s: &mut [f32], c: &mut [f32], mask: u8, horizontal: f32) {
         let mut a = [horizontal * s[3], horizontal * c[3]];
         let mut b = [0.0, 0.0];
         for lane in 0..3 {
@@ -68,14 +83,7 @@ impl Loading {
         }
         a[0] *= self.inv_norm;
         a[1] *= self.inv_norm;
-        let da = [
-            self.re[0] * a[0] + self.re[1] * b[0] - self.im[0] * a[1] - self.im[1] * b[1],
-            self.re[0] * a[1] + self.re[1] * b[1] + self.im[0] * a[0] + self.im[1] * b[0],
-        ];
-        let db = [
-            self.re[1] * a[0] + self.re[2] * b[0] - self.im[1] * a[1] - self.im[2] * b[1],
-            self.re[1] * a[1] + self.re[2] * b[1] + self.im[1] * a[0] + self.im[2] * b[0],
-        ];
+        let (da, db) = self.coordinate_delta(a, b);
         for lane in 0..3 {
             if mask & (1 << lane) != 0 {
                 s[lane] += self.inv_norm * da[0] + self.weights[lane] * db[0];
@@ -84,6 +92,87 @@ impl Loading {
         }
         s[3] += horizontal * self.inv_norm * da[0];
         c[3] += horizontal * self.inv_norm * da[1];
+    }
+}
+
+/// Native P1a diagnostic: collective vertical motion and the inherited single
+/// horizontal state. It does NOT provide two polarizations per physical string.
+/// `lever` is height / assumed bridge-line length, not measured geometry.
+#[cfg(test)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Directional {
+    matrix: Loading,
+    inv_root: f32,
+    lever: f32,
+}
+
+#[cfg(test)]
+impl Directional {
+    pub fn new(g: [f32; 3], h: [f32; 3], count: f32, lever: f32, rate: f32) -> Self {
+        Self {
+            matrix: Loading::new(g, h, 1.0, [0.0; 3], 0.0, rate),
+            inv_root: 1.0 / sqrtf(count),
+            lever,
+        }
+    }
+    pub fn active(&self) -> bool {
+        self.inv_root > 0.0
+    }
+    pub fn moment(&self, s: &[f32]) -> f32 {
+        self.lever * s[3]
+    }
+    pub fn apply(&self, s: &mut [f32], c: &mut [f32], mask: u8) {
+        let mut a = [0.0; 2];
+        for lane in 0..3 {
+            if mask & (1 << lane) != 0 {
+                a[0] += s[lane];
+                a[1] += c[lane];
+            }
+        }
+        a[0] *= self.inv_root;
+        a[1] *= self.inv_root;
+        let (da, db) = self.matrix.coordinate_delta(a, [s[3], c[3]]);
+        for lane in 0..3 {
+            if mask & (1 << lane) != 0 {
+                s[lane] += self.inv_root * da[0];
+                c[lane] += self.inv_root * da[1];
+            }
+        }
+        s[3] += db[0];
+        c[3] += db[1];
+    }
+
+    /// P1b: the same two-coordinate matrix, lifted isometrically into the
+    /// common horizontal subspace. Horizontal differences remain dark unless
+    /// unequal rotations or another spatial projection mix them into it.
+    pub fn apply_split(&self, s: &mut [f32], c: &mut [f32], mask: u8) {
+        let mut a = [0.0; 2];
+        for lane in 0..3 {
+            if mask & (1 << lane) != 0 {
+                a[0] += s[lane];
+                a[1] += c[lane];
+            }
+        }
+        a[0] *= self.inv_root;
+        a[1] *= self.inv_root;
+        let b = [
+            crate::polarization::common(s, mask),
+            crate::polarization::common(c, mask),
+        ];
+        let (da, db) = self.matrix.coordinate_delta(a, b);
+        for lane in 0..3 {
+            if mask & (1 << lane) != 0 {
+                s[lane] += self.inv_root * da[0];
+                c[lane] += self.inv_root * da[1];
+                let h = crate::polarization::HORIZONTAL_LANES[lane];
+                s[h] += self.inv_root * db[0];
+                c[h] += self.inv_root * db[1];
+            }
+        }
+    }
+
+    pub fn split_moment(&self, s: &[f32], mask: u8) -> f32 {
+        self.lever * crate::polarization::common(s, mask)
     }
 }
 
@@ -136,6 +225,141 @@ mod tests {
     use super::*;
 
     #[test]
+    fn directional_zero_lever_matches_scalar_loading() {
+        for count in 1..=3 {
+            let mask = (1 << count) - 1;
+            let n = count as f32;
+            let horizontal = 0.12;
+            let norm = n + horizontal * horizontal;
+            for (gamma, beta) in [(0.0, 20.0), (5.0, -300.0), (200.0, 70.0)] {
+                let g = [
+                    gamma * n,
+                    gamma * sqrtf(n) * horizontal,
+                    gamma * horizontal * horizontal,
+                ];
+                let h = [
+                    beta * n,
+                    beta * sqrtf(n) * horizontal,
+                    beta * horizontal * horizontal,
+                ];
+                let directional = Directional::new(g, h, n, 0.0, 44100.0);
+                let (drain, phase) = crate::bridge::complex_loading(gamma, beta, norm, 44100.0);
+                let mut s = [0.3, -0.2, 0.1, 0.7, -0.5];
+                let mut c = [-0.4, 0.6, -0.1, 0.2, 0.8];
+                let (mut expected_s, mut expected_c) = (s, c);
+                let mut sum = [horizontal * s[3], horizontal * c[3]];
+                for lane in 0..count {
+                    sum[0] += s[lane];
+                    sum[1] += c[lane];
+                }
+                let take = [
+                    drain * sum[0] + phase * sum[1],
+                    drain * sum[1] - phase * sum[0],
+                ];
+                for lane in 0..count {
+                    expected_s[lane] -= take[0];
+                    expected_c[lane] -= take[1];
+                }
+                expected_s[3] -= horizontal * take[0];
+                expected_c[3] -= horizontal * take[1];
+                directional.apply(&mut s, &mut c, mask);
+                for lane in 0..5 {
+                    assert!((s[lane] - expected_s[lane]).abs() < 2e-6);
+                    assert!((c[lane] - expected_c[lane]).abs() < 2e-6);
+                }
+                assert_eq!(directional.moment(&s), 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn directional_loading_is_passive_and_preserves_dark_vertical_motion() {
+        // G and H are sums of modal outer products: a dissipative PSD matrix
+        // and an arbitrary symmetric reactive matrix, with different axes.
+        for rate in [16000.0, 44100.0, 96000.0] {
+            for count in 1..=3 {
+                let mask = (1 << count) - 1;
+                for seed in 0..32 {
+                    let d = Directional::new(
+                        [20.0, -7.0, 5.0],
+                        [-300.0, 40.0, 50.0],
+                        count as f32,
+                        0.02,
+                        rate,
+                    );
+                    let mut s: [f32; 5] =
+                        core::array::from_fn(|i| crate::hash01(seed * 31 + i as u32) - 0.5);
+                    let mut c: [f32; 5] =
+                        core::array::from_fn(|i| crate::hash01(seed * 79 + i as u32) - 0.5);
+                    let before: f32 = s.iter().chain(c.iter()).map(|x| x * x).sum();
+                    let differences = [s[0] - s[1], c[0] - c[1]];
+                    let bloom = [s[4], c[4]];
+                    d.apply(&mut s, &mut c, mask);
+                    let after: f32 = s.iter().chain(c.iter()).map(|x| x * x).sum();
+                    assert!(after <= before + 2e-6);
+                    assert_eq!([s[4], c[4]], bloom);
+                    if count >= 2 {
+                        assert!((s[0] - s[1] - differences[0]).abs() < 1e-6);
+                        assert!((c[0] - c[1] - differences[1]).abs() < 1e-6);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn directional_moment_and_loading_share_the_lever_projection() {
+        let lever = 0.025 / 1.4;
+        let d = Directional::new([1.0, 0.0, 1.0], [0.0; 3], 3.0, lever, 44100.0);
+        let state = [0.3, -0.2, 0.1, 0.8, 0.0];
+        let (projection, gradient, horizontal) = (0.6, -3.2, 0.12);
+        let source = projection * (state[0] + state[1] + state[2] + horizontal * state[3])
+            + gradient * d.moment(&state);
+        let local = projection * (state[0] + state[1] + state[2])
+            + (horizontal * projection + lever * gradient) * state[3];
+        assert!((source - local).abs() < 1e-6);
+    }
+
+    #[test]
+    #[ignore = "offline comparison with independent scipy matrix exponentials"]
+    fn export_directional_matrix_probes() {
+        use std::io::Write;
+        let out = std::env::var("CG_DIRECTIONAL_MATRIX_CSV").expect("output CSV");
+        let mut file = std::fs::File::create(out).unwrap();
+        writeln!(
+            file,
+            "rate,g00,g01,g11,h00,h01,h11,re00,re01,re11,im00,im01,im11"
+        )
+        .unwrap();
+        for rate in [16000.0, 44100.0, 96000.0] {
+            for (g, h) in [
+                ([20.0, -7.0, 5.0], [-300.0, 40.0, 50.0]),
+                ([0.0; 3], [5000.0, -1700.0, -500.0]),
+                ([10000.0, 1000.0, 200.0], [5000.0, -1700.0, -500.0]),
+            ] {
+                let m = Loading::new(g, h, 1.0, [0.0; 3], 0.0, rate);
+                writeln!(
+                    file,
+                    "{rate},{},{},{},{},{},{},{},{},{},{},{},{}",
+                    g[0],
+                    g[1],
+                    g[2],
+                    h[0],
+                    h[1],
+                    h[2],
+                    m.re[0],
+                    m.re[1],
+                    m.re[2],
+                    m.im[0],
+                    m.im[1],
+                    m.im[2]
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn matrix_loading_is_contractive_for_arbitrary_complex_states() {
         for rate in [16000.0, 44100.0, 96000.0] {
             for g in [
@@ -162,9 +386,9 @@ mod tests {
                         rate,
                     );
                     for seed in 0..32 {
-                        let mut s =
+                        let mut s: [f32; 5] =
                             core::array::from_fn(|i| crate::hash01(seed * 31 + i as u32) - 0.5);
-                        let mut c =
+                        let mut c: [f32; 5] =
                             core::array::from_fn(|i| crate::hash01(seed * 79 + i as u32) - 0.5);
                         let before: f32 = s.iter().chain(c.iter()).map(|x| x * x).sum();
                         l.apply(&mut s, &mut c, 7, 0.12);

@@ -1,0 +1,12 @@
+{
+  "tuning": {
+    "PHYSICAL_PRESSURE_SCALE": 3.375,
+    "PHYSICAL_BRIDGE_BASS_RATIO": 1.25,
+    "UNISON_EXTRA_LOSS": 3.5,
+    "PHYSICAL_BRIDGE_TREBLE_RATIO": 1.5,
+    "PHYSICAL_BRIDGE_MOBILITY": 0.0004
+  },
+  "params": {
+    "31": 4.6
+  }
+}

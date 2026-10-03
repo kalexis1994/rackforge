@@ -1,0 +1,3349 @@
+{
+  "policy": "Offline identification of a causal force-to-microphone observation.\n\nThe frozen physical strings and their existing bridge loading stay unchanged.\nThese empirical FIRs replace the downstream acoustic rendering for diagnosis;\nthey do not identify mechanical admittance, wood constants, or acoustic feedback.\nMagnitude fitting avoids cancelling unrelated phases of recorded/native tones.\nMinimum phase is a modelling choice, not a measured microphone phase.\n",
+  "binary_sha256": "f1ee7a153219a9ae3b0e35863f75957234f1111363b1a51c91512dd73d37beff",
+  "selection": {
+    "algorithm_version": 2,
+    "name": "regions-3-smooth-3",
+    "regions": 3,
+    "regularization": 3.0,
+    "kernel_sha256": "215cfaa633c722bc300bed874f9688a6e4e489668bf33cd5136901f1b7d7a12d",
+    "numerics": {
+      "discarded_tail_energy_db": [
+        -106.71973487280621,
+        -111.75233744210567,
+        -106.55630949028594,
+        -111.48290980737295,
+        -106.73240242907846,
+        -111.80411274341502
+      ],
+      "taps": 32768,
+      "fft_size": 65536,
+      "maximum_l1_norm": 3.564194155052438,
+      "maximum_dc_gain": 5.944767492134078e-06,
+      "phase": "minimum phase chosen from fitted magnitude; not measured phase",
+      "dc_zero": "analytic stable 20Hz highpass before FIR truncation"
+    },
+    "training_pairs": [
+      [
+        36,
+        60
+      ],
+      [
+        36,
+        110
+      ],
+      [
+        42,
+        60
+      ],
+      [
+        42,
+        110
+      ],
+      [
+        48,
+        60
+      ],
+      [
+        48,
+        110
+      ],
+      [
+        54,
+        60
+      ],
+      [
+        54,
+        110
+      ],
+      [
+        60,
+        60
+      ],
+      [
+        60,
+        110
+      ],
+      [
+        66,
+        60
+      ],
+      [
+        66,
+        110
+      ],
+      [
+        72,
+        60
+      ],
+      [
+        72,
+        110
+      ],
+      [
+        78,
+        60
+      ],
+      [
+        78,
+        110
+      ],
+      [
+        84,
+        60
+      ],
+      [
+        84,
+        110
+      ],
+      [
+        90,
+        60
+      ],
+      [
+        90,
+        110
+      ],
+      [
+        96,
+        60
+      ],
+      [
+        96,
+        110
+      ]
+    ],
+    "pitch_test": [
+      [
+        39,
+        60
+      ],
+      [
+        39,
+        110
+      ],
+      [
+        45,
+        60
+      ],
+      [
+        45,
+        110
+      ],
+      [
+        51,
+        60
+      ],
+      [
+        51,
+        110
+      ],
+      [
+        57,
+        60
+      ],
+      [
+        57,
+        110
+      ],
+      [
+        63,
+        60
+      ],
+      [
+        63,
+        110
+      ],
+      [
+        69,
+        60
+      ],
+      [
+        69,
+        110
+      ],
+      [
+        75,
+        60
+      ],
+      [
+        75,
+        110
+      ],
+      [
+        81,
+        60
+      ],
+      [
+        81,
+        110
+      ],
+      [
+        87,
+        60
+      ],
+      [
+        87,
+        110
+      ],
+      [
+        93,
+        60
+      ],
+      [
+        93,
+        110
+      ]
+    ],
+    "velocity_test": [
+      [
+        36,
+        28
+      ],
+      [
+        36,
+        92
+      ],
+      [
+        36,
+        124
+      ],
+      [
+        39,
+        28
+      ],
+      [
+        39,
+        92
+      ],
+      [
+        39,
+        124
+      ],
+      [
+        42,
+        28
+      ],
+      [
+        42,
+        92
+      ],
+      [
+        42,
+        124
+      ],
+      [
+        45,
+        28
+      ],
+      [
+        45,
+        92
+      ],
+      [
+        45,
+        124
+      ],
+      [
+        48,
+        28
+      ],
+      [
+        48,
+        92
+      ],
+      [
+        48,
+        124
+      ],
+      [
+        51,
+        28
+      ],
+      [
+        51,
+        92
+      ],
+      [
+        51,
+        124
+      ],
+      [
+        54,
+        28
+      ],
+      [
+        54,
+        92
+      ],
+      [
+        54,
+        124
+      ],
+      [
+        57,
+        28
+      ],
+      [
+        57,
+        92
+      ],
+      [
+        57,
+        124
+      ],
+      [
+        60,
+        28
+      ],
+      [
+        60,
+        92
+      ],
+      [
+        60,
+        124
+      ],
+      [
+        63,
+        28
+      ],
+      [
+        63,
+        92
+      ],
+      [
+        63,
+        124
+      ],
+      [
+        66,
+        28
+      ],
+      [
+        66,
+        92
+      ],
+      [
+        66,
+        124
+      ],
+      [
+        69,
+        28
+      ],
+      [
+        69,
+        92
+      ],
+      [
+        69,
+        124
+      ],
+      [
+        72,
+        28
+      ],
+      [
+        72,
+        92
+      ],
+      [
+        72,
+        124
+      ],
+      [
+        75,
+        28
+      ],
+      [
+        75,
+        92
+      ],
+      [
+        75,
+        124
+      ],
+      [
+        78,
+        28
+      ],
+      [
+        78,
+        92
+      ],
+      [
+        78,
+        124
+      ],
+      [
+        81,
+        28
+      ],
+      [
+        81,
+        92
+      ],
+      [
+        81,
+        124
+      ],
+      [
+        84,
+        28
+      ],
+      [
+        84,
+        92
+      ],
+      [
+        84,
+        124
+      ],
+      [
+        87,
+        28
+      ],
+      [
+        87,
+        92
+      ],
+      [
+        87,
+        124
+      ],
+      [
+        90,
+        28
+      ],
+      [
+        90,
+        92
+      ],
+      [
+        90,
+        124
+      ],
+      [
+        93,
+        28
+      ],
+      [
+        93,
+        92
+      ],
+      [
+        93,
+        124
+      ],
+      [
+        96,
+        28
+      ],
+      [
+        96,
+        92
+      ],
+      [
+        96,
+        124
+      ]
+    ],
+    "cv": {
+      "regions-1-smooth-0.3": {
+        "regions": 1,
+        "regularization": 0.3,
+        "metrics": {
+          "h1_db": 7.828377967227288,
+          "h1_late_db": 8.147310799091168,
+          "decay_db": 4.468807071264934,
+          "balance_db": 9.681339337355276,
+          "attack_body_bands_db": 5.566232059235379,
+          "total": 7.036311652331307,
+          "impact_body_db": 6.8080355106155,
+          "worst_h1_db": 13.259860634777121,
+          "worst_h1_late_db": 20.3111480532868,
+          "worst_decay_db": 9.083692710705964,
+          "worst_balance_db": 29.714661393029207,
+          "worst_attack_body_bands_db": 13.708996097866024,
+          "worst_total": 14.65553762615978,
+          "worst_impact_body_db": 14.831044315049152,
+          "register_total": {
+            "grave": 5.87976742330833,
+            "medio": 5.639113217780444,
+            "agudo": 9.240754707267435
+          },
+          "objective": 33.943029656480036
+        },
+        "rows": {
+          "36:60": {
+            "h1_db": 8.562559673016159,
+            "h1_late_db": 2.2755844898054534,
+            "decay_db": 4.128969073137232,
+            "balance_db": 10.748956010017826,
+            "attack_body_bands_db": 4.225870102622459,
+            "h1_signed_db": [
+              -11.814967776690828,
+              -11.597126752552192,
+              -2.2755844898054534
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 9.232368970460785,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 8.892969059534984,
+            "legacy_total": 7.350257671737788,
+            "total": 7.820785496418537
+          },
+          "36:110": {
+            "h1_db": 6.12185119741779,
+            "h1_late_db": 0.07089683112737077,
+            "decay_db": 4.492044726406122,
+            "balance_db": 9.70164436332443,
+            "attack_body_bands_db": 2.795428875145407,
+            "h1_signed_db": [
+              -9.710693229461334,
+              -8.583963531664665,
+              -0.07089683112737077
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 6.933811620494001,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 7.175626717485656,
+            "legacy_total": 6.1103845228006755,
+            "total": 6.316241297224007
+          },
+          "60:60": {
+            "h1_db": 12.219406740116812,
+            "h1_late_db": 20.3111480532868,
+            "decay_db": 4.623739778369817,
+            "balance_db": 12.419662696017534,
+            "attack_body_bands_db": 4.040604646140718,
+            "h1_signed_db": [
+              -4.463585005534469,
+              -11.883487161529168,
+              -20.3111480532868
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 5.308905673317555,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 2.3551210822108786,
+            "legacy_total": 9.14373367455883,
+            "total": 8.18502667424851
+          },
+          "60:110": {
+            "h1_db": 11.983349310371773,
+            "h1_late_db": 19.690557141255294,
+            "decay_db": 5.000036015557629,
+            "balance_db": 13.976423899021018,
+            "attack_body_bands_db": 2.6418523223817054,
+            "h1_signed_db": [
+              -4.732816868094037,
+              -11.526673921765994,
+              -19.690557141255294
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 6.316803959621148,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 3.1512419421069566,
+            "legacy_total": 9.334565085632038,
+            "total": 8.580124804129316
+          },
+          "84:60": {
+            "h1_db": 6.039174945850978,
+            "h1_late_db": 8.914491671685745,
+            "decay_db": 5.484986836814683,
+            "balance_db": 8.505539437080145,
+            "attack_body_bands_db": 5.886938184259858,
+            "h1_signed_db": [
+              -3.502242802041202,
+              5.700790363825988,
+              -8.914491671685745
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 5.896352922563997,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -7.01116766937853,
+            "legacy_total": 6.494383527160528,
+            "total": 6.344875876011395
+          },
+          "84:110": {
+            "h1_db": 5.320274106168955,
+            "h1_late_db": 7.4771503620004225,
+            "decay_db": 5.254090812258767,
+            "balance_db": 6.115452419651227,
+            "attack_body_bands_db": 6.8488604232561014,
+            "h1_signed_db": [
+              -3.3185997525637987,
+              5.165072203942643,
+              -7.4771503620004225
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 4.901563555981152,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -5.757164396389207,
+            "legacy_total": 5.731810808625048,
+            "total": 5.524248995464074
+          },
+          "42:60": {
+            "h1_db": 12.199633724508955,
+            "h1_late_db": 12.196282538976426,
+            "decay_db": 2.43904307891156,
+            "balance_db": 13.11628891908049,
+            "attack_body_bands_db": 1.363748698672838,
+            "h1_signed_db": [
+              -11.290315287315146,
+              -13.11230334723529,
+              -12.196282538976426
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 7.268141707745568,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 8.69425737600713,
+            "legacy_total": 8.363267107877071,
+            "total": 8.089485757844196
+          },
+          "42:110": {
+            "h1_db": 12.765677617701618,
+            "h1_late_db": 12.542874381366573,
+            "decay_db": 2.2637458027646855,
+            "balance_db": 13.339701282482725,
+            "attack_body_bands_db": 1.4544377600954532,
+            "h1_signed_db": [
+              -12.075195714247009,
+              -13.678962757491274,
+              -12.542874381366573
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 6.555530760330275,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 8.376911636217443,
+            "legacy_total": 8.587014601521737,
+            "total": 8.079143641223872
+          },
+          "66:60": {
+            "h1_db": 3.061686707423282,
+            "h1_late_db": 3.601154623983909,
+            "decay_db": 3.2826805962578844,
+            "balance_db": 6.680218466361751,
+            "attack_body_bands_db": 4.099704296495464,
+            "h1_signed_db": [
+              -1.221452430467572,
+              -4.362453067818365,
+              -3.601154623983909
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 6.787995807256914,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 8.819909072722112,
+            "legacy_total": 4.177270757727377,
+            "total": 4.829952020109761
+          },
+          "66:110": {
+            "h1_db": 6.2944942937943145,
+            "h1_late_db": 6.464626369958559,
+            "decay_db": 3.8557988638811933,
+            "balance_db": 10.817614077888493,
+            "attack_body_bands_db": 4.436915147787673,
+            "h1_signed_db": [
+              -4.622614594743528,
+              -7.796241916680856,
+              -6.464626369958559
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 9.46123806257772,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 10.007362497258558,
+            "legacy_total": 6.536963510438582,
+            "total": 7.268032148473367
+          },
+          "90:60": {
+            "h1_db": 12.897966500079384,
+            "h1_late_db": 12.916006676765626,
+            "decay_db": 9.083692710705964,
+            "balance_db": 17.02359976390725,
+            "attack_body_bands_db": 8.911948085603363,
+            "h1_signed_db": [
+              9.932496120675985,
+              15.845396702796542,
+              12.916006676765626
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 6.753828281850122,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -6.502155139282433,
+            "legacy_total": 12.377903606521594,
+            "total": 10.971884775353725
+          },
+          "90:110": {
+            "h1_db": 10.911845400245392,
+            "h1_late_db": 12.978126093858016,
+            "decay_db": 8.359505656756308,
+            "balance_db": 29.714661393029207,
+            "attack_body_bands_db": 8.517075032926774,
+            "h1_signed_db": [
+              7.638293971918014,
+              12.119116134960151,
+              12.978126093858016
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 14.776403782225277,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -18.104942270598254,
+            "legacy_total": 14.615248907471283,
+            "total": 14.65553762615978
+          },
+          "48:60": {
+            "h1_db": 2.6084425470993744,
+            "h1_late_db": 1.9930309052017776,
+            "decay_db": 3.6666063313837793,
+            "balance_db": 6.871873339785439,
+            "attack_body_bands_db": 3.953054544216995,
+            "h1_signed_db": [
+              -3.8326845365867186,
+              -1.9996121995096274,
+              -1.9930309052017776
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 13.048592032750985,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 23.47363498660517,
+            "legacy_total": 4.140532990909635,
+            "total": 6.3675477513699725
+          },
+          "48:110": {
+            "h1_db": 3.617198307677531,
+            "h1_late_db": 2.780376355890418,
+            "decay_db": 3.4474909023953852,
+            "balance_db": 7.1528604478090845,
+            "attack_body_bands_db": 2.7416170771200443,
+            "h1_signed_db": [
+              -4.9854714237294,
+              -3.0857471434127746,
+              -2.780376355890418
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 12.315984189776215,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 21.90538704820233,
+            "legacy_total": 4.32734980680626,
+            "total": 6.324508402548748
+          },
+          "72:60": {
+            "h1_db": 2.0978824370408624,
+            "h1_late_db": 1.1829144804892096,
+            "decay_db": 2.0404334644288173,
+            "balance_db": 2.730169908012862,
+            "attack_body_bands_db": 4.447338930997772,
+            "h1_signed_db": [
+              -1.203370388784375,
+              -3.9073624418490027,
+              1.1829144804892096
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 1.0367386625711301,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.7425892378428038,
+            "legacy_total": 2.5940105357243874,
+            "total": 2.204692567436073
+          },
+          "72:110": {
+            "h1_db": 1.805498379640331,
+            "h1_late_db": 1.404877017630625,
+            "decay_db": 3.0265496703884205,
+            "balance_db": 4.088226287541674,
+            "attack_body_bands_db": 3.43269964730474,
+            "h1_signed_db": [
+              -0.7820582807662397,
+              -3.2295598405241286,
+              1.404877017630625
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 2.2908342607855054,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 4.878671905514846,
+            "legacy_total": 2.9255233694523506,
+            "total": 2.7668510922856395
+          },
+          "96:60": {
+            "h1_db": 12.089255551259697,
+            "h1_late_db": 6.623359809768317,
+            "decay_db": 7.309517811569252,
+            "balance_db": 0.0,
+            "attack_body_bands_db": 13.708996097866024,
+            "h1_signed_db": [
+              16.9622674256392,
+              12.682139418371577,
+              6.623359809768317
+            ],
+            "observed_partial_terms": 3,
+            "impact_body_db": 3.7559272911452677,
+            "observed_impact_balance_terms": 0,
+            "impact_H2_H1_error_db": 8.517276342677128,
+            "legacy_total": 8.11496831051311,
+            "total": 7.025208055671149
+          },
+          "96:110": {
+            "h1_db": 13.175300859700982,
+            "h1_late_db": 8.219260735524713,
+            "decay_db": 5.141277144167391,
+            "balance_db": 23.538446877250674,
+            "attack_body_bands_db": 9.965593137611142,
+            "h1_signed_db": [
+              14.399744864255116,
+              16.906896979323122,
+              8.219260735524713
+            ],
+            "observed_partial_terms": 5,
+            "impact_body_db": 14.831044315049152,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -15.70522434315778,
+            "legacy_total": 13.276125276891532,
+            "total": 13.664855036430936
+          },
+          "54:60": {
+            "h1_db": 1.6154662710188294,
+            "h1_late_db": 1.7847706857953227,
+            "decay_db": 2.439309171254846,
+            "balance_db": 2.2112107373552123,
+            "attack_body_bands_db": 5.255911821824033,
+            "h1_signed_db": [
+              1.711784501041528,
+              -1.3498436262196378,
+              1.7847706857953227
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 0.8132640608448494,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.06262067241671332,
+            "legacy_total": 2.5164299452827095,
+            "total": 2.0906384741732444
+          },
+          "54:110": {
+            "h1_db": 1.0124880198292072,
+            "h1_late_db": 0.4235067649009281,
+            "decay_db": 2.348259451973233,
+            "balance_db": 2.9863534615985072,
+            "attack_body_bands_db": 4.056937082258828,
+            "h1_signed_db": [
+              0.1217865779575078,
+              -2.492170716629186,
+              0.4235067649009281
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 0.9094604696403099,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.15311766271373983,
+            "legacy_total": 2.2965645976719817,
+            "total": 1.9497885656640639
+          },
+          "78:60": {
+            "h1_db": 13.259860634777121,
+            "h1_late_db": 19.422246472482925,
+            "decay_db": 6.039043600109199,
+            "balance_db": 3.8989136759994785,
+            "attack_body_bands_db": 11.204255959819445,
+            "h1_signed_db": [
+              -10.387414799513795,
+              -9.969920632334642,
+              -19.422246472482925
+            ],
+            "observed_partial_terms": 9,
+            "impact_body_db": 8.097326780010611,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -8.967056023113972,
+            "legacy_total": 8.806078935172078,
+            "total": 8.628890896381712
+          },
+          "78:110": {
+            "h1_db": 12.565002054261017,
+            "h1_late_db": 15.967595118251268,
+            "decay_db": 4.586934068336403,
+            "balance_db": 7.351647958601067,
+            "attack_body_bands_db": 8.467317428771503,
+            "h1_signed_db": [
+              -10.302060480872353,
+              -11.425350563659432,
+              -15.967595118251268
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 2.484664066542473,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.1686495849056051,
+            "legacy_total": 8.65249384004145,
+            "total": 7.110536396666705
+          }
+        },
+        "maximum_peak": 0.35571452362352357,
+        "worst_discarded_tail_energy_db": -90.02531847620668
+      },
+      "regions-1-smooth-3": {
+        "regions": 1,
+        "regularization": 3.0,
+        "metrics": {
+          "h1_db": 6.743772283447257,
+          "h1_late_db": 7.604780129017018,
+          "decay_db": 4.463477344171686,
+          "balance_db": 8.841835179106274,
+          "attack_body_bands_db": 5.423470605964911,
+          "total": 6.414458331100175,
+          "impact_body_db": 6.157326261638397,
+          "worst_h1_db": 13.836371297874138,
+          "worst_h1_late_db": 18.457325657705454,
+          "worst_decay_db": 9.0825001675297,
+          "worst_balance_db": 30.086396981267814,
+          "worst_attack_body_bands_db": 12.949813241392992,
+          "worst_total": 14.551107559452944,
+          "worst_impact_body_db": 14.87397562890748,
+          "register_total": {
+            "grave": 5.259450074686784,
+            "medio": 5.278782303379526,
+            "agudo": 8.42122360830405
+          },
+          "objective": 29.08451202235132
+        },
+        "rows": {
+          "36:60": {
+            "h1_db": 5.706904268373951,
+            "h1_late_db": 1.352892343806566,
+            "decay_db": 4.08861281677053,
+            "balance_db": 8.193874961001896,
+            "attack_body_bands_db": 4.270627163788336,
+            "h1_signed_db": [
+              -7.865538724711961,
+              -7.902281736603328,
+              1.352892343806566
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 6.344184349041523,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 5.392864595202589,
+            "legacy_total": 5.7086325129422395,
+            "total": 5.867520471967061
+          },
+          "36:110": {
+            "h1_db": 4.778729116973747,
+            "h1_late_db": 3.5117952524864933,
+            "decay_db": 4.452402044449686,
+            "balance_db": 7.49847736522409,
+            "attack_body_bands_db": 3.1127647659772584,
+            "h1_signed_db": [
+              -5.859100408750777,
+              -4.965291689683973,
+              3.5117952524864933
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 4.108212231451045,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 3.7303746484969835,
+            "legacy_total": 5.127189758255844,
+            "total": 4.872445376554644
+          },
+          "60:60": {
+            "h1_db": 10.344134109386944,
+            "h1_late_db": 18.457325657705454,
+            "decay_db": 4.629439403873024,
+            "balance_db": 10.579087268106612,
+            "attack_body_bands_db": 3.9636032970562067,
+            "h1_signed_db": [
+              -2.571817240288958,
+              -10.003259430166423,
+              -18.457325657705454
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.2047354354186073,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.4600762221588113,
+            "legacy_total": 8.01711910083877,
+            "total": 6.8140231844837285
+          },
+          "60:110": {
+            "h1_db": 10.10806606725817,
+            "h1_late_db": 17.836740299630645,
+            "decay_db": 5.005741646527099,
+            "balance_db": 12.06305494891264,
+            "attack_body_bands_db": 2.971039072481747,
+            "h1_signed_db": [
+              -2.8410221243875498,
+              -9.646435777756313,
+              -17.836740299630645
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 4.064036984294198,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 1.2556312470118982,
+            "legacy_total": 8.250678133272556,
+            "total": 7.204017846027966
+          },
+          "84:60": {
+            "h1_db": 6.184801595106843,
+            "h1_late_db": 9.352738238506795,
+            "decay_db": 5.487329763733497,
+            "balance_db": 7.080252775204234,
+            "attack_body_bands_db": 6.201754677742979,
+            "h1_signed_db": [
+              -3.9336667552844986,
+              5.267999791529235,
+              -9.352738238506795
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 4.93613857807839,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -5.587144546405128,
+            "legacy_total": 6.236839394683274,
+            "total": 5.911664190532054
+          },
+          "84:110": {
+            "h1_db": 5.465976977911475,
+            "h1_late_db": 7.915609963626856,
+            "decay_db": 5.255974954238136,
+            "balance_db": 4.689618126539589,
+            "attack_body_bands_db": 7.889439573956414,
+            "h1_signed_db": [
+              -3.750125683620464,
+              4.732195286487105,
+              -7.915609963626856
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 3.9411476922524713,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -4.3328417537021195,
+            "legacy_total": 5.582906148556909,
+            "total": 5.1724665344808
+          },
+          "42:60": {
+            "h1_db": 13.322923770505845,
+            "h1_late_db": 13.275076315418112,
+            "decay_db": 2.39910586620315,
+            "balance_db": 13.468257258926032,
+            "attack_body_bands_db": 1.2555986980842073,
+            "h1_signed_db": [
+              -12.549585008635013,
+              -14.144109987464411,
+              -13.275076315418112
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 8.404415820187161,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 9.680205045062607,
+            "legacy_total": 8.818203905671973,
+            "total": 8.71475688430077
+          },
+          "42:110": {
+            "h1_db": 13.836371297874138,
+            "h1_late_db": 13.590174138179208,
+            "decay_db": 2.2322904169940556,
+            "balance_db": 13.641316367531807,
+            "attack_body_bands_db": 1.4596111010429413,
+            "h1_signed_db": [
+              -13.242190773260262,
+              -14.67674898218294,
+              -13.590174138179208
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 7.652332582689597,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 9.32456048959023,
+            "legacy_total": 9.030073315543854,
+            "total": 8.68563813233029
+          },
+          "66:60": {
+            "h1_db": 3.6218855158208663,
+            "h1_late_db": 4.156630181129749,
+            "decay_db": 3.282022899196331,
+            "balance_db": 7.024610651908141,
+            "attack_body_bands_db": 4.17995955554869,
+            "h1_signed_db": [
+              -1.7848488725133365,
+              -4.9241774938195135,
+              -4.156630181129749
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 7.578542061805711,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 9.83573355012102,
+            "legacy_total": 4.471312251645725,
+            "total": 5.248119704185722
+          },
+          "66:110": {
+            "h1_db": 6.855153745912105,
+            "h1_late_db": 7.0207384304975164,
+            "decay_db": 3.855715512294483,
+            "balance_db": 11.135262398195545,
+            "attack_body_bands_db": 4.720627149336242,
+            "h1_signed_db": [
+              -5.186245765424701,
+              -8.358477041814098,
+              -7.0207384304975164
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 10.251987911505818,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 11.023356645884558,
+            "legacy_total": 6.855142361092179,
+            "total": 7.704353748695589
+          },
+          "90:60": {
+            "h1_db": 12.17028398886174,
+            "h1_late_db": 12.189009406865615,
+            "decay_db": 9.0825001675297,
+            "balance_db": 17.395470331938743,
+            "attack_body_bands_db": 8.294746844028529,
+            "h1_signed_db": [
+              9.204157573372036,
+              15.11768498634757,
+              12.189009406865615
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 6.851677564662921,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -6.87546375873011,
+            "legacy_total": 12.123304047572999,
+            "total": 10.805397426845479
+          },
+          "90:110": {
+            "h1_db": 10.184007945829682,
+            "h1_late_db": 12.251104160440413,
+            "decay_db": 8.358502250009149,
+            "balance_db": 30.086396981267814,
+            "attack_body_bands_db": 8.45238187183424,
+            "h1_signed_db": [
+              6.909770575165211,
+              11.391149101883421,
+              12.251104160440413
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 14.87397562890748,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -18.477932322678818,
+            "legacy_total": 14.443484869634766,
+            "total": 14.551107559452944
+          },
+          "48:60": {
+            "h1_db": 0.8084690751440462,
+            "h1_late_db": 0.5045216886372543,
+            "decay_db": 3.6782554988531593,
+            "balance_db": 4.548826742353096,
+            "attack_body_bands_db": 3.9138907838770427,
+            "h1_signed_db": [
+              -1.3805128496539893,
+              0.5403726871408949,
+              0.5045216886372543
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 8.9705448967655,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 19.268519632354206,
+            "legacy_total": 2.9268183541835366,
+            "total": 4.437749989829028
+          },
+          "48:110": {
+            "h1_db": 1.1267085354120592,
+            "h1_late_db": 0.28718352578802353,
+            "decay_db": 3.4611750134126784,
+            "balance_db": 4.733711938146291,
+            "attack_body_bands_db": 2.5051491758147124,
+            "h1_signed_db": [
+              -2.5475287454585853,
+              -0.5454133349895685,
+              -0.28718352578802353
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 7.994390545172468,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 17.700066511946414,
+            "legacy_total": 2.8188421016561698,
+            "total": 4.112729212535244
+          },
+          "72:60": {
+            "h1_db": 1.8099089759151472,
+            "h1_late_db": 2.047522827544995,
+            "decay_db": 2.0412081297513076,
+            "balance_db": 3.1058732511104754,
+            "attack_body_bands_db": 4.7531380280918665,
+            "h1_signed_db": [
+              -0.33875727441630943,
+              -3.0434468257841374,
+              2.047522827544995
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 1.2602620650724399,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.2757323451176106,
+            "legacy_total": 2.633209190999527,
+            "total": 2.2899724095177554
+          },
+          "72:110": {
+            "h1_db": 1.5725732965808217,
+            "h1_late_db": 2.269531395826,
+            "decay_db": 3.0269093964593425,
+            "balance_db": 3.6703324770060504,
+            "attack_body_bands_db": 3.209424706170195,
+            "h1_signed_db": [
+              0.0826012299358787,
+              -2.3655872639805864,
+              2.269531395826
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 1.5304532251800818,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 1.860381061334781,
+            "legacy_total": 2.706124828095165,
+            "total": 2.412206927366394
+          },
+          "96:60": {
+            "h1_db": 9.464857333598026,
+            "h1_late_db": 4.004463625542428,
+            "decay_db": 7.3042107560530525,
+            "balance_db": 0.0,
+            "attack_body_bands_db": 12.949813241392992,
+            "h1_signed_db": [
+              14.334331170966728,
+              10.055777204284922,
+              4.004463625542428
+            ],
+            "observed_partial_terms": 3,
+            "impact_body_db": 3.0987695084205917,
+            "observed_impact_balance_terms": 0,
+            "impact_H2_H1_error_db": 11.344644721913824,
+            "legacy_total": 7.08122474198152,
+            "total": 6.085610933591288
+          },
+          "96:110": {
+            "h1_db": 10.550512925725142,
+            "h1_late_db": 5.600487956503258,
+            "decay_db": 5.138690254515335,
+            "balance_db": 20.712278140529676,
+            "attack_body_bands_db": 9.403385752266127,
+            "h1_signed_db": [
+              11.77146569178747,
+              14.279585128884698,
+              5.600487956503258
+            ],
+            "observed_partial_terms": 5,
+            "impact_body_db": 12.053036163187011,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -12.877477371738614,
+            "legacy_total": 11.565929485604972,
+            "total": 11.687706155000482
+          },
+          "54:60": {
+            "h1_db": 2.3922121044390914,
+            "h1_late_db": 3.462533298696961,
+            "decay_db": 2.4346492117260277,
+            "balance_db": 2.982037489678525,
+            "attack_body_bands_db": 5.37957951380888,
+            "h1_signed_db": [
+              3.374405045160188,
+              0.33969796946012565,
+              3.462533298696961
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 2.9228002031686877,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -3.427620323689041,
+            "legacy_total": 2.998382838976152,
+            "total": 2.979487180024286
+          },
+          "54:110": {
+            "h1_db": 1.5627784494263335,
+            "h1_late_db": 2.1013765550124006,
+            "decay_db": 2.3446990849138802,
+            "balance_db": 2.999383522522395,
+            "attack_body_bands_db": 4.147028135993091,
+            "h1_signed_db": [
+              1.7844213746408286,
+              -0.8025374186257714,
+              2.1013765550124006
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 2.105951411140062,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -3.337731735704697,
+            "legacy_total": 2.5050473295572493,
+            "total": 2.4052733499529526
+          },
+          "78:60": {
+            "h1_db": 8.595207111457215,
+            "h1_late_db": 14.786598777013154,
+            "decay_db": 6.045033983860349,
+            "balance_db": 4.9763849719022675,
+            "attack_body_bands_db": 9.060672766209224,
+            "h1_signed_db": [
+              -5.704754711068812,
+              -5.294267846289678,
+              -14.786598777013154
+            ],
+            "observed_partial_terms": 9,
+            "impact_body_db": 9.52638238086174,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -11.342798953237779,
+            "legacy_total": 7.122778142882063,
+            "total": 7.7236792023769825
+          },
+          "78:110": {
+            "h1_db": 7.900524028326243,
+            "h1_late_db": 11.331108799516493,
+            "decay_db": 4.592032500413113,
+            "balance_db": 3.935865972332126,
+            "attack_body_bands_db": 7.2221174567261315,
+            "h1_signed_db": [
+              -5.619786373465121,
+              -6.750676911997115,
+              -11.331108799516493
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 3.787200516781209,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.2068655976806184,
+            "legacy_total": 5.980475646609414,
+            "total": 5.432156864152363
+          }
+        },
+        "maximum_peak": 0.34492701242051865,
+        "worst_discarded_tail_energy_db": -92.26811034249168
+      },
+      "regions-1-smooth-30": {
+        "regions": 1,
+        "regularization": 30.0,
+        "metrics": {
+          "h1_db": 6.807888677164606,
+          "h1_late_db": 7.45087936093988,
+          "decay_db": 4.463639430212462,
+          "balance_db": 9.093018025827108,
+          "attack_body_bands_db": 5.353785369063991,
+          "total": 6.613551532996425,
+          "impact_body_db": 6.729226512854392,
+          "worst_h1_db": 15.393462398378935,
+          "worst_h1_late_db": 17.254011329208936,
+          "worst_decay_db": 9.082770103130517,
+          "worst_balance_db": 28.744454966896587,
+          "worst_attack_body_bands_db": 12.380609400014015,
+          "worst_total": 13.693197466877635,
+          "worst_impact_body_db": 13.577269417890832,
+          "register_total": {
+            "grave": 6.493398859291989,
+            "medio": 5.063760492168181,
+            "agudo": 7.896047487322046
+          },
+          "objective": 29.022508099942474
+        },
+        "rows": {
+          "36:60": {
+            "h1_db": 9.120815778058008,
+            "h1_late_db": 2.92989106882456,
+            "decay_db": 4.090964809618365,
+            "balance_db": 11.518444710380116,
+            "attack_body_bands_db": 4.385734417124388,
+            "h1_signed_db": [
+              -12.230675327020457,
+              -12.201880938329005,
+              -2.92989106882456
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 11.301457775795875,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 9.313218268040998,
+            "legacy_total": 7.752498064888581,
+            "total": 8.639737992615405
+          },
+          "36:110": {
+            "h1_db": 6.7549120621037675,
+            "h1_late_db": 0.7722133495947787,
+            "decay_db": 4.464044408095852,
+            "balance_db": 10.228305620329,
+            "attack_body_bands_db": 3.135266826039072,
+            "h1_signed_db": [
+              -10.225590480227197,
+              -9.266932356489328,
+              -0.7722133495947787
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 9.075301121776596,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 7.673171462317079,
+            "legacy_total": 6.507596752748392,
+            "total": 7.149522845005443
+          },
+          "60:60": {
+            "h1_db": 9.133737178479628,
+            "h1_late_db": 17.254011329208936,
+            "decay_db": 4.630773388051499,
+            "balance_db": 9.944122152458778,
+            "attack_body_bands_db": 3.7079247300531972,
+            "h1_signed_db": [
+              -1.3557603082636405,
+              -8.791439897966306,
+              -17.254011329208936
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.23755069726578,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -0.8544679795340926,
+            "legacy_total": 7.396720607103418,
+            "total": 6.356928129644009
+          },
+          "60:110": {
+            "h1_db": 8.897648811341886,
+            "h1_late_db": 16.633428737290092,
+            "decay_db": 5.007083896913657,
+            "balance_db": 11.451649099993377,
+            "attack_body_bands_db": 2.8159770470619154,
+            "h1_signed_db": [
+              -1.6249121309073544,
+              -8.43460556582821,
+              -16.633428737290092
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.5002657331252967,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -0.0592132836644268,
+            "legacy_total": 7.6512568902557065,
+            "total": 6.613509100973104
+          },
+          "84:60": {
+            "h1_db": 6.218585788714226,
+            "h1_late_db": 9.45381417403538,
+            "decay_db": 5.486842028727361,
+            "balance_db": 7.07521935050671,
+            "attack_body_bands_db": 6.134531719979108,
+            "h1_signed_db": [
+              -4.03559811774273,
+              5.166345074364571,
+              -9.45381417403538
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 4.957870182155576,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -5.58211984432338,
+            "legacy_total": 6.237200128855363,
+            "total": 5.917367642180416
+          },
+          "84:110": {
+            "h1_db": 5.499758364622572,
+            "h1_late_db": 8.016715498585896,
+            "decay_db": 5.255598021204403,
+            "balance_db": 4.684461142164435,
+            "attack_body_bands_db": 7.830350560341875,
+            "h1_signed_db": [
+              -3.8520881124410096,
+              4.630471482840811,
+              -8.016715498585896
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 3.9628094726351826,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -4.327716710467783,
+            "legacy_total": 5.584482802511391,
+            "total": 5.179064470042339
+          },
+          "42:60": {
+            "h1_db": 14.899180143284369,
+            "h1_late_db": 14.858317211033999,
+            "decay_db": 2.3985632951810363,
+            "balance_db": 15.83180352501637,
+            "attack_body_bands_db": 1.0438366877690628,
+            "h1_signed_db": [
+              -14.136712767802003,
+              -15.702510451017105,
+              -14.858317211033999
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 10.848128179965576,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 12.757750028365038,
+            "legacy_total": 9.92888025836424,
+            "total": 10.158692238764575
+          },
+          "42:110": {
+            "h1_db": 15.393462398378935,
+            "h1_late_db": 15.15891978152699,
+            "decay_db": 2.23708106728443,
+            "balance_db": 15.98660511417122,
+            "attack_body_bands_db": 1.2175252366805247,
+            "h1_signed_db": [
+              -14.78853130139543,
+              -16.232936112214386,
+              -15.15891978152699
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 10.07406272221978,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 12.38080858191605,
+            "legacy_total": 10.126262170298618,
+            "total": 10.113212308278909
+          },
+          "66:60": {
+            "h1_db": 3.385951667835935,
+            "h1_late_db": 3.9191058881500282,
+            "decay_db": 3.281367602217121,
+            "balance_db": 6.625089481616382,
+            "attack_body_bands_db": 4.433550591953666,
+            "h1_signed_db": [
+              -1.5499323079261487,
+              -4.688816807431628,
+              -3.9191058881500282
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 7.498489150864753,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 10.624817575988459,
+            "legacy_total": 4.326729943494003,
+            "total": 5.11966974533669
+          },
+          "66:110": {
+            "h1_db": 6.619277593499088,
+            "h1_late_db": 6.783359566845917,
+            "decay_db": 3.8551710103555967,
+            "balance_db": 10.480993731818666,
+            "attack_body_bands_db": 4.3027394146641225,
+            "h1_signed_db": [
+              -4.9513405605880685,
+              -8.12313265306328,
+              -6.783359566845917
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 10.171928355402677,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 11.812428708729378,
+            "legacy_total": 6.546199255467864,
+            "total": 7.452631530451567
+          },
+          "90:60": {
+            "h1_db": 11.010999205978038,
+            "h1_late_db": 11.030303610236345,
+            "decay_db": 9.082770103130517,
+            "balance_db": 16.05346271583872,
+            "attack_body_bands_db": 8.715649846062451,
+            "h1_signed_db": [
+              8.044390812884004,
+              13.958303194813766,
+              11.030303610236345
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 5.554937128693394,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -5.533091067124097,
+            "legacy_total": 11.445255403743989,
+            "total": 9.972675834981342
+          },
+          "90:110": {
+            "h1_db": 9.024689040156556,
+            "h1_late_db": 11.092362784294899,
+            "decay_db": 8.358771782514905,
+            "balance_db": 28.744454966896587,
+            "attack_body_bands_db": 8.649281989770449,
+            "h1_signed_db": [
+              5.749985222854466,
+              10.231719113320302,
+              11.092362784294899
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 13.577269417890832,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -17.135608954963864,
+            "legacy_total": 13.731840149873236,
+            "total": 13.693197466877635
+          },
+          "48:60": {
+            "h1_db": 0.9554622454612248,
+            "h1_late_db": 0.9648587846615797,
+            "decay_db": 3.6731361063901624,
+            "balance_db": 4.635969376095824,
+            "attack_body_bands_db": 4.091077265071519,
+            "h1_signed_db": [
+              -0.9022002277714449,
+              0.9993277239506497,
+              0.9648587846615797
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 8.048163076139996,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 18.471199294932994,
+            "legacy_total": 3.025349746293653,
+            "total": 4.281053078755239
+          },
+          "48:110": {
+            "h1_db": 0.7761704603810955,
+            "h1_late_db": 0.17733204554288307,
+            "decay_db": 3.4573609404506644,
+            "balance_db": 4.777540523655754,
+            "attack_body_bands_db": 2.7263675924973922,
+            "h1_signed_db": [
+              -2.0705137397604574,
+              -0.08066559583994604,
+              0.17733204554288307
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 7.068160892675765,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 16.89302350674096,
+            "legacy_total": 2.739340166034597,
+            "total": 3.821545347694889
+          },
+          "72:60": {
+            "h1_db": 1.7281205518159801,
+            "h1_late_db": 2.2940190952413246,
+            "decay_db": 2.0414452627494306,
+            "balance_db": 3.692267070704094,
+            "attack_body_bands_db": 4.738965913520941,
+            "h1_signed_db": [
+              -0.09286518953090805,
+              -2.7974773706757077,
+              2.2940190952413246
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 1.0458653809159237,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.332092745140063,
+            "legacy_total": 2.749115163527115,
+            "total": 2.3233027178743173
+          },
+          "72:110": {
+            "h1_db": 1.6547159012079848,
+            "h1_late_db": 2.516041352538977,
+            "decay_db": 3.027289049658717,
+            "balance_db": 3.541742266510599,
+            "attack_body_bands_db": 3.28985474751274,
+            "h1_signed_db": [
+              0.3285081629959059,
+              -2.1195981880890713,
+              2.516041352538977
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 1.9214270951414854,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 1.8040175427737175,
+            "legacy_total": 2.7148866065920343,
+            "total": 2.516521728729397
+          },
+          "96:60": {
+            "h1_db": 7.952146590902231,
+            "h1_late_db": 2.4952383270774163,
+            "decay_db": 7.300496254898711,
+            "balance_db": 0.0,
+            "attack_body_bands_db": 12.380609400014015,
+            "h1_signed_db": [
+              12.819144094168038,
+              8.542057351461239,
+              2.4952383270774163
+            ],
+            "observed_partial_terms": 3,
+            "impact_body_db": 2.7199022989692487,
+            "observed_impact_balance_terms": 0,
+            "impact_H2_H1_error_db": 13.462675141826878,
+            "legacy_total": 6.4654667805425605,
+            "total": 5.529075660149233
+          },
+          "96:110": {
+            "h1_db": 9.037739212499412,
+            "h1_late_db": 4.091400478449884,
+            "decay_db": 5.136891085546483,
+            "balance_db": 18.594864851375124,
+            "attack_body_bands_db": 8.706891530355577,
+            "h1_signed_db": [
+              10.256258032796268,
+              12.765559126252086,
+              4.091400478449884
+            ],
+            "observed_partial_terms": 5,
+            "impact_body_db": 10.08573465483143,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -10.759555279500269,
+            "legacy_total": 10.402181438158532,
+            "total": 10.323069742326757
+          },
+          "54:60": {
+            "h1_db": 4.3676436670051615,
+            "h1_late_db": 5.434638975437586,
+            "decay_db": 2.4331897511378817,
+            "balance_db": 4.062977698620042,
+            "attack_body_bands_db": 5.90047499023173,
+            "h1_signed_db": [
+              5.349910961088177,
+              2.3183810644897207,
+              5.434638975437586
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 5.280109030849632,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -6.731684286470163,
+            "legacy_total": 4.037788394426047,
+            "total": 4.348368553531943
+          },
+          "54:110": {
+            "h1_db": 3.003122932996206,
+            "h1_late_db": 4.073500344051354,
+            "decay_db": 2.3436116861543304,
+            "balance_db": 3.564199980754996,
+            "attack_body_bands_db": 4.4361740525709985,
+            "h1_signed_db": [
+              3.7597137967178575,
+              1.1761546582194065,
+              4.073500344051354
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 4.159817885273057,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -6.642148054974065,
+            "legacy_total": 3.1934720511616534,
+            "total": 3.4350585096895045
+          },
+          "78:60": {
+            "h1_db": 7.517047234067086,
+            "h1_late_db": 13.712675076782801,
+            "decay_db": 6.045298523298321,
+            "balance_db": 5.082265766889903,
+            "attack_body_bands_db": 8.667244592286302,
+            "h1_signed_db": [
+              -4.6238561239503575,
+              -4.214610501468101,
+              -13.712675076782801
+            ],
+            "observed_partial_terms": 9,
+            "impact_body_db": 9.846466327954435,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -10.88383982654739,
+            "legacy_total": 6.712944293313482,
+            "total": 7.49632480197372
+          },
+          "78:110": {
+            "h1_db": 6.822364068831944,
+            "h1_late_db": 10.257198461265716,
+            "decay_db": 4.592317391094728,
+            "balance_db": 3.4699574223996894,
+            "attack_body_bands_db": 6.473248967846738,
+            "h1_signed_db": [
+              -4.538873976800637,
+              -5.671019768429478,
+              -10.257198461265716
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 4.107266702254332,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -1.7479362183063856,
+            "legacy_total": 5.374383472641795,
+            "total": 5.057604280044929
+          }
+        },
+        "maximum_peak": 0.3601730249927437,
+        "worst_discarded_tail_energy_db": -106.80109973603234
+      },
+      "regions-3-smooth-0.3": {
+        "regions": 3,
+        "regularization": 0.3,
+        "metrics": {
+          "h1_db": 7.886746802304224,
+          "h1_late_db": 8.47716088764684,
+          "decay_db": 4.463495203529953,
+          "balance_db": 9.423775003814121,
+          "attack_body_bands_db": 5.643942309348717,
+          "total": 6.881600578997259,
+          "impact_body_db": 6.290091478854623,
+          "worst_h1_db": 15.799425192684131,
+          "worst_h1_late_db": 19.55525347425946,
+          "worst_decay_db": 9.081387866627814,
+          "worst_balance_db": 33.821069565491705,
+          "worst_attack_body_bands_db": 14.914718256214346,
+          "worst_total": 17.17907666154508,
+          "worst_impact_body_db": 18.585001758729863,
+          "register_total": {
+            "grave": 5.355093902394415,
+            "medio": 5.341519974185581,
+            "agudo": 9.56316770920886
+          },
+          "objective": 35.81795840503551
+        },
+        "rows": {
+          "36:60": {
+            "h1_db": 6.4652429804142715,
+            "h1_late_db": 0.24707990489356035,
+            "decay_db": 4.056628437366265,
+            "balance_db": 9.054493672284092,
+            "attack_body_bands_db": 4.049690974296341,
+            "h1_signed_db": [
+              -9.581367087927667,
+              -9.567281948421588,
+              -0.24707990489356035
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 7.131840321529673,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 7.032487301705217,
+            "legacy_total": 6.148069216702035,
+            "total": 6.394011992908945
+          },
+          "36:110": {
+            "h1_db": 5.337563064178364,
+            "h1_late_db": 1.954361379117202,
+            "decay_db": 4.439553444415487,
+            "balance_db": 8.258510732003344,
+            "attack_body_bands_db": 2.2160650405335605,
+            "h1_signed_db": [
+              -7.491176937976732,
+              -6.567150875441158,
+              1.954361379117202
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 4.8402980651019405,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 5.30109227874275,
+            "legacy_total": 5.37507287264717,
+            "total": 5.241379170760863
+          },
+          "60:60": {
+            "h1_db": 11.458727017369,
+            "h1_late_db": 19.55525347425946,
+            "decay_db": 4.624076001415407,
+            "balance_db": 13.1425493062904,
+            "attack_body_bands_db": 3.0937902433773763,
+            "h1_signed_db": [
+              -3.701612009927892,
+              -11.11931556791965,
+              -19.55525347425946
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.9822629956466953,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 1.7029435438028955,
+            "legacy_total": 8.916279319512206,
+            "total": 7.682775238545829
+          },
+          "60:110": {
+            "h1_db": 11.222672748523237,
+            "h1_late_db": 18.934664934293874,
+            "decay_db": 5.000376476779163,
+            "balance_db": 14.626522593955661,
+            "attack_body_bands_db": 1.984066630974262,
+            "h1_signed_db": [
+              -3.970846107262812,
+              -10.76250720401303,
+              -18.934664934293874
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 4.9901679236988885,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 2.4990672247397114,
+            "legacy_total": 9.132270224312979,
+            "total": 8.096744649159456
+          },
+          "84:60": {
+            "h1_db": 7.080076698329665,
+            "h1_late_db": 12.03390790239149,
+            "decay_db": 5.485166074118226,
+            "balance_db": 3.3111629313183903,
+            "attack_body_bands_db": 7.17160896210679,
+            "h1_signed_db": [
+              -6.634059702085146,
+              2.572262490512358,
+              -12.03390790239149
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 2.172574936906779,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -1.0020354584244444,
+            "legacy_total": 5.752850440090555,
+            "total": 4.85778156429461
+          },
+          "84:110": {
+            "h1_db": 6.361175936940824,
+            "h1_late_db": 10.596562948959551,
+            "decay_db": 5.253081534560655,
+            "balance_db": 2.5735710021696776,
+            "attack_body_bands_db": 8.144862384920861,
+            "h1_signed_db": [
+              -6.450109198508709,
+              2.03685566335421,
+              -10.596562948959551
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 1.5556931419521334,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": 0.251999242308397,
+            "legacy_total": 5.40480406985,
+            "total": 4.442526337875533
+          },
+          "42:60": {
+            "h1_db": 12.797726334506441,
+            "h1_late_db": 12.739088406039436,
+            "decay_db": 2.4450062131650903,
+            "balance_db": 13.090613545447328,
+            "attack_body_bands_db": 1.9931006980232038,
+            "h1_signed_db": [
+              -11.957923430894432,
+              -13.696167166585454,
+              -12.739088406039436
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 7.390906765612782,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 8.584467151312651,
+            "legacy_total": 8.662074261433839,
+            "total": 8.344282387478575
+          },
+          "42:110": {
+            "h1_db": 13.371008934710682,
+            "h1_late_db": 13.084135368051449,
+            "decay_db": 2.2707281179255916,
+            "balance_db": 13.323442559105104,
+            "attack_body_bands_db": 2.1987434805473463,
+            "h1_signed_db": [
+              -12.752687914437693,
+              -14.276203521642902,
+              -13.084135368051449
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 6.674775585567494,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 8.26220863968522,
+            "legacy_total": 8.908207318488513,
+            "total": 8.349849385258258
+          },
+          "66:60": {
+            "h1_db": 2.047020120775,
+            "h1_late_db": 2.5869173407247175,
+            "decay_db": 3.28318712363503,
+            "balance_db": 6.152097267347604,
+            "attack_body_bands_db": 3.6919586148481023,
+            "h1_signed_db": [
+              -0.20648696217401152,
+              -3.3476560594262708,
+              -2.5869173407247175
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 5.42870883320017,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 7.149823470527657,
+            "legacy_total": 3.6290719322441234,
+            "total": 4.078981157483135
+          },
+          "66:110": {
+            "h1_db": 5.279982137174467,
+            "h1_late_db": 5.450584615860983,
+            "decay_db": 3.8561624600572335,
+            "balance_db": 9.880218338026648,
+            "attack_body_bands_db": 4.2972356507204905,
+            "h1_signed_db": [
+              -3.60772877614977,
+              -6.781633019512647,
+              -5.450584615860983
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 8.102024806657308,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 8.337350243062481,
+            "legacy_total": 5.926674295140106,
+            "total": 6.470511923019407
+          },
+          "90:60": {
+            "h1_db": 15.799425192684131,
+            "h1_late_db": 15.814277796080852,
+            "decay_db": 9.081387866627814,
+            "balance_db": 21.129681503280455,
+            "attack_body_bands_db": 9.47959116776703,
+            "h1_signed_db": [
+              12.836473392626214,
+              18.74752438934533,
+              15.814277796080852
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 10.562168548998024,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -10.611802297821896,
+            "legacy_total": 14.504504835081569,
+            "total": 13.518920763560683
+          },
+          "90:110": {
+            "h1_db": 13.813549387593246,
+            "h1_late_db": 15.87642397715674,
+            "decay_db": 8.35717641823084,
+            "balance_db": 33.821069565491705,
+            "attack_body_bands_db": 8.874207872634733,
+            "h1_signed_db": [
+              10.542541524820052,
+              15.021682660802945,
+              15.87642397715674
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 18.585001758729863,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -22.214862259318448,
+            "legacy_total": 16.710434962483482,
+            "total": 17.17907666154508
+          },
+          "48:60": {
+            "h1_db": 1.3926891666098176,
+            "h1_late_db": 0.7494028590961506,
+            "decay_db": 3.655419679679858,
+            "balance_db": 5.491184102004452,
+            "attack_body_bands_db": 4.054782916414104,
+            "h1_signed_db": [
+              -2.6979479052383155,
+              -0.7307167354949868,
+              -0.7494028590961506
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 11.407477610055178,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 22.1878591513519,
+            "legacy_total": 3.382309591196629,
+            "total": 5.3886015959112665
+          },
+          "48:110": {
+            "h1_db": 2.403405221669909,
+            "h1_late_db": 1.5390840722596053,
+            "decay_db": 3.4380872016183517,
+            "balance_db": 5.576313044247112,
+            "attack_body_bands_db": 2.5795223414481923,
+            "h1_signed_db": [
+              -3.8537370888830935,
+              -1.8173945038670283,
+              -1.5390840722596053
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 10.674497965531794,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 20.620468701966974,
+            "legacy_total": 3.4817202402680625,
+            "total": 5.279914671583995
+          },
+          "72:60": {
+            "h1_db": 2.255878401409633,
+            "h1_late_db": 0.7105765886376147,
+            "decay_db": 2.041087326891426,
+            "balance_db": 2.943279575304632,
+            "attack_body_bands_db": 4.983862645316757,
+            "h1_signed_db": [
+              -1.67665409856534,
+              -4.380404517025944,
+              0.7105765886376147
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 1.1131280364101386,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.44373494127305335,
+            "legacy_total": 2.7832285628399,
+            "total": 2.3657034312324594
+          },
+          "72:110": {
+            "h1_db": 1.963496359783516,
+            "h1_late_db": 0.9325333868339456,
+            "decay_db": 3.026548271984802,
+            "balance_db": 5.253169505897001,
+            "attack_body_bands_db": 3.3994772233389225,
+            "h1_signed_db": [
+              -1.2553441242534618,
+              -3.7026115682631406,
+              0.9325333868339456
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 3.6163895210062336,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 4.579841282112799,
+            "legacy_total": 3.2670747538955194,
+            "total": 3.354403445673198
+          },
+          "96:60": {
+            "h1_db": 12.969187178761397,
+            "h1_late_db": 7.493291951095223,
+            "decay_db": 7.321163002260278,
+            "balance_db": 0.0,
+            "attack_body_bands_db": 14.914718256214346,
+            "h1_signed_db": [
+              17.849962513601582,
+              13.564307071587386,
+              7.493291951095223
+            ],
+            "observed_partial_terms": 3,
+            "impact_body_db": 3.9779181221920554,
+            "observed_impact_balance_terms": 0,
+            "impact_H2_H1_error_db": 9.127535558975612,
+            "legacy_total": 8.60671400156371,
+            "total": 7.449515031720796
+          },
+          "96:110": {
+            "h1_db": 14.054892686929543,
+            "h1_late_db": 9.08882467419977,
+            "decay_db": 5.145596410119303,
+            "balance_db": 22.924974494213387,
+            "attack_body_bands_db": 10.803107085240555,
+            "h1_signed_db": [
+              15.286876217978026,
+              17.788977168610835,
+              9.08882467419977
+            ],
+            "observed_partial_terms": 5,
+            "impact_body_db": 14.59464164214185,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -15.09419727862236,
+            "legacy_total": 13.557321229294594,
+            "total": 13.816651332506408
+          },
+          "54:60": {
+            "h1_db": 1.7570518394704564,
+            "h1_late_db": 2.179462668956539,
+            "decay_db": 2.4379439552530786,
+            "balance_db": 1.8673441715204124,
+            "attack_body_bands_db": 4.401496858319578,
+            "h1_signed_db": [
+              2.140980292428665,
+              -0.950712557026165,
+              2.179462668956539
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 1.2429291227729284,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -0.02644858956644569,
+            "legacy_total": 2.351514704255969,
+            "total": 2.0743683088852087
+          },
+          "54:110": {
+            "h1_db": 1.1541528061814457,
+            "h1_late_db": 0.8182786766368579,
+            "decay_db": 2.3472217861850475,
+            "balance_db": 2.610128724403475,
+            "attack_body_bands_db": 3.4600837402728155,
+            "h1_signed_db": [
+              0.5512226351392648,
+              -2.092957106768214,
+              0.8182786766368579
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 0.5864638129181778,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.06261037955878024,
+            "legacy_total": 2.162303670851559,
+            "total": 1.7683437063682135
+          },
+          "78:60": {
+            "h1_db": 12.609242410848921,
+            "h1_late_db": 18.78410830194025,
+            "decay_db": 6.04167699472841,
+            "balance_db": 4.261329497474087,
+            "attack_body_bands_db": 10.380610276512497,
+            "h1_signed_db": [
+              -9.728827344540353,
+              -9.314791586066164,
+              -18.78410830194025
+            ],
+            "observed_partial_terms": 9,
+            "impact_body_db": 6.687365112979298,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -8.525940150908628,
+            "legacy_total": 8.54607800832462,
+            "total": 8.08139978448829
+          },
+          "78:110": {
+            "h1_db": 11.91426302582895,
+            "h1_late_db": 15.328718300745216,
+            "decay_db": 4.589619680641629,
+            "balance_db": 8.031393952125686,
+            "attack_body_bands_db": 7.99414774184392,
+            "h1_signed_db": [
+              -9.64357472913293,
+              -10.770496047608706,
+              -15.328718300745216
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 3.064777905192303,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.6098011929810738,
+            "legacy_total": 8.52436762850855,
+            "total": 7.159470197679489
+          }
+        },
+        "maximum_peak": 0.4209357626447518,
+        "worst_discarded_tail_energy_db": -89.15692413254328
+      },
+      "regions-3-smooth-3": {
+        "regions": 3,
+        "regularization": 3.0,
+        "metrics": {
+          "h1_db": 6.744432223221981,
+          "h1_late_db": 7.501069762482832,
+          "decay_db": 4.463089643950578,
+          "balance_db": 8.875610160120884,
+          "attack_body_bands_db": 5.316681837052109,
+          "total": 6.449379385137565,
+          "impact_body_db": 6.319332026440131,
+          "worst_h1_db": 13.885134248706464,
+          "worst_h1_late_db": 18.136271644372286,
+          "worst_decay_db": 9.082394708350051,
+          "worst_balance_db": 30.001419357566704,
+          "worst_attack_body_bands_db": 12.761657681425962,
+          "worst_total": 14.432933098993852,
+          "worst_impact_body_db": 14.755306488249921,
+          "register_total": {
+            "grave": 5.485263013687193,
+            "medio": 5.352070559824156,
+            "agudo": 8.236477375572992
+          },
+          "objective": 28.58888951965717
+        },
+        "rows": {
+          "36:60": {
+            "h1_db": 6.262148219372686,
+            "h1_late_db": 0.09183136178489804,
+            "decay_db": 4.087158131716084,
+            "balance_db": 9.205186371788983,
+            "attack_body_bands_db": 4.083047508403422,
+            "h1_signed_db": [
+              -9.341231658093001,
+              -9.353381638240158,
+              -0.09183136178489804
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 8.145239236177872,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 6.8653278671243925,
+            "legacy_total": 6.127295128917219,
+            "total": 6.631781155732383
+          },
+          "36:110": {
+            "h1_db": 5.273352292146339,
+            "h1_late_db": 2.066043404836755,
+            "decay_db": 4.456588157880144,
+            "balance_db": 8.176712242475126,
+            "attack_body_bands_db": 2.8695351430718015,
+            "h1_signed_db": [
+              -7.336248040230714,
+              -6.417765431371549,
+              2.066043404836755
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 5.913695214626006,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 5.212230038763984,
+            "legacy_total": 5.434428673800807,
+            "total": 5.554245309007107
+          },
+          "60:60": {
+            "h1_db": 10.021192401036457,
+            "h1_late_db": 18.136271644372286,
+            "decay_db": 4.629697324378862,
+            "balance_db": 10.463152331233164,
+            "attack_body_bands_db": 3.7942205612486934,
+            "h1_signed_db": [
+              -2.247563934681118,
+              -9.679741624055964,
+              -18.136271644372286
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 2.950452290285045,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.0003662650013964708,
+            "legacy_total": 7.849762838453071,
+            "total": 6.6249352014110645
+          },
+          "60:110": {
+            "h1_db": 9.78511400772699,
+            "h1_late_db": 17.515687727510535,
+            "decay_db": 5.006003962713422,
+            "balance_db": 11.947113941929384,
+            "attack_body_bands_db": 2.766021556455952,
+            "h1_signed_db": [
+              -2.5167417386674025,
+              -9.322912557003033,
+              -17.515687727510535
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.809694885827756,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.7957983688153014,
+            "legacy_total": 8.077972612333541,
+            "total": 7.010903180707095
+          },
+          "84:60": {
+            "h1_db": 6.28494035266895,
+            "h1_late_db": 9.652869363923124,
+            "decay_db": 5.487016860411705,
+            "balance_db": 6.840018834444128,
+            "attack_body_bands_db": 6.223049072839323,
+            "h1_signed_db": [
+              -4.23480924589547,
+              4.967142448188255,
+              -9.652869363923124
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 4.831027294686761,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -5.346595659459815,
+            "legacy_total": 6.214945408073989,
+            "total": 5.868965879727183
+          },
+          "84:110": {
+            "h1_db": 5.566112315288578,
+            "h1_late_db": 8.215752582225768,
+            "decay_db": 5.255703738878024,
+            "balance_db": 4.449340672745724,
+            "attack_body_bands_db": 7.898531069773003,
+            "h1_signed_db": [
+              -4.051274343479925,
+              4.431310020160041,
+              -8.215752582225768
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 3.8360143350197884,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -4.092262711213952,
+            "legacy_total": 5.55918007372289,
+            "total": 5.128388639047115
+          },
+          "42:60": {
+            "h1_db": 13.37506052442402,
+            "h1_late_db": 13.322790225125964,
+            "decay_db": 2.3966668284559165,
+            "balance_db": 13.310793836624415,
+            "attack_body_bands_db": 1.2168363489432314,
+            "h1_signed_db": [
+              -12.613381239636219,
+              -14.189010108509876,
+              -13.322790225125964
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 8.437092178285209,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 9.980845205519117,
+            "legacy_total": 8.790661802159974,
+            "total": 8.702269396191284
+          },
+          "42:110": {
+            "h1_db": 13.885134248706464,
+            "h1_late_db": 13.635617810033807,
+            "decay_db": 2.23075376217547,
+            "balance_db": 13.480972045244867,
+            "attack_body_bands_db": 1.3651916648725355,
+            "h1_signed_db": [
+              -13.299413090005459,
+              -14.720371846080123,
+              -13.635617810033807
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 7.680032962444087,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 9.620224155790062,
+            "legacy_total": 8.992507188633228,
+            "total": 8.664388632085943
+          },
+          "66:60": {
+            "h1_db": 4.187800549672342,
+            "h1_late_db": 4.720955503118276,
+            "decay_db": 3.2815930175762498,
+            "balance_db": 7.519842095855224,
+            "attack_body_bands_db": 4.231197235040881,
+            "h1_signed_db": [
+              -2.3518524099818947,
+              -5.490593735916853,
+              -4.720955503118276
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 8.177229203453107,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 10.644896396398565,
+            "legacy_total": 4.80076855599932,
+            "total": 5.644883717862767
+          },
+          "66:110": {
+            "h1_db": 7.42105199668693,
+            "h1_late_db": 7.5850290618810945,
+            "decay_db": 3.8552686322956395,
+            "balance_db": 11.687352775100782,
+            "attack_body_bands_db": 4.756968251104718,
+            "h1_signed_db": [
+              -5.753248357558235,
+              -8.924878570621459,
+              -7.5850290618810945
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 10.85067317732915,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 11.832517362267335,
+            "legacy_total": 7.196568788355238,
+            "total": 8.110094885598716
+          },
+          "90:60": {
+            "h1_db": 11.950219749278292,
+            "h1_late_db": 11.969181164866924,
+            "decay_db": 9.082394708350051,
+            "balance_db": 17.310478242348758,
+            "attack_body_bands_db": 8.25177567204135,
+            "h1_signed_db": [
+              8.983937952244084,
+              14.897540130723868,
+              11.969181164866924
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 6.732993374300021,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -6.790629349290949,
+            "legacy_total": 12.018561500728307,
+            "total": 10.697169469121235
+          },
+          "90:110": {
+            "h1_db": 9.963943750794085,
+            "h1_late_db": 12.031283570835562,
+            "decay_db": 8.358386216560055,
+            "balance_db": 30.001419357566704,
+            "attack_body_bands_db": 8.320957308436935,
+            "h1_signed_db": [
+              6.689549886635064,
+              11.170997794911628,
+              12.031283570835562
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 14.755306488249921,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -18.393117950510497,
+            "legacy_total": 14.32547530257516,
+            "total": 14.432933098993852
+          },
+          "48:60": {
+            "h1_db": 0.9589243659056189,
+            "h1_late_db": 0.9585963457528095,
+            "decay_db": 3.6756901213028663,
+            "balance_db": 4.4684675935878495,
+            "attack_body_bands_db": 3.9086212047433246,
+            "h1_signed_db": [
+              -0.9235191871378987,
+              0.9946575648261486,
+              0.9585963457528095
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 8.315684357543207,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 18.531786415585046,
+            "legacy_total": 2.957956137501144,
+            "total": 4.29738819251166
+          },
+          "48:110": {
+            "h1_db": 0.7828874680161206,
+            "h1_late_db": 0.1686028235431749,
+            "decay_db": 3.459270533075651,
+            "balance_db": 4.402648365456951,
+            "attack_body_bands_db": 2.5921080631701083,
+            "h1_signed_db": [
+              -2.091332931008317,
+              -0.08872664949686992,
+              0.1686028235431749
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 7.33787716053094,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 16.958993660567803,
+            "legacy_total": 2.628306547914309,
+            "total": 3.8056992010684665
+          },
+          "72:60": {
+            "h1_db": 1.8059858721380297,
+            "h1_late_db": 2.0595907552987427,
+            "decay_db": 2.041383349493195,
+            "balance_db": 3.2736934706338907,
+            "attack_body_bands_db": 4.73320766728367,
+            "h1_signed_db": [
+              -0.3268325688283191,
+              -3.031534292287027,
+              2.0595907552987427
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 1.2157638291200028,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.610824713974175,
+            "legacy_total": 2.6708454103726322,
+            "total": 2.3070750150594748
+          },
+          "72:110": {
+            "h1_db": 1.57660143141986,
+            "h1_late_db": 2.2816059539734184,
+            "decay_db": 3.027050952446152,
+            "balance_db": 3.621146316628014,
+            "attack_body_bands_db": 3.190139891467946,
+            "h1_signed_db": [
+              0.09453305681041968,
+              -2.353665283475742,
+              2.2816059539734184
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 1.580983027266218,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 1.5252885031632886,
+            "legacy_total": 2.6923808019856845,
+            "total": 2.4145313583058177
+          },
+          "96:60": {
+            "h1_db": 8.882009530478767,
+            "h1_late_db": 3.42251021010766,
+            "decay_db": 7.3032954494869315,
+            "balance_db": 0.0,
+            "attack_body_bands_db": 12.761657681425962,
+            "h1_signed_db": [
+              13.750873163470054,
+              9.472645217858584,
+              3.42251021010766
+            ],
+            "observed_partial_terms": 3,
+            "impact_body_db": 2.952881189245092,
+            "observed_impact_balance_terms": 0,
+            "impact_H2_H1_error_db": 12.479464359858667,
+            "legacy_total": 6.848775850253196,
+            "total": 5.874802185001169
+          },
+          "96:110": {
+            "h1_db": 9.967627344072058,
+            "h1_late_db": 5.018571561337666,
+            "decay_db": 5.13828261460104,
+            "balance_db": 19.57771144411333,
+            "attack_body_bands_db": 9.073264051879002,
+            "h1_signed_db": [
+              11.187976622954483,
+              13.696333847924024,
+              5.018571561337666
+            ],
+            "observed_partial_terms": 5,
+            "impact_body_db": 11.056032191172452,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -11.742659627146189,
+            "legacy_total": 11.028657692885663,
+            "total": 11.03550131745736
+          },
+          "54:60": {
+            "h1_db": 3.1589048841854015,
+            "h1_late_db": 4.227268767866228,
+            "decay_db": 2.4339375471367877,
+            "balance_db": 3.467425851163942,
+            "attack_body_bands_db": 5.393663070198455,
+            "h1_signed_db": [
+              4.1423708710023135,
+              1.1070750136876626,
+              4.227268767866228
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.9500835674283348,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -5.025196473805707,
+            "legacy_total": 3.3900070195698415,
+            "total": 3.530026156534465
+          },
+          "54:110": {
+            "h1_db": 1.8178576339282,
+            "h1_late_db": 2.8661175164803296,
+            "decay_db": 2.3442356640424857,
+            "balance_db": 3.285919673670442,
+            "attack_body_bands_db": 4.053843449046854,
+            "h1_signed_db": [
+              2.5522970096943496,
+              -0.03515837560992097,
+              2.8661175164803296
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 2.829627694484548,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -4.935486634143924,
+            "legacy_total": 2.65186552366013,
+            "total": 2.6963060663662346
+          },
+          "78:60": {
+            "h1_db": 8.072669488333327,
+            "h1_late_db": 14.266424881421727,
+            "decay_db": 6.045302170709789,
+            "balance_db": 5.119448815985095,
+            "attack_body_bands_db": 8.745651722224284,
+            "h1_signed_db": [
+              -5.1806792201623,
+              -4.770904363415951,
+              -14.266424881421727
+            ],
+            "observed_partial_terms": 9,
+            "impact_body_db": 9.703047964869764,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -11.367616010966128,
+            "legacy_total": 6.928469825924028,
+            "total": 7.622114360660462
+          },
+          "78:110": {
+            "h1_db": 7.377970484604087,
+            "h1_late_db": 10.81093253832556,
+            "decay_db": 4.592292423226203,
+            "balance_db": 3.6545792440626568,
+            "attack_body_bands_db": 6.737512221474937,
+            "h1_signed_db": [
+              -5.095691007353562,
+              -6.227287908133139,
+              -10.81093253832556
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 3.9638729593376056,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.231721696027826,
+            "legacy_total": 5.654634419654886,
+            "total": 5.231944054575566
+          }
+        },
+        "maximum_peak": 0.34292144597057633,
+        "worst_discarded_tail_energy_db": -91.31994684812868
+      },
+      "regions-3-smooth-30": {
+        "regions": 3,
+        "regularization": 30.0,
+        "metrics": {
+          "h1_db": 6.868743822751242,
+          "h1_late_db": 7.501234137080126,
+          "decay_db": 4.463653081323031,
+          "balance_db": 9.323377364708753,
+          "attack_body_bands_db": 5.407953851461411,
+          "total": 6.728185959338808,
+          "impact_body_db": 6.926710755784959,
+          "worst_h1_db": 15.72969939268514,
+          "worst_h1_late_db": 17.208825437248493,
+          "worst_decay_db": 9.082808640801066,
+          "worst_balance_db": 28.52449974610664,
+          "worst_attack_body_bands_db": 12.217900069525061,
+          "worst_total": 13.55282181570286,
+          "worst_impact_body_db": 13.35558583449628,
+          "register_total": {
+            "grave": 6.844841736139608,
+            "medio": 5.012024925066382,
+            "agudo": 7.898650958242328
+          },
+          "objective": 29.776547059216252
+        },
+        "rows": {
+          "36:60": {
+            "h1_db": 10.561184382714837,
+            "h1_late_db": 4.36835806814878,
+            "decay_db": 4.09096180289447,
+            "balance_db": 12.480298249207953,
+            "attack_body_bands_db": 4.464739238161497,
+            "h1_signed_db": [
+              -13.671192582633758,
+              -13.644002497361974,
+              -4.36835806814878
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 12.479433279938746,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 10.19979691118494,
+            "legacy_total": 8.508940432700022,
+            "total": 9.501563644509703
+          },
+          "36:110": {
+            "h1_db": 8.19043542529574,
+            "h1_late_db": 2.2071979414603007,
+            "decay_db": 4.463924653110948,
+            "balance_db": 11.187301668975271,
+            "attack_body_bands_db": 3.208294279043515,
+            "h1_signed_db": [
+              -11.660102750160519,
+              -10.704005584266405,
+              -2.2071979414603007
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 10.249932142108367,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 8.557692036000844,
+            "legacy_total": 7.260703121231591,
+            "total": 8.008010376450784
+          },
+          "60:60": {
+            "h1_db": 9.08697624715275,
+            "h1_late_db": 17.208825437248493,
+            "decay_db": 4.631108771713058,
+            "balance_db": 10.051802999245039,
+            "attack_body_bands_db": 3.6432509888052365,
+            "h1_signed_db": [
+              -1.3076025292589861,
+              -8.744500774950772,
+              -17.208825437248493
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.258710186178008,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -0.6249548565607981,
+            "legacy_total": 7.397657277563773,
+            "total": 6.362920504717331
+          },
+          "60:110": {
+            "h1_db": 8.850888556783497,
+            "h1_late_db": 16.5882427639467,
+            "decay_db": 5.007418999056677,
+            "balance_db": 11.559330101736146,
+            "attack_body_bands_db": 2.8771221778894875,
+            "h1_signed_db": [
+              -1.5767559274819263,
+              -8.387666978921867,
+              -16.5882427639467
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.6491422899140322,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 0.17028392597556063,
+            "legacy_total": 7.6710665967558525,
+            "total": 6.665585520045397
+          },
+          "84:60": {
+            "h1_db": 6.132748355190628,
+            "h1_late_db": 9.19638950497555,
+            "decay_db": 5.486903776723199,
+            "balance_db": 7.386919172719033,
+            "attack_body_bands_db": 6.268823688763289,
+            "h1_signed_db": [
+              -3.7777845755148576,
+              5.424070985081478,
+              -9.19638950497555
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 5.127331509818889,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -5.894012810466833,
+            "legacy_total": 6.305241214991771,
+            "total": 6.010763788698551
+          },
+          "84:110": {
+            "h1_db": 5.413926048974915,
+            "h1_late_db": 7.759296860815205,
+            "decay_db": 5.255670992728959,
+            "balance_db": 4.996155030832635,
+            "attack_body_bands_db": 7.972565821549227,
+            "h1_signed_db": [
+              -3.594268762729264,
+              4.888212523380275,
+              -7.759296860815205
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 4.132266123834922,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -4.639604683619176,
+            "legacy_total": 5.653715496264002,
+            "total": 5.273353153156732
+          },
+          "42:60": {
+            "h1_db": 15.237865975617842,
+            "h1_late_db": 15.198126577969667,
+            "decay_db": 2.398793117243297,
+            "balance_db": 16.482590864937507,
+            "attack_body_bands_db": 1.1051077571468744,
+            "h1_signed_db": [
+              -14.476338365869715,
+              -16.03913298301414,
+              -15.198126577969667
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 11.421961157709466,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 13.349007319800066,
+            "legacy_total": 10.219365250583477,
+            "total": 10.520014227364975
+          },
+          "42:110": {
+            "h1_db": 15.72969939268514,
+            "h1_late_db": 15.496901178456334,
+            "decay_db": 2.238018871463959,
+            "balance_db": 16.63488745086181,
+            "attack_body_bands_db": 1.209123234432393,
+            "h1_signed_db": [
+              -15.122752272975347,
+              -16.56944472662374,
+              -15.496901178456334
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 10.64530196376551,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 12.969679857982008,
+            "legacy_total": 10.4049898531861,
+            "total": 10.465067880830953
+          },
+          "66:60": {
+            "h1_db": 3.0180202148619557,
+            "h1_late_db": 3.5515903357619507,
+            "decay_db": 3.281428491208081,
+            "balance_db": 6.374795545903193,
+            "attack_body_bands_db": 4.429151370246307,
+            "h1_signed_db": [
+              -1.1817121134627797,
+              -4.320758195361137,
+              -3.5515903357619507
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 7.117462096909771,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 10.354827429140578,
+            "legacy_total": 4.134735790016448,
+            "total": 4.8804173667397786
+          },
+          "66:110": {
+            "h1_db": 6.2513583173828,
+            "h1_late_db": 6.415865206667242,
+            "decay_db": 3.8552574577573786,
+            "balance_db": 9.992331355584078,
+            "attack_body_bands_db": 4.126740290344165,
+            "h1_signed_db": [
+              -4.5831239921979545,
+              -7.755085753283204,
+              -6.415865206667242
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 9.790900274805026,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 11.542435703361512,
+            "legacy_total": 6.268883657970969,
+            "total": 7.149387812179484
+          },
+          "90:60": {
+            "h1_db": 10.784409262889932,
+            "h1_late_db": 10.803846641123414,
+            "decay_db": 9.082808640801066,
+            "balance_db": 15.833489200771695,
+            "attack_body_bands_db": 8.803469243211868,
+            "h1_signed_db": [
+              7.817699018732213,
+              13.731682128814171,
+              10.803846641123414
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 5.333243929541604,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -5.3130684855714065,
+            "legacy_total": 11.324138088886446,
+            "total": 9.826414549050236
+          },
+          "90:110": {
+            "h1_db": 8.798095062402114,
+            "h1_late_db": 10.865901429940216,
+            "decay_db": 8.358811069560453,
+            "balance_db": 28.52449974610664,
+            "attack_body_bands_db": 8.78937444676138,
+            "h1_signed_db": [
+              5.523292135943841,
+              10.005091621322286,
+              10.865901429940216
+            ],
+            "observed_partial_terms": 6,
+            "impact_body_db": 13.35558583449628,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -16.915599249836504,
+            "legacy_total": 13.61856714277172,
+            "total": 13.55282181570286
+          },
+          "48:60": {
+            "h1_db": 0.7435969859208669,
+            "h1_late_db": 0.33363517774604645,
+            "decay_db": 3.6724683990483125,
+            "balance_db": 5.224913558410546,
+            "attack_body_bands_db": 4.255007253301631,
+            "h1_signed_db": [
+              -1.5294863242873618,
+              0.3676694557291924,
+              0.33363517774604645
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 8.547988537942985,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 19.211581538580198,
+            "legacy_total": 3.1228555224322627,
+            "total": 4.479138776309943
+          },
+          "48:110": {
+            "h1_db": 1.2874845319976131,
+            "h1_late_db": 0.45320680389869494,
+            "decay_db": 3.4568035662685763,
+            "balance_db": 5.415841630315468,
+            "attack_body_bands_db": 2.5705786525361676,
+            "h1_signed_db": [
+              -2.6979423053757188,
+              -0.7113044867184257,
+              -0.45320680389869494
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 7.617137983902593,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 17.63237441697871,
+            "legacy_total": 3.054367683225601,
+            "total": 4.195060258394848
+          },
+          "72:60": {
+            "h1_db": 1.841129215047231,
+            "h1_late_db": 2.8186108783273056,
+            "decay_db": 2.041376567594238,
+            "balance_db": 3.919474744684842,
+            "attack_body_bands_db": 4.8926403022075196,
+            "h1_signed_db": [
+              0.43205946301292997,
+              -2.272717303801457,
+              2.8186108783273056
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 1.300060525746801,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -2.3940012823418186,
+            "legacy_total": 2.8685040986674286,
+            "total": 2.4763932054372715
+          },
+          "72:110": {
+            "h1_db": 1.8296351076672472,
+            "h1_late_db": 3.0406354451244866,
+            "decay_db": 3.0272449927881047,
+            "balance_db": 3.4029679922438496,
+            "attack_body_bands_db": 3.3995929389749726,
+            "h1_signed_db": [
+              0.8534339923121763,
+              -1.5948358855650788,
+              3.0406354451244866
+            ],
+            "observed_partial_terms": 15,
+            "impact_body_db": 1.8761871407528092,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": 1.7421070650055555,
+            "legacy_total": 2.757864474787771,
+            "total": 2.53744514127903
+          },
+          "96:60": {
+            "h1_db": 7.677698141642686,
+            "h1_late_db": 2.2210825473498943,
+            "decay_db": 7.300161715560133,
+            "balance_db": 0.0,
+            "attack_body_bands_db": 12.217900069525061,
+            "h1_signed_db": [
+              12.544472618682775,
+              8.26753925889539,
+              2.2210825473498943
+            ],
+            "observed_partial_terms": 3,
+            "impact_body_db": 2.6512348175926777,
+            "observed_impact_balance_terms": 0,
+            "impact_H2_H1_error_db": 12.553656036107359,
+            "legacy_total": 6.3449197888937325,
+            "total": 5.421498546068468
+          },
+          "96:110": {
+            "h1_db": 8.763303622691785,
+            "h1_late_db": 3.8172444228751132,
+            "decay_db": 5.136783286600218,
+            "balance_db": 19.503983479144832,
+            "attack_body_bands_db": 8.97516038861942,
+            "h1_signed_db": [
+              9.981609282647803,
+              12.491057162552437,
+              3.8172444228751132
+            ],
+            "observed_partial_terms": 5,
+            "impact_body_db": 10.698834499834343,
+            "observed_impact_balance_terms": 1,
+            "impact_H2_H1_error_db": -11.668572407535493,
+            "legacy_total": 10.573622017671301,
+            "total": 10.604925138212062
+          },
+          "54:60": {
+            "h1_db": 4.282203971840363,
+            "h1_late_db": 5.349006172427899,
+            "decay_db": 2.4331438372479783,
+            "balance_db": 3.919482651154076,
+            "attack_body_bands_db": 5.994752179419363,
+            "h1_signed_db": [
+              5.264343654210862,
+              2.233262088882327,
+              5.349006172427899
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 4.999179013743481,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -6.426736806415363,
+            "legacy_total": 3.9861408391575446,
+            "total": 4.239400382804028
+          },
+          "54:110": {
+            "h1_db": 2.917685087210414,
+            "h1_late_db": 3.987872352299803,
+            "decay_db": 2.343524033032284,
+            "balance_db": 3.5342381830861584,
+            "attack_body_bands_db": 4.557992076611516,
+            "h1_signed_db": [
+              3.674143072375717,
+              1.0910398369557228,
+              3.987872352299803
+            ],
+            "observed_partial_terms": 18,
+            "impact_body_db": 3.8789259316715685,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -6.337239044097565,
+            "legacy_total": 3.174329146044983,
+            "total": 3.3504783424516296
+          },
+          "78:60": {
+            "h1_db": 7.204363981981943,
+            "h1_late_db": 13.400434678250548,
+            "decay_db": 6.045376911302243,
+            "balance_db": 5.245764686691387,
+            "attack_body_bands_db": 8.725435720380126,
+            "h1_signed_db": [
+              -4.310902279961962,
+              -3.9017549877333195,
+              -13.400434678250548
+            ],
+            "observed_partial_terms": 9,
+            "impact_body_db": 9.998012009309253,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -11.06879463763789,
+            "legacy_total": 6.653128151249106,
+            "total": 7.489349115764143
+          },
+          "78:110": {
+            "h1_db": 6.509656212575025,
+            "h1_late_db": 9.944880590949104,
+            "decay_db": 4.592377835403049,
+            "balance_db": 3.443233710980405,
+            "attack_body_bands_db": 6.488162614220019,
+            "h1_signed_db": [
+              -4.225920181806124,
+              -5.358167864969847,
+              -9.944880590949104
+            ],
+            "observed_partial_terms": 12,
+            "impact_body_db": 4.258805377751935,
+            "observed_impact_balance_terms": 2,
+            "impact_H2_H1_error_db": -1.9328824415589203,
+            "legacy_total": 5.2605069531301245,
+            "total": 5.010081559285577
+          }
+        },
+        "maximum_peak": 0.36236127763068454,
+        "worst_discarded_tail_energy_db": -111.85615092933661
+      }
+    },
+    "selection_policy": "Four folds grouped by pitch, both velocities stay together. Selection frozen before reserved rendering."
+  },
+  "caveats": [
+    "Internal reserved corpus, not independent recordings.",
+    "Reference layer mapping is not measured physical hammer velocity.",
+    "Phase, mechanical loading and source dynamics are not fitted.",
+    "Prototype replaces downstream acoustics; no old room is added twice."
+  ],
+  "groups": {
+    "training": {
+      "actual": {
+        "h1_db": 4.852996953167467,
+        "h1_late_db": 5.4840449382633345,
+        "decay_db": 4.522788622540138,
+        "balance_db": 7.697240441827853,
+        "attack_body_bands_db": 4.850684953385771,
+        "total": 5.588735471484909,
+        "impact_body_db": 5.9114650578141985,
+        "worst_h1_db": 12.20393584341347,
+        "worst_h1_late_db": 21.27892353249262,
+        "worst_decay_db": 9.327507509241325,
+        "worst_balance_db": 19.052834853369816,
+        "worst_attack_body_bands_db": 9.0225244646474,
+        "worst_total": 9.07771432882761,
+        "worst_impact_body_db": 13.209040446148647,
+        "register_total": {
+          "grave": 4.368727597412431,
+          "medio": 5.680516528359514,
+          "agudo": 6.739907552901428
+        },
+        "objective": 17.239303053795876
+      },
+      "identified": {
+        "h1_db": 5.840560633978472,
+        "h1_late_db": 6.567647007578433,
+        "decay_db": 4.464466172373286,
+        "balance_db": 8.22560596833456,
+        "attack_body_bands_db": 5.147800482986226,
+        "total": 5.868300895667784,
+        "impact_body_db": 5.5065505941190604,
+        "worst_h1_db": 12.355365800909615,
+        "worst_h1_late_db": 17.303057919441457,
+        "worst_decay_db": 9.084103168910898,
+        "worst_balance_db": 25.89823049687131,
+        "worst_attack_body_bands_db": 11.124656783474366,
+        "worst_total": 11.983935317649518,
+        "worst_impact_body_db": 11.760403245970805,
+        "register_total": {
+          "grave": 5.172847045271848,
+          "medio": 4.903213500985777,
+          "agudo": 7.2875702920752286
+        },
+        "objective": 24.902246782267955
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": true,
+          "worst_decay_within_0_5db": true,
+          "worst_balance_within_0_5db": false,
+          "worst_attack_body_within_0_5db": false,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": true,
+          "no_clipping": true,
+          "small_discarded_tail": true
+        },
+        "maximum_pair_regression_db": 4.631663010352318,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      },
+      "maximum_peak": 0.3723402837090761
+    },
+    "reserved-pitches": {
+      "actual": {
+        "h1_db": 4.2871092767741334,
+        "h1_late_db": 4.389529723309792,
+        "decay_db": 4.03131003267144,
+        "balance_db": 7.235739478554289,
+        "attack_body_bands_db": 5.546526137418755,
+        "total": 5.437038625448494,
+        "impact_body_db": 6.300465865923401,
+        "worst_h1_db": 8.03086644256354,
+        "worst_h1_late_db": 10.88374779860711,
+        "worst_decay_db": 7.838868500977345,
+        "worst_balance_db": 10.394344671192156,
+        "worst_attack_body_bands_db": 10.84108857709257,
+        "worst_total": 7.023703135364471,
+        "worst_impact_body_db": 11.670798907682753,
+        "register_total": {
+          "grave": 5.119190058696019,
+          "medio": 5.692065542407538,
+          "agudo": 5.60580979749275
+        },
+        "objective": 14.732748288376243
+      },
+      "identified": {
+        "h1_db": 5.974980724242292,
+        "h1_late_db": 6.7410705047112085,
+        "decay_db": 3.530587691488202,
+        "balance_db": 7.478680026615443,
+        "attack_body_bands_db": 5.760233298542564,
+        "total": 5.686287697078279,
+        "impact_body_db": 5.622365254936813,
+        "worst_h1_db": 10.878150792412285,
+        "worst_h1_late_db": 17.081048404077805,
+        "worst_decay_db": 5.330851073289157,
+        "worst_balance_db": 18.309339620720454,
+        "worst_attack_body_bands_db": 11.325342564724023,
+        "worst_total": 11.269736391098057,
+        "worst_impact_body_db": 15.886259455169334,
+        "register_total": {
+          "grave": 5.397983225194071,
+          "medio": 4.173193344101527,
+          "agudo": 7.583788012567303
+        },
+        "objective": 25.30324883406383
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": false,
+          "worst_decay_within_0_5db": true,
+          "worst_balance_within_0_5db": false,
+          "worst_attack_body_within_0_5db": true,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false,
+          "no_clipping": true,
+          "small_discarded_tail": true
+        },
+        "maximum_pair_regression_db": 5.3375502289517325,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      },
+      "maximum_peak": 0.36835231689826725
+    },
+    "reserved-velocities": {
+      "actual": {
+        "h1_db": 4.6983215163209815,
+        "h1_late_db": 4.924135712473317,
+        "decay_db": 4.062925901976014,
+        "balance_db": 7.639150072510464,
+        "attack_body_bands_db": 5.233343264684963,
+        "total": 5.409627311439275,
+        "impact_body_db": 5.5737102036469715,
+        "worst_h1_db": 12.78792844491649,
+        "worst_h1_late_db": 21.187119158169217,
+        "worst_decay_db": 8.811573294035192,
+        "worst_balance_db": 19.095301181108763,
+        "worst_attack_body_bands_db": 13.29436231297995,
+        "worst_total": 9.065591321312134,
+        "worst_impact_body_db": 12.14557461017722,
+        "register_total": {
+          "grave": 4.80050042678503,
+          "medio": 5.851907547726967,
+          "agudo": 5.726674977083243
+        },
+        "objective": 16.632399549791728
+      },
+      "identified": {
+        "h1_db": 5.904174818842613,
+        "h1_late_db": 6.68059207346371,
+        "decay_db": 3.8962952123062555,
+        "balance_db": 7.960104321270208,
+        "attack_body_bands_db": 5.88447254384957,
+        "total": 5.773493515722633,
+        "impact_body_db": 5.354278208191136,
+        "worst_h1_db": 13.672959737278568,
+        "worst_h1_late_db": 18.817558663976882,
+        "worst_decay_db": 8.68652023346429,
+        "worst_balance_db": 25.972736513986053,
+        "worst_attack_body_bands_db": 15.265203100594112,
+        "worst_total": 12.062576142271752,
+        "worst_impact_body_db": 16.427098779836392,
+        "register_total": {
+          "grave": 5.2996947985397425,
+          "medio": 4.908886281278263,
+          "agudo": 7.056069679169683
+        },
+        "objective": 25.91562464839428
+      },
+      "acceptance": {
+        "passed": false,
+        "checks": {
+          "mean_improves": false,
+          "worst_pair_improves": false,
+          "every_register_improves": false,
+          "worst_late_H1_improves": true,
+          "worst_decay_within_0_5db": true,
+          "worst_balance_within_0_5db": false,
+          "worst_attack_body_within_0_5db": false,
+          "no_pair_regresses_over_2db": false,
+          "worst_impact_body_within_0_5db": false,
+          "no_clipping": true,
+          "small_discarded_tail": true
+        },
+        "maximum_pair_regression_db": 5.627162401865262,
+        "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+      },
+      "maximum_peak": 0.511524786484133
+    }
+  },
+  "C6_124": {
+    "rows": {
+      "h1_db": 3.135067957104379,
+      "h1_late_db": 4.058364332737696,
+      "decay_db": 2.153267765990953,
+      "balance_db": 3.0943967035029316,
+      "attack_body_bands_db": 7.966818225366981,
+      "h1_signed_db": [
+        -3.137348384259397,
+        -2.2094911543160443,
+        -4.058364332737696
+      ],
+      "observed_partial_terms": 6,
+      "impact_body_db": 2.5530413505799316,
+      "observed_impact_balance_terms": 1,
+      "impact_H2_H1_error_db": -2.6936610945470143,
+      "legacy_total": 3.604212636165051,
+      "total": 3.341419814768771
+    },
+    "baseline_rows": {
+      "h1_db": 4.020102239513136,
+      "h1_late_db": 5.072874355651628,
+      "decay_db": 4.927965525129128,
+      "balance_db": 6.089626207252543,
+      "attack_body_bands_db": 8.104451385363706,
+      "h1_signed_db": [
+        -4.016496655556004,
+        -2.970935707331776,
+        -5.072874355651628
+      ],
+      "observed_partial_terms": 6,
+      "impact_body_db": 9.933180847164541,
+      "observed_impact_balance_terms": 1,
+      "impact_H2_H1_error_db": -12.123061004241087,
+      "legacy_total": 5.377101424729571,
+      "total": 6.516121280338314
+    },
+    "features": {
+      "partials_db": [
+        [
+          -16.96220749823216,
+          -35.48701434348605,
+          -48.888848547117654,
+          -61.60004859013269,
+          -70.16962224573052,
+          -66.96376061093127
+        ],
+        [
+          -22.221014626327623,
+          -40.75602124227387,
+          -55.00034387520412,
+          -68.58005112199984,
+          -76.78829549326969,
+          -72.82002535125478
+        ],
+        [
+          -31.543208934582406,
+          -50.133998043218625,
+          -66.45079946382904,
+          -80.84068940698025,
+          -88.668129456669,
+          -83.59939289361262
+        ],
+        [
+          -46.16007305557281,
+          -66.75225131838884,
+          -87.55511866870546,
+          -102.5477035521289,
+          -127.58147928978674,
+          -118.42551048033862
+        ]
+      ],
+      "bands_db": [
+        [
+          -36.51581208208298,
+          -61.40598521301555,
+          -83.32943353887798,
+          -93.41661845551423
+        ],
+        [
+          -42.50650853014895,
+          -50.044118130293434,
+          -58.71395817107752,
+          -72.14266344361882
+        ],
+        [
+          -17.24026689054612,
+          -21.807682781224567,
+          -30.490373182574004,
+          -43.92408659240004
+        ],
+        [
+          -35.540528568942364,
+          -40.13283831151678,
+          -48.9084514190411,
+          -63.48502705855013
+        ],
+        [
+          -59.57566171407208,
+          -65.40550105074682,
+          -76.14822375074006,
+          -94.75818694267984
+        ]
+      ],
+      "total_db": [
+        -16.94637979646453,
+        -21.78042466363568,
+        -30.463272381596717,
+        -43.89532642293553
+      ],
+      "impact": {
+        "window_s": [
+          0.02,
+          0.1
+        ],
+        "partials_db": [
+          -19.19716610472626,
+          -37.72733973353085,
+          -51.48563340453072
+        ]
+      },
+      "centers_hz": [
+        1047.052001953125,
+        2096.795654296875,
+        3149.23095703125,
+        4209.7412109375,
+        5276.9805908203125,
+        6352.294921875
+      ],
+      "onset_seconds": 0.0,
+      "peak": 0.24240670353335242,
+      "hf_crest_db": -4.585123868353868
+    }
+  }
+}

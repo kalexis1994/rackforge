@@ -72,6 +72,30 @@ fn script(block: usize) -> Vec<MidiEvent> {
 
 #[test]
 fn four_instances_render_what_one_renders() {
+    compare_instances(script);
+}
+
+#[test]
+fn short_releases_restrike_the_same_string_across_instances() {
+    // B5, 29 ms held and 61 ms released: the damper has seated before
+    // each repeat. The coordinator must send it back to the worker that
+    // owns the remaining motion, including its seated-loss ledger.
+    compare_instances(|block| match block % 34 {
+        0 => vec![MidiEvent {
+            frame: 0,
+            data: [0x90, 83, 70],
+            length: 3,
+        }],
+        11 => vec![MidiEvent {
+            frame: 0,
+            data: [0x80, 83, 64],
+            length: 3,
+        }],
+        _ => vec![],
+    });
+}
+
+fn compare_instances(script: impl Fn(usize) -> Vec<MidiEvent>) {
     let path = wasm_path();
     if !path.is_file() {
         eprintln!("build the wasm first: {}", path.display());

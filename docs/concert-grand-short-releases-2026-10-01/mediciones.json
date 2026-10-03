@@ -1,0 +1,55 @@
+{
+  "baseline_binary_sha256": "330ddcd62778ae52a4f9907a5ceb466daf71a54654e99af3b663ef73d69a0a93",
+  "candidate_binary_sha256": "db93d789d5aa84376fd5eb57932c3245e8a71556d3ba06678ea1903b6fb7d425",
+  "events_sha256": "cc8ae2ab3bf4e81fc8144df1847b167ad6b1351c76bd848733c558ec65ec359a",
+  "baseline_audio_sha256": "5ca8819491c97ff85e9705b41d3d035dddfb9f48b51d812f5450f842e6757477",
+  "candidate_audio_sha256": "aa3dbae6895f0286211af1ca6c226d35eb5e202191d790cba0169c2c852724bf",
+  "clip_seconds": [
+    106,
+    115
+  ],
+  "gain_db": 0,
+  "sample_rate": 44100,
+  "musical_passage": {
+    "band_power_b_minus_a_db": {
+      "20-250": -0.1958840135576279,
+      "250-1000": -0.006809024993764376,
+      "1000-4000": 0.012679348315954764,
+      "4000-8000": 0.06700781006970716,
+      "8000-16000": 0.007226621722480836
+    },
+    "peak_a": 0.2431456744670868,
+    "peak_b": 0.2429877668619156,
+    "difference_rms_relative_a_db": -23.98359076754729
+  },
+  "probe_notes": [
+    60,
+    71,
+    78,
+    83,
+    85,
+    90,
+    97
+  ],
+  "probe_velocity": 70,
+  "probe_duration_ms": 28,
+  "probe_repeat_ms": 90,
+  "probe_audio_sha256": [
+    "465a579a044f66c41ce13a843ba04c54ad729fff4be96d0a64fb3e40949b2e27",
+    "6dab5f4581eea346b4ca5d514246e06a880db5eac6bee94cca99dc53591a1bd3"
+  ],
+  "probe_comparison": {
+    "band_power_b_minus_a_db": {
+      "20-250": -0.26696866169326355,
+      "250-1000": -0.2119069070666426,
+      "1000-4000": 0.3432419650075558,
+      "4000-8000": -0.030990335027063692,
+      "8000-16000": -0.008878246745214442
+    },
+    "peak_a": 0.10756790637969971,
+    "peak_b": 0.10176491737365723,
+    "difference_rms_relative_a_db": -16.985926735988073
+  },
+  "fresh_attack_identical": true,
+  "policy": "Full MIDI preroll, unchanged pedals, common unity export gain; B changes released-string reuse, no EQ or noise reduction. Audibility awaits listening."
+}

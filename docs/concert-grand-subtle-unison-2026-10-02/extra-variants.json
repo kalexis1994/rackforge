@@ -1,0 +1,4 @@
+{
+ "E-trio-persistente-sutil": {"UNISON_WIDTH": 0.10, "UNISON_EXTRA_LOSS": 0.5},
+ "F-trio-persistente-mayor": {"UNISON_WIDTH": 0.20, "UNISON_EXTRA_LOSS": 0.5}
+}

@@ -1,0 +1,701 @@
+{
+  "scope": "Mechanical vertical bridge pilot, not an identified piano or audible candidate",
+  "limitations": [
+    "Euler bending; one string; fixed axial/horizontal endpoints",
+    "Unidentified support geometry and felt footprint",
+    "P2 uses only 35 modes below 800 Hz; no acoustic pressure observer",
+    "Four milliseconds from rest; no backcheck or pedals"
+  ],
+  "solver": {
+    "method": "DOP853",
+    "rtol": 1e-09,
+    "atol": 1e-13,
+    "duration_s": 0.004,
+    "max_step": "1/(8*highest linear structural frequency)"
+  },
+  "gates": {
+    "energy_and_work_relative": 0.002,
+    "contact_time_relative": 0.001,
+    "bridge_displacement_and_velocity_relative_rms": 0.01,
+    "raw_interface_force": "reported diagnostic, not an acoustic or full-force convergence gate"
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1"
+  },
+  "maximum_energy_balance_relative_error": 1.4222644340828182e-13,
+  "maximum_support_work_balance_relative_error": 3.5806098506178024e-17,
+  "maximum_interface_force_residual_n": 2.842170943040401e-14,
+  "scalar_resolution": [
+    {
+      "left": "60-124-Coupled-loss-T12",
+      "right": "60-124-Coupled-loss-T24",
+      "relative_errors": {
+        "final_string_energy_j": 0.013251211141746351,
+        "final_support_energy_j": 0.00840214817347041,
+        "final_work_into_support_j": 0.00694881429817346,
+        "contact_time_s": 0.007273605211424874,
+        "bridge_displacement_relative_rms": 0.013326402702572007,
+        "bridge_velocity_relative_rms": 0.018366310143809246,
+        "raw_interface_force_relative_rms": 0.06261437661151678
+      },
+      "mechanical_output_gate_passed": false
+    },
+    {
+      "left": "60-124-Coupled-loss-T24",
+      "right": "60-124-Coupled-loss-T48",
+      "relative_errors": {
+        "final_string_energy_j": 0.0022093261330155527,
+        "final_support_energy_j": 0.0012500268506902559,
+        "final_work_into_support_j": 0.001022101749194508,
+        "contact_time_s": 0.001028340084825877,
+        "bridge_displacement_relative_rms": 0.002156527371309628,
+        "bridge_velocity_relative_rms": 0.0028576909497233954,
+        "raw_interface_force_relative_rms": 0.0071672030594652205
+      },
+      "mechanical_output_gate_passed": false
+    },
+    {
+      "left": "60-124-Coupled-loss-T48",
+      "right": "60-124-Coupled-loss-T72",
+      "relative_errors": {
+        "final_string_energy_j": 4.331309450198446e-05,
+        "final_support_energy_j": 2.4225197459321954e-05,
+        "final_work_into_support_j": 1.9751412926328375e-05,
+        "contact_time_s": 2.0201346357093917e-05,
+        "bridge_displacement_relative_rms": 4.23717099595725e-05,
+        "bridge_velocity_relative_rms": 5.595886317339766e-05,
+        "raw_interface_force_relative_rms": 0.00013703459739985286
+      },
+      "mechanical_output_gate_passed": true
+    }
+  ],
+  "p2_resolution": [
+    {
+      "left": "60-124-P2-low-band-T12",
+      "right": "60-124-P2-low-band-T48",
+      "relative_errors": {
+        "final_string_energy_j": 0.015355712780797818,
+        "final_support_energy_j": 0.00013151356639366814,
+        "final_work_into_support_j": 0.001686857616644996,
+        "contact_time_s": 0.008294784874068085,
+        "bridge_displacement_relative_rms": 0.01588314225690193,
+        "bridge_velocity_relative_rms": 0.032185868958094443,
+        "raw_interface_force_relative_rms": 0.06817159288305566
+      },
+      "mechanical_output_gate_passed": false
+    },
+    {
+      "left": "60-124-P2-low-band-T48",
+      "right": "60-124-P2-low-band-T72",
+      "relative_errors": {
+        "final_string_energy_j": 4.2941389097746814e-05,
+        "final_support_energy_j": 3.014232175227033e-06,
+        "final_work_into_support_j": 8.021193760034965e-06,
+        "contact_time_s": 2.020160585092954e-05,
+        "bridge_displacement_relative_rms": 4.3621192829146715e-05,
+        "bridge_velocity_relative_rms": 8.241800331923789e-05,
+        "raw_interface_force_relative_rms": 0.00013687749635105115
+      },
+      "mechanical_output_gate_passed": true
+    }
+  ],
+  "p2_support": {
+    "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "modes": 35,
+    "x_m": 0.6420689655172414,
+    "y_m": 0.5,
+    "cutoff_hz": 800.0,
+    "frequencies_hz": [
+      70.62213260234367,
+      139.24116527565243,
+      170.7420426662478,
+      178.13497442356172,
+      203.19352685899813,
+      225.34530232891365,
+      245.48269805313552,
+      285.6228947119935,
+      299.6450431535138,
+      313.243437148768,
+      313.85498725302,
+      353.7040759892574,
+      380.6291210022632,
+      404.6230827869208,
+      440.2095071338155,
+      510.7600846806116,
+      512.8937416057344,
+      529.5271284876352,
+      532.6223422708101,
+      542.9390671739197,
+      559.4716374951777,
+      564.4156101974451,
+      603.0403418480528,
+      633.107674392708,
+      635.6551400279947,
+      663.0433647346642,
+      665.3001251708085,
+      698.9054274754873,
+      713.443604425906,
+      737.7837713367302,
+      739.7396831036451,
+      748.6978413913473,
+      761.8394407351152,
+      777.7067002494059,
+      793.2442001051731
+    ],
+    "projection_kg_minus_half": [
+      0.8314296897088717,
+      -0.22141138758934814,
+      -4.261952616474287e-12,
+      3.434304902257609e-13,
+      -8.67161883495727e-12,
+      0.3930589655930641,
+      1.2007520749903635e-13,
+      0.33948571676164474,
+      0.46390255759021914,
+      0.07897179772271176,
+      4.841125574013152e-12,
+      -0.15734555359863078,
+      0.6606379314356585,
+      1.9836874873248243e-13,
+      -0.017529469330476943,
+      0.41149774527435706,
+      2.5194880092726873e-12,
+      1.6215806184845396e-12,
+      3.080830509459016e-13,
+      -0.031084863911778005,
+      -1.1314596768379726e-13,
+      2.7408878469755445e-13,
+      4.3395422190744336e-13,
+      -0.38426419185197225,
+      -2.100400896411897e-12,
+      0.01490443581762102,
+      -3.430367520880038e-13,
+      0.35845688054355035,
+      -0.035711703078511806,
+      6.662855850244842e-13,
+      0.11418886352380753,
+      5.3863681210329405e-14,
+      0.2783212008338524,
+      -0.010594342782750014,
+      -0.38649234400175647
+    ]
+  },
+  "scalar_fine": {
+    "60-124-Coupled-loss-T72": {
+      "initial_energy_j": 0.04693371904404984,
+      "maximum_balance_relative_error": 8.427138538744349e-15,
+      "support_work_balance_relative_error": 3.3496027634811696e-17,
+      "maximum_interface_power_residual_w": 3.694961003830599e-16,
+      "maximum_interface_force_residual": 2.1316282072803006e-14,
+      "final_string_energy_j": 0.02806343642102714,
+      "final_support_energy_j": 0.00023636540491229617,
+      "final_hammer_energy_j": 0.018608233371501675,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 2.568384660901699e-05,
+      "final_work_into_support_j": 0.0002620492515213123,
+      "maximum_support_energy_j": 0.00024044051477004757,
+      "maximum_support_energy_during_contact_j": 1.722352450127407e-07,
+      "contact_time_s": 0.0018168483761398175,
+      "support_energy_at_separation_j": 2.655491355881174e-07,
+      "string_energy_at_separation_j": 0.028325219430305738,
+      "maximum_bridge_displacement_m": 2.8197544048671007e-05,
+      "nfev": 226664,
+      "minimum_mass_eigenvalue": 0.9218331552471416,
+      "transverse": 72,
+      "axial": 144,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        2.0
+      ],
+      "support_loss": [
+        0.05
+      ],
+      "lift_contact": 0.1222064100000001
+    }
+  },
+  "p2_fine": {
+    "60-124-P2-low-band-T72": {
+      "initial_energy_j": 0.04693371904404984,
+      "maximum_balance_relative_error": 5.765936894930345e-15,
+      "support_work_balance_relative_error": 1.155035435683162e-17,
+      "maximum_interface_power_residual_w": 1.5525775109992423e-16,
+      "maximum_interface_force_residual": 2.6593317902565375e-14,
+      "final_string_energy_j": 0.028153740484704003,
+      "final_support_energy_j": 0.0001480598764285709,
+      "final_hammer_energy_j": 0.01860823337148698,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 2.368531143051472e-05,
+      "final_work_into_support_j": 0.0001717451878590853,
+      "maximum_support_energy_j": 0.00015037542840749707,
+      "maximum_support_energy_during_contact_j": 1.0695208759121758e-07,
+      "contact_time_s": 0.001816848376130273,
+      "support_energy_at_separation_j": 1.6341618277711057e-07,
+      "string_energy_at_separation_j": 0.02832532149514665,
+      "maximum_bridge_displacement_m": 9.750427027251465e-06,
+      "nfev": 226664,
+      "minimum_mass_eigenvalue": 0.9391251316082168,
+      "transverse": 72,
+      "axial": 144,
+      "support_modes": 35,
+      "support_frequency": [
+        70.62213260234367,
+        139.24116527565243,
+        170.7420426662478,
+        178.13497442356172,
+        203.19352685899813,
+        225.34530232891365,
+        245.48269805313552,
+        285.6228947119935,
+        299.6450431535138,
+        313.243437148768,
+        313.85498725302,
+        353.7040759892574,
+        380.6291210022632,
+        404.6230827869208,
+        440.2095071338155,
+        510.7600846806116,
+        512.8937416057344,
+        529.5271284876352,
+        532.6223422708101,
+        542.9390671739197,
+        559.4716374951777,
+        564.4156101974451,
+        603.0403418480528,
+        633.107674392708,
+        635.6551400279947,
+        663.0433647346642,
+        665.3001251708085,
+        698.9054274754873,
+        713.443604425906,
+        737.7837713367302,
+        739.7396831036451,
+        748.6978413913473,
+        761.8394407351152,
+        777.7067002494059,
+        793.2442001051731
+      ],
+      "support_projection": [
+        0.8314296897088717,
+        -0.22141138758934814,
+        -4.261952616474287e-12,
+        3.434304902257609e-13,
+        -8.67161883495727e-12,
+        0.3930589655930641,
+        1.2007520749903635e-13,
+        0.33948571676164474,
+        0.46390255759021914,
+        0.07897179772271176,
+        4.841125574013152e-12,
+        -0.15734555359863078,
+        0.6606379314356585,
+        1.9836874873248243e-13,
+        -0.017529469330476943,
+        0.41149774527435706,
+        2.5194880092726873e-12,
+        1.6215806184845396e-12,
+        3.080830509459016e-13,
+        -0.031084863911778005,
+        -1.1314596768379726e-13,
+        2.7408878469755445e-13,
+        4.3395422190744336e-13,
+        -0.38426419185197225,
+        -2.100400896411897e-12,
+        0.01490443581762102,
+        -3.430367520880038e-13,
+        0.35845688054355035,
+        -0.035711703078511806,
+        6.662855850244842e-13,
+        0.11418886352380753,
+        5.3863681210329405e-14,
+        0.2783212008338524,
+        -0.010594342782750014,
+        -0.38649234400175647
+      ],
+      "support_loss": [
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046,
+        0.046
+      ],
+      "lift_contact": 0.1222064100000001
+    }
+  },
+  "matched_support_controls": {
+    "60-60-Rigid-T12": {
+      "initial_energy_j": 0.0037952153692004955,
+      "maximum_balance_relative_error": 2.982458063541505e-14,
+      "support_work_balance_relative_error": 0.0,
+      "maximum_interface_power_residual_w": 0.0,
+      "maximum_interface_force_residual": 0.0,
+      "final_string_energy_j": 0.0016848657957861403,
+      "final_support_energy_j": 0.0,
+      "final_hammer_energy_j": 0.0021103495734144627,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 0.0,
+      "final_work_into_support_j": 0.0,
+      "maximum_support_energy_j": 0.0,
+      "maximum_support_energy_during_contact_j": 0.0,
+      "contact_time_s": 0.0023128169273432626,
+      "support_energy_at_separation_j": 0.0,
+      "string_energy_at_separation_j": 0.0016848657957861484,
+      "maximum_bridge_displacement_m": 0.0,
+      "nfev": 38792,
+      "minimum_mass_eigenvalue": 1.0,
+      "transverse": 12,
+      "axial": 24,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        0.0
+      ],
+      "support_loss": [
+        0.0
+      ],
+      "lift_contact": 0.12220641000000004
+    },
+    "60-60-Coupled-T12": {
+      "initial_energy_j": 0.0037952153692004955,
+      "maximum_balance_relative_error": 2.4682411560343486e-14,
+      "support_work_balance_relative_error": 2.3211179852753568e-17,
+      "maximum_interface_power_residual_w": 1.734723475976807e-17,
+      "maximum_interface_force_residual": 5.329070518200751e-15,
+      "final_string_energy_j": 0.0016641975684104885,
+      "final_support_energy_j": 2.0666762967705004e-05,
+      "final_hammer_energy_j": 0.002110351037822394,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 0.0,
+      "final_work_into_support_j": 2.066676296770507e-05,
+      "maximum_support_energy_j": 2.0666762967705004e-05,
+      "maximum_support_energy_during_contact_j": 4.921484290830163e-06,
+      "contact_time_s": 0.002312818360358432,
+      "support_energy_at_separation_j": 5.011388587608645e-06,
+      "string_energy_at_separation_j": 0.0016798529427905853,
+      "maximum_bridge_displacement_m": 8.255703918362164e-06,
+      "nfev": 38792,
+      "minimum_mass_eigenvalue": 0.9235006138714392,
+      "transverse": 12,
+      "axial": 24,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        2.0
+      ],
+      "support_loss": [
+        0.0
+      ],
+      "lift_contact": 0.12220641000000004
+    },
+    "60-60-Coupled-loss-T12": {
+      "initial_energy_j": 0.0037952153692004955,
+      "maximum_balance_relative_error": 3.131009614599127e-14,
+      "support_work_balance_relative_error": 1.11592210830546e-17,
+      "maximum_interface_power_residual_w": 1.474514954580286e-17,
+      "maximum_interface_force_residual": 5.329070518200751e-15,
+      "final_string_energy_j": 0.001663853232781574,
+      "final_support_energy_j": 1.963667997156117e-05,
+      "final_hammer_energy_j": 0.0021103510288617558,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 1.374427585721615e-06,
+      "final_work_into_support_j": 2.1011107557282758e-05,
+      "maximum_support_energy_j": 1.963667997156117e-05,
+      "maximum_support_energy_during_contact_j": 4.828271555775781e-06,
+      "contact_time_s": 0.002312818332838808,
+      "support_energy_at_separation_j": 4.915816209620546e-06,
+      "string_energy_at_separation_j": 0.0016798901633517103,
+      "maximum_bridge_displacement_m": 7.994854598087189e-06,
+      "nfev": 38792,
+      "minimum_mass_eigenvalue": 0.9235006138714392,
+      "transverse": 12,
+      "axial": 24,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        2.0
+      ],
+      "support_loss": [
+        0.05
+      ],
+      "lift_contact": 0.12220641000000004
+    },
+    "60-124-Rigid-T12": {
+      "initial_energy_j": 0.04693371904404984,
+      "maximum_balance_relative_error": 1.3971308630023527e-13,
+      "support_work_balance_relative_error": 0.0,
+      "maximum_interface_power_residual_w": 0.0,
+      "maximum_interface_force_residual": 0.0,
+      "final_string_energy_j": 0.028759324437217057,
+      "final_support_energy_j": 0.0,
+      "final_hammer_energy_j": 0.018174394606839256,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 0.0,
+      "final_work_into_support_j": 0.0,
+      "maximum_support_energy_j": 0.0,
+      "maximum_support_energy_during_contact_j": 0.0,
+      "contact_time_s": 0.0018017407090490617,
+      "support_energy_at_separation_j": 0.0,
+      "string_energy_at_separation_j": 0.028759324437219756,
+      "maximum_bridge_displacement_m": 0.0,
+      "nfev": 38792,
+      "minimum_mass_eigenvalue": 1.0,
+      "transverse": 12,
+      "axial": 24,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        0.0
+      ],
+      "support_loss": [
+        0.0
+      ],
+      "lift_contact": 0.1222064100000001
+    },
+    "60-124-Coupled-T12": {
+      "initial_energy_j": 0.04693371904404984,
+      "maximum_balance_relative_error": 1.4222644340828182e-13,
+      "support_work_balance_relative_error": 2.0790637842296916e-17,
+      "maximum_interface_power_residual_w": 4.440892098500626e-16,
+      "maximum_interface_force_residual": 2.842170943040401e-14,
+      "final_string_energy_j": 0.028505890585969914,
+      "final_support_energy_j": 0.000253434775411346,
+      "final_hammer_energy_j": 0.018174393682675205,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 0.0,
+      "final_work_into_support_j": 0.00025343477541134687,
+      "maximum_support_energy_j": 0.0002547222647201446,
+      "maximum_support_energy_during_contact_j": 1.0212961115211838e-07,
+      "contact_time_s": 0.0018017421878524233,
+      "support_energy_at_separation_j": 1.179472101245341e-07,
+      "string_energy_at_separation_j": 0.02875920741417376,
+      "maximum_bridge_displacement_m": 2.896798016887276e-05,
+      "nfev": 38792,
+      "minimum_mass_eigenvalue": 0.9235006138714392,
+      "transverse": 12,
+      "axial": 24,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        2.0
+      ],
+      "support_loss": [
+        0.0
+      ],
+      "lift_contact": 0.1222064100000001
+    },
+    "60-124-Coupled-loss-T12": {
+      "initial_energy_j": 0.04693371904404984,
+      "maximum_balance_relative_error": 1.3838248547832826e-13,
+      "support_work_balance_relative_error": 2.5410779585029564e-17,
+      "maximum_interface_power_residual_w": 2.411265631607762e-16,
+      "maximum_interface_force_residual": 2.1316282072803006e-14,
+      "final_string_energy_j": 0.028499368160333813,
+      "final_support_energy_j": 0.00023408077638878942,
+      "final_hammer_energy_j": 0.018174393678231468,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 2.587642910220388e-05,
+      "final_work_into_support_j": 0.0002599572054909944,
+      "maximum_support_energy_j": 0.00023859808623500172,
+      "maximum_support_energy_during_contact_j": 1.0259445121205001e-07,
+      "contact_time_s": 0.0018017421915092798,
+      "support_energy_at_separation_j": 1.1842450187575047e-07,
+      "string_energy_at_separation_j": 0.028759206217148923,
+      "maximum_bridge_displacement_m": 2.811259326015773e-05,
+      "nfev": 38792,
+      "minimum_mass_eigenvalue": 0.9235006138714392,
+      "transverse": 12,
+      "axial": 24,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        2.0
+      ],
+      "support_loss": [
+        0.05
+      ],
+      "lift_contact": 0.1222064100000001
+    },
+    "72-124-Rigid-T12": {
+      "initial_energy_j": 0.03907772854266038,
+      "maximum_balance_relative_error": 1.562584843889356e-14,
+      "support_work_balance_relative_error": 0.0,
+      "maximum_interface_power_residual_w": 0.0,
+      "maximum_interface_force_residual": 0.0,
+      "final_string_energy_j": 0.01424563020311937,
+      "final_support_energy_j": 0.0,
+      "final_hammer_energy_j": 0.02483209833954162,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 0.0,
+      "final_work_into_support_j": 0.0,
+      "maximum_support_energy_j": 0.0,
+      "maximum_support_energy_during_contact_j": 0.0,
+      "contact_time_s": 0.0014780585525001734,
+      "support_energy_at_separation_j": 0.0,
+      "string_energy_at_separation_j": 0.01424563020311937,
+      "maximum_bridge_displacement_m": 0.0,
+      "nfev": 63536,
+      "minimum_mass_eigenvalue": 1.0,
+      "transverse": 12,
+      "axial": 24,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        0.0
+      ],
+      "support_loss": [
+        0.0
+      ],
+      "lift_contact": 0.11041856000069175
+    },
+    "72-124-Coupled-T12": {
+      "initial_energy_j": 0.03907772854266038,
+      "maximum_balance_relative_error": 4.439161488322034e-15,
+      "support_work_balance_relative_error": 3.4680949127515896e-18,
+      "maximum_interface_power_residual_w": 1.1102230246251565e-16,
+      "maximum_interface_force_residual": 2.842170943040401e-14,
+      "final_string_energy_j": 0.014227739234489549,
+      "final_support_energy_j": 1.7882201171050154e-05,
+      "final_hammer_energy_j": 0.024832107106999905,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 0.0,
+      "final_work_into_support_j": 1.788220117105013e-05,
+      "maximum_support_energy_j": 7.015037198645546e-05,
+      "maximum_support_energy_during_contact_j": 6.541559329231825e-05,
+      "contact_time_s": 0.0014780585270898461,
+      "support_energy_at_separation_j": 6.6230844943143e-05,
+      "string_energy_at_separation_j": 0.014179390590717466,
+      "maximum_bridge_displacement_m": 1.4192654364736932e-05,
+      "nfev": 63536,
+      "minimum_mass_eigenvalue": 0.950009169623867,
+      "transverse": 12,
+      "axial": 24,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        2.0
+      ],
+      "support_loss": [
+        0.0
+      ],
+      "lift_contact": 0.11041856000069175
+    },
+    "72-124-Coupled-loss-T12": {
+      "initial_energy_j": 0.03907772854266038,
+      "maximum_balance_relative_error": 9.588588814775595e-15,
+      "support_work_balance_relative_error": 2.9478806758388513e-18,
+      "maximum_interface_power_residual_w": 1.1319070680748666e-16,
+      "maximum_interface_force_residual": 2.1316282072803006e-14,
+      "final_string_energy_j": 0.014223120253367055,
+      "final_support_energy_j": 1.553607764300765e-05,
+      "final_hammer_energy_j": 0.02483210693127947,
+      "final_felt_heat_j": 0.0,
+      "final_support_heat_j": 6.9652803711476456e-06,
+      "final_work_into_support_j": 2.2501358014155313e-05,
+      "maximum_support_energy_j": 6.762172201941386e-05,
+      "maximum_support_energy_during_contact_j": 6.3551874063983e-05,
+      "contact_time_s": 0.0014780585224660264,
+      "support_energy_at_separation_j": 6.430194679363097e-05,
+      "string_energy_at_separation_j": 0.014179928183094546,
+      "maximum_bridge_displacement_m": 1.3824170840519594e-05,
+      "nfev": 63536,
+      "minimum_mass_eigenvalue": 0.950009169623867,
+      "transverse": 12,
+      "axial": 24,
+      "support_modes": 1,
+      "support_frequency": [
+        180.0
+      ],
+      "support_projection": [
+        2.0
+      ],
+      "support_loss": [
+        0.05
+      ],
+      "lift_contact": 0.11041856000069175
+    }
+  },
+  "forced_support_ablation": {
+    "initial_hammer_energy_j": 0.04693371904404984,
+    "support_energy_j": 0.0002552941787545793,
+    "support_heat_j": 2.7063588024238044e-05,
+    "work_from_unaccounted_driver_j": 0.0002823577667788178,
+    "extra_total_energy_j": 0.0002823577667852989,
+    "extra_fraction_of_hammer_energy": 0.006016096157227405
+  },
+  "source_sha256": {
+    "tools/concert_grand_moving_bridge.py": "6782e8e6df4ce0d86c8e7d8fec2c1e5115fc61563c5c3e4cdb411db5b78a2fd1",
+    "tools/audit-concert-grand-moving-bridge.py": "7f2636983618194fc4246bdda79a1640a041bb15d3a10fa27a55f2ccba7eaccb",
+    "tools/summarize-concert-grand-moving-bridge.py": "d21d2456c5436b99399df3a963ad1f98ebd7c319f39b9c73756e4ea3d1be4f8a",
+    "tools/concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "tools/concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "tools/concert_grand_nonlinear_string.py": "f1c17115e3f296a12f5c51e14d888756e60303e33802f8873d43c6a746a4d0e6",
+    "tools/concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95",
+    "tools/audit-concert-grand-coupled-contact.py": "d3be447fe61704580540c48db1af7c70f5ed4adbeaf3ca6fb1b361de9077dc42",
+    "tools/tests/test_concert_moving_bridge.py": "0debdffa2d3997ab8242d09bdd09f70822e6825b49b4aa5b8e8a9455cc9a0408"
+  },
+  "input_sha256": {
+    "contact-end.csv": "9e4633a05219de98bd734937885a2ece1c66b38500f59249322307fe28bff76f",
+    "transfer.csv": "0cb57ffe16fea74fb857a0af3d443e6670992bad0f916283af279b87d183cb5f"
+  },
+  "p2_asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+  "report_sha256": {
+    "scalar": "4996684964957b6dbb50798a818804ffdab37099c7e3fc021a0b0722c8711b16",
+    "resolution": "af69e13354fa38183615b6ea5aa9ea2031d42ebfa22732deb097e963c6609367",
+    "resolution-fine": "72d53bf7ffa1ba78ebd7fa002df7d349c40ae775f7f53b05942b8dc1b0b76135",
+    "p2": "c835040461d96ab07567ce0fe4cc6472f197a7408f090b00ce76331d28192102",
+    "p2-fine": "4db7d8467229389b2b2039c664c28ef5f83b69471e0e9807ae0e337dd93c9902",
+    "p2-finest": "792e9381c5ba875615457f54a9186acb5d83b2be030492668120b8f6109920e8"
+  },
+  "factory_package_sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+  "source_archive_sha256": "874198a0ab37c4492cd34e3ab3638f6cca1548b501a4a74b98577d4bab91c432"
+}

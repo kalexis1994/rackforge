@@ -1,0 +1,1432 @@
+{
+  "decision": "listening pilot only; no factory change",
+  "checks": {
+    "native_base_bit_exact_pairs": 24,
+    "listener_control_wav_byte_exact_pairs": 8,
+    "new_measurement_tests_passed": 2
+  },
+  "experiments": {
+    "full": {
+      "Carga-fisica/Base": {
+        "tuning": {},
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 5.66708694523009,
+          "h1_late_db": 6.980192869732842,
+          "decay_db": 4.732705648392163,
+          "balance_db": 8.36149395329106,
+          "attack_body_bands_db": 5.037901230652543,
+          "total": 5.884848769385731,
+          "impact_body_db": 5.50124852999527,
+          "worst_h1_db": 12.78792844491649,
+          "worst_h1_late_db": 21.27892353249262,
+          "worst_decay_db": 9.327507509241325,
+          "worst_balance_db": 19.095301181108763,
+          "worst_attack_body_bands_db": 11.134126405074515,
+          "worst_total": 9.065591321312134,
+          "worst_impact_body_db": 11.725885034522067,
+          "register_total": {
+            "grave": 3.98619100275587,
+            "medio": 6.402301001181995,
+            "agudo": 7.266054304219328
+          },
+          "objective": 17.82274415702762
+        },
+        "acceptance": null,
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.4704643198731706,
+          "identified_mean_shape_db": 1.4704643198731706,
+          "actual_mean_resolved_rise_db": 3.9135920063532765,
+          "identified_mean_resolved_rise_db": 3.9135920063532765,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": 0.0
+      },
+      "Carga-fisica/A-afinacion-minima": {
+        "tuning": {
+          "UNISON_WIDTH": 0.04
+        },
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 5.664113984720619,
+          "h1_late_db": 6.971911796501228,
+          "decay_db": 4.749997571752779,
+          "balance_db": 8.365925403797013,
+          "attack_body_bands_db": 5.037295332425366,
+          "total": 5.887813750568743,
+          "impact_body_db": 5.500210187064564,
+          "worst_h1_db": 12.766765698800427,
+          "worst_h1_late_db": 21.280946037186474,
+          "worst_decay_db": 9.399377761854941,
+          "worst_balance_db": 19.12344846036381,
+          "worst_attack_body_bands_db": 11.15226343051004,
+          "worst_total": 9.055414914397755,
+          "worst_impact_body_db": 11.710866062355391,
+          "register_total": {
+            "grave": 3.986376410294245,
+            "medio": 6.395619701442851,
+            "agudo": 7.281445139969132
+          },
+          "objective": 17.827695749245656
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": true,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.030160904018712742,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.4704643198731706,
+          "identified_mean_shape_db": 1.470593793749657,
+          "actual_mean_resolved_rise_db": 3.9135920063532765,
+          "identified_mean_resolved_rise_db": 3.9127273347960636,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -0.42838890456700085
+      },
+      "Carga-fisica/B-afinacion-sutil": {
+        "tuning": {
+          "UNISON_WIDTH": 0.1
+        },
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 5.657658654205039,
+          "h1_late_db": 6.956845116042018,
+          "decay_db": 4.770256365205965,
+          "balance_db": 8.371564977400768,
+          "attack_body_bands_db": 5.036910256265634,
+          "total": 5.890520793412521,
+          "impact_body_db": 5.498565964460208,
+          "worst_h1_db": 12.723107467040718,
+          "worst_h1_late_db": 21.286677736741538,
+          "worst_decay_db": 9.520723075359893,
+          "worst_balance_db": 19.161994491558573,
+          "worst_attack_body_bands_db": 11.178396121679949,
+          "worst_total": 9.037539598017641,
+          "worst_impact_body_db": 11.68886492405609,
+          "register_total": {
+            "grave": 3.986855906755327,
+            "medio": 6.382905431591249,
+            "agudo": 7.301801041890988
+          },
+          "objective": 17.828819751728282
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": true,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.0701124092439187,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.4704643198731706,
+          "identified_mean_shape_db": 1.4707348345631033,
+          "actual_mean_resolved_rise_db": 3.9135920063532765,
+          "identified_mean_resolved_rise_db": 3.9115062629627726,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -1.160556293738935
+      },
+      "Carga-fisica/C-afinacion-y-rigidez": {
+        "tuning": {
+          "UNISON_WIDTH": 0.1,
+          "STRING_STIFFNESS_SPREAD": 0.003
+        },
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 5.657649164887,
+          "h1_late_db": 6.9568383637542945,
+          "decay_db": 4.7723957385610625,
+          "balance_db": 8.37166192964879,
+          "attack_body_bands_db": 5.035268282394857,
+          "total": 5.890733496894217,
+          "impact_body_db": 5.498488386210447,
+          "worst_h1_db": 12.72310189022175,
+          "worst_h1_late_db": 21.28669051599062,
+          "worst_decay_db": 9.532636227594422,
+          "worst_balance_db": 19.17570848551469,
+          "worst_attack_body_bands_db": 11.175648170477222,
+          "worst_total": 9.038219860908146,
+          "worst_impact_body_db": 11.687730773974655,
+          "register_total": {
+            "grave": 3.986413682503774,
+            "medio": 6.3828666113071675,
+            "agudo": 7.302920196871712
+          },
+          "objective": 17.832139958670822
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": true,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.07452384455551275,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.4704643198731706,
+          "identified_mean_shape_db": 1.4707324243186692,
+          "actual_mean_resolved_rise_db": 3.9135920063532765,
+          "identified_mean_resolved_rise_db": 3.9115316668730067,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -1.1605560723520654
+      },
+      "Carga-fisica/D-afinacion-mayor": {
+        "tuning": {
+          "UNISON_WIDTH": 0.2
+        },
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 5.643291902332585,
+          "h1_late_db": 6.927924525255523,
+          "decay_db": 4.792304948188938,
+          "balance_db": 8.366978619783744,
+          "attack_body_bands_db": 5.038128629805566,
+          "total": 5.889623879579292,
+          "impact_body_db": 5.49641846147594,
+          "worst_h1_db": 12.637717645412815,
+          "worst_h1_late_db": 21.26814695505474,
+          "worst_decay_db": 9.788828114399351,
+          "worst_balance_db": 19.15957250140361,
+          "worst_attack_body_bands_db": 11.220466300293994,
+          "worst_total": 8.995943463514553,
+          "worst_impact_body_db": 11.655671220023203,
+          "register_total": {
+            "grave": 3.988032972114846,
+            "medio": 6.354889380901183,
+            "agudo": 7.3259492857218484
+          },
+          "objective": 17.804052982840595
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": true,
+            "every_register_improves": false,
+            "worst_late_H1_improves": true,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.1704239883334573,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.4704643198731706,
+          "identified_mean_shape_db": 1.4707495645360116,
+          "actual_mean_resolved_rise_db": 3.9135920063532765,
+          "identified_mean_resolved_rise_db": 3.909440321863555,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -2.2417727722673533
+      },
+      "Carga-fisica/E-trio-persistente-sutil": {
+        "tuning": {
+          "UNISON_WIDTH": 0.1,
+          "UNISON_EXTRA_LOSS": 0.5
+        },
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 6.143517298308534,
+          "h1_late_db": 8.370653540734779,
+          "decay_db": 5.279964467340025,
+          "balance_db": 8.925895651902763,
+          "attack_body_bands_db": 4.883082785590196,
+          "total": 6.203515927691732,
+          "impact_body_db": 5.511588204595284,
+          "worst_h1_db": 13.785164083036717,
+          "worst_h1_late_db": 26.417376150760703,
+          "worst_decay_db": 9.651690085923695,
+          "worst_balance_db": 19.725639092209846,
+          "worst_attack_body_bands_db": 11.286565637195388,
+          "worst_total": 9.912357023223505,
+          "worst_impact_body_db": 11.48426035216247,
+          "register_total": {
+            "grave": 4.183018432505157,
+            "medio": 6.595312793694643,
+            "agudo": 7.832216556875394
+          },
+          "objective": 19.172032048656362
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": false,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": false,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.9728002186905735,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.4704643198731706,
+          "identified_mean_shape_db": 1.4198534140271157,
+          "actual_mean_resolved_rise_db": 3.9135920063532765,
+          "identified_mean_resolved_rise_db": 3.826239155611262,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 4,
+        "worst_long_level_delta_db": -14.402249784670246
+      },
+      "Carga-fisica/F-trio-persistente-mayor": {
+        "tuning": {
+          "UNISON_WIDTH": 0.2,
+          "UNISON_EXTRA_LOSS": 0.5
+        },
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 6.158916265502168,
+          "h1_late_db": 8.402190720107651,
+          "decay_db": 5.206155049489271,
+          "balance_db": 8.93221326210695,
+          "attack_body_bands_db": 4.885187802457793,
+          "total": 6.19483585466148,
+          "impact_body_db": 5.510370595065463,
+          "worst_h1_db": 13.924000819081973,
+          "worst_h1_late_db": 26.464003538380283,
+          "worst_decay_db": 9.339599065712486,
+          "worst_balance_db": 19.174854111161537,
+          "worst_attack_body_bands_db": 11.337791385978926,
+          "worst_total": 9.842905140267662,
+          "worst_impact_body_db": 11.452748337014503,
+          "register_total": {
+            "grave": 4.183681405596147,
+            "medio": 6.570429226768634,
+            "agudo": 7.830396931619655
+          },
+          "objective": 19.08320221902155
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": false,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 1.1008557267241876,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.4704643198731706,
+          "identified_mean_shape_db": 1.4227592665627091,
+          "actual_mean_resolved_rise_db": 3.9135920063532765,
+          "identified_mean_resolved_rise_db": 3.824121119523132,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 2,
+        "worst_long_level_delta_db": -9.94118422350273
+      },
+      "Control-sin-carga/Base": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 7.155386368952655,
+          "h1_late_db": 9.875614574312621,
+          "decay_db": 6.078354524516404,
+          "balance_db": 8.01944834411445,
+          "attack_body_bands_db": 4.838061060047241,
+          "total": 6.4456003918202995,
+          "impact_body_db": 5.518766251386512,
+          "worst_h1_db": 21.848432502778355,
+          "worst_h1_late_db": 28.436001610743617,
+          "worst_decay_db": 13.30150096687002,
+          "worst_balance_db": 16.101381739216418,
+          "worst_attack_body_bands_db": 11.846979398419789,
+          "worst_total": 12.330921544047305,
+          "worst_impact_body_db": 11.200435870389851,
+          "register_total": {
+            "grave": 5.4219948923931085,
+            "medio": 4.666682597899474,
+            "agudo": 9.248123685168315
+          },
+          "objective": 21.186398690680114
+        },
+        "acceptance": null,
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.6459628241445037,
+          "identified_mean_shape_db": 1.6459628241445037,
+          "actual_mean_resolved_rise_db": 3.7254617893324133,
+          "identified_mean_resolved_rise_db": 3.7254617893324133,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": 0.0
+      },
+      "Control-sin-carga/A-afinacion-minima": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0,
+          "UNISON_WIDTH": 0.04
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 7.1407311747075,
+          "h1_late_db": 9.830009050045303,
+          "decay_db": 6.03303790202538,
+          "balance_db": 8.007982003073801,
+          "attack_body_bands_db": 4.837841548375448,
+          "total": 6.430896199638806,
+          "impact_body_db": 5.51802343951901,
+          "worst_h1_db": 21.82319590722854,
+          "worst_h1_late_db": 28.299258149071875,
+          "worst_decay_db": 13.161692725720581,
+          "worst_balance_db": 16.23815879476911,
+          "worst_attack_body_bands_db": 11.86450015022742,
+          "worst_total": 12.340317008481215,
+          "worst_impact_body_db": 11.187062074545004,
+          "register_total": {
+            "grave": 5.422253592249994,
+            "medio": 4.655930379567101,
+            "agudo": 9.214504627099323
+          },
+          "objective": 21.143672563738154
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": true,
+            "worst_pair_improves": false,
+            "every_register_improves": false,
+            "worst_late_H1_improves": true,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.009395464433909595,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.6459628241445037,
+          "identified_mean_shape_db": 1.6468853620485362,
+          "actual_mean_resolved_rise_db": 3.7254617893324133,
+          "identified_mean_resolved_rise_db": 3.7245696796603194,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -0.3882431112090359
+      },
+      "Control-sin-carga/B-afinacion-sutil": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0,
+          "UNISON_WIDTH": 0.1
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 7.110564980933568,
+          "h1_late_db": 9.742427053559997,
+          "decay_db": 5.938655939821081,
+          "balance_db": 7.993638960448983,
+          "attack_body_bands_db": 4.837819372229999,
+          "total": 6.402271641264234,
+          "impact_body_db": 5.516753442370643,
+          "worst_h1_db": 21.75788644039144,
+          "worst_h1_late_db": 28.03078070540893,
+          "worst_decay_db": 12.903220277377535,
+          "worst_balance_db": 16.403519924262863,
+          "worst_attack_body_bands_db": 11.889953831214955,
+          "worst_total": 12.328589126183514,
+          "worst_impact_body_db": 11.167506681668316,
+          "register_total": {
+            "grave": 5.422064863734128,
+            "medio": 4.633603095217097,
+            "agudo": 9.151146964841478
+          },
+          "objective": 21.0498821516717
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": true,
+            "worst_pair_improves": true,
+            "every_register_improves": false,
+            "worst_late_H1_improves": true,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.007474579468041753,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.6459628241445037,
+          "identified_mean_shape_db": 1.6478310433607206,
+          "actual_mean_resolved_rise_db": 3.7254617893324133,
+          "identified_mean_resolved_rise_db": 3.7233520067438857,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -0.9866094890040316
+      },
+      "Control-sin-carga/C-afinacion-y-rigidez": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0,
+          "UNISON_WIDTH": 0.1,
+          "STRING_STIFFNESS_SPREAD": 0.003
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 7.110592003257923,
+          "h1_late_db": 9.742427313708173,
+          "decay_db": 5.93588039509999,
+          "balance_db": 7.993712391597555,
+          "attack_body_bands_db": 4.836167848278478,
+          "total": 6.401566236301508,
+          "impact_body_db": 5.516673220036737,
+          "worst_h1_db": 21.75789534005206,
+          "worst_h1_late_db": 28.03079795489389,
+          "worst_decay_db": 12.899687677355931,
+          "worst_balance_db": 16.36614612826602,
+          "worst_attack_body_bands_db": 11.887667106121018,
+          "worst_total": 12.318703529983487,
+          "worst_impact_body_db": 11.166414669957332,
+          "register_total": {
+            "grave": 5.421468113196503,
+            "medio": 4.6331943445126775,
+            "agudo": 9.150036251195342
+          },
+          "objective": 21.044963789288627
+        },
+        "acceptance": {
+          "passed": true,
+          "checks": {
+            "mean_improves": true,
+            "worst_pair_improves": true,
+            "every_register_improves": true,
+            "worst_late_H1_improves": true,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.00822589100331328,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.6459628241445037,
+          "identified_mean_shape_db": 1.647817136323673,
+          "actual_mean_resolved_rise_db": 3.7254617893324133,
+          "identified_mean_resolved_rise_db": 3.72331961401269,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -0.986626167423637
+      },
+      "Control-sin-carga/D-afinacion-mayor": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0,
+          "UNISON_WIDTH": 0.2
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 7.041635015234381,
+          "h1_late_db": 9.551186715779352,
+          "decay_db": 5.714514849052005,
+          "balance_db": 7.979951551352378,
+          "attack_body_bands_db": 4.839787750177404,
+          "total": 6.339425547824739,
+          "impact_body_db": 5.515231137419735,
+          "worst_h1_db": 21.588306877528993,
+          "worst_h1_late_db": 27.444397901533662,
+          "worst_decay_db": 12.354389617207236,
+          "worst_balance_db": 16.518680109764798,
+          "worst_attack_body_bands_db": 11.93047874540691,
+          "worst_total": 12.227555025620305,
+          "worst_impact_body_db": 11.138202943489036,
+          "register_total": {
+            "grave": 5.4209539827222315,
+            "medio": 4.5817883102902455,
+            "agudo": 9.015534350461738
+          },
+          "objective": 20.818197870955334
+        },
+        "acceptance": {
+          "passed": true,
+          "checks": {
+            "mean_improves": true,
+            "worst_pair_improves": true,
+            "every_register_improves": true,
+            "worst_late_H1_improves": true,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.012008635376042243,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.6459628241445037,
+          "identified_mean_shape_db": 1.6485321209524268,
+          "actual_mean_resolved_rise_db": 3.7254617893324133,
+          "identified_mean_resolved_rise_db": 3.7213061185864604,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -2.4778233288067355
+      },
+      "Control-sin-carga/E-trio-persistente-sutil": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0,
+          "UNISON_WIDTH": 0.1,
+          "UNISON_EXTRA_LOSS": 0.5
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 9.054388508563113,
+          "h1_late_db": 13.941104934824404,
+          "decay_db": 8.013246359824185,
+          "balance_db": 8.021237714193616,
+          "attack_body_bands_db": 4.792825338037423,
+          "total": 7.304496434793463,
+          "impact_body_db": 5.528243347552391,
+          "worst_h1_db": 24.826264300411832,
+          "worst_h1_late_db": 33.23038662771582,
+          "worst_decay_db": 15.38757216436483,
+          "worst_balance_db": 15.861071589232752,
+          "worst_attack_body_bands_db": 12.022886118602699,
+          "worst_total": 13.583470018783306,
+          "worst_impact_body_db": 10.963242033054447,
+          "register_total": {
+            "grave": 6.34854027871653,
+            "medio": 5.12009378089085,
+            "agudo": 10.44485524477301
+          },
+          "objective": 23.866453233363607
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": false,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": false,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 1.423270810953026,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.6459628241445037,
+          "identified_mean_shape_db": 1.8171401385488355,
+          "actual_mean_resolved_rise_db": 3.7254617893324133,
+          "identified_mean_resolved_rise_db": 3.636430203482847,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 1,
+        "worst_long_level_delta_db": -17.194781123637796
+      },
+      "Control-sin-carga/F-trio-persistente-mayor": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0,
+          "UNISON_WIDTH": 0.2,
+          "UNISON_EXTRA_LOSS": 0.5
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 8.98641439103334,
+          "h1_late_db": 13.727344823317388,
+          "decay_db": 7.703320053350116,
+          "balance_db": 8.06006502104592,
+          "attack_body_bands_db": 4.796012403331162,
+          "total": 7.235887414254353,
+          "impact_body_db": 5.527070159136353,
+          "worst_h1_db": 24.78598468804796,
+          "worst_h1_late_db": 32.89453345680063,
+          "worst_decay_db": 14.772583515241324,
+          "worst_balance_db": 16.03942452777691,
+          "worst_attack_body_bands_db": 12.070934100216888,
+          "worst_total": 13.562397500224971,
+          "worst_impact_body_db": 10.935447563494046,
+          "register_total": {
+            "grave": 6.3441578304510635,
+            "medio": 5.0356394822124475,
+            "agudo": 10.327864930099548
+          },
+          "objective": 23.6900491213394
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": false,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": false,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 1.3424010691182033,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.6459628241445037,
+          "identified_mean_shape_db": 1.8197878513174206,
+          "actual_mean_resolved_rise_db": 3.7254617893324133,
+          "identified_mean_resolved_rise_db": 3.6343923075554403,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 7,
+        "worst_long_level_delta_db": -9.648061746556905
+      }
+    },
+    "spatial-pilot": {
+      "Carga-fisica/Base": {
+        "tuning": {},
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 7.084007648193123,
+          "h1_late_db": 9.245917811920425,
+          "decay_db": 5.6631569256204495,
+          "balance_db": 10.92530260119754,
+          "attack_body_bands_db": 5.465313451158298,
+          "total": 7.1363731445053915,
+          "impact_body_db": 6.206548849284065,
+          "worst_h1_db": 11.384887881655642,
+          "worst_h1_late_db": 19.907080141455616,
+          "worst_decay_db": 8.68355571147475,
+          "worst_balance_db": 19.095301181108763,
+          "worst_attack_body_bands_db": 8.104451385363706,
+          "worst_total": 9.065591321312134,
+          "worst_impact_body_db": 9.933180847164541,
+          "register_total": {
+            "medio": 6.507021420980198,
+            "agudo": 7.765724868030586
+          },
+          "objective": 19.303730755126722
+        },
+        "acceptance": null,
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.696529039854849,
+          "identified_mean_shape_db": 1.696529039854849,
+          "actual_mean_resolved_rise_db": 4.065522376783863,
+          "identified_mean_resolved_rise_db": 4.065522376783863,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": 0.0
+      },
+      "Carga-fisica/G-apoyos-separados": {
+        "tuning": {
+          "UNISON_WIDTH": 0.1,
+          "SPATIAL_UNISON_GAP_M": 0.008
+        },
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 7.128574349997673,
+          "h1_late_db": 9.403465453621203,
+          "decay_db": 5.797685223639215,
+          "balance_db": 11.0123132777437,
+          "attack_body_bands_db": 5.455135252729258,
+          "total": 7.175801264462876,
+          "impact_body_db": 6.1558922505885985,
+          "worst_h1_db": 11.335161995452554,
+          "worst_h1_late_db": 19.82280377587891,
+          "worst_decay_db": 8.95354451556101,
+          "worst_balance_db": 19.450798505828637,
+          "worst_attack_body_bands_db": 8.082429206477299,
+          "worst_total": 9.238728270871098,
+          "worst_impact_body_db": 9.834878822959556,
+          "register_total": {
+            "medio": 6.444796220401787,
+            "agudo": 7.906806308523966
+          },
+          "objective": 19.5548760596172
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": false,
+            "every_register_improves": false,
+            "worst_late_H1_improves": true,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.22339981514824103,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": false
+          },
+          "actual_mean_shape_db": 1.696529039854849,
+          "identified_mean_shape_db": 1.6997848260743722,
+          "actual_mean_resolved_rise_db": 4.065522376783863,
+          "identified_mean_resolved_rise_db": 4.0745970687461694,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -2.975936527931026
+      },
+      "Carga-fisica/H-apoyos-y-trio-persistente": {
+        "tuning": {
+          "UNISON_WIDTH": 0.1,
+          "SPATIAL_UNISON_GAP_M": 0.008,
+          "UNISON_EXTRA_LOSS": 0.5
+        },
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 7.053426987151896,
+          "h1_late_db": 10.633058866371735,
+          "decay_db": 6.470533000896093,
+          "balance_db": 12.041691851128707,
+          "attack_body_bands_db": 5.118159790026221,
+          "total": 7.415923142844904,
+          "impact_body_db": 6.070253690339729,
+          "worst_h1_db": 12.125493760185336,
+          "worst_h1_late_db": 24.86968197505699,
+          "worst_decay_db": 9.333671945908993,
+          "worst_balance_db": 19.763250665630682,
+          "worst_attack_body_bands_db": 7.672279488868815,
+          "worst_total": 9.873180350464509,
+          "worst_impact_body_db": 9.653408850685611,
+          "register_total": {
+            "medio": 6.579900992580522,
+            "agudo": 8.251945293109287
+          },
+          "objective": 20.55167645770151
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": false,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": false,
+            "worst_balance_within_0_5db": false,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.8075890291523748,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.696529039854849,
+          "identified_mean_shape_db": 1.6540969014826175,
+          "actual_mean_resolved_rise_db": 4.065522376783863,
+          "identified_mean_resolved_rise_db": 3.986923374290768,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 4,
+        "worst_long_level_delta_db": -9.70914741927993
+      },
+      "Control-sin-carga/Base": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 7.27468398264904,
+          "h1_late_db": 10.906909246307084,
+          "decay_db": 8.948420028579244,
+          "balance_db": 8.248982739596071,
+          "attack_body_bands_db": 4.731943105759571,
+          "total": 7.080689617451211,
+          "impact_body_db": 5.656913814300058,
+          "worst_h1_db": 16.7854439688992,
+          "worst_h1_late_db": 26.46014607949135,
+          "worst_decay_db": 13.30150096687002,
+          "worst_balance_db": 11.479774764724914,
+          "worst_attack_body_bands_db": 6.971345068582005,
+          "worst_total": 9.992428105909188,
+          "worst_impact_body_db": 9.409402740107426,
+          "register_total": {
+            "medio": 4.85592020002114,
+            "agudo": 9.305459034881281
+          },
+          "objective": 20.671646904527886
+        },
+        "acceptance": null,
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.9743383357791724,
+          "identified_mean_shape_db": 1.9743383357791724,
+          "actual_mean_resolved_rise_db": 3.8744520777378333,
+          "identified_mean_resolved_rise_db": 3.8744520777378333,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": 0.0
+      },
+      "Control-sin-carga/G-apoyos-separados": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0,
+          "UNISON_WIDTH": 0.1,
+          "SPATIAL_UNISON_GAP_M": 0.008
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 7.197220548996536,
+          "h1_late_db": 10.734096749043044,
+          "decay_db": 8.700303996100782,
+          "balance_db": 8.195124445343932,
+          "attack_body_bands_db": 4.72595786991003,
+          "total": 6.992689681633161,
+          "impact_body_db": 5.615424777543232,
+          "worst_h1_db": 16.711071408747486,
+          "worst_h1_late_db": 26.171237478711674,
+          "worst_decay_db": 12.845353238454056,
+          "worst_balance_db": 11.74404549710457,
+          "worst_attack_body_bands_db": 6.968315517920885,
+          "worst_total": 9.952019191611157,
+          "worst_impact_body_db": 9.338156806530263,
+          "register_total": {
+            "medio": 4.796412998065843,
+            "agudo": 9.188966365200478
+          },
+          "objective": 20.482945910570585
+        },
+        "acceptance": {
+          "passed": true,
+          "checks": {
+            "mean_improves": true,
+            "worst_pair_improves": true,
+            "every_register_improves": true,
+            "worst_late_H1_improves": true,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": -0.040408914298030396,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": false
+          },
+          "actual_mean_shape_db": 1.9743383357791724,
+          "identified_mean_shape_db": 1.978048168433626,
+          "actual_mean_resolved_rise_db": 3.8744520777378333,
+          "identified_mean_resolved_rise_db": 3.8832741230675913,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -0.9641378477895941
+      },
+      "Control-sin-carga/H-apoyos-y-trio-persistente": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0,
+          "UNISON_WIDTH": 0.1,
+          "SPATIAL_UNISON_GAP_M": 0.008,
+          "UNISON_EXTRA_LOSS": 0.5
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 9.115981486381465,
+          "h1_late_db": 15.227088465055358,
+          "decay_db": 11.21165555467335,
+          "balance_db": 8.234813160373356,
+          "attack_body_bands_db": 4.5106380892798255,
+          "total": 7.922651655439963,
+          "impact_body_db": 5.504187384598364,
+          "worst_h1_db": 19.910573011056567,
+          "worst_h1_late_db": 31.487263290101822,
+          "worst_decay_db": 15.350931628814823,
+          "worst_balance_db": 11.543962665025587,
+          "worst_attack_body_bands_db": 6.934322005734759,
+          "worst_total": 11.269029149136191,
+          "worst_impact_body_db": 9.151333860507318,
+          "register_total": {
+            "medio": 5.413613320671354,
+            "agudo": 10.431689990208572
+          },
+          "objective": 23.21363575205261
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": false,
+            "worst_pair_improves": false,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": false,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 1.2766010432270036,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.9743383357791724,
+          "identified_mean_shape_db": 2.1351143503408387,
+          "actual_mean_resolved_rise_db": 3.8744520777378333,
+          "identified_mean_resolved_rise_db": 3.793821960536951,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 2,
+        "worst_long_level_delta_db": -15.890642455159963
+      }
+    },
+    "visible-pilot": {
+      "Carga-fisica/Base": {
+        "tuning": {},
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 7.084007648193123,
+          "h1_late_db": 9.245917811920425,
+          "decay_db": 5.6631569256204495,
+          "balance_db": 10.92530260119754,
+          "attack_body_bands_db": 5.465313451158298,
+          "total": 7.1363731445053915,
+          "impact_body_db": 6.206548849284065,
+          "worst_h1_db": 11.384887881655642,
+          "worst_h1_late_db": 19.907080141455616,
+          "worst_decay_db": 8.68355571147475,
+          "worst_balance_db": 19.095301181108763,
+          "worst_attack_body_bands_db": 8.104451385363706,
+          "worst_total": 9.065591321312134,
+          "worst_impact_body_db": 9.933180847164541,
+          "register_total": {
+            "medio": 6.507021420980198,
+            "agudo": 7.765724868030586
+          },
+          "objective": 19.303730755126722
+        },
+        "acceptance": null,
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.696529039854849,
+          "identified_mean_shape_db": 1.696529039854849,
+          "actual_mean_resolved_rise_db": 4.065522376783863,
+          "identified_mean_resolved_rise_db": 4.065522376783863,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": 0.0
+      },
+      "Carga-fisica/I-unisono-mas-visible": {
+        "tuning": {
+          "UNISON_WIDTH": 0.65,
+          "UNISON_EXTRA_LOSS": 1.0
+        },
+        "diagnostic_decoupling": false,
+        "metrics": {
+          "h1_db": 7.174705436832917,
+          "h1_late_db": 10.370987933264638,
+          "decay_db": 5.397019098491434,
+          "balance_db": 10.755367755098026,
+          "attack_body_bands_db": 5.262140768670844,
+          "total": 7.030414080175884,
+          "impact_body_db": 6.105962125935003,
+          "worst_h1_db": 11.946120477454793,
+          "worst_h1_late_db": 23.279154153748543,
+          "worst_decay_db": 9.061831638197363,
+          "worst_balance_db": 19.60850273379857,
+          "worst_attack_body_bands_db": 7.874555519022079,
+          "worst_total": 9.200783874446971,
+          "worst_impact_body_db": 9.757441346319279,
+          "register_total": {
+            "medio": 6.197532712045019,
+            "agudo": 7.863295448306749
+          },
+          "objective": 19.359190901630114
+        },
+        "acceptance": {
+          "passed": false,
+          "checks": {
+            "mean_improves": true,
+            "worst_pair_improves": false,
+            "every_register_improves": false,
+            "worst_late_H1_improves": false,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": false,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": 0.1854554187241142,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.696529039854849,
+          "identified_mean_shape_db": 1.642582613402209,
+          "actual_mean_resolved_rise_db": 4.065522376783863,
+          "identified_mean_resolved_rise_db": 4.003123726347511,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 1,
+        "worst_long_level_delta_db": -6.833240462338139
+      },
+      "Control-sin-carga/Base": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 7.27468398264904,
+          "h1_late_db": 10.906909246307084,
+          "decay_db": 8.948420028579244,
+          "balance_db": 8.248982739596071,
+          "attack_body_bands_db": 4.731943105759571,
+          "total": 7.080689617451211,
+          "impact_body_db": 5.656913814300058,
+          "worst_h1_db": 16.7854439688992,
+          "worst_h1_late_db": 26.46014607949135,
+          "worst_decay_db": 13.30150096687002,
+          "worst_balance_db": 11.479774764724914,
+          "worst_attack_body_bands_db": 6.971345068582005,
+          "worst_total": 9.992428105909188,
+          "worst_impact_body_db": 9.409402740107426,
+          "register_total": {
+            "medio": 4.85592020002114,
+            "agudo": 9.305459034881281
+          },
+          "objective": 20.671646904527886
+        },
+        "acceptance": null,
+        "temporal": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.9743383357791724,
+          "identified_mean_shape_db": 1.9743383357791724,
+          "actual_mean_resolved_rise_db": 3.8744520777378333,
+          "identified_mean_resolved_rise_db": 3.8744520777378333,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": 0.0
+      },
+      "Control-sin-carga/I-unisono-mas-visible": {
+        "tuning": {
+          "DIAGNOSTIC_STRING_DRAIN": 0,
+          "UNISON_WIDTH": 0.65,
+          "UNISON_EXTRA_LOSS": 1.0
+        },
+        "diagnostic_decoupling": true,
+        "metrics": {
+          "h1_db": 6.1759131626365775,
+          "h1_late_db": 7.4477255469329355,
+          "decay_db": 5.816697056054535,
+          "balance_db": 7.387953179291794,
+          "attack_body_bands_db": 4.620248853775174,
+          "total": 6.002875178183852,
+          "impact_body_db": 5.544192231258428,
+          "worst_h1_db": 14.157674246485447,
+          "worst_h1_late_db": 16.99521021726649,
+          "worst_decay_db": 8.425706250333306,
+          "worst_balance_db": 11.388009972857574,
+          "worst_attack_body_bands_db": 6.959957699072706,
+          "worst_total": 8.332169666989607,
+          "worst_impact_body_db": 9.244262540348455,
+          "register_total": {
+            "medio": 4.316446191834161,
+            "agudo": 7.689304164533544
+          },
+          "objective": 17.295050720544783
+        },
+        "acceptance": {
+          "passed": true,
+          "checks": {
+            "mean_improves": true,
+            "worst_pair_improves": true,
+            "every_register_improves": true,
+            "worst_late_H1_improves": true,
+            "worst_decay_within_0_5db": true,
+            "worst_balance_within_0_5db": true,
+            "worst_attack_body_within_0_5db": true,
+            "no_pair_regresses_over_2db": true,
+            "worst_impact_body_within_0_5db": true
+          },
+          "maximum_pair_regression_db": -0.23913047597738668,
+          "policy": "These guards screen measured tradeoffs. Listening remains required. Internal holdouts share the recording corpus."
+        },
+        "temporal": {
+          "passed": false,
+          "checks": {
+            "mean_shape_not_worse": false,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.9743383357791724,
+          "identified_mean_shape_db": 2.0317085553296765,
+          "actual_mean_resolved_rise_db": 3.8744520777378333,
+          "identified_mean_resolved_rise_db": 3.8110282238057587,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "late_notches": 0,
+        "worst_long_level_delta_db": -5.350212895412177
+      }
+    }
+  },
+  "identities": {
+    "C:\\SHARED\\Unisono-sutil-2026-10-02\\report.json": "e616ec0c8eb01f172e50ffc30c490ccf13fda8dca7d611b6b4bfc342edc4166a",
+    "C:\\SHARED\\Unisono-sutil-2026-10-02\\piloto-apoyos\\report.json": "d4acf67fbb3ced0bae87fff65137cdb6671574764d047afbd93ec867d8d9e514",
+    "C:\\SHARED\\Unisono-sutil-2026-10-02\\piloto-visible\\report.json": "2b0924421808ae951058be865d5e4b4550f1a4e078b2f813904d4a8b3a4689c3",
+    "tools\\audit-concert-grand-subtle-unison.py": "138ba2e506ddf5674b94e0446562245724812fc5253eb7ed1cdd6f5937db7481",
+    "tools\\export-concert-grand-subtle-unison.py": "cf8895ddda6a37bc2b285a9d680b2a09c623d935956ab50f81854adbc963ea14",
+    "tools\\tests\\test_concert_subtle_unison.py": "78a3a077c7e8e6a1fecaffd2968efb6577e83286ac584b4ed783d983f6ade6c3",
+    "C:\\SHARED\\Unisono-sutil-2026-10-02\\ESCUCHAR\\comparacion.json": "1683758f626e1ca3c06eaffe07cd1cf415e30903f87434f218f9d69fe94b4fe7"
+  },
+  "visible_C4": {
+    "Carga-fisica/Base": {
+      "h1_db": 11.384887881655642,
+      "h1_late_db": 19.907080141455616,
+      "decay_db": 5.488159876207463,
+      "balance_db": 14.601095075764071,
+      "attack_body_bands_db": 2.07543793860743,
+      "h1_signed_db": [
+        -4.004996259390914,
+        -10.242587244120394,
+        -19.907080141455616
+      ],
+      "observed_partial_terms": 18,
+      "impact_body_db": 8.307344723158124,
+      "observed_impact_balance_terms": 2,
+      "impact_H2_H1_error_db": 5.543761888927882,
+      "legacy_total": 9.318340187363471,
+      "total": 9.065591321312134
+    },
+    "Carga-fisica/I-unisono-mas-visible": {
+      "h1_db": 11.946120477454793,
+      "h1_late_db": 23.279154153748543,
+      "decay_db": 4.636914071037065,
+      "balance_db": 14.335542813339641,
+      "attack_body_bands_db": 1.9560908737095246,
+      "h1_signed_db": [
+        -3.474517720170187,
+        -9.084689558445646,
+        -23.279154153748543
+      ],
+      "observed_partial_terms": 18,
+      "impact_body_db": 8.380115114877892,
+      "observed_impact_balance_terms": 2,
+      "impact_H2_H1_error_db": 5.696077411766119,
+      "legacy_total": 9.217670019259783,
+      "total": 9.008281293164309
+    },
+    "Control-sin-carga/Base": {
+      "h1_db": 0.6086084920234912,
+      "h1_late_db": 0.43442731043757377,
+      "decay_db": 4.862320090288074,
+      "balance_db": 9.4181186574345,
+      "attack_body_bands_db": 1.5943113222688385,
+      "h1_signed_db": [
+        -1.1216491813678786,
+        -0.26974898426502136,
+        -0.43442731043757377
+      ],
+      "observed_partial_terms": 18,
+      "impact_body_db": 7.6655854534063605,
+      "observed_impact_balance_terms": 2,
+      "impact_H2_H1_error_db": 4.95215838507578,
+      "legacy_total": 4.022269357479191,
+      "total": 4.933098381460983
+    },
+    "Control-sin-carga/I-unisono-mas-visible": {
+      "h1_db": 1.0603185383654814,
+      "h1_late_db": 1.2881264067788862,
+      "decay_db": 3.784947563404037,
+      "balance_db": 8.598115244959846,
+      "attack_body_bands_db": 1.5865108439836846,
+      "h1_signed_db": [
+        -0.5430359929010109,
+        1.3497932154165468,
+        1.2881264067788862
+      ],
+      "observed_partial_terms": 18,
+      "impact_body_db": 7.6613101705850575,
+      "observed_impact_balance_terms": 2,
+      "impact_H2_H1_error_db": 5.0323532683078795,
+      "legacy_total": 3.704853817116442,
+      "total": 4.693967905483596
+    }
+  }
+}

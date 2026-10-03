@@ -1,0 +1,7 @@
+{
+  "A-actual": {},
+  "Contacto-sin-perdida": {"tuning":{"FELT_RATE_DAMPING":0}},
+  "Presion-causal": {"tuning":{"CAUSAL_RADIATION_FIR":1}},
+  "Integral-mas-densa": {"tuning":{"RADIATION_QUADRATURE_SCALE":2}},
+  "Sin-resonancia-paralela": {"tuning":{"BED_MIX":0}}
+}

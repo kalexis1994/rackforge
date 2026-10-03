@@ -1,0 +1,148 @@
+{
+  "legacy_coefficients_influence": {
+    "60:60": {
+      "identical": true,
+      "original_sha256": "3c53eac2420cb8ec399d76cfa2d88e4482c6f8d3023be8136128c72d8270f186",
+      "disabled_sha256": "3c53eac2420cb8ec399d76cfa2d88e4482c6f8d3023be8136128c72d8270f186"
+    },
+    "60:110": {
+      "identical": true,
+      "original_sha256": "a217a16e96a28e5dbc80f19c5f7767f03ea15fb08f7a94f50336749ef9e81a54",
+      "disabled_sha256": "a217a16e96a28e5dbc80f19c5f7767f03ea15fb08f7a94f50336749ef9e81a54"
+    },
+    "72:60": {
+      "identical": true,
+      "original_sha256": "f61f49d27a217b2db9381d2ba77c830150c59602910483a4993d685f1191e646",
+      "disabled_sha256": "f61f49d27a217b2db9381d2ba77c830150c59602910483a4993d685f1191e646"
+    },
+    "72:110": {
+      "identical": true,
+      "original_sha256": "8c56373ed2a61f27c47f713adf1ff3571d0420f4f688ce8459a5248eefac4b8f",
+      "disabled_sha256": "8c56373ed2a61f27c47f713adf1ff3571d0420f4f688ce8459a5248eefac4b8f"
+    },
+    "84:60": {
+      "identical": true,
+      "original_sha256": "c514e735b5897f18f426d57fd3a0e69cbf57277e62599a04cdff7260701373c3",
+      "disabled_sha256": "c514e735b5897f18f426d57fd3a0e69cbf57277e62599a04cdff7260701373c3"
+    },
+    "84:110": {
+      "identical": true,
+      "original_sha256": "4d7d205aef6ec5ca8119f0e3e306b9a74133008a806acc16097e437c2afcc556",
+      "disabled_sha256": "4d7d205aef6ec5ca8119f0e3e306b9a74133008a806acc16097e437c2afcc556"
+    }
+  },
+  "schedule": [
+    {
+      "seconds": 0,
+      "note": "C4",
+      "instrument": "A-actual",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 6.5,
+      "note": "C4",
+      "instrument": "Steinway",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 13.0,
+      "note": "C5",
+      "instrument": "A-actual",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 19.5,
+      "note": "C5",
+      "instrument": "Steinway",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 26.0,
+      "note": "Fs5",
+      "instrument": "A-actual",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 32.5,
+      "note": "Fs5",
+      "instrument": "Steinway",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 39.0,
+      "note": "C6",
+      "instrument": "A-actual",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 45.5,
+      "note": "C6",
+      "instrument": "Steinway",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 52.0,
+      "note": "Fs6",
+      "instrument": "A-actual",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 58.5,
+      "note": "Fs6",
+      "instrument": "Steinway",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 65.0,
+      "note": "C7",
+      "instrument": "A-actual",
+      "velocities": [
+        60,
+        110
+      ]
+    },
+    {
+      "seconds": 71.5,
+      "note": "C7",
+      "instrument": "Steinway",
+      "velocities": [
+        60,
+        110
+      ]
+    }
+  ],
+  "binary_sha256": "3b6ac0541fcd740b2cdab1586158b2e66790a6d367438f7ac91228970bb1d2b7",
+  "global_audit_sha256": "b2e8fc879df632f349bc1c87f79f600f52d76fcecb1fde353c47ad1defb3bfbe",
+  "common_export_trim_db": 0.0,
+  "policy": "Each root: actual v60/v110, then exact-root Steinway sampler v60/v110. Same common trim, no per-note matching; no transposition. The spectral table is diagnostic, not physical identification."
+}

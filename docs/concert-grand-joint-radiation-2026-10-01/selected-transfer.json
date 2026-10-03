@@ -1,0 +1,2000 @@
+{
+  "policy": "Compare the frozen board observer with a frequency-dependent Rayleigh integral.\n\nReads coefficients from bench::export_physical_transfer. The comparison holds\nmechanical masses, modes, bridge projections and microphone geometry fixed.\nThis diagnoses the observer approximation; it does not identify a real piano's\ngeometry or predict perceived fidelity from steady-state pressure alone.\n",
+  "sample_rate": 44100,
+  "mechanical_modes": 167,
+  "bank_sha256": "6aa88a20480e637f49263cea2d7854da94d5540d826a215b951a50f49ea514db",
+  "quadrature_scales": [
+    2,
+    4
+  ],
+  "common_path_seconds": 0.000301728443148688,
+  "mechanical_recurrence_max_relative_error": 2.9145563560643364e-13,
+  "geometry_shared": true,
+  "native_observer_at_modal_relative_error": 2.4403029490393868e-06,
+  "maximum_dense_grid_level_change_db": 1.3523172493266247,
+  "maximum_discrete_vs_continuous_level_change_db": 4.298439102931211,
+  "rows": [
+    {
+      "note": 36,
+      "partial": 1,
+      "frequency": 65.40639132514966,
+      "pressure_db": {
+        "current_two_tap": -24.54791276010259,
+        "common_path_removed_two_tap": -24.510616271408146,
+        "rayleigh_continuous": -25.867670977264467,
+        "retarded_discrete": -25.867765506314726,
+        "rayleigh_dense": -25.868077411955653
+      },
+      "dense_minus_base_db": -0.00040643469118702895,
+      "fir_minus_continuous_db": -9.452905025884871e-05
+    },
+    {
+      "note": 36,
+      "partial": 2,
+      "frequency": 130.8127826502993,
+      "pressure_db": {
+        "current_two_tap": -21.629280190033327,
+        "common_path_removed_two_tap": -21.451615069987714,
+        "rayleigh_continuous": -23.50619433295737,
+        "retarded_discrete": -23.50657365956314,
+        "rayleigh_dense": -23.50687717765147
+      },
+      "dense_minus_base_db": -0.0006828446940990793,
+      "fir_minus_continuous_db": -0.0003793266057713845
+    },
+    {
+      "note": 36,
+      "partial": 3,
+      "frequency": 196.21917397544897,
+      "pressure_db": {
+        "current_two_tap": -17.250845746436486,
+        "common_path_removed_two_tap": -17.009688123185867,
+        "rayleigh_continuous": -18.714080941571858,
+        "retarded_discrete": -18.714931935475793,
+        "rayleigh_dense": -18.715205891031538
+      },
+      "dense_minus_base_db": -0.0011249494596800792,
+      "fir_minus_continuous_db": -0.0008509939039367583
+    },
+    {
+      "note": 36,
+      "partial": 4,
+      "frequency": 261.6255653005986,
+      "pressure_db": {
+        "current_two_tap": -13.486469258702433,
+        "common_path_removed_two_tap": -13.428729176278189,
+        "rayleigh_continuous": -13.139123778993023,
+        "retarded_discrete": -13.140637055768513,
+        "rayleigh_dense": -13.140252607922946
+      },
+      "dense_minus_base_db": -0.0011288289299237575,
+      "fir_minus_continuous_db": -0.0015132767754908532
+    },
+    {
+      "note": 36,
+      "partial": 5,
+      "frequency": 327.0319566257483,
+      "pressure_db": {
+        "current_two_tap": -19.93703935285164,
+        "common_path_removed_two_tap": -19.745178626309816,
+        "rayleigh_continuous": -21.88822318571942,
+        "retarded_discrete": -21.890581593591783,
+        "rayleigh_dense": -21.889357964424164
+      },
+      "dense_minus_base_db": -0.0011347787047463777,
+      "fir_minus_continuous_db": -0.0023584078723674403
+    },
+    {
+      "note": 36,
+      "partial": 6,
+      "frequency": 392.43834795089793,
+      "pressure_db": {
+        "current_two_tap": -21.60982586631663,
+        "common_path_removed_two_tap": -21.702066447276973,
+        "rayleigh_continuous": -21.078673517395934,
+        "retarded_discrete": -21.082054648471487,
+        "rayleigh_dense": -21.077644995360924
+      },
+      "dense_minus_base_db": 0.001028522035009502,
+      "fir_minus_continuous_db": -0.0033811310755518208
+    },
+    {
+      "note": 39,
+      "partial": 1,
+      "frequency": 77.78174593052023,
+      "pressure_db": {
+        "current_two_tap": -14.921116919839166,
+        "common_path_removed_two_tap": -14.951077425940476,
+        "rayleigh_continuous": -15.142471063844205,
+        "retarded_discrete": -15.14260468006704,
+        "rayleigh_dense": -15.142907116809404
+      },
+      "dense_minus_base_db": -0.0004360529651982216,
+      "fir_minus_continuous_db": -0.00013361622283590858
+    },
+    {
+      "note": 39,
+      "partial": 2,
+      "frequency": 155.56349186104046,
+      "pressure_db": {
+        "current_two_tap": -12.701266805166423,
+        "common_path_removed_two_tap": -12.55942511562546,
+        "rayleigh_continuous": -13.448995899324466,
+        "retarded_discrete": -13.449531417247115,
+        "rayleigh_dense": -13.449839610532166
+      },
+      "dense_minus_base_db": -0.0008437112077005497,
+      "fir_minus_continuous_db": -0.0005355179226499134
+    },
+    {
+      "note": 39,
+      "partial": 3,
+      "frequency": 233.3452377915607,
+      "pressure_db": {
+        "current_two_tap": -18.278565712189497,
+        "common_path_removed_two_tap": -18.365736268403353,
+        "rayleigh_continuous": -17.094709133353614,
+        "retarded_discrete": -17.095906675639007,
+        "rayleigh_dense": -17.09611388114314
+      },
+      "dense_minus_base_db": -0.0014047477895265956,
+      "fir_minus_continuous_db": -0.0011975422853945515
+    },
+    {
+      "note": 39,
+      "partial": 4,
+      "frequency": 311.1269837220809,
+      "pressure_db": {
+        "current_two_tap": -28.824482414039846,
+        "common_path_removed_two_tap": -28.582168074055858,
+        "rayleigh_continuous": -28.79850712486412,
+        "retarded_discrete": -28.800741344368603,
+        "rayleigh_dense": -28.80212436074939
+      },
+      "dense_minus_base_db": -0.0036172358852716254,
+      "fir_minus_continuous_db": -0.0022342195044832342
+    },
+    {
+      "note": 39,
+      "partial": 5,
+      "frequency": 388.90872965260115,
+      "pressure_db": {
+        "current_two_tap": -23.284480537801326,
+        "common_path_removed_two_tap": -23.264957130235445,
+        "rayleigh_continuous": -22.991980772406198,
+        "retarded_discrete": -22.995299796612056,
+        "rayleigh_dense": -22.99142499297698
+      },
+      "dense_minus_base_db": 0.0005557794292170487,
+      "fir_minus_continuous_db": -0.0033190242058621666
+    },
+    {
+      "note": 39,
+      "partial": 6,
+      "frequency": 466.6904755831214,
+      "pressure_db": {
+        "current_two_tap": -18.42597026804474,
+        "common_path_removed_two_tap": -18.776473895433906,
+        "rayleigh_continuous": -20.19743549380574,
+        "retarded_discrete": -20.202273864111326,
+        "rayleigh_dense": -20.200535024470447
+      },
+      "dense_minus_base_db": -0.0030995306647083453,
+      "fir_minus_continuous_db": -0.004838370305587737
+    },
+    {
+      "note": 42,
+      "partial": 1,
+      "frequency": 92.4986056779086,
+      "pressure_db": {
+        "current_two_tap": -10.048747316399215,
+        "common_path_removed_two_tap": -10.045575352087265,
+        "rayleigh_continuous": -10.382248156022314,
+        "retarded_discrete": -10.382437152600282,
+        "rayleigh_dense": -10.382712749764336
+      },
+      "dense_minus_base_db": -0.00046459374202391726,
+      "fir_minus_continuous_db": -0.0001889965779689444
+    },
+    {
+      "note": 42,
+      "partial": 2,
+      "frequency": 184.9972113558172,
+      "pressure_db": {
+        "current_two_tap": -24.378198115411195,
+        "common_path_removed_two_tap": -23.81871133023621,
+        "rayleigh_continuous": -26.47486136732336,
+        "retarded_discrete": -26.47561816216276,
+        "rayleigh_dense": -26.476258491819866
+      },
+      "dense_minus_base_db": -0.0013971244965081215,
+      "fir_minus_continuous_db": -0.0007567948394036748
+    },
+    {
+      "note": 42,
+      "partial": 3,
+      "frequency": 277.4958170337258,
+      "pressure_db": {
+        "current_two_tap": -22.56502417092466,
+        "common_path_removed_two_tap": -22.978676726604938,
+        "rayleigh_continuous": -19.802307381262978,
+        "retarded_discrete": -19.80401062984691,
+        "rayleigh_dense": -19.803651947674158
+      },
+      "dense_minus_base_db": -0.0013445664111799403,
+      "fir_minus_continuous_db": -0.0017032485839331586
+    },
+    {
+      "note": 42,
+      "partial": 4,
+      "frequency": 369.9944227116344,
+      "pressure_db": {
+        "current_two_tap": -18.546074698185542,
+        "common_path_removed_two_tap": -18.563488759032396,
+        "rayleigh_continuous": -15.848452718030451,
+        "retarded_discrete": -15.851460823799645,
+        "rayleigh_dense": -15.84927921419488
+      },
+      "dense_minus_base_db": -0.0008264961644280589,
+      "fir_minus_continuous_db": -0.0030081057691941494
+    },
+    {
+      "note": 42,
+      "partial": 5,
+      "frequency": 462.493028389543,
+      "pressure_db": {
+        "current_two_tap": -19.94266616159823,
+        "common_path_removed_two_tap": -20.37569073647567,
+        "rayleigh_continuous": -22.97382765562552,
+        "retarded_discrete": -22.97856042507195,
+        "rayleigh_dense": -22.977692830606358
+      },
+      "dense_minus_base_db": -0.003865174980839303,
+      "fir_minus_continuous_db": -0.0047327694464321494
+    },
+    {
+      "note": 42,
+      "partial": 6,
+      "frequency": 554.9916340674516,
+      "pressure_db": {
+        "current_two_tap": -16.73487905530591,
+        "common_path_removed_two_tap": -16.976624310407953,
+        "rayleigh_continuous": -16.424666791215575,
+        "retarded_discrete": -16.43144975630884,
+        "rayleigh_dense": -16.426236364349222
+      },
+      "dense_minus_base_db": -0.0015695731336458824,
+      "fir_minus_continuous_db": -0.006782965093264903
+    },
+    {
+      "note": 45,
+      "partial": 1,
+      "frequency": 110.0,
+      "pressure_db": {
+        "current_two_tap": -20.15203735966074,
+        "common_path_removed_two_tap": -20.057548994283625,
+        "rayleigh_continuous": -21.45900390218722,
+        "retarded_discrete": -21.459271665669306,
+        "rayleigh_dense": -21.45978833381115
+      },
+      "dense_minus_base_db": -0.0007844316239332739,
+      "fir_minus_continuous_db": -0.00026776348208361133
+    },
+    {
+      "note": 45,
+      "partial": 2,
+      "frequency": 220.0,
+      "pressure_db": {
+        "current_two_tap": -17.989586156498678,
+        "common_path_removed_two_tap": -17.798551006466848,
+        "rayleigh_continuous": -16.717957575146883,
+        "retarded_discrete": -16.71902345011475,
+        "rayleigh_dense": -16.71911213242813
+      },
+      "dense_minus_base_db": -0.0011545572812482802,
+      "fir_minus_continuous_db": -0.0010658749678668148
+    },
+    {
+      "note": 45,
+      "partial": 3,
+      "frequency": 330.0,
+      "pressure_db": {
+        "current_two_tap": -18.27114638161691,
+        "common_path_removed_two_tap": -17.959262086176444,
+        "rayleigh_continuous": -20.674204806871927,
+        "retarded_discrete": -20.676600512899274,
+        "rayleigh_dense": -20.675327150221175
+      },
+      "dense_minus_base_db": -0.0011223433492476796,
+      "fir_minus_continuous_db": -0.0023957060273498074
+    },
+    {
+      "note": 45,
+      "partial": 4,
+      "frequency": 440.0,
+      "pressure_db": {
+        "current_two_tap": -14.721278180114002,
+        "common_path_removed_two_tap": -15.009372037164104,
+        "rayleigh_continuous": -16.234243719729758,
+        "retarded_discrete": -16.23848756698098,
+        "rayleigh_dense": -16.237551594951547
+      },
+      "dense_minus_base_db": -0.0033078752217915418,
+      "fir_minus_continuous_db": -0.0042438472512197
+    },
+    {
+      "note": 45,
+      "partial": 5,
+      "frequency": 550.0,
+      "pressure_db": {
+        "current_two_tap": -16.71366533933607,
+        "common_path_removed_two_tap": -17.332780491878776,
+        "rayleigh_continuous": -18.192331788108213,
+        "retarded_discrete": -18.19901523912123,
+        "rayleigh_dense": -18.194345298966898
+      },
+      "dense_minus_base_db": -0.0020135108586866687,
+      "fir_minus_continuous_db": -0.006683451013019816
+    },
+    {
+      "note": 45,
+      "partial": 6,
+      "frequency": 660.0,
+      "pressure_db": {
+        "current_two_tap": -24.53865963935246,
+        "common_path_removed_two_tap": -25.18589118802212,
+        "rayleigh_continuous": -27.01583766743452,
+        "retarded_discrete": -27.025567205457108,
+        "rayleigh_dense": -27.021764870890483
+      },
+      "dense_minus_base_db": -0.005927203455961779,
+      "fir_minus_continuous_db": -0.009729538022587414
+    },
+    {
+      "note": 48,
+      "partial": 1,
+      "frequency": 130.8127826502993,
+      "pressure_db": {
+        "current_two_tap": -17.167198570100823,
+        "common_path_removed_two_tap": -17.170472696148234,
+        "rayleigh_continuous": -18.738107029914637,
+        "retarded_discrete": -18.73848527481336,
+        "rayleigh_dense": -18.73874919256344
+      },
+      "dense_minus_base_db": -0.0006421626488012349,
+      "fir_minus_continuous_db": -0.00037824489872067353
+    },
+    {
+      "note": 48,
+      "partial": 2,
+      "frequency": 261.6255653005986,
+      "pressure_db": {
+        "current_two_tap": -14.524671110975056,
+        "common_path_removed_two_tap": -14.302613129974386,
+        "rayleigh_continuous": -14.22224247170506,
+        "retarded_discrete": -14.223754007070111,
+        "rayleigh_dense": -14.223238719658497
+      },
+      "dense_minus_base_db": -0.0009962479534373332,
+      "fir_minus_continuous_db": -0.0015115353650501252
+    },
+    {
+      "note": 48,
+      "partial": 3,
+      "frequency": 392.43834795089793,
+      "pressure_db": {
+        "current_two_tap": -18.209683340849672,
+        "common_path_removed_two_tap": -17.99299218876446,
+        "rayleigh_continuous": -19.864056305275483,
+        "retarded_discrete": -19.86746962452426,
+        "rayleigh_dense": -19.864303383873448
+      },
+      "dense_minus_base_db": -0.0002470785979650367,
+      "fir_minus_continuous_db": -0.003413319248776377
+    },
+    {
+      "note": 48,
+      "partial": 4,
+      "frequency": 523.2511306011972,
+      "pressure_db": {
+        "current_two_tap": -15.57372199873499,
+        "common_path_removed_two_tap": -16.382367764849228,
+        "rayleigh_continuous": -18.050789207289057,
+        "retarded_discrete": -18.05683389041382,
+        "rayleigh_dense": -18.053199512664
+      },
+      "dense_minus_base_db": -0.002410305374947667,
+      "fir_minus_continuous_db": -0.00604468312476609
+    },
+    {
+      "note": 48,
+      "partial": 5,
+      "frequency": 654.0639132514966,
+      "pressure_db": {
+        "current_two_tap": -20.72370085031895,
+        "common_path_removed_two_tap": -22.316263290812742,
+        "rayleigh_continuous": -25.046908410256812,
+        "retarded_discrete": -25.056332126646485,
+        "rayleigh_dense": -25.051360208130173
+      },
+      "dense_minus_base_db": -0.004451797873362184,
+      "fir_minus_continuous_db": -0.009423716389672687
+    },
+    {
+      "note": 48,
+      "partial": 6,
+      "frequency": 784.8766959017959,
+      "pressure_db": {
+        "current_two_tap": -17.660210908447894,
+        "common_path_removed_two_tap": -17.0439966277102,
+        "rayleigh_continuous": -16.305275369994312,
+        "retarded_discrete": -16.318872670676182,
+        "rayleigh_dense": -16.3081713284855
+      },
+      "dense_minus_base_db": -0.0028959584911856977,
+      "fir_minus_continuous_db": -0.013597300681868589
+    },
+    {
+      "note": 51,
+      "partial": 1,
+      "frequency": 155.56349186104046,
+      "pressure_db": {
+        "current_two_tap": -14.90420427880203,
+        "common_path_removed_two_tap": -14.774391710008011,
+        "rayleigh_continuous": -15.935945187925594,
+        "retarded_discrete": -15.936480812633675,
+        "rayleigh_dense": -15.936761675244274
+      },
+      "dense_minus_base_db": -0.0008164873186797541,
+      "fir_minus_continuous_db": -0.0005356247080821704
+    },
+    {
+      "note": 51,
+      "partial": 2,
+      "frequency": 311.1269837220809,
+      "pressure_db": {
+        "current_two_tap": -27.821910335643455,
+        "common_path_removed_two_tap": -24.877335743896502,
+        "rayleigh_continuous": -26.295853406727975,
+        "retarded_discrete": -26.298070012787683,
+        "rayleigh_dense": -26.29850210009372
+      },
+      "dense_minus_base_db": -0.0026486933657449557,
+      "fir_minus_continuous_db": -0.0022166060597088835
+    },
+    {
+      "note": 51,
+      "partial": 3,
+      "frequency": 466.6904755831214,
+      "pressure_db": {
+        "current_two_tap": -16.582564949996982,
+        "common_path_removed_two_tap": -16.683163460747743,
+        "rayleigh_continuous": -18.909094787274427,
+        "retarded_discrete": -18.913902540308804,
+        "rayleigh_dense": -18.91099512948331
+      },
+      "dense_minus_base_db": -0.0019003422088853111,
+      "fir_minus_continuous_db": -0.004807753034375904
+    },
+    {
+      "note": 51,
+      "partial": 4,
+      "frequency": 622.2539674441618,
+      "pressure_db": {
+        "current_two_tap": -12.254366713207807,
+        "common_path_removed_two_tap": -12.713699979436896,
+        "rayleigh_continuous": -12.905604059882844,
+        "retarded_discrete": -12.914221126101278,
+        "rayleigh_dense": -12.905851976337086
+      },
+      "dense_minus_base_db": -0.000247916454239698,
+      "fir_minus_continuous_db": -0.008617066218432867
+    },
+    {
+      "note": 51,
+      "partial": 5,
+      "frequency": 777.8174593052023,
+      "pressure_db": {
+        "current_two_tap": -15.166488824025969,
+        "common_path_removed_two_tap": -14.871176885358949,
+        "rayleigh_continuous": -15.154763096004274,
+        "retarded_discrete": -15.168076147845602,
+        "rayleigh_dense": -15.1576948114817
+      },
+      "dense_minus_base_db": -0.0029317154774295816,
+      "fir_minus_continuous_db": -0.013313051841330185
+    },
+    {
+      "note": 51,
+      "partial": 6,
+      "frequency": 933.3809511662428,
+      "pressure_db": {
+        "current_two_tap": -27.85471236752024,
+        "common_path_removed_two_tap": -24.504720824534353,
+        "rayleigh_continuous": -23.389624407057127,
+        "retarded_discrete": -23.40876524018399,
+        "rayleigh_dense": -23.395169492831812
+      },
+      "dense_minus_base_db": -0.005545085774682656,
+      "fir_minus_continuous_db": -0.019140833126863634
+    },
+    {
+      "note": 54,
+      "partial": 1,
+      "frequency": 184.9972113558172,
+      "pressure_db": {
+        "current_two_tap": -21.551964395000176,
+        "common_path_removed_two_tap": -21.058412821425613,
+        "rayleigh_continuous": -24.148493704983274,
+        "retarded_discrete": -24.14925125330643,
+        "rayleigh_dense": -24.149595626480085
+      },
+      "dense_minus_base_db": -0.001101921496815666,
+      "fir_minus_continuous_db": -0.0007575483231575845
+    },
+    {
+      "note": 54,
+      "partial": 2,
+      "frequency": 369.9944227116344,
+      "pressure_db": {
+        "current_two_tap": -21.34088431496255,
+        "common_path_removed_two_tap": -20.307281432042757,
+        "rayleigh_continuous": -24.97011794432074,
+        "retarded_discrete": -24.973186444704663,
+        "rayleigh_dense": -24.97203923389921
+      },
+      "dense_minus_base_db": -0.0019212895784698552,
+      "fir_minus_continuous_db": -0.0030685003839244556
+    },
+    {
+      "note": 54,
+      "partial": 3,
+      "frequency": 554.9916340674516,
+      "pressure_db": {
+        "current_two_tap": -20.845474607066556,
+        "common_path_removed_two_tap": -22.24303553868301,
+        "rayleigh_continuous": -25.168751149432957,
+        "retarded_discrete": -25.175732630560354,
+        "rayleigh_dense": -25.168133218368528
+      },
+      "dense_minus_base_db": 0.0006179310644317252,
+      "fir_minus_continuous_db": -0.006981481127393739
+    },
+    {
+      "note": 54,
+      "partial": 4,
+      "frequency": 739.9888454232688,
+      "pressure_db": {
+        "current_two_tap": -15.2610642989469,
+        "common_path_removed_two_tap": -16.228758734125055,
+        "rayleigh_continuous": -16.40681826121943,
+        "retarded_discrete": -16.41918579727532,
+        "rayleigh_dense": -16.408175257585512
+      },
+      "dense_minus_base_db": -0.0013569963660806184,
+      "fir_minus_continuous_db": -0.01236753605588793
+    },
+    {
+      "note": 54,
+      "partial": 5,
+      "frequency": 924.986056779086,
+      "pressure_db": {
+        "current_two_tap": -25.994727831048824,
+        "common_path_removed_two_tap": -22.997864750832623,
+        "rayleigh_continuous": -23.614198204644904,
+        "retarded_discrete": -23.633567494370613,
+        "rayleigh_dense": -23.619158780933176
+      },
+      "dense_minus_base_db": -0.004960576288277594,
+      "fir_minus_continuous_db": -0.01936928972570913
+    },
+    {
+      "note": 54,
+      "partial": 6,
+      "frequency": 1109.9832681349033,
+      "pressure_db": {
+        "current_two_tap": -25.22667270491894,
+        "common_path_removed_two_tap": -21.076762381542267,
+        "rayleigh_continuous": -23.401838288096457,
+        "retarded_discrete": -23.42861596415135,
+        "rayleigh_dense": -23.405619585660528
+      },
+      "dense_minus_base_db": -0.0037812975640771516,
+      "fir_minus_continuous_db": -0.02677767605489742
+    },
+    {
+      "note": 57,
+      "partial": 1,
+      "frequency": 220.0,
+      "pressure_db": {
+        "current_two_tap": -29.00975723703736,
+        "common_path_removed_two_tap": -27.504654999173024,
+        "rayleigh_continuous": -24.682173701212168,
+        "retarded_discrete": -24.68324081788014,
+        "rayleigh_dense": -24.683059394629367
+      },
+      "dense_minus_base_db": -0.0008856934171991725,
+      "fir_minus_continuous_db": -0.0010671166679722358
+    },
+    {
+      "note": 57,
+      "partial": 2,
+      "frequency": 440.0,
+      "pressure_db": {
+        "current_two_tap": -18.469507559005436,
+        "common_path_removed_two_tap": -18.526613025779465,
+        "rayleigh_continuous": -20.80243290535349,
+        "retarded_discrete": -20.80665534060372,
+        "rayleigh_dense": -20.804140484132105
+      },
+      "dense_minus_base_db": -0.0017075787786135863,
+      "fir_minus_continuous_db": -0.0042224352502259685
+    },
+    {
+      "note": 57,
+      "partial": 3,
+      "frequency": 660.0,
+      "pressure_db": {
+        "current_two_tap": -14.645561531756199,
+        "common_path_removed_two_tap": -15.859544410158929,
+        "rayleigh_continuous": -16.991545689487342,
+        "retarded_discrete": -17.001081760056667,
+        "rayleigh_dense": -16.992508388610265
+      },
+      "dense_minus_base_db": -0.0009626991229231661,
+      "fir_minus_continuous_db": -0.009536070569325358
+    },
+    {
+      "note": 57,
+      "partial": 4,
+      "frequency": 880.0,
+      "pressure_db": {
+        "current_two_tap": -17.52677268291646,
+        "common_path_removed_two_tap": -17.392703337469047,
+        "rayleigh_continuous": -17.885990274841838,
+        "retarded_discrete": -17.903532352041974,
+        "rayleigh_dense": -17.889990860166854
+      },
+      "dense_minus_base_db": -0.004000585325017791,
+      "fir_minus_continuous_db": -0.017542077200135578
+    },
+    {
+      "note": 57,
+      "partial": 5,
+      "frequency": 1100.0,
+      "pressure_db": {
+        "current_two_tap": -21.91841149258233,
+        "common_path_removed_two_tap": -19.23831747044345,
+        "rayleigh_continuous": -21.36165648777404,
+        "retarded_discrete": -21.387962474984693,
+        "rayleigh_dense": -21.365740236341374
+      },
+      "dense_minus_base_db": -0.004083748567328623,
+      "fir_minus_continuous_db": -0.02630598721064778
+    },
+    {
+      "note": 57,
+      "partial": 6,
+      "frequency": 1320.0,
+      "pressure_db": {
+        "current_two_tap": -22.9257086564729,
+        "common_path_removed_two_tap": -26.154181422462077,
+        "rayleigh_continuous": -28.38372141197908,
+        "retarded_discrete": -28.425774455410608,
+        "rayleigh_dense": -28.39868991817937
+      },
+      "dense_minus_base_db": -0.014968506200289236,
+      "fir_minus_continuous_db": -0.042053043431526105
+    },
+    {
+      "note": 60,
+      "partial": 1,
+      "frequency": 261.6255653005986,
+      "pressure_db": {
+        "current_two_tap": -18.48628502484448,
+        "common_path_removed_two_tap": -18.170577945692116,
+        "rayleigh_continuous": -17.301751420642923,
+        "retarded_discrete": -17.303261118935815,
+        "rayleigh_dense": -17.302581845125395
+      },
+      "dense_minus_base_db": -0.0008304244824731565,
+      "fir_minus_continuous_db": -0.0015096982928942335
+    },
+    {
+      "note": 60,
+      "partial": 2,
+      "frequency": 523.2511306011972,
+      "pressure_db": {
+        "current_two_tap": -18.95993712011865,
+        "common_path_removed_two_tap": -19.85129858582929,
+        "rayleigh_continuous": -22.105954430799684,
+        "retarded_discrete": -22.11199094429435,
+        "rayleigh_dense": -22.10657550744681
+      },
+      "dense_minus_base_db": -0.0006210766471247597,
+      "fir_minus_continuous_db": -0.0060365134946652405
+    },
+    {
+      "note": 60,
+      "partial": 3,
+      "frequency": 784.8766959017959,
+      "pressure_db": {
+        "current_two_tap": -15.114242088113993,
+        "common_path_removed_two_tap": -15.222605338865154,
+        "rayleigh_continuous": -17.206228987012796,
+        "retarded_discrete": -17.219781361664882,
+        "rayleigh_dense": -17.209613890174808
+      },
+      "dense_minus_base_db": -0.0033849031620103117,
+      "fir_minus_continuous_db": -0.013552374652086377
+    },
+    {
+      "note": 60,
+      "partial": 4,
+      "frequency": 1046.5022612023945,
+      "pressure_db": {
+        "current_two_tap": -16.0354162410284,
+        "common_path_removed_two_tap": -14.644290301501076,
+        "rayleigh_continuous": -15.693479685567722,
+        "retarded_discrete": -15.717144354045631,
+        "rayleigh_dense": -15.696942737758128
+      },
+      "dense_minus_base_db": -0.003463052190406664,
+      "fir_minus_continuous_db": -0.023664668477909906
+    },
+    {
+      "note": 60,
+      "partial": 5,
+      "frequency": 1308.1278265029932,
+      "pressure_db": {
+        "current_two_tap": -24.005723611137448,
+        "common_path_removed_two_tap": -27.666405933946994,
+        "rayleigh_continuous": -33.574619606445154,
+        "retarded_discrete": -33.615426489657516,
+        "rayleigh_dense": -33.577502213467106
+      },
+      "dense_minus_base_db": -0.0028826070219511095,
+      "fir_minus_continuous_db": -0.04080688321236203
+    },
+    {
+      "note": 60,
+      "partial": 6,
+      "frequency": 1569.7533918035917,
+      "pressure_db": {
+        "current_two_tap": -18.495429321271544,
+        "common_path_removed_two_tap": -21.87210102001773,
+        "rayleigh_continuous": -22.197449905485396,
+        "retarded_discrete": -22.249445707360522,
+        "rayleigh_dense": -22.209677557026836
+      },
+      "dense_minus_base_db": -0.01222765154143963,
+      "fir_minus_continuous_db": -0.05199580187512501
+    },
+    {
+      "note": 63,
+      "partial": 1,
+      "frequency": 311.1269837220809,
+      "pressure_db": {
+        "current_two_tap": -23.38679401012793,
+        "common_path_removed_two_tap": -22.54892835681821,
+        "rayleigh_continuous": -27.210045125965753,
+        "retarded_discrete": -27.212259695683404,
+        "rayleigh_dense": -27.213058027658903
+      },
+      "dense_minus_base_db": -0.0030129016931488817,
+      "fir_minus_continuous_db": -0.0022145697176488145
+    },
+    {
+      "note": 63,
+      "partial": 2,
+      "frequency": 622.2539674441618,
+      "pressure_db": {
+        "current_two_tap": -14.810218608527908,
+        "common_path_removed_two_tap": -15.193011541779246,
+        "rayleigh_continuous": -15.411669852101667,
+        "retarded_discrete": -15.420403325411677,
+        "rayleigh_dense": -15.41271746825807
+      },
+      "dense_minus_base_db": -0.0010476161564026705,
+      "fir_minus_continuous_db": -0.008733473310008693
+    },
+    {
+      "note": 63,
+      "partial": 3,
+      "frequency": 933.3809511662428,
+      "pressure_db": {
+        "current_two_tap": -18.458350755606006,
+        "common_path_removed_two_tap": -19.528936659381802,
+        "rayleigh_continuous": -18.430059437467072,
+        "retarded_discrete": -18.449362266960698,
+        "rayleigh_dense": -18.433679210629293
+      },
+      "dense_minus_base_db": -0.0036197731622220983,
+      "fir_minus_continuous_db": -0.019302829493625325
+    },
+    {
+      "note": 63,
+      "partial": 4,
+      "frequency": 1244.5079348883237,
+      "pressure_db": {
+        "current_two_tap": -29.101576952034982,
+        "common_path_removed_two_tap": -22.058260018813623,
+        "rayleigh_continuous": -25.112692624636665,
+        "retarded_discrete": -25.148595088303164,
+        "rayleigh_dense": -25.122073709403438
+      },
+      "dense_minus_base_db": -0.00938108476677509,
+      "fir_minus_continuous_db": -0.03590246366650101
+    },
+    {
+      "note": 63,
+      "partial": 5,
+      "frequency": 1555.6349186104046,
+      "pressure_db": {
+        "current_two_tap": -29.33529096582621,
+        "common_path_removed_two_tap": -23.760247807620996,
+        "rayleigh_continuous": -28.116676851442328,
+        "retarded_discrete": -28.168394781406732,
+        "rayleigh_dense": -28.12009333675853
+      },
+      "dense_minus_base_db": -0.003416485316198651,
+      "fir_minus_continuous_db": -0.051717929964401645
+    },
+    {
+      "note": 63,
+      "partial": 6,
+      "frequency": 1866.7619023324855,
+      "pressure_db": {
+        "current_two_tap": -21.356768372802843,
+        "common_path_removed_two_tap": -22.226342886838534,
+        "rayleigh_continuous": -24.10634508647385,
+        "retarded_discrete": -24.180422470778396,
+        "rayleigh_dense": -24.095725373373355
+      },
+      "dense_minus_base_db": 0.010619713100497393,
+      "fir_minus_continuous_db": -0.07407738430454716
+    },
+    {
+      "note": 66,
+      "partial": 1,
+      "frequency": 369.9944227116344,
+      "pressure_db": {
+        "current_two_tap": -15.370788382926325,
+        "common_path_removed_two_tap": -14.965005442679402,
+        "rayleigh_continuous": -14.859020916564706,
+        "retarded_discrete": -14.862043261009504,
+        "rayleigh_dense": -14.860214564199675
+      },
+      "dense_minus_base_db": -0.0011936476349693065,
+      "fir_minus_continuous_db": -0.0030223444447977196
+    },
+    {
+      "note": 66,
+      "partial": 2,
+      "frequency": 739.9888454232688,
+      "pressure_db": {
+        "current_two_tap": -19.881652488687653,
+        "common_path_removed_two_tap": -20.66831958449886,
+        "rayleigh_continuous": -19.211648337267835,
+        "retarded_discrete": -19.223895393279474,
+        "rayleigh_dense": -19.215413056795548
+      },
+      "dense_minus_base_db": -0.00376471952771547,
+      "fir_minus_continuous_db": -0.01224705601163777
+    },
+    {
+      "note": 66,
+      "partial": 3,
+      "frequency": 1109.9832681349033,
+      "pressure_db": {
+        "current_two_tap": -21.781256227726654,
+        "common_path_removed_two_tap": -21.883632926316665,
+        "rayleigh_continuous": -22.97759088070665,
+        "retarded_discrete": -23.004960780404172,
+        "rayleigh_dense": -22.980406958029285
+      },
+      "dense_minus_base_db": -0.0028160773226324196,
+      "fir_minus_continuous_db": -0.027369899697518848
+    },
+    {
+      "note": 66,
+      "partial": 4,
+      "frequency": 1479.9776908465376,
+      "pressure_db": {
+        "current_two_tap": -24.1912879219367,
+        "common_path_removed_two_tap": -23.37510953054672,
+        "rayleigh_continuous": -23.969404855447323,
+        "retarded_discrete": -24.01911263942359,
+        "rayleigh_dense": -23.965460037907196
+      },
+      "dense_minus_base_db": 0.003944817540125291,
+      "fir_minus_continuous_db": -0.04970778397626421
+    },
+    {
+      "note": 66,
+      "partial": 5,
+      "frequency": 1849.972113558172,
+      "pressure_db": {
+        "current_two_tap": -25.888081718065912,
+        "common_path_removed_two_tap": -22.604050942440928,
+        "rayleigh_continuous": -25.246534785797586,
+        "retarded_discrete": -25.316294171413034,
+        "rayleigh_dense": -25.245466414236937
+      },
+      "dense_minus_base_db": 0.0010683715606509547,
+      "fir_minus_continuous_db": -0.0697593856154454
+    },
+    {
+      "note": 66,
+      "partial": 6,
+      "frequency": 2219.9665362698065,
+      "pressure_db": {
+        "current_two_tap": -19.396319870568913,
+        "common_path_removed_two_tap": -20.812387043158488,
+        "rayleigh_continuous": -19.580702621006854,
+        "retarded_discrete": -19.699513911336325,
+        "rayleigh_dense": -19.580907210914592
+      },
+      "dense_minus_base_db": -0.00020458990773641541,
+      "fir_minus_continuous_db": -0.11881129032946966
+    },
+    {
+      "note": 69,
+      "partial": 1,
+      "frequency": 440.0,
+      "pressure_db": {
+        "current_two_tap": -24.333427696074672,
+        "common_path_removed_two_tap": -23.045166027341377,
+        "rayleigh_continuous": -23.02961238370481,
+        "retarded_discrete": -23.03397130153341,
+        "rayleigh_dense": -23.03240586968135
+      },
+      "dense_minus_base_db": -0.002793485976543075,
+      "fir_minus_continuous_db": -0.004358917828598326
+    },
+    {
+      "note": 69,
+      "partial": 2,
+      "frequency": 880.0,
+      "pressure_db": {
+        "current_two_tap": -19.751446150002995,
+        "common_path_removed_two_tap": -20.274354264397783,
+        "rayleigh_continuous": -17.398429083923162,
+        "retarded_discrete": -17.415452411277723,
+        "rayleigh_dense": -17.398502111954656
+      },
+      "dense_minus_base_db": -7.302803149642295e-05,
+      "fir_minus_continuous_db": -0.01702332735456188
+    },
+    {
+      "note": 69,
+      "partial": 3,
+      "frequency": 1320.0,
+      "pressure_db": {
+        "current_two_tap": -22.161724631156154,
+        "common_path_removed_two_tap": -22.41697851846385,
+        "rayleigh_continuous": -22.002588843114058,
+        "retarded_discrete": -22.04158771213667,
+        "rayleigh_dense": -22.00222258003082
+      },
+      "dense_minus_base_db": 0.0003662630832367024,
+      "fir_minus_continuous_db": -0.038998869022617816
+    },
+    {
+      "note": 69,
+      "partial": 4,
+      "frequency": 1760.0,
+      "pressure_db": {
+        "current_two_tap": -24.307694597812734,
+        "common_path_removed_two_tap": -20.38544725140389,
+        "rayleigh_continuous": -23.40083390740251,
+        "retarded_discrete": -23.46547511430409,
+        "rayleigh_dense": -23.40381079947134
+      },
+      "dense_minus_base_db": -0.0029768920688262915,
+      "fir_minus_continuous_db": -0.06464120690158137
+    },
+    {
+      "note": 69,
+      "partial": 5,
+      "frequency": 2200.0,
+      "pressure_db": {
+        "current_two_tap": -21.48551556218452,
+        "common_path_removed_two_tap": -20.315313171159243,
+        "rayleigh_continuous": -20.030939694589385,
+        "retarded_discrete": -20.137793032681873,
+        "rayleigh_dense": -20.033107937388536
+      },
+      "dense_minus_base_db": -0.0021682427991521107,
+      "fir_minus_continuous_db": -0.10685333809248837
+    },
+    {
+      "note": 69,
+      "partial": 6,
+      "frequency": 2640.0,
+      "pressure_db": {
+        "current_two_tap": -22.67778905272361,
+        "common_path_removed_two_tap": -25.594916212561102,
+        "rayleigh_continuous": -23.377262234808995,
+        "retarded_discrete": -23.51671076025547,
+        "rayleigh_dense": -23.36705555091787
+      },
+      "dense_minus_base_db": 0.010206683891125369,
+      "fir_minus_continuous_db": -0.13944852544647915
+    },
+    {
+      "note": 72,
+      "partial": 1,
+      "frequency": 523.2511306011972,
+      "pressure_db": {
+        "current_two_tap": -17.550575005154624,
+        "common_path_removed_two_tap": -16.7255549865586,
+        "rayleigh_continuous": -21.151734295434842,
+        "retarded_discrete": -21.157785248078266,
+        "rayleigh_dense": -21.15472998599916
+      },
+      "dense_minus_base_db": -0.002995690564316024,
+      "fir_minus_continuous_db": -0.006050952643423432
+    },
+    {
+      "note": 72,
+      "partial": 2,
+      "frequency": 1046.5022612023945,
+      "pressure_db": {
+        "current_two_tap": -22.253248785346482,
+        "common_path_removed_two_tap": -24.958254136324108,
+        "rayleigh_continuous": -21.89129545806349,
+        "retarded_discrete": -21.914750981400232,
+        "rayleigh_dense": -21.894511907253573
+      },
+      "dense_minus_base_db": -0.003216449190084813,
+      "fir_minus_continuous_db": -0.023455523336744655
+    },
+    {
+      "note": 72,
+      "partial": 3,
+      "frequency": 1569.7533918035917,
+      "pressure_db": {
+        "current_two_tap": -15.646301194370139,
+        "common_path_removed_two_tap": -15.618619109504579,
+        "rayleigh_continuous": -16.09157216680055,
+        "retarded_discrete": -16.145089659444288,
+        "rayleigh_dense": -16.10395571065618
+      },
+      "dense_minus_base_db": -0.012383543855631101,
+      "fir_minus_continuous_db": -0.05351749264373844
+    },
+    {
+      "note": 72,
+      "partial": 4,
+      "frequency": 2093.004522404789,
+      "pressure_db": {
+        "current_two_tap": -20.376097735302743,
+        "common_path_removed_two_tap": -17.36338007703383,
+        "rayleigh_continuous": -18.5288409404182,
+        "retarded_discrete": -18.619359004414367,
+        "rayleigh_dense": -18.527726635498595
+      },
+      "dense_minus_base_db": 0.001114304919604145,
+      "fir_minus_continuous_db": -0.09051806399616666
+    },
+    {
+      "note": 72,
+      "partial": 5,
+      "frequency": 2616.2556530059865,
+      "pressure_db": {
+        "current_two_tap": -24.194048939617424,
+        "common_path_removed_two_tap": -25.79266796887687,
+        "rayleigh_continuous": -24.445726604101715,
+        "retarded_discrete": -24.587280427056214,
+        "rayleigh_dense": -24.42802268931171
+      },
+      "dense_minus_base_db": 0.017703914790002623,
+      "fir_minus_continuous_db": -0.14155382295449995
+    },
+    {
+      "note": 72,
+      "partial": 6,
+      "frequency": 3139.5067836071835,
+      "pressure_db": {
+        "current_two_tap": -21.07567973984574,
+        "common_path_removed_two_tap": -18.22495028387103,
+        "rayleigh_continuous": -18.535365614519236,
+        "retarded_discrete": -18.750433398041842,
+        "rayleigh_dense": -18.522575824815597
+      },
+      "dense_minus_base_db": 0.01278978970363922,
+      "fir_minus_continuous_db": -0.21506778352260542
+    },
+    {
+      "note": 75,
+      "partial": 1,
+      "frequency": 622.2539674441618,
+      "pressure_db": {
+        "current_two_tap": -10.465913326261418,
+        "common_path_removed_two_tap": -9.786219409007535,
+        "rayleigh_continuous": -11.32280472857988,
+        "retarded_discrete": -11.331211487534599,
+        "rayleigh_dense": -11.322501575201924
+      },
+      "dense_minus_base_db": 0.00030315337795684054,
+      "fir_minus_continuous_db": -0.008406758954717325
+    },
+    {
+      "note": 75,
+      "partial": 2,
+      "frequency": 1244.5079348883237,
+      "pressure_db": {
+        "current_two_tap": -15.508133111205538,
+        "common_path_removed_two_tap": -16.874831845469583,
+        "rayleigh_continuous": -16.610429442445607,
+        "retarded_discrete": -16.645104397770712,
+        "rayleigh_dense": -16.61681313541277
+      },
+      "dense_minus_base_db": -0.00638369296715971,
+      "fir_minus_continuous_db": -0.03467495532510332
+    },
+    {
+      "note": 75,
+      "partial": 3,
+      "frequency": 1866.7619023324855,
+      "pressure_db": {
+        "current_two_tap": -24.593414592370706,
+        "common_path_removed_two_tap": -27.261906881147866,
+        "rayleigh_continuous": -27.296397948496427,
+        "retarded_discrete": -27.37111928380692,
+        "rayleigh_dense": -27.30073073925681
+      },
+      "dense_minus_base_db": -0.004332790760386492,
+      "fir_minus_continuous_db": -0.07472133531049249
+    },
+    {
+      "note": 75,
+      "partial": 4,
+      "frequency": 2489.0158697766474,
+      "pressure_db": {
+        "current_two_tap": -23.08648532780094,
+        "common_path_removed_two_tap": -18.857668914290667,
+        "rayleigh_continuous": -19.49285972723444,
+        "retarded_discrete": -19.630977959174114,
+        "rayleigh_dense": -19.491891657218307
+      },
+      "dense_minus_base_db": 0.0009680700161284813,
+      "fir_minus_continuous_db": -0.13811823193967776
+    },
+    {
+      "note": 75,
+      "partial": 5,
+      "frequency": 3111.269837220809,
+      "pressure_db": {
+        "current_two_tap": -24.40165411769174,
+        "common_path_removed_two_tap": -18.92166758782501,
+        "rayleigh_continuous": -19.861990336079717,
+        "retarded_discrete": -20.066526942465273,
+        "rayleigh_dense": -19.85792085813128
+      },
+      "dense_minus_base_db": 0.004069477948438605,
+      "fir_minus_continuous_db": -0.20453660638555524
+    },
+    {
+      "note": 75,
+      "partial": 6,
+      "frequency": 3733.523804664971,
+      "pressure_db": {
+        "current_two_tap": -22.460717608045794,
+        "common_path_removed_two_tap": -29.93070580531668,
+        "rayleigh_continuous": -29.76522646456278,
+        "retarded_discrete": -30.19643632887486,
+        "rayleigh_dense": -29.76487063464793
+      },
+      "dense_minus_base_db": 0.00035582991484571307,
+      "fir_minus_continuous_db": -0.43120986431208186
+    },
+    {
+      "note": 78,
+      "partial": 1,
+      "frequency": 739.9888454232688,
+      "pressure_db": {
+        "current_two_tap": -15.904571889809997,
+        "common_path_removed_two_tap": -14.888623046324652,
+        "rayleigh_continuous": -16.836555683417686,
+        "retarded_discrete": -16.848731875348,
+        "rayleigh_dense": -16.835720028425477
+      },
+      "dense_minus_base_db": 0.0008356549922061188,
+      "fir_minus_continuous_db": -0.012176191930315848
+    },
+    {
+      "note": 78,
+      "partial": 2,
+      "frequency": 1479.9776908465376,
+      "pressure_db": {
+        "current_two_tap": -25.108275627714324,
+        "common_path_removed_two_tap": -38.89061339783864,
+        "rayleigh_continuous": -28.482913079432038,
+        "retarded_discrete": -28.53637168009091,
+        "rayleigh_dense": -28.489692828466314
+      },
+      "dense_minus_base_db": -0.0067797490342753125,
+      "fir_minus_continuous_db": -0.053458600658871994
+    },
+    {
+      "note": 78,
+      "partial": 3,
+      "frequency": 2219.9665362698065,
+      "pressure_db": {
+        "current_two_tap": -18.42076872067265,
+        "common_path_removed_two_tap": -17.382787892912287,
+        "rayleigh_continuous": -18.392359716782934,
+        "retarded_discrete": -18.511166178684,
+        "rayleigh_dense": -18.394666073058236
+      },
+      "dense_minus_base_db": -0.0023063562753019478,
+      "fir_minus_continuous_db": -0.11880646190106758
+    },
+    {
+      "note": 78,
+      "partial": 4,
+      "frequency": 2959.955381693075,
+      "pressure_db": {
+        "current_two_tap": -23.767384636904126,
+        "common_path_removed_two_tap": -19.024301171578543,
+        "rayleigh_continuous": -19.39200967595522,
+        "retarded_discrete": -19.58036081165163,
+        "rayleigh_dense": -19.40216624541572
+      },
+      "dense_minus_base_db": -0.010156569460503573,
+      "fir_minus_continuous_db": -0.18835113569641082
+    },
+    {
+      "note": 78,
+      "partial": 5,
+      "frequency": 3699.944227116344,
+      "pressure_db": {
+        "current_two_tap": -17.72986593214398,
+        "common_path_removed_two_tap": -22.522341552024912,
+        "rayleigh_continuous": -21.26151933770518,
+        "retarded_discrete": -21.587776876550784,
+        "rayleigh_dense": -21.192191234173666
+      },
+      "dense_minus_base_db": 0.06932810353151,
+      "fir_minus_continuous_db": -0.3262575388456045
+    },
+    {
+      "note": 78,
+      "partial": 6,
+      "frequency": 4439.933072539613,
+      "pressure_db": {
+        "current_two_tap": -14.765204704955114,
+        "common_path_removed_two_tap": -17.748427304393,
+        "rayleigh_continuous": -17.425546125901064,
+        "retarded_discrete": -17.83655596569202,
+        "rayleigh_dense": -17.55782794250889
+      },
+      "dense_minus_base_db": -0.13228181660782545,
+      "fir_minus_continuous_db": -0.4110098397909578
+    },
+    {
+      "note": 81,
+      "partial": 1,
+      "frequency": 880.0,
+      "pressure_db": {
+        "current_two_tap": -19.77372379885524,
+        "common_path_removed_two_tap": -24.562665361622187,
+        "rayleigh_continuous": -25.530145032964732,
+        "retarded_discrete": -25.54722428597841,
+        "rayleigh_dense": -25.536585698069544
+      },
+      "dense_minus_base_db": -0.006440665104816324,
+      "fir_minus_continuous_db": -0.017079253013676163
+    },
+    {
+      "note": 81,
+      "partial": 2,
+      "frequency": 1760.0,
+      "pressure_db": {
+        "current_two_tap": -21.30117027255126,
+        "common_path_removed_two_tap": -22.69257227033187,
+        "rayleigh_continuous": -20.800539495195068,
+        "retarded_discrete": -20.86923676460612,
+        "rayleigh_dense": -20.810905340856042
+      },
+      "dense_minus_base_db": -0.010365845660973736,
+      "fir_minus_continuous_db": -0.06869726941104984
+    },
+    {
+      "note": 81,
+      "partial": 3,
+      "frequency": 2640.0,
+      "pressure_db": {
+        "current_two_tap": -23.222380369810015,
+        "common_path_removed_two_tap": -23.170677424907517,
+        "rayleigh_continuous": -24.60244755307994,
+        "retarded_discrete": -24.74901420733179,
+        "rayleigh_dense": -24.58529087936151
+      },
+      "dense_minus_base_db": 0.017156673718438403,
+      "fir_minus_continuous_db": -0.146566654251846
+    },
+    {
+      "note": 81,
+      "partial": 4,
+      "frequency": 3520.0,
+      "pressure_db": {
+        "current_two_tap": -25.61757687226556,
+        "common_path_removed_two_tap": -26.92638031486364,
+        "rayleigh_continuous": -25.79995696935336,
+        "retarded_discrete": -26.040105404971783,
+        "rayleigh_dense": -25.780597321160762
+      },
+      "dense_minus_base_db": 0.019359648192596057,
+      "fir_minus_continuous_db": -0.24014843561842436
+    },
+    {
+      "note": 81,
+      "partial": 5,
+      "frequency": 4400.0,
+      "pressure_db": {
+        "current_two_tap": -16.72286214673771,
+        "common_path_removed_two_tap": -20.49319480023229,
+        "rayleigh_continuous": -20.842810663923764,
+        "retarded_discrete": -21.231311486301543,
+        "rayleigh_dense": -20.950088512139985
+      },
+      "dense_minus_base_db": -0.10727784821621804,
+      "fir_minus_continuous_db": -0.38850082237777983
+    },
+    {
+      "note": 81,
+      "partial": 6,
+      "frequency": 5280.0,
+      "pressure_db": {
+        "current_two_tap": -21.947866487920365,
+        "common_path_removed_two_tap": -21.37851952659691,
+        "rayleigh_continuous": -24.162823468006273,
+        "retarded_discrete": -24.739258857619735,
+        "rayleigh_dense": -24.197368788721572
+      },
+      "dense_minus_base_db": -0.03454532071529757,
+      "fir_minus_continuous_db": -0.5764353896134622
+    },
+    {
+      "note": 84,
+      "partial": 1,
+      "frequency": 1046.5022612023945,
+      "pressure_db": {
+        "current_two_tap": -20.270443689691504,
+        "common_path_removed_two_tap": -26.366002638151876,
+        "rayleigh_continuous": -22.886985577144564,
+        "retarded_discrete": -22.910648804256702,
+        "rayleigh_dense": -22.89852178172933
+      },
+      "dense_minus_base_db": -0.01153620458476448,
+      "fir_minus_continuous_db": -0.02366322711213346
+    },
+    {
+      "note": 84,
+      "partial": 2,
+      "frequency": 2093.004522404789,
+      "pressure_db": {
+        "current_two_tap": -25.166038800645477,
+        "common_path_removed_two_tap": -23.552954928064214,
+        "rayleigh_continuous": -22.54431791555447,
+        "retarded_discrete": -22.639841402751543,
+        "rayleigh_dense": -22.566239754326283
+      },
+      "dense_minus_base_db": -0.021921838771813168,
+      "fir_minus_continuous_db": -0.09552348719707364
+    },
+    {
+      "note": 84,
+      "partial": 3,
+      "frequency": 3139.5067836071835,
+      "pressure_db": {
+        "current_two_tap": -16.243180275132477,
+        "common_path_removed_two_tap": -17.47070601722658,
+        "rayleigh_continuous": -18.75653488567159,
+        "retarded_discrete": -18.977166817697118,
+        "rayleigh_dense": -18.712822792429463
+      },
+      "dense_minus_base_db": 0.04371209324212501,
+      "fir_minus_continuous_db": -0.2206319320255282
+    },
+    {
+      "note": 84,
+      "partial": 4,
+      "frequency": 4186.009044809578,
+      "pressure_db": {
+        "current_two_tap": -13.617778063153267,
+        "common_path_removed_two_tap": -14.157327984549744,
+        "rayleigh_continuous": -14.87394444968761,
+        "retarded_discrete": -15.296818074593032,
+        "rayleigh_dense": -14.882716465110144
+      },
+      "dense_minus_base_db": -0.008772015422533048,
+      "fir_minus_continuous_db": -0.42287362490542185
+    },
+    {
+      "note": 84,
+      "partial": 5,
+      "frequency": 5232.511306011973,
+      "pressure_db": {
+        "current_two_tap": -17.35602435894647,
+        "common_path_removed_two_tap": -13.58466214677415,
+        "rayleigh_continuous": -15.083896230453304,
+        "retarded_discrete": -15.688691797513377,
+        "rayleigh_dense": -15.115880520728126
+      },
+      "dense_minus_base_db": -0.03198429027482094,
+      "fir_minus_continuous_db": -0.6047955670600731
+    },
+    {
+      "note": 84,
+      "partial": 6,
+      "frequency": 6279.013567214367,
+      "pressure_db": {
+        "current_two_tap": -23.516814945028962,
+        "common_path_removed_two_tap": -29.477936001557246,
+        "rayleigh_continuous": -41.59923175724349,
+        "retarded_discrete": -42.56342325045967,
+        "rayleigh_dense": -41.1177348645488
+      },
+      "dense_minus_base_db": 0.48149689269469154,
+      "fir_minus_continuous_db": -0.9641914932161781
+    },
+    {
+      "note": 87,
+      "partial": 1,
+      "frequency": 1244.5079348883237,
+      "pressure_db": {
+        "current_two_tap": -18.00487539125087,
+        "common_path_removed_two_tap": -19.05949846582064,
+        "rayleigh_continuous": -17.974122094814987,
+        "retarded_discrete": -18.00842527520227,
+        "rayleigh_dense": -17.985644673406025
+      },
+      "dense_minus_base_db": -0.01152257859103575,
+      "fir_minus_continuous_db": -0.03430318038728064
+    },
+    {
+      "note": 87,
+      "partial": 2,
+      "frequency": 2489.0158697766474,
+      "pressure_db": {
+        "current_two_tap": -26.542597566074114,
+        "common_path_removed_two_tap": -22.2323641092702,
+        "rayleigh_continuous": -22.33229037632224,
+        "retarded_discrete": -22.466098974372613,
+        "rayleigh_dense": -22.323356276732724
+      },
+      "dense_minus_base_db": 0.008934099589513075,
+      "fir_minus_continuous_db": -0.1338085980503733
+    },
+    {
+      "note": 87,
+      "partial": 3,
+      "frequency": 3733.523804664971,
+      "pressure_db": {
+        "current_two_tap": -18.322552942381094,
+        "common_path_removed_two_tap": -20.673630416025045,
+        "rayleigh_continuous": -19.898145285497122,
+        "retarded_discrete": -20.25297184917123,
+        "rayleigh_dense": -19.881060301833454
+      },
+      "dense_minus_base_db": 0.017084983663666575,
+      "fir_minus_continuous_db": -0.3548265636741067
+    },
+    {
+      "note": 87,
+      "partial": 4,
+      "frequency": 4978.031739553295,
+      "pressure_db": {
+        "current_two_tap": -20.19103666549669,
+        "common_path_removed_two_tap": -22.297226544475286,
+        "rayleigh_continuous": -25.16765664883604,
+        "retarded_discrete": -25.571244628548442,
+        "rayleigh_dense": -25.310465263895544
+      },
+      "dense_minus_base_db": -0.142808615059501,
+      "fir_minus_continuous_db": -0.40358797971240057
+    },
+    {
+      "note": 87,
+      "partial": 5,
+      "frequency": 6222.539674441618,
+      "pressure_db": {
+        "current_two_tap": -23.847079632656474,
+        "common_path_removed_two_tap": -28.214972977605267,
+        "rayleigh_continuous": -31.676766679372133,
+        "retarded_discrete": -32.5577769238952,
+        "rayleigh_dense": -31.49064996567676
+      },
+      "dense_minus_base_db": 0.1861167136953708,
+      "fir_minus_continuous_db": -0.8810102445230656
+    },
+    {
+      "note": 87,
+      "partial": 6,
+      "frequency": 7467.047609329942,
+      "pressure_db": {
+        "current_two_tap": -19.059135379412258,
+        "common_path_removed_two_tap": -21.564837206455604,
+        "rayleigh_continuous": -24.826688071191995,
+        "retarded_discrete": -25.910969760511563,
+        "rayleigh_dense": -24.74930019379803
+      },
+      "dense_minus_base_db": 0.07738787739395984,
+      "fir_minus_continuous_db": -1.0842816893195697
+    },
+    {
+      "note": 90,
+      "partial": 1,
+      "frequency": 1479.9776908465376,
+      "pressure_db": {
+        "current_two_tap": -22.309873618770414,
+        "common_path_removed_two_tap": -22.479357970510794,
+        "rayleigh_continuous": -24.886889270480573,
+        "retarded_discrete": -24.933562268910524,
+        "rayleigh_dense": -24.878061731718482
+      },
+      "dense_minus_base_db": 0.008827538762092142,
+      "fir_minus_continuous_db": -0.04667299842994906
+    },
+    {
+      "note": 90,
+      "partial": 2,
+      "frequency": 2959.955381693075,
+      "pressure_db": {
+        "current_two_tap": -18.98516968780487,
+        "common_path_removed_two_tap": -21.061253517914547,
+        "rayleigh_continuous": -20.838868019579067,
+        "retarded_discrete": -21.01618360376296,
+        "rayleigh_dense": -20.878710372560523
+      },
+      "dense_minus_base_db": -0.03984235298145347,
+      "fir_minus_continuous_db": -0.17731558418389093
+    },
+    {
+      "note": 90,
+      "partial": 3,
+      "frequency": 4439.933072539613,
+      "pressure_db": {
+        "current_two_tap": -16.02944935707837,
+        "common_path_removed_two_tap": -17.432472785293736,
+        "rayleigh_continuous": -16.432282767597105,
+        "retarded_discrete": -16.842509009729255,
+        "rayleigh_dense": -16.556184383129086
+      },
+      "dense_minus_base_db": -0.12390161553198131,
+      "fir_minus_continuous_db": -0.41022624213215114
+    },
+    {
+      "note": 90,
+      "partial": 4,
+      "frequency": 5919.91076338615,
+      "pressure_db": {
+        "current_two_tap": -21.90609876894262,
+        "common_path_removed_two_tap": -20.811053782129466,
+        "rayleigh_continuous": -22.01731798638432,
+        "retarded_discrete": -22.728739620677274,
+        "rayleigh_dense": -21.922076786898685
+      },
+      "dense_minus_base_db": 0.09524119948563667,
+      "fir_minus_continuous_db": -0.7114216342929504
+    },
+    {
+      "note": 90,
+      "partial": 5,
+      "frequency": 7399.888454232688,
+      "pressure_db": {
+        "current_two_tap": -15.399052679107026,
+        "common_path_removed_two_tap": -18.843264433446304,
+        "rayleigh_continuous": -19.441483234874323,
+        "retarded_discrete": -20.743075201407102,
+        "rayleigh_dense": -19.49343195411807
+      },
+      "dense_minus_base_db": -0.05194871924374625,
+      "fir_minus_continuous_db": -1.301591966532777
+    },
+    {
+      "note": 90,
+      "partial": 6,
+      "frequency": 8879.866145079226,
+      "pressure_db": {
+        "current_two_tap": -25.08042364358102,
+        "common_path_removed_two_tap": -29.496253286882137,
+        "rayleigh_continuous": -40.48597117709043,
+        "retarded_discrete": -44.78441028002163,
+        "rayleigh_dense": -40.397953907157074
+      },
+      "dense_minus_base_db": 0.08801726993335228,
+      "fir_minus_continuous_db": -4.298439102931211
+    },
+    {
+      "note": 93,
+      "partial": 1,
+      "frequency": 1760.0,
+      "pressure_db": {
+        "current_two_tap": -17.055314329248738,
+        "common_path_removed_two_tap": -19.04626403802118,
+        "rayleigh_continuous": -18.51036752907871,
+        "retarded_discrete": -18.580329389654604,
+        "rayleigh_dense": -18.517437854234732
+      },
+      "dense_minus_base_db": -0.0070703251560223085,
+      "fir_minus_continuous_db": -0.06996186057589489
+    },
+    {
+      "note": 93,
+      "partial": 2,
+      "frequency": 3520.0,
+      "pressure_db": {
+        "current_two_tap": -26.187915084899043,
+        "common_path_removed_two_tap": -24.589659435953976,
+        "rayleigh_continuous": -22.965525867346447,
+        "retarded_discrete": -23.241002589569337,
+        "rayleigh_dense": -22.986497646939767
+      },
+      "dense_minus_base_db": -0.020971779593318623,
+      "fir_minus_continuous_db": -0.2754767222228919
+    },
+    {
+      "note": 93,
+      "partial": 3,
+      "frequency": 5280.0,
+      "pressure_db": {
+        "current_two_tap": -18.043435627477102,
+        "common_path_removed_two_tap": -24.966160245467073,
+        "rayleigh_continuous": -21.418278751199423,
+        "retarded_discrete": -22.15967621144156,
+        "rayleigh_dense": -21.43313937611721
+      },
+      "dense_minus_base_db": -0.014860624917785545,
+      "fir_minus_continuous_db": -0.7413974602421382
+    },
+    {
+      "note": 93,
+      "partial": 4,
+      "frequency": 7040.0,
+      "pressure_db": {
+        "current_two_tap": -22.211366911720177,
+        "common_path_removed_two_tap": -23.7441961044772,
+        "rayleigh_continuous": -25.59106294282271,
+        "retarded_discrete": -26.705433953799236,
+        "rayleigh_dense": -25.59246997820058
+      },
+      "dense_minus_base_db": -0.0014070353778707467,
+      "fir_minus_continuous_db": -1.1143710109765301
+    },
+    {
+      "note": 93,
+      "partial": 5,
+      "frequency": 8800.0,
+      "pressure_db": {
+        "current_two_tap": -27.587054287437837,
+        "common_path_removed_two_tap": -26.4694131273479,
+        "rayleigh_continuous": -43.74774324740065,
+        "retarded_discrete": -45.95539864815187,
+        "rayleigh_dense": -42.95500685158272
+      },
+      "dense_minus_base_db": 0.7927363958179311,
+      "fir_minus_continuous_db": -2.2076554007512277
+    },
+    {
+      "note": 93,
+      "partial": 6,
+      "frequency": 10560.0,
+      "pressure_db": {
+        "current_two_tap": -26.84336902507303,
+        "common_path_removed_two_tap": -28.765847763373852,
+        "rayleigh_continuous": -50.67816815884208,
+        "retarded_discrete": -50.95698280251122,
+        "rayleigh_dense": -52.0304854081687
+      },
+      "dense_minus_base_db": -1.3523172493266247,
+      "fir_minus_continuous_db": -0.27881464366915026
+    },
+    {
+      "note": 96,
+      "partial": 1,
+      "frequency": 2093.004522404789,
+      "pressure_db": {
+        "current_two_tap": -19.728842921387873,
+        "common_path_removed_two_tap": -22.649079348607582,
+        "rayleigh_continuous": -21.922397960866647,
+        "retarded_discrete": -22.00775160655546,
+        "rayleigh_dense": -21.94388471928957
+      },
+      "dense_minus_base_db": -0.021486758422926168,
+      "fir_minus_continuous_db": -0.08535364568881276
+    },
+    {
+      "note": 96,
+      "partial": 2,
+      "frequency": 4186.009044809578,
+      "pressure_db": {
+        "current_two_tap": -13.436602244034273,
+        "common_path_removed_two_tap": -14.175666066513433,
+        "rayleigh_continuous": -14.81204550577208,
+        "retarded_discrete": -15.23228968951668,
+        "rayleigh_dense": -14.837843312088772
+      },
+      "dense_minus_base_db": -0.025797806316690174,
+      "fir_minus_continuous_db": -0.4202441837445991
+    },
+    {
+      "note": 96,
+      "partial": 3,
+      "frequency": 6279.013567214367,
+      "pressure_db": {
+        "current_two_tap": -19.49974942088861,
+        "common_path_removed_two_tap": -23.8954283621864,
+        "rayleigh_continuous": -24.901419766049457,
+        "retarded_discrete": -25.852376559854626,
+        "rayleigh_dense": -24.935153379779436
+      },
+      "dense_minus_base_db": -0.03373361372998125,
+      "fir_minus_continuous_db": -0.9509567938051713
+    },
+    {
+      "note": 96,
+      "partial": 4,
+      "frequency": 8372.018089619156,
+      "pressure_db": {
+        "current_two_tap": -23.803692270644415,
+        "common_path_removed_two_tap": -26.49430041884354,
+        "rayleigh_continuous": -25.003596135993774,
+        "retarded_discrete": -27.346952434770007,
+        "rayleigh_dense": -24.985452837711758
+      },
+      "dense_minus_base_db": 0.018143298282016846,
+      "fir_minus_continuous_db": -2.3433562987762278
+    },
+    {
+      "note": 96,
+      "partial": 5,
+      "frequency": 10465.022612023946,
+      "pressure_db": {
+        "current_two_tap": -26.8284944027902,
+        "common_path_removed_two_tap": -27.242278989262875,
+        "rayleigh_continuous": -42.86774119885272,
+        "retarded_discrete": -45.711718756060506,
+        "rayleigh_dense": -43.03065436899605
+      },
+      "dense_minus_base_db": -0.16291317014333784,
+      "fir_minus_continuous_db": -2.8439775572077886
+    },
+    {
+      "note": 96,
+      "partial": 6,
+      "frequency": 12558.027134428734,
+      "pressure_db": {
+        "current_two_tap": -28.09138094868576,
+        "common_path_removed_two_tap": -29.01109939891819,
+        "rayleigh_continuous": -46.753161404267836,
+        "retarded_discrete": -47.85522982563801,
+        "rayleigh_dense": -46.46789000137499
+      },
+      "dense_minus_base_db": 0.28527140289284836,
+      "fir_minus_continuous_db": -1.1020684213701728
+    }
+  ],
+  "ratios": [
+    {
+      "note": 36,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 2.9186325700692635,
+        "common_path_removed_two_tap": 3.0590012014204326,
+        "rayleigh_continuous": 2.3614766443070963,
+        "retarded_discrete": 2.3611918467515842,
+        "rayleigh_dense": 2.3612002343041816
+      }
+    },
+    {
+      "note": 39,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 2.2198501146727434,
+        "common_path_removed_two_tap": 2.391652310315015,
+        "rayleigh_continuous": 1.6934751645197395,
+        "retarded_discrete": 1.693073262819924,
+        "rayleigh_dense": 1.693067506277238
+      }
+    },
+    {
+      "note": 42,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -14.32945079901198,
+        "common_path_removed_two_tap": -13.773135978148943,
+        "rayleigh_continuous": -16.092613211301046,
+        "retarded_discrete": -16.09318100956248,
+        "rayleigh_dense": -16.093545742055532
+      }
+    },
+    {
+      "note": 45,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 2.1624512031620604,
+        "common_path_removed_two_tap": 2.2589979878167767,
+        "rayleigh_continuous": 4.741046327040337,
+        "retarded_discrete": 4.740248215554555,
+        "rayleigh_dense": 4.740676201383021
+      }
+    },
+    {
+      "note": 48,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 2.642527459125766,
+        "common_path_removed_two_tap": 2.8678595661738484,
+        "rayleigh_continuous": 4.515864558209577,
+        "retarded_discrete": 4.514731267743249,
+        "rayleigh_dense": 4.515510472904943
+      }
+    },
+    {
+      "note": 51,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -12.917706056841425,
+        "common_path_removed_two_tap": -10.102944033888491,
+        "rayleigh_continuous": -10.359908218802381,
+        "retarded_discrete": -10.361589200154008,
+        "rayleigh_dense": -10.361740424849447
+      }
+    },
+    {
+      "note": 54,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 0.21108008003762535,
+        "common_path_removed_two_tap": 0.7511313893828557,
+        "rayleigh_continuous": -0.8216242393374671,
+        "retarded_discrete": -0.8239351913982311,
+        "rayleigh_dense": -0.8224436074191246
+      }
+    },
+    {
+      "note": 57,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 10.540249678031923,
+        "common_path_removed_two_tap": 8.978041973393559,
+        "rayleigh_continuous": 3.8797407958586767,
+        "retarded_discrete": 3.8765854772764214,
+        "rayleigh_dense": 3.878918910497262
+      }
+    },
+    {
+      "note": 60,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -0.4736520952741685,
+        "common_path_removed_two_tap": -1.6807206401371744,
+        "rayleigh_continuous": -4.804203010156762,
+        "retarded_discrete": -4.808729825358537,
+        "rayleigh_dense": -4.803993662321414
+      }
+    },
+    {
+      "note": 63,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 8.57657540160002,
+        "common_path_removed_two_tap": 7.355916815038963,
+        "rayleigh_continuous": 11.798375273864085,
+        "retarded_discrete": 11.791856370271727,
+        "rayleigh_dense": 11.800340559400833
+      }
+    },
+    {
+      "note": 66,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -4.510864105761328,
+        "common_path_removed_two_tap": -5.703314141819458,
+        "rayleigh_continuous": -4.352627420703129,
+        "retarded_discrete": -4.36185213226997,
+        "rayleigh_dense": -4.355198492595873
+      }
+    },
+    {
+      "note": 69,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 4.5819815460716775,
+        "common_path_removed_two_tap": 2.7708117629435947,
+        "rayleigh_continuous": 5.631183299781647,
+        "retarded_discrete": 5.618518890255686,
+        "rayleigh_dense": 5.633903757726696
+      }
+    },
+    {
+      "note": 72,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -4.7026737801918586,
+        "common_path_removed_two_tap": -8.232699149765509,
+        "rayleigh_continuous": -0.7395611626286467,
+        "retarded_discrete": -0.7569657333219659,
+        "rayleigh_dense": -0.7397819212544121
+      }
+    },
+    {
+      "note": 75,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -5.04221978494412,
+        "common_path_removed_two_tap": -7.088612436462048,
+        "rayleigh_continuous": -5.287624713865727,
+        "retarded_discrete": -5.313892910236113,
+        "rayleigh_dense": -5.294311560210845
+      }
+    },
+    {
+      "note": 78,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -9.203703737904327,
+        "common_path_removed_two_tap": -24.00199035151399,
+        "rayleigh_continuous": -11.646357396014352,
+        "retarded_discrete": -11.687639804742908,
+        "rayleigh_dense": -11.653972800040837
+      }
+    },
+    {
+      "note": 81,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -1.5274464736960205,
+        "common_path_removed_two_tap": 1.8700930912903182,
+        "rayleigh_continuous": 4.729605537769665,
+        "retarded_discrete": 4.6779875213722875,
+        "rayleigh_dense": 4.725680357213502
+      }
+    },
+    {
+      "note": 84,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -4.895595110953973,
+        "common_path_removed_two_tap": 2.8130477100876625,
+        "rayleigh_continuous": 0.3426676615900952,
+        "retarded_discrete": 0.27080740150515936,
+        "rayleigh_dense": 0.33228202740304624
+      }
+    },
+    {
+      "note": 87,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -8.537722174823244,
+        "common_path_removed_two_tap": -3.172865643449562,
+        "rayleigh_continuous": -4.358168281507254,
+        "retarded_discrete": -4.457673699170343,
+        "rayleigh_dense": -4.337711603326699
+      }
+    },
+    {
+      "note": 90,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 3.324703930965544,
+        "common_path_removed_two_tap": 1.4181044525962463,
+        "rayleigh_continuous": 4.048021250901506,
+        "retarded_discrete": 3.917378665147563,
+        "rayleigh_dense": 3.9993513591579593
+      }
+    },
+    {
+      "note": 93,
+      "H2_H1_transfer_db": {
+        "current_two_tap": -9.132600755650305,
+        "common_path_removed_two_tap": -5.543395397932795,
+        "rayleigh_continuous": -4.455158338267736,
+        "retarded_discrete": -4.660673199914733,
+        "rayleigh_dense": -4.4690597927050355
+      }
+    },
+    {
+      "note": 96,
+      "H2_H1_transfer_db": {
+        "current_two_tap": 6.2922406773536,
+        "common_path_removed_two_tap": 8.47341328209415,
+        "rayleigh_continuous": 7.110352455094567,
+        "retarded_discrete": 6.775461917038779,
+        "rayleigh_dense": 7.106041407200799
+      }
+    }
+  ],
+  "caveats": [
+    "Unit sinusoidal force, no strings, envelopes, rim, auxiliary routes or room.",
+    "Common minimum-path/c removed identically for every mode in the causal observer.",
+    "Steady-state transfer ratios are not measured note attack ratios.",
+    "Positive mechanical masses and drive projections are held fixed."
+  ]
+}

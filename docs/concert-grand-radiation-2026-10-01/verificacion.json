@@ -1,0 +1,37 @@
+{
+  "verified_wavs": {
+    "Actual-intensidades.wav": {
+      "seconds": 36.0,
+      "peak": 0.357313871383667
+    },
+    "C6-fuerte-actual.wav": {
+      "seconds": 4.0,
+      "peak": 0.2558119297027588
+    },
+    "C6-fuerte-prueba-causal.wav": {
+      "seconds": 4.0,
+      "peak": 0.14699304103851318
+    },
+    "C6-fuerte-Steinway.wav": {
+      "seconds": 4.0,
+      "peak": 0.37844085693359375
+    },
+    "Prueba-causal-intensidades.wav": {
+      "seconds": 36.0,
+      "peak": 0.4274888038635254
+    },
+    "Steinway-intensidades.wav": {
+      "seconds": 36.0,
+      "peak": 0.5404541492462158
+    }
+  },
+  "baseline_bit_exact_to_previous_audit": {
+    "72:60": true,
+    "72:124": true,
+    "84:60": true,
+    "84:124": true,
+    "90:60": true,
+    "90:124": true
+  },
+  "retarded_observer_tests_passed": 2
+}

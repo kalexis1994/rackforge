@@ -1,0 +1,6 @@
+{
+  "A-actual": {},
+  "Unisono-sin-perdida-extra": {"tuning":{"UNISON_EXTRA_LOSS":0}},
+  "Puente-mitad": {"tuning":{"PHYSICAL_BRIDGE_MOBILITY":0.00025,"PHYSICAL_PRESSURE_SCALE":6}},
+  "Puente-mitad-unisono": {"tuning":{"PHYSICAL_BRIDGE_MOBILITY":0.00025,"PHYSICAL_PRESSURE_SCALE":6,"UNISON_EXTRA_LOSS":0}}
+}

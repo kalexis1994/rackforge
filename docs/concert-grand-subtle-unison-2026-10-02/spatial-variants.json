@@ -1,0 +1,4 @@
+{
+ "G-apoyos-separados": {"UNISON_WIDTH": 0.10, "SPATIAL_UNISON_GAP_M": 0.008},
+ "H-apoyos-y-trio-persistente": {"UNISON_WIDTH": 0.10, "SPATIAL_UNISON_GAP_M": 0.008, "UNISON_EXTRA_LOSS": 0.5}
+}

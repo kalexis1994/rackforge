@@ -1,6 +1,21 @@
 //! Passive modal velocity admittance, discretized by the trapezoidal rule.
 //! Radiation is a separate observation of these same mechanical modes.
-use crate::math::{expf, roundf, sincosf};
+use crate::math::{expf, powf, roundf, sincosf};
+
+/// Positive, smooth modal-mass calibration across plate frequency regimes.
+/// The same resulting mass must be used for admittance and radiation. This
+/// reduced calibration does not identify rib geometry from microphone audio.
+pub(crate) fn regional_mobility(frequency: f32, mean: f32, bass: f32, treble: f32) -> f32 {
+    if bass == 1.0 && treble == 1.0 {
+        return mean; // Preserve the accepted calibration bit for bit.
+    }
+    let low = frequency.max(0.0) / 200.0;
+    let high = frequency.max(0.0) / 1100.0;
+    let low4 = low * low * low * low;
+    let high4 = high * high * high * high;
+    mean * powf(bass.clamp(0.125, 8.0), 1.0 / (1.0 + low4))
+        * powf(treble.clamp(0.125, 8.0), high4 / (1.0 + high4))
+}
 
 pub(crate) fn warped_omega(frequency: f32, rate: f32) -> f32 {
     let (s, c) = sincosf(core::f32::consts::PI * frequency.clamp(0.01, 0.45 * rate) / rate);
@@ -115,6 +130,32 @@ impl Coefficients {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regional_modal_masses_preserve_loading_and_passivity() {
+        for frequency in [50.0, 200.0, 500.0, 1100.0, 8000.0] {
+            let mean = 0.0005;
+            assert_eq!(regional_mobility(frequency, mean, 1.0, 1.0), mean);
+            for (bass, treble) in [(0.125, 8.0), (2.0, 4.0), (8.0, 0.125)] {
+                let mobility = regional_mobility(frequency, mean, bass, treble);
+                assert!(mobility.is_finite() && mobility > 0.0);
+                let mass = 1.0 / (4.0 * 20.0 * mobility);
+                let c = Coefficients::new(frequency, 0.04, mass, 44100.0);
+                // Changing a modal mass must scale both the time-domain force
+                // response and the collocated load by precisely that factor.
+                let original = Coefficients::new(frequency, 0.04, 25.0, 44100.0);
+                let ratio = 25.0 / mass;
+                assert!((c.force / original.force - ratio).abs() < 1e-5 * ratio);
+                for f in [70.0, 370.0, 2000.0, 9000.0] {
+                    let omega = warped_omega(f, 44100.0);
+                    let y = c.mobility.conductance(omega, 0.7);
+                    let old = original.mobility.conductance(omega, 0.7);
+                    assert!(y.is_finite() && y >= 0.0);
+                    assert!((y / old - ratio).abs() < 1e-5 * ratio);
+                }
+            }
+        }
+    }
 
     #[test]
     fn reactive_mobility_matches_velocity_phase() {

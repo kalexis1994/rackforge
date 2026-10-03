@@ -32,6 +32,12 @@ mod mechanical;
 mod midrange;
 mod radiation;
 mod spatial_unison;
+#[cfg(test)]
+mod polarization;
+#[cfg(test)]
+mod ritz_board;
+#[cfg(test)]
+mod nonlinear_wires;
 mod trio_contact;
 mod unison;
 
@@ -728,7 +734,7 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
         "DUPLEX_LEVEL",
         &DUPLEX_LEVEL,
-        "Level of the duplex segments' ring at 2.015 and 4.03 times the pitch.",
+        "Research-only direct duplex ring at 2.015 and 4.03 times the pitch; disabled in factory voicing.",
     ),
     (
         "UNISON_BEAT_CAP_HZ",
@@ -1017,6 +1023,8 @@ pub fn apply_tuning(text: &str) -> (usize, Vec<(usize, f32)>, Vec<String>) {
             "COHERENT_UNISON" => Some(&COHERENT_UNISON),
             "RESTRIKE_PHASE_PRESERVE" => Some(&RESTRIKE_PHASE_PRESERVE),
             "CAUSAL_RADIATION_FIR" => Some(&CAUSAL_RADIATION_FIR),
+            "BOARD_ROOM_GEOMETRY" => Some(&BOARD_ROOM_GEOMETRY),
+            "SHARED_RADIATION_FIR" => Some(&SHARED_RADIATION_FIR),
             "FELT_RATE_MODEL" => Some(&FELT_RATE_MODEL),
             "AIR_PROPAGATION" => Some(&AIR_PROPAGATION),
             _ => None,
@@ -1087,6 +1095,46 @@ pub fn apply_tuning(text: &str) -> (usize, Vec<(usize, f32)>, Vec<String>) {
                     "line {}: spatial pin gap outside 0..0.012 m",
                     number + 1
                 ));
+            }
+            continue;
+        }
+        #[cfg(test)]
+        if name == "PER_STRING_POLARIZATIONS" {
+            if value == 0.0 || value == 1.0 || value == 2.0 {
+                PER_STRING_POLARIZATIONS.set(value);
+                set += 1;
+            } else {
+                complaints.push(format!("line {}: polarization mode must be 0, 1 or 2", number + 1));
+            }
+            continue;
+        }
+        #[cfg(test)]
+        if name == "TENSION_REFERENCE" {
+            if value == 0.0 || value == 1.0 {
+                TENSION_REFERENCE.set(value);
+                set += 1;
+            } else {
+                complaints.push(format!("line {}: tension reference must be 0 or 1", number + 1));
+            }
+            continue;
+        }
+        #[cfg(test)]
+        if name == "NONLINEAR_WIRE_GEOMETRY" {
+            if value == 0.0 || value == 1.0 || value == 2.0 || value == 3.0 {
+                NONLINEAR_WIRE_GEOMETRY.set(value);
+                set += 1;
+            } else {
+                complaints.push(format!("line {}: wire geometry mode must be 0, 1, 2 or 3", number + 1));
+            }
+            continue;
+        }
+        #[cfg(test)]
+        if name == "DIRECTIONAL_BRIDGE_HEIGHT_M" {
+            if (0.0..=0.06).contains(&value) {
+                DIRECTIONAL_BRIDGE_HEIGHT_M.set(value);
+                set += 1;
+            } else {
+                complaints.push(format!("line {}: diagnostic bridge height outside 0..0.06 m", number + 1));
             }
             continue;
         }
@@ -1285,6 +1333,23 @@ pub fn apply_tuning(text: &str) -> (usize, Vec<(usize, f32)>, Vec<String>) {
             }
             continue;
         }
+        if name == "PHYSICAL_BRIDGE_BASS_RATIO" || name == "PHYSICAL_BRIDGE_TREBLE_RATIO" {
+            let knob = if name == "PHYSICAL_BRIDGE_BASS_RATIO" {
+                &PHYSICAL_BRIDGE_BASS_RATIO
+            } else {
+                &PHYSICAL_BRIDGE_TREBLE_RATIO
+            };
+            if (0.125..=8.0).contains(&value) {
+                knob.set(value);
+                set += 1;
+            } else {
+                complaints.push(format!(
+                    "line {}: regional mobility ratio outside 0.125..8",
+                    number + 1
+                ));
+            }
+            continue;
+        }
         // The measured velocity curve is a compiled part of the voicing;
         // the lab can still disable or vary it for A/B renders.
         if name == "MIDRANGE_BALANCE" {
@@ -1348,6 +1413,15 @@ pub fn dump_tuning() -> String {
     out.push_str(&format!(
         "PHYSICAL_PRESSURE_SCALE = {}\n",
         PHYSICAL_PRESSURE_SCALE.get()
+    ));
+    out.push_str(&format!(
+        "PHYSICAL_BRIDGE_BASS_RATIO = {}\nPHYSICAL_BRIDGE_TREBLE_RATIO = {}\n",
+        PHYSICAL_BRIDGE_BASS_RATIO.get(),
+        PHYSICAL_BRIDGE_TREBLE_RATIO.get()
+    ));
+    out.push_str(&format!(
+        "BOARD_ROOM_GEOMETRY = {}\nCAUSAL_RADIATION_FIR = {}\nSHARED_RADIATION_FIR = {}\n",
+        BOARD_ROOM_GEOMETRY.get(), CAUSAL_RADIATION_FIR.get(), SHARED_RADIATION_FIR.get()
     ));
     out.push_str(&format!(
         "PHYSICAL_BED_ROUTE = {}\n",
@@ -2207,12 +2281,23 @@ impl Component {
 /// horizontal that carries the long tail, plus the onset bloom.
 /// Lane layout: 0-2 the vertical polarisations, 3 the horizontal, 4 the
 /// bloom. The names live in these constants now; the storage is lane-wise.
+#[cfg(not(test))]
 const LANES: usize = 5;
+// Native research only: horizontal lanes 3, 5, 6; bloom stays at 4. Factory
+// rendering leaves 5/6 zero. Generic voice operations cover all three H states.
+#[cfg(test)]
+const LANES: usize = 7;
 const LANE_HORIZONTAL: usize = 3;
 const LANE_BLOOM: usize = 4;
 
 #[derive(Clone, Copy, Default)]
 struct Partial {
+    /// Offline P3 absolute phase reference; no incremental f32 pole drift.
+    #[cfg(test)]
+    tension_reference: [nonlinear_wires::ReferencePole; LANES],
+    /// Native P3 geometry diagnostic: physical lane outputs before bridge load.
+    #[cfg(test)]
+    geometry_out: [f32; 6],
     /// Lane-wise (structure-of-arrays) storage of the five components.
     ///
     /// Lanes 0-2: the vertical polarisations of the strings this note owns
@@ -2240,6 +2325,10 @@ struct Partial {
     /// Imaginary coefficient of a passive complex projection (research only).
     bridge_phase: f32,
     spatial: spatial_unison::Loading,
+    #[cfg(test)]
+    directional: spatial_unison::Directional,
+    #[cfg(test)]
+    polarization_mask: u8,
     moment_out: f32,
     /// Zero retains the legacy renderer; bits 0..2 select physical vertical
     /// strings. The horizontal projection is shared by radiation and loading.
@@ -2260,8 +2349,68 @@ struct Partial {
 }
 
 impl Partial {
+    #[cfg(test)]
+    fn split_horizontal(&mut self, mode: u8, horizontal: f32, intrinsic: f32) {
+        assert!(self.bridge_mask != 0);
+        assert!(!self.spatial.active(), "isolate polarization from pin spacing");
+        let mask = self.bridge_mask;
+        let count = (mask & 7).count_ones() as f32;
+        let root = sqrtf(count);
+        let old = Component {
+            s: self.s[3], c: self.c[3], rc: self.rc[3], rs: self.rs[3],
+        };
+        let vertical_energy: f32 = (0..3).map(|i| self.lane_magnitude_squared(i)).sum();
+        let share_scale = sqrtf((old.s*old.s + old.c*old.c) / vertical_energy.max(1e-30));
+        for (wire, lane) in polarization::HORIZONTAL_LANES.iter().enumerate() {
+            if mask & (1 << wire) == 0 { self.retire_lane(*lane); continue; }
+            let component = if mode == 1 {
+                Component { s: old.s/root, c: old.c/root, ..old }
+            } else {
+                // Same hammer shares/phases and whole-string pitch as V_i.
+                // Redistribute existing horizontal energy, never clone it.
+                let r = sqrtf(self.rc[wire]*self.rc[wire] + self.rs[wire]*self.rs[wire]).max(1e-30);
+                Component {
+                    s: share_scale*self.s[wire], c: share_scale*self.c[wire],
+                    rc: intrinsic*self.rc[wire]/r, rs: intrinsic*self.rs[wire]/r,
+                }
+            };
+            self.set_lane(*lane, component);
+        }
+        self.polarization_mask = mask;
+        if mode == 2 {
+            // Reconstruct the inherited onset cancellation for the changed
+            // horizontal projection, not a new level or attack EQ.
+            self.s[LANE_BLOOM] -= horizontal*(self.horizontal_common()-old.s);
+            self.c[LANE_BLOOM] -= horizontal*(polarization::common(&self.c,mask)-old.c);
+        }
+    }
+
+    fn horizontal_common(&self) -> f32 {
+        #[cfg(test)]
+        if self.polarization_mask != 0 {
+            return polarization::common(&self.s, self.polarization_mask);
+        }
+        self.s[LANE_HORIZONTAL]
+    }
+
+    fn horizontal_energy(&self) -> f32 {
+        #[cfg(test)]
+        if self.polarization_mask != 0 {
+            return polarization::HORIZONTAL_LANES.iter().map(|i| self.lane_magnitude_squared(*i)).sum();
+        }
+        self.lane_magnitude_squared(LANE_HORIZONTAL)
+    }
+
+    fn horizontal_lane(lane: usize) -> bool {
+        #[cfg(test)]
+        if lane == 5 || lane == 6 { return true; }
+        lane == LANE_HORIZONTAL
+    }
+
     /// Installs one started component into a lane.
     fn set_lane(&mut self, lane: usize, component: Component) {
+        #[cfg(test)]
+        { self.tension_reference[lane] = nonlinear_wires::ReferencePole::default(); }
         self.s[lane] = component.s;
         self.c[lane] = component.c;
         self.rc[lane] = component.rc;
@@ -2289,6 +2438,8 @@ impl Partial {
 
     /// Silences one lane for good; an all-zero lane rotates to zero.
     fn retire_lane(&mut self, lane: usize) {
+        #[cfg(test)]
+        { self.tension_reference[lane] = nonlinear_wires::ReferencePole::default(); }
         self.s[lane] = 0.0;
         self.c[lane] = 0.0;
         self.rc[lane] = 0.0;
@@ -2322,6 +2473,28 @@ impl Partial {
             *output = s;
         }
         self.moment_out = 0.0;
+        #[cfg(test)]
+        if NONLINEAR_WIRE_GEOMETRY.get() == 3.0 {
+            self.geometry_out = [out[0], out[1], out[2], out[3], out[5], out[6]];
+        }
+        #[cfg(test)]
+        if self.polarization_mask != 0 {
+            let h = polarization::common(&out, self.polarization_mask);
+            if self.directional.active() {
+                self.moment_out = self.directional.split_moment(&out, self.polarization_mask);
+                self.directional.apply_split(&mut self.s, &mut self.c, self.polarization_mask);
+            } else {
+                polarization::bridge_delta(&mut self.s, &mut self.c, self.polarization_mask,
+                                           horizontal, self.drain, self.bridge_phase);
+            }
+            return out[0] + out[1] + out[2] + horizontal*h + out[4];
+        }
+        #[cfg(test)]
+        if self.directional.active() {
+            self.moment_out = self.directional.moment(&out);
+            self.directional.apply(&mut self.s, &mut self.c, self.bridge_mask);
+            return out[0] + out[1] + out[2] + horizontal * out[3] + out[4];
+        }
         if self.spatial.active() {
             self.moment_out = self.spatial.moment(&out);
             self.spatial
@@ -2445,6 +2618,10 @@ struct BodyMode {
 /// reason in `BodyMode`'s note.
 #[derive(Clone, Copy, Default)]
 struct BoardMode {
+    #[cfg(test)]
+    dense_shape: bool,
+    #[cfg(test)]
+    shape_cosine: [f32; BOARD_DRIVE_POINTS],
     passive: bool,
     y1: f32,
     y2: f32,
@@ -2467,10 +2644,11 @@ struct BoardMode {
     /// The output to each capsule as coefficients on the mode's last two
     /// VELOCITY samples: `out_m = v * out_y[m] + v1 * out_y1[m]`. A
     /// sinusoid's two consecutive samples span its plane, so any level and
-    /// phase per capsule is two multiplies -- on the velocity, so that
-    /// content below a mode's frequency keeps the 6 dB per octave the
-    /// board's radiation gives it (a displacement output summed over
-    /// hundreds of modes was a +15 dB shelf under the bass). See `BOARD_PAIR`.
+    /// phase per capsule is two multiplies at that modal frequency. This is
+    /// not an exact propagation filter for forced motion at other frequencies:
+    /// it does not generally retain acceleration's zero at DC or its broadband
+    /// phase. The native `CAUSAL_RADIATION_FIR` observer diagnoses that limitation
+    /// without changing the mechanical bank. See `BOARD_PAIR`.
     out_y: [f32; 2],
     out_y1: [f32; 2],
     v1: f32,
@@ -2484,6 +2662,8 @@ struct BoardMode {
 /// thread streams per mode are sixty bytes it uses.
 #[derive(Clone, Copy, Default)]
 struct BoardCold {
+    #[cfg(test)]
+    ritz_index: usize,
     mobility: bridge::MobilityMode,
     mechanical_force_gain: f32,
     radiation_shape: radiation::Shape,
@@ -2561,6 +2741,10 @@ impl BoardMode {
         (
             Self {
                 passive: false,
+                #[cfg(test)]
+                dense_shape: false,
+                #[cfg(test)]
+                shape_cosine: [0.0; BOARD_DRIVE_POINTS],
                 y1: 0.0,
                 y2: 0.0,
                 a1: 2.0 * r * cos,
@@ -2576,6 +2760,8 @@ impl BoardMode {
                 v1: 0.0,
             },
             BoardCold {
+                #[cfg(test)]
+                ritz_index: 0,
                 mobility: bridge::MobilityMode::default(),
                 mechanical_force_gain: 0.0,
                 radiation_shape: radiation::Shape::default(),
@@ -2670,6 +2856,10 @@ impl BoardMode {
         cos_t: &[f32; BOARD_DRIVE_POINTS],
         sin_t: &[f32; BOARD_DRIVE_POINTS],
     ) -> f32 {
+        #[cfg(test)]
+        if self.dense_shape {
+            return self.shape_cosine.iter().zip(cos_t).map(|(a,b)| a*b).sum();
+        }
         let q = self.shape_q as usize;
         self.shape_a * cos_t[0] + self.shape_b * cos_t[q] + self.shape_c * sin_t[q]
     }
@@ -3535,6 +3725,10 @@ pub static BOARD_CAUSAL_PAIR: Knob = Knob::new(0.0);
 pub static PHYSICAL_BRIDGE: Knob = Knob::new(1.0);
 /// Statistical mean driving-point mobility in m/(N s), before radiation.
 pub static PHYSICAL_BRIDGE_MOBILITY: Knob = Knob::new(0.0005);
+/// Native refit experiment: smooth positive modal-mass variation below 200 Hz
+/// and above 1.1 kHz. Unity preserves the accepted model. Not per-note EQ.
+pub static PHYSICAL_BRIDGE_BASS_RATIO: Knob = Knob::new(1.0);
+pub static PHYSICAL_BRIDGE_TREBLE_RATIO: Knob = Knob::new(1.0);
 /// Research-only conversion between the physical board pressure and the older
 /// auxiliary-source scale. One constant per instrument, never per note.
 pub static PHYSICAL_PRESSURE_SCALE: Knob = Knob::new(3.0);
@@ -3548,6 +3742,11 @@ pub static DIAGNOSTIC_STRING_DRAIN: Knob = Knob::new(1.0);
 /// Convergence probe for the spatial pressure integral. One preserves 14B.
 pub static RADIATION_QUADRATURE_SCALE: Knob = Knob::new(1.0);
 pub static CAUSAL_RADIATION_FIR: Knob = Knob::new(0.0);
+/// Research observer: use the room's actual capsule positions and signed axes.
+/// Zero preserves the accepted board observer. Not a public preset parameter.
+pub static BOARD_ROOM_GEOMETRY: Knob = Knob::new(0.0);
+/// Native research optimization; same causal kernels, shared delay histories.
+pub static SHARED_RADIATION_FIR: Knob = Knob::new(0.0);
 pub static FELT_RATE_MODEL: Knob = Knob::new(1.0);
 pub static FELT_RATE_DAMPING: Knob = Knob::new(0.2);
 /// Experimental residual source/transfer calibration. This compensates the
@@ -3595,6 +3794,18 @@ pub static STRING_STIFFNESS_SPREAD: Knob = Knob::new(0.0);
 pub static REACTIVE_BRIDGE: Knob = Knob::new(1.0);
 /// Assumed adjacent pin spacing for local-gradient research, not a measurement.
 pub static SPATIAL_UNISON_GAP_M: Knob = Knob::new(0.0);
+/// Native-only P1a prototype; no factory, public parameter or WASM change.
+#[cfg(test)]
+static DIRECTIONAL_BRIDGE_HEIGHT_M: Knob = Knob::new(0.0);
+/// Native P1b: 0 off, 1 isometric aggregate lift, 2 per-wire hammer shares.
+#[cfg(test)]
+static PER_STRING_POLARIZATIONS: Knob = Knob::new(0.0);
+/// Native P3 diagnostic: 1 instantaneous per-wire stretch, 2 phase-averaged,
+/// 3 phase-averaged plus per-wire longitudinal source. None conserves SI energy.
+#[cfg(test)]
+static NONLINEAR_WIRE_GEOMETRY: Knob = Knob::new(0.0);
+#[cfg(test)]
+static TENSION_REFERENCE: Knob = Knob::new(0.0);
 pub static STRING_TUNING_CENTER: Knob = Knob::new(0.5);
 /// Research control: retain a fraction of the unison width above C7.
 /// Zero preserves the historical taper; one retains the full register law.
@@ -4711,6 +4922,9 @@ struct Voice<const PARTIALS: usize = MAX_PARTIALS> {
     damper_pressed: bool,
     /// The felt's thud at the landing: coefficient, decay, release gain.
     damper_thud: [f32; 3],
+    /// Pole losses from a seated damper, vertical and horizontal. Lifting
+    /// removes these losses from future rotation, never from the state.
+    seated_loss: [f32; 2],
     /// Samples of a merged blow's momentum still to arrive.
     push_in: u32,
     /// Nonzero only for the phase-preserving smoothstep reconstruction.
@@ -4739,6 +4953,10 @@ struct Voice<const PARTIALS: usize = MAX_PARTIALS> {
     tension_applied: f32,
     /// The low-passed tension offset the glide follows.
     tension_smoothed: f32,
+    #[cfg(test)]
+    wire_tension_applied: [f32; 3],
+    #[cfg(test)]
+    wire_tension_smoothed: [f32; 3],
     tension_in: u32,
     /// The string's longitudinal modes, driven by its own tension.
     longitudinal: [BodyMode; LONGITUDINAL_MODES],
@@ -4826,6 +5044,7 @@ impl<const PARTIALS: usize> Default for Voice<PARTIALS> {
             damper_dwell: 1,
             damper_pressed: false,
             damper_thud: [0.0; 3],
+            seated_loss: [1.0; 2],
             push_in: 0,
             push_shape_total: 0,
             thump_in: 0,
@@ -4840,6 +5059,10 @@ impl<const PARTIALS: usize> Default for Voice<PARTIALS> {
             tension_rest: 0.0,
             tension_applied: 0.0,
             tension_smoothed: 0.0,
+            #[cfg(test)]
+            wire_tension_applied: [0.0; 3],
+            #[cfg(test)]
+            wire_tension_smoothed: [0.0; 3],
             tension_in: TENSION_INTERVAL,
             longitudinal: [BodyMode::default(); LONGITUDINAL_MODES],
             longitudinal_gain: 0.0,
@@ -4933,6 +5156,8 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
         // note that the excitation need not be computed where the resonator
         // bank has little gain.
         let mut slope = 0.0f32;
+        #[cfg(test)]
+        let mut wire_slopes = [[0.0f32; 2]; 3];
         for partial in self.partials[..self.partial_count].iter_mut() {
             // The bridge pushes back: every free string is a driven
             // resonator riding the rest of the instrument, weighted by the
@@ -4972,6 +5197,10 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
             }
             self.spatial_moment += partial.moment_out;
             slope += voice * partial.slope;
+            #[cfg(test)]
+            if NONLINEAR_WIRE_GEOMETRY.get() == 3.0 && partial.slope != 0.0 {
+                nonlinear_wires::add_end_slopes(&mut wire_slopes, partial);
+            }
             sum += voice;
         }
         if pushing && self.push_shape_total > 0 {
@@ -5002,6 +5231,10 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
         // bank's output peaked at 1.0x f0, which is why its mix has been
         // parked at zero since.
         let drive = slope * slope * self.longitudinal_gain;
+        #[cfg(test)]
+        let drive = if NONLINEAR_WIRE_GEOMETRY.get() == 3.0 {
+            nonlinear_wires::end_force_statistic(&wire_slopes) * self.longitudinal_gain
+        } else { drive };
         // The attack's surplus into the upper modes rides this envelope and
         // is gone within ~80 ms; the sustain keeps only the base y^2 feed.
         self.upper_env *= self.upper_env_decay;
@@ -5090,48 +5323,31 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
         sum
     }
 
-    /// Retires components that have decayed below audibility and refreshes the
-    /// loudness estimate. Runs at block cadence, never per sample.
-    /// One step of tension modulation, from the string's own motion.
-    ///
-    /// A real string is not linear once it is displaced far enough to matter:
-    /// stretching it raises its tension, and the tension is what sets every
-    /// mode's frequency, so at large amplitude the modes stop being
-    /// independent and become one coupled system. That is the Kirchhoff
-    /// tension law, T = T0 + (EA/2L)*integral of (dy/dx)^2.
-    ///
-    /// In modal coordinates that integral is a sum with no cross terms,
-    /// `sum (n*pi/L)^2 q_n^2`, and there is a happy accident in how this
-    /// model stores things: its amplitudes are already BRIDGE FORCE, which
-    /// carries the factor of n, so `(n q_n)^2` is just the component's own
-    /// squared value. The whole nonlinearity is one running sum.
-    ///
-    /// Two things fall out of it that this model has until now written by
-    /// hand, as three separate scripted mechanisms:
-    ///
-    /// * the slow part is the pitch glide -- sharp under the hammer, settling
-    ///   as the note decays -- which was a hand-drawn 28-step envelope;
-    /// * the part oscillating at twice each mode's frequency modulates every
-    ///   other mode, putting sidebands at f_i +/- 2f_j. Those are Conklin's
-    ///   phantom partials, which this model places by hand at frequencies it
-    ///   computes in advance. Here they are generated only while the string
-    ///   is actually moving that far, which is what a real one does.
+    /// Empirical tension statistic at control rate. The Kirchhoff relation
+    /// involves the integral of each physical string's squared transverse
+    /// slopes. These already colour-shaped bridge amplitudes are neither q_n
+    /// in metres nor calibrated force in newtons; weighting them again by
+    /// h/16 does not establish that integral. The native P3 audit separates
+    /// geometry, amplitude conversion and representable phase updates.
+    /// No bidirectional energy reaction is integrated in this factory path.
     fn tension_step(&mut self) {
+        #[cfg(test)]
+        if NONLINEAR_WIRE_GEOMETRY.get() > 0.0 {
+            nonlinear_wires::tension_step(self, NONLINEAR_WIRE_GEOMETRY.get() >= 2.0);
+            return;
+        }
         // Knobs read once per call, not per sample.
         let knob_tension_max_shift = TENSION_MAX_SHIFT.get();
         let knob_tension_smoothing = TENSION_SMOOTHING.get();
         let mut stretch = 0.0f32;
         for partial in &self.partials[..self.partial_count] {
-            // Kirchhoff-Carrier: the tension rise is the integral of the
-            // squared SLOPE, sum of (h*pi/L)^2 * q_h^2 -- per mode, no cross
-            // terms (the cosines are orthogonal), and weighted by the wave
-            // number squared. The unweighted sum of a coherent total that
-            // stood here let the fundamental own the tension when the real
-            // integral is dominated by the upper partials, and squared the
-            // sum of three strings, whose cross terms belong to no string's
-            // tension at all.
+            // Legacy empirical stretch statistic, weighted by h/16 rather
+            // than a length-normalized physical slope. Its squared sum still
+            // includes cross-wire and cross-polarization terms, unlike the
+            // per-wire integral of squared orthogonal slopes. Native P3
+            // diagnoses those terms; this branch preserves factory sound.
             let w = partial.slope;
-            let a = partial.s[0] + partial.s[1] + partial.s[2] + partial.s[LANE_HORIZONTAL];
+            let a = partial.s[0] + partial.s[1] + partial.s[2] + partial.horizontal_common();
             stretch += (w * a) * (w * a);
         }
         // The offset the current tension asks for, as a fractional shift in
@@ -5165,6 +5381,11 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
         }
         for partial in &mut self.partials[..self.partial_count] {
             for lane in 0..LANES {
+                #[cfg(test)]
+                if TENSION_REFERENCE.get() > 0.0 {
+                    nonlinear_wires::reference_shift(partial, lane, self.tension_smoothed as f64);
+                    continue;
+                }
                 // Rotate by an extra angle proportional to the component's own
                 // frequency, so the whole ladder sharpens together.
                 //
@@ -5344,7 +5565,7 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
             let magnitude = partial.lane_magnitude_squared(0)
                 + partial.lane_magnitude_squared(1)
                 + partial.lane_magnitude_squared(2)
-                + partial.lane_magnitude_squared(LANE_HORIZONTAL);
+                + partial.horizontal_energy();
             if magnitude < knob_dead_magnitude_squared {
                 self.partial_count -= 1;
                 self.partials[index] = self.partials[self.partial_count];
@@ -5468,6 +5689,21 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
         self.damper_phase = 0;
     }
 
+    fn lift_seated_damper(&mut self) {
+        if self.seated_loss == [1.0; 2] {
+            return;
+        }
+        for partial in &mut self.partials[..self.partial_count] {
+            for lane in 0..LANES {
+                let loss = self.seated_loss[usize::from(Partial::horizontal_lane(lane))];
+                partial.rc[lane] /= loss;
+                partial.rs[lane] /= loss;
+            }
+            partial.hold_inside_unit_circle(self.pole_ceiling);
+        }
+        self.seated_loss = [1.0; 2];
+    }
+
     /// The felt landing makes a small knock of its own, whether or not
     /// the string still carries energy: release a silent key on a real
     /// action and it still says something.
@@ -5570,9 +5806,11 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
             factor,
             DAMPER_HORIZONTAL_GRIP + DAMPER_HORIZONTAL_GRIP_BASS * (1.0 - position),
         );
+        self.seated_loss[0] *= factor;
+        self.seated_loss[1] *= sideways;
         for partial in &mut self.partials[..self.partial_count] {
             for lane in 0..LANES {
-                let grip = if lane == LANE_HORIZONTAL {
+                let grip = if Partial::horizontal_lane(lane) {
                     sideways
                 } else {
                     factor
@@ -6154,6 +6392,8 @@ pub struct ConcertGrand {
     /// The next board mode whose pair integral is due; `board_count` when
     /// the board is settled.
     pair_next: usize,
+    board_capsules: [radiation::Capsule; 2],
+    pressure_sum: radiation::PressureSum,
     // The unselected FIR observer is a native research probe.
     #[cfg(not(target_arch = "wasm32"))]
     retarded_pressure: Vec<radiation::RetardedPressure>,
@@ -6392,6 +6632,8 @@ impl Default for ConcertGrand {
             drive_basis_cos: [[0.0; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
             drive_basis_sin: [[0.0; BOARD_DRIVE_POINTS]; BOARD_DRIVE_POINTS],
             pair_next: 0,
+            board_capsules: [radiation::Capsule::default(); 2],
+            pressure_sum: radiation::PressureSum::default(),
             #[cfg(not(target_arch = "wasm32"))]
             retarded_pressure: Vec::new(),
             #[cfg(target_arch = "wasm32")]
@@ -6582,8 +6824,11 @@ pub static FELT_TREBLE_GAIN: Knob = Knob::new(1.0);
 /// One decade is where the two blows meet; what the treble still needs is
 /// in the contact's physics, not in K.
 pub static FELT_TREBLE_DECADES: Knob = Knob::new(0.6702945361198906);
-/// Level of the duplex segments' ring at 2.015 and 4.03 times the pitch (notes above the middle).
-pub static DUPLEX_LEVEL: Knob = Knob::new(0.018);
+/// Research-only direct excitation of two auxiliary rings above the middle.
+/// This is not passive bridge coupling: every strike initializes their motion.
+/// Disabled after the C#6 short-note audition identified this added ring as the
+/// tick. The main three-string unison and hammer contact remain unchanged.
+pub static DUPLEX_LEVEL: Knob = Knob::new(0.0);
 /// The fastest beat a unison may leave at its fundamental, in hertz; caps the
 /// detune in the treble the way a tuner does.
 pub static UNISON_BEAT_CAP_HZ: Knob = Knob::new(2.0);
@@ -6768,6 +7013,7 @@ pub static KEY_AFTERTOUCH_MM: Knob = Knob::new(1.0);
 /// let-off at its strong drive with a 1 mm aftertouch.
 pub static ACTION_RATIO: Knob = Knob::new(5.5);
 
+/// Legacy decay path only; physical loading uses projected admittance.
 /// How far the fundamental's prompt decay follows the reference's own
 /// measurement instead of the smooth law: one is the measured table, zero
 /// the law, the power the table's ratio is raised to. See
@@ -6784,6 +7030,7 @@ pub static LEVEL_VELOCITY_POWER: Knob = Knob::new(2.2);
 /// Zero selects the older power law for laboratory comparisons.
 pub static LEVEL_VELOCITY_DB_RANGE: Knob = Knob::new(26.0);
 
+/// Legacy bridge path only; bypassed when the physical bridge is active.
 /// Empirical correction of the radiated first harmonics between C4 and C5.
 /// It compensates the default board's note-dependent colour against the
 /// Steinway stage pair. It is not an estimate of hammer stiffness: the
@@ -6924,12 +7171,20 @@ static STAGE_TRACE_ARMED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
 #[cfg(test)]
 static STAGE_TRACE: std::sync::Mutex<Vec<[f32; 16]>> = std::sync::Mutex::new(Vec::new());
+// Offline identification input, immediately before projection onto the board.
+// Values use this engine's calibrated drive units; they are not measured N.
+#[cfg(test)]
+static BRIDGE_CAPTURE_ARMED: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+static BRIDGE_CAPTURE: std::sync::Mutex<Vec<[f32; BOARD_DRIVE_POINTS + 1]>> =
+    std::sync::Mutex::new(Vec::new());
 #[cfg(test)]
 static MODAL_TRACE: std::sync::Mutex<Vec<[f32; 6]>> = std::sync::Mutex::new(Vec::new());
 #[cfg(test)]
 static STRIKE_SPECTRUM: std::sync::Mutex<Vec<[f32; 3]>> = std::sync::Mutex::new(Vec::new());
 #[cfg(test)]
-static BRIDGE_LOSS_TRACE: std::sync::Mutex<Vec<[f32; 6]>> = std::sync::Mutex::new(Vec::new());
+static BRIDGE_LOSS_TRACE: std::sync::Mutex<Vec<[f32; 8]>> = std::sync::Mutex::new(Vec::new());
 
 /// One-variable-at-a-time overrides for the felt sweep. Tests only: the
 /// engine's own call sites never touch this, so a normal render is exactly
@@ -7276,6 +7531,10 @@ mod rate_felt_tests {
 #[derive(Clone, Copy)]
 struct StringEngine {
     bridge_modes: [bridge::MobilityMode; BOARD_MODES],
+    #[cfg(test)]
+    bridge_dense: [bool; BOARD_MODES],
+    #[cfg(test)]
+    bridge_shapes: [[f32; BOARD_DRIVE_POINTS]; BOARD_MODES],
     bridge_count: usize,
     /// Per-note calibration table: [anchor][param] multipliers.
     cal: [[f32; CAL_PARAMS]; 10],
@@ -7303,6 +7562,10 @@ impl Default for StringEngine {
     fn default() -> Self {
         Self {
             bridge_modes: [bridge::MobilityMode::default(); BOARD_MODES],
+            #[cfg(test)]
+            bridge_dense: [false; BOARD_MODES],
+            #[cfg(test)]
+            bridge_shapes: [[0.0; BOARD_DRIVE_POINTS]; BOARD_MODES],
             bridge_count: 0,
             cal: [
                 [
@@ -7347,6 +7610,48 @@ impl Default for StringEngine {
 }
 
 impl StringEngine {
+    /// P1a, native-only: a lateral force at an assumed elevated bridge rail
+    /// excites surface rotation. Each board mode contributes a PSD outer
+    /// product to conductance. The moment is also sent to the existing board
+    /// drive gradient, using the same height / 1.4 m line convention.
+    #[cfg(test)]
+    fn directional_bridge_loading(
+        &self,
+        frequency: f32,
+        position: f32,
+        projections: &[f32; BOARD_MODES],
+        gradients: &[f32; BOARD_MODES],
+        mask: u8,
+        horizontal: f32,
+        height: f32,
+    ) -> spatial_unison::Directional {
+        assert_eq!(
+            SPATIAL_UNISON_GAP_M.get(),
+            0.0,
+            "isolate pin spacing from directional loading"
+        );
+        let count = (mask & 7).count_ones() as f32;
+        let root = sqrtf(count);
+        let lever = height / 1.4;
+        let omega = bridge::warped_omega(frequency, self.sample_rate);
+        let scale = self.controls.tension_newtons()
+            / self.string_length(position).max(0.01)
+            / ((0.5 + 1.5 * self.controls.decay) * self.controls.lab(11)).max(0.05);
+        let mut g = [0.0; 3];
+        let mut h = [0.0; 3];
+        for (i, mode) in self.bridge_modes.iter().take(self.bridge_count).enumerate() {
+            let v = root * projections[i];
+            let t = horizontal * projections[i] + lever * gradients[i];
+            let shapes = [v * v, v * t, t * t];
+            let re = mode.conductance(omega, 1.0) * scale * DIAGNOSTIC_STRING_DRAIN.get();
+            let im = mode.susceptance(omega, 1.0) * scale * REACTIVE_BRIDGE.get();
+            for j in 0..3 {
+                g[j] += re * shapes[j];
+                h[j] += im * shapes[j];
+            }
+        }
+        spatial_unison::Directional::new(g, h, count, lever, self.sample_rate)
+    }
     fn bridge_projections(&self, position: f32) -> [f32; BOARD_MODES] {
         let along = position.clamp(0.0, 1.0) * (BOARD_DRIVE_POINTS - 1) as f32;
         let index = (along as usize).min(BOARD_DRIVE_POINTS - 2);
@@ -7361,11 +7666,20 @@ impl StringEngine {
             sin[q] = s0 * (1.0 - frac) + s1 * frac;
         }
         let mut projections = [0.0; BOARD_MODES];
-        for (projection, mode) in projections
+        for (i, (projection, mode)) in projections
             .iter_mut()
             .zip(self.bridge_modes.iter())
             .take(self.bridge_count)
+            .enumerate()
         {
+            #[cfg(test)]
+            if self.bridge_dense[i] {
+                *projection = self.bridge_shapes[i][index]*(1.0-frac)
+                    + self.bridge_shapes[i][index+1]*frac;
+                continue;
+            }
+            #[cfg(not(test))]
+            let _ = i;
             *projection = mode.a + mode.b * cos[mode.q as usize] + mode.c * sin[mode.q as usize];
         }
         projections
@@ -7429,11 +7743,20 @@ impl StringEngine {
             ds[q] = (s1 - s0) * (BOARD_DRIVE_POINTS - 1) as f32;
         }
         let mut result = [0.0; BOARD_MODES];
-        for (slope, mode) in result
+        for (i, (slope, mode)) in result
             .iter_mut()
             .zip(self.bridge_modes.iter())
             .take(self.bridge_count)
+            .enumerate()
         {
+            #[cfg(test)]
+            if self.bridge_dense[i] {
+                *slope = (self.bridge_shapes[i][index+1]-self.bridge_shapes[i][index])
+                    * (BOARD_DRIVE_POINTS-1) as f32;
+                continue;
+            }
+            #[cfg(not(test))]
+            let _ = i;
             *slope = mode.b * dc[mode.q as usize] + mode.c * ds[mode.q as usize];
         }
         result
@@ -8378,10 +8701,11 @@ impl StringUnit {
         // repetition and the shimmer of a tremolo. The old build damped the
         // living voice over 250 ms and started a stranger next to it.
         //
-        // A voice already under a damper (released, or half-pedalled) has
-        // had its decay rates scaled and cannot be honestly re-lifted, so
-        // those still take the legacy path: ease the dying voice out and
-        // strike fresh.
+        // A released string is still the same string. The finite,
+        // phase-preserving path restores its free poles from stored losses
+        // without undoing the energy already dissipated by its damper.
+        // Starting another oscillator beside it instead doubles the wire
+        // during short, unpedalled repetitions.
         //
         // A voice under a HALF pedal can be re-lifted now: since 0.170.1 it
         // carries its own damper's firmness, so relieving what was pressed
@@ -8408,7 +8732,7 @@ impl StringUnit {
                 && voice.active
                 && voice.note == note
                 && voice.channel == channel
-                && (voice.held || voice.sustained)
+                && (voice.held || voice.sustained || RESTRIKE_PHASE_PRESERVE.get() >= 0.5)
             {
                 // The felt is still bouncing on this string, and the
                 // hammer is about to reset every lane that has decayed
@@ -8417,6 +8741,7 @@ impl StringUnit {
                 // was applied to -- and the bounce disarmed, so no later
                 // contact relieves a press that no longer stands.
                 voice.cancel_damper();
+                voice.lift_seated_damper();
                 if voice.sustained && voice.damper_applied > 0.0 {
                     let own = StringEngine::damper_for(note, rate, grip * voice.firmness, 1.0);
                     voice.press_damper(own, -voice.damper_applied);
@@ -8961,6 +9286,9 @@ impl StringUnit {
                 } else {
                     simulate_strike(&frequencies, sim_modes, configuration)
                 };
+                #[cfg(test)]
+                nonlinear_wires::capture_contact(note, length, self.engine.controls.tension_newtons(),
+                    configuration, &frequencies[..sim_modes], &q, &over_omega, trio.as_ref());
                 if PHYSICAL_BRIDGE.get() >= 0.5 && CONTACT_BOARD_GAIN.get() > 0.0 {
                     contact_pulse = pulse;
                     contact_pulse.configure(
@@ -9193,7 +9521,10 @@ impl StringUnit {
             [0.0; BOARD_MODES]
         };
         let spatial_gap = SPATIAL_UNISON_GAP_M.get();
-        let bridge_gradients = if self.engine.bridge_count > 0 && spatial_gap > 0.0 {
+        let need_gradient = spatial_gap > 0.0;
+        #[cfg(test)]
+        let need_gradient = need_gradient || DIRECTIONAL_BRIDGE_HEIGHT_M.get() > 0.0;
+        let bridge_gradients = if self.engine.bridge_count > 0 && need_gradient {
             self.engine.bridge_gradients(position)
         } else {
             [0.0; BOARD_MODES]
@@ -9455,6 +9786,18 @@ impl StringUnit {
                         spatial_gap,
                     );
                 }
+                #[cfg(test)]
+                if DIRECTIONAL_BRIDGE_HEIGHT_M.get() > 0.0 {
+                    built.directional = self.engine.directional_bridge_loading(
+                        frequency,
+                        position,
+                        &bridge_projections,
+                        &bridge_gradients,
+                        built.bridge_mask,
+                        horizontal_bridge,
+                        DIRECTIONAL_BRIDGE_HEIGHT_M.get(),
+                    );
+                }
             } else {
                 built.drain = Partial::drain_per_sample(coupling, horizontal_bridge);
             }
@@ -9470,6 +9813,8 @@ impl StringUnit {
                     norm,
                     built.drain,
                     actual_rate,
+                    6.907_755 / slow_t60,
+                    extra_unison_loss,
                 ]);
             }
             built.slope = {
@@ -9518,6 +9863,16 @@ impl StringUnit {
                     );
                 }
             }
+            #[cfg(test)]
+            if PER_STRING_POLARIZATIONS.get() > 0.0 {
+                assert!(self.engine.bridge_count > 0, "polarization prototype requires physical bridge");
+                if PER_STRING_POLARIZATIONS.get() == 2.0 {
+                    assert_eq!(POLARISATION_CENTS.get(), 0.0, "per-wire pitch uses vertical string ladder");
+                }
+                built.split_horizontal(PER_STRING_POLARIZATIONS.get() as u8, horizontal_bridge, intrinsic);
+            }
+            #[cfg(test)]
+            nonlinear_wires::capture_built(note, n + 1, &built);
             partials[placed] = built;
             placed += 1;
         }
@@ -9680,19 +10035,19 @@ impl StringUnit {
             )
         };
 
-        // Duplex scale: the string segments behind the bridge, tuned high,
-        // struck only through the bridge, and — crucially — undamped, so a
-        // staccato treble note leaves their faint ping ringing. Fitted on the
-        // treble half of the compass, where builders fit them.
+        // Historical duplex approximation: two independently initialized
+        // rings, not resonators driven by the moving bridge. Factory voicing
+        // disables this synthetic attack; retain the opt-in research path.
         let mut duplex = [Component::default(); 2];
-        if position > 0.45 {
+        let duplex_level = DUPLEX_LEVEL.get();
+        if position > 0.45 && duplex_level > 0.0 {
             // Faint and barely off-harmonic: at −25 dB the duplex reads as
             // shimmer and afterglow; louder or wider it reads as a detuned
             // bell riding every strike. Compressed against velocity — the
             // tone grows with v^1.7 and masks it while held, but after the
             // damper falls the ring stands alone, so a hard strike must not
             // leave proportionally more of it.
-            let level = DUPLEX_LEVEL.get() * powf(velocity, 1.7) * (1.0 - 0.45 * velocity) * 0.32;
+            let level = duplex_level * powf(velocity, 1.7) * (1.0 - 0.45 * velocity) * 0.32;
             for (slot, (ratio, seed)) in duplex.iter_mut().zip([(2.015_f32, 11), (4.03, 29)]) {
                 let jitter = powf(
                     2.0,
@@ -9709,10 +10064,9 @@ impl StringUnit {
         }
 
         let chiff_mult = self.engine.controls.lab(3) * self.engine.cal(note, 3);
-        // How hard this string's own stretch pulls it sharp. The bass gate is
-        // the amplitude-to-length ratio in disguise: a treble string is short
-        // and stiff and barely stretches, a bass string is long and slack and
-        // stretches plenty.
+        // Empirical register taper in normalized output coordinates, not the
+        // SI coefficient EA/(8*T) times a modal slope-amplitude sum. Native
+        // P3 audits the contact/state conversion before replacing this gain.
         let tension_gain =
             TENSION_GAIN.get() * bass_gate / (1.0 + 40.0 * position) * self.engine.controls.lab(10);
         let longitudinal_gain = LONGITUDINAL_MIX.get() * self.engine.controls.lab(5);
@@ -9895,6 +10249,11 @@ impl StringUnit {
                     existing.drain = fresh.drain;
                     existing.bridge_phase = fresh.bridge_phase;
                     existing.spatial = fresh.spatial;
+                    #[cfg(test)]
+                    {
+                        assert_eq!(existing.polarization_mask, fresh.polarization_mask, "do not switch research mode on a ringing voice");
+                        existing.directional = fresh.directional;
+                    }
                     existing.mechanical_source = fresh.mechanical_source;
                 } else if voice.partial_count < MAX_PARTIALS {
                     // A partial the living voice did not have arrives over
@@ -10002,6 +10361,7 @@ impl StringUnit {
         voice.cull_in = CULL_INTERVAL;
         voice.tension_in = TENSION_INTERVAL;
         voice.damper_phase = 0;
+        voice.seated_loss = [1.0; 2];
         voice.damper_pressed = false;
         voice.push_in = 0;
         voice.push_shape_total = 0;
@@ -10015,6 +10375,11 @@ impl StringUnit {
         voice.tension_rest = 0.0;
         voice.tension_applied = 0.0;
         voice.tension_smoothed = 0.0;
+        #[cfg(test)]
+        {
+            voice.wire_tension_applied = [0.0; 3];
+            voice.wire_tension_smoothed = [0.0; 3];
+        }
         // The longitudinal modes sit at k*c_L/(2L), and the speaking length
         // follows from the pitch and the transverse speed: L = c/(2*f0) with
         // c = 2*L*f0. So f_L,k = k * f0 * c_L / c, and the ratio c_L/c is what
@@ -10819,6 +11184,41 @@ impl ConcertGrand {
             frequency += board_spacing(frequency, density);
             index += 1;
         }
+        #[cfg(test)]
+        if let Some(bank) = ritz_board::bank() {
+            assert!(PHYSICAL_BRIDGE.get() >= 0.5, "Ritz bank requires physical bridge");
+            assert_eq!(self.board_budget_spacing, 1.0, "research bank cannot thin geometry with budget");
+            let keep: Vec<(BoardMode,BoardCold)> = self.board[..index].iter().copied()
+                .zip(self.board_cold[..index].iter().copied())
+                .filter(|(_,cold)| cold.omega*self.engine.sample_rate/core::f32::consts::TAU >= ritz_board::CUTOFF)
+                .collect();
+            let count = bank.modes.len()+keep.len();
+            assert!(count <= BOARD_MODES, "Ritz hybrid exceeds bank capacity; do not truncate upper band");
+            for (slot, structural) in bank.modes.iter().enumerate() {
+                let f=structural.frequency;
+                let low=(log2f(300.0/f.max(20.0))/log2f(6.0)).clamp(0.0,1.0);
+                let loss_here=loss*powf(BOARD_LOW_LOSS.get()/BOARD_LOSS_FACTOR.get(),low);
+                // Shapes carry kg^-1/2 mass normalization. The generalized
+                // modal mass is one in both loading and source evolution.
+                let coefficients=bridge::Coefficients::new(f,loss_here,1.0,self.engine.sample_rate);
+                self.board[slot]=BoardMode {
+                    passive:true, dense_shape:true, shape_cosine:structural.cosine,
+                    a1:coefficients.av, a2:coefficients.aq, drive:coefficients.force,
+                    velocity:coefficients.half_step, ..BoardMode::default()
+                };
+                self.board_cold[slot]=BoardCold {
+                    ritz_index:slot+1, mobility:coefficients.mobility,
+                    mechanical_force_gain:coefficients.force,
+                    omega:core::f32::consts::TAU*f/self.engine.sample_rate,
+                    ..BoardCold::default()
+                };
+            }
+            for (slot,(mode,cold)) in keep.into_iter().enumerate() {
+                self.board[bank.modes.len()+slot]=mode;
+                self.board_cold[bank.modes.len()+slot]=cold;
+            }
+            index=count;
+        }
         self.board_count = index;
         self.engine.bridge_count = if PHYSICAL_BRIDGE.get() >= 0.5 {
             index
@@ -10831,6 +11231,13 @@ impl ConcertGrand {
             mobility.inverse_mass *=
                 self.board[i].drive / self.board_cold[i].mechanical_force_gain.max(1e-20);
             self.engine.bridge_modes[i] = mobility;
+            #[cfg(test)]
+            {
+                let idx=self.board_cold[i].ritz_index;
+                self.engine.bridge_dense[i]=idx>0;
+                self.engine.bridge_shapes[i]=if idx>0 { ritz_board::bank().unwrap().modes[idx-1].bridge }
+                    else { [0.0;BOARD_DRIVE_POINTS] };
+            }
         }
         for slot in self.board.iter_mut().skip(index) {
             *slot = BoardMode::default();
@@ -10878,6 +11285,13 @@ impl ConcertGrand {
         );
         let half = 0.5 * MIC_SPACING_M.get() * self.engine.controls.width;
         let capsules = [0.5 * BRIDGE_LENGTH_M - half, 0.5 * BRIDGE_LENGTH_M + half];
+        let shared_geometry = BOARD_ROOM_GEOMETRY.get() >= 0.5;
+        let common_path = if shared_geometry {
+            self.board_capsules[0].minimum_path(BRIDGE_LENGTH_M, BOARD_WIDTH_M)
+                .min(self.board_capsules[1].minimum_path(BRIDGE_LENGTH_M, BOARD_WIDTH_M))
+        } else {
+            height
+        };
         let pattern = self.engine.controls.mic_pattern;
         let speed = SOUND_SPEED.get();
         let grid_scale = if PHYSICAL_BRIDGE.get() >= 0.5 {
@@ -10937,10 +11351,19 @@ impl ConcertGrand {
                     } else {
                         2.0 * along * across
                     };
+                    #[cfg(test)]
+                    let shape = if cold.ritz_index>0 {
+                        assert_eq!((along_points,across_points),(40,24),"Ritz asset quadrature must match");
+                        ritz_board::bank().unwrap().modes[cold.ritz_index-1].surface[i*24+j]
+                    } else { shape };
                     for (m, capsule) in capsules.iter().enumerate() {
-                        let dx = x * BRIDGE_LENGTH_M - capsule;
-                        let r = sqrtf(dx * dx + y * y + height * height).max(1e-3);
-                        let directivity = (1.0 - pattern) + pattern * height / r;
+                        let (r, directivity) = if shared_geometry {
+                            self.board_capsules[m].observe(x * BRIDGE_LENGTH_M, y, pattern)
+                        } else {
+                            let dx = x * BRIDGE_LENGTH_M - capsule;
+                            let r = sqrtf(dx * dx + y * y + height * height).max(1e-3);
+                            (r, (1.0 - pattern) + pattern * height / r)
+                        };
                         let (sin_kr, cos_kr) = sincosf(-k * r);
                         let weight =
                             shape * directivity / r / (along_points * across_points) as f32;
@@ -10949,7 +11372,7 @@ impl ConcertGrand {
                         if retarded {
                             self.retarded_pressure[mode_index].deposit(
                                 m,
-                                (r - height) * sample_rate / speed,
+                                (r - common_path).max(0.0) * sample_rate / speed,
                                 weight * 1.2 * BRIDGE_LENGTH_M * BOARD_WIDTH_M
                                     / core::f32::consts::TAU,
                             );
@@ -10987,6 +11410,10 @@ impl ConcertGrand {
                 }
             }
             mode.set_pair(gains, cold.omega);
+        }
+        if retarded && SHARED_RADIATION_FIR.get() >= 0.5 {
+            let end = self.retarded_pressure[from..to].iter().map(|r| r.end()).max().unwrap_or(0);
+            self.pressure_sum.support(end);
         }
     }
 
@@ -11101,7 +11528,12 @@ impl ConcertGrand {
             let mass = 1.0
                 / (4.0
                     * spacing_here.max(1e-3)
-                    * PHYSICAL_BRIDGE_MOBILITY.get()
+                    * bridge::regional_mobility(
+                        placed,
+                        PHYSICAL_BRIDGE_MOBILITY.get(),
+                        PHYSICAL_BRIDGE_BASS_RATIO.get(),
+                        PHYSICAL_BRIDGE_TREBLE_RATIO.get(),
+                    )
                     * strength.max(0.01));
             let coefficients =
                 bridge::Coefficients::new(placed, loss_here, mass, self.engine.sample_rate);
@@ -11558,7 +11990,10 @@ impl ConcertGrand {
             let turn = if side == 0 { 1.0 } else { -1.0 };
             // The capsule, offset across the pair's line and turned outward.
             let across = (-aim.1, aim.0);
-            let half = 0.5 * MIC_SPACING_M.get() * turn;
+            let pair_width = if BOARD_ROOM_GEOMETRY.get() >= 0.5 {
+                self.engine.controls.width
+            } else { 1.0 };
+            let half = 0.5 * MIC_SPACING_M.get() * turn * pair_width;
             let mic = (
                 centre.0 + across.0 * half,
                 centre.1 + across.1 * half,
@@ -11568,6 +12003,12 @@ impl ConcertGrand {
                 aim.0 * cos_half - aim.1 * sin_half * turn,
                 aim.1 * cos_half + aim.0 * sin_half * turn,
             );
+            // Board-local coordinates share this exact capsule and polar axis
+            // with the point-source room. The board centre is at (L/2, 0, 0).
+            self.board_capsules[side] = radiation::Capsule {
+                position: [mic.0-piano.0+0.5*BRIDGE_LENGTH_M, mic.1-piano.1, mic.2-piano.2],
+                axis: [axis.0, axis.1, 0.0],
+            };
             // What this capsule makes of a source at `point`: its distance and
             // its polar response at the angle the source arrives from. The
             // sign is kept -- a figure-of-eight really does invert what
@@ -11791,12 +12232,15 @@ impl ConcertGrand {
         // from the picture, and the section is told: this slot. When no
         // string of this note is free to be re-struck, the blow goes to a
         // fresh slot and every section eases out whatever it is holding of
-        // that note -- which is the path a string under a damper takes,
-        // since its decay rates have been scaled and it cannot honestly be
-        // re-lifted.
+        // that note. The finite phase-preserving merge can also lift a
+        // released string: the worker restores its free poles and retains
+        // its remaining displacement instead of duplicating the string.
         let merge = self.engine.restrike_merge.then(|| {
             self.summary.iter().position(|voice| {
-                voice.active && voice.note == note && voice.channel == channel && voice.ringing_free
+                voice.active
+                    && voice.note == note
+                    && voice.channel == channel
+                    && (voice.ringing_free || RESTRIKE_PHASE_PRESERVE.get() >= 0.5)
             })
         });
         let slot = match merge.flatten() {
@@ -12239,6 +12683,7 @@ impl ConcertGrand {
         let retarded_pressure = cfg!(not(target_arch = "wasm32"))
             && physical_pressure
             && CAUSAL_RADIATION_FIR.get() >= 0.5;
+        let shared_pressure = retarded_pressure && SHARED_RADIATION_FIR.get() >= 0.5;
         let shared_bed_route = physical_pressure && PHYSICAL_BED_ROUTE.get() >= 0.5;
         let mechanical_radiation = MECHANICAL_RADIATION.get() >= 0.5;
         // The passive spatial observer already integrates directivity and 1/r
@@ -12335,6 +12780,13 @@ impl ConcertGrand {
                 }
             }
             let mut cos_t = [0.0f32; BOARD_DRIVE_POINTS];
+            #[cfg(test)]
+            if BRIDGE_CAPTURE_ARMED.load(core::sync::atomic::Ordering::Relaxed) {
+                let mut sources = [0.0; BOARD_DRIVE_POINTS + 1];
+                sources[..BOARD_DRIVE_POINTS].copy_from_slice(&drive_points);
+                sources[BOARD_DRIVE_POINTS] = excitation;
+                BRIDGE_CAPTURE.lock().unwrap().push(sources);
+            }
             let mut sin_t = [0.0f32; BOARD_DRIVE_POINTS];
             // With nothing sounding every drive point is zero, and the
             // projection below spends five hundred and twelve multiplies a
@@ -12363,13 +12815,19 @@ impl ConcertGrand {
                 let (left, right) = mode.tick_pair(mode.excitation(&cos_t, &sin_t));
                 let (left, right) =
                     if retarded_pressure && mode_index < self.retarded_pressure.len() {
-                        self.retarded_pressure[mode_index].tick(mode.y2, self.engine.sample_rate)
+                        if shared_pressure {
+                            self.retarded_pressure[mode_index].accumulate(mode.y2, self.engine.sample_rate, &mut self.pressure_sum);
+                            (0.0, 0.0)
+                        } else {
+                            self.retarded_pressure[mode_index].tick(mode.y2, self.engine.sample_rate)
+                        }
                     } else {
                         (left, right)
                     };
                 board_left += left;
                 board_right += right;
             }
+            if shared_pressure { (board_left, board_right) = self.pressure_sum.tick(); }
             #[cfg(test)]
             let stage_board_raw = board_left;
             // The rim: below its first mode the board radiates almost nothing.
@@ -13490,8 +13948,9 @@ impl ConcertGrand {
         self.mechanical_pedal.clear();
         self.room = [[0.0; ROOM_BUFFER]; ROOM_LINES];
         for observer in &mut self.retarded_pressure {
-            *observer = radiation::RetardedPressure::default();
+            observer.clear_state();
         }
+        self.pressure_sum.clear_state();
         self.room_lp = [0.0; ROOM_LINES];
         self.room_index = [0; ROOM_LINES];
     }
@@ -14541,6 +15000,40 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn board_receiver_coordinates_match_the_room_capsules() {
+        let mut piano = Box::new(ConcertGrand::default());
+        for distance in [0.5, 1.0, 2.64, 8.0, 16.0] {
+            for pattern in [0.0, 0.6, 1.0] {
+                piano.engine.controls.mic_distance = distance;
+                piano.engine.controls.mic_pattern = pattern;
+                piano.tune_room();
+                let common = piano.board_capsules[0].minimum_path(BRIDGE_LENGTH_M, BOARD_WIDTH_M)
+                    .min(piano.board_capsules[1].minimum_path(BRIDGE_LENGTH_M, BOARD_WIDTH_M));
+                for (side, capsule) in piano.board_capsules.iter().enumerate() {
+                    let (range, response) = capsule.observe(0.5*BRIDGE_LENGTH_M, 0.0, pattern);
+                    let expected = (MIC_REFERENCE_M.get()/range).clamp(0.12, MIC_NEAR_CAP.get())
+                        *MIC_PREAMP.get()*response;
+                    assert!((expected-piano.direct_gain[side]).abs() < 2e-5,
+                        "distance={distance} pattern={pattern} side={side}");
+                    let mut largest_delay = 0.0f32;
+                    for x in 0..41 {
+                        for y in 0..25 {
+                            let (path, _) = capsule.observe(x as f32/40.0*BRIDGE_LENGTH_M,
+                                (y as f32/24.0-0.5)*BOARD_WIDTH_M, pattern);
+                            assert!(path+1e-6 >= common);
+                            let delay = (path-common).max(0.0)*192000.0/SOUND_SPEED.get();
+                            largest_delay = largest_delay.max(delay);
+                        }
+                    }
+                    // Exercise the observer's actual support bound once.
+                    let mut observer = radiation::RetardedPressure::default();
+                    observer.deposit(side, largest_delay, 1.0);
+                }
+            }
+        }
+    }
     #[test]
     fn physical_unison_uses_one_mechanical_projection() {
         let h = 0.12;
@@ -18230,6 +18723,27 @@ mod tests {
     /// the YDP samples. Run with
     /// `cargo test -p rackforge-concert-grand render_reference -- --ignored`.
     #[test]
+    #[ignore = "process-wide capture: run single threaded"]
+    fn bridge_capture_preserves_render() {
+        let mut baseline = prepared();
+        let expected = render(&mut baseline, 4096, &[note_on(60, 110)]);
+        let mut measured = prepared();
+        {
+            let mut capture = BRIDGE_CAPTURE.lock().unwrap();
+            capture.clear();
+            capture.reserve(4096);
+        }
+        BRIDGE_CAPTURE_ARMED.store(true, core::sync::atomic::Ordering::Relaxed);
+        let actual = render(&mut measured, 4096, &[note_on(60, 110)]);
+        BRIDGE_CAPTURE_ARMED.store(false, core::sync::atomic::Ordering::Relaxed);
+        assert_eq!(actual, expected, "measurement must not change audio");
+        let capture = BRIDGE_CAPTURE.lock().unwrap();
+        assert_eq!(capture.len(), 4096);
+        assert!(capture.iter().flatten().all(|x| x.is_finite()));
+        assert!(capture.iter().flatten().any(|x| *x != 0.0));
+    }
+
+    #[test]
     #[ignore]
     fn render_reference_wavs() {
         if let Ok(value) = std::env::var("CG_AUDIT_DT_US") {
@@ -18378,6 +18892,13 @@ mod tests {
                 .ok()
                 .map(|s| s.parse::<usize>().unwrap() / block * block);
             let trace_stop = trace_start.map(|s| s + 13230);
+            let bridge_capture = std::env::var("CG_BRIDGE_CAPTURE").as_deref() == Ok("1");
+            if bridge_capture {
+                let mut capture = BRIDGE_CAPTURE.lock().unwrap();
+                capture.clear();
+                capture.reserve(total);
+                BRIDGE_CAPTURE_ARMED.store(true, core::sync::atomic::Ordering::Relaxed);
+            }
             if trace_start.is_some() {
                 STAGE_TRACE.lock().unwrap().clear();
             }
@@ -18407,6 +18928,30 @@ mod tests {
             }
             assert_eq!(next, events.len());
             file.flush().unwrap();
+            if bridge_capture {
+                BRIDGE_CAPTURE_ARMED.store(false, core::sync::atomic::Ordering::Relaxed);
+                let capture = BRIDGE_CAPTURE.lock().unwrap();
+                assert_eq!(capture.len(), total);
+                let mut file = std::io::BufWriter::new(
+                    std::fs::File::create(format!("{out}/bridge-drive.f32")).unwrap(),
+                );
+                for row in capture.iter() {
+                    for value in &row[..BOARD_DRIVE_POINTS] {
+                        assert!(value.is_finite());
+                        file.write_all(&value.to_le_bytes()).unwrap();
+                    }
+                }
+                file.flush().unwrap();
+                let mut auxiliary = std::io::BufWriter::new(
+                    std::fs::File::create(format!("{out}/auxiliary-drive.f32")).unwrap(),
+                );
+                for row in capture.iter() {
+                    let value = row[BOARD_DRIVE_POINTS];
+                    assert!(value.is_finite());
+                    auxiliary.write_all(&value.to_le_bytes()).unwrap();
+                }
+                auxiliary.flush().unwrap();
+            }
             if let Some(start) = trace_start {
                 STAGE_TRACE_ARMED.store(false, core::sync::atomic::Ordering::Relaxed);
                 let mut trace = std::io::BufWriter::new(
@@ -18766,12 +19311,12 @@ mod tests {
                     std::fs::File::create(format!("{dir}/loading{note:03}v{velocity}.csv"))
                         .unwrap(),
                 );
-                writeln!(file, "frequency_hz,intended_rate_s,initial_amplitude_norm,mechanical_norm,drain_per_sample,effective_rate_s").unwrap();
+                writeln!(file, "frequency_hz,intended_rate_s,initial_amplitude_norm,mechanical_norm,drain_per_sample,effective_rate_s,intrinsic_amplitude_rate_s,second_string_extra_rate_s").unwrap();
                 for row in BRIDGE_LOSS_TRACE.lock().unwrap().iter() {
                     writeln!(
                         file,
-                        "{},{},{},{},{},{}",
-                        row[0], row[1], row[2], row[3], row[4], row[5]
+                        "{},{},{},{},{},{},{},{}",
+                        row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7]
                     )
                     .unwrap();
                 }
@@ -18977,6 +19522,65 @@ mod tests {
             after > before * 1.2,
             "the second blow must add energy on balance: {before} -> {after}"
         );
+    }
+
+    #[test]
+    fn lifting_a_seated_damper_restores_poles_without_restoring_energy() {
+        for rate in [44100.0, 48000.0, 96000.0] {
+            let mut voice = Voice::<8>::default();
+            voice.note = 83;
+            voice.onset = 1.0;
+            voice.pole_ceiling = pole_ceiling(rate);
+            voice.partial_count = 1;
+            for lane in 0..LANES {
+                voice.partials[0].set_lane(lane, Component::start(0.1, 987.77, 0.9997, rate));
+            }
+            let before = voice.partials[0];
+            voice.damp(0.998, 0.0, 0.0, 0.0);
+            for _ in 0..200 {
+                voice.tick(0.0);
+            }
+            let damped = voice.partials[0];
+            assert!(damped.lane_magnitude_squared(0) < before.lane_magnitude_squared(0));
+            voice.lift_seated_damper();
+            let lifted = voice.partials[0];
+            assert_eq!(lifted.s, damped.s);
+            assert_eq!(lifted.c, damped.c);
+            for lane in 0..LANES {
+                assert!((lifted.rc[lane] - before.rc[lane]).abs() < 2e-7);
+                assert!((lifted.rs[lane] - before.rs[lane]).abs() < 2e-7);
+            }
+            voice.lift_seated_damper();
+            assert_eq!(voice.partials[0].rc, lifted.rc);
+            assert_eq!(voice.partials[0].rs, lifted.rs);
+        }
+    }
+
+    #[test]
+    fn short_unpedalled_repetitions_keep_one_string_after_the_damper_seats() {
+        let _turn = MERGE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _phase = TestKnob::set(&RESTRIKE_PHASE_PRESERVE, 1.0);
+        for note in [71, 78, 83, 85, 90, 97] {
+            let mut piano = prepared();
+            piano.engine.restrike_merge = true;
+            for _ in 0..5 {
+                render(&mut piano, (FS * 0.028) as usize, &[note_on(note, 70)]);
+                assert_eq!(
+                    piano.voices().filter(|v| v.active && v.note == note).count(),
+                    1
+                );
+                let voice = piano.voices().find(|v| v.active && v.note == note).unwrap();
+                assert_eq!(voice.seated_loss, [1.0; 2]);
+                for p in &voice.partials[..voice.partial_count] {
+                    for lane in 0..LANES {
+                        assert!(p.rc[lane] * p.rc[lane] + p.rs[lane] * p.rs[lane] < 1.0);
+                    }
+                }
+                render(&mut piano, (FS * 0.062) as usize, &[note_off(note)]);
+            }
+            let tail = render(&mut piano, (FS * 2.0) as usize, &[]);
+            assert!(tail.iter().all(|x| x.is_finite()));
+        }
     }
 
     #[test]
@@ -19413,9 +20017,11 @@ mod tests {";
 
     #[test]
     fn duplex_segments_ignore_the_damper() {
-        // The back segments have no dampers: releasing the key must speed up
-        // every string component's decay while leaving the duplex rotation
-        // untouched.
+        // Exercise the opt-in historical approximation. Factory voicing no
+        // longer injects these independent rings at each hammer strike.
+        let _duplex = TestKnob::set(&DUPLEX_LEVEL, 0.018);
+        // Releasing the key must speed up the strings' decay while leaving
+        // the auxiliary rotation untouched.
         let mut piano = prepared();
         render(&mut piano, 256, &[note_on(84, 120)]);
         let decay_squared = |c: &Component| c.rc * c.rc + c.rs * c.rs;
@@ -21013,6 +21619,120 @@ mod bench {
         }
         reset_every_knob();
     }
+    /// Export the same positive modal masses and projections used for audible
+    /// board motion and frozen-frequency loading, for an offline memory audit.
+    #[test]
+    #[ignore = "offline bridge-memory diagnostic; process-wide knobs"]
+    fn export_bridge_modal_loading() {
+        use std::io::Write;
+        reset_every_knob();
+        let out = std::env::var("CG_LOADING_DIR").expect("CG_LOADING_DIR");
+        std::fs::create_dir_all(&out).unwrap();
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.load_preset("concert"));
+        assert!(piano.prepare(44_100.0, 256, 0, 2));
+        let mut output = [0.0_f32; 512];
+        for frame in (0..8820usize).step_by(256) {
+            piano.process(&[], &mut output, &[], &[], (8820-frame).min(256) as u32, 0, 2);
+        }
+        assert!(piano.engine.bridge_count > 0);
+        let engine = &piano.engine;
+        for note in (36..=96).step_by(3) {
+            let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+            let projections = engine.bridge_projections(position);
+            let scale = engine.controls.tension_newtons()
+                / engine.string_length(position).max(0.01)
+                / ((0.5 + 1.5 * engine.controls.decay) * engine.controls.lab(11)).max(0.05);
+            let mut file = std::io::BufWriter::new(
+                std::fs::File::create(format!("{out}/modes{note:03}.csv")).unwrap(),
+            );
+            writeln!(file, "omega2,sigma,inverse_mass,projection,tension_length_decay_scale").unwrap();
+            for (mode, projection) in engine.bridge_modes.iter().zip(projections)
+                .take(engine.bridge_count)
+            {
+                writeln!(file, "{},{},{},{},{}", mode.omega2, mode.sigma,
+                    mode.inverse_mass, projection, scale).unwrap();
+            }
+        }
+        reset_every_knob();
+    }
+
+    /// Probe the known downstream board/room observation with independent
+    /// impulses at all sixteen bridge points. This is an oracle control, not
+    /// identification from piano notes or a measured real-piano impulse.
+    /// Sixteen forces are injected after the shared bed boundary. A seventeenth
+    /// probe separately drives the original-force auxiliary branch. Production
+    /// rendering is untouched. MIDI-dependent muting is not an LTI kernel.
+    #[test]
+    #[ignore = "offline causal reconstruction control; process-wide knobs"]
+    fn export_board_room_impulses() {
+        use std::io::Write;
+        let out = std::env::var("CG_ORACLE_DIR").expect("CG_ORACLE_DIR");
+        std::fs::create_dir_all(&out).unwrap();
+        let frames = 44_100usize * 3;
+        let impulse = 1e-6_f32;
+        let mut file = std::io::BufWriter::new(
+            std::fs::File::create(format!("{out}/board-room-kernels.f32")).unwrap(),
+        );
+        let mut maximum_peak = 0.0_f32;
+        // First the 16 spatial inputs and unmuted auxiliary input; then one
+        // auxiliary probe for each known MIDI owner mask. These are exact
+        // native gates, not fitted note-dependent tone or gain corrections.
+        for point in 0..BOARD_DRIVE_POINTS + 1 + NOTE_COUNT {
+            reset_every_knob();
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.load_preset("concert"));
+            assert!(piano.prepare(44_100.0, 256, 0, 2));
+            let mut output = vec![0.0_f32; 512];
+            let mut warmup = 44_100usize / 5;
+            while warmup > 0 {
+                let count = warmup.min(256);
+                piano.process(&[], &mut output, &[], &[], count as u32, 0, 2);
+                warmup -= count;
+            }
+            assert_eq!(piano.pair_next, piano.board_count);
+            // The stored forces already include the bed. Suppress a second
+            // contribution while keeping the factory board, room and mic.
+            BED_MIX.set(0.0);
+            if point > BOARD_DRIVE_POINTS {
+                let owner = LOW_NOTE + (point - BOARD_DRIVE_POINTS - 1) as u8;
+                for (muted, note) in piano.undamped_muted.iter_mut().zip(&piano.undamped_note) {
+                    *muted = *note == owner;
+                }
+            }
+            // plan_states is populated for RENDER_SPAN, not the whole host
+            // block. Reading past it would silently apply stale zero controls.
+            for frame in (0..frames).step_by(RENDER_SPAN) {
+                let count = (frames-frame).min(RENDER_SPAN);
+                piano.serial_stages(
+                    |section, offset| {
+                        let mut made = SectionFrame::default();
+                        if section == 0 && frame + offset == 0 {
+                            if point < BOARD_DRIVE_POINTS {
+                                made.drive_points[point] = impulse;
+                            } else {
+                                made.force = impulse;
+                            }
+                        }
+                        made
+                    },
+                    0, count, &mut output, 2,
+                );
+                for sample in &output[..count*2] {
+                    assert!(sample.is_finite());
+                    maximum_peak = maximum_peak.max(sample.abs());
+                    assert!(sample.abs() < 0.1, "probe must remain in linear output range");
+                    file.write_all(&(sample/impulse).to_le_bytes()).unwrap();
+                }
+            }
+        }
+        file.flush().unwrap();
+        std::fs::write(format!("{out}/oracle.json"),format!(
+            "{{\"rate\":44100,\"frames\":{frames},\"points\":16,\"sources\":17,\"kernel_count\":105,\"muted_owner_first\":21,\"muted_owner_count\":88,\"channels\":2,\"impulse_amplitude\":{impulse},\"probe_peak\":{maximum_peak},\"warmup_frames\":8820,\"serial_span\":128,\"preset\":\"concert\",\"input\":\"16 post-bed bridge points plus original auxiliary force\",\"caveat\":\"single held-key masks only; general MIDI needs time-varying gates\",\"output\":\"factory board, rim, room, air, proximity, preamp and output sensitivity\"}}"
+        )).unwrap();
+        reset_every_knob();
+    }
+
     /// Isolate the board from hammer, strings, room and output normalization.
     /// Export its exact digital coefficients, not a fitted acoustic response.
     /// Run alone: research knobs are process-wide.
@@ -21107,6 +21827,12 @@ mod bench {
         assert!(piano.load_preset("concert"));
         assert!(piano.set_parameter(25, 2.64));
         assert!(piano.set_parameter(31, 4.6));
+        if let Ok(spec) = std::env::var("CG_PARAMS") {
+            for part in spec.split(',').filter(|s| !s.is_empty()) {
+                let (index, value) = part.split_once('=').unwrap();
+                assert!(piano.set_parameter(index.parse().unwrap(), value.parse().unwrap()));
+            }
+        }
         assert!(piano.prepare(44100.0, 256, 0, 2));
         let mut output = vec![0.0f32; 512];
         for _ in 0..35 {
@@ -21116,7 +21842,13 @@ mod bench {
         let mut file = std::io::BufWriter::new(
             std::fs::File::create(std::env::var("CG_PHYSICAL_TRANSFER_CSV").unwrap()).unwrap(),
         );
-        writeln!(file,"frequency,a1,a2,drive,half_step,out_l,out_l1,out_r,out_r1,q,a,b,c,qy,theta_y,height,half_spacing,pattern").unwrap();
+        write!(file,"frequency,a1,a2,drive,half_step,out_l,out_l1,out_r,out_r1,q,a,b,c,qy,theta_y,height,half_spacing,pattern,geometry_shared").unwrap();
+        for side in ['l', 'r'] {
+            for field in ["px", "py", "pz", "ax", "ay", "az"] {
+                write!(file, ",{field}_{side}").unwrap();
+            }
+        }
+        writeln!(file, ",common_path").unwrap();
         for (mode, cold) in piano
             .board
             .iter()
@@ -21125,7 +21857,7 @@ mod bench {
         {
             assert!(mode.passive);
             let s = cold.radiation_shape;
-            writeln!(
+            write!(
                 file,
                 "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 cold.omega * 44100.0 / core::f32::consts::TAU,
@@ -21148,6 +21880,18 @@ mod bench {
                 piano.engine.controls.mic_pattern
             )
             .unwrap();
+            let shared = BOARD_ROOM_GEOMETRY.get() >= 0.5;
+            write!(file, ",{}", u8::from(shared)).unwrap();
+            for capsule in &piano.board_capsules {
+                for value in capsule.position.iter().chain(&capsule.axis) {
+                    write!(file, ",{value}").unwrap();
+                }
+            }
+            let common = if shared {
+                piano.board_capsules[0].minimum_path(BRIDGE_LENGTH_M, BOARD_WIDTH_M)
+                    .min(piano.board_capsules[1].minimum_path(BRIDGE_LENGTH_M, BOARD_WIDTH_M))
+            } else { piano.engine.controls.mic_distance };
+            writeln!(file, ",{common}").unwrap();
         }
         reset_every_knob();
     }
@@ -21168,7 +21912,7 @@ mod bench {
     /// test's instrument instead of this one. This is half the answer; the
     /// `#[ignore]` on the two fingerprints is the other half.
     #[cfg(test)]
-    fn reset_every_knob() {
+    pub(super) fn reset_every_knob() {
         for (_, knob, _) in TUNABLES {
             knob.set(knob.compiled());
         }
@@ -21179,6 +21923,8 @@ mod bench {
         BOARD_CAUSAL_PAIR.set(BOARD_CAUSAL_PAIR.compiled());
         RADIATION_QUADRATURE_SCALE.set(RADIATION_QUADRATURE_SCALE.compiled());
         CAUSAL_RADIATION_FIR.set(CAUSAL_RADIATION_FIR.compiled());
+        BOARD_ROOM_GEOMETRY.set(BOARD_ROOM_GEOMETRY.compiled());
+        SHARED_RADIATION_FIR.set(SHARED_RADIATION_FIR.compiled());
         BASS_BRIDGE_CORNER_HZ.set(BASS_BRIDGE_CORNER_HZ.compiled());
         FELT_RATE_MODEL.set(FELT_RATE_MODEL.compiled());
         FELT_RATE_DAMPING.set(FELT_RATE_DAMPING.compiled());
@@ -21186,6 +21932,8 @@ mod bench {
         SOFT_ATTACK_KNEE.set(SOFT_ATTACK_KNEE.compiled());
         PHYSICAL_BRIDGE.set(PHYSICAL_BRIDGE.compiled());
         PHYSICAL_BRIDGE_MOBILITY.set(PHYSICAL_BRIDGE_MOBILITY.compiled());
+        PHYSICAL_BRIDGE_BASS_RATIO.set(PHYSICAL_BRIDGE_BASS_RATIO.compiled());
+        PHYSICAL_BRIDGE_TREBLE_RATIO.set(PHYSICAL_BRIDGE_TREBLE_RATIO.compiled());
         PHYSICAL_PRESSURE_SCALE.set(PHYSICAL_PRESSURE_SCALE.compiled());
         PHYSICAL_BED_ROUTE.set(PHYSICAL_BED_ROUTE.compiled());
         CONTACT_BOARD_GAIN.set(CONTACT_BOARD_GAIN.compiled());
@@ -21195,6 +21943,10 @@ mod bench {
         STRING_STIFFNESS_SPREAD.set(STRING_STIFFNESS_SPREAD.compiled());
         REACTIVE_BRIDGE.set(REACTIVE_BRIDGE.compiled());
         SPATIAL_UNISON_GAP_M.set(SPATIAL_UNISON_GAP_M.compiled());
+        DIRECTIONAL_BRIDGE_HEIGHT_M.set(0.0);
+        PER_STRING_POLARIZATIONS.set(0.0);
+        NONLINEAR_WIRE_GEOMETRY.set(0.0);
+        TENSION_REFERENCE.set(0.0);
         STRING_TUNING_CENTER.set(STRING_TUNING_CENTER.compiled());
         UNISON_TREBLE_WIDTH_RATIO.set(UNISON_TREBLE_WIDTH_RATIO.compiled());
         JOINT_HAMMER_CONTACT.set(JOINT_HAMMER_CONTACT.compiled());
@@ -21220,13 +21972,14 @@ mod bench {
     /// Nothing about the instrument's sound should move by accident, and
     /// until now nothing stopped it -- these two tests printed their hash and
     /// asserted nothing, so they passed whatever the instrument did.
-    // Air + proximity candidate: ISO travelled-distance loss on near paths,
-    // every reflection and each stored FDN path. Proximity-only fingerprints
-    // were bf489fe94cfceda2 / fc689ced9f1f47aa. Air bypass must preserve that
-    // renderer; these new hashes deliberately include the acoustic change.
-    const RENDER_FINGERPRINT: u64 = 0x3c15_008f_4f34_9d6f;
+    // Air + proximity and released-string reuse, with the direct synthetic
+    // duplex ring removed after the listener-selected C#6 ablation. Previous
+    // hashes with that ring were 3c15008f4f349d6f / 76ef3169e4a9237c.
+    // The new factory renderer is checked bit-exact against DUPLEX_LEVEL=0
+    // on the frozen previous renderer, including full MIDI preroll.
+    const RENDER_FINGERPRINT: u64 = 0x232b_085e_d424_8398;
     /// As `RENDER_FINGERPRINT`, for the pedalled scenario.
-    const RENDER_FINGERPRINT_PEDALS: u64 = 0xf5f7_192f_2b5a_e4c5;
+    const RENDER_FINGERPRINT_PEDALS: u64 = 0x4371_ab4a_dc15_42ab;
 
     /// A fingerprint of rendered audio: what the instrument sounds like,
     /// as one number.

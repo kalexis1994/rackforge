@@ -1,0 +1,300 @@
+{
+  "date": "2026-10-03",
+  "status": "Joint SI contact verified in an isolated pilot; not selected or installed",
+  "gates": {
+    "felt_work_relative_error": 2.3365177793206725e-11,
+    "shared_potential_gradient_relative_error": 9.007316619692121e-11,
+    "damped_balance_relative_error": 3.587022654214264e-13,
+    "minimum_loss_j": 0.0
+  },
+  "cases": {
+    "60-60": {
+      "state_error_percent": 0.00703302795247121,
+      "maximum_balance_relative_error": 1.0774558268633275e-12,
+      "contact_time_ms": 2.3146091972715355,
+      "string_energy_j": 0.001677714404514999,
+      "hammer_initial_energy_j": 0.0037952153692004955,
+      "axial_linear_energy_j": 6.2511146114107e-07,
+      "matched_linear_string_energy_j": 0.0016812146835685916,
+      "nonlinear_vs_linear_energy_change_percent": -0.20819941009334597,
+      "handoff_energy_jump_j": 0.0,
+      "rate_damping_heat_percent": 5.001490738198541,
+      "rate_damped_state_error_percent": 0.00685241778878292,
+      "transverse_12_to_24_energy_change_percent": -1.30218439038422,
+      "temporal_refinement_error_ratios": [
+        4.002790888094833,
+        3.9997589423227016
+      ]
+    },
+    "60-124": {
+      "state_error_percent": 0.06951905193278071,
+      "maximum_balance_relative_error": 6.3669249328250075e-12,
+      "contact_time_ms": 1.792972262836898,
+      "string_energy_j": 0.02834710332942906,
+      "hammer_initial_energy_j": 0.04693371904404984,
+      "axial_linear_energy_j": 1.552334587020297e-05,
+      "matched_linear_string_energy_j": 0.028743729510486538,
+      "nonlinear_vs_linear_energy_change_percent": -1.3798702806216534,
+      "handoff_energy_jump_j": 0.0,
+      "rate_damping_heat_percent": 9.114612362239795,
+      "rate_damped_state_error_percent": 0.0489086253825316,
+      "transverse_12_to_24_energy_change_percent": -1.659369014577139,
+      "temporal_refinement_error_ratios": [
+        4.003284917515183,
+        4.000188838319896
+      ]
+    },
+    "72-60": {
+      "state_error_percent": 0.00273923805368403,
+      "maximum_balance_relative_error": 4.228449948232147e-13,
+      "contact_time_ms": 2.1318837754621955,
+      "string_energy_j": 0.0005813818682342817,
+      "hammer_initial_energy_j": 0.003159954058176257,
+      "axial_linear_energy_j": 5.377952979738942e-09,
+      "matched_linear_string_energy_j": 0.0005829251974171178,
+      "nonlinear_vs_linear_energy_change_percent": -0.26475595662606155,
+      "handoff_energy_jump_j": 4.336808689942018e-19,
+      "rate_damping_heat_percent": 9.505339718588772,
+      "rate_damped_state_error_percent": 0.0036913667120829414,
+      "transverse_12_to_24_energy_change_percent": -0.8381299076975712,
+      "temporal_refinement_error_ratios": [
+        4.001888084063427,
+        3.999768647472115
+      ]
+    },
+    "72-124": {
+      "state_error_percent": 0.06482635389010015,
+      "maximum_balance_relative_error": 2.160273546677035e-12,
+      "contact_time_ms": 1.4684139437255417,
+      "string_energy_j": 0.013892814438680488,
+      "hammer_initial_energy_j": 0.03907772854266038,
+      "axial_linear_energy_j": 3.541132211852352e-07,
+      "matched_linear_string_energy_j": 0.014280054862279384,
+      "nonlinear_vs_linear_energy_change_percent": -2.71175725397097,
+      "handoff_energy_jump_j": 3.469446951953614e-18,
+      "rate_damping_heat_percent": 13.882001047195443,
+      "rate_damped_state_error_percent": 0.05922079843041254,
+      "transverse_12_to_24_energy_change_percent": -2.038415074955613,
+      "temporal_refinement_error_ratios": [
+        3.943032345765198,
+        3.989077967282272
+      ]
+    }
+  },
+  "axial_resolution": {
+    "60": {
+      "2": {
+        "contact_time_s": 0.0017929700035603814,
+        "nfev": 29372,
+        "final_balance_relative_error": 1.3963916403235154e-12,
+        "string_energy_at_separation_j": 0.02834717107835604,
+        "components_at_separation": {
+          "axial_linear_j": 1.5480775777186804e-05,
+          "transverse_linear_j": 0.02826902084775649,
+          "nonlinear_interaction_j": 6.26694548223651e-05,
+          "total_j": 0.02834717107835604
+        },
+        "final_components": {
+          "axial_linear_j": 7.459618885730523e-05,
+          "transverse_linear_j": 0.028247786756600335,
+          "nonlinear_interaction_j": 2.4788132891796072e-05,
+          "total_j": 0.028347171078349435
+        }
+      },
+      "4": {
+        "contact_time_s": 0.0017999817399833383,
+        "nfev": 58712,
+        "final_balance_relative_error": 1.1783209500665346e-13,
+        "string_energy_at_separation_j": 0.028665346028278395,
+        "components_at_separation": {
+          "axial_linear_j": 3.310354213676699e-05,
+          "transverse_linear_j": 0.028601212385276926,
+          "nonlinear_interaction_j": 3.103010086470334e-05,
+          "total_j": 0.028665346028278395
+        },
+        "final_components": {
+          "axial_linear_j": 9.664757167158351e-05,
+          "transverse_linear_j": 0.02857550755670437,
+          "nonlinear_interaction_j": -6.809100098485038e-06,
+          "total_j": 0.02866534602827747
+        }
+      },
+      "8": {
+        "contact_time_s": 0.0018067571926731424,
+        "nfev": 117422,
+        "final_balance_relative_error": 8.72282761027924e-15,
+        "string_energy_at_separation_j": 0.028703217545000007,
+        "components_at_separation": {
+          "axial_linear_j": 4.982214231428806e-05,
+          "transverse_linear_j": 0.028650443694953606,
+          "nonlinear_interaction_j": 2.9517077321135343e-06,
+          "total_j": 0.028703217545000007
+        },
+        "final_components": {
+          "axial_linear_j": 0.00012637422407919225,
+          "transverse_linear_j": 0.02862085069443411,
+          "nonlinear_interaction_j": -4.4007373513337e-05,
+          "total_j": 0.028703217544999965
+        }
+      }
+    },
+    "72": {
+      "2": {
+        "contact_time_s": 0.0014684127253081268,
+        "nfev": 48692,
+        "final_balance_relative_error": 1.1019774478610618e-12,
+        "string_energy_at_separation_j": 0.013892827932691473,
+        "components_at_separation": {
+          "axial_linear_j": 3.6515335859225016e-07,
+          "transverse_linear_j": 0.013889650714272183,
+          "nonlinear_interaction_j": 2.812065060697755e-06,
+          "total_j": 0.013892827932691473
+        },
+        "final_components": {
+          "axial_linear_j": 2.9494035167738973e-05,
+          "transverse_linear_j": 0.013847503262484151,
+          "nonlinear_interaction_j": 1.583063503374227e-05,
+          "total_j": 0.013892827932685632
+        }
+      },
+      "4": {
+        "contact_time_s": 0.001476195166028995,
+        "nfev": 97382,
+        "final_balance_relative_error": 3.657869066377356e-14,
+        "string_energy_at_separation_j": 0.01416133339440806,
+        "components_at_separation": {
+          "axial_linear_j": 7.297590026906764e-07,
+          "transverse_linear_j": 0.01415880976988416,
+          "nonlinear_interaction_j": 1.7938655212101917e-06,
+          "total_j": 0.01416133339440806
+        },
+        "final_components": {
+          "axial_linear_j": 4.415735232151862e-05,
+          "transverse_linear_j": 0.01412275638968433,
+          "nonlinear_interaction_j": -5.5803475975408495e-06,
+          "total_j": 0.014161333394408308
+        }
+      },
+      "8": {
+        "contact_time_s": 0.001480290342037457,
+        "nfev": 194762,
+        "final_balance_relative_error": 8.878322976644069e-15,
+        "string_energy_at_separation_j": 0.014206120497734984,
+        "components_at_separation": {
+          "axial_linear_j": 8.656557638289939e-07,
+          "transverse_linear_j": 0.014203971037595391,
+          "nonlinear_interaction_j": 1.283804375763406e-06,
+          "total_j": 0.014206120497734984
+        },
+        "final_components": {
+          "axial_linear_j": 5.1640408755637804e-05,
+          "transverse_linear_j": 0.014167613894790917,
+          "nonlinear_interaction_j": -1.313380581157049e-05,
+          "total_j": 0.014206120497734984
+        }
+      }
+    }
+  },
+  "native_linear_handoff": {
+    "60-60": {
+      "transverse_modes_used": 12,
+      "axial_initial_state": "zero",
+      "linear_energy_j": 0.0015069411565282883,
+      "unpaid_extra_stretch_j": 8.98461246380761e-07,
+      "unpaid_fraction": 0.0005962152154969663,
+      "caveat": "Diagnostic on the first 12 native modes, not the full native contact or a measured piano"
+    },
+    "60-124": {
+      "transverse_modes_used": 12,
+      "axial_initial_state": "zero",
+      "linear_energy_j": 0.02404592724289438,
+      "unpaid_extra_stretch_j": 0.00021733362769610007,
+      "unpaid_fraction": 0.009038271866198155,
+      "caveat": "Diagnostic on the first 12 native modes, not the full native contact or a measured piano"
+    },
+    "72-60": {
+      "transverse_modes_used": 12,
+      "axial_initial_state": "zero",
+      "linear_energy_j": 0.0005073198928251051,
+      "unpaid_extra_stretch_j": 6.38183130648954e-08,
+      "unpaid_fraction": 0.00012579501408768197,
+      "caveat": "Diagnostic on the first 12 native modes, not the full native contact or a measured piano"
+    },
+    "72-124": {
+      "transverse_modes_used": 12,
+      "axial_initial_state": "zero",
+      "linear_energy_j": 0.011608181551451513,
+      "unpaid_extra_stretch_j": 1.4986795369986705e-07,
+      "unpaid_fraction": 1.2910545293903266e-05,
+      "caveat": "Diagnostic on the first 12 native modes, not the full native contact or a measured piano"
+    }
+  },
+  "factory_fingerprints": [
+    "232b085ed4248398",
+    "4371ab4adc1542ab"
+  ],
+  "package_sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+  "assumptions": {
+    "young_pa": 200000000000.0,
+    "density_kg_m3": 7850,
+    "transverse_per_direction": 12,
+    "axial": 2,
+    "bending": false,
+    "rate_damping_s_per_m": 0.1,
+    "output_normalization": false
+  },
+  "limitations": [
+    "Single representative string, fixed ends, initially at rest",
+    "Rate-damping law is an explicit passive assumption, not native Stulov memory or an identified real felt",
+    "No bending/bridge load/microphone, no full-field modal convergence or real-time budget verified",
+    "Axial linear energy is a diagnostic component, not the entire nonlinear energy or acoustic pressure",
+    "Conservation and temporal convergence do not demonstrate a more faithful audible piano"
+  ],
+  "artifact_sha256": {
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coupled-contact\\build\\source-audit.zip": "634070adba7e6a78ec522beee3112e230a7b12f3e6e037bf56322d351bd5d800",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coupled-contact\\build\\inspector.exe": "b1df5706c123ea51b936ac46117198e860c86ef575b8bbab09db6dd5be58b83d",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\tools\\concert_grand_nonlinear_string.py": "f1c17115e3f296a12f5c51e14d888756e60303e33802f8873d43c6a746a4d0e6",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\tools\\concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\tools\\audit-concert-grand-coupled-contact.py": "d3be447fe61704580540c48db1af7c70f5ed4adbeaf3ca6fb1b361de9077dc42",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\tools\\audit-concert-grand-contact-resolution.py": "2f2926b3cdfff5e1eaf5cf3914e5cfe2a50498da87cef767c98d7c0f05fbd324",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\Cargo.toml": "9e3036834fb2aeeda4461aa34a52512a5f26d46de27f684ef6023739a9130de3",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\Cargo.lock": "ea999e32bcd8d85c17d6d7045cdcccdc4a7878cc4fe22732c6bdb8765f25c168",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\plugins\\concert-grand\\Cargo.toml": "af23a1fe76df1b72303bf49cd6ce015b80241c9f3e92a1650cc0f3c1302cc557",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-coupled-contact\\summarize.py": "501e0e27c4df35182e92412a4168abb6300eb59d291ddac13bcfd8731f2f8e75",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\input\\contact-end.csv": "9e4633a05219de98bd734937885a2ece1c66b38500f59249322307fe28bff76f",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\input\\transfer.csv": "0cb57ffe16fea74fb857a0af3d443e6670992bad0f916283af279b87d183cb5f",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-124-705600.csv": "675cd3bfa96325678a3093bd144434be375edab6b945f4b45f87939a80cbb6f7",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-124-linear.csv": "70cd668f9f2d09d0f7aa2de6c8e13c2d5872359ecb94c7cc98076e88924232ad",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-124-rate-damped.csv": "fa8d800c33f016d921465f31a03c07285200610b97f581aaba42bce4edc30c42",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-60-705600.csv": "4bc406ea6f86ed6342567f62e847607d47d9be3f7514f14b298f2f26642e74e3",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-60-linear.csv": "694117a7a1f91665cbf16c579e7d1a884e1f2b3d22ea8c2013a19bd1dadb61f2",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-60-rate-damped.csv": "7177d60abd8105293124d22f227580b9acd13fac124057570badaeb28d26d605",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-124-705600.csv": "ba1d11c53e1931eaa1de9c2b999000d787739e6f44517f5b72705295198e696e",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-124-linear.csv": "35fdf8bcde064c4d461b110bdb86e1d0a1c53c8ecd7abba3ff06d809b0a690f8",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-124-rate-damped.csv": "8dd4a1aa93aab0e245a0ab6ee729370f8d26564fe1ec55693ff3cd184fb83655",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-60-705600.csv": "228a40121072f8aca1e87b8649c5360212addd8f2de6492b669ab0d9a51076ca",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-60-linear.csv": "11740e71df488a642472b44caec1ebbb8dec05e8fc4d3aad6ec6dfa664dfe9e3",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-60-rate-damped.csv": "5be3d219bdfb43d62648c1035a8fdd6f3f25286a1dafd9f227119764f8c5be62",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\quick\\60-124-705600.csv": "675cd3bfa96325678a3093bd144434be375edab6b945f4b45f87939a80cbb6f7",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\quick\\60-124-linear.csv": "70cd668f9f2d09d0f7aa2de6c8e13c2d5872359ecb94c7cc98076e88924232ad",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\quick\\60-124-rate-damped.csv": "fa8d800c33f016d921465f31a03c07285200610b97f581aaba42bce4edc30c42",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-124-705600.npz": "12ccc163fc14e5856c1f7e26979b8ab31e09fdd626bccf2cc90dd72c1958a05c",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-124-linear.npz": "07ef6f709bfcb70b62f7bc5c1a9a0d42feb125282c76f1b1b97ffcbceb195682",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-124-rate-damped.npz": "4ef874621ac2606448fd315785c5292f3d864b72ac935ada0e9cc43070a168d1",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-60-705600.npz": "1212700da94349f41dffb0257556c6b669a868bcfe61520a3cca97fc6d7e226b",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-60-linear.npz": "3c141e3476719c7e71a7758392dc64684767e2fe2564044af26678995cab1c11",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\60-60-rate-damped.npz": "fdb4715357ccbe77fc62d529f449adc0732393032ae611bb59dd70df60ce3afd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-124-705600.npz": "e43adb229485630aa517ae89e9a0d8b0c1d46559a83ec7b8fc82d40b04ea77a5",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-124-linear.npz": "c5603c35afddd45538d2170b4fcc38171bd1521732c0be15f7bb9c840148f598",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-124-rate-damped.npz": "99d16f2a6c6b0bc80a0aee9d1851e13615e95641783019e2d3c251c804e521b8",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-60-705600.npz": "0fd49a44a76ecde40608c3c3d9d2877bb9b4be2656d0748d02ce3408a47be754",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-60-linear.npz": "87acbe9d4c1cf72befd9386087fbfda0843debe8ec53e00de6f6c2928a7cff90",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\72-60-rate-damped.npz": "6117a84095a0ad438c962497c59298fe13bd476a724ee01cb42d39e063bbf208",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\quick\\60-124-705600.npz": "12ccc163fc14e5856c1f7e26979b8ab31e09fdd626bccf2cc90dd72c1958a05c",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\quick\\60-124-linear.npz": "07ef6f709bfcb70b62f7bc5c1a9a0d42feb125282c76f1b1b97ffcbceb195682",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\quick\\60-124-rate-damped.npz": "4ef874621ac2606448fd315785c5292f3d864b72ac935ada0e9cc43070a168d1",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\physical\\report.json": "84623d10880755a9e2b483a4667dfcffb0ed10b42fcd13925b2d17ab14c0ebc1",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\quick\\report.json": "810d1b4ade0843dd5b788bfac13c4f09f381243d16dece0012e3f42b857e4bb1",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-contacto-acoplado\\resolution\\resolution.json": "6f6a64a2bcf6931e38f84ff14321384e709f41b40e693833e4c41450a109baeb"
+  }
+}

@@ -1,0 +1,340 @@
+{
+  "policy": "Factorial diagnosis of the listener-rejected unison pilot, not a new fit.\n\nKeep stereo and unity export gain. Separate fixed pitch spread, secondary\nstring losses and reactive bridge loading. Harmonic colour motion below is\na descriptive baseline-relative measurement, not an audible-flanger score.\n",
+  "renderer_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+  "factory_changed": false,
+  "export_gain_db": 0,
+  "velocity": 124,
+  "hold_s": 2,
+  "profiles": {
+    "A-base": {
+      "UNISON_WIDTH": 0,
+      "UNISON_EXTRA_LOSS": 2
+    },
+    "Solo-afinacion": {
+      "UNISON_WIDTH": 0.65,
+      "UNISON_EXTRA_LOSS": 2
+    },
+    "Solo-perdidas": {
+      "UNISON_WIDTH": 0,
+      "UNISON_EXTRA_LOSS": 1
+    },
+    "B-rechazada": {
+      "UNISON_WIDTH": 0.65,
+      "UNISON_EXTRA_LOSS": 1
+    },
+    "B-sin-reactividad": {
+      "UNISON_WIDTH": 0.65,
+      "UNISON_EXTRA_LOSS": 1,
+      "REACTIVE_BRIDGE": 0
+    }
+  },
+  "listener_verdict": {
+    "B-rechazada": "Rejected: flanger-like sound"
+  },
+  "installed_package_unchanged_sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+  "script_sha256": "cdf848d85407822bc4691b0c5973c9e748aeadbd63dd50844997e6b78d190f72",
+  "notes": {
+    "C4": {
+      "sources": {
+        "A-base": {
+          "raw_sha256": "7dd6b537278ab13a7689c43ec11c5039768611fd1c9eac1e8055b94af4f954ba",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "dc38cd227ef17808c85fa39b9890e887e89f4c7cb74273a0c003e0b7e669626d",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          },
+          "wav_byte_exact_to_prior": "C:\\SHARED\\Unisono-sutil-2026-10-02\\piloto-visible\\Control-sin-carga\\60-124-Base.wav"
+        },
+        "Solo-afinacion": {
+          "raw_sha256": "82cee3d04e44dc77df1393ff9b5a9cf8a81559aea1745d4484314de044295b63",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "dc38cd227ef17808c85fa39b9890e887e89f4c7cb74273a0c003e0b7e669626d",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0,
+              "UNISON_WIDTH": 0.65,
+              "UNISON_EXTRA_LOSS": 2
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          }
+        },
+        "Solo-perdidas": {
+          "raw_sha256": "14169ef2afcb41c3f3abb69545ba96203436c93fd01762f5e761e8d1aeb8870d",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "dc38cd227ef17808c85fa39b9890e887e89f4c7cb74273a0c003e0b7e669626d",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0,
+              "UNISON_WIDTH": 0,
+              "UNISON_EXTRA_LOSS": 1
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          }
+        },
+        "B-rechazada": {
+          "raw_sha256": "c97237c5e79308215520912177d543d54b2625b51ebd83bf0a1f2ae2a0bfad85",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "dc38cd227ef17808c85fa39b9890e887e89f4c7cb74273a0c003e0b7e669626d",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0,
+              "UNISON_WIDTH": 0.65,
+              "UNISON_EXTRA_LOSS": 1.0
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          },
+          "wav_byte_exact_to_prior": "C:\\SHARED\\Unisono-sutil-2026-10-02\\ESCUCHAR\\C4-Unisono-control.wav"
+        },
+        "B-sin-reactividad": {
+          "raw_sha256": "5648d445b96212e3c28b9b9cd74428c5acaeaf399f8b0c442f69cebdb9bb0619",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "dc38cd227ef17808c85fa39b9890e887e89f4c7cb74273a0c003e0b7e669626d",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0,
+              "UNISON_WIDTH": 0.65,
+              "UNISON_EXTRA_LOSS": 1,
+              "REACTIVE_BRIDGE": 0
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          }
+        },
+        "Steinway": {
+          "wav_sha256": "8175d1b2c9b54fb51b5234f67dbf07329a2eb41f4a37d332c45617f0a365ce8b"
+        }
+      },
+      "metrics": {
+        "A-base": {
+          "relative_colour_rms_db": 0.0,
+          "median_partial_colour_range_db": 0.0,
+          "max_partial_colour_range_db": 0.0,
+          "stereo_level_delta_db": 0.0
+        },
+        "Solo-afinacion": {
+          "relative_colour_rms_db": 1.2385178799874923,
+          "median_partial_colour_range_db": 2.3287951607098445,
+          "max_partial_colour_range_db": 7.199533543311436,
+          "stereo_level_delta_db": -0.5410472207668349
+        },
+        "Solo-perdidas": {
+          "relative_colour_rms_db": 0.09628463764248027,
+          "median_partial_colour_range_db": 0.2498654538359792,
+          "max_partial_colour_range_db": 0.5652465897948461,
+          "stereo_level_delta_db": 2.090180584765246
+        },
+        "B-rechazada": {
+          "relative_colour_rms_db": 2.8871449388828263,
+          "median_partial_colour_range_db": 7.644110468399932,
+          "max_partial_colour_range_db": 14.98608064049722,
+          "stereo_level_delta_db": 1.0895206315156827
+        },
+        "B-sin-reactividad": {
+          "relative_colour_rms_db": 1.6589464590075638,
+          "median_partial_colour_range_db": 4.1199339546403415,
+          "max_partial_colour_range_db": 9.598961205226374,
+          "stereo_level_delta_db": 1.406764130418523
+        }
+      },
+      "timeline": [
+        {
+          "label": "A-base",
+          "start_s": 0.0
+        },
+        {
+          "label": "Solo-afinacion",
+          "start_s": 4.4
+        },
+        {
+          "label": "Solo-perdidas",
+          "start_s": 8.8
+        },
+        {
+          "label": "B-rechazada",
+          "start_s": 13.200000000000001
+        },
+        {
+          "label": "B-sin-reactividad",
+          "start_s": 17.6
+        },
+        {
+          "label": "Steinway",
+          "start_s": 22.0
+        }
+      ]
+    },
+    "C6": {
+      "sources": {
+        "A-base": {
+          "raw_sha256": "8848a05b82f5e4848435a2af749af3b41bf179e12a02df21829d539c66bc3670",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "37a16231d634b4e432e8e10438dd8c14bb7e889b8337bc4ce54d3c3c80436bf0",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          },
+          "wav_byte_exact_to_prior": "C:\\SHARED\\Unisono-sutil-2026-10-02\\piloto-visible\\Control-sin-carga\\84-124-Base.wav"
+        },
+        "Solo-afinacion": {
+          "raw_sha256": "291453f0bfa40682e96ee02d6103cdf58082b6d755c94e4b8992271582347360",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "37a16231d634b4e432e8e10438dd8c14bb7e889b8337bc4ce54d3c3c80436bf0",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0,
+              "UNISON_WIDTH": 0.65,
+              "UNISON_EXTRA_LOSS": 2
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          }
+        },
+        "Solo-perdidas": {
+          "raw_sha256": "004052ae08dec5f7a2b64190987fbfc55c7ba62056905e953553dfbaea75269d",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "37a16231d634b4e432e8e10438dd8c14bb7e889b8337bc4ce54d3c3c80436bf0",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0,
+              "UNISON_WIDTH": 0,
+              "UNISON_EXTRA_LOSS": 1
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          }
+        },
+        "B-rechazada": {
+          "raw_sha256": "a37f47b22cee4b0e30f878b37f75944a31ad061055a159a657813adb1ad60fd0",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "37a16231d634b4e432e8e10438dd8c14bb7e889b8337bc4ce54d3c3c80436bf0",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0,
+              "UNISON_WIDTH": 0.65,
+              "UNISON_EXTRA_LOSS": 1.0
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          },
+          "wav_byte_exact_to_prior": "C:\\SHARED\\Unisono-sutil-2026-10-02\\ESCUCHAR\\C6-Unisono-control.wav"
+        },
+        "B-sin-reactividad": {
+          "raw_sha256": "49b98a1a3569bd01336298a8ba89c34039c64ac0d917ac4c9fb1ee716222e934",
+          "manifest": {
+            "binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+            "events_sha256": "37a16231d634b4e432e8e10438dd8c14bb7e889b8337bc4ce54d3c3c80436bf0",
+            "frames": 176400,
+            "rate": 44100,
+            "preset": "concert",
+            "tuning": {
+              "DIAGNOSTIC_STRING_DRAIN": 0,
+              "UNISON_WIDTH": 0.65,
+              "UNISON_EXTRA_LOSS": 1,
+              "REACTIVE_BRIDGE": 0
+            },
+            "warmup_ms": 200,
+            "block_frames": 256
+          }
+        },
+        "Steinway": {
+          "wav_sha256": "95edffb7262b652d287af8e921267b66143ea1f4ee005dd40e9802e4f7892b83"
+        }
+      },
+      "metrics": {
+        "A-base": {
+          "relative_colour_rms_db": 0.0,
+          "median_partial_colour_range_db": 0.0,
+          "max_partial_colour_range_db": 0.0,
+          "stereo_level_delta_db": 0.0
+        },
+        "Solo-afinacion": {
+          "relative_colour_rms_db": 3.044401415340394,
+          "median_partial_colour_range_db": 9.177077325786051,
+          "max_partial_colour_range_db": 12.802727622688515,
+          "stereo_level_delta_db": -4.466045825730102
+        },
+        "Solo-perdidas": {
+          "relative_colour_rms_db": 0.5165715546956496,
+          "median_partial_colour_range_db": 0.9534734235466977,
+          "max_partial_colour_range_db": 3.0648992148855094,
+          "stereo_level_delta_db": 2.453987755912113
+        },
+        "B-rechazada": {
+          "relative_colour_rms_db": 4.54994704554942,
+          "median_partial_colour_range_db": 13.951449839509994,
+          "max_partial_colour_range_db": 17.226093660866624,
+          "stereo_level_delta_db": -3.8837273006275232
+        },
+        "B-sin-reactividad": {
+          "relative_colour_rms_db": 3.1798466489564547,
+          "median_partial_colour_range_db": 10.031840116811612,
+          "max_partial_colour_range_db": 11.974485831202507,
+          "stereo_level_delta_db": -0.9550044054210964
+        }
+      },
+      "timeline": [
+        {
+          "label": "A-base",
+          "start_s": 0.0
+        },
+        {
+          "label": "Solo-afinacion",
+          "start_s": 4.4
+        },
+        {
+          "label": "Solo-perdidas",
+          "start_s": 8.8
+        },
+        {
+          "label": "B-rechazada",
+          "start_s": 13.200000000000001
+        },
+        {
+          "label": "B-sin-reactividad",
+          "start_s": 17.6
+        },
+        {
+          "label": "Steinway",
+          "start_s": 22.0
+        }
+      ]
+    }
+  }
+}

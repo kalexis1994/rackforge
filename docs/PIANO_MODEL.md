@@ -13,6 +13,11 @@ drift from what this document says it does.
 
 ## What is modelled
 
+The active research order, missing mechanisms, prior rejected hypotheses and
+acceptance conditions are tracked in the
+[physics roadmap](concert-grand-physics-roadmap-2026-10-02/README.md).
+This roadmap distinguishes prototypes from the installed factory model.
+
 ### Stiff strings: inharmonicity (tested)
 
 A real piano string is not an ideal string; bending stiffness raises each
@@ -368,6 +373,152 @@ there is nothing for the unison detune to act on, so it was being applied
 between the two *polarisations* of a single string instead. The third string
 was also cut off above the twelfth partial — the same mistake the model had
 already made once at partial 32, eleven partials lower.
+
+### Shared modal-mass calibration experiment (2026-10-01)
+
+The physical branch computes bridge admittance and board motion from the same
+positive modal masses. A native refit experiment now permits a smooth change
+of mean mobility below 200 Hz and above 1.1 kHz through
+`PHYSICAL_BRIDGE_BASS_RATIO` and `PHYSICAL_BRIDGE_TREBLE_RATIO`. Both compile at
+unity: the factory audio is unchanged. These are research tuning-file controls,
+not added public parameters or a released calibration.
+
+For a mode at frequency `f`, its mean mobility is multiplied by
+`bass^(1/(1+(f/200)^4)) * treble^((f/1100)^4/(1+(f/1100)^4))` before deriving
+its mass. Positive ratios preserve positive masses. Both the time-domain force
+response and complex loading use that same mass; radiation remains an
+observation of those modes. The existing reduced string load still uses the
+frozen-frequency weak-coupling approximation, not a fully reciprocal transient
+string–board solver.
+
+Frequency regimes are motivated by Ege and Boutillon's measured plate and
+inter-rib behaviour ([synthetic mobility](https://arxiv.org/abs/1210.5688),
+[global/local descriptions](https://arxiv.org/abs/1210.5109)). The smooth law and
+the 200 Hz crossover are **calibration choices**, not their waveguide equations
+or identified rib geometry. A positive mass curve alone does not establish
+agreement with a recorded piano.
+
+The current refit measures attack, individual partial balance and decay with
+fixed gain and reference-only reliability masks. It rejects improvements that
+do not generalize to reserved roots/velocities. The stronger density fits failed
+this check. The modest regional experiment improves average errors but still
+fails the final worst-case guards, so its ratios remain unity in factory code.
+See [current refit report](concert-grand-current-refit-2026-10-01/README.md).
+`bridge::tests::regional_modal_masses_preserve_loading_and_passivity` checks
+positive conductance and matching force/loading scaling at multiple frequencies.
+
+### Forced-motion radiation audit (2026-10-01)
+
+The selected physical board observer matches each capsule's complex pressure
+gain at the mode's natural frequency using two consecutive velocity samples.
+Forced motion is broadband: that two-tap filter is not a propagation delay or
+an exact acceleration observation away from the matching frequency. It need
+not have zero gain at DC. The passive mechanical bank alone does not make this
+observation an exact broadband acoustic transfer.
+
+The native-only, default-off `CAUSAL_RADIATION_FIR` integrates retarded surface
+acceleration with the same mass-normalized shapes and microphone geometry.
+It removes a single common minimum-path/c delay from every board mode (height/c
+for the historical vertical pair); it has no acoustic
+feedback, and does not replace the auxiliary paths or room with a complete
+acoustic solver. This is still a diagnostic, not a released alternate model.
+
+A frozen-bank audit reproduces the existing observer at modal frequencies,
+checks its mechanical transfer against independent sinusoidal time stepping,
+and compares it with a frequency-dependent Rayleigh integral. A doubled spatial
+grid changes the tested pressure levels by at most 0.12 dB, while the two-tap
+approximation changes harmonic balance much more. The forced C6 H2/H1 transfer
+differs by about 13 dB between the current observer and the causal integral;
+that is a unit-force steady-state result, not a note-attack measurement.
+
+Actual note renders on six roots at two velocities show that simply enabling
+the causal observer also weakens C6's fundamental and worsens the high-register
+score. It fails acceptance; the factory observer is unchanged. The shared modal
+surface representation, loading, acoustic observation and recording geometry
+need joint validation before a new calibration can be accepted. See the
+[radiation audit](concert-grand-radiation-2026-10-01/README.md).
+
+The subsequent joint calibration found a receiver-coordinate inconsistency.
+The selected board interprets Mic Distance as height above its rectangle; the
+room uses the same control as lateral reach, with a separate, much smaller
+height. Native research switch `BOARD_ROOM_GEOMETRY` instead passes the room's
+actual capsule positions and signed polar axes to the board in board-local
+coordinates. Width then scales both pairs' spacing. It remains default-off:
+changing it changes the instrument's sound, and the edited reference samples
+do not identify their microphone coordinates. The room and auxiliary paths
+still have their historical source and phase approximations.
+
+The close receiver requires a denser spatial integral than the historical
+vertical pair: at distance 0.6 m, increasing the 40×24 grid to 80×48 changes one
+tested high component by 4.39 dB. Increasing 80×48 to 160×96 changes the tested
+H1..H6 transfers across C2..C7 by at most 0.34 dB. Fractional linear delays and
+backward-difference acceleration still differ from the continuous integral by
+up to 3.41 dB at high frequencies; spatial convergence does not remove this
+temporal approximation.
+
+`SHARED_RADIATION_FIR`, also native research and default-off, commutes the
+modal sum and the delay sum. It uses shared pressure delay slots, with f64
+accumulation to retain precision under spatial cancellation. Tests compare
+with independent convolution at four sample rates, including 128 cancelling
+modes. Storage is sized when kernels are built, with no allocation in the
+sample tick; kernel rebuilding is not yet a production real-time design.
+Factory fingerprint and WASM across-instance behavior remain unchanged.
+See [joint calibration](concert-grand-joint-radiation-2026-10-01/README.md).
+
+An offline source-to-microphone identification subsequently kept the physical
+strings and their loading frozen and fitted global/three-region causal FIR
+observations from the actual sixteen bridge-drive signals. It brings the
+C6/124 20–100ms harmonic balance closer without weakening its fundamental,
+but fails overall reserved-pitch and velocity guards and was rejected by
+listening for reduced attack. A subsequent temporal audit finds that C6/124
+energy rises only 0.918dB from 0–5ms to 5–20ms, against 3.558dB for the current
+model and 4.031dB for Steinway. New fitting guards separately check temporal
+envelope and initial rise; harmonic balance alone cannot approve an attack.
+The prototype remains rejected and uninstalled. Magnitude-only, minimum-phase fitting
+does not identify mechanical admittance or measured acoustic phase. C4 shows
+a large temporal discrepancy between simulated bridge drive and reference
+pressure, which motivates separating string losses, collective loading and
+modal body memory; it does not by itself locate the defective mechanism.
+See [identified-body experiment](concert-grand-identified-body-2026-10-02/README.md).
+
+A subsequent native reconstruction control explicitly captures the original
+auxiliary excitation as well as the sixteen post-bed bridge inputs. Probed
+causal responses, with the engine's existing held-key owner masks, recover
+current pressure and attack within the declared tolerances on all internal
+note/velocity splits. This is a known-model control, not a recovered Steinway
+phase or a successful free FIR identification from notes. A relative
+observation correction preserves the attack but worsens treble and worst-note
+errors; grouped cross-validation chooses zero correction. No new factory
+candidate results. General MIDI still requires the native time-varying gates.
+See [causal reconstruction control](concert-grand-reconstruction-2026-10-02/README.md).
+
+A full-native loss audit separates intrinsic string decay from collective
+bridge loading. C4's fundamental loses most of its level during 150–800 ms;
+its late acoustic slope is already close to the reference. Global intrinsic
+loss reduction barely addresses this transition. Bridge ablations improve
+C4 but regress other notes, and consistent modal damping/mobility trials do
+not pass the attack and keyboard guards. A passive rotating-envelope memory
+control with the same stationary admittance does not recover the missing
+level; it is not a complete bidirectional string solver. Local H1..H3 slopes
+on 105 pairs now retain reference support and fit residuals instead of
+assuming one exponential across the note. No factory change is approved.
+See [loss and transition audit](concert-grand-decay-loading-2026-10-02/README.md).
+
+A listener then reports missing unison richness in the recovered-sustain
+no-drain control. Fixed per-string pitch/stiffness differences and reduced
+secondary-string losses are tested both with native loading and with that
+diagnostic ablation. A stronger pilot improves the four-note strong-velocity
+mean but loses mid-tail level in the treble. The listener rejects that pilot
+(B in the comparator) for a flanger-like sound. A two-factor ablation separates
+pitch spread from secondary losses: pitch spread produces moving relative
+partial balance, amplified by the smaller losses; removing reactive loading
+reduces but does not eliminate it. A count of recovered envelope notches above
+3 dB does not certify stable spectral colour. The pilot is discarded.
+Twelve-second holds, stereo partial envelopes and reference-only support masks
+check delayed modulation without treating silence as an improvement. Current
+control WAVs remain identical to the listener's previous files. No factory
+tuning is changed. See [subtle unison audit](concert-grand-subtle-unison-2026-10-02/README.md)
+and [rejected pilot diagnosis](concert-grand-unison-flanger-2026-10-02/README.md).
 
 ### Phantom partials in the bass (tested)
 
@@ -1758,14 +1909,31 @@ simplification is stated: the halo shadows new strikes only — energy does not
 yet flow between already-sounding strings, and catching the pedal after a
 note adds nothing.
 
-### Duplex scale (tested)
+### Calibration paths in the selected physical renderer
 
-The short string segments between bridge and hitch pin are tuned high
-(Conklin's duplex scaling), excited only through the bridge — and undamped.
-The model gives every treble-half note two faint components near 2× and 4×
-its fundamental (each with a fixed per-note mistuning) that ignore the
-damper: a staccato treble note leaves their ping hanging where a bass note
-goes silent.
+The current physical bridge path replaces the legacy prompt-decay table
+(`PROMPT_MEASURED_POWER`) with projected admittance and bypasses the legacy
+midrange correction (`MIDRANGE_BALANCE`). These two controls do not affect
+the selected physical renderer; contact and physical bridge coefficients
+remain active. The [global timbre diagnosis](concert-grand-global-timbre-2026-10-01/README.md)
+checks this boundary with bit-exact audio and records the remaining tonal
+and decay errors. Historical refit results are specific to their renderer.
+
+### Duplex approximation (disabled in factory voicing)
+
+The historical approximation initializes two auxiliary oscillators near
+2.015× and 4.03× the fundamental at every treble-half strike, with fixed
+per-note mistuning and no damper loss. It does **not** calculate excitation
+by a moving bridge. The earlier description confused this implementation
+with the physical coupling of the short string segments beyond the bridge.
+
+The C#6 short-note audition on 2026-10-01 identified this added ring as the
+reported tick: the listener selected the `DUPLEX_LEVEL=0` ablation. The
+compiled default and shared factory calibration now use zero for every
+program. The main three-string unison, contact excitation and soundboard
+remain active. The opt-in research path retains a test of its undamped
+decay; passive duplex coupling remains unimplemented. See
+[the diagnosis](concert-grand-csharp6-click-2026-10-01/README.md).
 
 ### Una corda (tested)
 
@@ -1839,13 +2007,66 @@ real unison never settles into a clean exponential, and the churn is most of
 what keeps a long sustain alive. Under una corda the shifted hammer misses
 the third string almost entirely.
 
-A hard blow also stretches the string: the note starts several cents sharp
-and settles over ~250 ms (tension modulation; Askenfelt & Jansson report the
-effect on heavy bass strings). The glide runs at control rate by nudging
-each component's rotation — the audio loop never notices.
+The tension-modulation path is intended to represent the stretch from a hard
+blow. It nudges component rotations every 32 samples, but its current stretch
+statistic is a squared sum of empirical phasor amplitudes, with cross products
+between strings and polarizations. It is not an SI energy balance. The
+[2026-10-02 P3 audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P3.md)
+measured the stored vertical poles over the first 120 ms at velocity 124:
+F#2 changed at most 0.01527 cents, C4's upper partials at most 0.0004343 cents,
+and C5/C6/F#6 did not change at all. Small incremental updates can round away
+in the f32 poles while the applied-tension variable advances. The earlier
+claim of a several-cent glide was not demonstrated for the current factory.
+Per-string native controls and an independent conservative SI core are
+experimental; neither has replaced this factory path.
 
-Re-striking a sounding note no longer damps it like a released key: the old
-vibration eases out over ~250 ms underneath the new strike.
+The [P3 contact/reference audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P3-contacto.md)
+separates this motion-derived path from the scripted initial bass sharpening
+still applied at note-on. F#2 at velocity 124 starts 3.402 cents above velocity
+60; its historical descent counters are zero. Deriving contact mass from that
+already sharpened f0 makes the modal mass velocity-dependent by 0.3923% in
+this case. The absolute-reference pole prototype retains tiny accumulated
+updates but does not improve the sound consistently. The contact's SI states
+also undergo per-strike peak normalization and MIDI level normalization:
+their final audible amplitudes cannot directly provide physical elongation.
+
+The [2026-10-03 joint-contact pilot](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P3-contacto-acoplado.md)
+starts the SI hammer and nonlinear string together, rather than adding
+stretch energy to a normalized contact result. C4/C5 at velocities 60/124
+pass energy, positive-loss and independent temporal-convergence checks;
+separation transfers the same displacement and velocity without an energy
+jump. This remains an isolated fixed-end pilot: modal resolution, dispersion,
+bridge/microphone transfer and real-time cost are unresolved. It has not
+replaced the audible factory voice or demonstrated improved Steinway fidelity.
+
+In the current phase-preserving model, re-striking a sounding note delivers
+the new contact over a finite arrival to the same string. This also applies
+after the key was released and its damper seated: lifting removes the stored
+vertical/horizontal pole losses, without restoring any amplitude already
+dissipated. The existing motion and the new contact then share one voice.
+The historical fresh-voice bypass still eases the old voice out separately.
+
+Preserving the audible voice does not currently make the hammer collision
+depend on that voice's physical motion: `simulate_strike` initializes its
+modal q/v at zero and has no incoming string-state argument. The
+[resolved SI contact/restrike pilot](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P3-resolucion-reiteracion.md)
+preserves displacement and velocity during relaunch, counts external hammer
+energy and verifies phase-dependent energy exchange. Two moving-string controls
+separate while the hammer is still going forward and recontact later; all ten
+native collisions checked from rest already end with negative hammer velocity.
+The isolated Euler model passes modal-resolution criteria across C4/C5/C6/F#6,
+but it does not include a moving bridge, real backcheck or Timoshenko dispersion
+and has not replaced the factory collision/output path.
+
+The subsequent [moving-support SI pilot](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P3-puente-movil.md)
+adds a vertical moving endpoint with the string's mixed kinetic inertia and
+a reciprocal hammer/string/support potential. An elemental support and the
+35 low P2 structural modes pass interface work, loss and energy checks.
+C4 at velocity 124 requires 48→72 transverse modes (2N axial) to pass the
+declared mechanical output refinement gate. This is a one-string, four-ms
+Euler experiment with assumed support geometry, fixed axial/horizontal ends
+and no acoustic pressure observer; it is not a new factory voice or Steinway
+fit. The production collision/output path remains as described above.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
@@ -2814,12 +3035,15 @@ Stated so nobody mistakes silence for coverage:
 * **The longitudinal mixing itself.** Phantom partials are placed at the
   frequencies the mixing produces, but the mixing is not integrated, so their
   level tracks velocity by a stated rule rather than emerging.
-* ~~Re-strike interaction~~ — DONE: striking a note that still rings free
+* ~~Re-strike interaction~~ — DONE: striking a note that still rings
   merges the new blow into the living voice, partial by partial by harmonic
   number: phasors in phase with the strike grow, phasors against it cancel —
-  the flutter of fast repetition, emergent. Only a voice already under a
-  damper (its decay rates scaled) takes the legacy ease-out-and-strike-fresh
-  path, because a scaled rate cannot be honestly un-scaled.
+  the flutter of fast repetition, emergent. The finite phase-preserving path
+  also reuses a released voice under a seated damper. Its stored pole losses
+  are removed when the key lifts that damper; its attenuated modal state is
+  preserved, so lost energy is never restored. This is a contact reconstruction,
+  not a nonlinear collision initialized from the moving string. The legacy
+  reconstruction/bypass retains its former fresh-voice behavior for damped notes.
 * ~~String-to-string energy flow~~ — DONE for sounding strings: every free
   string receives the previous sample's total bridge signal (everyone but
   itself), weighted by its own drain coupling — reciprocity — and scaled by

@@ -1,0 +1,38 @@
+{
+  "baseline_binary_sha256": "db93d789d5aa84376fd5eb57932c3245e8a71556d3ba06678ea1903b6fb7d425",
+  "candidate_binary_sha256": "3b6ac0541fcd740b2cdab1586158b2e66790a6d367438f7ac91228970bb1d2b7",
+  "events_sha256": "cc8ae2ab3bf4e81fc8144df1847b167ad6b1351c76bd848733c558ec65ec359a",
+  "probe_events_sha256": "a31808d637ee9270d619b8d9b135da5837331c3340f0186a0f8bfbc0bbb0d9a7",
+  "candidate_probe_sha256": "671a19ffea081996f10ba8d4c35b8a0492bb871e59968c807e718480fa10ea84",
+  "selected_probe_sha256": "e5a13b599c4827d13350aae06d4eba76b2c624c5d695d87ee0b20b5306240646",
+  "candidate_midi_sha256": "b09151de8996fe2872ab83fc845fc5a72796ba70a96efc04cdfda2179a868200",
+  "selected_midi_sha256": "b09151de8996fe2872ab83fc845fc5a72796ba70a96efc04cdfda2179a868200",
+  "baseline_midi_sha256": "aa3dbae6895f0286211af1ca6c226d35eb5e202191d790cba0169c2c852724bf",
+  "probe_bit_exact_to_selected_C": true,
+  "midi_bit_exact_to_duplex_ablation": true,
+  "probe_frames_compared": 463050,
+  "midi_frames_compared": 5115600,
+  "csharp6_first_attack": {
+    "before": {
+      "peak": 0.07940259575843811,
+      "rms_20_250_first_15ms": 0.003062105035202741,
+      "rms_1000_4000_first_15ms": 0.029176565571720353,
+      "rms_4000_8000_first_15ms": 0.0004951516159253304
+    },
+    "after": {
+      "peak": 0.07939018309116364,
+      "rms_20_250_first_15ms": 0.0030619772889436837,
+      "rms_1000_4000_first_15ms": 0.029173834685836876,
+      "rms_4000_8000_first_15ms": 0.00021893534051197562
+    }
+  },
+  "sample_rate": 44100,
+  "export_gain_db": 0,
+  "musical_clip_seconds": [
+    106,
+    115
+  ],
+  "musical_peak_before": 0.2429877668619156,
+  "musical_peak_after": 0.2415030598640442,
+  "policy": "Full MIDI preroll and unchanged pedals. Common unity export gain. Only the direct synthetic duplex excitation is removed relative to the frozen renderer."
+}

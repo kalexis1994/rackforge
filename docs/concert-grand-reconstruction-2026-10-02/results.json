@@ -1,0 +1,769 @@
+{
+  "control_passed": true,
+  "capture_binary_sha256": "73c48629a32ee96f4bd85410db6eedb3f25c46b08b219d94dab2e2181bf48d9b",
+  "probe_binary_sha256": "0c5860b8f33e0a70bd688ddced4f2396bd0f683538afd6d1411c55c218e009d1",
+  "oracle_kernel_sha256": "e1ac9a250e44294d6d2a340282a1834664a6aa3e45bde8817e298386baadef97",
+  "groups": {
+    "training": {
+      "median_waveform_error_db": -71.95505622779079,
+      "p95_waveform_error_db": -33.90696311069903,
+      "p95_attack_waveform_error_db": -33.29583132136399,
+      "mean_shape_error_db": 0.005541635460351164,
+      "mean_resolved_rise_error_db": 0.018718421596685887,
+      "checks": {
+        "median_wave_below_minus30_db": true,
+        "p95_wave_below_minus20_db": true,
+        "p95_attack_wave_below_minus20_db": true,
+        "mean_shape_below_point3_db": true,
+        "p95_shape_below_1_db": true,
+        "mean_rise_below_point5_db": true,
+        "p95_rise_below_1_db": true
+      },
+      "passed": true,
+      "policy": "Declared engineering reconstruction tolerances; not psychoacoustic thresholds."
+    },
+    "reserved-pitches": {
+      "median_waveform_error_db": -70.82233765468959,
+      "p95_waveform_error_db": -35.171032432096005,
+      "p95_attack_waveform_error_db": -35.68495543575466,
+      "mean_shape_error_db": 0.0013046304337975465,
+      "mean_resolved_rise_error_db": 0.006065380906277795,
+      "checks": {
+        "median_wave_below_minus30_db": true,
+        "p95_wave_below_minus20_db": true,
+        "p95_attack_wave_below_minus20_db": true,
+        "mean_shape_below_point3_db": true,
+        "p95_shape_below_1_db": true,
+        "mean_rise_below_point5_db": true,
+        "p95_rise_below_1_db": true
+      },
+      "passed": true,
+      "policy": "Declared engineering reconstruction tolerances; not psychoacoustic thresholds."
+    },
+    "reserved-velocities": {
+      "median_waveform_error_db": -71.66438504073979,
+      "p95_waveform_error_db": -34.13279208994693,
+      "p95_attack_waveform_error_db": -35.51478114192222,
+      "mean_shape_error_db": 0.003480859935853547,
+      "mean_resolved_rise_error_db": 0.012813490412025766,
+      "checks": {
+        "median_wave_below_minus30_db": true,
+        "p95_wave_below_minus20_db": true,
+        "p95_attack_wave_below_minus20_db": true,
+        "mean_shape_below_point3_db": true,
+        "p95_shape_below_1_db": true,
+        "mean_rise_below_point5_db": true,
+        "p95_rise_below_1_db": true
+      },
+      "passed": true,
+      "policy": "Declared engineering reconstruction tolerances; not psychoacoustic thresholds."
+    }
+  },
+  "audition": {
+    "median_waveform_error_db": -44.76112751547767,
+    "p95_waveform_error_db": -33.44202085252557,
+    "p95_attack_waveform_error_db": -32.98255906261613,
+    "mean_shape_error_db": 0.005410138391640627,
+    "mean_resolved_rise_error_db": 0.027593111362101592,
+    "checks": {
+      "median_wave_below_minus30_db": true,
+      "p95_wave_below_minus20_db": true,
+      "p95_attack_wave_below_minus20_db": true,
+      "mean_shape_below_point3_db": true,
+      "p95_shape_below_1_db": true,
+      "mean_rise_below_point5_db": true,
+      "p95_rise_below_1_db": true
+    },
+    "passed": true,
+    "policy": "Declared engineering reconstruction tolerances; not psychoacoustic thresholds."
+  },
+  "C6_124": {
+    "waveform_error_db": -53.79433307078258,
+    "attack_waveform_error_db": -77.73691173977956,
+    "sustained_waveform_error_db": -75.49052652069466,
+    "temporal": {
+      "envelope_shape_error_db": 3.553580613937513e-05,
+      "attack_level_error_db": 2.4316276821423344e-05,
+      "peak_time_error_ms": 0.0,
+      "peak_level_error_db": 2.9666634027591954e-05,
+      "rise_error_db": 6.20825449431095e-05
+    },
+    "actual_attack": {
+      "onset_ms": 0.0,
+      "windows_s": [
+        [
+          0,
+          0.005
+        ],
+        [
+          0.005,
+          0.02
+        ],
+        [
+          0.02,
+          0.05
+        ],
+        [
+          0.05,
+          0.1
+        ],
+        [
+          0.1,
+          0.2
+        ]
+      ],
+      "levels_db": [
+        -21.594354758060614,
+        -18.036464160449984,
+        -19.72591859902842,
+        -21.02777660569747,
+        -24.024803869385615
+      ],
+      "rise_5_20_db": 3.55789059761063,
+      "rise_resolved": true,
+      "smoothing_ms": 4.988662131519274,
+      "envelope_times_ms": [
+        2.494331065759637,
+        7.482993197278911,
+        12.471655328798187,
+        17.460317460317462,
+        22.448979591836732,
+        27.43764172335601,
+        32.426303854875286,
+        37.414965986394556,
+        42.40362811791383,
+        47.39229024943311,
+        52.38095238095238,
+        57.36961451247166,
+        62.358276643990926,
+        67.34693877551021,
+        72.33560090702947,
+        77.32426303854875,
+        82.31292517006803,
+        87.30158730158729,
+        92.29024943310657,
+        97.27891156462586,
+        102.26757369614513,
+        107.2562358276644,
+        112.24489795918367,
+        117.23356009070295,
+        122.22222222222221,
+        127.2108843537415,
+        132.19954648526078,
+        137.18820861678006,
+        142.17687074829934,
+        147.16553287981858,
+        152.15419501133786,
+        157.14285714285714,
+        162.13151927437642,
+        167.1201814058957,
+        172.10884353741497,
+        177.09750566893422,
+        182.0861678004535,
+        187.0748299319728,
+        192.06349206349208,
+        197.05215419501135
+      ],
+      "envelope_relative_db": [
+        -0.5665781523631495,
+        4.131933381552077,
+        3.033231267353422,
+        1.4200002268372955,
+        0.8036644280231293,
+        1.4470530572768752,
+        1.369700609055979,
+        1.6118957263240574,
+        1.3565226276636828,
+        1.1406670518062079,
+        0.9311309396083871,
+        0.6984603036651897,
+        0.5467760169894014,
+        0.20727996037648566,
+        0.12180418798890713,
+        -0.3573402601791855,
+        -0.2793199109694555,
+        -0.5690610669992218,
+        -0.5985535465966834,
+        -1.0431200102719238,
+        -1.299092902998325,
+        -1.5813116220127448,
+        -1.7361258463257272,
+        -1.825629407356974,
+        -2.3038926213764306,
+        -2.1563537206966785,
+        -2.469088668496898,
+        -2.3245773486710632,
+        -2.712898026563721,
+        -2.845583104339571,
+        -3.279047386638638,
+        -3.3947169237529806,
+        -3.6236481074838736,
+        -3.867558400157421,
+        -3.8840899575234857,
+        -4.231613233677461,
+        -4.303569176510674,
+        -4.681533888710327,
+        -4.69936128056904,
+        -5.375514971329835
+      ],
+      "envelope_db": [
+        -21.594354758060618,
+        -16.89584322414539,
+        -17.994545338344047,
+        -19.607776378860173,
+        -20.22411217767434,
+        -19.580723548420593,
+        -19.65807599664149,
+        -19.41588087937341,
+        -19.671253978033786,
+        -19.88710955389126,
+        -20.09664566608908,
+        -20.32931630203228,
+        -20.481000588708067,
+        -20.820496645320983,
+        -20.90597241770856,
+        -21.385116865876654,
+        -21.307096516666924,
+        -21.59683767269669,
+        -21.626330152294152,
+        -22.070896615969392,
+        -22.326869508695793,
+        -22.609088227710213,
+        -22.763902452023196,
+        -22.853406013054443,
+        -23.3316692270739,
+        -23.184130326394147,
+        -23.496865274194366,
+        -23.35235395436853,
+        -23.74067463226119,
+        -23.87335971003704,
+        -24.306823992336106,
+        -24.42249352945045,
+        -24.651424713181342,
+        -24.89533500585489,
+        -24.911866563220954,
+        -25.25938983937493,
+        -25.331345782208142,
+        -25.709310494407795,
+        -25.727137886266508,
+        -26.403291577027304
+      ],
+      "peak_time_ms": 8.866213151927438,
+      "peak_level_db": -16.685761526954465
+    },
+    "reconstructed_attack": {
+      "onset_ms": 0.0,
+      "windows_s": [
+        [
+          0,
+          0.005
+        ],
+        [
+          0.005,
+          0.02
+        ],
+        [
+          0.02,
+          0.05
+        ],
+        [
+          0.05,
+          0.1
+        ],
+        [
+          0.1,
+          0.2
+        ]
+      ],
+      "levels_db": [
+        -21.59435976452887,
+        -18.036407084373298,
+        -19.725929465313943,
+        -21.02776724915156,
+        -24.024789596729747
+      ],
+      "rise_5_20_db": 3.557952680155573,
+      "rise_resolved": true,
+      "smoothing_ms": 4.988662131519274,
+      "envelope_times_ms": [
+        2.494331065759637,
+        7.482993197278911,
+        12.471655328798187,
+        17.460317460317462,
+        22.448979591836732,
+        27.43764172335601,
+        32.426303854875286,
+        37.414965986394556,
+        42.40362811791383,
+        47.39229024943311,
+        52.38095238095238,
+        57.36961451247166,
+        62.358276643990926,
+        67.34693877551021,
+        72.33560090702947,
+        77.32426303854875,
+        82.31292517006803,
+        87.30158730158729,
+        92.29024943310657,
+        97.27891156462586,
+        102.26757369614513,
+        107.2562358276644,
+        112.24489795918367,
+        117.23356009070295,
+        122.22222222222221,
+        127.2108843537415,
+        132.19954648526078,
+        137.18820861678006,
+        142.17687074829934,
+        147.16553287981858,
+        152.15419501133786,
+        157.14285714285714,
+        162.13151927437642,
+        167.1201814058957,
+        172.10884353741497,
+        177.09750566893422,
+        182.0861678004535,
+        187.0748299319728,
+        192.06349206349208,
+        197.05215419501135
+      ],
+      "envelope_relative_db": [
+        -0.5665925153773124,
+        4.131970512464925,
+        3.033257468490362,
+        1.4200965196714286,
+        0.8036822693412091,
+        1.4469953423800916,
+        1.3696930980292343,
+        1.6118567677766364,
+        1.3565355126823277,
+        1.1406525456649987,
+        0.9312310301113023,
+        0.6983880514087915,
+        0.5467825383514047,
+        0.20728858692025653,
+        0.1217032479407365,
+        -0.3574026540671511,
+        -0.2793457620757067,
+        -0.568974091973871,
+        -0.5985456382388108,
+        -1.0431311881983945,
+        -1.2990512836833688,
+        -1.5813084659097072,
+        -1.7360624071485518,
+        -1.8256429245236205,
+        -2.30391255829489,
+        -2.1563332543475155,
+        -2.469115397860797,
+        -2.3245672837906497,
+        -2.7128998268816886,
+        -2.8454855467996722,
+        -3.2790657766950915,
+        -3.394700473040647,
+        -3.6236580446135847,
+        -3.867614380872343,
+        -3.88411755327531,
+        -4.231546297031912,
+        -4.303573304979519,
+        -4.68153004918171,
+        -4.699427394683955,
+        -5.3754673412031835
+      ],
+      "envelope_db": [
+        -21.59435976452887,
+        -16.895796736686634,
+        -17.994509780661197,
+        -19.60767072948013,
+        -20.22408497981035,
+        -19.580771906771467,
+        -19.658074151122324,
+        -19.415910481374922,
+        -19.67123173646923,
+        -19.88711470348656,
+        -20.096536219040257,
+        -20.329379197742767,
+        -20.480984710800154,
+        -20.820478662231302,
+        -20.906064001210822,
+        -21.38516990321871,
+        -21.307113011227266,
+        -21.59674134112543,
+        -21.62631288739037,
+        -22.070898437349953,
+        -22.326818532834928,
+        -22.609075715061266,
+        -22.76382965630011,
+        -22.85341017367518,
+        -23.33167980744645,
+        -23.184100503499074,
+        -23.496882647012356,
+        -23.35233453294221,
+        -23.740667076033247,
+        -23.87325279595123,
+        -24.30683302584665,
+        -24.422467722192206,
+        -24.651425293765143,
+        -24.895381630023902,
+        -24.91188480242687,
+        -25.25931354618347,
+        -25.331340554131078,
+        -25.70929729833327,
+        -25.727194643835514,
+        -26.403234590354742
+      ],
+      "peak_time_ms": 8.866213151927438,
+      "peak_level_db": -16.685731860320438
+    },
+    "target_peak": 0.2558119297027588,
+    "predicted_peak": 0.2558364205493427
+  },
+  "relative_selection": {
+    "alpha": 0.0,
+    "cv": {
+      "0.0": {
+        "metrics": {
+          "h1_db": 4.8584021854652635,
+          "h1_late_db": 5.475979328984926,
+          "decay_db": 4.517665003998932,
+          "balance_db": 7.691571952285266,
+          "attack_body_bands_db": 4.850774095406583,
+          "total": 5.587448276724441,
+          "impact_body_db": 5.908694752013124,
+          "worst_h1_db": 12.204064060462649,
+          "worst_h1_late_db": 21.278991693339613,
+          "worst_decay_db": 9.237210205210623,
+          "worst_balance_db": 19.080108372660202,
+          "worst_attack_body_bands_db": 9.05290539165823,
+          "worst_total": 9.089587054132492,
+          "worst_impact_body_db": 13.209008076842345,
+          "register_total": {
+            "grave": 4.369295640072271,
+            "medio": 5.680486657574591,
+            "agudo": 6.735822127738998
+          },
+          "objective": 17.241190842379538
+        },
+        "temporal_guard": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.3441534591922553,
+          "identified_mean_shape_db": 1.3441534591922546,
+          "actual_mean_resolved_rise_db": 4.01379994448408,
+          "identified_mean_resolved_rise_db": 4.013799944484081,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "maximum_peak": 0.27978200373128165
+      },
+      "0.125": {
+        "metrics": {
+          "h1_db": 4.751496754822776,
+          "h1_late_db": 5.289399680801164,
+          "decay_db": 4.508540663813306,
+          "balance_db": 7.693012147173177,
+          "attack_body_bands_db": 4.739468473317507,
+          "total": 5.545174414175021,
+          "impact_body_db": 5.907700642903425,
+          "worst_h1_db": 11.840083515812422,
+          "worst_h1_late_db": 20.913601643929717,
+          "worst_decay_db": 9.170104910495184,
+          "worst_balance_db": 19.478784658963676,
+          "worst_attack_body_bands_db": 9.108949306386313,
+          "worst_total": 9.361297306878166,
+          "worst_impact_body_db": 13.489422209173142,
+          "register_total": {
+            "grave": 4.296714187432187,
+            "medio": 5.499762116818791,
+            "agudo": 6.827693863935027
+          },
+          "objective": 17.26858103903316
+        },
+        "temporal_guard": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.3441534591922553,
+          "identified_mean_shape_db": 1.3269935068021743,
+          "actual_mean_resolved_rise_db": 4.01379994448408,
+          "identified_mean_resolved_rise_db": 4.009914563552206,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "maximum_peak": 0.3030594318568942
+      },
+      "0.25": {
+        "metrics": {
+          "h1_db": 4.65855411795908,
+          "h1_late_db": 5.103098886029614,
+          "decay_db": 4.499991013838113,
+          "balance_db": 7.710234334708766,
+          "attack_body_bands_db": 4.64423517876266,
+          "total": 5.513503450180492,
+          "impact_body_db": 5.914957135011574,
+          "worst_h1_db": 11.475803312855597,
+          "worst_h1_late_db": 20.547952795722722,
+          "worst_decay_db": 9.10322468519392,
+          "worst_balance_db": 19.900243335783284,
+          "worst_attack_body_bands_db": 9.165507852142198,
+          "worst_total": 9.717196258503938,
+          "worst_impact_body_db": 13.766021219438713,
+          "register_total": {
+            "grave": 4.227225467713505,
+            "medio": 5.324823511634473,
+            "agudo": 6.941291386556991
+          },
+          "objective": 17.35532631979686
+        },
+        "temporal_guard": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.3441534591922553,
+          "identified_mean_shape_db": 1.3114851358328237,
+          "actual_mean_resolved_rise_db": 4.01379994448408,
+          "identified_mean_resolved_rise_db": 4.005213272439879,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "maximum_peak": 0.3287747521153231
+      },
+      "0.5": {
+        "metrics": {
+          "h1_db": 4.5493262052748324,
+          "h1_late_db": 4.851900242318421,
+          "decay_db": 4.493342645305489,
+          "balance_db": 7.780377909956909,
+          "attack_body_bands_db": 4.528500592495885,
+          "total": 5.496019965261221,
+          "impact_body_db": 5.964171662436362,
+          "worst_h1_db": 11.819055889220984,
+          "worst_h1_late_db": 19.815887466439165,
+          "worst_decay_db": 8.971769459392528,
+          "worst_balance_db": 20.81053212135102,
+          "worst_attack_body_bands_db": 9.280075639976863,
+          "worst_total": 10.460690100271632,
+          "worst_impact_body_db": 14.308146791832286,
+          "register_total": {
+            "grave": 4.12115597174511,
+            "medio": 5.076089028082762,
+            "agudo": 7.1858321616611756
+          },
+          "objective": 18.115511389010436
+        },
+        "temporal_guard": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.3441534591922553,
+          "identified_mean_shape_db": 1.2836872434078666,
+          "actual_mean_resolved_rise_db": 4.01379994448408,
+          "identified_mean_resolved_rise_db": 3.9940889583286747,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "maximum_peak": 0.3870591949054861
+      },
+      "0.75": {
+        "metrics": {
+          "h1_db": 4.574387033981901,
+          "h1_late_db": 4.730631738619155,
+          "decay_db": 4.49159739678653,
+          "balance_db": 7.908389171460597,
+          "attack_body_bands_db": 4.556994817505565,
+          "total": 5.548923289694454,
+          "impact_body_db": 6.041949179033967,
+          "worst_h1_db": 12.934191875445181,
+          "worst_h1_late_db": 19.08281589492691,
+          "worst_decay_db": 8.845748983189678,
+          "worst_balance_db": 21.807118884331228,
+          "worst_attack_body_bands_db": 9.396541322709144,
+          "worst_total": 11.24056903553793,
+          "worst_impact_body_db": 14.836255810871396,
+          "register_total": {
+            "grave": 4.074295297940385,
+            "medio": 4.945170766968179,
+            "agudo": 7.476365673493228
+          },
+          "objective": 19.641538087754533
+        },
+        "temporal_guard": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.3441534591922553,
+          "identified_mean_shape_db": 1.2623914497650437,
+          "actual_mean_resolved_rise_db": 4.01379994448408,
+          "identified_mean_resolved_rise_db": 3.9816425488689378,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "maximum_peak": 0.4548890177836393
+      },
+      "1.0": {
+        "metrics": {
+          "h1_db": 4.682613744507237,
+          "h1_late_db": 4.8485814157045075,
+          "decay_db": 4.492052255257709,
+          "balance_db": 8.073553235376117,
+          "attack_body_bands_db": 4.680173333823287,
+          "total": 5.65272073570564,
+          "impact_body_db": 6.163856392894112,
+          "worst_h1_db": 14.107831176563145,
+          "worst_h1_late_db": 18.348761775570857,
+          "worst_decay_db": 8.727608095971174,
+          "worst_balance_db": 22.883485300204672,
+          "worst_attack_body_bands_db": 9.554904093198218,
+          "worst_total": 12.054869466540854,
+          "worst_impact_body_db": 15.351394416930512,
+          "register_total": {
+            "grave": 4.056684490814542,
+            "medio": 4.953239503488334,
+            "agudo": 7.773367904759717
+          },
+          "objective": 21.475085669844432
+        },
+        "temporal_guard": {
+          "passed": true,
+          "checks": {
+            "mean_shape_not_worse": true,
+            "p95_shape_within_half_db": true,
+            "mean_resolved_rise_not_worse": true
+          },
+          "actual_mean_shape_db": 1.3441534591922553,
+          "identified_mean_shape_db": 1.2452656756612892,
+          "actual_mean_resolved_rise_db": 4.01379994448408,
+          "identified_mean_resolved_rise_db": 3.9687607722430336,
+          "policy": "Do not regress mean temporal shape or resolved rise; p95 shape allowance 0.5dB. Engineering guard, not a perceptual threshold. Listening can reject a passing candidate."
+        },
+        "maximum_peak": 0.5357290716071907
+      }
+    },
+    "eligible": [
+      "0.0",
+      "0.125",
+      "0.25",
+      "0.5",
+      "0.75",
+      "1.0"
+    ],
+    "training_pairs": [
+      [
+        36,
+        60
+      ],
+      [
+        36,
+        110
+      ],
+      [
+        42,
+        60
+      ],
+      [
+        42,
+        110
+      ],
+      [
+        48,
+        60
+      ],
+      [
+        48,
+        110
+      ],
+      [
+        54,
+        60
+      ],
+      [
+        54,
+        110
+      ],
+      [
+        60,
+        60
+      ],
+      [
+        60,
+        110
+      ],
+      [
+        66,
+        60
+      ],
+      [
+        66,
+        110
+      ],
+      [
+        72,
+        60
+      ],
+      [
+        72,
+        110
+      ],
+      [
+        78,
+        60
+      ],
+      [
+        78,
+        110
+      ],
+      [
+        84,
+        60
+      ],
+      [
+        84,
+        110
+      ],
+      [
+        90,
+        60
+      ],
+      [
+        90,
+        110
+      ],
+      [
+        96,
+        60
+      ],
+      [
+        96,
+        110
+      ]
+    ],
+    "kernel_sha256": "6a50860b2d644106100a4c0f0ad8789010fb7dbe0dd1409fba5717edf0686188",
+    "original_observer_sha256": "e1ac9a250e44294d6d2a340282a1834664a6aa3e45bde8817e298386baadef97",
+    "correction_tail_energy_db": [
+      -300.0,
+      -300.0,
+      -300.0,
+      -300.0,
+      -300.0,
+      -300.0
+    ],
+    "policy": "Select CV harmonic objective among temporal guard passes. Zero is baseline, not an improvement."
+  },
+  "relative_accepted": false,
+  "tools_sha256": {
+    "reconstruct-concert-grand-current.py": "88019d4322a3cdf41c4cfb65fef9f884d9547854af42983ca095d712a289de68",
+    "audit-concert-grand-observer-control.py": "435ffe01ad5b3d57c3d738469db9dd2d5b5b6c567ff9d44306cb07389efd9f39",
+    "fit-concert-grand-causal-observation.py": "c171217e6e3e92402a27a2b498e234eae6fdb1fa95a486927b4ea66b44c9b042",
+    "concert_grand_attack_metrics.py": "19247b7c8838a4cdf58e909bc655e68246e1934fee8a7e9ea2c195de868b8883"
+  }
+}

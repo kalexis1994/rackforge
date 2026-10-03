@@ -15,6 +15,7 @@ separate from RackForge. The pinned versions are listed in
 | `RF-7.rfplugin` | <https://github.com/kalexis1994/RF-7> | GPL-3.0-only |
 | `RF-Organ.rfplugin` | <https://github.com/kalexis1994/RF-Organ> | GPL-2.0-or-later |
 | `RF-Tines.rfplugin` | <https://github.com/kalexis1994/RF-Tines> | Proprietary, all rights reserved |
+| `RF-Musette.rfplugin` | <https://github.com/kalexis1994/RF-Musette> | GPL-3.0-only |
 | `RF-Limiter.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-limiter> | GPL-3.0-only |
 | `RF-EQ.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-eq> | GPL-3.0-only |
 | `RF-Comp.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-comp> | GPL-3.0-only |

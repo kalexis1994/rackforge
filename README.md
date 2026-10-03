@@ -98,8 +98,8 @@ graph, so changing stage routing does not rewrite the plugin.
 Native CI builds are published in two editions for every supported platform:
 
 - **Standard** includes Concert Grand and the officially pinned instruments —
-  today RF-106, RF-5, RF-7, RF-Organ and RF-Tines — so a new installation can
-  be played immediately.
+  today RF-106, RF-5, RF-7, RF-Organ, RF-Tines and RF-Musette — so a new
+  installation can be played immediately.
 - **Minimal** includes no instrument plugins. It keeps the complete RackForge
   host, Plugin Manager, controller support, and performance tools so you can
   install only the instruments you want.
@@ -129,6 +129,10 @@ Standard installations include:
   holds RF-73 treats RF-Tines as a separate instrument: sessions, presets and
   `.rf73` program files saved under the old identity do not carry over, and
   the old package stays installed until it is removed in Plugin Manager.
+- **RF-Musette**, a physically modelled piano accordion: every reed a
+  self-oscillating free reed under one bellows, the treble's 14 registers and
+  the Stradella or free bass, the bellows played by the wheel or Expression
+  or each key's touch, and its registers on a controller's pads.
 
 Source and releases for these instruments:
 
@@ -137,6 +141,7 @@ Source and releases for these instruments:
 - [RF-7 source and releases](https://github.com/kalexis1994/RF-7)
 - [RF-Organ source and releases](https://github.com/kalexis1994/RF-Organ)
 - [RF-Tines source and releases](https://github.com/kalexis1994/RF-Tines)
+- [RF-Musette source and releases](https://github.com/kalexis1994/RF-Musette)
 - [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
   a SoundFont instrument that includes the sampled YDP Grand Piano
 

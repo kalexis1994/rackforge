@@ -162,6 +162,36 @@ OFFICIAL_PLUGINS = (
         ),
     },
     {
+        "filename": "RF-Musette.rfplugin",
+        "plugin_id": "org.rackforge.musette",
+        "version": "0.13.17",
+        "url": (
+            "https://github.com/kalexis1994/RF-Musette/"
+            "releases/download/v0.13.17/RF-Musette.rfplugin"
+        ),
+        "sha256": "e494e1d00b26afaaa21b311e1ca5d58f1883a394f38c5eabaace6423f77611b4",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "metadata/control-layout.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/config.html",
+            "web/app.js",
+            "web/app_bg.wasm",
+            "web/styles.css",
+            "web/fonts/OFL-GrandHotel.txt",
+            "web/fonts/OFL-JosefinSans.txt",
+        ),
+    },
+    {
         "filename": "RF-Limiter.rfplugin",
         "plugin_id": "org.rackforge.rf-limiter",
         "version": "0.2.0",

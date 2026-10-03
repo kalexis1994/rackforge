@@ -1,0 +1,352 @@
+{
+  "scope": "Connect the frozen reciprocal SI bridge to a retarded surface observer.\n\nOnly the first 4 ms of C4/124 are observed. Frequency results are transforms\nof that finite acceleration window, in Pa*s, not SPL or a sustained piano.\n",
+  "mechanical_commit": "346b6c8",
+  "geometry_m": [
+    [
+      0.55,
+      0.5,
+      0.66
+    ],
+    [
+      0.85,
+      0.5,
+      0.66
+    ]
+  ],
+  "density_kg_m3": 1.2,
+  "speed_m_s": 343.0,
+  "source_units": "B sqrt(kg)*m; V sqrt(kg)*m/s; acceleration transform sqrt(kg)*m/s",
+  "pressure_transform_units": "Pa*s, not SPL",
+  "declared_frequency_band_hz": [
+    60,
+    800
+  ],
+  "gain": 1.0,
+  "normalization": "none; same SI input and geometry",
+  "assumptions": [
+    "Flat infinite rigid baffle; no lid/room/microphone pattern",
+    "Readout only: acoustic reaction and radiated energy are not in the mechanical budget",
+    "P2 low bank and geometry are assumed, not Steinway identification",
+    "Acceleration is windowed to 4 ms; no piano audition or tail validity claim"
+  ],
+  "sources": {
+    "48": {
+      "transverse": 48,
+      "axial": 96,
+      "support": {
+        "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+        "modes": 35,
+        "x_m": 0.6420689655172414,
+        "y_m": 0.5,
+        "cutoff_hz": 800.0,
+        "frequencies_hz": [
+          70.62213260234367,
+          139.24116527565243,
+          170.7420426662478,
+          178.13497442356172,
+          203.19352685899813,
+          225.34530232891365,
+          245.48269805313552,
+          285.6228947119935,
+          299.6450431535138,
+          313.243437148768,
+          313.85498725302,
+          353.7040759892574,
+          380.6291210022632,
+          404.6230827869208,
+          440.2095071338155,
+          510.7600846806116,
+          512.8937416057344,
+          529.5271284876352,
+          532.6223422708101,
+          542.9390671739197,
+          559.4716374951777,
+          564.4156101974451,
+          603.0403418480528,
+          633.107674392708,
+          635.6551400279947,
+          663.0433647346642,
+          665.3001251708085,
+          698.9054274754873,
+          713.443604425906,
+          737.7837713367302,
+          739.7396831036451,
+          748.6978413913473,
+          761.8394407351152,
+          777.7067002494059,
+          793.2442001051731
+        ],
+        "projection_kg_minus_half": [
+          0.8314296897088717,
+          -0.22141138758934814,
+          -4.261952616474287e-12,
+          3.434304902257609e-13,
+          -8.67161883495727e-12,
+          0.3930589655930641,
+          1.2007520749903635e-13,
+          0.33948571676164474,
+          0.46390255759021914,
+          0.07897179772271176,
+          4.841125574013152e-12,
+          -0.15734555359863078,
+          0.6606379314356585,
+          1.9836874873248243e-13,
+          -0.017529469330476943,
+          0.41149774527435706,
+          2.5194880092726873e-12,
+          1.6215806184845396e-12,
+          3.080830509459016e-13,
+          -0.031084863911778005,
+          -1.1314596768379726e-13,
+          2.7408878469755445e-13,
+          4.3395422190744336e-13,
+          -0.38426419185197225,
+          -2.100400896411897e-12,
+          0.01490443581762102,
+          -3.430367520880038e-13,
+          0.35845688054355035,
+          -0.035711703078511806,
+          6.662855850244842e-13,
+          0.11418886352380753,
+          5.3863681210329405e-14,
+          0.2783212008338524,
+          -0.010594342782750014,
+          -0.38649234400175647
+        ]
+      },
+      "source_duration_s": 0.004,
+      "source_units": "B sqrt(kg)*m; V sqrt(kg)*m/s; acceleration transform sqrt(kg)*m/s",
+      "source_temporal_quadrature_relative_error": 4.156107689035505e-07,
+      "frozen_final_state_relative_error": 0.0,
+      "input_sha256": {
+        "contact-end.csv": "9e4633a05219de98bd734937885a2ece1c66b38500f59249322307fe28bff76f",
+        "transfer.csv": "0cb57ffe16fea74fb857a0af3d443e6670992bad0f916283af279b87d183cb5f"
+      },
+      "frozen_state_sha256": "1f89c412a93f394cf910cc97b9a521084c7f1b999b0e60ef6486b99933a3960f",
+      "mechanical": {
+        "initial_energy_j": 0.04693371904404984,
+        "maximum_balance_relative_error": 3.252579786883784e-15,
+        "support_work_balance_relative_error": 9.817801203306876e-18,
+        "maximum_interface_power_residual_w": 1.6132928326584306e-16,
+        "maximum_interface_force_residual": 1.8009326669771514e-14,
+        "final_string_energy_j": 0.028154949445428713,
+        "final_support_energy_j": 0.0001480603227154143,
+        "final_hammer_energy_j": 0.018607023033160686,
+        "final_felt_heat_j": 0.0,
+        "final_support_heat_j": 2.3686242745100066e-05,
+        "final_work_into_support_j": 0.00017174656546051448,
+        "maximum_support_energy_j": 0.00015037647097385667,
+        "maximum_support_energy_during_contact_j": 1.0697819448630174e-07,
+        "contact_time_s": 0.0018168116728754875,
+        "support_energy_at_separation_j": 1.6311300322697418e-07,
+        "string_energy_at_separation_j": 0.02832653213762298,
+        "maximum_bridge_displacement_m": 9.75046618451529e-06,
+        "nfev": 151508,
+        "minimum_mass_eigenvalue": 0.9392566569483034
+      },
+      "source_sha256": "cfaefa2aca854966b568c349e9038062f6b83722ef428e363848c2c4fa15c62a"
+    },
+    "72": {
+      "transverse": 72,
+      "axial": 144,
+      "support": {
+        "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+        "modes": 35,
+        "x_m": 0.6420689655172414,
+        "y_m": 0.5,
+        "cutoff_hz": 800.0,
+        "frequencies_hz": [
+          70.62213260234367,
+          139.24116527565243,
+          170.7420426662478,
+          178.13497442356172,
+          203.19352685899813,
+          225.34530232891365,
+          245.48269805313552,
+          285.6228947119935,
+          299.6450431535138,
+          313.243437148768,
+          313.85498725302,
+          353.7040759892574,
+          380.6291210022632,
+          404.6230827869208,
+          440.2095071338155,
+          510.7600846806116,
+          512.8937416057344,
+          529.5271284876352,
+          532.6223422708101,
+          542.9390671739197,
+          559.4716374951777,
+          564.4156101974451,
+          603.0403418480528,
+          633.107674392708,
+          635.6551400279947,
+          663.0433647346642,
+          665.3001251708085,
+          698.9054274754873,
+          713.443604425906,
+          737.7837713367302,
+          739.7396831036451,
+          748.6978413913473,
+          761.8394407351152,
+          777.7067002494059,
+          793.2442001051731
+        ],
+        "projection_kg_minus_half": [
+          0.8314296897088717,
+          -0.22141138758934814,
+          -4.261952616474287e-12,
+          3.434304902257609e-13,
+          -8.67161883495727e-12,
+          0.3930589655930641,
+          1.2007520749903635e-13,
+          0.33948571676164474,
+          0.46390255759021914,
+          0.07897179772271176,
+          4.841125574013152e-12,
+          -0.15734555359863078,
+          0.6606379314356585,
+          1.9836874873248243e-13,
+          -0.017529469330476943,
+          0.41149774527435706,
+          2.5194880092726873e-12,
+          1.6215806184845396e-12,
+          3.080830509459016e-13,
+          -0.031084863911778005,
+          -1.1314596768379726e-13,
+          2.7408878469755445e-13,
+          4.3395422190744336e-13,
+          -0.38426419185197225,
+          -2.100400896411897e-12,
+          0.01490443581762102,
+          -3.430367520880038e-13,
+          0.35845688054355035,
+          -0.035711703078511806,
+          6.662855850244842e-13,
+          0.11418886352380753,
+          5.3863681210329405e-14,
+          0.2783212008338524,
+          -0.010594342782750014,
+          -0.38649234400175647
+        ]
+      },
+      "source_duration_s": 0.004,
+      "source_units": "B sqrt(kg)*m; V sqrt(kg)*m/s; acceleration transform sqrt(kg)*m/s",
+      "source_temporal_quadrature_relative_error": 4.1561729719872796e-07,
+      "frozen_final_state_relative_error": 0.0,
+      "input_sha256": {
+        "contact-end.csv": "9e4633a05219de98bd734937885a2ece1c66b38500f59249322307fe28bff76f",
+        "transfer.csv": "0cb57ffe16fea74fb857a0af3d443e6670992bad0f916283af279b87d183cb5f"
+      },
+      "frozen_state_sha256": "4365190ae1c8f0d0f183589951693ddab3f053b481c68aa17544b5dedd3560fc",
+      "mechanical": {
+        "initial_energy_j": 0.04693371904404984,
+        "maximum_balance_relative_error": 5.765936894930345e-15,
+        "support_work_balance_relative_error": 1.155035435683162e-17,
+        "maximum_interface_power_residual_w": 1.5525775109992423e-16,
+        "maximum_interface_force_residual": 2.6593317902565375e-14,
+        "final_string_energy_j": 0.028153740484704003,
+        "final_support_energy_j": 0.0001480598764285709,
+        "final_hammer_energy_j": 0.01860823337148698,
+        "final_felt_heat_j": 0.0,
+        "final_support_heat_j": 2.368531143051472e-05,
+        "final_work_into_support_j": 0.0001717451878590853,
+        "maximum_support_energy_j": 0.00015037542840749707,
+        "maximum_support_energy_during_contact_j": 1.0695208759121758e-07,
+        "contact_time_s": 0.001816848376130273,
+        "support_energy_at_separation_j": 1.6341618277711057e-07,
+        "string_energy_at_separation_j": 0.02832532149514665,
+        "maximum_bridge_displacement_m": 9.750427027251465e-06,
+        "nfev": 226664,
+        "minimum_mass_eigenvalue": 0.9391251316082168
+      },
+      "source_sha256": "0883578e2681f3dad36f146b3c501e8dc9088e7dff93c5a8b4a61968ce4432aa"
+    }
+  },
+  "spatial_quadrature": {
+    "16x12": {
+      "transfer_relative_rms": 0.00904813183498894,
+      "source_pressure_relative_rms": 0.02430217287914371
+    },
+    "32x24": {
+      "transfer_relative_rms": 0.0009902176852760256,
+      "source_pressure_relative_rms": 0.002277384587411814
+    },
+    "64x48": {
+      "transfer_relative_rms": 4.67849324600982e-15,
+      "source_pressure_relative_rms": 8.886599943069643e-15
+    },
+    "96x72": {
+      "transfer_relative_rms": 0.0,
+      "source_pressure_relative_rms": 0.0
+    }
+  },
+  "sampled_delay": {
+    "48000": {
+      "transfer_relative_rms": 0.002245832232648437,
+      "source_pressure_relative_rms": 0.002743601644354298
+    },
+    "96000": {
+      "transfer_relative_rms": 0.0005491828100520738,
+      "source_pressure_relative_rms": 0.0006208415416893869
+    },
+    "192000": {
+      "transfer_relative_rms": 0.0001368289529964252,
+      "source_pressure_relative_rms": 0.00016280527348570516
+    }
+  },
+  "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+  "reference": "https://acoustics.asn.au/conference_proceedings/INTERNOISE2014/papers/p898.pdf",
+  "mechanical_refinement_pressure_relative_rms": 0.00010195999053451855,
+  "diagnostics": {
+    "no_delay_relative_rms": 1.6578302386044086,
+    "frozen_modal_phase_relative_rms": 4.009577192436108,
+    "policy": "Matched-input ablations of propagation, not fitted real-piano candidates"
+  },
+  "radiation_load_diagnostic": {
+    "angular_refinement_relative_rms": 6.770990168947046e-08,
+    "rows": [
+      {
+        "frequency_hz": 80.0,
+        "radiated_power_w_per_n_squared": 0.00039124521461508615,
+        "modeled_viscous_power_w_per_n_squared": 0.0005564706232451025,
+        "ratio": 0.7030833224106399,
+        "worst_state_resistance_to_loss": 0.849181823599951
+      },
+      {
+        "frequency_hz": 261.6255653,
+        "radiated_power_w_per_n_squared": 7.031254272930838e-05,
+        "modeled_viscous_power_w_per_n_squared": 0.00011972277028566253,
+        "ratio": 0.5872946521496313,
+        "worst_state_resistance_to_loss": 4.058719443484776
+      },
+      {
+        "frequency_hz": 523.2511306,
+        "radiated_power_w_per_n_squared": 6.109486718848245e-05,
+        "modeled_viscous_power_w_per_n_squared": 0.00029758626755190546,
+        "ratio": 0.20530136585629305,
+        "worst_state_resistance_to_loss": 3.786637912656257
+      },
+      {
+        "frequency_hz": 784.8766959,
+        "radiated_power_w_per_n_squared": 6.041000213692452e-05,
+        "modeled_viscous_power_w_per_n_squared": 0.00035990484119844703,
+        "ratio": 0.16784992926398343,
+        "worst_state_resistance_to_loss": 3.5213870411462507
+      }
+    ],
+    "policy": "Bare P2 bank under harmonic unit force at the C4 point; not the transient or factory. The .046 loss may already include radiation. Identify its partition before adding acoustic damping; a dissipative resistance alone does not include acoustic reactive mass/stiffness."
+  },
+  "source_sha256": {
+    "tools/concert_grand_si_observer.py": "91b735ca1d879d8e611a9f6b2a385094f0f778d5139ced4b30caafbf066d15e2",
+    "tools/audit-concert-grand-si-observer.py": "6f46bd811e6329ed496dc716e9b322d0e533c02bcd5a3d2f9f1a2355722d0951",
+    "tools/tests/test_concert_si_observer.py": "87227e914c36ae469600a51c12db7dd752609feca72935628a5ceb352673aeba"
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1"
+  },
+  "factory_package_sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+  "observer_source_archive_sha256": "2b47085e2b54eb8ace353a7d655259f06a2db6d46e5920637d82e856532d8ebf"
+}

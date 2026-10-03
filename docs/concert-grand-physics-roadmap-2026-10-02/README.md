@@ -19,7 +19,8 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 - Prototipos nativos fuera de la calibración de fábrica. Antes de trasladar
   algo al plugin: estabilidad, uso de pedales/reiteraciones, coste WASM y escucha.
 - Conservar resultados rechazados y sus causas. No repetir búsquedas sin una
-  hipótesis distinta. No hacer commit ni paquete nuevo en esta etapa.
+  hipótesis distinta. El avance acumulado quedó en el commit 346b6c8 autorizado
+  el 2026-10-03; no se selecciona ni empaqueta automáticamente un piloto.
 
 ## Orden y estado
 
@@ -28,9 +29,10 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P1a | Admitancia direccional del puente | La horizontal usa la misma familia de modos con un factor fijo; falta una segunda proyección mecánica independiente. | Piloto medido: pasivo, sin mejora consistente; escucha pendiente |
 | P1b | Dos polarizaciones por cuerda | Fábrica: tres verticales y una horizontal agregada. Prototipo: una horizontal independiente por cuerda, con proyección equivalente. Falta identificar propiedades direccionales reales. | Piloto medido: equivalencia verificada, sin mejora consistente |
 | P2 | Tabla ortótropa con costillas y puente | Piloto: placa ortótropa, nueve costillas discretas, puente recto/curvo; modos físicos bajo 800 Hz con complemento alto heredado. Geometría y acústica aún sin identificar. | Resolución y curva medidas: mejora desigual, sin selección |
-| P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. El motor audible sigue sin intercambio de energía bidireccional consistente. | Piloto: puente móvil medido en C4; salida SI e integración pendientes |
+| P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
+| P6 | Radiación y carga acústica del aire | Observador SI de superficie con retardos, probado en 60–800 Hz. Falta reacción del campo acústico, parte reactiva y separación de pérdidas estructurales/radiativas. | Observador medido; acoplamiento pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -99,7 +101,7 @@ radian. No asumir que agregar estados mejora el sonido por sí mismo.
 - [Bensa y colaboradores, ICMC 1999, Resynthesis of Piano Strings Vibrations](https://quod.lib.umich.edu/cgi/p/pod/dod-idx/resynthesis-of-piano-strings-vibrations-based-on-physical.pdf?c=icmc%3Bidno%3Dbbp2372.1999.335%3Bformat%3Dpdf): acoplamiento entre polarizaciones.
 - [Bank, admitancia matricial pasiva](https://home.mit.bme.hu/~bank/publist/dafx10adm/index.html): construcción pasiva multidimensional. Su ejemplo es guitarra; aquí se usa el principio mecánico, no se afirma haber reproducido ese instrumento.
 - [Ege y Boutillon, descripciones global/local de tabla](https://arxiv.org/abs/1210.5109): transición a comportamiento localizado entre costillas.
-- [Chabassier, Chaigne y Joly, piano completo](https://perso.ensta.fr/~touze/PDF/Batwoman/chabassier-jasa.pdf): cuerdas no lineales Timoshenko, tabla ortótropa y acoplamientos.
+- [Chabassier, Chaigne y Joly, piano completo](https://perso.ensta-paris.fr/~touze/PDF/Batwoman/chabassier-jasa.pdf): cuerdas no lineales Timoshenko, tabla ortótropa y acoplamientos.
 
 ## Registro de etapas
 
@@ -405,3 +407,31 @@ con superficie/formas consistentes y ganancia común. Luego comparación por
 registro/intensidad. Siguen abiertos banco alto, geometría real, unísono,
 backcheck/pedal, masa de graves, Timoshenko e implementación en tiempo real.
 Datos y copia del seguimiento en `C:\SHARED\Fisica-pendiente-2026-10-03`.
+
+### 2026-10-03 — Commit y observación SI de superficie
+
+Investigación acumulada del piano y sus herramientas/documentación guardada
+en **346b6c8**, por pedido del usuario. El trabajo posterior del observador
+continúa como etapa independiente.
+
+[Resultados y reproducción](RESULTADOS-P3-observacion-SI.md). Observador de
+presión desde las formas SI de la tabla, con retardos punto a punto y sin
+ganancias ajustadas por nota. Seis pruebas independientes pasan, incluyendo
+pistón analítico, temporal retardado, simetría y potencia radiada positiva.
+
+La captura C4/124 de 4 ms conserva exactamente los estados congelados de la
+etapa anterior. La presión en 60–800 Hz cambia 0,01020% RMS complejo al
+refinar 48→72 modos de cuerda. Superficie 64×48 y retardo a 192 kHz pasan
+los criterios declarados. No se produjo ni seleccionó un piano audible.
+
+Se agrega **P6** para seguir la carga del aire: en el banco bajo P2 supuesto,
+su radiación representa 16,78–70,31% de la disipación modelada bajo las cuatro
+excitaciones armónicas de prueba. No es una medición del Steinway ni de la
+fábrica. El observador lee movimiento, pero aún no devuelve carga acústica.
+El 0,046 existente puede incluir radiación; separar pérdidas antes de añadir
+resistencia, e incluir la parte reactiva para conservar energía del aire.
+
+Siguiente trabajo: ensayo reducido recíproco tabla/aire con un control
+analítico de pasividad/energía, y después fuente SI de mayor duración/banda
+para escuchar. Banco alto, unísono, masa de graves, Timoshenko, backcheck/pedal
+y coste siguen registrados. Datos en `C:\SHARED\Fisica-pendiente-2026-10-03\P3-observacion-SI`.

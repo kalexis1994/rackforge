@@ -2068,6 +2068,19 @@ Euler experiment with assumed support geometry, fixed axial/horizontal ends
 and no acoustic pressure observer; it is not a new factory voice or Steinway
 fit. The production collision/output path remains as described above.
 
+The [subsequent SI surface-observer audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P3-observacion-SI.md)
+reads intrinsic P2 modal acceleration through a retarded Rayleigh integral
+over an explicitly assumed flat baffled surface. It passes analytic pressure,
+causality, symmetry, spatial/temporal refinement and radiation-power controls;
+the C4/124 source reproduces the frozen mechanical state exactly. Only the
+first 4 ms and the 60–800 Hz diagnostic band are examined, not a sustained
+factory voice. This readout does not return an acoustic load to the board.
+The assumed P2 bank's radiation resistance is substantial relative to its
+chosen viscous losses, motivating the separate P6 board/air coupling step.
+Structural versus radiative loss partition and reactive acoustic impedance
+remain unresolved; adding that resistance directly to the existing losses
+could count radiation twice. No observer or damping change is promoted.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

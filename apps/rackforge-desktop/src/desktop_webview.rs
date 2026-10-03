@@ -32,6 +32,18 @@ fn webview_data_directory() -> std::path::PathBuf {
         .join("WebView2")
 }
 
+/// On Linux, WebKitGTK's cache in the user's cache directory (inside a
+/// Flatpak, the app's own).
+#[cfg(target_os = "linux")]
+fn webview_data_directory() -> std::path::PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("RackForge")
+        .join("WebKit")
+}
+
 pub struct DesktopWebView {
     view: WebView,
     current_url: Option<String>,
@@ -41,11 +53,17 @@ pub struct DesktopWebView {
 
 impl DesktopWebView {
     pub fn new(creation: &CreationContext<'_>) -> Result<Self> {
+        // WebKitGTK is a GTK widget: GTK must be up on this, the window's,
+        // thread before the view is made, and its events are then pumped
+        // every frame (`pump`). The window is X11's -- see `run` -- because a
+        // child WebView cannot be placed in a Wayland surface.
+        #[cfg(target_os = "linux")]
+        gtk::init().context("starting GTK for the embedded RackForge workspace")?;
         // Only borrowed while the view is built: what the context carries into
         // the WebView is the directory above, and nothing after that reads it.
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let mut context = WebContext::new(Some(webview_data_directory()));
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let mut context = WebContext::new(None);
         let view = WebViewBuilder::new_with_web_context(&mut context)
             // The chassis colour, not a near-white. This is what shows in the
@@ -76,7 +94,7 @@ impl DesktopWebView {
                 NewWindowResponse::Deny
             })
             .build_as_child(creation)
-            .context("creating the embedded RackForge WebView2 workspace")?;
+            .context("creating the embedded RackForge web workspace")?;
         Ok(Self {
             view,
             current_url: None,
@@ -85,7 +103,29 @@ impl DesktopWebView {
         })
     }
 
-    pub fn show(&mut self, url: &str, rect: eframe::egui::Rect) -> Result<()> {
+    /// Shows the interface over `rect`, in egui's points. WebView2 takes
+    /// them as they are, since it scales with the window's DPI; a WebKit child
+    /// of an X11 window does not scale, so on Linux they become the pixels
+    /// they cover -- on a 150 % display it otherwise filled two-thirds of the
+    /// window each way.
+    pub fn show(
+        &mut self,
+        url: &str,
+        rect: eframe::egui::Rect,
+        pixels_per_point: f32,
+    ) -> Result<()> {
+        // The bottom pixel row is left to the window: an X11 child that covers
+        // its parent entirely makes the X server report the parent fully
+        // obscured, winit passes that on as occluded, and eframe stops
+        // running frames for an occluded window -- one a second, measured --
+        // and every request the interface sends the host waited for one.
+        #[cfg(target_os = "linux")]
+        let rect = eframe::egui::Rect::from_min_max(
+            (rect.min.to_vec2() * pixels_per_point).to_pos2(),
+            (rect.max.to_vec2() * pixels_per_point - eframe::egui::vec2(0.0, 1.0)).to_pos2(),
+        );
+        #[cfg(not(target_os = "linux"))]
+        let _ = pixels_per_point;
         if self.current_url.as_deref() != Some(url) {
             self.view
                 .load_url(url)
@@ -122,5 +162,21 @@ impl DesktopWebView {
 
     pub fn reload(&self) -> Result<()> {
         self.view.reload().context("reloading RackForge Web UI")
+    }
+
+    /// Lets GTK handle what is waiting for it -- the WebView's drawing, input
+    /// and network -- for a few milliseconds of the frame. Linux only:
+    /// WebView2 runs on the window's own message loop.
+    ///
+    /// Bounded in time, not by an empty queue: a page that animates keeps the
+    /// queue from ever emptying, and draining it held the frame -- and with it
+    /// every request the interface sends the host -- until a plugin's panel
+    /// gave up waiting.
+    #[cfg(target_os = "linux")]
+    pub fn pump(&self) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(4);
+        while gtk::events_pending() && std::time::Instant::now() < deadline {
+            gtk::main_iteration_do(false);
+        }
     }
 }

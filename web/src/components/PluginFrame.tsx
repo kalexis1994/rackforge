@@ -1,4 +1,5 @@
 import { hostAssetUrl, pluginKitUrls } from "../plugin-kit/location";
+import { postToPlugin } from "./postToPlugin";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { NavLink, useNavigate } from "react-router";
@@ -250,17 +251,14 @@ export function PluginFrame({
 
   const sendPluginResponse = useCallback(
     (requestId: string, ok: boolean, error?: string, result?: unknown) => {
-      frameRef.current?.contentWindow?.postMessage(
-        {
-          protocol: "rackforge.plugin.web@1",
-          kind: "response",
-          request_id: requestId,
-          ok,
-          ...(error ? { error } : {}),
-          ...(result !== undefined ? { result } : {}),
-        },
-        window.location.origin,
-      );
+      postToPlugin(frameRef.current, {
+        protocol: "rackforge.plugin.web@1",
+        kind: "response",
+        request_id: requestId,
+        ok,
+        ...(error ? { error } : {}),
+        ...(result !== undefined ? { result } : {}),
+      });
     },
     [],
   );
@@ -478,15 +476,12 @@ export function PluginFrame({
       );
     }
 
-    frameRef.current?.contentWindow?.postMessage(
-      {
-        protocol: "rackforge.plugin.web@1",
-        kind: "parameter_changed",
-        parameter_index: parameterIndex,
-        value: canonicalValue,
-      },
-      window.location.origin,
-    );
+    postToPlugin(frameRef.current, {
+      protocol: "rackforge.plugin.web@1",
+      kind: "parameter_changed",
+      parameter_index: parameterIndex,
+      value: canonicalValue,
+    });
   }, [
     ensureIsolatedState,
     flushIsolatedParameterWrite,
@@ -554,15 +549,12 @@ export function PluginFrame({
           for (const parameter of result.values) {
             if (parameterValues.get(parameter.index) === parameter.value) continue;
             parameterValues.set(parameter.index, parameter.value);
-            frameRef.current?.contentWindow?.postMessage(
-              {
-                protocol: "rackforge.plugin.web@1",
-                kind: "parameter_changed",
-                parameter_index: parameter.index,
-                value: parameter.value,
-              },
-              window.location.origin,
-            );
+            postToPlugin(frameRef.current, {
+              protocol: "rackforge.plugin.web@1",
+              kind: "parameter_changed",
+              parameter_index: parameter.index,
+              value: parameter.value,
+            });
           }
         } catch {
           // The regular plugin request path owns user-facing errors. A
@@ -637,8 +629,7 @@ export function PluginFrame({
     const frame = frameRef.current;
     if (!frame || !selectedSurface) return;
 
-    const send = (message: unknown) =>
-      frame.contentWindow?.postMessage(message, window.location.origin);
+    const send = (message: unknown) => postToPlugin(frame, message);
     const onMessage = (event: MessageEvent) => {
       if (
         event.source !== frame.contentWindow ||
@@ -1324,10 +1315,7 @@ export function PluginFrame({
             // has installed its own listener, so publishing the idempotent
             // context here closes that race without plugin-specific timing.
             if (pluginContextReady) {
-              frameRef.current?.contentWindow?.postMessage(
-                pluginContext,
-                window.location.origin,
-              );
+              postToPlugin(frameRef.current, pluginContext);
             }
           }}
         />

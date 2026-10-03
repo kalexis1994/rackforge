@@ -1436,7 +1436,7 @@ async fn pick_native_resource(
     State(state): State<WebState>,
     Json(request): Json<NativeResourcePickRequest>,
 ) -> Response {
-    #[cfg(target_os = "windows")]
+    #[cfg(desktop_host)]
     {
         let picked = match tokio::task::spawn_blocking(move || {
             let mut dialog = rfd::FileDialog::new().set_title(match request.kind {
@@ -1481,7 +1481,7 @@ async fn pick_native_resource(
             Err(error) => resource_error(error),
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(desktop_host))]
     {
         let _ = (state, request);
         resource_error(ResourceError::Backend(
@@ -1491,7 +1491,7 @@ async fn pick_native_resource(
 }
 
 async fn read_native_text_file(Json(request): Json<NativeTextReadRequest>) -> Response {
-    #[cfg(target_os = "windows")]
+    #[cfg(desktop_host)]
     {
         let maximum = request.maximum_bytes.clamp(1, MAX_PORTABLE_TEXT_BYTES);
         match tokio::task::spawn_blocking(move || -> Result<Value, String> {
@@ -1533,7 +1533,7 @@ async fn read_native_text_file(Json(request): Json<NativeTextReadRequest>) -> Re
             Err(error) => internal_error(error),
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(desktop_host))]
     {
         let _ = request;
         resource_error(ResourceError::Backend(
@@ -1543,7 +1543,7 @@ async fn read_native_text_file(Json(request): Json<NativeTextReadRequest>) -> Re
 }
 
 async fn write_native_text_file(Json(request): Json<NativeTextWriteRequest>) -> Response {
-    #[cfg(target_os = "windows")]
+    #[cfg(desktop_host)]
     {
         if request.text.is_empty() || request.text.len() > MAX_PORTABLE_TEXT_BYTES {
             return (
@@ -1577,7 +1577,7 @@ async fn write_native_text_file(Json(request): Json<NativeTextWriteRequest>) -> 
             Err(error) => internal_error(error),
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(desktop_host))]
     {
         let _ = request;
         resource_error(ResourceError::Backend(

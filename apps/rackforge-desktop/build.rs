@@ -3,6 +3,16 @@ fn main() {
     stamp_revision();
     generate_bundled_plugin_module();
 
+    // The platforms the desktop host runs on. What the host does everywhere
+    // it runs -- audio, the webview, MIDI and controllers, dialogs -- is
+    // gated on `desktop_host`; what only Windows has (ASIO, WebView2's
+    // profile, MessageBox, the named mutex) stays `windows`.
+    println!("cargo::rustc-check-cfg=cfg(desktop_host)");
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if matches!(target_os.as_str(), "windows" | "linux") {
+        println!("cargo:rustc-cfg=desktop_host");
+    }
+
     #[cfg(windows)]
     {
         let mut resource = winresource::WindowsResource::new();

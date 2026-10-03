@@ -323,7 +323,7 @@ impl Step {
     }
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 struct PendingLiveStateSave {
     response: Receiver<std::result::Result<Vec<u8>, String>>,
     path: PathBuf,
@@ -334,16 +334,16 @@ pub(super) struct DesktopShutdown {
     step: Step,
     started_at: Instant,
     cleanup_deadline: Option<Instant>,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     state_save: Option<PendingLiveStateSave>,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     audio_cleanup: Option<thread::JoinHandle<()>>,
     controller_cleanup: Option<thread::JoinHandle<()>>,
     warnings: Vec<String>,
 }
 
 impl DesktopApp {
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn begin_shutdown_state_save(&mut self) -> Option<PendingLiveStateSave> {
         self.live_state_dirty.take()?;
         let audio = self.audio.as_ref()?;
@@ -374,24 +374,24 @@ impl DesktopApp {
 impl DesktopShutdown {
     pub(super) fn begin(app: &mut DesktopApp) -> Self {
         eprintln!("DESKTOP_SHUTDOWN_BEGIN");
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let state_save = app.begin_shutdown_state_save();
         let mut shutdown = Self {
             step: Step::SavingPluginState,
             started_at: Instant::now(),
             cleanup_deadline: None,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             state_save,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             audio_cleanup: None,
             controller_cleanup: None,
             warnings: Vec::new(),
         };
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if shutdown.state_save.is_none() {
             shutdown.start_cleanup(app);
         }
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         shutdown.start_cleanup(app);
         shutdown
     }
@@ -405,7 +405,7 @@ impl DesktopShutdown {
             shutdown.store(true, std::sync::atomic::Ordering::Release);
         }
         self.controller_cleanup = app.controller_supervisor.take();
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if let Some(audio) = app.audio.take() {
             match thread::Builder::new()
                 .name("rackforge-desktop-audio-shutdown".into())
@@ -419,7 +419,7 @@ impl DesktopShutdown {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn poll_state_save(&mut self) -> bool {
         let Some(pending) = self.state_save.as_ref() else {
             return true;
@@ -468,16 +468,16 @@ impl DesktopShutdown {
     pub(super) fn poll(&mut self, app: &mut DesktopApp) {
         match self.step {
             Step::SavingPluginState => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 let complete = self.poll_state_save();
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 let complete = true;
                 if complete {
                     self.start_cleanup(app);
                 }
             }
             Step::StoppingAudioMidi => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     let finished = self
                         .audio_cleanup
@@ -497,7 +497,7 @@ impl DesktopShutdown {
                         self.step = Step::RestoringControllers;
                     }
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 {
                     self.step = Step::RestoringControllers;
                 }

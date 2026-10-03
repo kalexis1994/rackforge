@@ -42,7 +42,7 @@ other numbers (below).
 | Pedal | the Sustain pedal type sends CC 64 on the keyboard channel | Documented | MCC 4.4, 4.4.1. Which type is factory is not said |
 | Keyboard channel | the Default Keyboard Channel; the controls above follow it | Documented | MCC 4.2.2, 3.x "Keyboard"; UM 4.1 (Shift + keys) |
 | Not declared | Shift (CC 9), the main encoder (CC 114/112, click 115/113) | Documented (CH) | They drive the keyboard's own menus |
-| Slots | faders `control-1.1`–`1.4`; knobs `control-2`; pads by note; modulation strip `mod-wheel` | Convention | catalog README; as the Oxygen Pro Mini |
+| Slots | faders `control-1.1`–`1.4`; knobs `control-2`; pads by number (bank A `switch-1`, bank B `switch-2`); modulation strip `mod-wheel` | Convention | catalog README; as the Oxygen Pro Mini |
 | Roles | faders attack, decay, sustain, release; knobs cutoff, resonance, filter envelope amount, LFO rate, LFO depth, filter LFO amount, key tracking, amplifier level; Play and Stop take the transport | Convention | catalog README, "Eight knobs and four faders" |
 
 ## Open questions, until someone with the hardware checks

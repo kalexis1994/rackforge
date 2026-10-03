@@ -45,7 +45,7 @@ readings were withdrawn on 2026-09-25. Nothing below rests on them.
 | Joystick Y | CC 1 up and down, 0 at centre | Documented (a mod wheel effect; Modulation 2 centres at 0); Official software (CC 1) | QS item 8; FAQ; BW keys input `b001??`, and its program's Y axis (Dual CC, CC 1) |
 | Sustain pedal | CC 64, channel 1 | Documented (the input); Official software (the CC) | QS item 2; BW keys note input `b040??` |
 | Other buttons | Arp, Tap Tempo, Octave, Bank A/B, CC, Prog Change, Full Level, Note Repeat, Prog Select act on the keyboard itself | Documented | QS items 5–14. Not declared |
-| Slots | knobs `control-1` (no faders); pads by note: 40–43, 36–39 → `switch-1`, 48–51, 44–47 → `switch-2`; joystick Y `mod-wheel` | Convention | catalog README, "Slots" |
+| Slots | knobs `control-1` (no faders); pads by number: 1–8 → `switch-1`, 9–16 → `switch-2`; joystick Y `mod-wheel` | Convention | catalog README, "Slots" |
 | Roles | knobs 1–4 cutoff, resonance, filter envelope amount, LFO rate; 5–8 attack, decay, sustain, release | Convention: RackForge's eight-knobs-no-faders rule | catalog README |
 
 ## Open questions, until someone with the hardware checks

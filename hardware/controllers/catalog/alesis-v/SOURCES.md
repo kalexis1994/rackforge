@@ -50,7 +50,7 @@ Channels from 1.
 | Ports | the keys' port `V25` / `V49` / `V61` (Windows), `V25 MIDI 1` (Linux); the editor's `MIDIIN2 (V49)`, `V25 MIDI 2`, `EDITOR` | Community ×4 | PN; TM |
 | Identity Reply | **not found** | — | The names ("v25"/"v49"/"v61", not "mkii", not the editor's port) single the family out |
 | The pads play when nothing maps them | drum pads on a keyboard | Convention | catalog README |
-| Slots | knobs `control-1.1`–`1.4`; pads by note (36–39 `switch-1.5`–`1.8`, 41–42 `switch-1.2`–`1.3`, 46 `switch-2.7`, 49 `switch-2.2`); buttons none (the keyboard has pads); modulation wheel `mod-wheel` | Convention | catalog README |
+| Slots | knobs `control-1.1`–`1.4`; pads by number, 1–8 `switch-1.1`–`1.8`; buttons none (the keyboard has pads); modulation wheel `mod-wheel` | Convention | catalog README |
 | Roles | knobs as the first four of the rule for eight knobs and no faders | Convention | catalog README |
 
 ## Open questions, until someone with the hardware checks

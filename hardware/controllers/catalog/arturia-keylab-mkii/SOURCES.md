@@ -38,7 +38,7 @@ on the first port and play as on any keyboard.
 | Pads (DAW preset) | notes 36–51 on channel 10, on the DAW port | Official software ×2 | BW `ButtonId.PAD1`–`PAD16`; AB `PAD_IDS` on channel 10 |
 | Buttons | notes on channel 1; press at velocity ≥ 64, release below or by note-off. Play 94, Stop 93, Record 95, Loop 86, Rewind 91, Forward 92, Metro 89, Save 74, Undo 81, Punch In 87, Punch Out 88, Read 56, Write 57, Solo 8, Mute 16, Record Arm 0, Previous 48, Next 49, Preset < 98, Preset > 99, Bank 33, wheel click 84, Select Multi 51, Select 1–8 24–31 | Official software ×2, but for Bank (one source) | BW `ButtonId`, `createButton`; AB `create_button` notes, as listed in the manifest's comments. AB reads note 74 as its View button, and 46/47 as bank buttons its KeyLab Essential had |
 | Held from instruments | faders, encoders, the wheel and every button (`plays = false`); the pads play | Convention | catalog README |
-| Slots | faders 1–8 `control-1`; encoders 1–8 `control-2`; pads by note; Rewind/Forward `step`, Previous/Next `step-2`; Save, Metro, Undo `switch-3.1`, `.3`, `.4`; the ninth fader and encoder none | Convention | catalog README |
+| Slots | faders 1–8 `control-1`; encoders 1–8 `control-2`; pads by number (1–8 `switch-1`, 9–16 `switch-2`); Rewind/Forward `step`, Previous/Next `step-2`; Save, Metro, Undo `switch-3.1`, `.3`, `.4`; the ninth fader and encoder none | Convention | catalog README |
 | Roles | none: roles take absolute control changes, and these faders send pitch bend, the encoders relative steps. The slots give every instrument its map | — | — |
 | Transport | Play and Stop take the transport | Convention | catalog README |
 

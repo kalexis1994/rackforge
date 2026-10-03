@@ -98,9 +98,9 @@ midi = { channel = 0, cc = 51 }
 button = { latching = true }
 
 # Pads: notes on channel 10 [TM; BL; GH], which play and take the slot of
-# the note they send. Pad 2 is 41 in two sources and 32 in the dump [TM]:
-# see SOURCES.md. Which physical pad is the first is not documented; the
-# order is the sources'.
+# their number. Pad 2 is 41 in two sources and 32 in the dump [TM]: see
+# SOURCES.md. Which physical pad is the first is not documented; the order is
+# the sources'.
 
 [[inputs]]
 id = "pad-1"
@@ -108,7 +108,7 @@ name = "Pad 1"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 49 }
-slot = "switch-2.2"
+slot = "switch-1.1"
 
 [[inputs]]
 id = "pad-2"
@@ -132,7 +132,7 @@ name = "Pad 4"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 46 }
-slot = "switch-2.7"
+slot = "switch-1.4"
 
 [[inputs]]
 id = "pad-5"

@@ -38,7 +38,7 @@ text layer runs the columns one row out of step.
 | Identity Reply | **not documented** | — | The name ("beatstep", not "pro") singles the product out |
 | Held from instruments | the sixteen knobs (`plays = false`): no keys; CC 7 is volume | Convention | catalog README |
 | The pads play | they are drum pads, as the MPD218's | Convention | catalog README |
-| Slots | knobs 1–8 `control-1`, 9–16 `control-2` (no faders); pads by note: 40–43 then 36–39 `switch-1`, 48–51 then 44–47 `switch-2` | Convention | catalog README |
+| Slots | knobs 1–8 `control-1`, 9–16 `control-2` (no faders); pads by number: 1–8 (the top row) `switch-1`, 9–16 `switch-2` | Convention | catalog README |
 | Roles | knobs 1–8 as the rule for eight knobs and no faders | Convention | catalog README |
 
 ## Open questions, until someone with the hardware checks

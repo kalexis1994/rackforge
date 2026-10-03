@@ -41,7 +41,7 @@ byte (AB USB product 52).
 | Knob type | absolute, read from the record's zero type byte | Official software, reading assumed | PR. The format is not documented; see the open questions |
 | Pads | 16 pads, three pad banks; notes on channel 10: A 36–51, B 52–67, C 68–83 | Documented (count); Official software ×2 for bank A (PR; AB), one for B and C (PR) | UG item 6; PR; AB `PAD_IDS`, `PAD_CHANNEL = 9` |
 | Pad order | pad 1 bottom left; bottom row 36–39, top row 48–51 | Official software | AB `PAD_IDS`, top row first |
-| Slots | knob banks A, B, C on control rows 1, 2, 3; bank A's pads by note; banks B and C none | Convention | catalog README |
+| Slots | knob banks A, B, C on control rows 1, 2, 3; bank A's pads by number, 1–8 `switch-1`, 9–16 `switch-2`; banks B and C none | Convention | catalog README |
 | Roles | the four-knob rule on bank A: cutoff, resonance, filter envelope amount, LFO rate | Convention | catalog README |
 
 ## Open questions, until someone with the hardware checks

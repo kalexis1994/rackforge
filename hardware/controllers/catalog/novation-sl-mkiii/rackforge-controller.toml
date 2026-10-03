@@ -566,10 +566,9 @@ midi = { channel = 15, cc = 117 }
 plays = false
 
 # Pads 1-16: notes 96-103 (top row) and 112-119 (bottom row), velocity
-# sensitive, released with velocity 0 [PR p13, p15; BW 0x60 + row * 16 + i;
-# AB offsets 96 and 112]. They launch clips in a DAW, never notes an
-# instrument should hear. No slot: the catalog places pads by the notes
-# 36-51, and these send 96 and up.
+# sensitive, released with velocity 0 [PR p13, p15; BW 0x60 + row * 16 + i; AB
+# offsets 96 and 112]. They launch clips in a DAW, never notes an instrument
+# should hear, and take the slots of their numbers.
 
 [[inputs]]
 id = "pad-1"
@@ -577,6 +576,7 @@ name = "Pad 1"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 96 }
+slot = "switch-1.1"
 plays = false
 
 [[inputs]]
@@ -585,6 +585,7 @@ name = "Pad 2"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 97 }
+slot = "switch-1.2"
 plays = false
 
 [[inputs]]
@@ -593,6 +594,7 @@ name = "Pad 3"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 98 }
+slot = "switch-1.3"
 plays = false
 
 [[inputs]]
@@ -601,6 +603,7 @@ name = "Pad 4"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 99 }
+slot = "switch-1.4"
 plays = false
 
 [[inputs]]
@@ -609,6 +612,7 @@ name = "Pad 5"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 100 }
+slot = "switch-1.5"
 plays = false
 
 [[inputs]]
@@ -617,6 +621,7 @@ name = "Pad 6"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 101 }
+slot = "switch-1.6"
 plays = false
 
 [[inputs]]
@@ -625,6 +630,7 @@ name = "Pad 7"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 102 }
+slot = "switch-1.7"
 plays = false
 
 [[inputs]]
@@ -633,6 +639,7 @@ name = "Pad 8"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 103 }
+slot = "switch-1.8"
 plays = false
 
 [[inputs]]
@@ -641,6 +648,7 @@ name = "Pad 9"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 112 }
+slot = "switch-2.1"
 plays = false
 
 [[inputs]]
@@ -649,6 +657,7 @@ name = "Pad 10"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 113 }
+slot = "switch-2.2"
 plays = false
 
 [[inputs]]
@@ -657,6 +666,7 @@ name = "Pad 11"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 114 }
+slot = "switch-2.3"
 plays = false
 
 [[inputs]]
@@ -665,6 +675,7 @@ name = "Pad 12"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 115 }
+slot = "switch-2.4"
 plays = false
 
 [[inputs]]
@@ -673,6 +684,7 @@ name = "Pad 13"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 116 }
+slot = "switch-2.5"
 plays = false
 
 [[inputs]]
@@ -681,6 +693,7 @@ name = "Pad 14"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 117 }
+slot = "switch-2.6"
 plays = false
 
 [[inputs]]
@@ -689,6 +702,7 @@ name = "Pad 15"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 118 }
+slot = "switch-2.7"
 plays = false
 
 [[inputs]]
@@ -697,6 +711,7 @@ name = "Pad 16"
 kind = "pad"
 group = "Pads"
 midi = { channel = 15, note = 119 }
+slot = "switch-2.8"
 plays = false
 
 # Faders 1-8 take the catalog's roles (catalog README, "Rows of knobs and

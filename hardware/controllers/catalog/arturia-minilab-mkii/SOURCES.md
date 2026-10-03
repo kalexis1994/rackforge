@@ -51,7 +51,7 @@ once.
 | Identity Reply, for the record | `F0 7E id 06 02 00 20 6B 02 00 04 02 …` | Official software (via a copy); Community ×2 | CU `expectSysexIdentityResponse('00206B','0200','0402')`; mfeyx/bitwig-arturia-minilab-mkii `26fb8ce1`; molenick/midilab `6422b86e`. Not used: the name singles the product out |
 | Not used | Shift + encoders 1 and 9 (CC 7 and 116 in one source, not confirmed for memory 1); the sustain pedal's CC; Shift and Oct −/+ (SysEx) | Community ×1 or not found | — |
 | Flagged, not used | presets and notes taken from Arturia's MIDI Control Center | — | its licence forbids reverse engineering |
-| Slots | encoders 1–8 `control-1`, 9–16 `control-2` (no faders); pads 1–8 by note (`switch-1`); pads 9–16 none (CC); modulation strip `mod-wheel` | Convention | catalog README |
+| Slots | encoders 1–8 `control-1`, 9–16 `control-2` (no faders); pads by number: 1–8 `switch-1`, 9–16 (CC buttons) `switch-2`; modulation strip `mod-wheel` | Convention | catalog README |
 | Roles | encoders 2–8 as the rule for eight knobs and no faders; encoder 1 none (relative) | Convention | catalog README |
 | Pads 9–16 declared as buttons | a pad cannot send a CC in the package format | Convention | — |
 

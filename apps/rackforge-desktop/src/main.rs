@@ -70,6 +70,7 @@ use rackforge_surface_runtime::{
 use semver::Version;
 use shutdown::DesktopShutdown;
 use startup::{Options, Startup, options_from_layout, parse_startup};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
@@ -150,6 +151,14 @@ struct DesktopPlugin {
     sound_summaries: Vec<SoundSummary>,
     sounds: Vec<PlaySound>,
     selected_sound_id: Option<String>,
+    /// Whether the live state saved for this plugin -- its last panel and
+    /// the adjustments made since its program was chosen -- belongs to the
+    /// program selected: true once the session's program was restored, or
+    /// once a fresh start has dropped the old state. False for a program
+    /// chosen by default, the first, as after the plugin was removed and
+    /// installed again: the old state would sound under its name. The audio
+    /// start that drops it sets it, through a shared reference.
+    live_state_matches: Cell<bool>,
     instance: PluginInstance<'static>,
     resources: BTreeMap<String, PathBuf>,
     resource_data_paths: BTreeMap<String, PathBuf>,
@@ -693,7 +702,10 @@ impl DesktopApp {
                     continue;
                 }
                 match plugin.instance.load_preset(&sound_id) {
-                    Ok(()) => plugin.selected_sound_id = Some(sound_id),
+                    Ok(()) => {
+                        plugin.selected_sound_id = Some(sound_id);
+                        plugin.live_state_matches.set(true);
+                    }
                     Err(error) => warnings.push(format!(
                         "Could not restore {} program {sound_id:?} ({error:#}); using its first available program",
                         plugin.name
@@ -1106,7 +1118,10 @@ impl DesktopApp {
             };
             if plugin.sounds.iter().any(|sound| sound.id == *sound_id) {
                 match plugin.instance.load_preset(sound_id) {
-                    Ok(()) => plugin.selected_sound_id = Some(sound_id.clone()),
+                    Ok(()) => {
+                        plugin.selected_sound_id = Some(sound_id.clone());
+                        plugin.live_state_matches.set(true);
+                    }
                     Err(error) => warnings.push(format!(
                         "Could not retain {} program {sound_id:?} after reload: {error:#}",
                         plugin.name
@@ -3426,7 +3441,12 @@ impl DesktopApp {
                         plugin: plugin.runtime,
                         preset_id: selected_sound_id.clone(),
                         resources: resources.clone(),
-                        initial_state: read_live_state(&live_state_dir, &plugin.plugin_id),
+                        // The saved state is the selected program's: kept
+                        // only while that program stays selected.
+                        initial_state: (selected_sound_id == plugin.selected_sound_id)
+                            .then(|| read_live_state(&live_state_dir, &plugin.plugin_id))
+                            .flatten(),
+                        restore_live_parameters: selected_sound_id == plugin.selected_sound_id,
                     })?;
                 }
                 Ok((instance, catalog, selected_sound_id))
@@ -3546,7 +3566,12 @@ impl DesktopApp {
                         plugin: plugin.runtime,
                         preset_id: selected_sound_id.clone(),
                         resources: plugin.resources.clone(),
-                        initial_state: read_live_state(&live_state_dir, &plugin.plugin_id),
+                        // The saved state is the selected program's: kept
+                        // only while that program stays selected.
+                        initial_state: (selected_sound_id == plugin.selected_sound_id)
+                            .then(|| read_live_state(&live_state_dir, &plugin.plugin_id))
+                            .flatten(),
+                        restore_live_parameters: selected_sound_id == plugin.selected_sound_id,
                     })?;
                 }
                 Ok((instance, catalog, selected_sound_id))
@@ -8042,12 +8067,23 @@ fn desktop_audio_specs(
 ) -> Vec<desktop_audio::VoiceSpec> {
     plugins
         .iter()
-        .map(|plugin| desktop_audio::VoiceSpec {
-            instance_id: plugin.instance_id.clone(),
-            plugin: plugin.runtime,
-            preset_id: plugin.selected_sound_id.clone(),
-            resources: plugin.resources.clone(),
-            initial_state: read_live_state(live_state_dir, &plugin.plugin_id),
+        .map(|plugin| {
+            // From this start on, what is saved is this program's: dropped
+            // here if it was another's, written by the next flush.
+            let matches = plugin.live_state_matches.replace(true);
+            desktop_audio::VoiceSpec {
+                instance_id: plugin.instance_id.clone(),
+                plugin: plugin.runtime,
+                preset_id: plugin.selected_sound_id.clone(),
+                resources: plugin.resources.clone(),
+                initial_state: if matches {
+                    read_live_state(live_state_dir, &plugin.plugin_id)
+                } else {
+                    discard_live_state(live_state_dir, &plugin.plugin_id);
+                    None
+                },
+                restore_live_parameters: matches,
+            }
         })
         .collect()
 }
@@ -8059,6 +8095,18 @@ fn live_state_path(dir: &Path, plugin_id: &str) -> PathBuf {
 
 fn read_live_state(dir: &Path, plugin_id: &str) -> Option<Vec<u8>> {
     fs::read(live_state_path(dir, plugin_id)).ok()
+}
+
+/// Drops a plugin's saved live state: it belongs to a program no longer
+/// selected, and the next flush writes the one now playing.
+fn discard_live_state(dir: &Path, plugin_id: &str) {
+    match fs::remove_file(live_state_path(dir, plugin_id)) {
+        Ok(()) => eprintln!("DESKTOP_LIVE_STATE_DISCARDED plugin={plugin_id}"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            eprintln!("DESKTOP_LIVE_STATE_NOT_DISCARDED plugin={plugin_id} error={error}")
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -8392,6 +8440,7 @@ fn apply_desktop_play_chain_state(
                 preset_id: effect.program_id.clone(),
                 resources: plugin.resources.clone(),
                 initial_state: None,
+                restore_live_parameters: true,
             },
             effect.enabled,
         ));
@@ -8595,6 +8644,7 @@ fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<Desk
         sound_summaries,
         sounds,
         selected_sound_id,
+        live_state_matches: Cell::new(false),
         instance,
         resources: BTreeMap::new(),
         resource_data_paths: package

@@ -409,6 +409,10 @@ pub struct VoiceSpec {
     /// meant yesterday. Panel edits used to live only in the running
     /// instance and every restart silently reset them.
     pub initial_state: Option<Vec<u8>>,
+    /// Whether the adjustments recorded since the program was chosen are
+    /// laid over it again; false drops them, as they were made on another
+    /// program (see `initial_state`).
+    pub restore_live_parameters: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -996,6 +1000,17 @@ impl DesktopAudio {
         if specs.is_empty() {
             bail!("no playable plugin is available for the audio engine");
         }
+        // The adjustments saved for a plugin whose program was not restored
+        // were made on another program: dropped now, before anything can
+        // fail, so a later start does not lay them over this one.
+        let mut live_parameter_store = LiveParameterStateStore::open(Some(data_root))?;
+        let mut dropped = false;
+        for spec in specs.iter().filter(|spec| !spec.restore_live_parameters) {
+            dropped |= live_parameter_store.clear_plugin(&spec.plugin.manifest().id);
+        }
+        if dropped {
+            live_parameter_store.flush()?;
+        }
 
         let host_id = cpal::available_hosts()
             .into_iter()
@@ -1046,7 +1061,6 @@ impl DesktopAudio {
             bail!("the selected audio output reports zero channels");
         }
 
-        let live_parameter_store = LiveParameterStateStore::open(Some(data_root))?;
         let live_parameter_targets = specs
             .iter()
             .map(|spec| LiveParameterTarget {
@@ -3191,8 +3205,11 @@ fn prepare_audio_voice(
             );
         }
     }
-    let restored_parameters: Vec<(u32, f64)> =
-        live_parameter_store.restored_values(&spec.plugin.manifest().id, spec.plugin.parameters());
+    let restored_parameters: Vec<(u32, f64)> = if spec.restore_live_parameters {
+        live_parameter_store.restored_values(&spec.plugin.manifest().id, spec.plugin.parameters())
+    } else {
+        Vec::new()
+    };
     for (parameter_index, value) in restored_parameters.iter().copied() {
         // A value the plugin refuses costs that one parameter, never the
         // instrument.

@@ -51,3 +51,16 @@ rackforge_render_systemd_unit() {
   sudo install -m 0644 "$temporary" "$destination"
   rm -f "$temporary"
 }
+
+# The machine's LAN address, for the line that says where the Web interface
+# is. Not every distribution ships `hostname` (SteamOS has none, and the line
+# then named 127.0.0.1); every one ships iproute2's `ip`.
+rackforge_lan_address() {
+  local address=""
+  address="$(hostname -I 2>/dev/null | awk '{print $1}')" || true
+  if [[ -z "$address" ]]; then
+    address="$(ip -4 route get 1.1.1.1 2>/dev/null \
+      | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}')" || true
+  fi
+  printf '%s' "$address"
+}

@@ -44,14 +44,6 @@ done
 if [[ ! -f "$root/config/rackforge.toml" ]]; then
   install -m 0644 "$script_dir/config/rackforge.toml" "$root/config/rackforge.toml"
 fi
-# Rendered, not copied: the seed names @RACKFORGE_ROOT@ and the bundled
-# instrument, because Core refuses a relative `package` or `data_root`.
-if [[ ! -f "$root/config/audio.toml.example" && -f "$source_root/config/audio.toml" ]]; then
-  rackforge_render_audio_seed \
-    "$source_root/config/audio.toml" \
-    "$root/config/audio.toml.example"
-fi
-
 web_stage="$(mktemp -d "$root/.web-stage.XXXXXX")"
 trap 'rm -rf "$web_stage"' EXIT
 cp -R "$source_root/web/dist/." "$web_stage/"
@@ -111,6 +103,18 @@ for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
 done
 shopt -u nullglob
 
+# Rendered, not copied: the seed names @RACKFORGE_ROOT@ and the bundled
+# instrument, because Core refuses a relative `package` or `data_root`. After
+# the plugins, as the Pi's installers order it: the seed points at the
+# installed Concert Grand, and rendered before it was installed it found no
+# instrument and was skipped, so a fresh install had no audio configuration
+# until the installer ran a second time.
+if [[ ! -f "$root/config/audio.toml.example" && -f "$source_root/config/audio.toml" ]]; then
+  rackforge_render_audio_seed \
+    "$source_root/config/audio.toml" \
+    "$root/config/audio.toml.example"
+fi
+
 controller_package="$source_root/controller-packages/org.rackforge.arturia-keylab-essential-mk3.rfcontroller"
 if [[ -d "$controller_package" ]]; then
   "$root/bin/rackforge-controller-host" verify "$controller_package"
@@ -144,7 +148,7 @@ else
   sudo systemctl stop rackforge-audio.service
 fi
 
-address="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+address="$(rackforge_lan_address)"
 printf 'RACKFORGE_LINUX_INSTALLED root=%s web=http://%s:8787\n' \
   "$root" "${address:-127.0.0.1}"
 printf 'Log out and back in once if this user was newly added to the audio group.\n'

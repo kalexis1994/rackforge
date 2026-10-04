@@ -122,6 +122,45 @@ def summarize(args):
             cold_refinement=bool([c for c in comparisons if c['left'].endswith('-Cold')]) and all(c['passed'] for c in comparisons if c['left'].endswith('-Cold')),
             reiterated_refinement=bool([c for c in comparisons if c['left'].endswith('-Relaunch')]) and all(c['passed'] for c in comparisons if c['left'].endswith('-Relaunch'))),
         scope='C4/124 vertical one-string nonlinear SI contact, 35 low P2 modes and 11445-state passive air; prescribed separated-head relaunch, not key action or audio.')
+    report['contact_implementation_commit']='a526d50'
+    source_names=['audit-concert-grand-bounded-contact.py','concert_grand_bounded_contact.py',
+        'concert_grand_bounded_air.py','concert_grand_rational_air.py','concert_grand_acoustic_bath.py','concert_grand_surface_impedance.py',
+        'concert_grand_moving_bridge.py','concert_grand_coupled_contact.py','concert_grand_contact_study.py',
+        'concert_grand_nonlinear_string.py','concert_grand_orthotropic_plate.py',
+        'audit-concert-grand-moving-bridge.py','audit-concert-grand-coupled-contact.py']
+    report['source_sha256']={name:digest(Path(__file__).with_name(name)) for name in source_names}
+    report['trajectory_sha256']={key:digest(args.output/(key+'.npz')) for key in cases}
+    sequences=[]
+    for key,second in cases.items():
+        if not key.endswith('-Relaunch'):continue
+        first=cases[second['first_case']]
+        scale=first['initial_energy_j']+abs(second['relaunch_external_work_j'])
+        continuity=abs(second['initial_energy_j']-first['energy_checkpoints'][-1]['stored_total_j']-second['relaunch_external_work_j'])/scale
+        loss=sum(first[k]+second[k] for k in ['felt_heat_j','material_heat_j','radiation_loss_j'])
+        budget=abs(second['energy_checkpoints'][-1]['stored_total_j']+loss-first['initial_energy_j']-second['relaunch_external_work_j'])/scale
+        sequences.append(dict(rate_hz=second['rate_hz'],preserved_living_states=second['preserved_living_states'],
+            relaunch_continuity_relative_error=continuity,cumulative_budget_relative_error=budget,
+            passed=second['preserved_living_states'] and max(continuity,budget)<CRITERIA['energy_budget']))
+    report['two_contact_sequences']=sequences
+    report['gates']['persistent_sequence']=bool(sequences) and all(s['passed'] for s in sequences)
+    scalar=args.output.parent/f'T{args.transverse}-384000-Cold.npz'
+    scalar_report=args.reports/'control-escalar-384000.json'
+    key=f'T{args.transverse}-384000-Cold'
+    if scalar.exists() and scalar_report.exists() and key in cases:
+        old=json.loads(scalar_report.read_text())
+        with np.load(scalar) as aa,np.load(args.output/(key+'.npz')) as bb:
+            equality={name:bool(np.array_equal(aa[name],bb[name])) for name in ['q','v','wave_state_final','relaxation_state_final','board_position','board_velocity']}
+            indices=[i for i in range(len(COLUMNS)) if i!=11]
+            equality['trace_except_radiation']=bool(np.array_equal(aa['trace'][:,indices],bb['trace'][:,indices]))
+            trace_error=float(np.linalg.norm(aa['trace'][:,11]-bb['trace'][:,11])/np.linalg.norm(aa['trace'][:,11]))
+        radiation_error=abs(old['radiation_loss_j']-cases[key]['radiation_loss_j'])/old['radiation_loss_j']
+        observer=dict(scalar_trajectory_sha256=digest(scalar),scalar_report_sha256=digest(scalar_report),
+            dynamics_bitwise_equal=equality,radiation_trajectory_relative_error=trace_error,
+            final_radiation_relative_error=radiation_error,relative_limit=1e-12,
+            scalar_elapsed_s=old['elapsed_s'],batched_elapsed_s=cases[key]['elapsed_s'],
+            passed=all(equality.values()) and max(trace_error,radiation_error)<1e-12)
+        report['observer_equivalence']=observer;report['gates']['observer_equivalence']=observer['passed']
+    else:report['gates']['observer_equivalence']=False
     if args.reference:
         ref=args.reference/f'T{args.transverse}-768000-Air.json'
         old=json.loads(ref.read_text());fine=cases[f'T{args.transverse}-768000-Cold']

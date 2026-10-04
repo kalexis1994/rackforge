@@ -62,8 +62,8 @@ class BoundedContact:
         """Advance the coupled state without altering the physical port.
 
         With defer_radiation, loss_j/radiation_loss_j include relaxation only.
-        The caller must add dt*wave.radiation_batch(wave_inputs) to close the
-        radiation ledger. This changes observer cost, never the dynamics.
+        The caller must add dt*wave.radiation_batch([wave_inputs])[0] to close
+        the radiation ledger. This changes observer cost, never the dynamics.
         """
         if not np.isfinite(dt) or dt<=0:raise ValueError('positive step')
         q,v,r,z=state;h=dt/2

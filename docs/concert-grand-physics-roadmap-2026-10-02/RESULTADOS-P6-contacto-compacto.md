@@ -48,16 +48,56 @@ SI y coeficientes permanecen congelados. Medidas y procedencia únicas en
 El almacenamiento acústico se evalúa independientemente cada 0,5 ms, nueve
 puntos; trabajo y pérdidas, cada paso. El fixture verifica además la identidad
 en cada paso. Un balance correcto no basta para certificar la precisión de
-una trayectoria: faltan los refinamientos y el segundo contacto de este banco.
+una trayectoria; los refinamientos y el segundo contacto se verifican abajo.
 
-## Ensayo que se retoma
+## Resultados completos desde a526d50
 
-La ejecución agrupada se interrumpió durante la limpieza del disco. No tiene
-todavía una trayectoria completa ni se declara validada a escala C4.
-Primero debe coincidir con el control escalar guardado; después se comparan
-384/768 kHz para contacto frío y relanzamiento a los 4 ms, conservando los
-estados vivos. Umbrales previos: balance 1e−9, energía/trabajo e impulso/fuerza
-0,2%, tiempo de contacto 0,1%, trayectorias RMS de puente/tabla 1%.
+La ejecución se retomó después de la limpieza del disco y completó cuatro
+casos: primer golpe durante 0–4 ms y relanzamiento durante 4–8 ms, a 384 y
+768 kHz. No se reinicia el aire ni la tabla al relanzar. El fieltro conserva
+su parámetro de pérdida de tasa cero: su disipación se verifica en el fixture
+separado, no se identifica ni ajusta en este C4.
+
+El primer caso agrupado coincide **bit a bit** con el control escalar en q,
+v, ambos estados acústicos finales, posiciones/velocidades de tabla y todas
+las columnas del registro salvo radiación. Su error RMS de radiación es
+8,24e−16; el de radiación final, 2,15e−16. Se conserva el mismo factor angular
+completo; no se descartan canales ni se aproximan fuerzas para ahorrar tiempo.
+El coste medido baja de 210,94 a 120,89 s para este caso en el mismo equipo.
+Es coste de laboratorio offline, todavía no una implementación de audio.
+
+Los umbrales siguen fijados antes de ejecutar: balance 1e−9, energía/trabajo
+e impulso/fuerza 0,2%, tiempo de contacto 0,1%, trayectorias RMS de puente/tabla
+1%. Todos pasan; no se amplían los límites para aceptar la repetición.
+
+| Cambio 384 → 768 kHz | Primer golpe | Segundo golpe | Límite |
+| --- | ---: | ---: | ---: |
+| Velocidad RMS del puente | 0,011121% | 0,028135% | 1% |
+| Posición RMS del puente | 0,002075% | 0,005676% | 1% |
+| Velocidad RMS del banco de tabla | 0,007543% | 0,013821% | 1% |
+| Posición RMS del banco de tabla | 0,001848% | 0,004465% | 1% |
+| Mayor cambio de energía/trabajo | 0,043529% | 0,005334% | 0,2% |
+| Duración del contacto | 0,000458% | 0,000415% | 0,1% |
+| Fuerza máxima | 0,002756% | 0,023213% | 0,2% |
+| Impulso | 0,000076% | 0,001167% | 0,2% |
+
+La duración fina es 1,816846 ms para el primer golpe y 2,249334 ms para el
+segundo, medido desde el relanzamiento. El trabajo externo de éste es
+0,0283254612 J; su balance de continuidad relativo es 9,22e−17.
+El presupuesto global acumulado de los dos contactos da 3,41e−15 a 384 kHz
+y 5,14e−13 a 768 kHz. Máximos en todos los puntos de los cuatro casos:
+global 5,79e−13, aire 1,50e−16, tabla 3,68e−16. Los controles evaluados cada
+0,5 ms conservan su alcance: no son una evaluación independiente del
+almacenamiento en todos los pasos del banco grande.
+
+El contraste con el baño finito anterior cambia la energía final de tabla
+−0,005167% y su trabajo +0,001251%; fuerza/duración/impulso iniciales coinciden
+hasta redondeo. Son aproximaciones acústicas distintas: ese baño no es una
+verdad exacta de banda ancha ni se usa como gate para promover sonido.
+
+`resumen-P6-contacto-compacto.json` contiene medidas, comparaciones, presupuesto
+de las dos secuencias, equivalencia del observador y SHA-256 de fuentes y
+trayectorias. Los cinco gates pasan. Pasaron también los 16 tests dirigidos.
 
 Informes, procedencia y resumen se guardan sólo en el repositorio. `SHARED`
 contiene las trayectorias NPZ; no se generan CSV duplicados ni ZIP de fuentes.
@@ -71,3 +111,15 @@ sobrescribir casos medidos. `--summary` permite escoger otro resumen en el repo.
 Quedan abiertos modos altos de tabla, banco de notas/velocidades, pérdidas
 identificadas, ambas caras/borde, unísono, P4, graves y acción/pedal. Este
 ensayo no es una demostración audible de cuerpo ni se promueve a fábrica.
+
+## Siguiente paso concreto
+
+Ampliar la base estructural con controles por etapas, antes de ajustar el
+sonido: el asset P2 tiene 256 modos exportados hasta 2965,08 Hz, mientras
+este ensayo sólo usa 35 bajo 800 Hz. Un primer escalón a 1200 Hz incorpora
+59 modos; luego 1500 Hz, 90, y 2000 Hz, 145. Recalcular para cada base masa,
+resistencia y factor de radiación; no reutilizar matrices de 35 modos como
+si describieran las formas nuevas. Mantener pasividad, controles geométricos,
+refinamiento temporal y trabajo de contacto. Después añadir observación SI
+y comparar notas/velocidades con una ganancia común para escuchar el cuerpo.
+La transferencia del aire hasta 6 kHz no sustituye esta ampliación estructural.

@@ -46,7 +46,7 @@ Los datos del ensayo de contacto compacto en curso permanecen en `SHARED`.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Matriz P2, contacto C4 y kernel geométrico verificados. Candidato compacto 64 kHz/polar 96 pasa fuerza (0,515–0,595%) y transferencia medida de esas formas bajas hasta 6 kHz (máx. 1,128%). Faltan contacto no lineal compacto, modos de tabla altos/banco completo, pérdidas y ambas caras/borde. | Candidato de aire listo para contacto SI; ninguna selección audible |
+| P6 | Radiación y carga acústica del aire | Matriz P2, kernel geométrico y contacto compacto C4 frío/reiterado verificados. Candidato 64 kHz/polar 96 pasa memoria y transferencia medida de 35 formas bajas hasta 6 kHz; contacto a 384/768 kHz pasa balances y precisión. Faltan modos de tabla altos/banco completo, observación SI, pérdidas y ambas caras/borde. | Contacto compacto vertical validado en C4/124; ninguna selección audible |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -714,3 +714,25 @@ su equivalencia en C4 y los refinamientos frío/reiterado del banco grande
 se interrumpieron al limpiar el disco y se retoman a continuación. No se
 declara selección audible ni se cambia el paquete. Informes y resúmenes
 quedan sólo en el repositorio, con trayectorias NPZ únicas en `SHARED`.
+
+### 2026-10-04 — P6 contacto compacto: refinamientos completos
+
+La implementación y control inicial quedaron en **a526d50**, por pedido del
+usuario. [Resultados completos](RESULTADOS-P6-contacto-compacto.md) y
+`resumen-P6-contacto-compacto.json` quedan sólo en el repo. Se completan los
+cuatro ensayos, frío y reiterado a 384/768 kHz; todos pasan los umbrales
+previos. El observador agrupado conserva estados/dinámica bit a bit frente
+al control escalar y cambia la radiación sólo por redondeo, 8,24e−16 RMS.
+
+La velocidad RMS del puente cambia 0,011121% / 0,028135%; el mayor cambio de
+energía/trabajo es 0,043529% / 0,005334%. Los estados vivos se conservan al
+relanzar y el balance de las dos colisiones cierra a 5,14e−13 en la tasa fina.
+Máximo error global de los cuatro ensayos: 5,79e−13. Se mantienen los controles
+de almacenamiento cada 0,5 ms y los tests de identidad por paso del fixture.
+
+Siguiente: ampliar la base P2 de 35 modos bajo 800 Hz a 59 bajo 1200 Hz como
+primer escalón, recalculando su carga acústica y verificando los mismos
+controles. El asset exportado permite hasta 256 modos/2965,08 Hz; los 6 kHz
+de transferencia del aire no son modos mecánicos adicionales. Luego observación
+SI, banco de notas/velocidades y escucha. Fábrica, pérdidas identificadas,
+ambas caras/borde, unísono, P4, graves y acción/pedal siguen abiertos.

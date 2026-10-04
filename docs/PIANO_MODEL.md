@@ -2213,10 +2213,16 @@ separated-head relaunch and a batched radiation observer with identical
 dynamics. Sixteen targeted contact/air tests pass. The first scalar C4/124
 trajectory (72 transverse / 144 axial modes, 4 ms at 384 kHz) closes its
 global budget to 2.22e-15 at independent 0.5 ms storage checkpoints.
-Large-case observer equivalence and cold/reiterated time refinements remain
-pending at this checkpoint; a balanced trajectory alone is not a precision
-or audible-improvement gate. Reports have one canonical copy in the repo;
-unversioned numerical trajectories remain in SHARED.
+The completed four-case bank now passes cold/reiterated 384/768 kHz refinement
+and the cumulative two-contact budget. Bridge velocity RMS changes are
+0.011121% / 0.028135%; maximum global budget error is 5.79e-13. The large
+batched observer preserves mechanical/acoustic states bit for bit, with
+8.24e-16 relative radiation-trajectory difference from the scalar control.
+These gates still concern one vertical C4/124 string and 35 low structural
+modes. Wider mechanical bases, note/velocity bank and listening remain open;
+no audible improvement or factory selection follows from these measurements.
+Reports have one canonical copy in the repo; unversioned numerical
+trajectories remain in SHARED.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a

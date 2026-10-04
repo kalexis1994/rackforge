@@ -9122,6 +9122,16 @@ fn run() -> Result<()> {
         // SAFETY: nothing has started a thread yet; the variable is set
         // before GTK or any other library reads the environment.
         unsafe { std::env::set_var("GDK_BACKEND", "x11") };
+        // WebKitGTK's accelerated compositing, in a child of an X11 window,
+        // drew the interface at two frames a second for a core and a quarter
+        // of a handheld's CPU (a Ryzen Z1 Extreme, inside the Flatpak), and
+        // took from the plugins' audio: a fixed load through RF-Musette ran
+        // some 10 % slower and missed blocks it otherwise made. Without it
+        // the same page draws at 120 frames for a quarter of a core. No
+        // interface or plugin panel uses WebGL, the one thing it costs. The
+        // setting's own policy, Never, is not the same: the view stays black.
+        // SAFETY: as above.
+        unsafe { std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1") };
         // The desktop file's StartupWMClass: how the desktop matches this
         // window to RackForge's launcher and icon.
         native.viewport = native

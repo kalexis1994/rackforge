@@ -46,7 +46,7 @@ Los datos del ensayo de contacto compacto en curso permanecen en `SHARED`.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Matriz P2, kernel geométrico y contacto compacto C4 frío/reiterado verificados. Candidato 64 kHz/polar 96 pasa memoria y transferencia medida de 35 formas bajas hasta 6 kHz; contacto a 384/768 kHz pasa balances y precisión. Faltan modos de tabla altos/banco completo, observación SI, pérdidas y ambas caras/borde. | Contacto compacto vertical validado en C4/124; ninguna selección audible |
+| P6 | Radiación y carga acústica del aire | Matriz P2, kernel geométrico y contacto compacto C4 frío/reiterado verificados para 35 modos. Carga ampliada a 59 modos bajo 1200 Hz: pasa transferencia hasta 6 kHz, memoria, refinamiento espacial y energía; falta su contacto SI. Faltan más modos altos/banco completo, observación SI, pérdidas y ambas caras/borde. | Contacto vertical C4/124 de 35 modos y puerto prescrito de 59 validados; ninguna selección audible |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -736,3 +736,25 @@ controles. El asset exportado permite hasta 256 modos/2965,08 Hz; los 6 kHz
 de transferencia del aire no son modos mecánicos adicionales. Luego observación
 SI, banco de notas/velocidades y escucha. Fábrica, pérdidas identificadas,
 ambas caras/borde, unísono, P4, graves y acción/pedal siguen abiertos.
+
+### 2026-10-04 — P6 carga ampliada a 59 modos bajo 1200 Hz
+
+Los refinamientos del contacto compacto quedaron en **d35cb4a**, por pedido del
+usuario. [Construcción y resultados](RESULTADOS-P6-tabla-1200.md). Se recalcula
+el puerto completo para 59 formas P2, hasta 1193,51 Hz, con 19293 estados de
+aire. El subespacio anterior del factor y de la masa estática coincide
+exactamente; la relajación ampliada conserva residuos positivos sin clipping.
+
+Pasan los 11 gates. Máximo Z/R/X bajo 1200 Hz: 0,764700%; complejo en el
+barrido hasta 6 kHz: 0,989030%, o 1,321738% en seis puntos de la grilla fina.
+Error de velocidad cargada: 0,234164%. La excitación central de C4 tiene
+29 modos casi nodales; un ensayo distribuido activa los 59, incluidos los
+24 nuevos. Su RMS de fuerza pasa en ambas grillas: 0,641665% / 1,089959%.
+Balance de estados arbitrarios: 3,16e−16. Pasan 16 tests de aire/kernel.
+
+Los 6 kHz siguen siendo transferencia del aire para estas formas; la tabla
+no contiene modos mecánicos hasta esa frecuencia. Los contactos SI anteriores
+siguen siendo de 35 modos. Siguiente: contacto frío/reiterado con los 59 modos,
+balances y refinamientos; luego observación SI, banco de notas y escucha.
+Paquete sin cambios. Informe y resumen únicos en el repo; sólo tres NPZ de
+coeficientes/mediciones en `C:\SHARED\Fisica-pendiente-2026-10-04\P6-tabla-1200`.

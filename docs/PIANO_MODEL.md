@@ -2224,6 +2224,21 @@ no audible improvement or factory selection follows from these measurements.
 Reports have one canonical copy in the repo; unversioned numerical
 trajectories remain in SHARED.
 
+The [59-mode P2 air-load audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-tabla-1200.md)
+recomputes radiation for structural modes up to 1193.51 Hz, with 19293 air
+states. Its original 35-mode factor and static-mass principal block remain
+exactly unchanged; completion uses the enlarged positive residual matrices.
+Eleven gates pass: low-band Z/R/X maximum error is 0.764700%, high-band complex
+error is 0.989030% on the 1–6 kHz sweep and 1.321738% at six points against the
+finer spatial grid. A distributed prescribed drive activates all 59 modes,
+including the 24 additions; force RMS errors are 0.641665% / 1.089959% on the
+two geometric grids. Arbitrary live-state budget error is at most 3.16e-16.
+The central C4 projection alone leaves 29 modes almost nodal and is reported
+separately. Sixteen air/kernel tests pass. This validates the expanded air
+port, not a 59-mode nonlinear contact, a complete structural model to 6 kHz
+or a listening result. Cold/reiterated SI contacts with this new basis,
+observation and the note/velocity bank remain next; factory is unchanged.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

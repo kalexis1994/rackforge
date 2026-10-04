@@ -1,0 +1,267 @@
+{
+  "baseline_commit": "d35cb4a",
+  "scope": "Expanded intrinsic P2 modes, one baffled face; not a complete piano or listening result.",
+  "cutoff_hz": 1200.0,
+  "modes": 59,
+  "frequency_hz": [
+    70.62213260234367,
+    139.24116527565243,
+    170.7420426662478,
+    178.13497442356172,
+    203.19352685899813,
+    225.34530232891365,
+    245.48269805313552,
+    285.6228947119935,
+    299.6450431535138,
+    313.243437148768,
+    313.85498725302,
+    353.7040759892574,
+    380.6291210022632,
+    404.6230827869208,
+    440.2095071338155,
+    510.7600846806116,
+    512.8937416057344,
+    529.5271284876352,
+    532.6223422708101,
+    542.9390671739197,
+    559.4716374951777,
+    564.4156101974451,
+    603.0403418480528,
+    633.107674392708,
+    635.6551400279947,
+    663.0433647346642,
+    665.3001251708085,
+    698.9054274754873,
+    713.443604425906,
+    737.7837713367302,
+    739.7396831036451,
+    748.6978413913473,
+    761.8394407351152,
+    777.7067002494059,
+    793.2442001051731,
+    814.577433446898,
+    843.3353905236611,
+    901.5572365102009,
+    911.641193302532,
+    976.5164418942323,
+    995.3824731203342,
+    1008.2619004787629,
+    1031.4848795951684,
+    1037.3593077633225,
+    1044.59278240834,
+    1060.4740328080063,
+    1061.2000323899874,
+    1069.3988867493497,
+    1075.6330344074436,
+    1080.1314536480834,
+    1087.3808260624585,
+    1106.1366382337071,
+    1129.8816942028086,
+    1136.5123520206744,
+    1153.5983611109716,
+    1154.55220928071,
+    1166.2116928309968,
+    1172.8675819615626,
+    1193.5079134853531
+  ],
+  "cells": [
+    128,
+    96
+  ],
+  "factor_rate_hz": 64000,
+  "angular": [
+    96,
+    96
+  ],
+  "inputs": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-resolucion-aire\\Polar96\\Wave64000-Cells128x96-Angle96x96-Sparse.npz": "e3c5e6802d5543592d1ad5e3059d6fb5e571d229bf63e2bb42edfc7eb89bb315",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-estados-acusticos\\spectrum.npz": "60b383fdd94610cf33d3b7b920274d33405f88c98d12a06a2511ef7f1f56117f",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-contacto-compacto\\T72-384000-Cold.npz": "f909afbd5860fbc20fec453344afa89e5443596edbf3b53194497daf0929dc1e",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\Cells128x96-Rate128000-Q16.npz": "e1580c8684007164dd9ba232ee872275f5ad42bf757837a81ff724f7a1b639ae"
+  },
+  "criteria": {
+    "factor_subspace": 1e-10,
+    "mass_subspace": 1e-10,
+    "mass_limit": 1e-10,
+    "geometric_reference": 1e-05,
+    "low_ZRX": 0.02,
+    "laplace": 0.02,
+    "high_Z": 0.02,
+    "loaded_velocity": 0.05,
+    "reference_spatial_change": 0.01,
+    "memory_rms": 0.02,
+    "memory_late_peak": 0.01,
+    "energy": 1e-09
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1",
+    "blas_threads": 1
+  },
+  "build": {
+    "taps": 326,
+    "outputs": 9216,
+    "factor_subspace_relative": 0.0,
+    "mass_subspace_relative": 0.0,
+    "dc_relative": 1.6401267053098954e-16,
+    "seconds": 36.82799999997951
+  },
+  "gates": {
+    "subspace": true,
+    "limits": true,
+    "reference": true,
+    "low_transfer": true,
+    "laplace": true,
+    "high_transfer": true,
+    "loaded_velocity": true,
+    "all_mode_drive": true,
+    "memory": true,
+    "spatial": true,
+    "energy": true
+  },
+  "coefficient_sha256": "d7b4c0274f0b94498307076869a50ee47c8c57895e2f44b90b8ddc91d6245e5e",
+  "completion": {
+    "states": 19293,
+    "relaxation_time_s": [
+      9.60287966926275e-06,
+      1.1457279058817292e-05
+    ],
+    "mass_relative": 3.0671948990609595e-16,
+    "limit_relative": 2.9279615760704977e-15
+  },
+  "reference_checks": {
+    "duffy_relative": 1.994139947440963e-08,
+    "time_refinement_relative": 3.29910376227348e-08,
+    "mass_relative": 2.1358596814704293e-09,
+    "duffy_max_point_relative": 5.0719818544620766e-08,
+    "time_refinement_max_point_relative": 7.382852623633845e-08
+  },
+  "reference_probe_s": [
+    [
+      0.0,
+      376.99111843077515
+    ],
+    [
+      0.0,
+      1643.8419078755135
+    ],
+    [
+      0.0,
+      7539.822368615503
+    ],
+    [
+      0.0,
+      12566.370614359172
+    ],
+    [
+      0.0,
+      28274.33388230814
+    ],
+    [
+      0.0,
+      37699.11184307752
+    ],
+    [
+      20.0,
+      376.99111843077515
+    ],
+    [
+      50.0,
+      1643.8419078755135
+    ],
+    [
+      100.0,
+      7539.822368615503
+    ]
+  ],
+  "transfer": {
+    "low_points": 210,
+    "low_ZRX_max": [
+      0.006735770310175425,
+      0.0059597521379449086,
+      0.0076469974526309
+    ],
+    "laplace_max": 0.006166378319041004,
+    "high_points": 61,
+    "high_complex_max": 0.009890299579878453,
+    "high_max_frequency_hz": 6000.0,
+    "loaded_velocity_max": 0.0023416358058744122,
+    "subspace_impedance_change": 3.887524318369552e-05
+  },
+  "memory": {
+    "FrozenC4": {
+      "rms_relative": 0.005616744428339734,
+      "late_peak_relative": 1.2940473987399853e-16,
+      "normalizer": "Frozen original bath total-force RMS and initial peak",
+      "input_new_mode_velocity_l2": 0.0,
+      "excited_modes": 19,
+      "excited_new_modes": 0,
+      "spatial192_rms_relative": 0.006124655034446363,
+      "spatial192_late_peak_relative": 1.2940473987399853e-16,
+      "reference_grid_rms_change": 0.001591011922784879
+    },
+    "C4Projected": {
+      "rms_relative": 0.003488641179602932,
+      "late_peak_relative": 9.281818489003586e-17,
+      "normalizer": "Independent geometric reference RMS and initial peak; fixed before comparing candidate",
+      "input_new_mode_velocity_l2": 0.012210286434988277,
+      "excited_modes": 30,
+      "excited_new_modes": 11,
+      "spatial192_rms_relative": 0.006410531111492321,
+      "spatial192_late_peak_relative": 9.281818489003586e-17,
+      "reference_grid_rms_change": 0.0033073330699773295
+    },
+    "Distributed": {
+      "rms_relative": 0.00641664803281291,
+      "late_peak_relative": 8.900376328825413e-17,
+      "normalizer": "Independent geometric reference RMS and initial peak; fixed before comparing candidate",
+      "input_new_mode_velocity_l2": 0.016241935976947668,
+      "excited_modes": 59,
+      "excited_new_modes": 24,
+      "spatial192_rms_relative": 0.01089959300318628,
+      "spatial192_late_peak_relative": 8.900376328825413e-17,
+      "reference_grid_rms_change": 0.0050942596695014225
+    }
+  },
+  "spatial": {
+    "cells": [
+      192,
+      144
+    ],
+    "reference_complex_max_change": 0.007881560122505524,
+    "candidate_high_complex_max": 0.013217376644319882
+  },
+  "storage": [
+    {
+      "dt_s": 2.0833333333333333e-05,
+      "budget_relative": 2.8748739726687567e-16,
+      "radiation_power_w": 0.1453121735497123
+    },
+    {
+      "dt_s": 5.208333333333333e-06,
+      "budget_relative": 8.766501807814754e-17,
+      "radiation_power_w": 0.34517130563235016
+    },
+    {
+      "dt_s": 1.3020833333333333e-06,
+      "budget_relative": 3.161764399537965e-16,
+      "radiation_power_w": 0.5015658262538196
+    }
+  ],
+  "verification_s": 129.71799999999348,
+  "all_load_gates_passed": true,
+  "decision": "Load verification only: wider coupled nonlinear contacts, observation and listening still required; no factory selection.",
+  "source_sha256": {
+    "audit-concert-grand-extended-board.py": "39d7e74da881531c78c31da23742bcb22feb387ba563facd74d86f8db030051b",
+    "concert_grand_surface_impedance.py": "8ad393eb161ef53aff727ec007ea22d87c4a0406e7c55be8c588654a5f01091a",
+    "concert_grand_geometric_memory.py": "a7c37f0c4c052cb70f5139d4adff994126b972bf043a0938070d1a63131e61b7",
+    "concert_grand_rational_air.py": "ca2b4fc83ae26b4d08d4024a2aab29b150d28fe24715707ac300c05832acf469",
+    "concert_grand_bounded_air.py": "cab4c544f9d1c79b229cb253dfefaff965a01cfe2887cd63267ef5ea07c593b9"
+  },
+  "measurement_sha256": {
+    "transfer.npz": "7924e82f3623f3955acfcacbf9e424b8f2728b498bb56872ec41a48d9d98bc91",
+    "memory.npz": "60b6a047d08e40fd55c4e673b841d2f0da397afcbeb51d8e29fdbbadd5e84eed"
+  }
+}

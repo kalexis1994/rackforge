@@ -1,0 +1,107 @@
+{
+  "rate_hz": 768000,
+  "duration_s": 0.004,
+  "initial_energy_j": 0.07523232595156168,
+  "initial_air_energy_j": 1.0423918889333603e-05,
+  "final_string_energy_j": 0.046358788129155025,
+  "final_board_energy_j": 0.00033310246588276834,
+  "final_hammer_energy_j": 0.028428851268011965,
+  "final_air_energy_j": 2.5050149815186612e-05,
+  "felt_heat_j": 0.0,
+  "material_heat_j": 7.143047087303003e-05,
+  "radiation_loss_j": 1.5103467835055334e-05,
+  "air_port_work_j": 2.9729698760896614e-05,
+  "work_into_board_j": 0.0002911345664194474,
+  "contact_time_s": 0.0022493288551452156,
+  "maximum_force_n": 25.680417181998475,
+  "impulse_n_s": 0.026045243207043853,
+  "negative_air_work_steps": 0,
+  "max_newton_iterations": 3,
+  "energy_checkpoints": [
+    {
+      "time_s": 0.0,
+      "stored_total_j": 0.07523232595156168,
+      "stored_air_j": 1.0423918889333603e-05,
+      "total_relative": 0.0,
+      "air_relative": 0.0,
+      "board_relative": 0.0
+    },
+    {
+      "time_s": 0.0005,
+      "stored_total_j": 0.07522435311466596,
+      "stored_air_j": 1.1433064177693081e-05,
+      "total_relative": 1.8446575501001614e-14,
+      "air_relative": 1.6466135662972937e-17,
+      "board_relative": 7.392897992604447e-17
+    },
+    {
+      "time_s": 0.001,
+      "stored_total_j": 0.07521277960083377,
+      "stored_air_j": 9.51655322878818e-06,
+      "total_relative": 2.2873753621242002e-14,
+      "air_relative": 3.163749826526766e-17,
+      "board_relative": 1.4920166073307982e-16
+    },
+    {
+      "time_s": 0.0015,
+      "stored_total_j": 0.07520571157560271,
+      "stored_air_j": 9.797809996171755e-06,
+      "total_relative": 4.0398000347193535e-14,
+      "air_relative": 4.590251972508764e-17,
+      "board_relative": 1.5046529590901075e-16
+    },
+    {
+      "time_s": 0.002,
+      "stored_total_j": 0.07519555854839917,
+      "stored_air_j": 9.59607820678862e-06,
+      "total_relative": 7.360183624899644e-14,
+      "air_relative": 5.998739884603064e-17,
+      "board_relative": 2.774192018705321e-16
+    },
+    {
+      "time_s": 0.0025,
+      "stored_total_j": 0.07518603781244736,
+      "stored_air_j": 1.13848658101797e-05,
+      "total_relative": 9.463093232013829e-14,
+      "air_relative": 7.460144608742475e-17,
+      "board_relative": 3.289399107893452e-16
+    },
+    {
+      "time_s": 0.003,
+      "stored_total_j": 0.07517518080554798,
+      "stored_air_j": 1.6084990094023807e-05,
+      "total_relative": 1.062522748857693e-13,
+      "air_relative": 9.461976349512791e-17,
+      "board_relative": 3.422704438662409e-16
+    },
+    {
+      "time_s": 0.0035,
+      "stored_total_j": 0.07516069872845849,
+      "stored_air_j": 2.0637850051211962e-05,
+      "total_relative": 1.245143846317609e-13,
+      "air_relative": 1.2155104315723476e-16,
+      "board_relative": 3.231753559452822e-16
+    },
+    {
+      "time_s": 0.004,
+      "stored_total_j": 0.07514579201286495,
+      "stored_air_j": 2.5050149815186612e-05,
+      "total_relative": 1.508929875981932e-13,
+      "air_relative": 1.559131942980166e-16,
+      "board_relative": 3.855046051967134e-16
+    }
+  ],
+  "maximum_total_budget_relative_error": 1.508929875981932e-13,
+  "maximum_air_budget_relative_error": 1.559131942980166e-16,
+  "maximum_board_budget_relative_error": 3.855046051967134e-16,
+  "final_interface_force_residual": 1.2348888197297344e-14,
+  "final_interface_power_residual_w": 6.418476861114186e-17,
+  "elapsed_s": 212.0470000000205,
+  "observer_batch_size": 64,
+  "budget_scope": "Independent storage evaluated each 0.5ms. Loss and port work accumulated every step. Small-fixture tests check every-step identity.",
+  "energy_passed": true,
+  "preserved_living_states": true,
+  "relaunch_external_work_j": 0.028325461201695046,
+  "first_case": "T72-768000-Cold",
+  "additional_modes_final_board_energy_j": 8.444096191223468e-06
+}

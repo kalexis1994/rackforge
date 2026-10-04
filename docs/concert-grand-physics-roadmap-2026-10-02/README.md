@@ -46,7 +46,7 @@ Los datos del ensayo de contacto compacto en curso permanecen en `SHARED`.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Matriz P2, kernel geométrico y contacto compacto C4 frío/reiterado verificados para 35 modos. Carga ampliada a 59 modos bajo 1200 Hz: pasa transferencia hasta 6 kHz, memoria, refinamiento espacial y energía; falta su contacto SI. Faltan más modos altos/banco completo, observación SI, pérdidas y ambas caras/borde. | Contacto vertical C4/124 de 35 modos y puerto prescrito de 59 validados; ninguna selección audible |
+| P6 | Radiación y carga acústica del aire | Carga de 59 modos bajo 1200 Hz: pasa transferencia hasta 6 kHz, memoria, refinamiento espacial y energía. Contacto C4/124 frío/reiterado a 384/768 kHz pasa balances y precisión, conservando estados; diferencia de velocidad local frente a 35 modos 19,36% / 16,73%. Faltan convergencia estructural/banco completo, observación SI, pérdidas y ambas caras/borde. | Contacto vertical compacto de 59 modos validado en C4/124; ninguna selección audible |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -758,3 +758,29 @@ siguen siendo de 35 modos. Siguiente: contacto frío/reiterado con los 59 modos,
 balances y refinamientos; luego observación SI, banco de notas y escucha.
 Paquete sin cambios. Informe y resumen únicos en el repo; sólo tres NPZ de
 coeficientes/mediciones en `C:\SHARED\Fisica-pendiente-2026-10-04\P6-tabla-1200`.
+
+### 2026-10-04 — P6 contacto compacto con 59 modos
+
+La carga ampliada quedó en **1bfad0a**, por pedido del usuario.
+[Resultados y reproducción](RESULTADOS-P6-contacto-compacto-1200.md).
+Se conectan los 59 modos/19293 estados al mismo contacto vertical C4/124.
+Los cuatro casos frío/reiterado a 384/768 kHz pasan energía, refinamientos y
+secuencia, con los umbrales anteriores; también pasa el prefijo del observador.
+La velocidad RMS del puente cambia 0,015692% /
+0,037503% al refinar; máximo de energía/trabajo 0,070808% / 0,005345%.
+Balance global máximo 5,82e−13; secuencia fina acumulada 5,14e−13.
+
+El prefijo de 64 pasos con memoria viva conserva estados y trabajos bit a
+bit entre observadores; la radiación difiere 3,78e−15. Su alcance no se
+presenta como una trayectoria escalar completa. Pasan 16 tests dirigidos.
+Frente a 35 modos, a tasa fina, la velocidad del puente difiere 19,361732% /
+16,732672%, y la energía final de tabla aumenta 2,477252% / 2,518698%.
+No es un error temporal ni una mejora audible ya seleccionada.
+
+Siguiente: observación SI de las dos bases con igual geometría y ganancia,
+para medir cuánto del cambio local llega al micrófono. Después resolver
+convergencia estructural y ampliar notas/intensidades antes de escucha.
+Fábrica, pérdidas identificadas, ambas caras/borde, unísono, P4, graves y
+acción/pedal siguen abiertos. Informes únicos en el repo; cuatro NPZ en
+`C:\SHARED\Fisica-pendiente-2026-10-04\P6-contacto-compacto-1200`, sin WAV ni
+copias adicionales del coeficiente.

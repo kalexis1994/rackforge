@@ -2239,6 +2239,22 @@ port, not a 59-mode nonlinear contact, a complete structural model to 6 kHz
 or a listening result. Cold/reiterated SI contacts with this new basis,
 observation and the note/velocity bank remain next; factory is unchanged.
 
+The [59-mode compact contact bank](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-contacto-compacto-1200.md)
+now passes cold/reiterated C4/124 refinement at 384/768 kHz with living
+string/board/air states preserved. Bridge velocity RMS changes are 0.015692%
+/ 0.037503%; maximum energy/work changes are 0.070808% / 0.005345%. Maximum
+global budget error is 5.82e-13, and the fine two-contact ledger closes to
+5.14e-13. Five bank gates and sixteen targeted contact/air tests pass.
+A 64-step live prefix compares scalar/batched observers: states/work are
+bitwise identical each step, with radiation error 3.78e-15; this is not a
+full scalar-trajectory equivalence check for the enlarged bank.
+With frozen physical inputs, 35→59 modes changes local bridge velocity by
+19.361732% / 16.732672%, while final board energy changes by +2.477252%
+/ +2.518698%. These are structural-basis effects, not temporal error or a
+Steinway fitting score. SI observation with matched microphone geometry and
+gain is next to determine the radiated-pressure effect; structural convergence,
+a wider note/velocity bank and listening remain open. Factory stays unchanged.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

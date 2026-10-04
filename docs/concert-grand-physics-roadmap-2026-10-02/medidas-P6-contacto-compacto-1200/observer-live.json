@@ -1,0 +1,17 @@
+{
+  "rate_hz": 384000,
+  "steps": 64,
+  "duration_s": 0.00016666666666666666,
+  "board_modes": 59,
+  "acoustic_states": 19293,
+  "initial_wave_norm": 0.12738414592647004,
+  "initial_relaxation_norm": 0.08658095251846386,
+  "states_bitwise_equal_each_step": true,
+  "work_bitwise_equal_each_step": true,
+  "radiation_relative_error": 3.781209392535738e-15,
+  "relative_limit": 1e-12,
+  "passed": true,
+  "scope": "Live prefix after prescribed relaunch; not a full scalar trajectory or performance benchmark.",
+  "first_case": "T72-384000-Cold",
+  "first_trajectory_sha256": "b9d78d279214f4d953cc850f8d5417fd45a89c867f83244a09e1b27f331948dd"
+}

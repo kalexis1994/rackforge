@@ -2188,6 +2188,23 @@ benchmark uses two prescribed impulses over 24 ms; it is not a nonlinear
 hammer contact or a listening result. High-band transfer, compact nonlinear
 contacts and the wider note/velocity bank still precede factory selection.
 
+The [P6 temporal/polar refinement](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-resolucion-aire.md)
+preserves the projected-cell integral with a sparse delay histogram, matching
+the archived dense factor to 1.22437e-14. A temporal-only 64 kHz attempt fails
+memory and high-band checks. An independent exact-cell hemisphere Gram shows
+the dominant 6 kHz error is polar quadrature: doubling azimuth alone leaves
+12.575874% resistance error, while doubling polar points lowers it to 0.000554258%.
+The 64 kHz / polar 96 / azimuth 96 candidate retains mass, finite resistance
+limit and the passive storage certificate with 11445 states. Prescribed-force
+RMS is 0.51510–0.59509% over three geometric grids. A 61-point sweep at 1–6 kHz
+has maximum complex error 1.12750%; six high-band controls on the finer grids
+also pass the unchanged 2% criterion. Twenty-four tests pass, including new
+sparse/dense and streamed/dense equivalence checks. These are still the air
+transfer matrices for 35 low P2 shapes, not new structural modes above 800 Hz.
+The previous persistent-board trajectory uses the 32 kHz load. Nonlinear SI
+contacts with this new load, wider mechanical bases and listening remain
+pending; no factory package or audible improvement follows from these gates.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

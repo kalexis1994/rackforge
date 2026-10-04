@@ -32,7 +32,7 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Matriz P2, contacto C4 y kernel geométrico verificados. La carga compacta limitada conserva masa/resistencia alta y baja la fuerza a 0,889–1,011%; memoria pasa las tres grillas. Tabla con estados persistentes ensayada; faltan transferencia alta, contacto no lineal compacto/banco completo, pérdidas y ambas caras/borde. | Candidato bajo con margen; banda alta pendiente; ninguna selección audible |
+| P6 | Radiación y carga acústica del aire | Matriz P2, contacto C4 y kernel geométrico verificados. Candidato compacto 64 kHz/polar 96 pasa fuerza (0,515–0,595%) y transferencia medida de esas formas bajas hasta 6 kHz (máx. 1,128%). Faltan contacto no lineal compacto, modos de tabla altos/banco completo, pérdidas y ambas caras/borde. | Candidato de aire listo para contacto SI; ninguna selección audible |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -654,3 +654,34 @@ pasividad y memoria, resolver transferencia alta y llevarla al contacto SI
 persistente. Fábrica, pérdidas identificadas, ambas caras/borde, unísono,
 P4 y acción/pedal siguen abiertos. Datos y fuentes en
 `C:\SHARED\Fisica-pendiente-2026-10-04\P6-carga-limitada`.
+
+### 2026-10-04 — P6 resolución polar y transferencia hasta 6 kHz
+
+La carga limitada anterior quedó en **5834c39**, por pedido del usuario.
+[Resultados, rechazos y reproducción](RESULTADOS-P6-resolucion-aire.md).
+Un generador sparse conserva la integral de retardos y reproduce el factor
+denso congelado con error 1,22437e−14. El control de generación tarda ~7 s;
+facilita refinamientos sin modificar blancos físicos ni ajustar samples.
+La evaluación hemisférica por bloques también coincide con la densa.
+
+Duplicar sólo la tasa a 64 kHz con polar 48 **falla**: 2,11772% de memoria
+y 12,64950% complejo a 6 kHz. Se conserva el rechazo. Una integral angular
+independiente muestra que duplicar azimut no resuelve el error resistivo;
+duplicar puntos polares lo baja de 12,575874% a 0,000554258% en ese control.
+
+Con 64 kHz / polar 96 / azimut 96, 11445 estados conservan masa, límite y
+certificado de pasividad. La memoria pasa en tres grillas: **0,51510–0,59509%**.
+Un barrido de 61 frecuencias entre 1–6 kHz da máximo complejo **1,12750%**;
+los seis puntos altos en las grillas 192×144 y 256×192 también pasan. Bajo
+800 Hz pasan Z/R/X/Laplace y velocidad cargada. Pasan **24 tests**.
+
+La banda hasta 6 kHz es la transferencia del aire para las **mismas 35 formas
+P2 bajo 800 Hz**; todavía no se agregaron los modos estructurales altos.
+El banco de tabla previo conserva su factor de 32 kHz y no se presenta como
+una trayectoria nueva del candidato de 64 kHz. No se cambia audio/paquete.
+
+Siguiente: contacto SI con este puerto, contacto frío y reiterado preservando
+estados, balances y refinamientos con criterios previos. Después ampliar
+modos de tabla, notas/velocidades y observación SI para escucha. Pérdidas,
+ambas caras/borde, unísono, P4, graves y acción/pedal siguen abiertos.
+Datos y fuentes en `C:\SHARED\Fisica-pendiente-2026-10-04\P6-resolucion-aire`.

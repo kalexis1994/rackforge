@@ -4,11 +4,21 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
 from scipy.integrate import solve_ivp
-from concert_grand_rational_air import RationalAir,surface_factor
+from concert_grand_rational_air import RationalAir,surface_factor,surface_factor_sparse
 from concert_grand_surface_impedance import RectangularLoad
 
 
 class RationalAirTests(unittest.TestCase):
+    def test_sparse_cell_histogram_matches_dense_projection(self):
+        rng=np.random.default_rng(827)
+        surface=RectangularLoad(.43,.31,rng.normal(size=(9,7,3)))
+        for rate in [16000,64000]:
+            sparse=surface_factor_sparse(surface,rate,6,12)
+            dense=surface_factor(surface,rate,6,12)
+            np.testing.assert_allclose(sparse,dense,rtol=2e-10,atol=2e-11)
+            np.testing.assert_allclose(sparse.sum(axis=0),0.,atol=2e-13)
+            np.testing.assert_array_equal(sparse[:,1::2],-sparse[::-1,0::2])
+
     def fixture(self):
         rng=np.random.default_rng(729)
         h=rng.normal(size=(7,3,2));h[-1]=-h[:-1].sum(axis=0)
@@ -54,7 +64,7 @@ class RationalAirTests(unittest.TestCase):
 
     def test_surface_far_field_and_mass_congruence(self):
         surface=RectangularLoad(.4,.3,np.ones((8,6,1)))
-        air=RationalAir(surface_factor(surface,32000,12,24),32000)
+        air=RationalAir(surface_factor_sparse(surface,32000,12,24),32000)
         for f in [80.,300.,800.]:
             reference=surface.angular_resistance(f,12,24)
             self.assertLess(np.linalg.norm(air.impedance(2j*np.pi*f).real-reference)/np.linalg.norm(reference),.01)

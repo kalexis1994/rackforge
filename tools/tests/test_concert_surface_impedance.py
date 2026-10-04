@@ -10,6 +10,12 @@ from scipy.special import j1,struve
 
 
 class SurfaceLoadTests(unittest.TestCase):
+    def test_streamed_hemisphere_matches_dense_exact_cells(self):
+        rng=np.random.default_rng(754)
+        surface=RectangularLoad(.43,.31,rng.normal(size=(9,7,3)))
+        for block in [1,17,400]:
+            np.testing.assert_allclose(surface.angular_resistance_streamed(1800,8,16,block),surface.angular_resistance(1800,8,16),rtol=2e-13,atol=2e-12)
+
     def test_disk_complex_load_against_bessel_and_struve_solution(self):
         # A circular aperture supplies an independent finite-frequency
         # reactance check. Partial square cells approximate its boundary.

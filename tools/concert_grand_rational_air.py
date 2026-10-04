@@ -12,6 +12,7 @@ import numpy as np
 from numpy.polynomial.legendre import leggauss
 from scipy.fft import rfft,irfft,next_fast_len
 from scipy.signal import fftconvolve,lfilter
+from scipy.sparse import coo_matrix
 from concert_grand_acoustic_bath import positive_factor
 
 
@@ -49,6 +50,45 @@ def surface_factor(surface,rate,polar=12,azimuth=24):
             cdf=(np.maximum(z,0)**2-np.maximum(z-a,0)**2-np.maximum(z-b,0)**2+np.maximum(z-a-b,0)**2)/(2*a*b)
             cdf=np.where(z<=0,0.,np.where(z>=a+b,1.,cdf))
         area=(np.diff(cdf,axis=0)@shapes)*(surface.hx*surface.hy)
+        scale=rate*np.sqrt(surface.density*weight/(2*np.pi**2*surface.speed))
+        H[:,2*i]=np.diff(np.vstack((np.zeros((1,surface.modes)),area,np.zeros((1,surface.modes)))),axis=0)*scale
+        H[:,2*i+1]=-H[::-1,2*i]
+    return H
+
+
+def surface_factor_sparse(surface,rate,polar=12,azimuth=24):
+    """Same cell-delay integral with only intersected histogram bins stored.
+
+    A projected cell covers few bins. Its uniform-sum CDF is evaluated in
+    triangular/linear pieces to avoid subtracting large squared distances.
+    The opposite direction, area normalization and backward derivative are
+    identical to surface_factor. This changes cost, not the discretization.
+    """
+    if rate<=0 or polar<2 or azimuth<4 or azimuth%2:raise ValueError('wave grid')
+    g,w=leggauss(polar);u=(g+1)/2;w=w/2
+    az=2*np.pi*(np.arange(azimuth//2)+.5)/azimuth;radial=np.sqrt(1-u*u)
+    directions=np.column_stack((np.repeat(radial,len(az))*np.tile(np.cos(az),polar),np.repeat(radial,len(az))*np.tile(np.sin(az),polar)))
+    weights=np.repeat(w,len(az))*2*np.pi/azimuth
+    extent=(abs(directions[:,0])*surface.length+abs(directions[:,1])*surface.width)/surface.speed
+    order=int(np.ceil(extent.max()*rate))+2;center=order/(2*rate)
+    xx,yy=np.meshgrid((np.arange(surface.nx)+.5)*surface.hx-surface.length/2,(np.arange(surface.ny)+.5)*surface.hy-surface.width/2,indexing='ij')
+    positions=np.column_stack((xx.ravel(),yy.ravel()));shapes=surface.shapes.reshape(-1,surface.modes)
+    H=np.zeros((order+2,2*len(directions),surface.modes));cells=np.arange(len(positions))
+    for i,(direction,weight) in enumerate(zip(directions,weights)):
+        a,b=sorted((abs(direction[0])*surface.hx/surface.speed,abs(direction[1])*surface.hy/surface.speed))
+        lower=center+positions@direction/surface.speed-(a+b)/2
+        first=np.floor(lower*rate+.5).astype(int)
+        bins=first[None,:]+np.arange(int(np.ceil((a+b)*rate))+2)[:,None]
+        def cdf(z):
+            if a<1e-14:return np.clip(z/b,0.,1.)
+            z=np.clip(z,0.,a+b)
+            return np.where(z<a,z*z/(2*a*b),np.where(z<=b,(z-a/2)/b,1-(a+b-z)**2/(2*a*b)))
+        left=(bins-.5)/rate-lower[None,:]
+        probability=cdf(left+1/rate)-cdf(left)
+        active=(bins>=0)&(bins<order+1)&(probability!=0)
+        rows=bins[active];columns=np.broadcast_to(cells,bins.shape)[active]
+        histogram=coo_matrix((probability[active],(rows,columns)),shape=(order+1,len(cells))).tocsr()
+        area=(histogram@shapes)*(surface.hx*surface.hy)
         scale=rate*np.sqrt(surface.density*weight/(2*np.pi**2*surface.speed))
         H[:,2*i]=np.diff(np.vstack((np.zeros((1,surface.modes)),area,np.zeros((1,surface.modes)))),axis=0)*scale
         H[:,2*i+1]=-H[::-1,2*i]

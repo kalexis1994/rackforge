@@ -117,3 +117,21 @@ class RectangularLoad:
         aperture=np.sinc(k*self.hx*directions[:,0]/(2*np.pi))*np.sinc(k*self.hy*directions[:,1]/(2*np.pi))
         far=(np.exp(1j*k*path)@self.shapes.reshape(-1,self.modes))*((self.hx*self.hy)*aperture[:,None])
         return self.density*omega**2/(4*np.pi**2*self.speed)*(far.conj().T@(weights[:,None]*far)).real
+
+    def angular_resistance_streamed(self,frequency,polar=24,azimuth=48,block=64):
+        """Same exact-cell hemisphere Gram, with bounded temporary memory."""
+        if block<1:raise ValueError('positive direction block')
+        g,w=leggauss(polar);u=(g+1)/2;w=w/2
+        az=2*np.pi*(np.arange(azimuth)+.5)/azimuth
+        sintheta,angle=np.meshgrid(np.sqrt(1-u*u),az,indexing='ij')
+        directions=np.c_[(sintheta*np.cos(angle)).ravel(),(sintheta*np.sin(angle)).ravel()]
+        weights=np.repeat(w,azimuth)*2*np.pi/azimuth
+        x,y=np.meshgrid((np.arange(self.nx)+.5)*self.hx,(np.arange(self.ny)+.5)*self.hy,indexing='ij')
+        positions=np.c_[x.ravel(),y.ravel()];shapes=self.shapes.reshape(-1,self.modes)
+        omega=2*np.pi*frequency;k=omega/self.speed;gram=np.zeros((self.modes,self.modes),dtype=complex)
+        for start in range(0,len(directions),block):
+            d=directions[start:start+block];weight=weights[start:start+block]
+            aperture=np.sinc(k*self.hx*d[:,0]/(2*np.pi))*np.sinc(k*self.hy*d[:,1]/(2*np.pi))
+            far=(np.exp(1j*k*(d@positions.T))@shapes)*((self.hx*self.hy)*aperture[:,None])
+            gram+=far.conj().T@(weight[:,None]*far)
+        return (self.density*omega**2/(4*np.pi**2*self.speed)*gram).real

@@ -21,6 +21,9 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['asset','bath','contact','rational','geometry','output']:p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--board-rates',type=int,nargs='+',default=[])
+    p.add_argument('--profiles',nargs='+',help='specific coefficient filenames without .npz')
+    p.add_argument('--board-profile',help='exact profile used for board tests')
+    p.add_argument('--baseline-commit',default='5834c39')
     args=p.parse_args();args.output.mkdir(parents=True,exist_ok=True)
     with np.load(args.asset) as d:
         mask=d['frequency']<=800
@@ -36,7 +39,7 @@ def main():
             geometries.append(d['geometric_total_force']);norm=float(np.linalg.norm(d['bath_total_force']))
             peak=float(np.linalg.norm(d['bath_total_force'][:129],axis=1).max());axis=d['time_s']
             if len(geometries)==1:s=d['laplace_s'];z_geometry=d['impedance']
-    report=dict(baseline_commit='c353719',profiles={},board={},selected_profile=None,
+    report=dict(baseline_commit=args.baseline_commit,profiles={},board={},selected_profile=None,
         method='Adjacent-tap factor average, unchanged Cayley mapping, positive matrix mass/resistance relaxation. No coefficient or sample fit.',
         force_convention='Total regular force, left derivative at driven knots. Exact stationary stop. New bounded load has no inertial delta.',
         normalization='All prescribed-force errors use frozen bath RMS and initial peak, unchanged from c353719.',
@@ -48,7 +51,9 @@ def main():
         environment=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__),
         scope='One baffled face, 35 low P2 shapes, frozen C4 velocity; board impulses are not a nonlinear hammer or piano audio.')
     best=None
-    names=['Wave32000-Cells128x96-Angle24x48-Tail','Wave32000-Cells128x96-Angle48x96-Tail','Wave64000-Cells128x96-Angle24x48-Tail']
+    names=args.profiles or ['Wave32000-Cells128x96-Angle24x48-Tail','Wave32000-Cells128x96-Angle48x96-Tail','Wave64000-Cells128x96-Angle24x48-Tail']
+    board_profile=args.board_profile or 'Wave32000-Cells128x96-Angle48x96-Tail'
+    if args.board_rates and board_profile not in names:p.error('board profile must be explicitly included in measured profiles')
     for label in names:
         start=time.monotonic();path=args.rational/(label+'.npz')
         with np.load(path) as d:air=BoundedAir(d['factor'],float(d['factor_rate']),spectrum['static_mass'],limit)
@@ -86,7 +91,7 @@ def main():
         np.savez_compressed(args.output/(label+'-bounded.npz'),time_s=axis,total_force=force,
             mass_target=spectrum['static_mass'],limit_target=limit,relaxation_B=air.relaxation.B,relaxation_tau=air.relaxation.tau)
         save(args.output/'resumen.json',report);print(label,json.dumps(item),flush=True)
-        if 'Angle48x96' in label:best=air
+        if label==board_profile:best=air
     # Integrator refinement is separate from the accuracy of the surface load.
     trajectories={}
     if args.board_rates:report['inputs'][str(args.bath/'Fine384.npz')]=digest(args.bath/'Fine384.npz')

@@ -1,0 +1,590 @@
+{
+  "baseline_commit": "5834c39",
+  "research_candidate": "Wave64000-Cells128x96-Angle96x96-Sparse",
+  "selected_factory_profile": null,
+  "generation": {
+    "baseline_commit": "5834c39",
+    "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "control_sha256": "b2ea7c2b013c1227b3868dffd13cf6fda4239ece284868eb4315ea090951cc91",
+    "cells": [
+      128,
+      96
+    ],
+    "angular": [
+      48,
+      96
+    ],
+    "modes": 35,
+    "criteria": {
+      "factor_equivalence_relative": 1e-10
+    },
+    "control": {
+      "rate_hz": 32000,
+      "equivalence_relative": 1.2243740271950296e-14,
+      "seconds": 6.719000000040978,
+      "passed": true
+    },
+    "method": "Stable projected-cell CDF; sparse bins; same area, delay histogram, backward derivative and opposite-direction reversal as archived dense generator.",
+    "environment": {
+      "python": "3.12.14",
+      "numpy": "2.3.5",
+      "scipy": "1.18.1"
+    },
+    "generated": {
+      "profile": "Wave64000-Cells128x96-Angle48x96-Sparse",
+      "rate_hz": 64000,
+      "seconds": 17.04699999996228,
+      "taps": 326,
+      "wave_outputs": 4608,
+      "wave_states": 11375,
+      "sha256": "36c5ddd98f94fc48f6c533a8ddcb8941ab780e9cc2510f2589fbe0fc6d785470",
+      "dc_sum_relative": 1.8364382451622914e-16,
+      "construction": "Unchanged physical projection and angular quadrature; only temporal bin resolution doubled."
+    }
+  },
+  "fine_generation": {
+    "baseline_commit": "5834c39",
+    "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "control_sha256": "b2ea7c2b013c1227b3868dffd13cf6fda4239ece284868eb4315ea090951cc91",
+    "cells": [
+      128,
+      96
+    ],
+    "angular": [
+      96,
+      96
+    ],
+    "modes": 35,
+    "control_angular": [
+      48,
+      96
+    ],
+    "criteria": {
+      "factor_equivalence_relative": 1e-10
+    },
+    "control": {
+      "rate_hz": 32000,
+      "equivalence_relative": 1.2243740271950296e-14,
+      "seconds": 7.0310000000172295,
+      "passed": true
+    },
+    "method": "Stable projected-cell CDF; sparse bins; same area, delay histogram, backward derivative and opposite-direction reversal as archived dense generator.",
+    "environment": {
+      "python": "3.12.14",
+      "numpy": "2.3.5",
+      "scipy": "1.18.1"
+    },
+    "generated": {
+      "profile": "Wave64000-Cells128x96-Angle96x96-Sparse",
+      "rate_hz": 64000,
+      "seconds": 34.59299999999348,
+      "taps": 326,
+      "wave_outputs": 9216,
+      "wave_states": 11375,
+      "sha256": "e3c5e6802d5543592d1ad5e3059d6fb5e571d229bf63e2bb42edfc7eb89bb315",
+      "dc_sum_relative": 1.8640287436302645e-16,
+      "angular": [
+        96,
+        96
+      ],
+      "construction": "Unchanged physical surface and projected-cell integral; temporal and angular quadrature are controlled refinements."
+    }
+  },
+  "rejected_temporal_only": {
+    "baseline_commit": "5834c39",
+    "profiles": {
+      "Wave64000-Cells128x96-Angle48x96-Sparse": {
+        "input_sha256": "36c5ddd98f94fc48f6c533a8ddcb8941ab780e9cc2510f2589fbe0fc6d785470",
+        "states": 11445,
+        "state_ratio": 0.03251180310545244,
+        "relaxation_time_s": [
+          9.48512064279016e-06,
+          1.5124881364170834e-05
+        ],
+        "mass_relative": 2.8644198827779142e-16,
+        "limit_relative": 3.2756294614854815e-15,
+        "wave_limit_relative": 4.873600177471357e-16,
+        "low_ZRX_max": [
+          0.0026492786065027293,
+          0.0021342070368142244,
+          0.003120232977550659
+        ],
+        "laplace_max": 0.0024705407144859884,
+        "loaded_velocity_max": 0.0011809728606840583,
+        "additional_high": [
+          {
+            "frequency_hz": 999.9999999999999,
+            "complex_relative": 0.003577566907283499,
+            "resistance_relative": 0.0030816414416902534,
+            "reactance_relative": 0.004477618819734072
+          },
+          {
+            "frequency_hz": 1200.0,
+            "complex_relative": 0.0036122053651832147,
+            "resistance_relative": 0.0032495643596655703,
+            "reactance_relative": 0.005723472481948437
+          },
+          {
+            "frequency_hz": 1999.9999999999998,
+            "complex_relative": 0.0030153134062881064,
+            "resistance_relative": 0.0027834224359954093,
+            "reactance_relative": 0.2273392374498171
+          },
+          {
+            "frequency_hz": 3000.0,
+            "complex_relative": 0.007637409477456031,
+            "resistance_relative": 0.006375678744147338,
+            "reactance_relative": 8.185946559870153
+          },
+          {
+            "frequency_hz": 4500.0,
+            "complex_relative": 0.020951559257358907,
+            "resistance_relative": 0.013004259406251299,
+            "reactance_relative": 57.063867690635426
+          },
+          {
+            "frequency_hz": 6000.0,
+            "complex_relative": 0.12649503982816268,
+            "resistance_relative": 0.08865433300890092,
+            "reactance_relative": 252.78051467133662
+          }
+        ],
+        "memory": {
+          "128x96": {
+            "rms_common": 0.020973194658406292,
+            "late_peak_common": 1.3428475918315003e-16,
+            "passed": false
+          },
+          "192x144": {
+            "rms_common": 0.021102751674466583,
+            "late_peak_common": 1.3428475918315003e-16,
+            "passed": false
+          },
+          "256x192": {
+            "rms_common": 0.021177206333636223,
+            "late_peak_common": 1.3428475918315003e-16,
+            "passed": false
+          }
+        },
+        "storage": [
+          {
+            "dt_s": 2.0833333333333333e-05,
+            "balance_relative": 2.4579810413529413e-16,
+            "radiation_power_w": 0.08404728086442587
+          },
+          {
+            "dt_s": 5.208333333333333e-06,
+            "balance_relative": 1.6752890418950693e-16,
+            "radiation_power_w": 0.1983558567373571
+          },
+          {
+            "dt_s": 1.3020833333333333e-06,
+            "balance_relative": 8.507686219816693e-17,
+            "radiation_power_w": 0.29784621933584504
+          }
+        ],
+        "seconds": 18.73399999999674,
+        "gates": {
+          "low_frequency": true,
+          "laplace": true,
+          "loaded_velocity": true,
+          "mass": true,
+          "limit": true,
+          "memory": false,
+          "energy": true,
+          "states": true,
+          "diagnostic_high": false
+        }
+      }
+    },
+    "board": {},
+    "selected_profile": null,
+    "method": "Adjacent-tap factor average, unchanged Cayley mapping, positive matrix mass/resistance relaxation. No coefficient or sample fit.",
+    "force_convention": "Total regular force, left derivative at driven knots. Exact stationary stop. New bounded load has no inertial delta.",
+    "normalization": "All prescribed-force errors use frozen bath RMS and initial peak, unchanged from c353719.",
+    "cells": [
+      128,
+      96
+    ],
+    "modes": 35,
+    "criteria": {
+      "low_ZRX_max": 0.02,
+      "laplace_max": 0.02,
+      "loaded_velocity_max": 0.05,
+      "mass_relative": 1e-10,
+      "limit_relative": 1e-10,
+      "memory_rms_common": 0.02,
+      "late_peak_common": 0.01,
+      "energy_relative": 1e-09,
+      "board_time_refinement": 0.001,
+      "board_velocity_vs_bath": 0.05,
+      "diagnostic_high_complex_max": 0.02,
+      "state_ratio": 0.1
+    },
+    "inputs": {
+      "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-contacto-aire\\T72-768000-Air.npz": "09c879725f7981cb922f6ba3d9decdfa3946dea315d8931b69b75c5b7371f3a3",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-estados-acusticos\\spectrum.npz": "60b383fdd94610cf33d3b7b920274d33405f88c98d12a06a2511ef7f1f56117f",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\Cells128x96-Rate128000-Q16.npz": "e1580c8684007164dd9ba232ee872275f5ad42bf757837a81ff724f7a1b639ae",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\spatial192\\Cells192x144-Rate128000-Q16.npz": "625fd285cd2fbd182efc8914af4a261379e98a414d7cc2f0b31429f37febf9c0",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\spatial256\\Cells256x192-Rate128000-Q16.npz": "7b93dd019575d5f5facfbcf887fe0218bda3a6d35352f7454edf2e704827c219"
+    },
+    "environment": {
+      "python": "3.12.14",
+      "numpy": "2.3.5",
+      "scipy": "1.18.1"
+    },
+    "scope": "One baffled face, 35 low P2 shapes, frozen C4 velocity; board impulses are not a nonlinear hammer or piano audio.",
+    "decision": "No factory selection: broad-band transfer, nonlinear hammer contacts and wider note/velocity bank still required, regardless of low-band or board results."
+  },
+  "candidate": {
+    "baseline_commit": "5834c39",
+    "profiles": {
+      "Wave64000-Cells128x96-Angle96x96-Sparse": {
+        "input_sha256": "e3c5e6802d5543592d1ad5e3059d6fb5e571d229bf63e2bb42edfc7eb89bb315",
+        "states": 11445,
+        "state_ratio": 0.03251180310545244,
+        "relaxation_time_s": [
+          9.694093920322302e-06,
+          1.1380214801476081e-05
+        ],
+        "mass_relative": 2.557480300359958e-16,
+        "limit_relative": 2.780129341759772e-15,
+        "wave_limit_relative": 4.1104594692488917e-16,
+        "low_ZRX_max": [
+          0.002645187013002565,
+          0.0021300154098274956,
+          0.0031160893262066045
+        ],
+        "laplace_max": 0.0024636002259964696,
+        "loaded_velocity_max": 0.0011768150858356462,
+        "additional_high": [
+          {
+            "frequency_hz": 999.9999999999999,
+            "complex_relative": 0.0035712064804298144,
+            "resistance_relative": 0.0030731644133913474,
+            "reactance_relative": 0.004474183874825988
+          },
+          {
+            "frequency_hz": 1200.0,
+            "complex_relative": 0.0035602071703085374,
+            "resistance_relative": 0.0031861868906916556,
+            "reactance_relative": 0.005715055183227326
+          },
+          {
+            "frequency_hz": 1999.9999999999998,
+            "complex_relative": 0.0010544799475301152,
+            "resistance_relative": 0.000973177341495311,
+            "reactance_relative": 0.07960039691343326
+          },
+          {
+            "frequency_hz": 3000.0,
+            "complex_relative": 0.0026278362994150615,
+            "resistance_relative": 0.0022581352363170277,
+            "reactance_relative": 2.616492427443914
+          },
+          {
+            "frequency_hz": 4500.0,
+            "complex_relative": 0.006362542264585661,
+            "resistance_relative": 0.0047705842042261365,
+            "reactance_relative": 14.624084769881136
+          },
+          {
+            "frequency_hz": 6000.0,
+            "complex_relative": 0.011275014402506672,
+            "resistance_relative": 0.007020334717833552,
+            "reactance_relative": 24.71711099574194
+          }
+        ],
+        "memory": {
+          "128x96": {
+            "rms_common": 0.005150977387010799,
+            "late_peak_common": 1.3675484641223723e-16,
+            "passed": true
+          },
+          "192x144": {
+            "rms_common": 0.005678223186328408,
+            "late_peak_common": 1.3675484641223723e-16,
+            "passed": true
+          },
+          "256x192": {
+            "rms_common": 0.005950904665281573,
+            "late_peak_common": 1.3675484641223723e-16,
+            "passed": true
+          }
+        },
+        "storage": [
+          {
+            "dt_s": 2.0833333333333333e-05,
+            "balance_relative": 2.4648209544877097e-16,
+            "radiation_power_w": 0.0850802305278214
+          },
+          {
+            "dt_s": 5.208333333333333e-06,
+            "balance_relative": 3.614365987261236e-16,
+            "radiation_power_w": 0.20081609104523446
+          },
+          {
+            "dt_s": 1.3020833333333333e-06,
+            "balance_relative": 3.027997674042145e-16,
+            "radiation_power_w": 0.2950707859076495
+          }
+        ],
+        "seconds": 35.31300000002375,
+        "gates": {
+          "low_frequency": true,
+          "laplace": true,
+          "loaded_velocity": true,
+          "mass": true,
+          "limit": true,
+          "memory": true,
+          "energy": true,
+          "states": true,
+          "diagnostic_high": true
+        }
+      }
+    },
+    "board": {},
+    "selected_profile": null,
+    "method": "Adjacent-tap factor average, unchanged Cayley mapping, positive matrix mass/resistance relaxation. No coefficient or sample fit.",
+    "force_convention": "Total regular force, left derivative at driven knots. Exact stationary stop. New bounded load has no inertial delta.",
+    "normalization": "All prescribed-force errors use frozen bath RMS and initial peak, unchanged from c353719.",
+    "cells": [
+      128,
+      96
+    ],
+    "modes": 35,
+    "criteria": {
+      "low_ZRX_max": 0.02,
+      "laplace_max": 0.02,
+      "loaded_velocity_max": 0.05,
+      "mass_relative": 1e-10,
+      "limit_relative": 1e-10,
+      "memory_rms_common": 0.02,
+      "late_peak_common": 0.01,
+      "energy_relative": 1e-09,
+      "board_time_refinement": 0.001,
+      "board_velocity_vs_bath": 0.05,
+      "diagnostic_high_complex_max": 0.02,
+      "state_ratio": 0.1
+    },
+    "inputs": {
+      "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-contacto-aire\\T72-768000-Air.npz": "09c879725f7981cb922f6ba3d9decdfa3946dea315d8931b69b75c5b7371f3a3",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-estados-acusticos\\spectrum.npz": "60b383fdd94610cf33d3b7b920274d33405f88c98d12a06a2511ef7f1f56117f",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\Cells128x96-Rate128000-Q16.npz": "e1580c8684007164dd9ba232ee872275f5ad42bf757837a81ff724f7a1b639ae",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\spatial192\\Cells192x144-Rate128000-Q16.npz": "625fd285cd2fbd182efc8914af4a261379e98a414d7cc2f0b31429f37febf9c0",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\spatial256\\Cells256x192-Rate128000-Q16.npz": "7b93dd019575d5f5facfbcf887fe0218bda3a6d35352f7454edf2e704827c219"
+    },
+    "environment": {
+      "python": "3.12.14",
+      "numpy": "2.3.5",
+      "scipy": "1.18.1"
+    },
+    "scope": "One baffled face, 35 low P2 shapes, frozen C4 velocity; board impulses are not a nonlinear hammer or piano audio.",
+    "decision": "No factory selection: broad-band transfer, nonlinear hammer contacts and wider note/velocity bank still required, regardless of low-band or board results."
+  },
+  "band": {
+    "baseline_commit": "5834c39",
+    "coefficient_sha256": "e3c5e6802d5543592d1ad5e3059d6fb5e571d229bf63e2bb42edfc7eb89bb315",
+    "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "target_sha256": "60b383fdd94610cf33d3b7b920274d33405f88c98d12a06a2511ef7f1f56117f",
+    "geometry_inputs": {
+      "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\Cells128x96-Rate128000-Q16.npz": "e1580c8684007164dd9ba232ee872275f5ad42bf757837a81ff724f7a1b639ae",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\spatial192\\Cells192x144-Rate128000-Q16.npz": "625fd285cd2fbd182efc8914af4a261379e98a414d7cc2f0b31429f37febf9c0",
+      "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\spatial256\\Cells256x192-Rate128000-Q16.npz": "7b93dd019575d5f5facfbcf887fe0218bda3a6d35352f7454edf2e704827c219"
+    },
+    "angular_probe_sha256": "2524d0f67e3fa3251e4ef399723ccb1fc2544c1cf4af04ea756f8271abaa35ec",
+    "criteria": {
+      "complex_max": 0.02,
+      "reference_quadrature": 16,
+      "reference_rate_hz": 128000
+    },
+    "sweep": {
+      "points": 61,
+      "low_hz": 1000,
+      "high_hz": 6000,
+      "maximum_complex": 0.011275014402506672,
+      "maximum_complex_frequency_hz": 6000.0,
+      "maximum_resistance": 0.007020334717833552,
+      "passed": true
+    },
+    "spatial_controls": {
+      "128x96": {
+        "points": [
+          {
+            "frequency_hz": 999.9999999999999,
+            "complex_relative": 0.0035712064804298144
+          },
+          {
+            "frequency_hz": 1200.0,
+            "complex_relative": 0.0035602071703085374
+          },
+          {
+            "frequency_hz": 1999.9999999999998,
+            "complex_relative": 0.0010544799475301152
+          },
+          {
+            "frequency_hz": 3000.0,
+            "complex_relative": 0.0026278362994150615
+          },
+          {
+            "frequency_hz": 4500.0,
+            "complex_relative": 0.006362542264585661
+          },
+          {
+            "frequency_hz": 6000.0,
+            "complex_relative": 0.011275014402506672
+          }
+        ],
+        "maximum_complex": 0.011275014402506672,
+        "geometry_change_relative_to_128": 0.0
+      },
+      "192x144": {
+        "points": [
+          {
+            "frequency_hz": 999.9999999999999,
+            "complex_relative": 0.006205635065515982
+          },
+          {
+            "frequency_hz": 1200.0,
+            "complex_relative": 0.006056501626259996
+          },
+          {
+            "frequency_hz": 1999.9999999999998,
+            "complex_relative": 0.0033468774475104756
+          },
+          {
+            "frequency_hz": 3000.0,
+            "complex_relative": 0.003319634266859541
+          },
+          {
+            "frequency_hz": 4500.0,
+            "complex_relative": 0.005934869783463209
+          },
+          {
+            "frequency_hz": 6000.0,
+            "complex_relative": 0.010680703503237042
+          }
+        ],
+        "maximum_complex": 0.010680703503237042,
+        "geometry_change_relative_to_128": 0.003691053586224015
+      },
+      "256x192": {
+        "points": [
+          {
+            "frequency_hz": 999.9999999999999,
+            "complex_relative": 0.00722647202399046
+          },
+          {
+            "frequency_hz": 1200.0,
+            "complex_relative": 0.007172012566485035
+          },
+          {
+            "frequency_hz": 1999.9999999999998,
+            "complex_relative": 0.0043703436974792485
+          },
+          {
+            "frequency_hz": 3000.0,
+            "complex_relative": 0.0040606538244360325
+          },
+          {
+            "frequency_hz": 4500.0,
+            "complex_relative": 0.006112972724658709
+          },
+          {
+            "frequency_hz": 6000.0,
+            "complex_relative": 0.010661242237834573
+          }
+        ],
+        "maximum_complex": 0.010661242237834573,
+        "geometry_change_relative_to_128": 0.00498783296546743
+      }
+    },
+    "high_grid_change_common_128": {
+      "192x144": 0.003691053586224015,
+      "256x192": 0.00498783296546743
+    },
+    "seconds": 5.547000000020489,
+    "scope": "Transfer of 35 frozen low P2 surface shapes through one baffled face; this does not add physical board modes above 800 Hz or certify the continuous full piano.",
+    "normalization": "Transfer relative to geometric matrices; force RMS in separate audit retains its frozen bath denominator.",
+    "all_measured_high_controls_passed": true
+  },
+  "angular_probe": {
+    "frequency_hz": 6000,
+    "reference": "Direct Rayleigh Gauss16 128x96",
+    "profiles": [
+      {
+        "polar": 48,
+        "azimuth": 96,
+        "resistance_relative": 0.12575874016182695,
+        "seconds": 2.062999999965541
+      },
+      {
+        "polar": 96,
+        "azimuth": 96,
+        "resistance_relative": 5.5425775392333195e-06,
+        "seconds": 4.578000000037719
+      },
+      {
+        "polar": 48,
+        "azimuth": 192,
+        "resistance_relative": 0.12575856694542753,
+        "seconds": 4.7189999999827705
+      },
+      {
+        "polar": 96,
+        "azimuth": 192,
+        "resistance_relative": 2.220918198798493e-08,
+        "seconds": 9.40600000001723
+      }
+    ]
+  },
+  "tests": {
+    "count": 24,
+    "passed": true,
+    "log_sha256": "da6c4c82f9ddbb68afc36976df62cc86c4735e4be44abf4d7165fed11c6b8ce4"
+  },
+  "native_package": {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.172.0.rfplugin",
+    "sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+    "changed": false
+  },
+  "scope": "Air transfer for 35 frozen P2 shapes below 800Hz, one baffled face. Prescribed C4 port; not new high board modes or piano audio.",
+  "next_step": "Nonlinear SI hammer/string/bridge contacts using this passive load; cold and reiterated contacts with persistent states and frozen convergence/energy criteria.",
+  "integration_status": "Previous persistent-board trajectories belong to 32k factor. No new 64k nonlinear contact or coupled board trajectory claimed.",
+  "sources_sha256": {
+    "tools/audit-concert-grand-air-resolution.py": "091fb56a3ba67e16b642223bee8e117706a33f72df97751ae7bb5771450a4618",
+    "tools/audit-concert-grand-air-band.py": "066cb76e62fab66f9c3f06a2a9d76c071636b3a612116b6446b877764664f64f",
+    "tools/audit-concert-grand-bounded-air.py": "9753c4da1d20d440ce58e59c0aafefc00e5367f29572b7d9c0ffa1cb63b2024d",
+    "tools/concert_grand_rational_air.py": "b57a66edc1d5e7f8490d0488f5afb3a82c1c649a35d84d55ab4bba5797d1e5dc",
+    "tools/concert_grand_bounded_air.py": "2e2d5ca063b6a41ace02fef06d3f45ca6521355e20dd83c2bf19835760a3a47b",
+    "tools/concert_grand_surface_impedance.py": "8ad393eb161ef53aff727ec007ea22d87c4a0406e7c55be8c588654a5f01091a",
+    "tools/concert_grand_geometric_memory.py": "a7c37f0c4c052cb70f5139d4adff994126b972bf043a0938070d1a63131e61b7",
+    "tools/concert_grand_acoustic_bath.py": "8acc2a8f74bf4f11828b08045b5f96ac10f9f336545f8199ed0d08235b1eba6f",
+    "tools/concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95",
+    "tools/tests/test_concert_rational_air.py": "fa740584314780bbace577240e730811a8f9481a06f379677bf838737253f6eb",
+    "tools/tests/test_concert_bounded_air.py": "ceb7dc191943832ee048d6f695f34621c6978a02749858f86f4df85a002858ca",
+    "tools/tests/test_concert_surface_impedance.py": "f4e38f16f94da757faf98935e893f978b20d1d8af754c245f79023ae5a207782",
+    "tools/tests/test_concert_geometric_memory.py": "76174871814d00bdbdc0ba8bb7020220cacff1b6400229d7bdf4e9bc3c688c18",
+    "docs/PIANO_MODEL.md": "7e53adb623057d1b7f15d1b6d7a36657a8f9dea4290ea788834eeef4fbd43b35",
+    "docs/concert-grand-physics-roadmap-2026-10-02/README.md": "39f94b87b04ca87f7ca09855881febc5e6cf4aaeb56b3ac83884ef1abd590e40",
+    "docs/concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-resolucion-aire.md": "cf1553edc7ce7080ade2e0ad03c229755c78a35d5e9a416533cb5f0c963a6e69"
+  },
+  "source_archive_sha256": "9726e9e32263e3ecdc48fe835b015a17f961f3edac835f984b23b8e75302254b",
+  "artifacts_sha256": {
+    "band-sweep.npz": "47bf1ba7d66f787537a6ddd72cd1eda520ca27c1541efc6847270ed3741b16d0",
+    "Polar96\\Wave64000-Cells128x96-Angle96x96-Sparse-bounded.npz": "fa0fee04f7c081170300ee63776faabeae32ebe7ab47eccea5c979a99421fcb8",
+    "Polar96\\Wave64000-Cells128x96-Angle96x96-Sparse.npz": "e3c5e6802d5543592d1ad5e3059d6fb5e571d229bf63e2bb42edfc7eb89bb315",
+    "Wave64000-Cells128x96-Angle48x96-Sparse-bounded.npz": "fce46337083aaf957b26c8f745b001df83aa7e1b1e3d7769e41c4e89c9ae9830",
+    "Wave64000-Cells128x96-Angle48x96-Sparse.npz": "36c5ddd98f94fc48f6c533a8ddcb8941ab780e9cc2510f2589fbe0fc6d785470"
+  },
+  "manifests_sha256": {
+    "resumen-rechazado-Angle48x96.json": "7de16cc2c0d5c43608ae43b944cbc92619ca74c0181b3499484d3d731faed07a",
+    "factors.json": "c9881550faf6c59e1ab9aa620b71b094257b7a631c599f619a451fcbadc18e5f",
+    "Polar96\\factors.json": "ecbf3769346b9990e84d6a8c1c1d2b248dd0f5b23bb4dd500c04d4e9e8cbb7fc",
+    "Polar96\\resumen.json": "6436d63eba696f943638fac2c1640620afdce92e46874c9055501e3979c40294",
+    "band.json": "a916d0222382c6f9d498b9f8fc1667c36b096527cad2ba5c821dceedef8774e1",
+    "angular-probe.json": "2524d0f67e3fa3251e4ef399723ccb1fc2544c1cf4af04ea756f8271abaa35ec"
+  }
+}

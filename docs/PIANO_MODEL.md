@@ -2149,14 +2149,29 @@ certificate closes work/radiation balances for arbitrary live states and steps;
 six tests include independent ODEs, an exact-stop kernel and an 80-digit
 underflow control. Completing only an already-PSD static mass residual gives
 5740 states versus 352026, and passes held-out Z/R/X/Laplace, static mass and
-loaded velocity in 60–800 Hz. It removes the previous late recurrence, but
-still fails the 64 ms prescribed-port force criterion: best RMS 5.29358%,
-limit 2%. Exact continuous-kernel quadrature confirms this failure. Independent
-geometric diagnostics expose higher-band error and an inertial tail that
-lacks the finite resistive high-frequency limit. This is not a demonstrated
-attack improvement or a real-time cost benchmark. Direct geometric transient
-comparison and a passive high-band completion precede coupled-contact and
-full-band listening checks. No rational variant is promoted to factory.
+loaded velocity in 60–800 Hz. It removes the previous late recurrence.
+The original 5.29358% force RMS is superseded: the v1 comparator subtracted
+an inertial tail already included in the reference and used inconsistent
+knot derivatives. With total regular force and left derivatives, the best
+RMS versus that bath is 3.58061%. Coefficients and storage certificates are
+unchanged. Independent geometric diagnostics expose higher-band error and
+an inertial tail lacking the finite resistive high-frequency limit.
+
+The [P6 direct geometric transient audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-kernel-geometrico.md)
+integrates rectangular-cell overlaps along circles of radius ct, including
+local terms, without fitted poles or a frequency-grid IFFT. Independent
+surface/Laplace, angular and time integration checks pass; 22 tests cover
+the geometry and related load evaluators. Its physical support is 5.0159331 ms
+for this single baffled face. The finite bath differs by 3.97163% at an abrupt
+prescribed stop, mainly after the stop; this limits its broadband transient
+reference role without invalidating its own energy/contact checks.
+The compact rational load differs by 1.94783% on 128×96 cells and 1.99520%
+on 256×192 cells, using the same frozen bath RMS throughout. Its remaining
+margin to 2% is smaller than the last spatial refinement change. No robust
+continuous-surface pass or factory selection is claimed. This prescribed-port
+kernel has no certified coupled integrator yet. A better compact-load margin,
+passive high-band completion and coupled/contact checks precede full-band
+listening. No demonstrated attack improvement or real-time cost claim follows.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a

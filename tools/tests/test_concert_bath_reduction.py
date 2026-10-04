@@ -65,6 +65,8 @@ class ReductionTests(unittest.TestCase):
                 v=velocity[i]+t/dt*(velocity[i+1]-velocity[i])
                 return np.r_[y[3:],bath.projection@v-bath.omega**2*y[:3]-2*bath.gamma*y[3:]]
             result=solve_ivp(ode,(0,dt),state,method='DOP853',rtol=1e-12,atol=1e-16);state=result.y[:,-1]
+            expected_force=bath.projection.T@state[3:]+bath.tail_mass@((velocity[i+1]-velocity[i])/dt)
+            np.testing.assert_allclose(force[i+1],expected_force,rtol=1e-10,atol=1e-14)
         np.testing.assert_allclose(np.r_[a,p],state,rtol=1e-10,atol=1e-15)
         late=free_force(bath,a,p,100,.0005)
         matrix=np.block([[np.zeros((3,3)),np.eye(3)],[-np.diag(bath.omega**2),-2*np.diag(bath.gamma)]])

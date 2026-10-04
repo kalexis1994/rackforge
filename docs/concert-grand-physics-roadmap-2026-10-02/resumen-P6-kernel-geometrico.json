@@ -1,0 +1,546 @@
+{
+  "baseline_commit": "de2cb2e",
+  "method": "Direct Rayleigh transient reference, with frozen air/rational comparisons.",
+  "profiles": {
+    "Cells128x96-Rate128000-Q8": {
+      "rate_hz": 128000,
+      "quadrature": 8,
+      "seconds": 2.422000000020489,
+      "static_mass_relative": 3.8609083598114105e-09,
+      "low_frequency_max": [
+        5.54534954273859e-09,
+        3.7119091544795577e-09,
+        7.570260268345434e-09
+      ],
+      "laplace_max": 5.55092474554736e-09,
+      "high_frequency_errors": [
+        {
+          "frequency_hz": 1000.0,
+          "complex_relative": 6.215595502570564e-09,
+          "resistance_relative": 2.023276828782254e-09,
+          "reactance_relative": 1.0698646039157592e-08
+        },
+        {
+          "frequency_hz": 1200.0,
+          "complex_relative": 8.50247914156101e-09,
+          "resistance_relative": 3.5025790982660047e-09,
+          "reactance_relative": 2.3403815293520024e-08
+        },
+        {
+          "frequency_hz": 2000.0,
+          "complex_relative": 1.1390694099681229e-08,
+          "resistance_relative": 7.060643217241778e-09,
+          "reactance_relative": 1.7522550052377735e-06
+        },
+        {
+          "frequency_hz": 3000.0,
+          "complex_relative": 3.0519465094708146e-08,
+          "resistance_relative": 7.611802783271968e-09,
+          "reactance_relative": 5.753613312523295e-05
+        },
+        {
+          "frequency_hz": 4500.0,
+          "complex_relative": 7.107412544250958e-08,
+          "resistance_relative": 2.651992359652681e-08,
+          "reactance_relative": 0.0002290423661466134
+        },
+        {
+          "frequency_hz": 6000.0,
+          "complex_relative": 6.7264685371068e-08,
+          "resistance_relative": 5.0672345365732944e-08,
+          "reactance_relative": 0.00012393074667042833
+        }
+      ],
+      "high_frequency_limit_relative": 3.6923611477092596e-16,
+      "physical_force_after_support_peak_common": 0.0,
+      "bath_vs_geometric": {
+        "force_rms_common": 0.039716316802383834,
+        "late_peak_common": 0.0018719985568680952,
+        "error_partition": {
+          "driven": 0.0012104039567567876,
+          "stop_to_10ms": 0.039490521566558474,
+          "after_10ms": 0.0040520919300978345
+        },
+        "max_error_time_s": 0.00403125
+      },
+      "rational_vs_geometric": {
+        "Wave32000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.04624592060400214,
+          "late_peak_common": 1.2859397269823974e-16,
+          "error_partition": {
+            "driven": 0.0027496326962536803,
+            "stop_to_10ms": 0.04616410610579785,
+            "after_10ms": 2.8048075749414757e-16
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        },
+        "Wave64000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.06257097485664193,
+          "late_peak_common": 1.3773504129997836e-16,
+          "error_partition": {
+            "driven": 0.000693928976475611,
+            "stop_to_10ms": 0.0625671268086215,
+            "after_10ms": 2.8921431368831185e-16
+          },
+          "max_error_time_s": 0.00409375,
+          "memory_passed": false
+        },
+        "Wave32000-Cells128x96-Angle48x96-Tail": {
+          "force_rms_common": 0.01947833156375568,
+          "late_peak_common": 1.4562344337433905e-16,
+          "error_partition": {
+            "driven": 0.0027290649750401175,
+            "stop_to_10ms": 0.01928620244811326,
+            "after_10ms": 2.825925961231048e-16
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": true
+        }
+      },
+      "rational_vs_bath": {
+        "Wave32000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.05335743389650473,
+          "late_peak_common": 0.001871998556868103,
+          "error_partition": {
+            "driven": 0.0027743780357262953,
+            "stop_to_10ms": 0.05313096206097522,
+            "after_10ms": 0.004052091930097836
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        },
+        "Wave64000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.07895995767599799,
+          "late_peak_common": 0.0018719985568680843,
+          "error_partition": {
+            "driven": 0.0012694781375277007,
+            "stop_to_10ms": 0.07884569672749278,
+            "after_10ms": 0.004052091930097836
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        },
+        "Wave32000-Cells128x96-Angle48x96-Tail": {
+          "force_rms_common": 0.03580607074018599,
+          "late_peak_common": 0.0018719985568680954,
+          "error_partition": {
+            "driven": 0.002747249876713901,
+            "stop_to_10ms": 0.035469816336656364,
+            "after_10ms": 0.004052091930097836
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        }
+      },
+      "refinement": null,
+      "legacy_bath_consistency_passed": false,
+      "geometric_reference_checks_passed": true
+    },
+    "Cells128x96-Rate128000-Q16": {
+      "rate_hz": 128000,
+      "quadrature": 16,
+      "seconds": 4.562999999965541,
+      "static_mass_relative": 1.52378379061821e-09,
+      "low_frequency_max": [
+        1.7634366333107562e-09,
+        2.288383139920351e-09,
+        2.0409231113776524e-09
+      ],
+      "laplace_max": 1.7059133202290592e-09,
+      "high_frequency_errors": [
+        {
+          "frequency_hz": 1000.0,
+          "complex_relative": 1.9451783125203037e-09,
+          "resistance_relative": 9.288417580720058e-10,
+          "reactance_relative": 3.1931612415375016e-09
+        },
+        {
+          "frequency_hz": 1200.0,
+          "complex_relative": 2.894174400336555e-09,
+          "resistance_relative": 1.3234366844311638e-09,
+          "reactance_relative": 7.800672361666804e-09
+        },
+        {
+          "frequency_hz": 2000.0,
+          "complex_relative": 9.576324570462509e-09,
+          "resistance_relative": 5.526222119362197e-09,
+          "reactance_relative": 1.5331840007588771e-06
+        },
+        {
+          "frequency_hz": 3000.0,
+          "complex_relative": 1.277193962339969e-08,
+          "resistance_relative": 3.838686433404726e-09,
+          "reactance_relative": 2.3714145791302757e-05
+        },
+        {
+          "frequency_hz": 4500.0,
+          "complex_relative": 2.8488382023229666e-08,
+          "resistance_relative": 1.404089838886661e-08,
+          "reactance_relative": 8.609936431098291e-05
+        },
+        {
+          "frequency_hz": 6000.0,
+          "complex_relative": 2.4874427003190064e-08,
+          "resistance_relative": 2.220959428227329e-08,
+          "reactance_relative": 3.138137542907424e-05
+        }
+      ],
+      "high_frequency_limit_relative": 3.6923611477092596e-16,
+      "physical_force_after_support_peak_common": 0.0,
+      "bath_vs_geometric": {
+        "force_rms_common": 0.03971631672437452,
+        "late_peak_common": 0.0018719985568680952,
+        "error_partition": {
+          "driven": 0.0012104013386424555,
+          "stop_to_10ms": 0.03949052156834953,
+          "after_10ms": 0.0040520919300978345
+        },
+        "max_error_time_s": 0.00403125
+      },
+      "rational_vs_geometric": {
+        "Wave32000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.046245920451276935,
+          "late_peak_common": 1.2859397269823974e-16,
+          "error_partition": {
+            "driven": 0.00274963041794755,
+            "stop_to_10ms": 0.046164106088502695,
+            "after_10ms": 2.8048075749414757e-16
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        },
+        "Wave64000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.0625709748716545,
+          "late_peak_common": 1.3773504129997836e-16,
+          "error_partition": {
+            "driven": 0.0006939267395824562,
+            "stop_to_10ms": 0.06256712684844423,
+            "after_10ms": 2.8921431368831185e-16
+          },
+          "max_error_time_s": 0.00409375,
+          "memory_passed": false
+        },
+        "Wave32000-Cells128x96-Angle48x96-Tail": {
+          "force_rms_common": 0.019478331203871213,
+          "late_peak_common": 1.4562344337433905e-16,
+          "error_partition": {
+            "driven": 0.002729062689475345,
+            "stop_to_10ms": 0.01928620240805889,
+            "after_10ms": 2.825925961231048e-16
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": true
+        }
+      },
+      "rational_vs_bath": {
+        "Wave32000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.05335743389650473,
+          "late_peak_common": 0.001871998556868103,
+          "error_partition": {
+            "driven": 0.0027743780357262953,
+            "stop_to_10ms": 0.05313096206097522,
+            "after_10ms": 0.004052091930097836
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        },
+        "Wave64000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.07895995767599799,
+          "late_peak_common": 0.0018719985568680843,
+          "error_partition": {
+            "driven": 0.0012694781375277007,
+            "stop_to_10ms": 0.07884569672749278,
+            "after_10ms": 0.004052091930097836
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        },
+        "Wave32000-Cells128x96-Angle48x96-Tail": {
+          "force_rms_common": 0.03580607074018599,
+          "late_peak_common": 0.0018719985568680954,
+          "error_partition": {
+            "driven": 0.002747249876713901,
+            "stop_to_10ms": 0.035469816336656364,
+            "after_10ms": 0.004052091930097836
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        }
+      },
+      "refinement": {
+        "force_rms_common": 4.3559437265478296e-09,
+        "impedance_relative": 1.1248575874589156e-08,
+        "mass_relative": 5.1669611589100075e-09
+      },
+      "legacy_bath_consistency_passed": false,
+      "geometric_reference_checks_passed": true
+    },
+    "Cells128x96-Rate256000-Q8": {
+      "rate_hz": 256000,
+      "quadrature": 8,
+      "seconds": 4.811999999976251,
+      "static_mass_relative": 2.3289215166016505e-09,
+      "low_frequency_max": [
+        3.5643055486054602e-09,
+        4.383883198836178e-09,
+        4.215729619654987e-09
+      ],
+      "laplace_max": 3.0456171016883616e-09,
+      "high_frequency_errors": [
+        {
+          "frequency_hz": 1000.0,
+          "complex_relative": 3.1103869160942405e-09,
+          "resistance_relative": 1.4533436830388437e-09,
+          "reactance_relative": 5.1260523227744495e-09
+        },
+        {
+          "frequency_hz": 1200.0,
+          "complex_relative": 4.773043034410767e-09,
+          "resistance_relative": 2.4691013821577366e-09,
+          "reactance_relative": 1.2447746267864363e-08
+        },
+        {
+          "frequency_hz": 2000.0,
+          "complex_relative": 1.2311472703643483e-08,
+          "resistance_relative": 1.1846331083965991e-08,
+          "reactance_relative": 6.572418990523963e-07
+        },
+        {
+          "frequency_hz": 3000.0,
+          "complex_relative": 1.3641145237640938e-08,
+          "resistance_relative": 1.0919842096788636e-08,
+          "reactance_relative": 1.591553096320473e-05
+        },
+        {
+          "frequency_hz": 4500.0,
+          "complex_relative": 2.2558919343501418e-08,
+          "resistance_relative": 9.221982323811786e-09,
+          "reactance_relative": 7.151069145774033e-05
+        },
+        {
+          "frequency_hz": 6000.0,
+          "complex_relative": 1.3706708750919667e-08,
+          "resistance_relative": 8.841570827705471e-09,
+          "reactance_relative": 2.9342993644028617e-05
+        }
+      ],
+      "high_frequency_limit_relative": 3.6923611477092596e-16,
+      "physical_force_after_support_peak_common": 0.0,
+      "bath_vs_geometric": {
+        "force_rms_common": 0.03971631674363993,
+        "late_peak_common": 0.0018719985568680952,
+        "error_partition": {
+          "driven": 0.0012104015797992898,
+          "stop_to_10ms": 0.03949052158033354,
+          "after_10ms": 0.0040520919300978345
+        },
+        "max_error_time_s": 0.00403125
+      },
+      "rational_vs_geometric": {
+        "Wave32000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.04624592043618242,
+          "late_peak_common": 1.2859397269823974e-16,
+          "error_partition": {
+            "driven": 0.0027496305228873956,
+            "stop_to_10ms": 0.04616410606713099,
+            "after_10ms": 2.8048075749414757e-16
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        },
+        "Wave64000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.06257097486683166,
+          "late_peak_common": 1.3773504129997836e-16,
+          "error_partition": {
+            "driven": 0.000693926851368057,
+            "stop_to_10ms": 0.0625671268423813,
+            "after_10ms": 2.8921431368831185e-16
+          },
+          "max_error_time_s": 0.00409375,
+          "memory_passed": false
+        },
+        "Wave32000-Cells128x96-Angle48x96-Tail": {
+          "force_rms_common": 0.01947833122924878,
+          "late_peak_common": 1.4562344337433905e-16,
+          "error_partition": {
+            "driven": 0.002729062795146956,
+            "stop_to_10ms": 0.01928620241873638,
+            "after_10ms": 2.825925961231048e-16
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": true
+        }
+      },
+      "rational_vs_bath": {
+        "Wave32000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.05335743389650473,
+          "late_peak_common": 0.001871998556868103,
+          "error_partition": {
+            "driven": 0.0027743780357262953,
+            "stop_to_10ms": 0.05313096206097522,
+            "after_10ms": 0.004052091930097836
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        },
+        "Wave64000-Cells128x96-Angle24x48-Tail": {
+          "force_rms_common": 0.07895995767599799,
+          "late_peak_common": 0.0018719985568680843,
+          "error_partition": {
+            "driven": 0.0012694781375277007,
+            "stop_to_10ms": 0.07884569672749278,
+            "after_10ms": 0.004052091930097836
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        },
+        "Wave32000-Cells128x96-Angle48x96-Tail": {
+          "force_rms_common": 0.03580607074018599,
+          "late_peak_common": 0.0018719985568680954,
+          "error_partition": {
+            "driven": 0.002747249876713901,
+            "stop_to_10ms": 0.035469816336656364,
+            "after_10ms": 0.004052091930097836
+          },
+          "max_error_time_s": 0.00403125,
+          "memory_passed": false
+        }
+      },
+      "refinement": {
+        "force_rms_common": 7.993343018065491e-10,
+        "impedance_relative": 4.868740659014088e-09,
+        "mass_relative": 1.479863870250552e-09
+      },
+      "legacy_bath_consistency_passed": false,
+      "geometric_reference_checks_passed": true
+    }
+  },
+  "panel": {
+    "length": 1.4,
+    "width": 1.0,
+    "thickness": 0.008,
+    "density": 392,
+    "ex": 11500000000.0,
+    "ey": 470000000.0,
+    "gxy": 500000000.0,
+    "nuxy": 0.3
+  },
+  "modes": 35,
+  "cells": [
+    128,
+    96
+  ],
+  "max_delay_s": 0.0050159331003164,
+  "setup_s": 12.954000000027008,
+  "frequency_count": 196,
+  "inputs": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-contacto-aire\\T72-768000-Air.npz": "09c879725f7981cb922f6ba3d9decdfa3946dea315d8931b69b75c5b7371f3a3",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-reduccion-aire\\Grid2-Rank0.01-High40-Gamma2-Parts-memory.npz": "a96529edeeaa1fd20ef7f6826171ef8f0288e35135f0ca22a742ab8970fd5f75",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-estados-acusticos\\spectrum.npz": "60b383fdd94610cf33d3b7b920274d33405f88c98d12a06a2511ef7f1f56117f",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-estados-acusticos\\bath-fine.npz": "0c9948d8305bb5f61d8c75f19aff3a5ab8058176f6f1afc36ca0bd5e14d7a8d5"
+  },
+  "rational_inputs": {
+    "Wave32000-Cells128x96-Angle24x48-Tail": "345abe1fe1797eed273148d328d9de49ddd5b52e07348e246f1f0a1432337a13",
+    "Wave64000-Cells128x96-Angle24x48-Tail": "f9817e8dcf2cb67c2449a87d738e928c7c728865a2e0d28eeb2b6c81e101cb93",
+    "Wave32000-Cells128x96-Angle48x96-Tail": "b2ea7c2b013c1227b3868dffd13cf6fda4239ece284868eb4315ea090951cc91"
+  },
+  "criteria": {
+    "reference_quadrature_relative": 1e-05,
+    "time_refinement_relative": 0.001,
+    "legacy_memory_force_rms": 0.02,
+    "legacy_late_peak_normalized": 0.01
+  },
+  "force_convention": "v2: total regular force, including each model own M_tail * LEFT segment acceleration at drive knots. Initial force zero; both inertial stop deltas excluded, geometric model has none. Wave force at stop knot is left limit.",
+  "normalization": "All pairwise force errors use the SAME frozen bath total regular RMS and initial peak; no new normalizer to improve a score",
+  "scope": "One lossless baffled face and frozen low P2 shapes, prescribed velocity; not a coupled integrator or piano audio",
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1"
+  },
+  "references": [
+    "https://doi.org/10.1121/1.1912541",
+    "https://doi.org/10.1121/1.1912424"
+  ],
+  "frozen_low_reference_cells": [
+    128,
+    96
+  ],
+  "additional_high_reference_cells": [
+    128,
+    96
+  ],
+  "spatial_refinement": {
+    "cells": [
+      [
+        128,
+        96
+      ],
+      [
+        192,
+        144
+      ],
+      [
+        256,
+        192
+      ]
+    ],
+    "force_rms_common": {
+      "0-1": 0.0015622326833976195,
+      "1-2": 0.0005533244925575249,
+      "0-2": 0.0021150282747343925
+    },
+    "last_change_below_0_1_percent": true,
+    "rational_margin_robust": false,
+    "interpretation": "Nominal scores below 2%; remaining margin smaller than measured spatial change. No continuous-surface or coupled-contact acceptance."
+  },
+  "selected_profile": null,
+  "next_step": "Improve compact-load margin and high-frequency limit, then certify and measure coupled persistent contacts before listening.",
+  "tests": {
+    "count": 22,
+    "passed": true,
+    "log_sha256": "308be5cc8e83c3ae2e0d0cf889a6c83af2ee511e0a9cc96691c8e754a169af5c"
+  },
+  "native_package": {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.172.0.rfplugin",
+    "sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+    "changed": false
+  },
+  "spatial_reports": {
+    "spatial192/resumen.json": "00ffa9b5e861f6f079ed858e85901535df6fb7b4f55ffa63296b9f08d518a6ef",
+    "spatial256/resumen.json": "ec658ac260ea5af827086b81d0a5f500d89e5a82ebfeec4075f8e0527345b0dd"
+  },
+  "metadata_finalization": "Added reference-grid origins, gates and provenance after runs; force and impedance arrays unchanged.",
+  "source_files_sha256": {
+    "tools/concert_grand_geometric_memory.py": "a7c37f0c4c052cb70f5139d4adff994126b972bf043a0938070d1a63131e61b7",
+    "tools/audit-concert-grand-geometric-memory.py": "f3414541fdd39db748a839b9a40e7b168c1533cf61712b68d08b0c87f872e224",
+    "tools/concert_grand_rational_air.py": "b21c2a123482d0a91ec058d445576ff880b824438b15b6eb40171a5343e5a74b",
+    "tools/audit-concert-grand-rational-air.py": "fc8b3520df645795b329bef133d7525094ba30f5b8fcd47e36ae1c21b2ab83f3",
+    "tools/concert_grand_surface_impedance.py": "8df473dbd277348cff7405448c43786823a56c629a71d0115d452c719af1a41b",
+    "tools/concert_grand_acoustic_bath.py": "8acc2a8f74bf4f11828b08045b5f96ac10f9f336545f8199ed0d08235b1eba6f",
+    "tools/concert_grand_bath_reduction.py": "7b6ef9a06fc09408f61845543ca024080affc71e5bae90d250762e5c8ff2b1e5",
+    "tools/concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95",
+    "tools/tests/test_concert_geometric_memory.py": "76174871814d00bdbdc0ba8bb7020220cacff1b6400229d7bdf4e9bc3c688c18",
+    "tools/tests/test_concert_rational_air.py": "69ec59b3d49d53ca6b5cba01a2693b555fa8ce7f09c412ee68e1ba0e31b5b8db",
+    "tools/tests/test_concert_bath_reduction.py": "bd851dc447a1ac59d6aaab0c6ce4b368c045660174cbec0e150fdf59dc133406",
+    "tools/tests/test_concert_surface_impedance.py": "982e95f5ff3bdbd61ffacf0dfe3926532aa3bb583a3cf642c83a3303ffd52886",
+    "docs/PIANO_MODEL.md": "91adee2b2215fffaedba14f5096480ce03300b4596efea92f1591eb8fff68afc",
+    "docs/concert-grand-physics-roadmap-2026-10-02/README.md": "0e7a00d62a8f0cbbefffaaa8ca5235af344a4244f843c9ea3f1768a68e19d81d",
+    "docs/concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-kernel-geometrico.md": "16cb8ea6a31d9256141aef5b9de3123d0bd9fb21eced8b9a395bde8b9ed28074",
+    "docs/concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-carga-racional.md": "1acb9834542fc8d4f123f7e414f027357ea07ba0f1f3712a0d79ea1b567565ed"
+  },
+  "source_archive_sha256": "2f05767690bf5839413fdb6fb2e65450fafe1ae1f1368cdf8a451cfeb6d4ea51",
+  "artifacts_sha256": {
+    "Cells128x96-Rate128000-Q16.npz": "e1580c8684007164dd9ba232ee872275f5ad42bf757837a81ff724f7a1b639ae",
+    "Cells128x96-Rate128000-Q8.npz": "6418d7ecc7ebede3fd6526e1c187c85700d503b4f5f547aad3697b93422dafca",
+    "Cells128x96-Rate256000-Q8.npz": "54cecc2c774b70613a884bec5f3555c8e5bf733ce383bd992dcfc727fe6e3574",
+    "rational-v2\\Wave32000-Cells128x96-Angle48x96-Tail-Exact16.npz": "a424c05b5abce482a7a8a81e826f7f176dcb79fd1a5e8307d82127e7c1f459da",
+    "rational-v2\\Wave32000-Cells128x96-Angle48x96-Tail-Exact8.npz": "595be0a01e84db9f8227547ba3897bf22f98b224a3125ab002c598f6c313b628",
+    "spatial192\\Cells192x144-Rate128000-Q16.npz": "625fd285cd2fbd182efc8914af4a261379e98a414d7cc2f0b31429f37febf9c0",
+    "spatial256\\Cells256x192-Rate128000-Q16.npz": "7b93dd019575d5f5facfbcf887fe0218bda3a6d35352f7454edf2e704827c219"
+  },
+  "legacy_source_archive_sha256": "2159b6215b5f1af89525cf39e656e74de3e5dbf87360c28f9cbcf55a3db1e9cd",
+  "corrected_rational_manifest_sha256": "ec29c15e9d56d0bd1d904d52a46853958ccd4efc2c5bf49cb93c8722aa4632cb"
+}

@@ -1,5 +1,13 @@
 # P6 — Carga racional con certificado de energía
 
+**Corrección 2026-10-04:** la comparación de memoria v1 descontó una cola
+inercial que la referencia ya incluía y usó otra convención de derivada.
+Los RMS de fuerza de este informe son históricos y quedan sustituidos por
+[el ensayo geométrico y la convención v2](RESULTADOS-P6-kernel-geometrico.md).
+Coeficientes, pasividad, masa y mediciones de frecuencia siguen válidos.
+Los datos/ZIP originales se conservan; el código actual evita sobrescribir
+un informe v1 de memoria con resultados v2.
+
 2026-10-03–04. La etapa anterior quedó en **77f00db**, por pedido del usuario.
 **Ninguna variante se selecciona para fábrica.** Hay una representación
 compacta que pasa frecuencia y elimina la recurrencia tardía anterior, pero

@@ -200,7 +200,9 @@ class RationalAir:
         Driven sample knots plus a stationary port after the last knot.
         Gauss integration of the analytic step kernel handles every segment;
         -K(t-stop)*v_stop handles the jump, without smearing it over a step.
-        Force at the stop knot is the left limit. Both inertial delta impulses
+        Regular inertial force at knots uses the LEFT segment derivative,
+        matching the bath's exact linear drive. Force at stop is the left
+        limit. Both inertial delta impulses
         are external to this sampled array. Refine quadrature independently.
         """
         velocity=np.asarray(velocity,dtype=float)
@@ -218,5 +220,5 @@ class RationalAir:
             result[1:]+=fftconvolve(acceleration[:,mode,None],integration[:,:,mode],axes=0)[:count-1]
         knot=len(velocity)-1
         result[knot+1:]-=np.einsum('tmn,n->tm',self.step_kernel(np.arange(1,coast_steps+1)*dt),velocity[-1])
-        result[:knot]+=acceleration@self.tail_mass.T
+        result[1:knot+1]+=acceleration@self.tail_mass.T
         return result

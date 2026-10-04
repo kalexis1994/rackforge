@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--reuse-factors',action='store_true',help='reuse the frozen Raw factor with exactly these grid parameters')
     parser.add_argument('--exact-quadrature',type=int,nargs='+');parser.add_argument('--exact-only',action='store_true')
     parser.add_argument('--wide-band',action='store_true',help='diagnose load above the accepted low-bank band, without fitting it')
+    parser.add_argument('--coefficients',type=Path,help='read a frozen coefficient profile; write corrected measurements to a different output')
     args=parser.parse_args();args.output.mkdir(parents=True,exist_ok=True)
     data=np.load(args.reference/'spectrum.npz')
     with np.load(args.asset) as d:
@@ -37,13 +38,16 @@ def main():
     K=(2*np.pi*model['frequency'])**2;D=.046*2*np.pi*model['frequency']
     report_path=args.output/'resumen.json'
     report=json.loads(report_path.read_text(encoding='utf-8')) if report_path.exists() else dict(
-        criteria=CRITERIA,profiles={},baseline_commit='77f00db',asset_sha256=digest(args.asset),
+        criteria=CRITERIA,profiles={},baseline_commit='de2cb2e',asset_sha256=digest(args.asset),
         spectrum_sha256=digest(args.reference/'spectrum.npz'),panel=model['panel'],modes=surface.modes,
         environment=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__),
         method='Paired surface wave FIR, positive-real completion, Cayley continuous rational realization; no frequency fit',
         references=['https://www.dsprelated.com/freebooks/pasp/Digitizing_Bridge_Reflectance.html',
                     'https://arxiv.org/pdf/1904.13326'])
     report['criteria']=CRITERIA
+    if report.get('force_convention_version')!='total-left-derivative-v2' and any('memory' in item for item in report['profiles'].values()):
+        raise ValueError('Frozen v1 memory report: use a fresh output and --coefficients to preserve historical results')
+    report['force_convention_version']='total-left-derivative-v2'
     if not args.profile:
         for rate in args.rates:
             start=time.monotonic()
@@ -87,7 +91,16 @@ def main():
                 report_path.write_text(json.dumps(report,indent=2),encoding='utf-8');print(key,json.dumps(item),flush=True)
     else:
         if args.contact_reference is None or args.memory_reference is None:parser.error('memory needs both frozen references')
-        with np.load(args.output/f'{args.profile}.npz') as d:air=RationalAir(d['factor'],float(d['factor_rate']),d['tail_mass'] if 'tail_mass' in d else None)
+        coefficients=args.coefficients or args.output
+        if args.profile not in report['profiles']:
+            if args.coefficients is None:parser.error('missing coefficient profile')
+            frozen=json.loads((coefficients/'resumen.json').read_text(encoding='utf-8'))
+            item=frozen['profiles'][args.profile].copy()
+            item.pop('memory',None)
+            report['profiles'][args.profile]=item
+            report['inherited_frequency_manifest_sha256']=digest(coefficients/'resumen.json')
+        report['profiles'][args.profile]['coefficient_input_sha256']=digest(coefficients/f'{args.profile}.npz')
+        with np.load(coefficients/f'{args.profile}.npz') as d:air=RationalAir(d['factor'],float(d['factor_rate']),d['tail_mass'] if 'tail_mass' in d else None)
         if args.wide_band:
             geometric=RectangularLoad.from_plate(model,*report['profiles'][args.profile]['cells'])
             high=[]
@@ -108,7 +121,6 @@ def main():
             print('wide',json.dumps(high),flush=True)
         with np.load(args.contact_reference) as d:velocity=d['board_velocity']
         with np.load(args.memory_reference) as d:time_axis=d['time_s'];full=d['full_force']
-        with np.load(args.reference/'bath-fine.npz') as d:tail=d['tail_mass']
         original_t=np.arange(len(velocity))/128000
         previous=None;profiles=report['profiles'][args.profile].get('memory',{}).get('profiles',{})
         scale=float(np.linalg.norm(full[:129],axis=1).max())
@@ -129,15 +141,14 @@ def main():
             # Post-stop values are zero; the shrinking last interval resolves
             # the prescribed stop. The cutoff bath's delta tail is separate.
             slope_full=np.zeros_like(drive)
-            inside=t<.004
-            interval=np.minimum((t[inside]*128000).astype(int),len(velocity)-2)
+            inside=(t>0)&(t<=.004)
+            interval=np.clip(np.ceil(t[inside]*128000).astype(int)-1,0,len(velocity)-2)
             slope_full[inside]=np.diff(velocity,axis=0)[interval]*128000
             actual=air.sampled_force(drive,1/rate,slope_full)
             at=np.rint(time_axis*rate).astype(int);actual=actual[at]
-            # Compare the noninertial reference during the drive. At grid
-            # knots use its right-hand piecewise-linear derivative convention.
-            slope=np.zeros_like(actual);slope[:128]=np.diff(velocity,axis=0)[::4]*128000
-            compared=actual-slope@tail.T
+            # linear_drive's frozen reference ALREADY includes its own tail
+            # on the drive, with LEFT derivatives. Only stop deltas are absent.
+            compared=actual
             error=compared-full;normalization=max(np.linalg.norm(full),1e-30)
             item=dict(rate_hz=rate,memory_force_rms=rel(compared,full),
                 late_force_peak_normalized=float(np.linalg.norm((compared-full)[time_axis>=.010],axis=1).max()/scale),
@@ -146,7 +157,7 @@ def main():
                 error_partition={name:float(np.linalg.norm(error[mask])/normalization) for name,mask in
                     [('driven',time_axis<.004),('stop_to_10ms',(time_axis>=.004)&(time_axis<.010)),('after_10ms',time_axis>=.010)]},
                 maximum_error_time_s=float(time_axis[np.argmax(np.linalg.norm(error,axis=1))]),
-                scope='Prescribed frozen velocity for 4ms then stationary port; not a coupled piano note. Baseline tail removed on the driven interval; both stop delta impulses are excluded.',
+                scope='Total regular force, own tail included with LEFT derivative at drive knots; both stop delta impulses excluded. Prescribed port, not a coupled piano note.',
                 rational_direct_term_included=True)
             item['gates']={k:item[k]<CRITERIA[k] for k in ['memory_force_rms','late_force_peak_normalized']}
             profiles[str(rate)]=item;previous=compared
@@ -157,11 +168,10 @@ def main():
         memory.update(profiles=profiles,contact_input_sha256=digest(args.contact_reference),memory_reference_sha256=digest(args.memory_reference))
         if args.exact_quadrature:
             previous=None;exact={}
-            slope=np.zeros_like(full);slope[:128]=np.diff(velocity,axis=0)[::4]*128000
             for quadrature in args.exact_quadrature:
                 start=time.monotonic()
                 actual=air.linear_drive_force(velocity,1/128000,round(.060*128000),quadrature)[::4]
-                compared=actual-slope@tail.T;error=compared-full
+                compared=actual;error=compared-full
                 item=dict(quadrature=quadrature,memory_force_rms=rel(compared,full),
                     late_force_peak_normalized=float(np.linalg.norm(error[time_axis>=.010],axis=1).max()/scale),
                     quadrature_refinement=None if previous is None else rel(compared,previous),

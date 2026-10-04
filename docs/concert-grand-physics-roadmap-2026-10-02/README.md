@@ -32,7 +32,7 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Matriz P2 y contacto C4 medidos. Carga racional pasiva reduce estados 61× y elimina el eco tardío, pero falla la fuerza transitoria y la banda alta. Faltan kernel geométrico temporal, completado alto, contactos largos/banco completo, separación de pérdidas y ambas caras/borde. | Referencia medida; reducción compacta aún rechazada; integración audible pendiente |
+| P6 | Radiación y carga acústica del aire | Matriz P2, contacto C4 y kernel geométrico temporal verificados. Comparador de fuerza corregido: carga racional 61× menor queda en 1,95–1,995% frente a geometría, sin margen espacial robusto. Faltan completado alto, contactos largos/banco completo, separación de pérdidas y ambas caras/borde. | Referencia directa medida; ninguna reducción seleccionada; integración audible pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -580,10 +580,10 @@ No se implementa Vector Fitting ni se ajustan muestras/programas.
 Una cola de masa ya PSD permite 5740 estados frente a 352026 (61,33× menos).
 Z/R/X/Laplace, masa y velocidad cargada pasan los límites previos bajo 800 Hz.
 El balance del factor físico cierra por debajo de 7,22e−16 a tres pasos.
-La memoria de 64 ms ya no tiene el eco recurrente anterior, pero el mejor
-RMS de fuerza es 5,29358% con límite 2%: **rechazada para promoción**.
-Un kernel continuo con parada exacta confirma que el fallo no se resuelve
-refinando el integrador. La memoria no es una nota larga acoplada.
+La memoria de 64 ms ya no tiene el eco recurrente anterior. El RMS de fuerza
+v1 de 5,29358% quedó invalidado por una doble resta de cola y una convención
+de derivadas inconsistente; la etapa siguiente corrige el comparador. La
+memoria prescrita no es una nota larga acoplada. No se promovió la variante.
 
 Fuera de la banda baja, el diagnóstico geométrico detecta error complejo
 20,63944% a 6 kHz en esa variante. La cola inercial tampoco tiene el límite
@@ -597,3 +597,31 @@ límite y pasividad. Después retomar tabla/contactos reiterados, precisión
 del segundo contacto, demás registros y escucha. No se modifica fábrica;
 coste real, unísono, P4, pérdidas, acción/pedal y ambas caras siguen abiertos.
 Datos en `C:\SHARED\Fisica-pendiente-2026-10-03\P6-carga-racional`.
+
+### 2026-10-04 — P6 kernel geométrico y comparador corregido
+
+La carga racional anterior quedó en **de2cb2e**, por pedido del usuario.
+[Resultados, corrección y reproducción](RESULTADOS-P6-kernel-geometrico.md).
+Se integran directamente los solapamientos de celdas sobre círculos de radio
+ct: referencia continua de Rayleigh, términos locales y soporte físico de
+5,0159331 ms. Masa, Z/Laplace, límite resistivo y refinamientos temporales
+se verifican independientemente. Pasan 22 tests de esta etapa y referencias.
+
+La fuerza del baño ya incluía su cola inercial regular: el comparador v1 la
+descontaba otra vez. Se corrige a fuerza total con derivada izquierda en
+los nudos, sin las deltas de parada. El mejor RMS contra el baño pasa a
+3,58061%; los coeficientes y certificados previos conservan su validez.
+Los archivos originales quedan congelados y los informes advierten la corrección.
+
+El baño finito difiere 3,97163% de la referencia geométrica, principalmente
+tras la parada brusca. La racional fina difiere 1,94783% con celdas 128×96,
+1,98033% con 192×144 y 1,99520% con 256×192. El último cambio de referencia
+es 0,05533%, mayor que el margen final del candidato hasta 2%.
+**No se declara un pase robusto ni se selecciona para fábrica.**
+
+Siguiente: mejorar el margen de la carga compacta, respetando masa, límite
+alto y pasividad; después repetir tabla/contactos con estados persistentes.
+El kernel geométrico es un evaluador de puerto prescrito, aún sin integrador
+acoplado certificado. Banco alto, unísono, P4, pérdidas, acción/pedal y ambas
+caras/borde siguen abiertos. No se modificó audio ni paquete instalado.
+Datos en `C:\SHARED\Fisica-pendiente-2026-10-04\P6-kernel-geometrico`.

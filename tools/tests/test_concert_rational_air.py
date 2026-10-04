@@ -76,7 +76,7 @@ class RationalAirTests(unittest.TestCase):
         with self.assertRaises(ValueError):air.with_static_tail(air.static_mass()-tail)
 
     def test_exact_stop_kernel_against_independent_ode(self):
-        air=self.fixture();dt=1/128000
+        raw=self.fixture();air=raw.with_static_tail(raw.static_mass()+np.diag([.001,.002]));dt=1/128000
         velocity=np.array([[0.,0.],[.01,-.02],[.03,.01],[-.02,.025]])
         actual=air.linear_drive_force(velocity,dt,25,8)
         state=air.zero_state()
@@ -93,7 +93,7 @@ class RationalAirTests(unittest.TestCase):
                 for row in r:derivative.append(air.a*(u-row));u=2*row-u
                 return np.array(derivative).ravel()
             state=solve_ivp(ode,(0,dt),state.ravel(),method='DOP853',rtol=1e-12,atol=1e-15).y[:,-1].reshape(state.shape)
-            reference.append(force(state,v1))
+            reference.append(force(state,v1)+air.tail_mass@((v1-v0)/dt))
         np.testing.assert_allclose(actual,reference,atol=2e-14,rtol=1e-10)
         # Large t/high order: exponential underflow must not prematurely
         # erase a polynomial-amplified tail; compare a scaled recurrence.

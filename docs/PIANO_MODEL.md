@@ -2132,6 +2132,18 @@ less energy than its dry control, while the first contact barely changes.
 This is one vertical string, the 35-mode low board bank and a baffled face,
 not a demonstrated solution to the perceived attack or a new factory voice.
 
+The [P6 passive compression audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-reduccion-aire.md)
+finds that a 10.28-fold spectral-channel reduction can pass frequency-domain
+and 24 ms board/two-contact checks yet produce a spurious echo near 29 ms.
+An independent 64 ms prescribed-velocity memory test rejects it; increasing
+high-channel absorption also fails. Spatial-only truncation with unchanged
+frequency grid and broadening passes frequency/memory with 30.29% fewer
+channels, below the declared cost target. Four tests check grouping, known
+multiport fitting, static mass/energy and exact memory against independent
+ODE/matrix exponentials. No reduction is selected for factory use. Shared-pole
+matrix rational approximation, a passivity certificate and longer geometric
+kernel comparisons remain the next research step.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

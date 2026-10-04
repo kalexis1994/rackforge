@@ -32,7 +32,7 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Matriz compleja de P2, estados pasivos y contacto no lineal vertical de C4 verificados. Faltan reducción, contactos largos/banco completo, separación de pérdidas y ambas caras/borde. | Referencia con martillo y aire persistente medida; integración audible pendiente |
+| P6 | Radiación y carga acústica del aire | Matriz P2 y contacto C4 medidos. Reducir fuerte su grilla introduce ecos; control espacial conserva memoria, con ahorro insuficiente. Faltan representación compacta, contactos largos/banco completo, separación de pérdidas y ambas caras/borde. | Referencia medida; reducción ≥10× rechazada por memoria; integración audible pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -540,3 +540,30 @@ contactos reiterados y horizontes largos. Luego ampliar banda, registros,
 unísono y observación SI para escucha con ganancia común. La partición de
 pérdidas, P4/Timoshenko, acción y pedal continúan pendientes. No se cambia
 el paquete por la validación de esta referencia.
+
+### 2026-10-03 — P6 reducción y rechazo por ecos tardíos
+
+El contacto con aire anterior quedó en **6ebf47e**, por pedido del usuario.
+[Resultados y reproducción](RESULTADOS-P6-reduccion-aire.md). Cuatro pruebas
+independientes pasan. Pesos de residuos PSD no negativos y cola PSD conservan
+pasividad y masa estática. El entrenamiento usa sólo impedancias de la
+referencia física, con verificación fuera del entrenamiento.
+
+La variante de 17119 canales (10,28× menos) pasa frecuencia, tabla de 24 ms
+y dos contactos C4 de 4 ms. Pero el control acústico de 64 ms con idéntica
+velocidad prescrita detecta un eco a 29,0625 ms: error de fuerza 49,39123%
+RMS y pico tardío 55,30072% del pico inicial. **Rechazada.** La absorción
+alta baja el error pero también falla. No se cambiaron límites para aceptarla.
+
+Conservar la grilla/Γ y descartar sólo direcciones espaciales débiles pasa
+frecuencia y memoria: 0,29763% RMS, pico tardío 0,06273%. Reduce 30,29% los
+canales; no cumple el objetivo de 10× ni tiene aún todos los contactos.
+Ninguna variante se selecciona. Datos, fuentes y rechazos en
+`C:\SHARED\Fisica-pendiente-2026-10-03\P6-reduccion-aire`.
+
+Siguiente: aproximación racional matricial con polos compartidos/adaptados,
+certificación de pasividad y estos mismos controles de memoria. Contrastar
+también la referencia finita con el kernel geométrico causal al ampliar el
+horizonte. No volver a adelgazar la grilla suponiendo que pasividad o una
+curva de frecuencia buena resuelven la memoria. Fábrica y pendientes de
+banda alta, unísono, P4, pérdidas, acción/pedal continúan en el plan.

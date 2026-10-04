@@ -1,0 +1,188 @@
+{
+  "scope": "Exact spherical air-port benchmark and SI contact integration.\n\nThe sphere is an analytical test geometry, not a calibrated piano panel.\nThe support's .05 loss is explicitly material loss in this benchmark. Nothing\nis subtracted from or added to the factory's phenomenological damping.\n",
+  "baseline_commit": "aaa520d",
+  "linear": {
+    "structural_mass_kg": 0.25,
+    "structural_frequency_hz": 180.0,
+    "material_loss": 0.05,
+    "radius_m": 0.18,
+    "radiation_resistance_high_limit_kg_s": 167.58310789379559,
+    "air_mass_low_limit_kg": 0.08794448810753122,
+    "air_memory_s": 0.0005247813411078718,
+    "resistance_only_kg_s": 43.65480253310373,
+    "frequency_profiles": {
+      "Dry": {
+        "velocity_resonance_hz": 180.0,
+        "maximum_velocity_m_s_per_n": 0.07073553026306459
+      },
+      "Resistance-only": {
+        "velocity_resonance_hz": 180.0,
+        "maximum_velocity_m_s_per_n": 0.017303442140787894
+      },
+      "Sphere": {
+        "velocity_resonance_hz": 158.2,
+        "maximum_velocity_m_s_per_n": 0.0199266856838933
+      }
+    },
+    "initial_energy_j": 5e-05,
+    "final_stored_air_energy_j": 2.068870343249858e-12,
+    "final_escaped_wave_energy_j": 3.830733228780643e-05,
+    "final_material_heat_j": 1.1692647240397807e-05,
+    "maximum_energy_balance_relative_error": 8.809142651444724e-15,
+    "maximum_air_port_balance_relative_error": 8.944667923005412e-15,
+    "final_state_error_against_exponential": 3.8197724411202355e-17,
+    "negative_port_power_samples": 664.0
+  },
+  "contacts": {
+    "48": {
+      "scope": "Exact spherical air-port benchmark and SI contact integration.\n\nThe sphere is an analytical test geometry, not a calibrated piano panel.\nThe support's .05 loss is explicitly material loss in this benchmark. Nothing\nis subtracted from or added to the factory's phenomenological damping.\n",
+      "cases": {
+        "Dry-T48": {
+          "profile": "Dry",
+          "transverse": 48,
+          "axial": 96,
+          "initial_hammer_energy_j": 0.04693371904404984,
+          "final_string_energy_j": 0.028064651935300895,
+          "final_support_energy_j": 0.00023635967891368962,
+          "final_hammer_energy_j": 0.01860702303307063,
+          "final_stored_air_energy_j": 0.0,
+          "final_escaped_wave_energy_j": 0.0,
+          "final_material_and_felt_heat_j": 2.5684396764647433e-05,
+          "final_port_work_j": 0.0,
+          "external_driver_work_j": 0.0,
+          "maximum_energy_balance_relative_error": 3.1047352511163393e-15,
+          "maximum_air_port_balance_relative_error": 0.0,
+          "contact_time_s": 0.0018168116733564927,
+          "negative_port_power_samples": 0.0,
+          "nfev": 151508,
+          "frozen_mechanical_state_relative_error": 0.0
+        },
+        "Sphere-T48": {
+          "profile": "Sphere",
+          "transverse": 48,
+          "axial": 96,
+          "initial_hammer_energy_j": 0.04693371904404984,
+          "final_string_energy_j": 0.028081920684703922,
+          "final_support_energy_j": 0.00011658339042626526,
+          "final_hammer_energy_j": 0.01860702303306988,
+          "final_stored_air_energy_j": 1.7728256261729526e-05,
+          "final_escaped_wave_energy_j": 9.403124681728232e-05,
+          "final_material_and_felt_heat_j": 1.643243277074117e-05,
+          "final_port_work_j": 0.00011175950307901185,
+          "external_driver_work_j": 0.0,
+          "maximum_energy_balance_relative_error": 4.878869680325676e-15,
+          "maximum_air_port_balance_relative_error": 6.0639360373366e-18,
+          "contact_time_s": 0.0018168116733286504,
+          "negative_port_power_samples": 35.0,
+          "nfev": 151508
+        },
+        "Resistance-only-T48": {
+          "profile": "Resistance-only",
+          "transverse": 48,
+          "axial": 96,
+          "initial_hammer_energy_j": 0.04693371904404984,
+          "final_string_energy_j": 0.02804919765716311,
+          "final_support_energy_j": 0.0001841500254268956,
+          "final_hammer_energy_j": 0.01860702303306714,
+          "final_stored_air_energy_j": 0.0,
+          "final_escaped_wave_energy_j": 7.051330625772484e-05,
+          "final_material_and_felt_heat_j": 2.283502213490153e-05,
+          "final_port_work_j": 7.051330625772484e-05,
+          "external_driver_work_j": 0.0,
+          "maximum_energy_balance_relative_error": 3.5482688584186737e-15,
+          "maximum_air_port_balance_relative_error": 1.4437942946039525e-19,
+          "contact_time_s": 0.001816811673349248,
+          "negative_port_power_samples": 0.0,
+          "nfev": 151508
+        },
+        "One-way-T48": {
+          "profile": "One-way",
+          "transverse": 48,
+          "axial": 96,
+          "initial_hammer_energy_j": 0.04693371904404984,
+          "final_string_energy_j": 0.028064651935300895,
+          "final_support_energy_j": 0.00023635967891368962,
+          "final_hammer_energy_j": 0.01860702303307063,
+          "final_stored_air_energy_j": 3.17556203012179e-05,
+          "final_escaped_wave_energy_j": 0.00014538724755347332,
+          "final_material_and_felt_heat_j": 2.5684396764647433e-05,
+          "final_port_work_j": 0.00017714286785469095,
+          "external_driver_work_j": 0.00017714286785469095,
+          "maximum_energy_balance_relative_error": 3.135921207879785e-15,
+          "maximum_air_port_balance_relative_error": 9.817801203306876e-18,
+          "contact_time_s": 0.0018168116733564927,
+          "negative_port_power_samples": 37.0,
+          "nfev": 151508
+        }
+      },
+      "elapsed_s": 104.76500000001397
+    },
+    "72": {
+      "scope": "Exact spherical air-port benchmark and SI contact integration.\n\nThe sphere is an analytical test geometry, not a calibrated piano panel.\nThe support's .05 loss is explicitly material loss in this benchmark. Nothing\nis subtracted from or added to the factory's phenomenological damping.\n",
+      "cases": {
+        "Sphere-T72": {
+          "profile": "Sphere",
+          "transverse": 72,
+          "axial": 144,
+          "initial_hammer_energy_j": 0.04693371904404984,
+          "final_string_energy_j": 0.028080707438197513,
+          "final_support_energy_j": 0.00011658789342409699,
+          "final_hammer_energy_j": 0.018608233371501064,
+          "final_stored_air_energy_j": 1.7727613811966164e-05,
+          "final_escaped_wave_energy_j": 9.403057280487602e-05,
+          "final_material_and_felt_heat_j": 1.643215431066103e-05,
+          "final_port_work_j": 0.0001117581866168423,
+          "external_driver_work_j": 0.0,
+          "maximum_energy_balance_relative_error": 8.279294002976905e-15,
+          "maximum_air_port_balance_relative_error": 6.930212614098972e-18,
+          "contact_time_s": 0.001816848376138278,
+          "negative_port_power_samples": 33.0,
+          "nfev": 226664
+        }
+      },
+      "elapsed_s": 42.65600000001723
+    }
+  },
+  "modal_refinement_relative_errors": {
+    "final_string_energy_j": 4.320569590631444e-05,
+    "final_support_energy_j": 3.8623202628388284e-05,
+    "final_stored_air_energy_j": 3.624005859871828e-05,
+    "final_escaped_wave_energy_j": 7.168013404507276e-06,
+    "final_port_work_j": 1.1779559148255927e-05,
+    "contact_time_s": 2.0201360834357394e-05,
+    "bridge_displacement_rms": 4.043606307133795e-05,
+    "bridge_velocity_rms": 5.96772217191142e-05
+  },
+  "modal_gate_passed": true,
+  "source_sha256": {
+    "tools/concert_grand_air_load.py": "940f29da4fde961aa8e2173e1f8835125dd44c38d6575a43c3b8353a954b092f",
+    "tools/audit-concert-grand-air-load.py": "18285ef5265d0b6f36fbcf278456716765e0a499d637549a22c19d807056ee7a",
+    "tools/tests/test_concert_air_load.py": "d16d6bf9cdb4a1280796ba56e90bb7b59c78f7dcf24c144cecd07f3884f66414"
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1"
+  },
+  "contact_solver": {
+    "method": "DOP853",
+    "duration_s": 0.004,
+    "rtol": 1e-09,
+    "atol": 1e-13,
+    "max_step": "1/(8*highest linear structural frequency)"
+  },
+  "input_sha256": {
+    "contact-end.csv": "9e4633a05219de98bd734937885a2ece1c66b38500f59249322307fe28bff76f",
+    "transfer.csv": "0cb57ffe16fea74fb857a0af3d443e6670992bad0f916283af279b87d183cb5f"
+  },
+  "references": [
+    "https://www.mathworks.com/help/audio/ref/sphericalsourceradiationimpedance.html"
+  ],
+  "limits": [
+    "One exact spherical load; not the P2 plate radiation matrix",
+    "Material loss fixed by benchmark definition, not factory loss partition",
+    "One-string SI contact, 4 ms, C4/124 only; no audible piano candidate"
+  ],
+  "factory_package_sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+  "source_archive_sha256": "6561addd28699aaf44c2f75e4e6fd5b65ecfb734c3a9696915a85432d8fbc944"
+}

@@ -2081,6 +2081,18 @@ Structural versus radiative loss partition and reactive acoustic impedance
 remain unresolved; adding that resistance directly to the existing losses
 could count radiation twice. No observer or damping change is promoted.
 
+The [P6 reciprocal air-port benchmark](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-carga-aire.md)
+uses an exact pulsating-sphere impedance to verify reactive storage, outgoing
+wave energy and force feedback. Its passive state can return stored energy
+without negative radiation. It is connected to the SI one-string contact
+through the moving support's mixed-mass transform and passes energy, independent
+dynamics and C4/124 modal-refinement checks. The sphere is an analytical test
+geometry, not a replacement for the P2 soundboard or a factory calibration.
+Complex P2 modal impedance, surface self-interaction, loss partition and global
+acoustic-state persistence remain necessary before a complete loaded-board
+candidate. The experimental .05 material loss is defined for that benchmark;
+factory/P2 phenomenological damping is unchanged.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

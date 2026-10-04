@@ -32,7 +32,7 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Observador SI de superficie con retardos, probado en 60–800 Hz. Falta reacción del campo acústico, parte reactiva y separación de pérdidas estructurales/radiativas. | Observador medido; acoplamiento pendiente |
+| P6 | Radiación y carga acústica del aire | Observador SI probado en 60–800 Hz. Carga esférica analítica recíproca conectada al contacto SI; faltan impedancia compleja de P2 y separación de pérdidas. | Control recíproco medido; acoplamiento de tabla pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -435,3 +435,30 @@ Siguiente trabajo: ensayo reducido recíproco tabla/aire con un control
 analítico de pasividad/energía, y después fuente SI de mayor duración/banda
 para escuchar. Banco alto, unísono, masa de graves, Timoshenko, backcheck/pedal
 y coste siguen registrados. Datos en `C:\SHARED\Fisica-pendiente-2026-10-03\P3-observacion-SI`.
+
+### 2026-10-03 — P6 carga reactiva y radiación recíprocas
+
+La observación SI anterior quedó en **aaa520d**, por pedido del usuario.
+[Resultados y reproducción](RESULTADOS-P6-carga-aire.md). Se implementó la
+impedancia exacta de una esfera pulsante como control analítico, con fuerza
+recíproca, almacenamiento inercial y canal de onda saliente. Ocho pruebas
+pasan, incluyendo solución de campo, pasividad, exponencial matricial y
+contacto no lineal contra DOP853 independiente.
+
+El soporte lineal supuesto cambia su pico de velocidad de 180 a 158,2 Hz al
+cargarlo con ese puerto. Una resistencia constante sólo cambia amplitud en
+ese control. No se trasladan esas frecuencias ni la geometría esférica al piano.
+El elemento inercial puede devolver energía sin hacer negativa la radiación.
+
+C4/124 con soporte elemental y esfera pasa resolución 48→72: error de
+velocidad de soporte 0,00597% RMS, radiación 0,000717% y trabajo 0,00118%.
+El control sin aire reproduce exactamente el estado congelado. El presupuesto
+total recíproco cierra a 8,280e-15 relativo; una ablación sin reacción paga
+su energía con un driver externo contabilizado. Fábrica/paquete preservados.
+
+Siguiente: impedancia **compleja modal de P2**, autointeracción de superficie
+y realización causal/pasiva con términos entre modos. No reemplazar la placa
+por esferas por nota, ni duplicar masa/pérdida ya incluida en datos medidos.
+Conservar estado acústico global entre golpes. Después ampliar banda/duración
+para escuchar. Pendientes previos siguen abiertos. Datos en
+`C:\SHARED\Fisica-pendiente-2026-10-03\P6-carga-aire`.

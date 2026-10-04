@@ -4,6 +4,20 @@ Actualizado: 2026-10-04. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
+## Ubicación de los archivos
+
+Por pedido del usuario del 2026-10-04, los informes, planes, resúmenes y fuentes
+se mantienen en el repositorio como única copia. No duplicarlos en `C:\SHARED`
+ni crear allí ZIP de fuentes que ya conserva Git. `SHARED` puede contener los
+datos de medición y coeficientes no versionados necesarios para los ensayos,
+los paquetes entregables y los audios que el usuario solicite generar.
+
+El usuario pidió eliminar los audios existentes de `SHARED` y las copias
+idénticas de informes ya versionados: se eliminaron 2361 archivos de audio y
+134 informes/resúmenes duplicados. Las rutas históricas de escucha ya no
+contienen esos audios; se conservan en el repo sus parámetros y resultados.
+Los datos del ensayo de contacto compacto en curso permanecen en `SHARED`.
+
 ## Base y reglas de comparación
 
 - Fábrica y paquete actuales: 0.172.0. El paquete en `C:\SHARED` conserva
@@ -685,3 +699,18 @@ estados, balances y refinamientos con criterios previos. Después ampliar
 modos de tabla, notas/velocidades y observación SI para escucha. Pérdidas,
 ambas caras/borde, unísono, P4, graves y acción/pedal siguen abiertos.
 Datos y fuentes en `C:\SHARED\Fisica-pendiente-2026-10-04\P6-resolucion-aire`.
+
+### 2026-10-04 — P6 contacto compacto: implementación y control inicial
+
+La resolución polar anterior quedó en **919a3c5**, por pedido del usuario.
+[Construcción, control escalar y ensayo pendiente](RESULTADOS-P6-contacto-compacto.md).
+Se implementa el contacto SI con el puerto de 11445 estados y relanzamiento
+que conserva cuerda, tabla y aire. Pasan cinco tests nuevos y los once de
+las dos cargas de aire: 16 en total. El primer C4/124 frío a 384 kHz cierra
+el balance global a 2,22e−15 en los controles de almacenamiento cada 0,5 ms.
+
+La medición angular agrupada conserva estados y fuerzas en el fixture;
+su equivalencia en C4 y los refinamientos frío/reiterado del banco grande
+se interrumpieron al limpiar el disco y se retoman a continuación. No se
+declara selección audible ni se cambia el paquete. Informes y resúmenes
+quedan sólo en el repositorio, con trayectorias NPZ únicas en `SHARED`.

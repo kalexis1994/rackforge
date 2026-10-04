@@ -82,12 +82,29 @@ class BoundedAir:
     def static_mass(self):return self.wave.static_mass()+(self.relaxation.B*self.relaxation.tau)@self.relaxation.B.T
     def high_limit(self):return self.wave_limit+self.relaxation.B@self.relaxation.B.T
     def zero_state(self):return self.wave.zero_state(),np.zeros(self.modes)
-    def energy(self,state):return self.wave.energy(state[0])+self.relaxation.energy(state[1])
+    def energy(self,state):
+        # Exact zero-state shortcut only, never a small-energy threshold.
+        wave=self.wave.energy(state[0]) if np.any(state[0]) else 0.
+        return wave+self.relaxation.energy(state[1])
+
+    def derivative(self,state,velocity):
+        """Continuous state derivative and force, with no inertial delta."""
+        u=np.asarray(velocity,dtype=float).copy();force=self.wave.D@u;rows=[]
+        for row,residue in zip(state[0],self.wave.R[1:]):
+            rows.append(self.wave.a*(u-row));u=2*row-u;force+=residue@u
+        difference=self.relaxation.B.T@velocity-state[1]
+        force+=self.relaxation.B@difference
+        return (np.array(rows),difference/self.relaxation.tau),force
 
     def midpoint(self,state,velocity,dt):
         wave,f1,p1=self.wave.midpoint(state[0],velocity,dt)
         relax,f2,p2=self.relaxation.midpoint(state[1],velocity,dt)
         return (wave,relax),f1+f2,p1+p2
+
+    def midpoint_deferred(self,state,velocity,dt):
+        wave,f1,inputs=self.wave.midpoint_deferred(state[0],velocity,dt)
+        relax,f2,p2=self.relaxation.midpoint(state[1],velocity,dt)
+        return (wave,relax),f1+f2,p2,inputs
 
     def centered_constant(self,state,dt):
         """Centered force at zero input, without calculating radiation power."""

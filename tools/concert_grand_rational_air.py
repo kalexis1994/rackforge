@@ -171,6 +171,31 @@ class RationalAir:
             force+=self.R[j+1]@u;wave+=self.H[j+1]@u
         return 2*centered-state,force,float(wave@wave/2)
 
+    def midpoint_deferred(self,state,velocity,dt):
+        """Identical dynamics; retain centered wave inputs for a batched observer.
+
+        Radiation is an output, not a feedback term. The caller must evaluate
+        all retained inputs with radiation_batch before closing a loss ledger.
+        """
+        state=np.asarray(state,dtype=float);velocity=np.asarray(velocity,dtype=float)
+        if state.shape!=(self.order,self.modes) or velocity.shape!=(self.modes,) or not np.isfinite(dt) or dt<=0:raise ValueError('state/input/time step')
+        centered=np.empty_like(state);inputs=np.empty((self.order+1,self.modes))
+        inputs[0]=velocity;force=self.D@velocity;factor=dt*self.a/2
+        for j in range(self.order):
+            centered[j]=(state[j]+factor*inputs[j])/(1+factor)
+            inputs[j+1]=2*centered[j]-inputs[j]
+            force+=self.R[j+1]@inputs[j+1]
+        return 2*centered-state,force,inputs
+
+    def radiation_batch(self,inputs):
+        """All angular channels, same FIR factor; only summation order changes."""
+        inputs=np.asarray(inputs,dtype=float)
+        if inputs.ndim!=3 or inputs.shape[1:]!=(self.order+1,self.modes):raise ValueError('batch wave inputs')
+        if not hasattr(self,'observer_matrix'):
+            self.observer_matrix=np.ascontiguousarray(self.H.transpose(1,0,2)).reshape(self.outputs,-1)
+        field=self.observer_matrix@inputs.reshape(len(inputs),-1).T
+        return np.sum(field*field,axis=0)/2
+
     def energy(self,state,velocity=None):
         """Positive storage: energy of all future FIR wave tails.
 

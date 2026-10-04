@@ -2205,6 +2205,19 @@ The previous persistent-board trajectory uses the 32 kHz load. Nonlinear SI
 contacts with this new load, wider mechanical bases and listening remain
 pending; no factory package or audible improvement follows from these gates.
 
+The [compact SI contact pilot](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-contacto-compacto.md)
+now couples that 11445-state load to the mixed-mass hammer/string/bridge
+system without an instantaneous air mass. Five new tests cover an independent
+physical-coordinate ODE, live-state energy ledgers, decoupling, prescribed
+separated-head relaunch and a batched radiation observer with identical
+dynamics. Sixteen targeted contact/air tests pass. The first scalar C4/124
+trajectory (72 transverse / 144 axial modes, 4 ms at 384 kHz) closes its
+global budget to 2.22e-15 at independent 0.5 ms storage checkpoints.
+Large-case observer equivalence and cold/reiterated time refinements remain
+pending at this checkpoint; a balanced trajectory alone is not a precision
+or audible-improvement gate. Reports have one canonical copy in the repo;
+unversioned numerical trajectories remain in SHARED.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

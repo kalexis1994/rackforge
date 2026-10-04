@@ -32,7 +32,7 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Observador SI probado en 60–800 Hz. Carga esférica analítica recíproca conectada al contacto SI; faltan impedancia compleja de P2 y separación de pérdidas. | Control recíproco medido; acoplamiento de tabla pendiente |
+| P6 | Radiación y carga acústica del aire | Observador SI y control esférico recíproco probados. Impedancia compleja de 35 modos de P2 verificada en seis frecuencias; faltan realización temporal pasiva, separación de pérdidas y ambas caras/borde. | Matriz de carga medida; integración temporal de tabla pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -462,3 +462,28 @@ por esferas por nota, ni duplicar masa/pérdida ya incluida en datos medidos.
 Conservar estado acústico global entre golpes. Después ampliar banda/duración
 para escuchar. Pendientes previos siguen abiertos. Datos en
 `C:\SHARED\Fisica-pendiente-2026-10-03\P6-carga-aire`.
+
+### 2026-10-03 — P6 impedancia compleja de la superficie P2
+
+El control de carga acústica anterior quedó en **3bbb170**, por pedido del
+usuario. [Resultados y reproducción](RESULTADOS-P6-impedancia-tabla.md).
+Resistencia y reactancia se calculan juntas desde el kernel saliente de
+Rayleigh, conservando todos los términos entre los 35 modos físicos bajos.
+Se integra la autointeracción y la interacción singular entre celdas vecinas.
+Siete pruebas pasan, incluido un pistón circular con solución compleja analítica.
+
+En seis frecuencias de 60–800 Hz, la resistencia coincide con un integral
+angular independiente de la misma superficie a 1,470e-15 relativo. La malla
+fina aproxima la superficie Ritz continua con error máximo de 0,07351%.
+192×144→256×192 cambia la resistencia hasta 0,05718% y la reactancia hasta
+0,11058%. La potencia armónica cierra a 6,093e-16 relativo. No se recortan
+autovalores para hacer pasar pasividad. Son controles en puntos declarados,
+no una prueba temporal global ni una medición del Steinway.
+
+Siguiente: representación causal y pasiva de la matriz con estados acústicos,
+validada en una banda más densa y contra la matriz compleja, manteniendo
+interacción entre modos y energía almacenada. Separar pérdidas estructurales
+de radiación antes de integrar contactos largos. Después ampliar banco,
+unísono y pedales para escuchar con ganancia común. La fábrica y el paquete
+continúan preservados. Datos en
+`C:\SHARED\Fisica-pendiente-2026-10-03\P6-impedancia-tabla`.

@@ -2077,7 +2077,7 @@ first 4 ms and the 60–800 Hz diagnostic band are examined, not a sustained
 factory voice. This readout does not return an acoustic load to the board.
 The assumed P2 bank's radiation resistance is substantial relative to its
 chosen viscous losses, motivating the separate P6 board/air coupling step.
-Structural versus radiative loss partition and reactive acoustic impedance
+Structural versus radiative loss partition and time-domain acoustic loading
 remain unresolved; adding that resistance directly to the existing losses
 could count radiation twice. No observer or damping change is promoted.
 
@@ -2088,10 +2088,22 @@ without negative radiation. It is connected to the SI one-string contact
 through the moving support's mixed-mass transform and passes energy, independent
 dynamics and C4/124 modal-refinement checks. The sphere is an analytical test
 geometry, not a replacement for the P2 soundboard or a factory calibration.
-Complex P2 modal impedance, surface self-interaction, loss partition and global
+Loss partition, a causal passive P2 load and global
 acoustic-state persistence remain necessary before a complete loaded-board
 candidate. The experimental .05 material loss is defined for that benchmark;
 factory/P2 phenomenological damping is unchanged.
+
+The [P6 complex P2 surface load](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-impedancia-tabla.md)
+now calculates resistance and reactance from the same outgoing Rayleigh kernel,
+with Galerkin cell overlap and nonsingular self/touching-cell quadrature.
+It retains mutual terms between the 35 intrinsic modes below 800 Hz. Seven
+tests include the analytic complex impedance of a circular baffled piston.
+Surface refinement and an independent hemisphere power integral pass at six
+declared frequencies from 60 to 800 Hz. The finest resistance differs from
+the continuous Ritz-surface result by at most 0.07351% at those frequencies.
+These frequency-domain matrices are not a reduced time-domain load, a proof
+over the entire band, or a calibrated Steinway. One baffled face remains the
+geometry assumption. No new source, damping or package is promoted.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a

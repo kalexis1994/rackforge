@@ -1,0 +1,242 @@
+{
+  "scope": "P6: complex load of the frozen P2 low bank, without factory changes.",
+  "baseline_commit": "3bbb170",
+  "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+  "panel": {
+    "length": 1.4,
+    "width": 1.0,
+    "thickness": 0.008,
+    "density": 392,
+    "ex": 11500000000.0,
+    "ey": 470000000.0,
+    "gxy": 500000000.0,
+    "nuxy": 0.3
+  },
+  "modes": 35,
+  "modal_cutoff_hz": 800.0,
+  "frequency_hz": [
+    60.0,
+    80.0,
+    261.6255653,
+    523.2511306,
+    784.8766959,
+    800.0
+  ],
+  "units": "modal Z s^-1; static added mass dimensionless; intrinsic modal mass is identity",
+  "convention": "exp(+i omega t), outgoing exp(-s*r/c); force on wood is -Z*V",
+  "density_kg_m3": 1.2,
+  "speed_m_s": 343.0,
+  "criteria": {
+    "grid_complex_relative": 0.01,
+    "grid_real_relative": 0.005,
+    "grid_imag_relative": 0.005,
+    "grid_static_mass_relative": 0.005,
+    "quadrature_relative": 1e-05,
+    "same_surface_angular_relative": 1e-08,
+    "continuous_angular_relative": 0.005,
+    "reciprocity_relative": 1e-12,
+    "negative_eigenvalue_relative": 1e-08,
+    "power_balance_relative": 1e-10
+  },
+  "assumptions": [
+    "Same frozen mass-normalized P2 shapes; uniform-cell averages approximate the continuous surface",
+    "One face in an infinite rigid baffle; no second face, edge, lid or room",
+    "P2 geometry is an assumption, not an identified Steinway",
+    "Frequency samples are not a reduced causal passive time-domain realization",
+    "Diagnostic harmonic mechanical loss .046 is assumed material; factory loss partition remains unknown"
+  ],
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1"
+  },
+  "grids": {
+    "32x24": {
+      "seconds": 0.09399999998277053,
+      "reciprocity_relative": 5.398408227369608e-16,
+      "resistance_min_eigenvalue_relative": -4.315250002457469e-17,
+      "reactance_min_eigenvalue": 0.019799514009421842,
+      "static_mass_eigenvalue_range": [
+        0.008742616943218363,
+        0.12407084195796092
+      ],
+      "complex_relative": 0.06107522909465832,
+      "real_relative": 0.040881191220016336,
+      "imag_relative": 0.07499138348654093,
+      "static_mass_relative": 0.03363588430279656,
+      "real_max_per_frequency_relative": 0.045250525000300475,
+      "imag_max_per_frequency_relative": 0.08369105299593167
+    },
+    "64x48": {
+      "seconds": 0.26600000000325963,
+      "reciprocity_relative": 3.827177047774423e-16,
+      "resistance_min_eigenvalue_relative": -5.593183011019745e-17,
+      "reactance_min_eigenvalue": 0.006738456791895515,
+      "static_mass_eigenvalue_range": [
+        0.00926764549390073,
+        0.12433931797000866
+      ],
+      "complex_relative": 0.015165683722517276,
+      "real_relative": 0.009901898673690887,
+      "imag_relative": 0.01874430707271155,
+      "static_mass_relative": 0.00846891240464281,
+      "real_max_per_frequency_relative": 0.010967918182711348,
+      "imag_max_per_frequency_relative": 0.020923898110929533
+    },
+    "128x96": {
+      "seconds": 0.9220000000204891,
+      "reciprocity_relative": 3.1247541091844e-16,
+      "resistance_min_eigenvalue_relative": -1.975318599917537e-17,
+      "reactance_min_eigenvalue": 0.0051417437225052915,
+      "static_mass_eigenvalue_range": [
+        0.009405186378623238,
+        0.12440815490477194
+      ],
+      "complex_relative": 0.0030734779057199286,
+      "real_relative": 0.0019889666979368737,
+      "imag_relative": 0.0038072985811005615,
+      "static_mass_relative": 0.0017263326466223786,
+      "real_max_per_frequency_relative": 0.0022034829035179845,
+      "imag_max_per_frequency_relative": 0.00424967375031408
+    },
+    "192x144": {
+      "seconds": 2.39000000001397,
+      "reciprocity_relative": 3.8030628153408897e-16,
+      "resistance_min_eigenvalue_relative": -2.2460754401382823e-17,
+      "reactance_min_eigenvalue": 0.004990393909113388,
+      "static_mass_eigenvalue_range": [
+        0.00943107490004147,
+        0.12442101680690787
+      ],
+      "complex_relative": 0.0007993031288902056,
+      "real_relative": 0.0005160721442585656,
+      "imag_relative": 0.0009907138865667552,
+      "static_mass_relative": 0.00044970735636501436,
+      "real_max_per_frequency_relative": 0.0005717507569176244,
+      "imag_max_per_frequency_relative": 0.0011057726601744586
+    },
+    "256x192": {
+      "seconds": 4.812999999965541,
+      "reciprocity_relative": 4.581802643102868e-16,
+      "resistance_min_eigenvalue_relative": -2.679916852691165e-17,
+      "reactance_min_eigenvalue": 0.004955734518074295,
+      "static_mass_eigenvalue_range": [
+        0.00944018272542125,
+        0.12442553093141273
+      ],
+      "complex_relative": 0.0,
+      "real_relative": 0.0,
+      "imag_relative": 0.0,
+      "static_mass_relative": 0.0,
+      "real_max_per_frequency_relative": 0.0,
+      "imag_max_per_frequency_relative": 0.0
+    }
+  },
+  "quadrature": {
+    "order8_to16_complex_relative": 1.218131619231506e-12,
+    "order8_to16_static_relative": 1.1272940967226043e-12
+  },
+  "references": [
+    "https://arxiv.org/pdf/2407.00265",
+    "https://doi.org/10.1121/1.1430684",
+    "https://physics.byu.edu/docs/publication/3436"
+  ],
+  "sources": {
+    "tools/audit-concert-grand-surface-impedance.py": "bd09245b783bf42c094bdaa4e5cacc5c62f50a500a2c089cf8f351c9d97db1d3",
+    "tools/concert_grand_surface_impedance.py": "8df473dbd277348cff7405448c43786823a56c629a71d0115d452c719af1a41b",
+    "tools/tests/test_concert_surface_impedance.py": "982e95f5ff3bdbd61ffacf0dfe3926532aa3bb583a3cf642c83a3303ffd52886"
+  },
+  "same_surface_angular_relative": 1.4692144028042558e-15,
+  "continuous_angular_relative": 0.0006635444328030588,
+  "continuous_angular_per_frequency_relative": [
+    3.7662799529568185e-06,
+    6.620531617280677e-06,
+    7.100118813383248e-05,
+    0.00030573031624719194,
+    0.0007067384641245637,
+    0.0007350861695734368
+  ],
+  "right_half_plane": [
+    {
+      "s_real": 10.0,
+      "s_imag": 376.99111843077515,
+      "hermitian_min_eigenvalue_relative": 0.005361395022080379
+    },
+    {
+      "s_real": 300.0,
+      "s_imag": 1643.8419078755135,
+      "hermitian_min_eigenvalue_relative": 0.036389117667700886
+    },
+    {
+      "s_real": 1000.0,
+      "s_imag": 5026.548245743669,
+      "hermitian_min_eigenvalue_relative": 0.20863457510395503
+    }
+  ],
+  "harmonic_diagnostics": [
+    {
+      "frequency_hz": 60.0,
+      "resistance_off_diagonal_fraction": 0.5601497781401565,
+      "reactance_off_diagonal_fraction": 0.8964346719304394,
+      "full_vs_resistance_velocity_relative": 0.22829169949279132,
+      "full_vs_diagonal_velocity_relative": 0.0028481882430827646
+    },
+    {
+      "frequency_hz": 80.0,
+      "resistance_off_diagonal_fraction": 0.5727015359827946,
+      "reactance_off_diagonal_fraction": 0.9060480511475654,
+      "full_vs_resistance_velocity_relative": 0.23714623390630832,
+      "full_vs_diagonal_velocity_relative": 0.005835749190082107
+    },
+    {
+      "frequency_hz": 261.6255653,
+      "resistance_off_diagonal_fraction": 0.7469072354476943,
+      "reactance_off_diagonal_fraction": 0.9492613115325417,
+      "full_vs_resistance_velocity_relative": 0.14629402648047035,
+      "full_vs_diagonal_velocity_relative": 0.055476244977774085
+    },
+    {
+      "frequency_hz": 523.2511306,
+      "resistance_off_diagonal_fraction": 0.8920924434270805,
+      "reactance_off_diagonal_fraction": 0.9477095944356997,
+      "full_vs_resistance_velocity_relative": 0.2799393610913645,
+      "full_vs_diagonal_velocity_relative": 0.0207448560586576
+    },
+    {
+      "frequency_hz": 784.8766959,
+      "resistance_off_diagonal_fraction": 0.9523871216955092,
+      "reactance_off_diagonal_fraction": 0.9466279917052934,
+      "full_vs_resistance_velocity_relative": 0.33145202706379207,
+      "full_vs_diagonal_velocity_relative": 0.037359889947780195
+    },
+    {
+      "frequency_hz": 800.0,
+      "resistance_off_diagonal_fraction": 0.955032777421353,
+      "reactance_off_diagonal_fraction": 0.9472089800267423,
+      "full_vs_resistance_velocity_relative": 0.28377169772431093,
+      "full_vs_diagonal_velocity_relative": 0.03406120406263982
+    }
+  ],
+  "harmonic_power_balance_max_relative": 6.09260339168068e-16,
+  "gates": {
+    "grid_complex": true,
+    "grid_real": true,
+    "grid_imag": true,
+    "grid_mass": true,
+    "quadrature": true,
+    "angular_same": true,
+    "angular_continuous": true,
+    "reciprocal": true,
+    "dissipative": true,
+    "reactive": true,
+    "static_mass": true,
+    "right_half_plane": true,
+    "harmonic_power": true
+  },
+  "frozen_dependencies_sha256": {
+    "concert_grand_si_observer.py": "91b735ca1d879d8e611a9f6b2a385094f0f778d5139ced4b30caafbf066d15e2",
+    "concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95"
+  },
+  "source_archive_sha256": "6f12d4f865fcb9ee7302c483961ecdd1d6294b3adfcec4068fc08e8518d3dec7",
+  "factory_package_sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb"
+}

@@ -2140,9 +2140,23 @@ high-channel absorption also fails. Spatial-only truncation with unchanged
 frequency grid and broadening passes frequency/memory with 30.29% fewer
 channels, below the declared cost target. Four tests check grouping, known
 multiport fitting, static mass/energy and exact memory against independent
-ODE/matrix exponentials. No reduction is selected for factory use. Shared-pole
-matrix rational approximation, a passivity certificate and longer geometric
-kernel comparisons remain the next research step.
+ODE/matrix exponentials. No spectral reduction is selected for factory use.
+
+The [P6 paired-wave rational audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-carga-racional.md)
+constructs a reciprocal positive-real load from a surface FIR spectral factor
+and a Cayley map with repeated stable poles. An explicit nonnegative storage
+certificate closes work/radiation balances for arbitrary live states and steps;
+six tests include independent ODEs, an exact-stop kernel and an 80-digit
+underflow control. Completing only an already-PSD static mass residual gives
+5740 states versus 352026, and passes held-out Z/R/X/Laplace, static mass and
+loaded velocity in 60–800 Hz. It removes the previous late recurrence, but
+still fails the 64 ms prescribed-port force criterion: best RMS 5.29358%,
+limit 2%. Exact continuous-kernel quadrature confirms this failure. Independent
+geometric diagnostics expose higher-band error and an inertial tail that
+lacks the finite resistive high-frequency limit. This is not a demonstrated
+attack improvement or a real-time cost benchmark. Direct geometric transient
+comparison and a passive high-band completion precede coupled-contact and
+full-band listening checks. No rational variant is promoted to factory.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a

@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-03. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-04. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -32,7 +32,7 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Matriz P2 y contacto C4 medidos. Reducir fuerte su grilla introduce ecos; control espacial conserva memoria, con ahorro insuficiente. Faltan representación compacta, contactos largos/banco completo, separación de pérdidas y ambas caras/borde. | Referencia medida; reducción ≥10× rechazada por memoria; integración audible pendiente |
+| P6 | Radiación y carga acústica del aire | Matriz P2 y contacto C4 medidos. Carga racional pasiva reduce estados 61× y elimina el eco tardío, pero falla la fuerza transitoria y la banda alta. Faltan kernel geométrico temporal, completado alto, contactos largos/banco completo, separación de pérdidas y ambas caras/borde. | Referencia medida; reducción compacta aún rechazada; integración audible pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -567,3 +567,33 @@ también la referencia finita con el kernel geométrico causal al ampliar el
 horizonte. No volver a adelgazar la grilla suponiendo que pasividad o una
 curva de frecuencia buena resuelven la memoria. Fábrica y pendientes de
 banda alta, unísono, P4, pérdidas, acción/pedal continúan en el plan.
+
+### 2026-10-04 — P6 carga racional y límite transitorio
+
+La reducción anterior quedó en **77f00db**, por pedido del usuario.
+[Resultados y reproducción](RESULTADOS-P6-carga-racional.md). Un factor de
+ondas de la superficie, con pares angulares invertidos y transformación de
+Cayley, genera una carga recíproca pasiva con almacenamiento verificable.
+Seis pruebas nuevas pasan; las 22 de esta etapa y sus referencias pasan.
+No se implementa Vector Fitting ni se ajustan muestras/programas.
+
+Una cola de masa ya PSD permite 5740 estados frente a 352026 (61,33× menos).
+Z/R/X/Laplace, masa y velocidad cargada pasan los límites previos bajo 800 Hz.
+El balance del factor físico cierra por debajo de 7,22e−16 a tres pasos.
+La memoria de 64 ms ya no tiene el eco recurrente anterior, pero el mejor
+RMS de fuerza es 5,29358% con límite 2%: **rechazada para promoción**.
+Un kernel continuo con parada exacta confirma que el fallo no se resuelve
+refinando el integrador. La memoria no es una nota larga acoplada.
+
+Fuera de la banda baja, el diagnóstico geométrico detecta error complejo
+20,63944% a 6 kHz en esa variante. La cola inercial tampoco tiene el límite
+resistivo finito del Rayleigh físico; una corrección positiva aditiva no
+siempre es posible. Esto explica limitaciones del método, sin atribuir todavía
+todo el error a un único mecanismo. No basta aumentar factor_rate.
+
+Siguiente: contrastar el transitorio de ambos modelos con el kernel causal
+geométrico directo y completar la banda alta respetando masa, resistencia
+límite y pasividad. Después retomar tabla/contactos reiterados, precisión
+del segundo contacto, demás registros y escucha. No se modifica fábrica;
+coste real, unísono, P4, pérdidas, acción/pedal y ambas caras siguen abiertos.
+Datos en `C:\SHARED\Fisica-pendiente-2026-10-03\P6-carga-racional`.

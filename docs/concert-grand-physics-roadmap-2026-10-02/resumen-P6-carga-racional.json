@@ -1,0 +1,1100 @@
+{
+  "criteria": {
+    "complex_max": 0.02,
+    "resistance_max": 0.02,
+    "reactance_max": 0.02,
+    "laplace_max": 0.02,
+    "loaded_velocity_max": 0.05,
+    "static_mass_error": 1e-10,
+    "state_ratio": 0.1,
+    "memory_force_rms": 0.02,
+    "late_force_peak_normalized": 0.01,
+    "energy_budget": 1e-09
+  },
+  "profiles": {
+    "Wave16000-Cells64x48-Angle12x24-Raw": {
+      "states": 2940,
+      "state_ratio": 0.008351655843602462,
+      "order": 84,
+      "wave_outputs": 288,
+      "rate": 16000,
+      "cells": [
+        64,
+        48
+      ],
+      "angular": [
+        12,
+        24
+      ],
+      "stable_pole_rad_s": -32000.0,
+      "reciprocity_error": 2.0975767255717102e-16,
+      "dc_error": 2.2263111360983986e-16,
+      "complex_max": 0.0893995998432242,
+      "resistance_max": 0.04301653835200208,
+      "reactance_max": 0.12151411275314046,
+      "loaded_velocity_max": 0.05324330253999471,
+      "static_mass_error": 0.0656379352604604,
+      "raw_static_mass_error": 0.0656379352604604,
+      "laplace_max": 0.09075864363843056,
+      "mass_eigenvalue_range": [
+        0.008258740558396382,
+        0.12004513912161147
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.0,
+      "seconds": 0.15600000001722947,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": false,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": false,
+        "static_mass_error": false,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "8ca0f3d5b414ee9089eda45244bd7a371861e253221b687f5b58ff5f0753ab5e"
+    },
+    "Wave16000-Cells64x48-Angle12x24-Mass": {
+      "states": 2940,
+      "state_ratio": 0.008351655843602462,
+      "order": 84,
+      "wave_outputs": 288,
+      "rate": 16000,
+      "cells": [
+        64,
+        48
+      ],
+      "angular": [
+        12,
+        24
+      ],
+      "stable_pole_rad_s": -32000.0,
+      "reciprocity_error": 2.0898948204316423e-16,
+      "dc_error": 2.2145515712773773e-16,
+      "complex_max": 0.06744686717018386,
+      "resistance_max": 0.06277123248018002,
+      "reactance_max": 0.07225327805898678,
+      "loaded_velocity_max": 0.01901193752134587,
+      "static_mass_error": 1.4123151733535613e-14,
+      "raw_static_mass_error": 0.0656379352604604,
+      "laplace_max": 0.0668026744175097,
+      "mass_eigenvalue_range": [
+        0.00940518637862333,
+        0.12440815490477136
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.0625508098077116,
+      "seconds": 0.375,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": false,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": true,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "cfa1d59bb015f42420215173c096decfdae556ca4ea14334d30c5c0786ee6923"
+    },
+    "Wave32000-Cells64x48-Angle12x24-Raw": {
+      "states": 5740,
+      "state_ratio": 0.01630561378989052,
+      "order": 164,
+      "wave_outputs": 288,
+      "rate": 32000,
+      "cells": [
+        64,
+        48
+      ],
+      "angular": [
+        12,
+        24
+      ],
+      "stable_pole_rad_s": -64000.0,
+      "reciprocity_error": 2.0315029072086682e-16,
+      "dc_error": 3.12255279824908e-16,
+      "complex_max": 0.0554965070336583,
+      "resistance_max": 0.016889645420178855,
+      "reactance_max": 0.078497222428708,
+      "loaded_velocity_max": 0.03208778332452029,
+      "static_mass_error": 0.04453130838011007,
+      "raw_static_mass_error": 0.04453130838011007,
+      "laplace_max": 0.05725609534008478,
+      "mass_eigenvalue_range": [
+        0.008665624362802226,
+        0.12033009474074524
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.0,
+      "seconds": 0.25,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": true,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": false,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "c6659cec2103255b2b6cdf9300da3a8bd30f21b6f2769c2d06a203871af26e5b"
+    },
+    "Wave32000-Cells64x48-Angle12x24-Mass": {
+      "states": 5740,
+      "state_ratio": 0.01630561378989052,
+      "order": 164,
+      "wave_outputs": 288,
+      "rate": 32000,
+      "cells": [
+        64,
+        48
+      ],
+      "angular": [
+        12,
+        24
+      ],
+      "stable_pole_rad_s": -64000.0,
+      "reciprocity_error": 2.0290399646834193e-16,
+      "dc_error": 2.491280868542636e-16,
+      "complex_max": 0.048565515464409785,
+      "resistance_max": 0.043039113482128175,
+      "reactance_max": 0.05400839599660228,
+      "loaded_velocity_max": 0.014604542187952601,
+      "static_mass_error": 1.3468654547791533e-14,
+      "raw_static_mass_error": 0.04453130838011007,
+      "laplace_max": 0.048912318527245514,
+      "mass_eigenvalue_range": [
+        0.009405186378623224,
+        0.12440815490477303
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.03486663734151126,
+      "seconds": 0.625,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": false,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": true,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "1b80e5bf2c49b3bcb9273b184d807863faf237f875b7665777bf99679dd7c842"
+    },
+    "Wave32000-Cells128x96-Angle24x48-Raw": {
+      "states": 5740,
+      "state_ratio": 0.01630561378989052,
+      "order": 164,
+      "wave_outputs": 1152,
+      "rate": 32000,
+      "cells": [
+        128,
+        96
+      ],
+      "angular": [
+        24,
+        48
+      ],
+      "stable_pole_rad_s": -64000.0,
+      "reciprocity_error": 1.646923376614062e-16,
+      "dc_error": 2.690998579919634e-16,
+      "complex_max": 0.035347899430977124,
+      "resistance_max": 0.009222820945001048,
+      "reactance_max": 0.05033503843807193,
+      "loaded_velocity_max": 0.01872116189586941,
+      "static_mass_error": 0.029876673414130764,
+      "raw_static_mass_error": 0.029876673414130764,
+      "laplace_max": 0.03646185974699063,
+      "mass_eigenvalue_range": [
+        0.00890983144270283,
+        0.12222524648353009
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.0,
+      "seconds": 0.875,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": true,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": false,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "2a4b51727b80d37e70134b2b52fa32a8ca8dbdfd59eca229a38d0cd8b3ec45bf"
+    },
+    "Wave32000-Cells128x96-Angle24x48-Mass": {
+      "states": 5740,
+      "state_ratio": 0.01630561378989052,
+      "order": 164,
+      "wave_outputs": 1152,
+      "rate": 32000,
+      "cells": [
+        128,
+        96
+      ],
+      "angular": [
+        24,
+        48
+      ],
+      "stable_pole_rad_s": -64000.0,
+      "reciprocity_error": 1.648131465749348e-16,
+      "dc_error": 2.6109711678444954e-16,
+      "complex_max": 0.03544213088038835,
+      "resistance_max": 0.034458634826838405,
+      "reactance_max": 0.036496034805815154,
+      "loaded_velocity_max": 0.009737843086982145,
+      "static_mass_error": 9.948547600574481e-15,
+      "raw_static_mass_error": 0.029876673414130764,
+      "laplace_max": 0.035211331914439384,
+      "mass_eigenvalue_range": [
+        0.009405186378623268,
+        0.12440815490477156
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.025502628752107365,
+      "seconds": 2.077999999979511,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": false,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": true,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "00ded00b889b4c0786a31c9f0c61078460e40d28dd432febc4a1e61e7b50374a"
+    },
+    "Wave64000-Cells128x96-Angle24x48-Raw": {
+      "states": 11340,
+      "state_ratio": 0.032213529682466636,
+      "order": 324,
+      "wave_outputs": 1152,
+      "rate": 64000,
+      "cells": [
+        128,
+        96
+      ],
+      "angular": [
+        24,
+        48
+      ],
+      "stable_pole_rad_s": -128000.0,
+      "reciprocity_error": 1.7803663963781238e-16,
+      "dc_error": 2.758728973490275e-16,
+      "complex_max": 0.021561667817763027,
+      "resistance_max": 0.0023165050161499407,
+      "reactance_max": 0.031172039856024892,
+      "loaded_velocity_max": 0.01457157076266488,
+      "static_mass_error": 0.019310895461382517,
+      "raw_static_mass_error": 0.019310895461382517,
+      "laplace_max": 0.022444169887984946,
+      "mass_eigenvalue_range": [
+        0.009154246374356256,
+        0.12236737106920265
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.0,
+      "seconds": 1.5939999999827705,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": true,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": false,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "3b0e631620047078911591479d85718e97d819e48adfe004d95fad48f4f3e5a4"
+    },
+    "Wave64000-Cells128x96-Angle24x48-Mass": {
+      "states": 11340,
+      "state_ratio": 0.032213529682466636,
+      "order": 324,
+      "wave_outputs": 1152,
+      "rate": 64000,
+      "cells": [
+        128,
+        96
+      ],
+      "angular": [
+        24,
+        48
+      ],
+      "stable_pole_rad_s": -128000.0,
+      "reciprocity_error": 1.7710959556543862e-16,
+      "dc_error": 2.348802650165485e-16,
+      "complex_max": 0.02386506385407308,
+      "resistance_max": 0.021106592917148673,
+      "reactance_max": 0.026577241904539625,
+      "loaded_velocity_max": 0.007090634962190547,
+      "static_mass_error": 1.0838569109641269e-14,
+      "raw_static_mass_error": 0.019310895461382517,
+      "laplace_max": 0.02403391747942431,
+      "mass_eigenvalue_range": [
+        0.009405186378623202,
+        0.12440815490477189
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.012667870042041644,
+      "seconds": 3.952999999979511,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": false,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": true,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "5afba848e75c29e4e06fc2a779a41a745e47bee43d9b142139d69ac0cf7656e0"
+    },
+    "Wave32000-Cells128x96-Angle24x48-Tail": {
+      "states": 5740,
+      "state_ratio": 0.01630561378989052,
+      "order": 164,
+      "wave_outputs": 1152,
+      "rate": 32000,
+      "cells": [
+        128,
+        96
+      ],
+      "angular": [
+        24,
+        48
+      ],
+      "stable_pole_rad_s": -64000.0,
+      "reciprocity_error": 1.646923376614062e-16,
+      "dc_error": 2.690998579919634e-16,
+      "complex_max": 0.008601666323433052,
+      "resistance_max": 0.009222820945001048,
+      "reactance_max": 0.007859928034176547,
+      "loaded_velocity_max": 0.0030044498897021685,
+      "static_mass_error": 2.5192692930860078e-20,
+      "raw_static_mass_error": 0.029876673414130764,
+      "laplace_max": 0.007996852355366393,
+      "mass_eigenvalue_range": [
+        0.009405186378623238,
+        0.12440815490477194
+      ],
+      "tail_eigenvalue_range": [
+        0.0004125295368240713,
+        0.0021902146471279786
+      ],
+      "congruence_change": 0.0,
+      "seconds": 3.280999999959022,
+      "gates": {
+        "complex_max": true,
+        "resistance_max": true,
+        "reactance_max": true,
+        "laplace_max": true,
+        "loaded_velocity_max": true,
+        "static_mass_error": true,
+        "state_ratio": true
+      },
+      "memory": {
+        "profiles": {
+          "128000": {
+            "rate_hz": 128000,
+            "memory_force_rms": 0.0676465130184796,
+            "late_force_peak_normalized": 0.0018719985568680952,
+            "full_late_peak_normalized": 0.0018719985568680952,
+            "temporal_refinement": null,
+            "seconds": 0.46799999999348074,
+            "scope": "Prescribed frozen velocity for 4ms then stationary port; not a coupled piano note. Baseline tail removed on the driven interval; both stop delta impulses are excluded.",
+            "rational_direct_term_included": true,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          },
+          "256000": {
+            "rate_hz": 256000,
+            "memory_force_rms": 0.06643379034721636,
+            "late_force_peak_normalized": 0.0018719985568680952,
+            "full_late_peak_normalized": 0.0018719985568680952,
+            "temporal_refinement": 0.010202982940589661,
+            "seconds": 0.9220000000204891,
+            "scope": "Prescribed frozen velocity for 4ms then stationary port; not a coupled piano note. Baseline tail removed on the driven interval; both stop delta impulses are excluded.",
+            "rational_direct_term_included": true,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          }
+        },
+        "contact_input_sha256": "09c879725f7981cb922f6ba3d9decdfa3946dea315d8931b69b75c5b7371f3a3",
+        "memory_reference_sha256": "a96529edeeaa1fd20ef7f6826171ef8f0288e35135f0ca22a742ab8970fd5f75",
+        "exact_profiles": {
+          "8": {
+            "quadrature": 8,
+            "memory_force_rms": 0.06605861057923779,
+            "late_force_peak_normalized": 0.0018719985568680989,
+            "quadrature_refinement": null,
+            "error_partition": {
+              "driven": 0.03882588891383161,
+              "stop_to_10ms": 0.05329043941177658,
+              "after_10ms": 0.004052091930097838
+            },
+            "maximum_error_time_s": 0.00403125,
+            "scope": "Continuous rational step kernel and exact velocity jump; both stop tail delta impulses excluded, left wave force at stop knot",
+            "seconds": 1.547000000020489,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          },
+          "16": {
+            "quadrature": 16,
+            "memory_force_rms": 0.06605861057923833,
+            "late_force_peak_normalized": 0.0018719985568681067,
+            "quadrature_refinement": 3.652970277166711e-15,
+            "error_partition": {
+              "driven": 0.0388258889138325,
+              "stop_to_10ms": 0.05329043941177659,
+              "after_10ms": 0.004052091930097837
+            },
+            "maximum_error_time_s": 0.00403125,
+            "scope": "Continuous rational step kernel and exact velocity jump; both stop tail delta impulses excluded, left wave force at stop knot",
+            "seconds": 2.5160000000032596,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          }
+        }
+      },
+      "wide_band_diagnostic": [
+        {
+          "frequency_hz": 1000.0,
+          "complex_relative": 0.01347683005819389,
+          "resistance_relative": 0.013265581873644875,
+          "reactance_relative": 0.0139293617188103
+        },
+        {
+          "frequency_hz": 1200.0,
+          "complex_relative": 0.015905644276057136,
+          "resistance_relative": 0.0130430865385064,
+          "reactance_relative": 0.030155865367249537
+        },
+        {
+          "frequency_hz": 2000.0,
+          "complex_relative": 0.022914935718126445,
+          "resistance_relative": 0.021606127543929397,
+          "reactance_relative": 1.4965781034379302
+        },
+        {
+          "frequency_hz": 3000.0,
+          "complex_relative": 0.11290789909763477,
+          "resistance_relative": 0.08974416008760173,
+          "reactance_relative": 133.37965751353795
+        },
+        {
+          "frequency_hz": 4500.0,
+          "complex_relative": 0.5521198301679057,
+          "resistance_relative": 0.40038705299191213,
+          "reactance_relative": 1320.4853917351418
+        },
+        {
+          "frequency_hz": 6000.0,
+          "complex_relative": 0.7831497218067232,
+          "resistance_relative": 0.5621520373405983,
+          "reactance_relative": 1527.579642554677
+        }
+      ],
+      "physical_factor_certificate": [
+        {
+          "dt_s": 2.0833333333333333e-05,
+          "storage_j": 5.127251061560708e-08,
+          "radiated_j": 6.175118931638185e-10,
+          "balance_relative": 5.142401202624544e-16
+        },
+        {
+          "dt_s": 5.208333333333333e-06,
+          "storage_j": 5.5726740844167696e-08,
+          "radiated_j": 4.0517106767011456e-10,
+          "balance_relative": 1.7904987781041513e-16
+        },
+        {
+          "dt_s": 1.3020833333333333e-06,
+          "storage_j": 5.4083587816167716e-08,
+          "radiated_j": 2.7371230521798464e-10,
+          "balance_relative": 1.0992910960222176e-16
+        }
+      ],
+      "coefficient_file_sha256": "345abe1fe1797eed273148d328d9de49ddd5b52e07348e246f1f0a1432337a13",
+      "certificate_passed": true
+    },
+    "Wave64000-Cells128x96-Angle24x48-Tail": {
+      "states": 11340,
+      "state_ratio": 0.032213529682466636,
+      "order": 324,
+      "wave_outputs": 1152,
+      "rate": 64000,
+      "cells": [
+        128,
+        96
+      ],
+      "angular": [
+        24,
+        48
+      ],
+      "stable_pole_rad_s": -128000.0,
+      "reciprocity_error": 1.7803663963781238e-16,
+      "dc_error": 2.758728973490275e-16,
+      "complex_max": 0.0021753818529818844,
+      "resistance_max": 0.0023165050161499407,
+      "reactance_max": 0.002008281964469329,
+      "loaded_velocity_max": 0.0007605155300275338,
+      "static_mass_error": 0.0,
+      "raw_static_mass_error": 0.019310895461382517,
+      "laplace_max": 0.0020251984234473477,
+      "mass_eigenvalue_range": [
+        0.009405186378623238,
+        0.12440815490477194
+      ],
+      "tail_eigenvalue_range": [
+        0.00023895050499086294,
+        0.0020413399889725728
+      ],
+      "congruence_change": 0.0,
+      "seconds": 6.389999999955762,
+      "gates": {
+        "complex_max": true,
+        "resistance_max": true,
+        "reactance_max": true,
+        "laplace_max": true,
+        "loaded_velocity_max": true,
+        "static_mass_error": true,
+        "state_ratio": true
+      },
+      "memory": {
+        "profiles": {
+          "256000": {
+            "rate_hz": 256000,
+            "memory_force_rms": 0.0881925542007127,
+            "late_force_peak_normalized": 0.0018719985568680952,
+            "full_late_peak_normalized": 0.0018719985568680952,
+            "temporal_refinement": null,
+            "seconds": 1.8439999999827705,
+            "scope": "Prescribed frozen velocity for 4ms then stationary port; not a coupled piano note. Baseline tail removed on the driven interval; both stop delta impulses are excluded.",
+            "rational_direct_term_included": true,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          },
+          "512000": {
+            "rate_hz": 512000,
+            "memory_force_rms": 0.08796601206530505,
+            "late_force_peak_normalized": 0.0018719985568680952,
+            "full_late_peak_normalized": 0.0018719985568680952,
+            "temporal_refinement": 0.005328269591574169,
+            "seconds": 4.1560000000172295,
+            "scope": "Prescribed frozen velocity for 4ms then stationary port; not a coupled piano note. Baseline tail removed on the driven interval; both stop delta impulses are excluded.",
+            "rational_direct_term_included": true,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          }
+        },
+        "contact_input_sha256": "09c879725f7981cb922f6ba3d9decdfa3946dea315d8931b69b75c5b7371f3a3",
+        "memory_reference_sha256": "a96529edeeaa1fd20ef7f6826171ef8f0288e35135f0ca22a742ab8970fd5f75",
+        "exact_profiles": {
+          "8": {
+            "quadrature": 8,
+            "memory_force_rms": 0.08768067372925967,
+            "late_force_peak_normalized": 0.0018719985568680787,
+            "quadrature_refinement": null,
+            "error_partition": {
+              "driven": 0.038052214791243585,
+              "stop_to_10ms": 0.07888922642597013,
+              "after_10ms": 0.004052091930097838
+            },
+            "maximum_error_time_s": 0.00403125,
+            "scope": "Continuous rational step kernel and exact velocity jump; both stop tail delta impulses excluded, left wave force at stop knot",
+            "seconds": 2.2810000000172295,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          },
+          "16": {
+            "quadrature": 16,
+            "memory_force_rms": 0.08768067316567837,
+            "late_force_peak_normalized": 0.0018719985568680772,
+            "quadrature_refinement": 9.226951518530348e-09,
+            "error_partition": {
+              "driven": 0.038052213491371216,
+              "stop_to_10ms": 0.07888922642657646,
+              "after_10ms": 0.004052091930097837
+            },
+            "maximum_error_time_s": 0.00403125,
+            "scope": "Continuous rational step kernel and exact velocity jump; both stop tail delta impulses excluded, left wave force at stop knot",
+            "seconds": 3.905999999959022,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          }
+        }
+      },
+      "wide_band_diagnostic": [
+        {
+          "frequency_hz": 1000.0,
+          "complex_relative": 0.0034073600841150195,
+          "resistance_relative": 0.003336141509638181,
+          "reactance_relative": 0.0035587143726661472
+        },
+        {
+          "frequency_hz": 1200.0,
+          "complex_relative": 0.0040342757495490005,
+          "resistance_relative": 0.0032668960510270715,
+          "reactance_relative": 0.007788101091121493
+        },
+        {
+          "frequency_hz": 2000.0,
+          "complex_relative": 0.009007872928695423,
+          "resistance_relative": 0.005576205779154481,
+          "reactance_relative": 1.3868482674690068
+        },
+        {
+          "frequency_hz": 3000.0,
+          "complex_relative": 0.12522764866914074,
+          "resistance_relative": 0.09266013668816565,
+          "reactance_relative": 163.99041315982774
+        },
+        {
+          "frequency_hz": 4500.0,
+          "complex_relative": 0.639987809988269,
+          "resistance_relative": 0.4596812924510032,
+          "reactance_relative": 1546.666074710777
+        },
+        {
+          "frequency_hz": 6000.0,
+          "complex_relative": 0.9447482646178565,
+          "resistance_relative": 0.6589122640920855,
+          "reactance_relative": 1896.770669594597
+        }
+      ],
+      "high_frequency_limit": {
+        "physical_resistance_eigenvalue_range": [
+          42.481448598338176,
+          101.33239057842623
+        ],
+        "missing_resistance_eigenvalue_range": [
+          42.45683395991415,
+          100.82133053818568
+        ],
+        "passive_additive_resistance_possible": true,
+        "inertial_tail_is_unbounded_at_infinity": true
+      },
+      "physical_factor_certificate": [
+        {
+          "dt_s": 2.0833333333333333e-05,
+          "storage_j": 4.315721965495429e-08,
+          "radiated_j": 2.433573329708623e-10,
+          "balance_relative": 7.211463295396717e-16
+        },
+        {
+          "dt_s": 5.208333333333333e-06,
+          "storage_j": 4.1964833326889604e-08,
+          "radiated_j": 1.275340691820999e-10,
+          "balance_relative": 2.1004833580192213e-16
+        },
+        {
+          "dt_s": 1.3020833333333333e-06,
+          "storage_j": 4.159024376162191e-08,
+          "radiated_j": 2.239704341817395e-11,
+          "balance_relative": 6.592054093094067e-16
+        }
+      ],
+      "coefficient_file_sha256": "f9817e8dcf2cb67c2449a87d738e928c7c728865a2e0d28eeb2b6c81e101cb93",
+      "certificate_passed": true
+    },
+    "Wave32000-Cells128x96-Angle48x96-Raw": {
+      "states": 5740,
+      "state_ratio": 0.01630561378989052,
+      "order": 164,
+      "wave_outputs": 4608,
+      "rate": 32000,
+      "cells": [
+        128,
+        96
+      ],
+      "angular": [
+        48,
+        96
+      ],
+      "stable_pole_rad_s": -64000.0,
+      "reciprocity_error": 1.3174326119690266e-16,
+      "dc_error": 3.047794721438209e-16,
+      "complex_max": 0.03518833841829897,
+      "resistance_max": 0.009222898667265262,
+      "reactance_max": 0.050099377145091314,
+      "loaded_velocity_max": 0.018726061680411944,
+      "static_mass_error": 0.029679847944521564,
+      "raw_static_mass_error": 0.029679847944521564,
+      "laplace_max": 0.03629020973724644,
+      "mass_eigenvalue_range": [
+        0.008857802243059784,
+        0.12305490302234592
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.0,
+      "seconds": 180.81199999997625,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": true,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": false,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "dd8a1ce04d2898af82ddc9f8435b5c5f6f2acb12d1a52e490f91238289140103"
+    },
+    "Wave32000-Cells128x96-Angle48x96-Mass": {
+      "states": 5740,
+      "state_ratio": 0.01630561378989052,
+      "order": 164,
+      "wave_outputs": 4608,
+      "rate": 32000,
+      "cells": [
+        128,
+        96
+      ],
+      "angular": [
+        48,
+        96
+      ],
+      "stable_pole_rad_s": -64000.0,
+      "reciprocity_error": 1.3795637381746764e-16,
+      "dc_error": 3.14079360256227e-16,
+      "complex_max": 0.03676768072350923,
+      "resistance_max": 0.038972739784538045,
+      "reactance_max": 0.03417129723717322,
+      "loaded_velocity_max": 0.010663253987933954,
+      "static_mass_error": 1.0245585457352482e-14,
+      "raw_static_mass_error": 0.029679847944521564,
+      "laplace_max": 0.03627895685948812,
+      "mass_eigenvalue_range": [
+        0.009405186378623323,
+        0.12440815490477239
+      ],
+      "tail_eigenvalue_range": [
+        0.0,
+        0.0
+      ],
+      "congruence_change": 0.02687807477456435,
+      "seconds": 185.43699999997625,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": false,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": true,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "63f4c9b263050700a12161e58fdae7cb8590252c15b3e83fd8b907dd508382b5"
+    },
+    "Wave32000-Cells128x96-Angle48x96-Tail": {
+      "states": 5740,
+      "state_ratio": 0.01630561378989052,
+      "order": 164,
+      "wave_outputs": 4608,
+      "rate": 32000,
+      "cells": [
+        128,
+        96
+      ],
+      "angular": [
+        48,
+        96
+      ],
+      "stable_pole_rad_s": -64000.0,
+      "reciprocity_error": 1.3174326119690266e-16,
+      "dc_error": 3.047794721438209e-16,
+      "complex_max": 0.008597604433692597,
+      "resistance_max": 0.009222898667265262,
+      "reactance_max": 0.007850476494424422,
+      "loaded_velocity_max": 0.0030035607682153687,
+      "static_mass_error": 3.184258322391117e-21,
+      "raw_static_mass_error": 0.029679847944521564,
+      "laplace_max": 0.007992397024618902,
+      "mass_eigenvalue_range": [
+        0.009405186378623238,
+        0.12440815490477194
+      ],
+      "tail_eigenvalue_range": [
+        0.0003525341952395535,
+        0.0014469550526717834
+      ],
+      "congruence_change": 0.0,
+      "seconds": 189.88999999995576,
+      "gates": {
+        "complex_max": true,
+        "resistance_max": true,
+        "reactance_max": true,
+        "laplace_max": true,
+        "loaded_velocity_max": true,
+        "static_mass_error": true,
+        "state_ratio": true
+      },
+      "physical_factor_certificate": [
+        {
+          "dt_s": 2.0833333333333333e-05,
+          "storage_j": 5.0913872842620264e-08,
+          "radiated_j": 5.968489851516144e-10,
+          "balance_relative": 4.366291095371824e-16
+        },
+        {
+          "dt_s": 5.208333333333333e-06,
+          "storage_j": 5.3974610756776677e-08,
+          "radiated_j": 3.87390108436667e-10,
+          "balance_relative": 4.3294156228239455e-16
+        },
+        {
+          "dt_s": 1.3020833333333333e-06,
+          "storage_j": 5.357036019563428e-08,
+          "radiated_j": 2.611724464194239e-10,
+          "balance_relative": 4.941124066560605e-16
+        }
+      ],
+      "memory": {
+        "profiles": {},
+        "contact_input_sha256": "09c879725f7981cb922f6ba3d9decdfa3946dea315d8931b69b75c5b7371f3a3",
+        "memory_reference_sha256": "a96529edeeaa1fd20ef7f6826171ef8f0288e35135f0ca22a742ab8970fd5f75",
+        "exact_profiles": {
+          "8": {
+            "quadrature": 8,
+            "memory_force_rms": 0.052935843047382185,
+            "late_force_peak_normalized": 0.001871998556868086,
+            "quadrature_refinement": null,
+            "error_partition": {
+              "driven": 0.03882030741979842,
+              "stop_to_10ms": 0.03575986244324022,
+              "after_10ms": 0.004052091930097838
+            },
+            "maximum_error_time_s": 0.00403125,
+            "scope": "Continuous rational step kernel and exact velocity jump; both stop tail delta impulses excluded, left wave force at stop knot",
+            "seconds": 1.5619999999762513,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          },
+          "16": {
+            "quadrature": 16,
+            "memory_force_rms": 0.052935843047383344,
+            "late_force_peak_normalized": 0.0018719985568680954,
+            "quadrature_refinement": 8.805886850640416e-15,
+            "error_partition": {
+              "driven": 0.03882030741979992,
+              "stop_to_10ms": 0.035759862443240295,
+              "after_10ms": 0.004052091930097836
+            },
+            "maximum_error_time_s": 0.00403125,
+            "scope": "Continuous rational step kernel and exact velocity jump; both stop tail delta impulses excluded, left wave force at stop knot",
+            "seconds": 2.625,
+            "gates": {
+              "memory_force_rms": false,
+              "late_force_peak_normalized": true
+            }
+          }
+        }
+      },
+      "wide_band_diagnostic": [
+        {
+          "frequency_hz": 1000.0,
+          "complex_relative": 0.01347480247168156,
+          "resistance_relative": 0.013263206202839916,
+          "reactance_relative": 0.013928060215621171
+        },
+        {
+          "frequency_hz": 1200.0,
+          "complex_relative": 0.015894116174735577,
+          "resistance_relative": 0.01303926491433507,
+          "reactance_relative": 0.030114704376120103
+        },
+        {
+          "frequency_hz": 2000.0,
+          "complex_relative": 0.022061802225475317,
+          "resistance_relative": 0.02157344495258932,
+          "reactance_relative": 0.90519945696577
+        },
+        {
+          "frequency_hz": 3000.0,
+          "complex_relative": 0.053079198708696124,
+          "resistance_relative": 0.05080711505443905,
+          "reactance_relative": 29.90898059749717
+        },
+        {
+          "frequency_hz": 4500.0,
+          "complex_relative": 0.11768401536192723,
+          "resistance_relative": 0.10717607350725619,
+          "reactance_relative": 168.83983664114157
+        },
+        {
+          "frequency_hz": 6000.0,
+          "complex_relative": 0.2063943795761839,
+          "resistance_relative": 0.17429426736641826,
+          "reactance_relative": 309.69801562636195
+        }
+      ],
+      "high_frequency_limit": {
+        "physical_resistance_eigenvalue_range": [
+          42.481448598338176,
+          101.33239057842623
+        ],
+        "missing_resistance_eigenvalue_range": [
+          -63.13422075885084,
+          99.69687563803625
+        ],
+        "passive_additive_resistance_possible": false,
+        "inertial_tail_is_unbounded_at_infinity": true
+      },
+      "certificate_passed": true,
+      "coefficient_file_sha256": "b2ea7c2b013c1227b3868dffd13cf6fda4239ece284868eb4315ea090951cc91"
+    },
+    "Wave16000-Cells64x48-Angle12x24-Tail": {
+      "states": 2940,
+      "state_ratio": 0.008351655843602462,
+      "order": 84,
+      "wave_outputs": 288,
+      "rate": 16000,
+      "cells": [
+        64,
+        48
+      ],
+      "angular": [
+        12,
+        24
+      ],
+      "stable_pole_rad_s": -32000.0,
+      "reciprocity_error": 2.0975767255717102e-16,
+      "dc_error": 2.2263111360983986e-16,
+      "complex_max": 0.03980165141730141,
+      "resistance_max": 0.04301653835200208,
+      "reactance_max": 0.03592413662879387,
+      "loaded_velocity_max": 0.015950776169895393,
+      "static_mass_error": 1.9076738205123721e-19,
+      "raw_static_mass_error": 0.0656379352604604,
+      "laplace_max": 0.03761623970885517,
+      "mass_eigenvalue_range": [
+        0.009405186378623238,
+        0.124408154904772
+      ],
+      "tail_eigenvalue_range": [
+        0.0006664569882132406,
+        0.004391254439476161
+      ],
+      "congruence_change": 0.0,
+      "seconds": 0.5779999999795109,
+      "gates": {
+        "complex_max": false,
+        "resistance_max": false,
+        "reactance_max": false,
+        "laplace_max": false,
+        "loaded_velocity_max": true,
+        "static_mass_error": true,
+        "state_ratio": true
+      },
+      "coefficient_file_sha256": "0c40d8e21c382494f3f0322135b104644e2dd757c207f301a1c0ee3d117a14d0"
+    }
+  },
+  "baseline_commit": "77f00db",
+  "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+  "spectrum_sha256": "60b383fdd94610cf33d3b7b920274d33405f88c98d12a06a2511ef7f1f56117f",
+  "panel": {
+    "length": 1.4,
+    "width": 1.0,
+    "thickness": 0.008,
+    "density": 392,
+    "ex": 11500000000.0,
+    "ey": 470000000.0,
+    "gxy": 500000000.0,
+    "nuxy": 0.3
+  },
+  "modes": 35,
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1"
+  },
+  "method": "Paired surface wave FIR, positive-real completion, Cayley continuous rational realization; no frequency fit",
+  "references": [
+    "https://www.dsprelated.com/freebooks/pasp/Digitizing_Bridge_Reflectance.html",
+    "https://arxiv.org/pdf/1904.13326"
+  ],
+  "rejected_tails": {
+    "32000-[64, 48]-[12, 24]": [
+      -0.0001940161349058031,
+      0.004085818177269947
+    ]
+  },
+  "completed_local_date": "2026-10-04",
+  "archived_at_utc": "2026-10-04T03:04:15.490733+00:00",
+  "sources": {
+    "tools/concert_grand_rational_air.py": "ace421c5fccf3e40d485768b672b8e48528d206bc6d17d915adc67e460552403",
+    "tools/audit-concert-grand-rational-air.py": "0f0507e0ee8e9f15989d668ab4b3aa17a9e19e808455d7fa25834cc80089441a",
+    "tools/tests/test_concert_rational_air.py": "44dc30e82f4c82149d575bbaed88d33dba4c19fb57697a182e460a9681101606",
+    "tools/concert_grand_acoustic_bath.py": "8acc2a8f74bf4f11828b08045b5f96ac10f9f336545f8199ed0d08235b1eba6f",
+    "tools/concert_grand_surface_impedance.py": "8df473dbd277348cff7405448c43786823a56c629a71d0115d452c719af1a41b",
+    "tools/concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95",
+    "docs/concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-carga-racional.md": "e97e9c100c17184695ae2c703609772101cade98983531ad5149addb74ba690f"
+  },
+  "tests": {
+    "passed": 22,
+    "new_tests": 6,
+    "log_sha256": "3543a7bcb5a7559a8a04f518d4e24c16b7f90a6935a426e67c224870dbeb904d"
+  },
+  "full_bath_sha256": "0c9948d8305bb5f61d8c75f19aff3a5ab8058176f6f1afc36ca0bd5e14d7a8d5",
+  "package": {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.172.0.rfplugin",
+    "sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+    "unchanged": true
+  },
+  "decision": {
+    "selected_profile": null,
+    "factory_promoted": false,
+    "reason": "Low-band transfer and late-memory peak pass; all checked rational candidates still fail the unchanged 2% full memory-force criterion",
+    "next": "Compare both rational and finite-bath transients against the direct causal geometric kernel; complete high-band load while preserving mass, finite radiation limit and passivity",
+    "pending": [
+      "Reduced coupled board and two-contact bank",
+      "Second-contact precision refinement",
+      "Full-band multi-register/unison",
+      "Loss partition and second face/edge",
+      "Real-time cost and common-gain audition"
+    ]
+  },
+  "source_zip_sha256": "2159b6215b5f1af89525cf39e656e74de3e5dbf87360c28f9cbcf55a3db1e9cd"
+}

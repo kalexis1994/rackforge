@@ -32,7 +32,7 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Observador SI y control esférico recíproco probados. Impedancia compleja de 35 modos de P2 verificada en seis frecuencias; faltan realización temporal pasiva, separación de pérdidas y ambas caras/borde. | Matriz de carga medida; integración temporal de tabla pendiente |
+| P6 | Radiación y carga acústica del aire | Matriz compleja de P2 y estados temporales pasivos verificados en 187 frecuencias y 24 ms. Faltan contacto no lineal, reducción, separación de pérdidas y ambas caras/borde. | Referencia temporal medida; integración con martillo y cola larga pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -487,3 +487,28 @@ de radiación antes de integrar contactos largos. Después ampliar banco,
 unísono y pedales para escuchar con ganancia común. La fábrica y el paquete
 continúan preservados. Datos en
 `C:\SHARED\Fisica-pendiente-2026-10-03\P6-impedancia-tabla`.
+
+### 2026-10-03 — P6 estados acústicos y tabla cargada en el tiempo
+
+La matriz compleja anterior quedó en **ec03076**, por pedido del usuario.
+[Resultados y reproducción](RESULTADOS-P6-estados-acusticos.md). Realización
+espectral mediante canales oscilatorios recíprocos y masa de cola positiva.
+Su identidad de energía establece pasividad; seis pruebas independientes
+pasan. En 187 frecuencias de 60–800 Hz, el error máximo de impedancia compleja
+es 0,22332% y el de velocidad de tabla cargada 0,20272% frente al control
+Rayleigh de la misma superficie. La absorción del baño es numérica y se
+documenta separadamente de pérdidas físicas y ondas almacenadas.
+
+Dos impulsos separados 8 ms conservan el aire. El ensayo de 24 ms necesita
+192→384 kHz para pasar el criterio temporal de 0,1%: velocidad cambia
+0,03535% y desplazamiento 0,00867%. El balance total cierra a 6,168e−13
+relativo, incluyendo trabajo instantáneo de la masa de cola. Hay devolución
+de energía al puerto con absorción no negativa. No se promovió audio/paquete.
+
+Siguiente: contacto no lineal SI con esta referencia, incluyendo la cola
+inercial en la masa compartida. Luego reducir coste y verificar horizontes
+largos y recurrencias antes de escuchar. El banco tiene 352026 estados de
+aire y no es una implementación lista para tiempo real. Partición de pérdidas,
+segunda cara/borde, banco alto, unísono, Timoshenko, graves y acción/pedal
+siguen abiertos. Datos en
+`C:\SHARED\Fisica-pendiente-2026-10-03\P6-estados-acusticos`.

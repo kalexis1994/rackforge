@@ -2077,7 +2077,7 @@ first 4 ms and the 60–800 Hz diagnostic band are examined, not a sustained
 factory voice. This readout does not return an acoustic load to the board.
 The assumed P2 bank's radiation resistance is substantial relative to its
 chosen viscous losses, motivating the separate P6 board/air coupling step.
-Structural versus radiative loss partition and time-domain acoustic loading
+Structural versus radiative loss partition and factory time-domain acoustic loading
 remain unresolved; adding that resistance directly to the existing losses
 could count radiation twice. No observer or damping change is promoted.
 
@@ -2088,7 +2088,7 @@ without negative radiation. It is connected to the SI one-string contact
 through the moving support's mixed-mass transform and passes energy, independent
 dynamics and C4/124 modal-refinement checks. The sphere is an analytical test
 geometry, not a replacement for the P2 soundboard or a factory calibration.
-Loss partition, a causal passive P2 load and global
+Loss partition, a compact causal passive P2 load and global
 acoustic-state persistence remain necessary before a complete loaded-board
 candidate. The experimental .05 material loss is defined for that benchmark;
 factory/P2 phenomenological damping is unchanged.
@@ -2104,6 +2104,19 @@ the continuous Ritz-surface result by at most 0.07351% at those frequencies.
 These frequency-domain matrices are not a reduced time-domain load, a proof
 over the entire band, or a calibrated Steinway. One baffled face remains the
 geometry assumption. No new source, damping or package is promoted.
+
+The [P6 spectral acoustic-state reference](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-estados-acusticos.md)
+realizes the same low P2 bank as reciprocal oscillator ports with a positive
+inertial tail. Its energy identity proves passivity of the realized system;
+six tests check independent state dynamics, analytic sphere transfer, energy
+and re-strike persistence. Against the Rayleigh matrices at 187 frequencies
+in 60–800 Hz, maximum complex impedance error is 0.22332% and maximum loaded
+board-velocity error is 0.20272%. A 24 ms two-impulse board control passes
+192→384 kHz refinement, energy and interface-work budgets. Numerical bath
+absorption is distinguished from physical material/radiative losses; the bath
+stores both near-field energy and waves. Its 352026 air states are an offline
+reference. Nonlinear-contact coupling, reduction, long-horizon recurrence,
+loss separation and full-band audition remain pending.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a

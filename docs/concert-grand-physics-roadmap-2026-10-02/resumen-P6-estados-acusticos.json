@@ -1,0 +1,334 @@
+{
+  "scope": "Offline P2 spectral acoustic states: transfer, energy and finite horizon.",
+  "baseline_commit": "ec03076",
+  "criteria": {
+    "complex_max_relative": 0.02,
+    "resistance_max_relative": 0.02,
+    "reactance_max_relative": 0.02,
+    "laplace_max_relative": 0.02,
+    "static_mass_relative": 1e-10,
+    "spectral_roundoff_relative": 1e-10,
+    "loaded_velocity_max_relative": 0.05,
+    "time_energy_balance_relative": 1e-09,
+    "time_velocity_refinement_relative": 0.001,
+    "time_displacement_refinement_relative": 0.001,
+    "broadening_velocity_relative": 0.01,
+    "port_energy_balance_relative": 1e-09
+  },
+  "profiles": {
+    "2.0": {
+      "construction": {
+        "segments": 1680,
+        "ports": 56606,
+        "gamma_hz": 2.0,
+        "cutoff_hz": 6000.0,
+        "min_spacing_hz": 1.0,
+        "max_spacing_hz": 10.0,
+        "source_roundoff_relative": 7.999204957857707e-13,
+        "spectral_roundoff_relative": 7.035278926228383e-13,
+        "tail_roundoff_relative": 3.6137960077627065e-15,
+        "tail_mass_eigenvalues": [
+          0.0007178024255349185,
+          0.0017136577668808068
+        ]
+      },
+      "seconds": 1.25,
+      "complex_rms_relative": 0.008420915904940006,
+      "complex_max_relative": 0.008483614539601357,
+      "resistance_rms_relative": 0.009135150573966215,
+      "resistance_max_relative": 0.021309948714199445,
+      "reactance_rms_relative": 0.00785001289017995,
+      "reactance_max_relative": 0.008532080676155757,
+      "laplace_max_relative": 0.008028002673998454,
+      "static_mass_relative": 1.4931530088712614e-15,
+      "loaded_velocity_max_relative": 0.008113018022712607,
+      "positive_real_min_relative": 2.4116211959745207e-05
+    },
+    "1.0": {
+      "construction": {
+        "segments": 2880,
+        "ports": 96410,
+        "gamma_hz": 1.0,
+        "cutoff_hz": 6000.0,
+        "min_spacing_hz": 0.5,
+        "max_spacing_hz": 10.0,
+        "source_roundoff_relative": 7.999204957857707e-13,
+        "spectral_roundoff_relative": 7.470117679819214e-13,
+        "tail_roundoff_relative": 3.3774612089719096e-15,
+        "tail_mass_eigenvalues": [
+          0.0007178024255351373,
+          0.001713657766880811
+        ]
+      },
+      "seconds": 2.3439999999827705,
+      "complex_rms_relative": 0.004284728936244203,
+      "complex_max_relative": 0.00432390807278557,
+      "resistance_rms_relative": 0.004624398113032265,
+      "resistance_max_relative": 0.01086186770658972,
+      "reactance_rms_relative": 0.0040146104524295964,
+      "reactance_max_relative": 0.004392507796680677,
+      "laplace_max_relative": 0.004039579062104832,
+      "static_mass_relative": 3.3742894765358194e-15,
+      "loaded_velocity_max_relative": 0.004056948202945451,
+      "positive_real_min_relative": 1.1950736505348126e-05
+    },
+    "0.5": {
+      "construction": {
+        "segments": 5280,
+        "ports": 176013,
+        "gamma_hz": 0.5,
+        "cutoff_hz": 6000.0,
+        "min_spacing_hz": 0.25,
+        "max_spacing_hz": 10.0,
+        "source_roundoff_relative": 7.999204957857707e-13,
+        "spectral_roundoff_relative": 7.693426216044103e-13,
+        "tail_roundoff_relative": 3.4722628036480557e-15,
+        "tail_mass_eigenvalues": [
+          0.0007178024255348781,
+          0.0017136577668808006
+        ]
+      },
+      "seconds": 4.5310000000172295,
+      "complex_rms_relative": 0.0022004349740812703,
+      "complex_max_relative": 0.002233203950273289,
+      "resistance_rms_relative": 0.0023443594731820836,
+      "resistance_max_relative": 0.005496766151689192,
+      "reactance_rms_relative": 0.002087425497181458,
+      "reactance_max_relative": 0.0023211507583176328,
+      "laplace_max_relative": 0.0020276758079431833,
+      "static_mass_relative": 2.7613089390189636e-15,
+      "loaded_velocity_max_relative": 0.00202724887982722,
+      "positive_real_min_relative": 5.9525168542636345e-06
+    }
+  },
+  "density_kg_m3": 1.2,
+  "speed_m_s": 343.0,
+  "frequency_band_hz": [
+    60.0,
+    800.0
+  ],
+  "test_frequency_count": 187,
+  "spectrum": {
+    "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "source_sha256": "60b383fdd94610cf33d3b7b920274d33405f88c98d12a06a2511ef7f1f56117f",
+    "cells": [
+      128,
+      96
+    ],
+    "modes": 35,
+    "source_frequency_count": 481,
+    "test_frequency_count": 187,
+    "cutoff_hz": 6000.0,
+    "source_spacing_hz": [
+      5.0,
+      20.0
+    ],
+    "seconds": 81.48499999998603
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1"
+  },
+  "assumptions": [
+    "35 intrinsic modes of assumed P2; one face in an infinite rigid baffle",
+    "Positive oscillator spectral quadrature, not a fitted Steinway or compact real-time model",
+    "Numerical bath absorption is not identified radiative/material/air attenuation",
+    "Static tail represents frequencies above 6000 Hz only to first inertial order",
+    "Finite frequency grid must be assessed over the declared time horizon; distant recurrence is not piano physics"
+  ],
+  "references": [
+    "https://doc.comsol.com/6.3/doc/com.comsol.help.models.aco.wave_based_room/wave_based_room.html",
+    "https://arxiv.org/pdf/0811.3625"
+  ],
+  "frequency_gates": {
+    "complex_max_relative": true,
+    "resistance_max_relative": true,
+    "reactance_max_relative": true,
+    "laplace_max_relative": true,
+    "static_mass_relative": true,
+    "loaded_velocity_max_relative": true,
+    "positive_spectral_construction": true
+  },
+  "transient": {
+    "profiles": {
+      "Fine48": {
+        "rate_hz": 48000,
+        "gamma_hz": 0.5,
+        "duration_s": 0.024,
+        "seconds": 18.75,
+        "final_energy": {
+          "wood_j": 6.673321756579241e-07,
+          "air_j": 9.762414001331116e-07,
+          "total_j": 1.6435735757910358e-06
+        },
+        "external_impulse_work_j": 6.822422230460143e-06,
+        "material_loss_j": 5.069155620270264e-06,
+        "numerical_bath_absorption_j": 1.0969303439800013e-07,
+        "air_port_work_j": 1.0803862057427218e-06,
+        "negative_port_work_steps": 278,
+        "max_energy_balance_relative": 1.2353351259251888e-13,
+        "max_port_balance_relative": 4.182326198255868e-16,
+        "impulsive_tail_work_j": 5.548228788568533e-09,
+        "total_air_port_work_j": 1.0859344345312902e-06,
+        "final_air_budget_relative": 2.6165515355651613e-14,
+        "final_wood_budget_relative": 9.733695866586413e-14
+      },
+      "Fine96": {
+        "rate_hz": 96000,
+        "gamma_hz": 0.5,
+        "duration_s": 0.024,
+        "seconds": 35.01600000000326,
+        "final_energy": {
+          "wood_j": 6.665909028136721e-07,
+          "air_j": 9.754305545222878e-07,
+          "total_j": 1.6420214573359599e-06
+        },
+        "external_impulse_work_j": 6.817445073112872e-06,
+        "material_loss_j": 5.0656180882777385e-06,
+        "numerical_bath_absorption_j": 1.0980552749839635e-07,
+        "air_port_work_j": 1.0796913444761703e-06,
+        "negative_port_work_steps": 554,
+        "max_energy_balance_relative": 1.1405684053782972e-13,
+        "max_port_balance_relative": 3.1847240995831564e-16,
+        "impulsive_tail_work_j": 5.544737544321513e-09,
+        "total_air_port_work_j": 1.0852360820204919e-06,
+        "final_air_budget_relative": 2.8203597823624562e-14,
+        "final_wood_budget_relative": 1.4213619343712114e-13
+      },
+      "Fine192": {
+        "rate_hz": 192000,
+        "gamma_hz": 0.5,
+        "duration_s": 0.024,
+        "seconds": 63.95299999997951,
+        "final_energy": {
+          "wood_j": 6.664055332738332e-07,
+          "air_j": 9.751942627644582e-07,
+          "total_j": 1.6415997960382914e-06
+        },
+        "external_impulse_work_j": 6.816161193569318e-06,
+        "material_loss_j": 5.064730252954255e-06,
+        "numerical_bath_absorption_j": 1.0983114457598422e-07,
+        "air_port_work_j": 1.0794815764138672e-06,
+        "negative_port_work_steps": 1109,
+        "max_energy_balance_relative": 1.1556954399636123e-13,
+        "max_port_balance_relative": 3.6170282221866555e-16,
+        "impulsive_tail_work_j": 5.5438309271203106e-09,
+        "total_air_port_work_j": 1.0850254073409874e-06,
+        "final_air_budget_relative": 7.996666834586929e-14,
+        "final_wood_budget_relative": 3.554074148705302e-14
+      },
+      "No-absorption96": {
+        "rate_hz": 96000,
+        "gamma_hz": 0.0,
+        "duration_s": 0.024,
+        "seconds": 31.875,
+        "final_energy": {
+          "wood_j": 6.668442074738489e-07,
+          "air_j": 1.0848815611151411e-06,
+          "total_j": 1.75172576858899e-06
+        },
+        "external_impulse_work_j": 6.818006053962458e-06,
+        "material_loss_j": 5.066280285374251e-06,
+        "numerical_bath_absorption_j": 0.0,
+        "air_port_work_j": 1.079336422294549e-06,
+        "negative_port_work_steps": 554,
+        "max_energy_balance_relative": 1.1504133363179336e-13,
+        "max_port_balance_relative": 4.0917681670146205e-16,
+        "impulsive_tail_work_j": 5.545138820593071e-09,
+        "total_air_port_work_j": 1.084881561115142e-06,
+        "final_air_budget_relative": 1.2423470154621314e-16,
+        "final_wood_budget_relative": 1.1504133363179336e-13
+      },
+      "Double-absorption96": {
+        "rate_hz": 96000,
+        "gamma_hz": 1.0,
+        "duration_s": 0.024,
+        "seconds": 34.18800000002375,
+        "final_energy": {
+          "wood_j": 6.663391499823254e-07,
+          "air_j": 8.783405473296486e-07,
+          "total_j": 1.544679697311974e-06
+        },
+        "external_impulse_work_j": 6.816889199081224e-06,
+        "material_loss_j": 5.064960251342213e-06,
+        "numerical_bath_absorption_j": 2.072492504245956e-07,
+        "air_port_work_j": 1.0800454578019298e-06,
+        "negative_port_work_steps": 554,
+        "max_energy_balance_relative": 3.581030705788661e-13,
+        "max_port_balance_relative": 3.018396562960187e-16,
+        "impulsive_tail_work_j": 5.5443399526472095e-09,
+        "total_air_port_work_j": 1.085589797754577e-06,
+        "final_air_budget_relative": 4.880117313318864e-14,
+        "final_wood_budget_relative": 3.09270833681748e-13
+      },
+      "Fine384": {
+        "rate_hz": 384000,
+        "gamma_hz": 0.5,
+        "duration_s": 0.024,
+        "seconds": 134.2029999999795,
+        "final_energy": {
+          "wood_j": 6.663596799203274e-07,
+          "air_j": 9.75150736724422e-07,
+          "total_j": 1.6415104166447494e-06
+        },
+        "external_impulse_work_j": 6.8158577454399326e-06,
+        "material_loss_j": 5.0645080538910844e-06,
+        "numerical_bath_absorption_j": 1.0983927489989676e-07,
+        "air_port_work_j": 1.0794463929536656e-06,
+        "negative_port_work_steps": 2216,
+        "max_energy_balance_relative": 6.167711642801833e-13,
+        "max_port_balance_relative": 3.7198153125432326e-16,
+        "impulsive_tail_work_j": 5.543618671263445e-09,
+        "total_air_port_work_j": 1.0849900116249291e-06,
+        "final_air_budget_relative": 8.953931570902117e-14,
+        "final_wood_budget_relative": 5.269211639226228e-13
+      }
+    },
+    "refinement": {
+      "Fine48-Fine96": {
+        "velocity_relative": 0.005660597182344653,
+        "displacement_relative": 0.001389038182420005
+      },
+      "Fine96-Fine192": {
+        "velocity_relative": 0.0014140419178690555,
+        "displacement_relative": 0.000346926798993003
+      },
+      "Fine192-Fine384": {
+        "velocity_relative": 0.00035351644159952323,
+        "displacement_relative": 8.670711464748196e-05
+      }
+    },
+    "refinement_gate_pair": "Fine192-Fine384",
+    "broadening": {
+      "Fine96": 0.0003536002344872831,
+      "Double-absorption96": 0.0007059636787701343
+    },
+    "gates": {
+      "energy": true,
+      "port": true,
+      "velocity": true,
+      "displacement": true,
+      "broadening": true,
+      "global_wood_air_budgets": true
+    },
+    "source": "two prescribed point-force impulses at 0/8 ms, not the nonlinear hammer or a factory note",
+    "damping": ".046*omega assumed material for this diagnostic only",
+    "air_energy": "includes near field, tail inertance and waves in the finite bath; absorption is numerical, not separately identified radiation",
+    "bath_parameters_sha256": "0c9948d8305bb5f61d8c75f19aff3a5ab8058176f6f1afc36ca0bd5e14d7a8d5",
+    "horizon_note": "24 ms; no validation of long tails or distant finite-bath recurrence"
+  },
+  "sources": {
+    "tools/audit-concert-grand-acoustic-bath.py": "c8a5391fd39d70b99699aa0282009c546edbf54812d3ba43e785a5ee2601bfe7",
+    "tools/concert_grand_acoustic_bath.py": "8acc2a8f74bf4f11828b08045b5f96ac10f9f336545f8199ed0d08235b1eba6f",
+    "tools/tests/test_concert_acoustic_bath.py": "145b67aa23801ab93f072acb14ce48f168543280b6994013ce4dd60296ab54c6"
+  },
+  "frozen_dependencies_sha256": {
+    "concert_grand_si_observer.py": "91b735ca1d879d8e611a9f6b2a385094f0f778d5139ced4b30caafbf066d15e2",
+    "concert_grand_surface_impedance.py": "8df473dbd277348cff7405448c43786823a56c629a71d0115d452c719af1a41b",
+    "concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95"
+  },
+  "source_archive_sha256": "8fa8884c7e2679eb59874cb104522ffba0092741d26e6ac075bca29ab11559ce",
+  "bath_parameters_sha256": "0c9948d8305bb5f61d8c75f19aff3a5ab8058176f6f1afc36ca0bd5e14d7a8d5",
+  "factory_package_sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb"
+}

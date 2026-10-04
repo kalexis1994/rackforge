@@ -43,6 +43,7 @@ const INCLUDED_PLUGINS: Array<{ name: string; kind: "instrument" | "effect"; abo
   { name: "RF - Concert Grand", kind: "instrument", about: "A grand piano modelled from its physics — strings, hammers and soundboard — with no samples." },
   { name: "RF-Tines", kind: "instrument", about: "An electric piano modelled from hammer, tine and pickup, from bell-like to barking." },
   { name: "RF-Organ", kind: "instrument", about: "A tonewheel organ with its rotary speaker, modelled rather than sampled." },
+  { name: "RF-Musette", kind: "instrument", about: "A piano accordion modelled reed by reed under one bellows, from a single clarinet reed to a wet musette." },
   { name: "RF-7", kind: "instrument", about: "A six-operator FM synthesizer: all 32 algorithms, and the cartridges you already own." },
   { name: "RF-106", kind: "instrument", about: "A six-voice analog polysynth with its lush stereo chorus and 128 factory programs." },
   { name: "RF-5", kind: "instrument", about: "A five-voice analog polysynth: two oscillators a voice, hard sync and a four-pole filter." },

@@ -1,0 +1,612 @@
+{
+  "scope": "C4 velocity 124 vertical one-string SI contact; frozen P2 low band and full bath",
+  "criteria": {
+    "energy_budget": 1e-09,
+    "energy_work_change": 0.002,
+    "contact_time_change": 0.001,
+    "bridge_displacement_velocity_rms_change": 0.01,
+    "impulse_force_change": 0.002
+  },
+  "cases": {
+    "T48-384000-Air": {
+      "rate_hz": 384000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.04693371904404984,
+      "initial_air_energy_j": 0.0,
+      "initial_board_energy_j": 0.0,
+      "final_string_energy_j": 0.028154459383409304,
+      "final_board_energy_j": 0.00013967575186099994,
+      "final_hammer_energy_j": 0.018607120906273478,
+      "final_felt_potential_j": 0.0,
+      "final_air_energy_j": 9.762120342265562e-06,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 2.265801135692226e-05,
+      "numerical_absorption_j": 4.2870806951431384e-08,
+      "air_port_work_j": 9.804991149217207e-06,
+      "work_into_board_j": 0.00017213875436713236,
+      "contact_time_s": 0.0018168005528873654,
+      "maximum_force_n": 25.556831483801044,
+      "impulse_n_s": 0.023868285960595766,
+      "maximum_total_budget_relative_error": 2.8090461795814498e-15,
+      "maximum_air_budget_relative_error": 4.54795202800245e-18,
+      "maximum_board_budget_relative_error": 1.5015460663881104e-16,
+      "final_interface_force_residual": 1.50043841153459e-14,
+      "final_interface_power_residual_w": 8.673617379884035e-19,
+      "negative_air_work_steps": 84,
+      "elapsed_s": 55.06300000002375,
+      "transverse": 48,
+      "axial": 96
+    },
+    "T48-768000-Air": {
+      "rate_hz": 768000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.04693371904404984,
+      "initial_air_energy_j": 0.0,
+      "initial_board_energy_j": 0.0,
+      "final_string_energy_j": 0.028154532240435952,
+      "final_board_energy_j": 0.0001396755894976188,
+      "final_hammer_energy_j": 0.018607047521078612,
+      "final_felt_potential_j": 0.0,
+      "final_air_energy_j": 9.762279145999404e-06,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 2.2658540604399038e-05,
+      "numerical_absorption_j": 4.28733144101424e-08,
+      "air_port_work_j": 9.805152460409733e-06,
+      "work_into_board_j": 0.00017213928256240988,
+      "contact_time_s": 0.0018168089174093822,
+      "maximum_force_n": 25.557519023559944,
+      "impulse_n_s": 0.023868267775126423,
+      "maximum_total_budget_relative_error": 5.785156684580113e-13,
+      "maximum_air_budget_relative_error": 3.970434310160869e-18,
+      "maximum_board_budget_relative_error": 3.765415520327108e-16,
+      "final_interface_force_residual": 7.64482145517634e-15,
+      "final_interface_power_residual_w": 1.734723475976807e-17,
+      "negative_air_work_steps": 169,
+      "elapsed_s": 95.14100000000326,
+      "transverse": 48,
+      "axial": 96
+    },
+    "T48-768000-Dry": {
+      "rate_hz": 768000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.04693371904404984,
+      "initial_air_energy_j": 0.0,
+      "initial_board_energy_j": 0.0,
+      "final_string_energy_j": 0.028154925132309876,
+      "final_board_energy_j": 0.00014806034314142339,
+      "final_hammer_energy_j": 0.018607047521078425,
+      "final_felt_potential_j": 0.0,
+      "final_air_energy_j": 0.0,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 2.3686047547215083e-05,
+      "numerical_absorption_j": 0.0,
+      "air_port_work_j": 0.0,
+      "work_into_board_j": 0.00017174639068861283,
+      "contact_time_s": 0.0018168089174106087,
+      "maximum_force_n": 25.557519023559966,
+      "impulse_n_s": 0.023868267775126396,
+      "maximum_total_budget_relative_error": 5.774807567076391e-13,
+      "maximum_air_budget_relative_error": 0.0,
+      "maximum_board_budget_relative_error": 5.463317610781356e-16,
+      "final_interface_force_residual": 1.0312991642818815e-14,
+      "final_interface_power_residual_w": -1.214306433183765e-17,
+      "negative_air_work_steps": 0,
+      "elapsed_s": 124.25,
+      "transverse": 48,
+      "axial": 96
+    },
+    "T72-384000-Air": {
+      "rate_hz": 384000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.04693371904404984,
+      "initial_air_energy_j": 0.0,
+      "initial_board_energy_j": 0.0,
+      "final_string_energy_j": 0.028153250497248955,
+      "final_board_energy_j": 0.00013967552315698637,
+      "final_hammer_energy_j": 0.018608331176347238,
+      "final_felt_potential_j": 0.0,
+      "final_air_energy_j": 9.761837166105629e-06,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 2.2657141722701083e-05,
+      "numerical_absorption_j": 4.286840783250292e-08,
+      "air_port_work_j": 9.804705573938354e-06,
+      "work_into_board_j": 0.0001721373704536311,
+      "contact_time_s": 0.0018168372917994307,
+      "maximum_force_n": 25.554673647187865,
+      "impulse_n_s": 0.023868585870540304,
+      "maximum_total_budget_relative_error": 2.5133571080465603e-15,
+      "maximum_air_budget_relative_error": 4.800616029558142e-18,
+      "maximum_board_budget_relative_error": 1.183911321575241e-16,
+      "final_interface_force_residual": 1.09991234559188e-14,
+      "final_interface_power_residual_w": 2.5153490401663703e-17,
+      "negative_air_work_steps": 104,
+      "elapsed_s": 98.89100000000326,
+      "transverse": 72,
+      "axial": 144
+    },
+    "T72-768000-Air-Relaunch": {
+      "rate_hz": 768000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.07523647970390947,
+      "initial_air_energy_j": 9.76199596262821e-06,
+      "initial_board_energy_j": 0.00013967535477970157,
+      "final_string_energy_j": 0.04636803924496393,
+      "final_board_energy_j": 0.00032495894009355734,
+      "final_hammer_energy_j": 0.02843895057447399,
+      "final_felt_potential_j": 0.0,
+      "final_air_energy_j": 3.801409057827996e-05,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 6.607091141095022e-05,
+      "numerical_absorption_j": 4.4594240011088107e-07,
+      "air_port_work_j": 2.8698037015764706e-05,
+      "work_into_board_j": 0.0002800525337405484,
+      "contact_time_s": 0.002249333885343025,
+      "maximum_force_n": 25.687923054845832,
+      "impulse_n_s": 0.02604726775726,
+      "maximum_total_budget_relative_error": 1.5199139032876505e-13,
+      "maximum_air_budget_relative_error": 2.783045477211274e-17,
+      "maximum_board_budget_relative_error": 2.9685818423586923e-16,
+      "final_interface_force_residual": 1.7291702725015263e-14,
+      "final_interface_power_residual_w": 6.765421556309548e-17,
+      "negative_air_work_steps": 0,
+      "elapsed_s": 146.375,
+      "transverse": 72,
+      "axial": 144,
+      "relaunch_external_work_j": 0.0283254612017034,
+      "preserved_living_states": true,
+      "first_case": "T72-768000-Air"
+    },
+    "T72-768000-Air": {
+      "rate_hz": 768000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.04693371904404984,
+      "initial_air_energy_j": 0.0,
+      "initial_board_energy_j": 0.0,
+      "final_string_energy_j": 0.028153323309117306,
+      "final_board_energy_j": 0.00013967535477970157,
+      "final_hammer_energy_j": 0.018608257842346435,
+      "final_felt_potential_j": 0.0,
+      "final_air_energy_j": 9.76199596262821e-06,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 2.265767095564534e-05,
+      "numerical_absorption_j": 4.287091508055556e-08,
+      "air_port_work_j": 9.804866877708957e-06,
+      "work_into_board_j": 0.0001721378926130586,
+      "contact_time_s": 0.001816845607524994,
+      "maximum_force_n": 25.555378021813834,
+      "impulse_n_s": 0.023868567698348324,
+      "maximum_total_budget_relative_error": 5.743760214565228e-13,
+      "maximum_air_budget_relative_error": 4.0787188822561656e-18,
+      "maximum_board_budget_relative_error": 1.0048808290443509e-16,
+      "final_interface_force_residual": 1.1724958974306251e-14,
+      "final_interface_power_residual_w": 2.47198095326695e-17,
+      "negative_air_work_steps": 210,
+      "elapsed_s": 172.56199999997625,
+      "transverse": 72,
+      "axial": 144
+    }
+  },
+  "comparisons": [
+    {
+      "left": "T48-384000-Air",
+      "right": "T48-768000-Air",
+      "changes": {
+        "final_string_energy_j": {
+          "relative_change": 2.5877548248943737e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_board_energy_j": {
+          "relative_change": 1.1624320450918118e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_hammer_energy_j": {
+          "relative_change": 3.943946226944095e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_air_energy_j": {
+          "relative_change": 1.6267075696831695e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "material_heat_j": {
+          "relative_change": 2.3357527124831974e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "numerical_absorption_j": {
+          "relative_change": 5.848530130027494e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "relative_change": 1.645167611388168e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "work_into_board_j": {
+          "relative_change": 3.0684180255976484e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "contact_time_s": {
+          "relative_change": 4.603963541081228e-06,
+          "limit": 0.001,
+          "passed": true
+        },
+        "maximum_force_n": {
+          "relative_change": 2.6901662804832522e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "impulse_n_s": {
+          "relative_change": 7.619098928142287e-07,
+          "limit": 0.002,
+          "passed": true
+        },
+        "board_position": {
+          "relative_change": 1.848250226286862e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "board_velocity": {
+          "relative_change": 7.544317047894562e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_displacement_m": {
+          "relative_change": 2.0750633036479267e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_velocity_m_s": {
+          "relative_change": 0.00011124292146427916,
+          "limit": 0.01,
+          "passed": true
+        }
+      },
+      "passed": true
+    },
+    {
+      "left": "T72-384000-Air",
+      "right": "T72-768000-Air",
+      "changes": {
+        "final_string_energy_j": {
+          "relative_change": 2.5862619326014735e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_board_energy_j": {
+          "relative_change": 1.2054902961503042e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_hammer_energy_j": {
+          "relative_change": 3.940938556621081e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_air_energy_j": {
+          "relative_change": 1.6266808876868758e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "material_heat_j": {
+          "relative_change": 2.3357782240364622e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "numerical_absorption_j": {
+          "relative_change": 5.8483660727317045e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "relative_change": 1.6451398332566596e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "work_into_board_j": {
+          "relative_change": 3.0333787615627437e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "contact_time_s": {
+          "relative_change": 4.577012779061771e-06,
+          "limit": 0.001,
+          "passed": true
+        },
+        "maximum_force_n": {
+          "relative_change": 2.7562676841134464e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "impulse_n_s": {
+          "relative_change": 7.613440492123252e-07,
+          "limit": 0.002,
+          "passed": true
+        },
+        "board_position": {
+          "relative_change": 1.8481099170847066e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "board_velocity": {
+          "relative_change": 7.542775392944067e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_displacement_m": {
+          "relative_change": 2.0747543703271112e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_velocity_m_s": {
+          "relative_change": 0.00011121358964895048,
+          "limit": 0.01,
+          "passed": true
+        }
+      },
+      "passed": true
+    },
+    {
+      "left": "T48-384000-Air",
+      "right": "T72-384000-Air",
+      "changes": {
+        "final_string_energy_j": {
+          "relative_change": 4.2939487945349704e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_board_energy_j": {
+          "relative_change": 1.6373950739768289e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_hammer_energy_j": {
+          "relative_change": 6.503915167300651e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_air_energy_j": {
+          "relative_change": 2.9008490421901905e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "material_heat_j": {
+          "relative_change": 3.838234459675021e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "numerical_absorption_j": {
+          "relative_change": 5.5964731366651555e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "relative_change": 2.912634925134048e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "work_into_board_j": {
+          "relative_change": 8.039587787467125e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "contact_time_s": {
+          "relative_change": 2.022135511593411e-05,
+          "limit": 0.001,
+          "passed": true
+        },
+        "maximum_force_n": {
+          "relative_change": 8.443999884211393e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "impulse_n_s": {
+          "relative_change": 1.2565048728285307e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "board_position": {
+          "relative_change": 3.8158037891328655e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "board_velocity": {
+          "relative_change": 7.380350095168893e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_displacement_m": {
+          "relative_change": 4.416267006727595e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_velocity_m_s": {
+          "relative_change": 8.26810920448284e-05,
+          "limit": 0.01,
+          "passed": true
+        }
+      },
+      "passed": true
+    },
+    {
+      "left": "T48-768000-Air",
+      "right": "T72-768000-Air",
+      "changes": {
+        "final_string_energy_j": {
+          "relative_change": 4.2940980905610046e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_board_energy_j": {
+          "relative_change": 1.6804533454863751e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_hammer_energy_j": {
+          "relative_change": 6.504215913585192e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_air_energy_j": {
+          "relative_change": 2.9008757253945463e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "material_heat_j": {
+          "relative_change": 3.838208946546639e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "numerical_absorption_j": {
+          "relative_change": 5.596637212738406e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "relative_change": 2.9126627045316497e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "work_into_board_j": {
+          "relative_change": 8.074627440719573e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "contact_time_s": {
+          "relative_change": 2.0194404774817197e-05,
+          "limit": 0.001,
+          "passed": true
+        },
+        "maximum_force_n": {
+          "relative_change": 8.377891120543083e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "impulse_n_s": {
+          "relative_change": 1.2565614564346242e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "board_position": {
+          "relative_change": 3.815807088132216e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "board_velocity": {
+          "relative_change": 7.380237816962571e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_displacement_m": {
+          "relative_change": 4.416249562044852e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_velocity_m_s": {
+          "relative_change": 8.267762430660829e-05,
+          "limit": 0.01,
+          "passed": true
+        }
+      },
+      "passed": true
+    }
+  ],
+  "dry_independent_DOP853": {
+    "case": "T48-768000-Dry",
+    "reference": "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P3-puente-movil\\p2-fine\\60-124-P2-low-band-T48.npz",
+    "sha256": "1f89c412a93f394cf910cc97b9a521084c7f1b999b0e60ef6486b99933a3960f",
+    "body_q_relative_error": 4.3852883104704794e-05,
+    "body_v_relative_error": 0.0004510920955418022,
+    "limit": 0.001,
+    "passed": true
+  },
+  "loading_effect": {
+    "contact_time_s": {
+      "dry": 0.0018168089174106087,
+      "air": 0.0018168089174093822,
+      "relative_change": -6.750569560521473e-13
+    },
+    "maximum_force_n": {
+      "dry": 25.557519023559966,
+      "air": 25.557519023559944,
+      "relative_change": -8.340513041642574e-16
+    },
+    "impulse_n_s": {
+      "dry": 0.023868267775126396,
+      "air": 0.023868267775126423,
+      "relative_change": 1.162865100941827e-15
+    },
+    "final_string_energy_j": {
+      "dry": 0.028154925132309876,
+      "air": 0.028154532240435952,
+      "relative_change": -1.3954641046901606e-05
+    },
+    "final_hammer_energy_j": {
+      "dry": 0.018607047521078425,
+      "air": 0.018607047521078612,
+      "relative_change": 1.0068772877226292e-14
+    },
+    "final_board_energy_j": {
+      "dry": 0.00014806034314142339,
+      "air": 0.0001396755894976188,
+      "relative_change": -0.056630651164948996
+    },
+    "material_heat_j": {
+      "dry": 2.3686047547215083e-05,
+      "air": 2.2658540604399038e-05,
+      "relative_change": -0.04338026176667269
+    },
+    "work_into_board_j": {
+      "dry": 0.00017174639068861283,
+      "air": 0.00017213928256240988,
+      "relative_change": 0.0022876281255272196
+    }
+  },
+  "environment": {
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1",
+    "blas_threads_per_process": 1,
+    "elapsed_note": "Diagnostic wall time; dry and part of T72 overlapped, not a performance benchmark"
+  },
+  "source_hashes": {
+    "audit-concert-grand-bath-contact.py": "ec0a38affb45cc245899ab5f26c989c6c53f1e81641d23551965f8d6d9ba79d2",
+    "concert_grand_bath_contact.py": "c7d7ae1d640391aa8b028627750305e7b9d863a81cd2134a173e4a135e1a085f",
+    "test_concert_bath_contact.py": "3d87777e4a9c6edc8d76c80790b7afe8ded605cd70ea157c79ce0a72cd06d6a8"
+  },
+  "baseline_commit": "e244450",
+  "first_contact_resolution_gates_passed": true,
+  "two_contact_budget_relative_errors": {
+    "total": 8.159539929005275e-13,
+    "air": 4.8150539725041815e-17,
+    "board": 4.181228277173046e-16
+  },
+  "second_contact_resolution": "One rate/resolution; energy and persistence checked, accuracy refinement remains pending",
+  "factory_changed": false,
+  "scope_limitations": [
+    "One C4 string and equivalent hammer, elastic felt; no unison/action/pedal",
+    "P2 35 modes <=800Hz, one baffled face, geometric model not identified Steinway",
+    "4ms per incident head, 8ms combined; no long-tail recurrence validation",
+    ".046*omega assumed material damping; physical material/radiative partition unidentified",
+    "gamma is numerical absorption, not physical radiated energy",
+    "Full axial phase resolution and full-band acoustic attack remain unverified"
+  ],
+  "frozen_dependencies_sha256": {
+    "tools/audit-concert-grand-moving-bridge.py": "7f2636983618194fc4246bdda79a1640a041bb15d3a10fa27a55f2ccba7eaccb",
+    "tools/audit-concert-grand-coupled-contact.py": "d3be447fe61704580540c48db1af7c70f5ed4adbeaf3ca6fb1b361de9077dc42",
+    "tools/concert_grand_moving_bridge.py": "6782e8e6df4ce0d86c8e7d8fec2c1e5115fc61563c5c3e4cdb411db5b78a2fd1",
+    "tools/concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "tools/concert_grand_nonlinear_string.py": "f1c17115e3f296a12f5c51e14d888756e60303e33802f8873d43c6a746a4d0e6",
+    "tools/concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "tools/concert_grand_acoustic_bath.py": "8acc2a8f74bf4f11828b08045b5f96ac10f9f336545f8199ed0d08235b1eba6f",
+    "tools/concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95"
+  },
+  "source_archive_sha256": "ec2fb150754476a799f18c9925b860aae8026cb69079bbd3d018f61a6f0b0347",
+  "factory_package_sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb"
+}

@@ -32,7 +32,7 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Matriz compleja de P2 y estados temporales pasivos verificados en 187 frecuencias y 24 ms. Faltan contacto no lineal, reducción, separación de pérdidas y ambas caras/borde. | Referencia temporal medida; integración con martillo y cola larga pendientes |
+| P6 | Radiación y carga acústica del aire | Matriz compleja de P2, estados pasivos y contacto no lineal vertical de C4 verificados. Faltan reducción, contactos largos/banco completo, separación de pérdidas y ambas caras/borde. | Referencia con martillo y aire persistente medida; integración audible pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -512,3 +512,31 @@ aire y no es una implementación lista para tiempo real. Partición de pérdidas
 segunda cara/borde, banco alto, unísono, Timoshenko, graves y acción/pedal
 siguen abiertos. Datos en
 `C:\SHARED\Fisica-pendiente-2026-10-03\P6-estados-acusticos`.
+
+### 2026-10-03 — P6 contacto no lineal y aire persistente
+
+Los estados acústicos anteriores quedaron en **e244450**, por pedido del
+usuario. [Resultados y reproducción](RESULTADOS-P6-contacto-aire.md). El
+contacto SI de cuerda/martillo/puente recibe la matriz completa del aire;
+la masa de cola entra en la inercia compartida y se verifica el trabajo
+entre cuerda, tabla y aire. Seis pruebas pasan, incluida una ODE independiente
+en coordenadas físicas y el límite desacoplado contra el contacto previo.
+
+En C4/124, 4 ms: 384→768 kHz cambia la velocidad de puente ≈0,01112% RMS,
+y 48→72 modos de cuerda ≈0,00827%. Energías, trabajo, fuerza, impulso y
+duración pasan sus criterios previos. El control sin aire aproxima la
+velocidad final DOP853 congelada con error 0,04511% RMS. Un segundo martillo
+prescrito conserva exactamente los estados vivos; sus balances cierran,
+pero su refinamiento de precisión sigue pendiente.
+
+La carga reduce 5,66307% la energía de tabla a 4 ms respecto del control
+sin aire, mientras el primer contacto permanece prácticamente igual.
+Esto no demuestra resolver el ataque fino. La referencia conserva una
+cuerda, tabla hasta 800 Hz y una cara en bafle; no es audio de fábrica.
+Datos y fuentes en `C:\SHARED\Fisica-pendiente-2026-10-03\P6-contacto-aire`.
+
+Siguiente: reducción pasiva contra este banco completo, precisión de
+contactos reiterados y horizontes largos. Luego ampliar banda, registros,
+unísono y observación SI para escucha con ganancia común. La partición de
+pérdidas, P4/Timoshenko, acción y pedal continúan pendientes. No se cambia
+el paquete por la validación de esta referencia.

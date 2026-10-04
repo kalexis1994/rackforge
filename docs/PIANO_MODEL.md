@@ -2115,8 +2115,22 @@ board-velocity error is 0.20272%. A 24 ms two-impulse board control passes
 192→384 kHz refinement, energy and interface-work budgets. Numerical bath
 absorption is distinguished from physical material/radiative losses; the bath
 stores both near-field energy and waves. Its 352026 air states are an offline
-reference. Nonlinear-contact coupling, reduction, long-horizon recurrence,
-loss separation and full-band audition remain pending.
+reference. Full-bank nonlinear-contact integration, reduction, long-horizon
+recurrence, loss separation and full-band audition remain pending.
+
+The [P6 nonlinear contact/air reference](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-contacto-aire.md)
+connects this full bath to the SI hammer/string/moving-board system. The tail
+inertance enters the shared mixed mass through the physical board mapping;
+AVF mechanical work and midpoint acoustic work close global, air-port and
+intrinsic-board budgets. Six tests include an independent physical-coordinate
+ODE, the uncoupled contact limit and exact living-state persistence. C4/124
+first-contact observables pass 384-to-768 kHz and 48-to-72 transverse-mode
+refinement. A second prescribed incident head preserves string, board and air
+states with external relaunch work accounted; its accuracy refinement and
+real action/backcheck remain pending. At 4 ms the loaded board stores 5.66307%
+less energy than its dry control, while the first contact barely changes.
+This is one vertical string, the 35-mode low board bank and a baffled face,
+not a demonstrated solution to the perceived attack or a new factory voice.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a

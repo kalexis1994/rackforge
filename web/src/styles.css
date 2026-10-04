@@ -1873,6 +1873,142 @@ body {
   gap: 5px;
 }
 
+/* On a short window -- a handheld at a tablet's interface size -- the
+   sections give way and scroll, LIVE to ABOUT, rather than the rail's foot
+   (the Touch Controller, the lighting, the connection) running off the
+   bottom of the screen. The frame is what gives way; the list scrolls in
+   it, and says so (`ScrollingNavigation`). */
+.rail .primary-nav-frame {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* A lane under the list: the gap between the last section and the Touch
+     Controller, and where the downward chevron sits when there is more. */
+  padding-bottom: 22px;
+}
+
+.rail .primary-nav {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* The fades and the chevrons say it scrolls; a scrollbar's width, taken
+     from the keys, took as much from the square keys' height too. */
+  scrollbar-width: none;
+  /* Room inside the scroll box for the keys' shadows and focus rings, which
+     it would otherwise clip, given back outside so nothing moves. */
+  margin: -4px;
+  padding: 4px;
+}
+
+.rail .primary-nav::-webkit-scrollbar {
+  display: none;
+}
+
+/* The keys keep their size; the list scrolls instead of squeezing them. */
+.rail .primary-nav > .nav-item {
+  flex-shrink: 0;
+}
+
+/* More beyond an edge: the list fades out there, onto the rail itself. */
+.rail .primary-nav-frame[data-more-below] .primary-nav {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+}
+
+.rail .primary-nav-frame[data-more-above] .primary-nav {
+  -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to top, #000 calc(100% - 40px), transparent);
+}
+
+.rail .primary-nav-frame[data-more-above][data-more-below] .primary-nav {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 40px,
+    #000 calc(100% - 40px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 40px,
+    #000 calc(100% - 40px),
+    transparent
+  );
+}
+
+/* And a chevron on the fade: a mark printed on the rail, not a key -- it
+   points the way, and a touch on it moves the list on by most of its
+   height. */
+.rail .primary-nav-cue {
+  position: absolute;
+  left: 50%;
+  z-index: 1;
+  width: 40px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--fp-rail-label, #9d978c);
+  background: none;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition:
+    opacity var(--rf-motion-instant, 120ms) ease,
+    color var(--rf-motion-instant, 120ms) ease;
+}
+
+.rail .primary-nav-cue:hover {
+  color: var(--ink, #f4f2ec);
+}
+
+.rail .primary-nav-cue svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Above the list, in the brand's 32 px of space, rather than over the
+   label of the key the list stopped on. */
+.rail .primary-nav-cue-up {
+  top: -26px;
+}
+
+/* Below the list, in its lane, likewise. */
+.rail .primary-nav-cue-down {
+  bottom: 0;
+}
+
+.rail .primary-nav-frame[data-more-above] .primary-nav-cue-up,
+.rail .primary-nav-frame[data-more-below] .primary-nav-cue-down {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The icon in proportion to its key: its full 32 px chip and 19 px glyph
+   while the key is wide enough, smaller with it below that -- never closer
+   to the key's edge than the narrow rail's square keys put it. */
+.rail .nav-item {
+  container-type: inline-size;
+}
+
+.rail .nav-mark {
+  width: min(32px, 64cqi);
+  height: min(32px, 64cqi);
+}
+
+.rail .nav-mark svg {
+  width: min(19px, 38cqi);
+  height: min(19px, 38cqi);
+}
+
 .rail-context-actions {
   margin-top: 18px;
   padding-top: 14px;
@@ -2119,6 +2255,32 @@ body {
 
 .audio-health-readout .audio-health-lost {
   opacity: 0.6;
+}
+
+/* Each number keeps the width of its widest usual value, so the readout --
+   centred under the meter -- does not shift every time one gains or loses
+   a digit: the load up to "100%", the losses up to three digits. */
+.audio-health-load,
+.audio-health-readout .audio-health-lost {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wider than the meter's column, the readout was laid from the column's
+   start and ran past the window's edge; given back 16 px a side, its margin
+   box fits and the column centres it, over the meter. */
+.master-output-meter .audio-health-readout {
+  margin-inline: -16px;
+}
+
+/* A character is 1ch plus the readout's 0.04em of tracking. */
+.audio-health-load {
+  min-width: calc(4 * (1ch + 0.04em));
+  text-align: end;
+}
+
+.audio-health-readout .audio-health-lost {
+  min-width: calc(3 * (1ch + 0.04em));
+  text-align: start;
 }
 
 /* The flight recorder's save mark: as quiet as the readout until pressed. */

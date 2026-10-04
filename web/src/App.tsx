@@ -605,6 +605,7 @@ function RackForgeApp() {
             (item) => !(dockableController && item.path === "/controller"),
           )}
           onPlayRequest={requestPlayNavigation}
+          scrollCues
         />
         {/* The node editor's Save and Exit are in its own header, at every
             size; the rail keeps only navigation. */}

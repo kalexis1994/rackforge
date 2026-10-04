@@ -1,0 +1,705 @@
+{
+  "baseline_commit": "42e0b3c",
+  "criteria": {
+    "cell_quadrature": 1e-05,
+    "spatial_transfer": 0.01,
+    "spatial_pressure": 0.01,
+    "capture_pressure": 0.001,
+    "mechanical_pressure": 0.01,
+    "join": 1e-10,
+    "nested_transfer": 1e-10,
+    "decomposition": 1e-10
+  },
+  "geometry_m": [
+    [
+      0.55,
+      0.5,
+      0.66
+    ],
+    [
+      0.85,
+      0.5,
+      0.66
+    ],
+    [
+      0.55,
+      0.5,
+      2.0
+    ],
+    [
+      0.85,
+      0.5,
+      2.0
+    ]
+  ],
+  "density_kg_m3": 1.2,
+  "speed_m_s": 343.0,
+  "pressure_units": "Pa*s; Fourier transforms of finite acceleration windows; not SPL",
+  "source_units": "Physical intrinsic B sqrt(kg)*m, V sqrt(kg)*m/s, A-transform sqrt(kg)*m/s",
+  "gain": 1.0,
+  "normalization": "none",
+  "source_durations_s": {
+    "Cold": 0.004,
+    "Relaunch": 0.004,
+    "Sequence": 0.008
+  },
+  "frequency_band_hz": [
+    60,
+    6000
+  ],
+  "frequency_step_hz": 20.0,
+  "scope": "Same P6 constant-cell surface and baffled upper half-space; pressure readout only, source already includes reciprocal air load. No new damping, room, lid, pattern or EQ.",
+  "assumptions": [
+    "Hypothetical P2 geometry and losses, not identified Steinway",
+    "First two microphones reuse P3 SI geometry; other two are a separate 2m height control, not rescaled primary audio",
+    "Acceleration is observed only inside 4/8ms windows, with no endpoint impulses; full sustain and audition remain untested"
+  ],
+  "inputs": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\resumen-P6-contacto-compacto.json": "bc429ca5f5c3b140a06b68aa0da1bca6bd7f710e2416c9711383398e88fe8e66",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\resumen-P6-contacto-compacto-1200.json": "420ce73ee321216b03a907e8cf0ac34b3abe56b21c3309cee9859ec8ccb1dc25"
+  },
+  "source_trajectory_sha256": {
+    "35": {
+      "T72-384000-Cold": "3d7ead714c82252cd34abe7c244f745072f3be79f1b323be5d1cdb39d43ec7f1",
+      "T72-384000-Relaunch": "4ca0676bdbc417de10495094ab4921efda063640672d18214f44ec537652dfde",
+      "T72-768000-Cold": "7e6624cf997956f89982625b214befa12258eb4481995c7f7e7f2036a2f789e4",
+      "T72-768000-Relaunch": "5d01f55815c27fa1a51d910419dea5bc847693cbf23db2bd2128317fbd7a562e"
+    },
+    "59": {
+      "T72-384000-Cold": "b9d78d279214f4d953cc850f8d5417fd45a89c867f83244a09e1b27f331948dd",
+      "T72-384000-Relaunch": "953939ce53870709eaed99e016dfbcb9b3a219bb15cbd47874f450fe81a12c0f",
+      "T72-768000-Cold": "aa9302fa1209bce1f945b93137918f14c7bf24bbefed71d720643d0208433e9c",
+      "T72-768000-Relaunch": "b9300698e4b43d12f01885a228ed9ae2d957388ca9d271d8234a5dd60e40f40c"
+    }
+  },
+  "gates": {
+    "nested_transfer": true,
+    "cell_quadrature": true,
+    "spatial_transfer": true,
+    "capture_pressure": true,
+    "mechanical_pressure": true,
+    "spatial_pressure": true,
+    "join": true,
+    "decomposition": true
+  },
+  "checks": {
+    "nested_transfer": 0.0,
+    "cell_quadrature_max_point": 8.628079218767833e-13,
+    "continuous_plate_quadrature_max_point": 6.855358007931452e-15,
+    "cell_to_continuous_plate_max_point": 0.004640469398508916,
+    "spatial_transfer": {
+      "Low": 0.00017939193742212605,
+      "AddedBand": 0.0005632013568918773,
+      "High": 0.0021644782629954063,
+      "Full": 0.0017800301989387552
+    },
+    "capture": [
+      {
+        "case": "M35-R384000-Cold",
+        "errors": {
+          "Low": 1.9275887096338494e-08,
+          "AddedBand": 4.8320308667529994e-08,
+          "High": 1.5290843137009478e-06,
+          "Full": 4.6909231871591295e-07
+        }
+      },
+      {
+        "case": "M35-R384000-Relaunch",
+        "errors": {
+          "Low": 5.7503364396749255e-09,
+          "AddedBand": 4.5453574106771317e-08,
+          "High": 1.639436891970212e-06,
+          "Full": 2.481633355113535e-07
+        }
+      },
+      {
+        "case": "M35-R384000-Sequence",
+        "errors": {
+          "Low": 1.0035295891051446e-08,
+          "AddedBand": 5.197425396551128e-08,
+          "High": 2.366733032636962e-06,
+          "Full": 2.970201647664627e-07
+        }
+      },
+      {
+        "case": "M35-R768000-Cold",
+        "errors": {
+          "Low": 2.0683999588050273e-08,
+          "AddedBand": 5.186337844497435e-08,
+          "High": 1.6403090877884865e-06,
+          "Full": 5.032074282724442e-07
+        }
+      },
+      {
+        "case": "M35-R768000-Relaunch",
+        "errors": {
+          "Low": 6.175116899976018e-09,
+          "AddedBand": 4.8746848384640365e-08,
+          "High": 1.7565529885537651e-06,
+          "Full": 2.6586904388810124e-07
+        }
+      },
+      {
+        "case": "M35-R768000-Sequence",
+        "errors": {
+          "Low": 1.0770441685210217e-08,
+          "AddedBand": 5.57931870344708e-08,
+          "High": 2.537767067970473e-06,
+          "Full": 3.1843213658024043e-07
+        }
+      },
+      {
+        "case": "M59-R384000-Cold",
+        "errors": {
+          "Low": 2.030452229909705e-08,
+          "AddedBand": 5.051353593398556e-08,
+          "High": 1.7120318718227375e-06,
+          "Full": 4.984223107602536e-07
+        }
+      },
+      {
+        "case": "M59-R384000-Relaunch",
+        "errors": {
+          "Low": 6.332254230293798e-09,
+          "AddedBand": 5.1011447317265964e-08,
+          "High": 1.7818354846949334e-06,
+          "Full": 2.7324494572501697e-07
+        }
+      },
+      {
+        "case": "M59-R384000-Sequence",
+        "errors": {
+          "Low": 1.0601928530293048e-08,
+          "AddedBand": 6.062672461367586e-08,
+          "High": 2.670717372018852e-06,
+          "Full": 3.2429895111431765e-07
+        }
+      },
+      {
+        "case": "M59-R768000-Cold",
+        "errors": {
+          "Low": 2.1797099323388866e-08,
+          "AddedBand": 5.413399952862527e-08,
+          "High": 1.836825224032272e-06,
+          "Full": 5.347470551102655e-07
+        }
+      },
+      {
+        "case": "M59-R768000-Relaunch",
+        "errors": {
+          "Low": 6.8043078722588585e-09,
+          "AddedBand": 5.461877018967005e-08,
+          "High": 1.9094276865492917e-06,
+          "Full": 2.9280683212695725e-07
+        }
+      },
+      {
+        "case": "M59-R768000-Sequence",
+        "errors": {
+          "Low": 1.13820854176729e-08,
+          "AddedBand": 6.498452477761738e-08,
+          "High": 2.8636419033781037e-06,
+          "Full": 3.477090454272613e-07
+        }
+      }
+    ],
+    "mechanical": [
+      {
+        "modes": 35,
+        "phase": "Cold",
+        "errors": {
+          "Low": 6.863131038245433e-05,
+          "AddedBand": 9.947830953823441e-05,
+          "High": 0.0008849207987586424,
+          "Full": 0.00028068439415466535
+        }
+      },
+      {
+        "modes": 35,
+        "phase": "Relaunch",
+        "errors": {
+          "Low": 6.679254807660502e-05,
+          "AddedBand": 0.0002771858329542052,
+          "High": 0.0023971367150437753,
+          "Full": 0.00037663478354963873
+        }
+      },
+      {
+        "modes": 35,
+        "phase": "Sequence",
+        "errors": {
+          "Low": 6.85882087764656e-05,
+          "AddedBand": 0.0003106173474315191,
+          "High": 0.002809429739038098,
+          "Full": 0.00036577068782503344
+        }
+      },
+      {
+        "modes": 59,
+        "phase": "Cold",
+        "errors": {
+          "Low": 7.666736890301093e-05,
+          "AddedBand": 0.0001290422150966309,
+          "High": 0.0009686555591794626,
+          "Full": 0.0002950657462873643
+        }
+      },
+      {
+        "modes": 59,
+        "phase": "Relaunch",
+        "errors": {
+          "Low": 7.10902727867066e-05,
+          "AddedBand": 0.00032342595781815553,
+          "High": 0.0025778337949665226,
+          "Full": 0.0004121250636378211
+        }
+      },
+      {
+        "modes": 59,
+        "phase": "Sequence",
+        "errors": {
+          "Low": 7.234205286717836e-05,
+          "AddedBand": 0.0003552586937170979,
+          "High": 0.003138848980115517,
+          "Full": 0.0003977073225283723
+        }
+      }
+    ],
+    "spatial_pressure": [
+      {
+        "case": "M35-R384000-Cold",
+        "errors": {
+          "Low": 0.00025345646343958894,
+          "AddedBand": 0.00037990612695041454,
+          "High": 0.000857150087061473,
+          "Full": 0.00037900168169576994
+        }
+      },
+      {
+        "case": "M35-R384000-Relaunch",
+        "errors": {
+          "Low": 0.00011174823058090226,
+          "AddedBand": 0.0003479033798947584,
+          "High": 0.0009552132573919553,
+          "Full": 0.00020619587642690764
+        }
+      },
+      {
+        "case": "M35-R384000-Sequence",
+        "errors": {
+          "Low": 0.00014193626501968025,
+          "AddedBand": 0.0003354599930361155,
+          "High": 0.0007889137047456133,
+          "Full": 0.00018677220775167934
+        }
+      },
+      {
+        "case": "M35-R768000-Cold",
+        "errors": {
+          "Low": 0.000253458110642454,
+          "AddedBand": 0.0003798989417455295,
+          "High": 0.0008572033405688816,
+          "Full": 0.0003790095873110364
+        }
+      },
+      {
+        "case": "M35-R768000-Relaunch",
+        "errors": {
+          "Low": 0.00011175384981848275,
+          "AddedBand": 0.00034790245611906437,
+          "High": 0.0009552580617942781,
+          "Full": 0.00020619240325760684
+        }
+      },
+      {
+        "case": "M35-R768000-Sequence",
+        "errors": {
+          "Low": 0.0001419386226304967,
+          "AddedBand": 0.000335467680922262,
+          "High": 0.0007890399692614698,
+          "Full": 0.00018677519294759846
+        }
+      },
+      {
+        "case": "M59-R384000-Cold",
+        "errors": {
+          "Low": 0.00024255409750619013,
+          "AddedBand": 0.0003710150908337192,
+          "High": 0.0010407335071939267,
+          "Full": 0.00040402045920662997
+        }
+      },
+      {
+        "case": "M59-R384000-Relaunch",
+        "errors": {
+          "Low": 0.00011448164964298768,
+          "AddedBand": 0.00037433200315969734,
+          "High": 0.0011461482061483417,
+          "Full": 0.00023536780941912583
+        }
+      },
+      {
+        "case": "M59-R384000-Sequence",
+        "errors": {
+          "Low": 0.0001433698108043386,
+          "AddedBand": 0.00039576182403822346,
+          "High": 0.0010479853168087628,
+          "Full": 0.00021374530250341914
+        }
+      },
+      {
+        "case": "M59-R768000-Cold",
+        "errors": {
+          "Low": 0.00024255873041002357,
+          "AddedBand": 0.00037101349453882645,
+          "High": 0.0010407994772780448,
+          "Full": 0.000404034286247844
+        }
+      },
+      {
+        "case": "M59-R768000-Relaunch",
+        "errors": {
+          "Low": 0.00011448730474481855,
+          "AddedBand": 0.0003743411422472986,
+          "High": 0.0011461841531196647,
+          "Full": 0.0002353721318005737
+        }
+      },
+      {
+        "case": "M59-R768000-Sequence",
+        "errors": {
+          "Low": 0.00014337240625499116,
+          "AddedBand": 0.0003957797844368886,
+          "High": 0.001048062325381911,
+          "Full": 0.0002137523500617631
+        }
+      }
+    ],
+    "join": [
+      {
+        "modes": 35,
+        "rate_hz": 384000,
+        "relative": 6.6677250728099345e-15
+      },
+      {
+        "modes": 35,
+        "rate_hz": 768000,
+        "relative": 6.6402863992946025e-15
+      },
+      {
+        "modes": 59,
+        "rate_hz": 384000,
+        "relative": 6.2375791380487494e-15
+      },
+      {
+        "modes": 59,
+        "rate_hz": 768000,
+        "relative": 6.21938245427027e-15
+      }
+    ],
+    "decomposition_max": 1.311709495966524e-15
+  },
+  "basis_changes": {
+    "Cold": {
+      "Close": {
+        "pressure_spectral_difference": {
+          "Low": 0.07393999121833698,
+          "AddedBand": 0.2937662199785273,
+          "High": 0.2904657812843198,
+          "Full": 0.1699268992737246
+        },
+        "pressure_norm_ratio": {
+          "Low": 1.0260356626141522,
+          "AddedBand": 1.0538147175491859,
+          "High": 0.9982626084849722,
+          "Full": 1.0295364338057247
+        },
+        "common_modes_change": {
+          "Low": 0.0015227825617677973,
+          "AddedBand": 0.005222666876073106,
+          "High": 0.008557460740031593,
+          "Full": 0.003672544409736443
+        },
+        "additional_modes_norm_relative": {
+          "Low": 0.07388485532978802,
+          "AddedBand": 0.29316787591651744,
+          "High": 0.29055962997297535,
+          "Full": 0.16970951357287659
+        }
+      },
+      "Height2m": {
+        "pressure_spectral_difference": {
+          "Low": 0.12759712117828584,
+          "AddedBand": 0.5202961364358885,
+          "High": 0.22549996321771823,
+          "Full": 0.2675492109968541
+        },
+        "pressure_norm_ratio": {
+          "Low": 1.070942242458932,
+          "AddedBand": 1.3932263836427474,
+          "High": 0.9229292669896187,
+          "Full": 1.116330197864918
+        },
+        "common_modes_change": {
+          "Low": 0.0023999334915000762,
+          "AddedBand": 0.005725160925485158,
+          "High": 0.003237349673789986,
+          "Full": 0.00343849333220238
+        },
+        "additional_modes_norm_relative": {
+          "Low": 0.12697941871252716,
+          "AddedBand": 0.5164404049560174,
+          "High": 0.22421373755773139,
+          "Full": 0.26572345055906305
+        }
+      },
+      "CloseMono": {
+        "pressure_spectral_difference": {
+          "Low": 0.03567605440297131,
+          "AddedBand": 0.06745213524095538,
+          "High": 0.1253053895563397,
+          "Full": 0.05567908412817704
+        },
+        "pressure_norm_ratio": {
+          "Low": 1.019394839040425,
+          "AddedBand": 0.9768483396495805,
+          "High": 0.9953372798776652,
+          "Full": 1.0089776351376742
+        },
+        "common_modes_change": {
+          "Low": 0.0007160015642076153,
+          "AddedBand": 0.0028607211276703987,
+          "High": 0.003351491238802106,
+          "Full": 0.0017123712582602937
+        },
+        "additional_modes_norm_relative": {
+          "Low": 0.035330645667770104,
+          "AddedBand": 0.06742008177501468,
+          "High": 0.12546175611579882,
+          "Full": 0.05554158677574831
+        }
+      }
+    },
+    "Relaunch": {
+      "Close": {
+        "pressure_spectral_difference": {
+          "Low": 0.03896856617769345,
+          "AddedBand": 0.26814056377300033,
+          "High": 0.34901824230628836,
+          "Full": 0.10342756585420566
+        },
+        "pressure_norm_ratio": {
+          "Low": 1.0013637624523366,
+          "AddedBand": 1.0368970142568041,
+          "High": 1.040079399226419,
+          "Full": 1.0055962347915635
+        },
+        "common_modes_change": {
+          "Low": 0.0014580309721340578,
+          "AddedBand": 0.008061246448330103,
+          "High": 0.013120929176774088,
+          "Full": 0.0034137386019789115
+        },
+        "additional_modes_norm_relative": {
+          "Low": 0.03899299471677019,
+          "AddedBand": 0.26598556049231703,
+          "High": 0.35018705849618903,
+          "Full": 0.10299517117774816
+        }
+      },
+      "Height2m": {
+        "pressure_spectral_difference": {
+          "Low": 0.04284647164949552,
+          "AddedBand": 0.388668660130781,
+          "High": 0.17960365245968918,
+          "Full": 0.10475960500023224
+        },
+        "pressure_norm_ratio": {
+          "Low": 0.999424627414375,
+          "AddedBand": 1.0321617681949558,
+          "High": 0.9417049157865488,
+          "Full": 0.9995776850820455
+        },
+        "common_modes_change": {
+          "Low": 0.0012914278926215276,
+          "AddedBand": 0.006852873354661947,
+          "High": 0.005912827916460626,
+          "Full": 0.0022722746910807273
+        },
+        "additional_modes_norm_relative": {
+          "Low": 0.04177200708546672,
+          "AddedBand": 0.38329850328272813,
+          "High": 0.17732905955526496,
+          "Full": 0.10314317236956165
+        }
+      },
+      "CloseMono": {
+        "pressure_spectral_difference": {
+          "Low": 0.025254156875775945,
+          "AddedBand": 0.06850318709227173,
+          "High": 0.24254966180935777,
+          "Full": 0.046247530343633346
+        },
+        "pressure_norm_ratio": {
+          "Low": 1.0002844977723477,
+          "AddedBand": 1.0107409836994818,
+          "High": 1.0195090043834896,
+          "Full": 1.001637489949333
+        },
+        "common_modes_change": {
+          "Low": 0.000766007488606973,
+          "AddedBand": 0.003047696746705974,
+          "High": 0.004292474173686231,
+          "Full": 0.0013197658190805938
+        },
+        "additional_modes_norm_relative": {
+          "Low": 0.024829787101586176,
+          "AddedBand": 0.06920051058188578,
+          "High": 0.24275160952545768,
+          "Full": 0.046160676035075676
+        }
+      }
+    },
+    "Sequence": {
+      "Close": {
+        "pressure_spectral_difference": {
+          "Low": 0.04404844734486718,
+          "AddedBand": 0.38870099158162225,
+          "High": 0.46778622375084755,
+          "Full": 0.11825872464135809
+        },
+        "pressure_norm_ratio": {
+          "Low": 1.0054679820811074,
+          "AddedBand": 1.0911136318417332,
+          "High": 1.0105349420214014,
+          "Full": 1.0109504140066632
+        },
+        "common_modes_change": {
+          "Low": 0.0011883126972724886,
+          "AddedBand": 0.010178043143617827,
+          "High": 0.015037541029197493,
+          "Full": 0.003272558018402586
+        },
+        "additional_modes_norm_relative": {
+          "Low": 0.04438329506416116,
+          "AddedBand": 0.3863216716890118,
+          "High": 0.4686579100531506,
+          "Full": 0.11794768048380652
+        }
+      },
+      "Height2m": {
+        "pressure_spectral_difference": {
+          "Low": 0.04092233502819727,
+          "AddedBand": 0.6169134373327536,
+          "High": 0.21625154202516936,
+          "Full": 0.13185213484038788
+        },
+        "pressure_norm_ratio": {
+          "Low": 1.0024825942311435,
+          "AddedBand": 1.2049791871080793,
+          "High": 0.8826167534036011,
+          "Full": 1.0081544194570426
+        },
+        "common_modes_change": {
+          "Low": 0.00131714010394231,
+          "AddedBand": 0.00979737963276151,
+          "High": 0.0055262515195811605,
+          "Full": 0.0024682078916311244
+        },
+        "additional_modes_norm_relative": {
+          "Low": 0.04027078902213682,
+          "AddedBand": 0.6090216074440977,
+          "High": 0.21466445716832763,
+          "Full": 0.1301778191494986
+        }
+      },
+      "CloseMono": {
+        "pressure_spectral_difference": {
+          "Low": 0.02326536224842514,
+          "AddedBand": 0.08158612526653432,
+          "High": 0.3127073693663633,
+          "Full": 0.04408354614336657
+        },
+        "pressure_norm_ratio": {
+          "Low": 1.0032344226388883,
+          "AddedBand": 1.0263098282278782,
+          "High": 1.0088843896369286,
+          "Full": 1.0046690946122268
+        },
+        "common_modes_change": {
+          "Low": 0.0005962881476287574,
+          "AddedBand": 0.0038221630857685593,
+          "High": 0.006361309603672427,
+          "Full": 0.0012747364640025654
+        },
+        "additional_modes_norm_relative": {
+          "Low": 0.022953060074184427,
+          "AddedBand": 0.08464968487931628,
+          "High": 0.3129678180226643,
+          "Full": 0.044290820796030896
+        }
+      }
+    }
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1",
+    "blas_threads": 1
+  },
+  "frequency_integration_diagnostic": {
+    "Cold": {
+      "step10": {
+        "Low": 0.07387242646049581,
+        "AddedBand": 0.2940091685228273,
+        "High": 0.2903577272830134,
+        "Full": 0.16992086264827408
+      },
+      "step20": {
+        "Low": 0.07393999121833698,
+        "AddedBand": 0.2937662199785273,
+        "High": 0.2904657812843198,
+        "Full": 0.1699268992737246
+      }
+    },
+    "Relaunch": {
+      "step10": {
+        "Low": 0.03895511864647118,
+        "AddedBand": 0.2679810655502979,
+        "High": 0.34907561790668384,
+        "Full": 0.10342065166930525
+      },
+      "step20": {
+        "Low": 0.03896856617769345,
+        "AddedBand": 0.26814056377300033,
+        "High": 0.34901824230628836,
+        "Full": 0.10342756585420566
+      }
+    },
+    "Sequence": {
+      "step10": {
+        "Low": 0.04400725681862496,
+        "AddedBand": 0.38940781831411586,
+        "High": 0.4677050543384389,
+        "Full": 0.11825919322975025
+      },
+      "step20": {
+        "Low": 0.04404844734486718,
+        "AddedBand": 0.38870099158162225,
+        "High": 0.46778622375084755,
+        "Full": 0.11825872464135809
+      }
+    }
+  },
+  "measurement_sha256": "45de1f8c053dc8162a87daf936519e9a3d2deffc5c6072cc22d021f5843bcb73",
+  "source_sha256": {
+    "audit-concert-grand-cell-observation.py": "f5bdb32c38ca751e0e715ec40e4391d09cd0576601a65c8e13cb66c38dd5bb04",
+    "concert_grand_cell_observer.py": "8978333039a9ab2aa9e210dfc9fb9b141d6dab6b0489ad733c1795bddccc7d8a",
+    "concert_grand_surface_impedance.py": "8ad393eb161ef53aff727ec007ea22d87c4a0406e7c55be8c588654a5f01091a",
+    "concert_grand_si_observer.py": "91b735ca1d879d8e611a9f6b2a385094f0f778d5139ced4b30caafbf066d15e2"
+  },
+  "seconds": 68.36000000004424,
+  "all_observation_gates_passed": true,
+  "decision": "Finite attack pressure comparison only. Structural convergence, wider notes/velocities, sustain and listening remain open; factory unchanged."
+}

@@ -2255,6 +2255,25 @@ Steinway fitting score. SI observation with matched microphone geometry and
 gain is next to determine the radiated-pressure effect; structural convergence,
 a wider note/velocity bank and listening remain open. Factory stays unchanged.
 
+The [matched 35/59-mode SI pressure audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-observacion-1200.md)
+now observes the frozen coupled contacts with complete Green-function phase
+and quadrature inside the same constant cells as their acoustic load. Cubic
+Hermite source interpolation uses analytic exponential moments and introduces
+no window-end impulses; the joined 8 ms transform closes to 6.67e-15.
+Eight gates and thirteen observer tests pass. Maximum pressure errors are
+0.000286% for capture refinement, 0.313885% for mechanical-rate refinement,
+and 0.114618% for spatial refinement. Outputs are Pa*s transforms of finite
+4/8 ms acceleration windows, not SPL, sustain or a piano audition.
+The close-pair complex pressure difference is 16.992% / 10.342% for the two
+contacts and 11.826% for their sequence, whose pressure-spectrum norm changes
+only +1.10%. Magnitude redistribution and phase both contribute; mono averaging
+reduces the sequence difference to 4.408%, while the 2 m-height pair gives
+13.185%. Added modes dominate this change, with no per-note normalization.
+This confirms a radiated-field effect of structural truncation, not Steinway
+identification or convergence at 59 modes. The next structural step is 90
+modes below 1500 Hz, with recomputed load, contacts and matched observation;
+full sustain, the note/velocity bank and listening remain pending.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

@@ -46,7 +46,7 @@ Los datos del ensayo de contacto compacto en curso permanecen en `SHARED`.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Carga de 59 modos bajo 1200 Hz: pasa transferencia hasta 6 kHz, memoria, refinamiento espacial y energía. Contacto C4/124 frío/reiterado a 384/768 kHz pasa balances y precisión, conservando estados; diferencia de velocidad local frente a 35 modos 19,36% / 16,73%. Faltan convergencia estructural/banco completo, observación SI, pérdidas y ambas caras/borde. | Contacto vertical compacto de 59 modos validado en C4/124; ninguna selección audible |
+| P6 | Radiación y carga acústica del aire | Carga/contactos de 59 modos bajo 1200 Hz verificados. Observación SI del ataque C4/124 pasa precisión: presión compleja de 8 ms cambia 11,83% frente a 35 modos con +1,10% de norma global. Faltan convergencia estructural/banco completo, fuente sostenida, pérdidas y ambas caras/borde. | Contacto y presión del ataque vertical C4/124 medidos; ninguna selección audible |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -784,3 +784,29 @@ Fábrica, pérdidas identificadas, ambas caras/borde, unísono, P4, graves y
 acción/pedal siguen abiertos. Informes únicos en el repo; cuatro NPZ en
 `C:\SHARED\Fisica-pendiente-2026-10-04\P6-contacto-compacto-1200`, sin WAV ni
 copias adicionales del coeficiente.
+
+### 2026-10-04 — P6 presión SI de las bases 35/59
+
+El banco de contactos ampliado quedó en **42e0b3c**, por pedido del usuario.
+[Resultados y límites](RESULTADOS-P6-observacion-1200.md). Se lee presión SI
+con retardos completos e integral dentro de las mismas celdas de su carga.
+Las dos cápsulas cercanas reutilizan la geometría P3; otras dos a altura 2 m
+sirven de control. Ganancia 1, misma geometría entre bases, sin normalización.
+
+Pasan ocho gates y 13 tests. Errores máximos de presión: captura 0,000286%,
+tasa mecánica 0,313885%, resolución espacial 0,114618%. La fuente Hermite
+conserva la unión de los contactos sin impulsos artificiales, error 6,67e−15.
+Las transformadas son Pa·s de ventanas de 4/8 ms, no SPL ni notas sostenidas.
+
+La diferencia global de presión del par cercano es 16,992% / 10,342% para
+los dos golpes y 11,826% en la secuencia, con apenas +1,10% de norma global
+en ésta. Las contribuciones de magnitud y fase son comparables. La diferencia
+baja a 4,408% en mono; a altura 2 m es 13,185%. No es sólo ganancia ni una
+medida perceptiva de anchura. El aporte principal viene de los modos añadidos.
+
+Siguiente: 90 modos bajo 1500 Hz, con carga/contactos/observación recalculados,
+para medir convergencia estructural antes de elegir escucha. Permanecen abiertos
+fuente sostenida, banco de notas/intensidades, geometría/pérdidas identificadas,
+ambas caras/borde, unísono, P4, graves y acción/pedal. Paquete sin cambios.
+Sólo un NPZ derivado de 5,20 MB en `C:\SHARED\Fisica-pendiente-2026-10-04\P6-observacion-1200`;
+informes y fuentes tienen su copia única en el repo.

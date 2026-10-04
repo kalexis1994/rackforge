@@ -50,12 +50,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-5.rfplugin",
         "plugin_id": "org.rackforge.rf-5",
-        "version": "0.1.17",
+        "version": "0.1.20",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-5/"
-            "releases/download/v0.1.17/RF-5.rfplugin"
+            "releases/download/v0.1.20/RF-5.rfplugin"
         ),
-        "sha256": "d90e5252181b2da7a86a9a20aebd57d613068c99ac67fb6a40c7450a605622ba",
+        "sha256": "e3017a15620de8ea2b44ae2b93c943b4c8b98a3fec76fb78f1e6515ceb1554ad",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

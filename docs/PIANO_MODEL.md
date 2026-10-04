@@ -2173,6 +2173,21 @@ kernel has no certified coupled integrator yet. A better compact-load margin,
 passive high-band completion and coupled/contact checks precede full-band
 listening. No demonstrated attack improvement or real-time cost claim follows.
 
+The [P6 finite-limit completion](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-carga-limitada.md)
+averages neighboring wave-factor taps to null the Nyquist endpoint, then adds
+a strictly positive matrix relaxation matching the residual static mass and
+physical resistive limit. Its storage and radiation loss are explicit; there
+is no unbounded inertial tail or eigenvalue repair. Four new tests include
+non-diagonal limits, exact-stop force, arbitrary-state work, and a persistent
+board/air midpoint solver against an independent physical ODE. The fine
+5810-state candidate passes the unchanged prescribed-force criteria on all
+three geometric grids: RMS 0.88913–1.01116%, with adequate measured spatial
+margin. Held-out low-band transfer passes. Its complex error at 6 kHz drops
+from 20.63944% to 5.54673%, still above the 2% diagnostic limit. The board
+benchmark uses two prescribed impulses over 24 ms; it is not a nonlinear
+hammer contact or a listening result. High-band transfer, compact nonlinear
+contacts and the wider note/velocity bank still precede factory selection.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

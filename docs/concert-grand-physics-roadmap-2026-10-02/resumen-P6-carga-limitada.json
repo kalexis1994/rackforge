@@ -1,0 +1,482 @@
+{
+  "baseline_commit": "c353719",
+  "profiles": {
+    "Wave32000-Cells128x96-Angle24x48-Tail": {
+      "input_sha256": "345abe1fe1797eed273148d328d9de49ddd5b52e07348e246f1f0a1432337a13",
+      "states": 5810,
+      "state_ratio": 0.01650446273854772,
+      "relaxation_time_s": [
+        1.895079304517609e-05,
+        3.0023348209479734e-05
+      ],
+      "mass_relative": 3.5952737056181996e-16,
+      "limit_relative": 3.1056329325181507e-15,
+      "wave_limit_relative": 2.375616270729375e-16,
+      "low_ZRX_max": [
+        0.010559509103649804,
+        0.008465634662708813,
+        0.012467380642658357
+      ],
+      "laplace_max": 0.00985490335642801,
+      "loaded_velocity_max": 0.004705661720017157,
+      "additional_high": [
+        {
+          "frequency_hz": 999.9999999999999,
+          "complex_relative": 0.014249038470755713,
+          "resistance_relative": 0.012256801756489525,
+          "reactance_relative": 0.017859525111706638
+        },
+        {
+          "frequency_hz": 1200.0,
+          "complex_relative": 0.014398076106093314,
+          "resistance_relative": 0.012914758138309328,
+          "reactance_relative": 0.022982819445868958
+        },
+        {
+          "frequency_hz": 1999.9999999999998,
+          "complex_relative": 0.013400862342457551,
+          "resistance_relative": 0.00944900075928923,
+          "reactance_relative": 1.8628655634782385
+        },
+        {
+          "frequency_hz": 3000.0,
+          "complex_relative": 0.09608466809159451,
+          "resistance_relative": 0.06812282585915336,
+          "reactance_relative": 131.91614136310227
+        },
+        {
+          "frequency_hz": 4500.0,
+          "complex_relative": 0.44853207946028145,
+          "resistance_relative": 0.31627367873623974,
+          "reactance_relative": 1104.794532032976
+        },
+        {
+          "frequency_hz": 6000.0,
+          "complex_relative": 0.5548131101000436,
+          "resistance_relative": 0.38885236814811525,
+          "reactance_relative": 1108.6785605763853
+        }
+      ],
+      "memory": {
+        "128x96": {
+          "rms_common": 0.02895688661222776,
+          "late_peak_common": 1.5619404708657934e-16,
+          "passed": false
+        },
+        "192x144": {
+          "rms_common": 0.029243587196410147,
+          "late_peak_common": 1.5619404708657934e-16,
+          "passed": false
+        },
+        "256x192": {
+          "rms_common": 0.02936577776321742,
+          "late_peak_common": 1.5619404708657934e-16,
+          "passed": false
+        }
+      },
+      "storage": [
+        {
+          "dt_s": 2.0833333333333333e-05,
+          "balance_relative": 1.0513789832917881e-16,
+          "radiation_power_w": 0.08722350834289855
+        },
+        {
+          "dt_s": 5.208333333333333e-06,
+          "balance_relative": 2.4239150029819204e-16,
+          "radiation_power_w": 0.308568712035193
+        },
+        {
+          "dt_s": 1.3020833333333333e-06,
+          "balance_relative": 3.584428493503303e-16,
+          "radiation_power_w": 0.25342553878417834
+        }
+      ],
+      "seconds": 3.7959999999729916,
+      "gates": {
+        "low_frequency": true,
+        "laplace": true,
+        "loaded_velocity": true,
+        "mass": true,
+        "limit": true,
+        "memory": false,
+        "energy": true,
+        "states": true,
+        "diagnostic_high": false
+      },
+      "realized_endpoint_note": "Computed from B diag(tau) B.T and B B.T, not the stored residual targets."
+    },
+    "Wave32000-Cells128x96-Angle48x96-Tail": {
+      "input_sha256": "b2ea7c2b013c1227b3868dffd13cf6fda4239ece284868eb4315ea090951cc91",
+      "states": 5810,
+      "state_ratio": 0.01650446273854772,
+      "relaxation_time_s": [
+        1.924527146892199e-05,
+        2.2725878534326755e-05
+      ],
+      "mass_relative": 4.1333588646712093e-16,
+      "limit_relative": 3.437853364487596e-15,
+      "wave_limit_relative": 3.1154886118800166e-16,
+      "low_ZRX_max": [
+        0.010539361025460285,
+        0.008467930074689772,
+        0.012429754634994203
+      ],
+      "laplace_max": 0.009823385462549544,
+      "loaded_velocity_max": 0.004689399267183609,
+      "additional_high": [
+        {
+          "frequency_hz": 999.9999999999999,
+          "complex_relative": 0.014213572511104097,
+          "resistance_relative": 0.012222326809302693,
+          "reactance_relative": 0.017821048542207736
+        },
+        {
+          "frequency_hz": 1200.0,
+          "complex_relative": 0.014201299528369894,
+          "resistance_relative": 0.012724788415609166,
+          "reactance_relative": 0.022728540632307514
+        },
+        {
+          "frequency_hz": 1999.9999999999998,
+          "complex_relative": 0.0043877231037903,
+          "resistance_relative": 0.003456564754854898,
+          "reactance_relative": 0.5298232820237531
+        },
+        {
+          "frequency_hz": 3000.0,
+          "complex_relative": 0.01020694303122156,
+          "resistance_relative": 0.006098936991757131,
+          "reactance_relative": 15.933316908517506
+        },
+        {
+          "frequency_hz": 4500.0,
+          "complex_relative": 0.023184479468979738,
+          "resistance_relative": 0.009388551692334327,
+          "reactance_relative": 73.63746635466052
+        },
+        {
+          "frequency_hz": 6000.0,
+          "complex_relative": 0.05546734572279809,
+          "resistance_relative": 0.02893793124572037,
+          "reactance_relative": 132.56917308150284
+        }
+      ],
+      "memory": {
+        "128x96": {
+          "rms_common": 0.008891322556567147,
+          "late_peak_common": 1.4041468806251595e-16,
+          "passed": true
+        },
+        "192x144": {
+          "rms_common": 0.009764068540228115,
+          "late_peak_common": 1.4041468806251595e-16,
+          "passed": true
+        },
+        "256x192": {
+          "rms_common": 0.010111604373791485,
+          "late_peak_common": 1.4041468806251595e-16,
+          "passed": true
+        }
+      },
+      "storage": [
+        {
+          "dt_s": 2.0833333333333333e-05,
+          "balance_relative": 2.0892027956584702e-16,
+          "radiation_power_w": 0.08848019863845578
+        },
+        {
+          "dt_s": 5.208333333333333e-06,
+          "balance_relative": 6.492490511840842e-17,
+          "radiation_power_w": 0.3090464481659956
+        },
+        {
+          "dt_s": 1.3020833333333333e-06,
+          "balance_relative": 2.920600577653939e-16,
+          "radiation_power_w": 0.25183104070994156
+        }
+      ],
+      "seconds": 10.063000000023749,
+      "gates": {
+        "low_frequency": true,
+        "laplace": true,
+        "loaded_velocity": true,
+        "mass": true,
+        "limit": true,
+        "memory": true,
+        "energy": true,
+        "states": true,
+        "diagnostic_high": false
+      },
+      "realized_endpoint_note": "Computed from B diag(tau) B.T and B B.T, not the stored residual targets."
+    },
+    "Wave64000-Cells128x96-Angle24x48-Tail": {
+      "input_sha256": "f9817e8dcf2cb67c2449a87d738e928c7c728865a2e0d28eeb2b6c81e101cb93",
+      "states": 11410,
+      "state_ratio": 0.03241237863112384,
+      "relaxation_time_s": [
+        9.260397556989419e-06,
+        2.5302030375597924e-05
+      ],
+      "mass_relative": 2.614839775211977e-16,
+      "limit_relative": 3.2013286673062886e-15,
+      "wave_limit_relative": 3.133641630683684e-16,
+      "low_ZRX_max": [
+        0.003002556400574805,
+        0.002864909609271776,
+        0.0031473840857590423
+      ],
+      "laplace_max": 0.002867583919994111,
+      "loaded_velocity_max": 0.0011649620886077783,
+      "additional_high": [
+        {
+          "frequency_hz": 999.9999999999999,
+          "complex_relative": 0.004153084491234238,
+          "resistance_relative": 0.003920858844775104,
+          "reactance_relative": 0.004622157948013927
+        },
+        {
+          "frequency_hz": 1200.0,
+          "complex_relative": 0.004790542484331176,
+          "resistance_relative": 0.004459311311203303,
+          "reactance_relative": 0.006871517194005948
+        },
+        {
+          "frequency_hz": 1999.9999999999998,
+          "complex_relative": 0.014694190208974249,
+          "resistance_relative": 0.010987272801480014,
+          "reactance_relative": 1.9127436309786023
+        },
+        {
+          "frequency_hz": 3000.0,
+          "complex_relative": 0.12559011626700764,
+          "resistance_relative": 0.09050373615431885,
+          "reactance_relative": 169.5153592350988
+        },
+        {
+          "frequency_hz": 4500.0,
+          "complex_relative": 0.6082094887641618,
+          "resistance_relative": 0.4326747458874348,
+          "reactance_relative": 1484.831142855234
+        },
+        {
+          "frequency_hz": 6000.0,
+          "complex_relative": 0.8604031730551729,
+          "resistance_relative": 0.5964098468968678,
+          "reactance_relative": 1737.3699737577633
+        }
+      ],
+      "memory": {
+        "128x96": {
+          "rms_common": 0.051326523225679745,
+          "late_peak_common": 1.4881239119254443e-16,
+          "passed": false
+        },
+        "192x144": {
+          "rms_common": 0.05138323576280613,
+          "late_peak_common": 1.4881239119254443e-16,
+          "passed": false
+        },
+        "256x192": {
+          "rms_common": 0.05140960775613079,
+          "late_peak_common": 1.4881239119254443e-16,
+          "passed": false
+        }
+      },
+      "storage": [
+        {
+          "dt_s": 2.0833333333333333e-05,
+          "balance_relative": 0.0,
+          "radiation_power_w": 0.05991387798234902
+        },
+        {
+          "dt_s": 5.208333333333333e-06,
+          "balance_relative": 1.6053419522489564e-16,
+          "radiation_power_w": 0.1893445882760482
+        },
+        {
+          "dt_s": 1.3020833333333333e-06,
+          "balance_relative": 1.375877243089788e-16,
+          "radiation_power_w": 0.262842447878909
+        }
+      ],
+      "seconds": 6.937999999965541,
+      "gates": {
+        "low_frequency": true,
+        "laplace": true,
+        "loaded_velocity": true,
+        "mass": true,
+        "limit": true,
+        "memory": false,
+        "energy": true,
+        "states": true,
+        "diagnostic_high": false
+      },
+      "realized_endpoint_note": "Computed from B diag(tau) B.T and B B.T, not the stored residual targets."
+    }
+  },
+  "board": {
+    "192000": {
+      "rate_hz": 192000,
+      "seconds": 67.39100000000326,
+      "energy_snapshots": [
+        {
+          "time_s": 0.0,
+          "total_balance_relative": 0.0,
+          "air_balance_relative": 0.0,
+          "stored_total_j": 4.761857076880476e-06,
+          "stored_air_j": 0.0
+        },
+        {
+          "time_s": 0.008,
+          "total_balance_relative": 2.1233845914385033e-14,
+          "air_balance_relative": 1.4109331824690055e-14,
+          "stored_total_j": 4.245658645814981e-06,
+          "stored_air_j": 1.6682974230743303e-07
+        },
+        {
+          "time_s": 0.024,
+          "total_balance_relative": 2.0737147764340938e-13,
+          "air_balance_relative": 3.079528530273385e-14,
+          "stored_total_j": 7.013375219941931e-07,
+          "stored_air_j": 3.591369633260416e-08
+        }
+      ],
+      "material_loss_j": 5.061758301929596e-06,
+      "radiation_loss_j": 1.0582136347829187e-06,
+      "air_port_work_j": 1.0941273311157328e-06,
+      "external_impulse_work_j": 6.821309458705293e-06,
+      "negative_port_work_steps": 1106,
+      "states_preserved_at_second_impulse": true,
+      "velocity_vs_bath": 0.0008556986470634999,
+      "displacement_vs_bath": 0.00047204046947296686
+    },
+    "384000": {
+      "rate_hz": 384000,
+      "seconds": 126.90700000000652,
+      "energy_snapshots": [
+        {
+          "time_s": 0.0,
+          "total_balance_relative": 0.0,
+          "air_balance_relative": 0.0,
+          "stored_total_j": 4.761857076880476e-06,
+          "stored_air_j": 0.0
+        },
+        {
+          "time_s": 0.008,
+          "total_balance_relative": 2.8859494058851773e-13,
+          "air_balance_relative": 2.669875741244893e-14,
+          "stored_total_j": 4.2452868676768316e-06,
+          "stored_air_j": 1.668209612973504e-07
+        },
+        {
+          "time_s": 0.024,
+          "total_balance_relative": 3.571424479916424e-13,
+          "air_balance_relative": 5.647097643400535e-14,
+          "stored_total_j": 7.012833400642323e-07,
+          "stored_air_j": 3.590536322271513e-08
+        }
+      ],
+      "material_loss_j": 5.061535957930168e-06,
+      "radiation_loss_j": 1.0581754339486494e-06,
+      "air_port_work_j": 1.0940807971709793e-06,
+      "external_impulse_work_j": 6.820994731940614e-06,
+      "negative_port_work_steps": 2209,
+      "states_preserved_at_second_impulse": true,
+      "velocity_vs_bath": 0.001174696927411838,
+      "displacement_vs_bath": 0.0005096439680977261
+    }
+  },
+  "selected_profile": null,
+  "method": "Adjacent-tap factor average, unchanged Cayley mapping, positive matrix mass/resistance relaxation. No coefficient or sample fit.",
+  "force_convention": "Total regular force, left derivative at driven knots. Exact stationary stop. New bounded load has no inertial delta.",
+  "normalization": "All prescribed-force errors use frozen bath RMS and initial peak, unchanged from c353719.",
+  "cells": [
+    128,
+    96
+  ],
+  "modes": 35,
+  "criteria": {
+    "low_ZRX_max": 0.02,
+    "laplace_max": 0.02,
+    "loaded_velocity_max": 0.05,
+    "mass_relative": 1e-10,
+    "limit_relative": 1e-10,
+    "memory_rms_common": 0.02,
+    "late_peak_common": 0.01,
+    "energy_relative": 1e-09,
+    "board_time_refinement": 0.001,
+    "board_velocity_vs_bath": 0.05,
+    "diagnostic_high_complex_max": 0.02,
+    "state_ratio": 0.1
+  },
+  "inputs": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-contacto-aire\\T72-768000-Air.npz": "09c879725f7981cb922f6ba3d9decdfa3946dea315d8931b69b75c5b7371f3a3",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-estados-acusticos\\spectrum.npz": "60b383fdd94610cf33d3b7b920274d33405f88c98d12a06a2511ef7f1f56117f",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\Cells128x96-Rate128000-Q16.npz": "e1580c8684007164dd9ba232ee872275f5ad42bf757837a81ff724f7a1b639ae",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\spatial192\\Cells192x144-Rate128000-Q16.npz": "625fd285cd2fbd182efc8914af4a261379e98a414d7cc2f0b31429f37febf9c0",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\spatial256\\Cells256x192-Rate128000-Q16.npz": "7b93dd019575d5f5facfbcf887fe0218bda3a6d35352f7454edf2e704827c219",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-estados-acusticos\\Fine384.npz": "a710c6cda520b970ba7075e101c45d6f4e30098cd8de72a010bd650c37335d53"
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1"
+  },
+  "scope": "One baffled face, 35 low P2 shapes, frozen C4 velocity; board impulses are not a nonlinear hammer or piano audio.",
+  "board_refinement": {
+    "pair": [
+      192000,
+      384000
+    ],
+    "velocity": 0.00035314798646844333,
+    "displacement": 8.664168105652345e-05,
+    "passed": true
+  },
+  "decision": "No factory selection: broad-band transfer, nonlinear hammer contacts and wider note/velocity bank still required, regardless of low-band or board results.",
+  "board_gates": {
+    "energy": true,
+    "air_budget": true,
+    "velocity_vs_bath": true,
+    "time_refinement": true
+  },
+  "native_package": {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.172.0.rfplugin",
+    "sha256": "ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb",
+    "changed": false
+  },
+  "tests": {
+    "count": 15,
+    "passed": true,
+    "log_sha256": "17fb68e02d4a73c8201c9de33397d28d60d153fd7318b7be4e489975016f6b10"
+  },
+  "metadata_finalization": "Added gates, input hash and realized endpoint checks after run. Endpoint properties now evaluate realized B matrices; actual forces/states/integration unchanged.",
+  "low_band_research_candidate": "Wave32000-Cells128x96-Angle48x96-Tail",
+  "sources_sha256": {
+    "tools/concert_grand_bounded_air.py": "2e2d5ca063b6a41ace02fef06d3f45ca6521355e20dd83c2bf19835760a3a47b",
+    "tools/audit-concert-grand-bounded-air.py": "e53afefd6731e86f0adb6b6bf746b2da03f34f368cd725e9b10ce9005dafd2f9",
+    "tools/tests/test_concert_bounded_air.py": "ceb7dc191943832ee048d6f695f34621c6978a02749858f86f4df85a002858ca",
+    "tools/concert_grand_rational_air.py": "b21c2a123482d0a91ec058d445576ff880b824438b15b6eb40171a5343e5a74b",
+    "tools/tests/test_concert_rational_air.py": "69ec59b3d49d53ca6b5cba01a2693b555fa8ce7f09c412ee68e1ba0e31b5b8db",
+    "tools/concert_grand_geometric_memory.py": "a7c37f0c4c052cb70f5139d4adff994126b972bf043a0938070d1a63131e61b7",
+    "tools/tests/test_concert_geometric_memory.py": "76174871814d00bdbdc0ba8bb7020220cacff1b6400229d7bdf4e9bc3c688c18",
+    "tools/concert_grand_surface_impedance.py": "8df473dbd277348cff7405448c43786823a56c629a71d0115d452c719af1a41b",
+    "tools/concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95",
+    "tools/concert_grand_acoustic_bath.py": "8acc2a8f74bf4f11828b08045b5f96ac10f9f336545f8199ed0d08235b1eba6f",
+    "docs/PIANO_MODEL.md": "0044272daea055193de2eec1ecacfac628570346a1a0df620174e4aa509d6951",
+    "docs/concert-grand-physics-roadmap-2026-10-02/README.md": "c5d0ba8ea5da6582c293819c89f13f37ca21b3219ea99ed08c33b978c3eff68a",
+    "docs/concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-carga-limitada.md": "091cb8bc238a0b42647805582992ae2b83d22b4df39c18bed8fbbb2a15f4c962"
+  },
+  "source_archive_sha256": "f492b33142ce71af3f6665a12be0015e8b42f98e17b6f1d155f7f0a7b9e70132",
+  "artifacts_sha256": {
+    "Board192000.npz": "88027c3062acdb75d3be1b56e90f13acf99abe45c732419cf3a841dee123c131",
+    "Board384000.npz": "135a36b7c58a63e92b59adf53e1ed078c84a56c44198ff1463f2496557fc4c47",
+    "Wave32000-Cells128x96-Angle24x48-Tail-bounded.npz": "725d134d378393c0108486e23a768160c0fb8e734521c51d0b280dc039d66a4d",
+    "Wave32000-Cells128x96-Angle48x96-Tail-bounded.npz": "2c67c5168a1d021b5b61f8cbac94d1a825763ebfd078a87f4dda8deabb60f50b",
+    "Wave64000-Cells128x96-Angle24x48-Tail-bounded.npz": "3badace241d82447e0361cf14491a430ecf42247ca3ae1ef6aa7a84aa0021d6d"
+  },
+  "board_csv_sha256": {
+    "Board192000.csv": "c8058d30bd3aa14fc5ec470dd522d54df61d4a3edbdd5c33a8fd7ec2bc66afa4",
+    "Board384000.csv": "4006d4f84e1d756ade62032d4750e6eb628e353bd53649cba3d153473b6f72d7"
+  }
+}

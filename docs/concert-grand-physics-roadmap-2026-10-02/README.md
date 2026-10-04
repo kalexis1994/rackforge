@@ -32,7 +32,7 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Matriz P2, contacto C4 y kernel geométrico temporal verificados. Comparador de fuerza corregido: carga racional 61× menor queda en 1,95–1,995% frente a geometría, sin margen espacial robusto. Faltan completado alto, contactos largos/banco completo, separación de pérdidas y ambas caras/borde. | Referencia directa medida; ninguna reducción seleccionada; integración audible pendiente |
+| P6 | Radiación y carga acústica del aire | Matriz P2, contacto C4 y kernel geométrico verificados. La carga compacta limitada conserva masa/resistencia alta y baja la fuerza a 0,889–1,011%; memoria pasa las tres grillas. Tabla con estados persistentes ensayada; faltan transferencia alta, contacto no lineal compacto/banco completo, pérdidas y ambas caras/borde. | Candidato bajo con margen; banda alta pendiente; ninguna selección audible |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -625,3 +625,32 @@ El kernel geométrico es un evaluador de puerto prescrito, aún sin integrador
 acoplado certificado. Banco alto, unísono, P4, pérdidas, acción/pedal y ambas
 caras/borde siguen abiertos. No se modificó audio ni paquete instalado.
 Datos en `C:\SHARED\Fisica-pendiente-2026-10-04\P6-kernel-geometrico`.
+
+### 2026-10-04 — P6 carga limitada y tabla persistente
+
+La referencia geométrica anterior quedó en **c353719**, por pedido del usuario.
+[Resultados, construcción y reproducción](RESULTADOS-P6-carga-limitada.md).
+Un promedio de taps conserva el factor positivo y anula su extremo de Nyquist.
+Una relajación matricial de residuos ya positivos completa masa DC y
+resistencia infinita sin cola inercial ilimitada. No hay ajuste de muestras
+ni reparación de eigenvalores. Cuatro tests nuevos comprueban límites,
+parada contra ODE, trabajo de estados arbitrarios y tabla/aire acoplados
+contra una ODE física independiente; las 15 pruebas de esta etapa pasan.
+
+El candidato fino tiene 5810 estados. El RMS de fuerza frente a geometría
+pasa de 1,94783–1,99520% a **0,88913–1,01116%** en las tres grillas, con
+normalizador y umbrales congelados. El margen ahora supera el cambio espacial
+medido. Las variantes angulares gruesas siguen rechazadas. La masa/límite
+son completados algebraicos; no bastan solos para aceptar la transferencia.
+
+El error complejo a 6 kHz baja de 20,63944% a 5,54673%, pero sigue fallando
+el control de 2%; también falla 4,5 kHz (2,31845%). La tabla se prueba con
+dos impulsos a 0/8 ms durante 24 ms, a 192/384 kHz, preservando estados vivos;
+los balances y refinamiento se publican en el informe y su resumen.
+No es todavía el contacto no lineal SI ni un banco de notas de fábrica.
+
+Siguiente: refinar representación temporal/angular respetando masa/límite,
+pasividad y memoria, resolver transferencia alta y llevarla al contacto SI
+persistente. Fábrica, pérdidas identificadas, ambas caras/borde, unísono,
+P4 y acción/pedal siguen abiertos. Datos y fuentes en
+`C:\SHARED\Fisica-pendiente-2026-10-04\P6-carga-limitada`.

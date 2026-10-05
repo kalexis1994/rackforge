@@ -54,8 +54,9 @@ release, con geometría/pérdidas supuestas; no resuelve el timbre.
 Ver [diagnóstico, medidas y criterios](RESULTADOS-P6-release-y-banda.md).
 La [ampliación estructural](RESULTADOS-P6-banda-alta.md) pasa el refinamiento
 de admitancia/presión hasta 6 kHz en el sector vertical simétrico de la tabla
-supuesta. Faltan preservar la flexibilidad modal alta en una base compacta y
-construir su carga recíproca antes de volver a escuchar el modelo completo.
+supuesta. La [proyección pasiva](RESULTADOS-P6-proyeccion-pasiva.md) conserva
+esa flexibilidad con 606 coordenadas y pasa puertos/frecuencias reservados.
+Falta construir su carga recíproca antes de volver a escuchar el modelo completo.
 
 | ID | Mecanismo | Representación actual / falta | Estado |
 | --- | --- | --- | --- |
@@ -65,7 +66,7 @@ construir su carga recíproca antes de volver a escuchar el modelo completo.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. La tabla refinada 132×112 pasa presión/admitancia hasta 6 kHz y celdas de observación; simetría exacta del piloto vertical. Faltan compresión de flexibilidad alta, nueva carga recíproca, identificación y ambas caras/borde. | Cobertura estructural medida; nuevo modelo acoplado y escucha pendientes |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla refinada 132×112 y proyección pasiva 7392→606 pasan presión/admitancia seca hasta 6 kHz. Faltan nueva carga recíproca, integrador de pérdidas proyectadas, identificación y ambas caras/borde. | Reducción estructural medida; nuevo modelo acoplado y escucha pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1030,3 +1031,24 @@ carga acústica recíproca de la misma superficie; después contacto, sostenido,
 liberación y escucha. La simetría no acredita fuerzas laterales ni una tabla
 real asimétrica. Siguen pendientes identificación, unísono, P4, ambas caras,
 acción/pedal y coste runtime. La medición seca no establece mejora de timbre.
+
+### 2026-10-05 — P6: proyección pasiva y controles espaciales reservados
+
+El avance anterior queda en **c6f3b1a8** por pedido del usuario; pasan 35
+pruebas dirigidas. [Método, resultados y reproducción](RESULTADOS-P6-proyeccion-pasiva.md).
+Se conservan 296 modos hasta 6 kHz y se enriquece la cola mediante estados
+forzados reales/imaginarios, incluyendo flexibilidad estática. Se proyectan
+masa, rigidez, pérdidas completas, puertos y radiación con el mismo mapa.
+
+Cuatro/18 puntos de construcción fallan en notas reservadas: 13,717%/2,649%.
+35 posiciones virtuales del puente, distintas de los siete controles MIDI,
+dan 606 coordenadas. Pasan transferencias en dos grillas y controles físicos:
+máximo por nota/banda 0,138867%, masa 1,50e−15, flexibilidad estática 5,33e−16.
+Velocidad modal completa ponderada por masa: error 0,195859%, pasa el 1%.
+Norma elástica: 1,364417%, diagnóstico separado; no acredita balance temporal.
+Pasan cuatro pruebas nuevas de congruencia, interpolación, potencia y rechazo.
+
+Siguiente: carga recíproca de estas formas, controles del sistema cargado y
+extensión del integrador para pérdidas de cola no diagonales. Datos nuevos
+únicos en `local/`; sin WAV nuevo ni actualización del paquete. Sigue pendiente
+la escucha, y la precisión seca no certifica fidelidad musical ni las 88 teclas.

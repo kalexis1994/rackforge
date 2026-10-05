@@ -2424,6 +2424,23 @@ factors do not describe this refined basis. New numerical data are stored
 once under repo-local `local/concert-grand-physics/`; recent WAVs and obsolete
 packages in SHARED were removed at the user's request. Factory stays unchanged.
 
+The [passive compliant projection](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-proyeccion-pasiva.md)
+now keeps the 296 modes through 6 kHz and enriches the high sector with real
+forced states at five shifts including DC. Mass, stiffness, full damping,
+ports and readout use the same real congruence. Four/18 construction points
+fail held-out transfers; 35 virtual bridge positions reduce 7392 coordinates
+to 606. Seven integer-note ports are excluded from construction and checked
+on an independent shifted frequency grid. Maximum per-input/band dry error
+is 0.138867%; full mass-weighted velocity error is 0.195859%, passing 1%.
+Elastic-state error is 1.364417%, recorded as a separate diagnostic without
+a selection threshold; this is not an energy-balance error. Four new tests
+check congruence, static/shifted-state interpolation, reciprocal passive ports
+and harmonic power/heat. Dense tail damping is retained after stiffness
+diagonalization. A new reciprocal air load and support for this loss matrix
+in the time integrator remain pending. Dry bridge agreement does not validate
+air-returned distributed forces, coupled notes, musical fidelity or runtime.
+Numerical data remain unique under `local/`, with no new WAV/package in SHARED.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

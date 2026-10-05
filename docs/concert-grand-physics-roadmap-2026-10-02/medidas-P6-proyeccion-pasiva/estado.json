@@ -1,0 +1,212 @@
+{
+  "parent_report_sha256": "12e847763b7cdea34e593741778a35ac493fd920dfde4626c41dd962f3cd894c",
+  "mechanical_report_sha256": "d3fde91ab5dc34701f00bb329f1496de9252ab8c5db2b99b813b22ee510a4ba7",
+  "inputs_sha256": {
+    "local\\concert-grand-physics\\P6-simetria-banda-alta-2026-10-05\\Panel-simetrico-banda-alta.npz": "ecee61e1c1f9503dca79a67ff49cdd93abc4d8beda9fdc1458d7044856205af9",
+    "local\\concert-grand-physics\\P6-proyeccion-espacial-2026-10-05\\Tabla-proyectada-pasiva.npz": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e"
+  },
+  "source_sha256": {
+    "audit-concert-grand-projected-state.py": "d26a01c865eb678a5ac929ce55d6586c7167e069a4a4f8a9fee651aa8a41fd48",
+    "concert_grand_compliant_projection.py": "e3c8001416fb70a349a27db2cadea5e1d2c67f0ba105507ff63e03d355ed57a8"
+  },
+  "frequency_points": 901,
+  "by_note": {
+    "60": {
+      "mass_velocity": {
+        "low": 1.7482325852488966e-12,
+        "middle": 8.986424905472308e-11,
+        "upper": 1.4106599969713285e-06
+      },
+      "elastic_state": {
+        "low": 2.3297382264984893e-11,
+        "middle": 4.132272255493369e-10,
+        "upper": 2.0715793064150714e-06
+      },
+      "viscous_velocity": {
+        "low": 1.2869945949814021e-11,
+        "middle": 2.0427991684350354e-10,
+        "upper": 1.9643558906394307e-06
+      }
+    },
+    "64": {
+      "mass_velocity": {
+        "low": 1.5990762037489493e-12,
+        "middle": 8.320630565933428e-11,
+        "upper": 2.1773977987094146e-06
+      },
+      "elastic_state": {
+        "low": 2.185359872972701e-11,
+        "middle": 3.9301064997714843e-10,
+        "upper": 3.1142092290305886e-06
+      },
+      "viscous_velocity": {
+        "low": 1.1770735335958496e-11,
+        "middle": 1.9020406199691124e-10,
+        "upper": 3.017870539505308e-06
+      }
+    },
+    "67": {
+      "mass_velocity": {
+        "low": 1.676245486657066e-12,
+        "middle": 8.417356744141678e-11,
+        "upper": 1.6316548355818828e-06
+      },
+      "elastic_state": {
+        "low": 2.224475718988352e-11,
+        "middle": 3.8763282011063994e-10,
+        "upper": 2.3867061759548937e-06
+      },
+      "viscous_velocity": {
+        "low": 1.2256736944122226e-11,
+        "middle": 1.9260634968298938e-10,
+        "upper": 2.2832988928681398e-06
+      }
+    },
+    "72": {
+      "mass_velocity": {
+        "low": 1.7964808569025239e-12,
+        "middle": 8.884550683152776e-11,
+        "upper": 1.474646520601241e-06
+      },
+      "elastic_state": {
+        "low": 2.3749801961160255e-11,
+        "middle": 4.047980625188484e-10,
+        "upper": 2.0915658443594204e-06
+      },
+      "viscous_velocity": {
+        "low": 1.2949972235634764e-11,
+        "middle": 2.0282315540374176e-10,
+        "upper": 2.0362927251612552e-06
+      }
+    },
+    "36": {
+      "mass_velocity": {
+        "low": 3.117211969124468e-05,
+        "middle": 0.000311491449812581,
+        "upper": 0.0013036647468778367
+      },
+      "elastic_state": {
+        "low": 0.001737920069480521,
+        "middle": 0.0056438920013002465,
+        "upper": 0.009901629179530979
+      },
+      "viscous_velocity": {
+        "low": 0.00029423215667761973,
+        "middle": 0.0010908940260672827,
+        "upper": 0.002789928157602831
+      }
+    },
+    "48": {
+      "mass_velocity": {
+        "low": 2.990674785411912e-05,
+        "middle": 0.00036254031260377745,
+        "upper": 0.0013682997010398296
+      },
+      "elastic_state": {
+        "low": 0.0014330551323243224,
+        "middle": 0.00563073198227187,
+        "upper": 0.00895325234644694
+      },
+      "viscous_velocity": {
+        "low": 0.0002875271758523206,
+        "middle": 0.001148685438640053,
+        "upper": 0.0027319241304930362
+      }
+    },
+    "53": {
+      "mass_velocity": {
+        "low": 3.318462491406121e-05,
+        "middle": 0.0004089298826218995,
+        "upper": 0.0019585854215304595
+      },
+      "elastic_state": {
+        "low": 0.0016118696184891873,
+        "middle": 0.006484069363160122,
+        "upper": 0.013644171024307471
+      },
+      "viscous_velocity": {
+        "low": 0.00037042360176358686,
+        "middle": 0.0014584762431321435,
+        "upper": 0.004434359279974424
+      }
+    },
+    "65": {
+      "mass_velocity": {
+        "low": 8.820406488164035e-06,
+        "middle": 0.00011549785926125192,
+        "upper": 0.0006648097807584336
+      },
+      "elastic_state": {
+        "low": 0.0003355813868686083,
+        "middle": 0.00141061968619042,
+        "upper": 0.003163873578440833
+      },
+      "viscous_velocity": {
+        "low": 7.765788119713409e-05,
+        "middle": 0.00031665201491183024,
+        "upper": 0.0011202862826281057
+      }
+    },
+    "69": {
+      "mass_velocity": {
+        "low": 1.207265853437427e-05,
+        "middle": 0.00015444826841798753,
+        "upper": 0.0006042582468502102
+      },
+      "elastic_state": {
+        "low": 0.0003662716655347053,
+        "middle": 0.0015211893132702728,
+        "upper": 0.0024976578696400444
+      },
+      "viscous_velocity": {
+        "low": 0.0001112727578744884,
+        "middle": 0.00044982078737639767,
+        "upper": 0.0011033051324853256
+      }
+    },
+    "84": {
+      "mass_velocity": {
+        "low": 2.2904438103041823e-05,
+        "middle": 0.000268971214152067,
+        "upper": 0.0011077593929224182
+      },
+      "elastic_state": {
+        "low": 0.0015681546409660665,
+        "middle": 0.0060044985578930855,
+        "upper": 0.010702315704797988
+      },
+      "viscous_velocity": {
+        "low": 0.00025814151684507106,
+        "middle": 0.0010202369726586345,
+        "upper": 0.002663575867494701
+      }
+    },
+    "96": {
+      "mass_velocity": {
+        "low": 3.810308716229676e-05,
+        "middle": 0.0003717203270286048,
+        "upper": 0.0018852565285359328
+      },
+      "elastic_state": {
+        "low": 0.0018858978195394665,
+        "middle": 0.005981082677149177,
+        "upper": 0.012794261884154673
+      },
+      "viscous_velocity": {
+        "low": 0.00032008888746418136,
+        "middle": 0.001201652264493908,
+        "upper": 0.0038411913778748593
+      }
+    }
+  },
+  "stored_ritz_relative": 0.0,
+  "maximum_mass_velocity_relative": 0.0019585854215304595,
+  "mass_velocity_criterion": 0.01,
+  "mass_velocity_passed": true,
+  "definitions": {
+    "mass_velocity": "sqrt(integral(w^2*sum(abs(error_modal_q)^2))/integral(w^2*sum(abs(full_modal_q)^2)))",
+    "elastic_state": "same with modal omega^2 weights; diagnostic, no selection threshold",
+    "viscous_velocity": "same with w^2*modal damping weights; diagnostic, no selection threshold"
+  },
+  "scope": "Full mass-normalized dry modal motion, four construction-note ports and seven held-out integer ports. Not actual surface-relative velocity, reciprocal air loading or a time-domain note."
+}

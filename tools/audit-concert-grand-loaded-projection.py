@@ -52,9 +52,16 @@ def evaluate(model,surface,frequency,B,projected=None,order=8):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     for n in ['mechanical-report','projection-report','state-report','output','report']:p.add_argument('--'+n,type=Path,required=True)
-    p.add_argument('--cells',nargs=2,type=int,default=[192,144]);p.add_argument('--limit-frequencies',type=int)
+    p.add_argument('--cells',nargs=2,type=int,default=[192,144]);p.add_argument('--fine-cells',nargs=2,type=int,default=[256,192])
+    p.add_argument('--limit-frequencies',type=int);p.add_argument('--real-arithmetic',action='store_true')
     a=p.parse_args()
     if a.output.exists() or a.report.exists():raise ValueError('new output/report required')
+    if any(n<=0 for n in a.cells+a.fine_cells) or any(f<=c for c,f in zip(a.cells,a.fine_cells)):
+        raise ValueError('fine cells must refine both positive spatial dimensions')
+    Surface=RitzSurface
+    if a.real_arithmetic:
+        from concert_grand_real_surface import RealArithmeticSurface
+        Surface=RealArithmeticSurface
     start=time.monotonic();mechanical=json.loads(a.mechanical_report.read_text());parent=json.loads(a.projection_report.read_text());state=json.loads(a.state_report.read_text())
     if (not mechanical['all_spatial_gates_passed'] or not parent['selected'] or not state['mass_velocity_passed']
         or reference.digest(a.mechanical_report)!=parent['mechanical_report_sha256']
@@ -70,7 +77,7 @@ def main():
         red['low_count']=int(d['low_count']);notes=d['test_notes'].tolist()
         small=dict(full,frequency=red['frequency'],vectors=d['ritz_vectors'])
     B=ports(full,notes);b=red['projection'].T@B
-    full_surface=RitzSurface(full,a.cells);small_surface=RitzSurface(small,a.cells)
+    full_surface=Surface(full,a.cells);small_surface=Surface(small,a.cells)
     resonances=full['frequency'][(full['frequency']>=60)&(full['frequency']<=6000)]
     sampled=resonances[np.unique(np.linspace(0,len(resonances)-1,14,dtype=int))]
     pitch=440*2**((np.array(notes)-69)/12)
@@ -79,13 +86,14 @@ def main():
     if a.limit_frequencies:
         if a.limit_frequencies<2:raise ValueError('at least two preflight points')
         f=f[np.unique(np.linspace(0,len(f)-1,a.limit_frequencies,dtype=int))]
-    r=dict(criteria=CRITERIA,cells=a.cells,notes=notes,full_modes=len(full['frequency']),projected_modes=len(small['frequency']),
+    r=dict(criteria=CRITERIA,cells=a.cells,fine_cells=a.fine_cells,real_arithmetic=a.real_arithmetic,notes=notes,full_modes=len(full['frequency']),projected_modes=len(small['frequency']),
         frequencies_hz=f.tolist(),rows=[],spatial=[],angular=[],quadrature=[],gates={},
         inputs_sha256={str(full_path):reference.digest(full_path),str(small_path):reference.digest(small_path)},
         parent_reports_sha256={str(a.mechanical_report):reference.digest(a.mechanical_report),str(a.projection_report):reference.digest(a.projection_report),str(a.state_report):reference.digest(a.state_report)},
         source_sha256={n:reference.digest(Path(__file__).with_name(n)) for n in ['audit-concert-grand-loaded-projection.py','concert_grand_matrixfree_air.py','concert_grand_surface_impedance.py','concert_grand_cell_observer.py','concert_grand_orthotropic_plate.py']},
         solver='Right-preconditioned block GMRES with original force residual approval',
         scope='Continuous frequency-domain one-face baffled constant-cell Rayleigh load, reciprocal feedback on both parent and projected board. Sparse harmonic controls, not dense band proof, causal realization or audio.')
+    if a.real_arithmetic:r['source_sha256']['concert_grand_real_surface.py']=reference.digest(Path(__file__).with_name('concert_grand_real_surface.py'))
     a.output.mkdir(parents=True);reference.write(a.report,r)
     allY=[];allP=[];allSmallY=[];allSmallP=[];cached={}
     print('loaded harmonic controls',len(f),'frequencies',len(notes),'ports',flush=True)
@@ -104,12 +112,12 @@ def main():
     r['gates']['passive_ports']=min(row[which]['minimum_dissipation'] for row in r['rows'] for which in ['full','projected'])>=CRITERIA['minimum_dissipation']
     # A limited run is a preflight only and cannot approve spatial/angular gates.
     if not a.limit_frequencies:
-        fine_surface=RitzSurface(full,[256,192])
+        fine_surface=Surface(full,a.fine_cells)
         for hz in CHECKS:
             if hz not in cached:cached[hz]=evaluate(full,full_surface,hz,B)
             q,Y,P,stats=cached[hz]
             _,fy,fp,fs=evaluate(full,fine_surface,hz,B)
-            result=dict(frequency_hz=hz,cells_fine=[256,192],mobility_relative=port_errors(Y,fy),pressure_relative=port_errors(P,fp),fine_solve=fs)
+            result=dict(frequency_hz=hz,cells_fine=a.fine_cells,mobility_relative=port_errors(Y,fy),pressure_relative=port_errors(P,fp),fine_solve=fs)
             r['spatial'].append(result);print('spatial',hz,max(result['mobility_relative']),max(result['pressure_relative']),flush=True)
             if hz in ANGULAR:
                 velocity=2j*np.pi*hz*q

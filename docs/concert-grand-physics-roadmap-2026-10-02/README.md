@@ -66,7 +66,7 @@ Falta construir su carga recíproca antes de volver a escuchar el modelo complet
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla refinada 132×112 y proyección pasiva 7392→606 pasan presión/admitancia seca hasta 6 kHz. Faltan nueva carga recíproca, integrador de pérdidas proyectadas, identificación y ambas caras/borde. | Reducción estructural medida; nuevo modelo acoplado y escucha pendientes |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla refinada 132×112 y proyección pasiva 7392→606 pasan controles secos y cargados en frecuencia hasta 6 kHz; malla 256×192 contrastada con 320×240. Faltan realización causal, integrador de pérdidas proyectadas, identificación y ambas caras/borde. | Carga continua medida en puntos declarados; transitorios y escucha pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1068,3 +1068,20 @@ integral angular independiente coincide. **No se aprueba la corrida 192×144**:
 refinar a 256×192 cambia presión a 6 kHz un 1,018371%, por encima del 1%.
 Se conserva el control fallido; siguiente: base 256×192 y contraste 320×240.
 Sin nuevo WAV ni paquete, datos nuevos pequeños sólo en `local/`.
+
+### 2026-10-05 — P6: refinamiento cargado aprobado y aritmética equivalente
+
+El control original queda reproducible en **0a99543**. La
+[repetición refinada](RESULTADOS-P6-carga-directa.md#carga-con-superficie-refinada)
+usa superficie 256×192 y referencia 320×240. Pasan los nueve controles con
+los mismos límites: presión proyectada máxima 0,622059%, admitancia 0,255148%,
+cambio espacial máximo 0,479522%. Balance de potencia 1,902e−10; no es aún
+un balance de estados acústicos en el tiempo. Los 83 puntos son discretos.
+
+Se evita la copia compleja de la matriz Ritz mediante productos separados
+real/imaginario. Dos pruebas adicionales y un preflight idéntico al anterior
+dan diferencia máxima 2,615e−14. Ese preflight baja de 33,375 a 17,297 s;
+la corrida refinada completa tarda 542,828 s con pico de 2,10 GiB. No es una
+medición de audio en tiempo real. Siguiente: realización causal pasiva y
+contacto/coast/diagnósticos con la matriz completa de pérdidas proyectadas.
+El paquete instalado sigue en 0.172.0; no se dejan nuevos archivos en SHARED.

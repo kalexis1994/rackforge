@@ -1,0 +1,21 @@
+{
+  "parent_reports_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-carga-directa\\preflight.json": "7550d879b080038e9dd4ddabf3914c61699cfd592f7486d681f47df10876bd3d",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-carga-directa\\preflight-real.json": "ecc8899f9da842c1605202caecd2f4541952d8e184b2aa2c7882477e337cb810"
+  },
+  "source_sha256": "28271cfa0d7043e778ab2068623ca87d797a8601cabed377faff40dbe823c90a",
+  "transfer_relative_by_input": {
+    "mobility_full": 9.495661522620842e-16,
+    "pressure_full": 2.61462084730303e-14,
+    "mobility_projected": 5.498418227121564e-16,
+    "pressure_projected": 1.792580807810292e-14
+  },
+  "criterion": 1e-10,
+  "passed": true,
+  "before_seconds": 33.375,
+  "after_seconds": 17.29699999999866,
+  "observed_ratio": 1.9295253512171233,
+  "before_peak_bytes": 2455916544,
+  "after_peak_bytes": 1597263872,
+  "scope": "One standalone before/after run at identical three-point preflight. Not repeated timing statistics, runtime audio or different cell resolutions."
+}

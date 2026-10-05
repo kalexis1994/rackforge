@@ -106,7 +106,7 @@ exactamente la apertura rectangular de cada celda mediante sinc y sumas
 separables. Se aplica al **movimiento complejo cargado**, no sólo a una forma
 real aislada. Los bloques angulares acotan memoria temporal sin quitar direcciones.
 
-La corrida completa de 192×144 **no se aprueba**: pasa nueve de diez
+La corrida completa de 192×144 **no se aprueba**: pasa los demás
 controles, pero falla el refinamiento espacial de presión a 6 kHz.
 
 | Control | Resultado |
@@ -124,6 +124,56 @@ bytes (2,73 GiB). Se conserva el ensayo fallido sin cambiar su umbral ni
 presentarlo como referencia espacial aprobada. Transferencias pequeñas con
 SHA256 `5edd88d12eeab8fdf0ab561522d913b33da1c6f71ff09f219a6693329c8acbea`.
 El siguiente refinamiento parte de 256×192 y lo contrasta con 320×240.
+Las fuentes y mediciones de ese control quedan conservadas en **0a99543**;
+los hashes originales corresponden a esa versión.
+
+### Aritmética equivalente antes del refinamiento
+
+La matriz Ritz es real. Multiplicarla directamente por entradas complejas
+creaba una copia compleja grande repetidamente. `RealArithmeticSurface`
+usa `U*Re(q) + i*U*Im(q)` y la misma operación para la transpuesta.
+No cambia modos, proyecciones, cuadraturas ni ecuaciones; evita esa copia.
+Dos pruebas nuevas pasan mapas y solución cargada contra la aritmética anterior.
+
+[Comparación antes/después](medidas-P6-carga-directa/aritmetica.json), en
+los mismos tres puntos y geometría 192×144:
+
+| Ejecución standalone | Tiempo | Peak working set |
+| --- | ---: | ---: |
+| Producto complejo anterior | 33,375 s | 2.455.916.544 bytes |
+| Productos real/imaginario | 17,297 s | 1.597.263.872 bytes |
+
+Máxima diferencia por frecuencia/puerto en las cuatro familias de
+transferencias: **2,615e−14** relativa, dentro de 1e−10. La razón de tiempo
+observada es 1,93; son dos corridas individuales, no estadística repetida ni
+benchmark de audio/runtime. [Preflight optimizado](medidas-P6-carga-directa/preflight-real.json).
+
+### Carga con superficie refinada
+
+[Corrida 256×192 y referencia 320×240](medidas-P6-carga-directa/refinada.json).
+Se repiten los mismos 83 puntos con aritmética real/imaginaria. **Pasan los
+nueve controles**, con los mismos umbrales. No se aprueba la referencia
+192×144 retrospectivamente.
+
+| Control | Resultado |
+| --- | ---: |
+| Proyección cargada, máximo de admitancia por puerto/frecuencia | 0,255148% |
+| Proyección cargada, máximo de presión | 0,622059% |
+| Refinamiento espacial 256×192 → 320×240, máximo de presión | 0,479522%, a 6 kHz |
+| Residual de fuerzas originales, máximo | 9,863e−11 |
+| Balance armónico de potencia, máximo | 1,902e−10 |
+| Reciprocidad, disipación de puertos, potencia angular y cuadraturas | pasan |
+
+Tiempo 542,828 s (9,05 minutos); peak working set de proceso
+2.249.625.600 bytes (2,10 GiB). La comparación temporal con los 850,516 s
+anteriores cambia también la malla: la comparación de aritmética aislada es
+el preflight de la sección anterior. Transferencias con SHA256
+`6496facb3b5b42d4b593e4fe639337178138242734e855921efced7fb1230331`.
+Se verificaron de nuevo hashes de fuentes, entradas, informes padres y salida.
+
+Esto valida la reducción y la carga en los puntos y geometría declarados.
+No certifica toda la banda entre puntos ni identifica un piano real; tampoco
+valida aún contacto, apagador o un transitorio acoplado en el tiempo.
 
 ## Datos y reproducción
 
@@ -137,13 +187,18 @@ Desde el repo, con Python/NumPy/SciPy y BLAS de un hilo; usar rutas nuevas:
 ```powershell
 python -m unittest tools/tests/test_concert_matrixfree_air.py
 python tools/audit-concert-grand-loaded-projection.py --mechanical-report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-banda-alta/simetria.json --projection-report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-proyeccion-pasiva/espacial.json --state-report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-proyeccion-pasiva/estado.json --output local/concert-grand-physics/P6-carga-directa-repeticion --report local/concert-grand-physics/P6-carga-directa-repeticion.json
+python tools/audit-concert-grand-loaded-projection.py --mechanical-report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-banda-alta/simetria.json --projection-report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-proyeccion-pasiva/espacial.json --state-report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-proyeccion-pasiva/estado.json --cells 256 192 --fine-cells 320 240 --real-arithmetic --output local/concert-grand-physics/P6-carga-refinada-repeticion --report local/concert-grand-physics/P6-carga-refinada-repeticion.json
+python -m unittest tools/tests/test_concert_real_surface.py
 ```
 
 `--limit-frequencies 3` ejecuta sólo un preflight y lo marca como tal; no
 permite aprobar la corrida completa. Cada informe conserva hashes de
 entradas/fuentes, los eventos de solver, potencias y errores por puerto.
-Los controles de esta etapa tienen una única ubicación en
-`local/concert-grand-physics/P6-carga-directa[-preflight]-2026-10-05/`.
+Los controles de esta etapa tienen una única ubicación bajo
+`local/concert-grand-physics/`: `P6-carga-directa-2026-10-05`,
+`P6-carga-directa-preflight-2026-10-05`, `P6-carga-real-preflight-2026-10-05`
+y `P6-carga-directa-refinada-2026-10-05`. Los dos preflights son mediciones
+antes/después necesarias para el control aritmético; no copias de los factores.
 
 ## Qué sigue
 

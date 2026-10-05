@@ -204,9 +204,13 @@ A package contains a versioned manifest, portable component or target-specific
 transition artifacts, optional WEB assets, immutable package assets, integrity
 metadata, and migration information. It never contains user state.
 
-One archive must install safely on every supported host. If native transition
-artifacts are required, they live inside the same package under explicit target
-keys. Missing targets fail validation before activation.
+One archive must install safely on every supported host. The portable
+component is always there and runs everywhere; beside it, the same processor
+may be built natively for particular platforms under explicit target keys
+(`[binaries]`, see [docs/PLUGIN_ABI.md](docs/PLUGIN_ABI.md)). A host runs a
+native build only for a package the release's official set installed, and only
+when the build loads; every other case runs the component, so a missing target
+costs speed, never the plugin.
 
 ## Compatibility policy
 
@@ -252,14 +256,38 @@ this document summarizes product direction and delivery order.
 - [ ] Stabilize WIT contracts and the `wasm-v1` runtime.
 - [ ] Migrate the reference instrument to the portable runtime.
 - [ ] Publish plugin and WEB SDKs with simulators.
-- [ ] Add macOS and additional certified controllers.
+- [x] Hybrid packages: one `.rfplugin` with the component and native builds of
+  the same processor, held to the component bit for bit in the plugin's CI
+  (`rackforge-core compare-native`). RF-Musette runs 1.7-2x faster natively.
+- [ ] Native builds for parallel processors (`export_parallel_processor!`).
+- [ ] Add additional certified controllers.
+
+### macOS
+
+GitHub's macOS runners cost nothing for public repositories, so the work
+below needs no Mac to build; a tester with an Apple Silicon Mac runs it.
+RackForge's core already builds there (the plugins' CI compiles it on
+`macos-14` to compare their native builds), and every hybrid plugin already
+ships `macos-aarch64`.
+
+- [ ] Desktop app: macOS dependencies (cpal on CoreAudio, midir on CoreMIDI,
+  wry on WKWebView, rfd), and the window, event loop and audio-device paths
+  that today distinguish only Windows and Linux.
+- [ ] A `.app` bundle (Info.plist, icon) built by CI on `macos-14` and
+  published as a zip.
+- [ ] VST3 as a macOS bundle (`Contents/MacOS`).
+- [ ] Signing and notarization: the Apple Developer Program (US$99 a year)
+  before distributing to the public. Until then a tester opens the unsigned
+  app once with right-click, Open (or `xattr -dr com.apple.quarantine`).
+- [ ] An Intel (`macos-x86_64`) build, if anyone asks for one.
 - [ ] Add a signed repository index and controlled update channels.
 
 ## Deliberately deferred decisions
 
 - A VST compatibility bridge is out of scope.
 - Arbitrary plugin network and process access is out of scope.
-- macOS support follows contract stabilization.
+- macOS support follows contract stabilization; its steps are listed under
+  Delivery phases.
 - A public marketplace follows signing, trust, rollback, and conformance.
 
 The immediate goal is reliability and contract stability, not a larger feature

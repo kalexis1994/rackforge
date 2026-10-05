@@ -351,8 +351,8 @@ pub const NATIVE_BUILDS_ENV: &str = "RACKFORGE_NATIVE_BUILDS";
 ///
 /// Only an official package's (`rackforge_plugin_api::install`): a native
 /// build runs unsandboxed, with the host's own rights, so it is trusted no
-/// further than the release that carried it. Never for a package that
-/// renders in parallel, which a native build does not do. And a build that
+/// further than the release that carried it. A package that renders in
+/// parallel is scheduled the same way in either form. And a build that
 /// will not load -- a library this system cannot link, a table from another
 /// SDK -- is reported and passed over for the component, which runs
 /// everywhere: a package never fails to load for carrying one.
@@ -360,11 +360,7 @@ pub const NATIVE_BUILDS_ENV: &str = "RACKFORGE_NATIVE_BUILDS";
 fn native_build(package: &PluginPackage) -> Option<PortableModule> {
     let manifest = package.manifest();
     let relative = manifest.host_binary()?;
-    if manifest
-        .capabilities
-        .contains(&Capability::ParallelRenderV1)
-        || std::env::var(NATIVE_BUILDS_ENV).is_ok_and(|value| value == "off")
-    {
+    if std::env::var(NATIVE_BUILDS_ENV).is_ok_and(|value| value == "off") {
         return None;
     }
     let official = rackforge_plugin_api::installation_record_for(
@@ -526,15 +522,9 @@ impl PortableLoadedPlugin {
         // The browser backend cannot schedule units at all and reports no
         // layout, which keeps every parallel package on its sequential
         // `rackforge_process` fallback there.
-        // A native build is only chosen for a package that does not declare
-        // the extension, and has none to report.
         #[cfg(not(target_arch = "wasm32"))]
         let parallel_layout = {
-            let layout = if module.is_native_build() {
-                None
-            } else {
-                module.instantiate()?.parallel_layout()
-            };
+            let layout = module.instantiate()?.parallel_layout();
             let declares_parallel = package
                 .manifest()
                 .capabilities

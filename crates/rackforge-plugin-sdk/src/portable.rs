@@ -640,6 +640,19 @@ pub mod native {
         pub const EXCHANGE_INPUT: u32 = 5;
         /// Packed wide MIDI events, two `u64` each; absent without `midi2`.
         pub const MIDI2: u32 = 6;
+        /// Bytes: each unit's dispatch payload, at the dispatch stride.
+        /// This and the four below exist only in a parallel build.
+        pub const DISPATCH: u32 = 7;
+        /// `u32`s: the plan header (shared bytes, reserved), then each
+        /// planned unit's index and payload length.
+        pub const PLAN: u32 = 8;
+        /// `f32`s: each unit's mix slot, `mix_slot_samples` apart.
+        pub const MIX: u32 = 9;
+        /// Bytes: the block-shared payload.
+        pub const SHARED: u32 = 10;
+        /// Bytes: each unit's report, at the report stride; absent when the
+        /// plugin reports nothing.
+        pub const REPORTS: u32 = 11;
     }
 
     pub type CreateFn = unsafe extern "C" fn() -> *mut c_void;
@@ -683,6 +696,43 @@ pub mod native {
         midi2_event_count: i32,
     ) -> i32;
 
+    /// A unit's render: `rackforge_parallel_render_unit`'s arguments.
+    pub type RenderUnitFn = unsafe extern "C" fn(
+        instance: *mut c_void,
+        unit: i32,
+        payload_bytes: i32,
+        shared_bytes: i32,
+        frames: i32,
+        output_channels: i32,
+    ) -> i32;
+    /// The post-stage: `rackforge_parallel_end_block`'s arguments.
+    pub type EndBlockFn =
+        unsafe extern "C" fn(instance: *mut c_void, frames: i32, output_channels: i32) -> i32;
+
+    /// The parallel-render extension of a build whose processor renders in
+    /// units ([`crate::ParallelProcessor`]): the component's
+    /// `rackforge_parallel_*` exports, each taking the instance first, and
+    /// the geometry its constant exports report. The pre-stages return the
+    /// planned unit count, or a status.
+    #[repr(C)]
+    pub struct NativeParallelApiV1 {
+        pub struct_size: u32,
+        pub parallel_abi_version: u32,
+        pub max_units: u32,
+        pub dispatch_stride: u32,
+        /// Floats a unit writes per frame.
+        pub unit_channels: u32,
+        pub report_stride: u32,
+        pub shared_capacity: u32,
+        /// The distance between two units' slots in the mix region.
+        pub mix_slot_samples: u32,
+        pub begin_block: ProcessFn,
+        /// Present exactly when the table's `process_v2` is.
+        pub begin_block_v2: Option<ProcessV2Fn>,
+        pub render_unit: RenderUnitFn,
+        pub end_block: EndBlockFn,
+    }
+
     /// The table. Fields are only ever appended; `struct_size` says how many a
     /// build has.
     #[repr(C)]
@@ -721,6 +771,9 @@ pub mod native {
         pub program_apply_edit: LengthFn,
         pub process: ProcessFn,
         pub process_v2: Option<ProcessV2Fn>,
+        /// The parallel-render extension, for a processor that renders in
+        /// units; absent for every other.
+        pub parallel: Option<&'static NativeParallelApiV1>,
     }
 
     pub type EntryFnV1 = unsafe extern "C" fn() -> *const NativeApiV1;

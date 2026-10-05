@@ -9,7 +9,7 @@
 //! [`PortableInstance`].
 //!
 //! What only the sandbox has, a native build answers as a component that
-//! does not use it would: no fuel and no budget, and no parallel rendering.
+//! does not use it would: no fuel and no budget.
 
 use crate::library::{LibraryInstance, LibraryModule};
 use crate::native::{WasmInstance, WasmModule};
@@ -17,7 +17,7 @@ use crate::{
     MidiEvent, MidiEvent2, ParallelBlockPlan, ParallelLayout, ParallelPlanEntry, ParameterEvent,
 };
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -108,16 +108,6 @@ macro_rules! either {
         match $backend {
             InstanceBackend::Wasm($instance) => $call,
             InstanceBackend::Library($instance) => $call,
-        }
-    };
-}
-
-/// A call only the sandbox answers: a native build has no parallel units.
-macro_rules! wasm_only {
-    ($backend:expr, $instance:ident => $call:expr) => {
-        match $backend {
-            InstanceBackend::Wasm($instance) => $call,
-            InstanceBackend::Library(_) => bail!("a native build does not render in parallel"),
         }
     };
 }
@@ -284,14 +274,10 @@ impl PortableInstance {
         ))
     }
 
-    /// The parallel-render geometry when the component exports the optional
-    /// extension, `None` for classic single-unit components and for every
-    /// native build.
+    /// The parallel-render geometry when the processor renders in units,
+    /// `None` for a classic single-unit one.
     pub fn parallel_layout(&self) -> Option<ParallelLayout> {
-        match &self.backend {
-            InstanceBackend::Wasm(instance) => instance.parallel_layout(),
-            InstanceBackend::Library(_) => None,
-        }
+        either!(&self.backend, instance => instance.parallel_layout())
     }
 
     pub fn parallel_begin_block(
@@ -303,25 +289,25 @@ impl PortableInstance {
         midi2: &[MidiEvent2],
         plan: &mut [ParallelPlanEntry],
     ) -> Result<ParallelBlockPlan> {
-        wasm_only!(&mut self.backend, instance => instance.parallel_begin_block(
+        either!(&mut self.backend, instance => instance.parallel_begin_block(
             input, frames, midi, parameters, midi2, plan,
         ))
     }
 
     pub fn parallel_read_shared(&self, shared: &mut [u8]) -> Result<()> {
-        wasm_only!(&self.backend, instance => instance.parallel_read_shared(shared))
+        either!(&self.backend, instance => instance.parallel_read_shared(shared))
     }
 
     pub fn parallel_write_shared(&mut self, shared: &[u8]) -> Result<()> {
-        wasm_only!(&mut self.backend, instance => instance.parallel_write_shared(shared))
+        either!(&mut self.backend, instance => instance.parallel_write_shared(shared))
     }
 
     pub fn parallel_read_dispatch(&self, unit: u32, payload: &mut [u8]) -> Result<()> {
-        wasm_only!(&self.backend, instance => instance.parallel_read_dispatch(unit, payload))
+        either!(&self.backend, instance => instance.parallel_read_dispatch(unit, payload))
     }
 
     pub fn parallel_write_dispatch(&mut self, unit: u32, payload: &[u8]) -> Result<()> {
-        wasm_only!(&mut self.backend, instance => instance.parallel_write_dispatch(unit, payload))
+        either!(&mut self.backend, instance => instance.parallel_write_dispatch(unit, payload))
     }
 
     pub fn parallel_render_unit(
@@ -333,25 +319,25 @@ impl PortableInstance {
         output: &mut [f32],
         frames: u32,
     ) -> Result<()> {
-        wasm_only!(&mut self.backend, instance => instance.parallel_render_unit(
+        either!(&mut self.backend, instance => instance.parallel_render_unit(
             unit, payload_bytes, shared_bytes, input, output, frames,
         ))
     }
 
     pub fn parallel_read_report(&self, unit: u32, report: &mut [u8]) -> Result<()> {
-        wasm_only!(&self.backend, instance => instance.parallel_read_report(unit, report))
+        either!(&self.backend, instance => instance.parallel_read_report(unit, report))
     }
 
     pub fn parallel_write_report(&mut self, unit: u32, report: &[u8]) -> Result<()> {
-        wasm_only!(&mut self.backend, instance => instance.parallel_write_report(unit, report))
+        either!(&mut self.backend, instance => instance.parallel_write_report(unit, report))
     }
 
     pub fn parallel_write_mix_slot(&mut self, unit: u32, samples: &[f32]) -> Result<()> {
-        wasm_only!(&mut self.backend, instance => instance.parallel_write_mix_slot(unit, samples))
+        either!(&mut self.backend, instance => instance.parallel_write_mix_slot(unit, samples))
     }
 
     pub fn parallel_end_block(&mut self, output: &mut [f32], frames: u32) -> Result<()> {
-        wasm_only!(&mut self.backend, instance => instance.parallel_end_block(output, frames))
+        either!(&mut self.backend, instance => instance.parallel_end_block(output, frames))
     }
 
     /// Whether this plugin is metered at all: never, for a native build.

@@ -428,5 +428,5 @@ fn a_library_that_is_not_there_is_refused() {
     let error = unsafe { PortableModule::load_native_build(&missing) }
         .err()
         .expect("nothing to load");
-    assert!(format!("{error:#}").contains("loading native plugin build"));
+    assert!(format!("{error:#}").contains("native plugin build"));
 }

@@ -165,14 +165,39 @@ fn compare_native(package_path: &Path, library: &Path, options: &[String]) -> Re
     if program_ids.is_empty() {
         program_ids.push(None);
     }
+    // A processor that renders in units is also scheduled the way a host
+    // schedules it -- the pre-stage on a coordinator, each unit in its own
+    // worker instance, the post-stage back on the coordinator -- here one
+    // unit after another, which is what every thread count reduces to.
+    let staged = native.parallel_layout().is_some();
     let (mut component_time, mut native_time) = (0.0_f64, 0.0_f64);
     for program in &program_ids {
-        let render = |plugin: &LoadedPlugin, time: &mut f64| -> Result<(Vec<u32>, Vec<u8>)> {
+        let render = |plugin: &LoadedPlugin,
+                      in_units: bool,
+                      time: &mut f64|
+         -> Result<(Vec<u32>, Vec<u8>)> {
             let mut instance = plugin.create_instance()?;
+            instance.activate(RATE, FRAMES, input_channels, output_channels)?;
+            let mut units = if in_units {
+                Some(
+                    rackforge_core::parallel_render::ParallelUnits::create(
+                        plugin,
+                        RATE,
+                        FRAMES,
+                        input_channels,
+                        output_channels,
+                    )?
+                    .context("a parallel processor without units")?,
+                )
+            } else {
+                None
+            };
             if let Some(program) = program {
                 instance.load_preset(program)?;
+                if let Some(units) = &mut units {
+                    units.mirror(|unit| unit.load_preset(program))?;
+                }
             }
-            instance.activate(RATE, FRAMES, input_channels, output_channels)?;
             let mut bits = Vec::with_capacity(blocks * (FRAMES * output_channels) as usize);
             let mut output = vec![0.0_f32; (FRAMES * output_channels) as usize];
             let mut input = vec![0.0_f32; (FRAMES * input_channels) as usize];
@@ -195,35 +220,81 @@ fn compare_native(package_path: &Path, library: &Path, options: &[String]) -> Re
                     next += 1;
                 }
                 let begun = Instant::now();
-                instance.process_interleaved(
-                    &input,
-                    &mut output,
-                    FRAMES,
-                    input_channels,
-                    output_channels,
-                    &midi,
-                    &[],
-                )?;
+                match &mut units {
+                    None => instance.process_interleaved(
+                        &input,
+                        &mut output,
+                        FRAMES,
+                        input_channels,
+                        output_channels,
+                        &midi,
+                        &[],
+                    )?,
+                    Some(units) => {
+                        let wide: Vec<rackforge_core::midi2::Midi2Event> = midi
+                            .iter()
+                            .map(rackforge_core::midi2::Midi2Event::from_midi1)
+                            .collect();
+                        let planned = units.begin(&mut instance, &input, FRAMES, &wide, &[])?;
+                        let (mut pending, mut completed) = (planned, 0_u32);
+                        while pending != 0 {
+                            let bit = pending.isolate_lowest_one();
+                            pending &= !bit;
+                            let job = units.unit_job(
+                                bit.trailing_zeros(),
+                                &input,
+                                FRAMES,
+                                output_channels,
+                            );
+                            // SAFETY: produced for this block, and this thread
+                            // holds the whole Slot.
+                            if unsafe {
+                                rackforge_core::parallel_render::execute_unit_job(
+                                    &job,
+                                    FRAMES,
+                                    output_channels,
+                                )
+                            } {
+                                completed |= bit;
+                            }
+                        }
+                        if completed != planned {
+                            bail!("a unit failed in block {block}");
+                        }
+                        units.finish(
+                            &mut instance,
+                            &mut output,
+                            FRAMES,
+                            output_channels,
+                            completed,
+                        )?;
+                    }
+                }
                 *time += begun.elapsed().as_secs_f64();
                 bits.extend(output.iter().map(|sample| sample.to_bits()));
             }
             Ok((bits, instance.save_state()?))
         };
-        let (expected, expected_state) = render(&component, &mut component_time)?;
-        let (actual, actual_state) = render(&native, &mut native_time)?;
+        let (expected, expected_state) = render(&component, false, &mut component_time)?;
         let label = program.as_deref().unwrap_or("(default)");
-        if let Some(index) = expected.iter().zip(&actual).position(|(a, b)| a != b) {
-            let frame = index / output_channels as usize;
-            bail!(
-                "program {label:?} differs at frame {frame} (block {}), channel {}: component {} native {}",
-                frame / FRAMES as usize,
-                index % output_channels as usize,
-                f32::from_bits(expected[index]),
-                f32::from_bits(actual[index])
-            );
+        let mut forms = vec![("native", render(&native, false, &mut native_time)?)];
+        if staged {
+            forms.push(("native in units", render(&native, true, &mut 0.0)?));
         }
-        if expected_state != actual_state {
-            bail!("program {label:?} leaves a different state natively");
+        for (form, (actual, actual_state)) in forms {
+            if let Some(index) = expected.iter().zip(&actual).position(|(a, b)| a != b) {
+                let frame = index / output_channels as usize;
+                bail!(
+                    "program {label:?} differs {form} at frame {frame} (block {}), channel {}: component {} {form} {}",
+                    frame / FRAMES as usize,
+                    index % output_channels as usize,
+                    f32::from_bits(expected[index]),
+                    f32::from_bits(actual[index])
+                );
+            }
+            if expected_state != actual_state {
+                bail!("program {label:?} leaves a different state {form}");
+            }
         }
         let fingerprint = expected
             .iter()
@@ -234,8 +305,9 @@ fn compare_native(package_path: &Path, library: &Path, options: &[String]) -> Re
     }
     let per_block = |seconds: f64| seconds * 1e6 / (blocks * program_ids.len()) as f64;
     println!(
-        "NATIVE_BUILD_MATCHES programs={} blocks={} component_us_per_block={:.0} native_us_per_block={:.0} platform={}",
+        "NATIVE_BUILD_MATCHES programs={} units={} blocks={} component_us_per_block={:.0} native_us_per_block={:.0} platform={}",
         program_ids.len(),
+        staged,
         blocks * program_ids.len(),
         per_block(component_time),
         per_block(native_time),

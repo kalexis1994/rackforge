@@ -103,8 +103,13 @@ rackforge_plugin_sdk::export_parallel_processor!(
     midi2 = { max_events = 4, families = MIDI_FAMILY_NOTE }
 );
 
+/// The component's block regions, as its exports left them.
+fn scratch() -> &'static mut RackForgeParallelScratch {
+    unsafe { &mut *rf_export_scratch() }
+}
+
 fn shared_report() -> [f32; REPORT_WORDS] {
-    let shared = unsafe { &(*core::ptr::addr_of!(RF_SHARED)).0 };
+    let shared = &scratch().shared.0;
     let mut report = [0.0; REPORT_WORDS];
     for (word, value) in report.iter_mut().enumerate() {
         *value = f32::from_le_bytes(shared[word * 4..][..4].try_into().expect("four bytes"));
@@ -152,10 +157,7 @@ fn the_wide_pre_stage_hands_the_coordinator_what_the_host_wrote() {
     // The wide pre-stage: one unit planned, the report in the shared payload.
     assert_eq!(rackforge_parallel_begin_block_v2(64, 0, 2, 1, 0, 1), 1);
     assert_eq!(shared_report(), expected);
-    assert_eq!(
-        unsafe { (*core::ptr::addr_of!(RF_PLAN))[0] },
-        (REPORT_WORDS * 4) as u32
-    );
+    assert_eq!(scratch().plan[0], (REPORT_WORDS * 4) as u32);
 
     // The composed wide block reaches the same coordinator and a unit.
     assert_eq!(rackforge_process_v2(64, 0, 2, 1, 0, 1), STATUS_OK);

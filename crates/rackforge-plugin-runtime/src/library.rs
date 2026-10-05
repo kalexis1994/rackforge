@@ -6,12 +6,14 @@
 //! (`rackforge_plugin_sdk::portable::native`), each taking the instance
 //! first. This backend drives that table with the component's calling
 //! sequence and the component's checks, so a caller cannot tell which of the
-//! two it holds -- except that a native build is not sandboxed, has no fuel
-//! and does not render in parallel. Which packages are trusted to run one is
-//! the caller's decision, not this module's.
+//! two it holds -- except that a native build is not sandboxed and has no
+//! fuel. A build whose processor renders in units carries the parallel-render
+//! table too, and its instances are scheduled exactly as a component's are.
+//! Which packages are trusted to run one is the caller's decision, not this
+//! module's.
 //!
 //! Two threads, by the work. The real-time entries -- `process`, parameters,
-//! `reset`, latency -- run on the caller's thread, which may be an audio
+//! `reset`, latency, the parallel stages -- run on the caller's thread, which may be an audio
 //! thread that cannot wait on another. Everything else runs on the module's
 //! control thread, whose stack is as large as a component's: a processor
 //! built by value can need megabytes while it is made and prepared (RF-
@@ -21,13 +23,18 @@
 
 use crate::shared::{
     PROGRAM_EDIT_BASIC, PROGRAM_EDIT_DECLARATIVE, PROGRAM_EDIT_KNOWN_CAPABILITIES,
-    PROGRAM_EDIT_PREVIEW, check_status, checked_samples, validate_realtime_events,
+    PROGRAM_EDIT_PREVIEW, check_status, checked_samples, validate_parallel_plan,
+    validate_realtime_events,
 };
-use crate::{ABI_VERSION_V1, ABI_VERSION_V1_1, MidiEvent, MidiEvent2, ParameterEvent};
+use crate::{
+    ABI_VERSION_V1, ABI_VERSION_V1_1, MAX_PARALLEL_UNITS, MidiEvent, MidiEvent2,
+    PARALLEL_ABI_VERSION_V1, ParallelBlockPlan, ParallelLayout, ParallelPlanEntry, ParameterEvent,
+};
 
 use anyhow::{Context, Result, bail};
 use rackforge_plugin_sdk::portable::native::{
-    ENTRY_SYMBOL_V1, EntryFnV1, LengthFn, NATIVE_ABI_VERSION_V1, NativeApiV1, region,
+    ENTRY_SYMBOL_V1, EntryFnV1, LengthFn, NATIVE_ABI_VERSION_V1, NativeApiV1, NativeParallelApiV1,
+    region,
 };
 use std::ffi::c_void;
 use std::fs::File;
@@ -141,6 +148,11 @@ impl LibraryModule {
     /// Loading runs the library's initialisers, and every later call runs
     /// its code in this process, unsandboxed: the caller vouches for it.
     pub(crate) unsafe fn open(path: &Path) -> Result<Self> {
+        // Absolute, so the system loads this file and no other: on Windows a
+        // relative name is looked up along the library search path instead.
+        let path = &path
+            .canonicalize()
+            .with_context(|| format!("resolving native plugin build {}", path.display()))?;
         let library = unsafe { libloading::Library::new(path) }
             .with_context(|| format!("loading native plugin build {}", path.display()))?;
         let entry = *unsafe { library.get::<EntryFnV1>(ENTRY_SYMBOL_V1) }.with_context(|| {
@@ -289,9 +301,24 @@ pub(crate) struct LibraryInstance {
     /// build has the wide entry, as a component's four exports are.
     midi2: Option<Region<u64>>,
     capabilities: u32,
+    /// The parallel-render extension, for a build whose processor renders
+    /// in units.
+    parallel: Option<NativeParallel>,
     prepared_input_channels: u32,
     prepared_output_channels: u32,
     maximum_frames: u32,
+}
+
+/// A native build's parallel-render table and its instance's regions, which
+/// the instance makes on first use; read once it has been initialized.
+struct NativeParallel {
+    api: &'static NativeParallelApiV1,
+    layout: ParallelLayout,
+    dispatch: Region<u8>,
+    plan: Region<u32>,
+    mix: Region<f32>,
+    shared: Region<u8>,
+    reports: Option<Region<u8>>,
 }
 
 // SAFETY: see `Handle`; the regions belong to the instance and are touched
@@ -355,6 +382,7 @@ impl LibraryInstance {
             exchange,
             midi2,
             capabilities: 0,
+            parallel: None,
             prepared_input_channels: 0,
             prepared_output_channels: 0,
             maximum_frames: 0,
@@ -377,6 +405,7 @@ impl LibraryInstance {
             );
         }
         instance.capabilities = capabilities;
+        instance.parallel = instance.parallel_table()?;
         Ok(instance)
     }
 
@@ -784,6 +813,407 @@ impl LibraryInstance {
         check_status(status, "process")?;
         // SAFETY: as above.
         output.copy_from_slice(unsafe { &self.output.slice()[..output_samples] });
+        Ok(())
+    }
+}
+
+impl LibraryInstance {
+    /// The parallel-render table and regions, checked as a component's
+    /// parallel exports are.
+    fn parallel_table(&self) -> Result<Option<NativeParallel>> {
+        let api = self.module.api();
+        // SAFETY: the table and what it points to are static data of the
+        // library `self.module` keeps loaded.
+        let Some(parallel) = api
+            .parallel
+            .map(|table| unsafe { &*(table as *const NativeParallelApiV1) })
+        else {
+            return Ok(None);
+        };
+        if (parallel.struct_size as usize) < size_of::<NativeParallelApiV1>() {
+            bail!("native parallel-render table is smaller than this host reads");
+        }
+        if parallel.parallel_abi_version as i32 != PARALLEL_ABI_VERSION_V1 {
+            bail!(
+                "unsupported parallel-render ABI version {:#010x}",
+                parallel.parallel_abi_version
+            );
+        }
+        let max_units = parallel.max_units as usize;
+        if !(1..=MAX_PARALLEL_UNITS).contains(&max_units) {
+            bail!("parallel-render max_units {max_units} is outside 1..={MAX_PARALLEL_UNITS}");
+        }
+        let dispatch_stride = parallel.dispatch_stride as usize;
+        if dispatch_stride == 0 || !dispatch_stride.is_multiple_of(8) {
+            bail!("parallel-render dispatch stride must be a positive multiple of 8");
+        }
+        let shared_capacity = parallel.shared_capacity as usize;
+        if shared_capacity == 0 || !shared_capacity.is_multiple_of(8) {
+            bail!("parallel-render shared capacity must be a positive multiple of 8");
+        }
+        let report_stride = parallel.report_stride as usize;
+        let mix_slot_samples = parallel.mix_slot_samples as usize;
+        // A pre-stage that takes the wide count exactly when the block entry
+        // does, as a component's exports must.
+        match (api.process_v2.is_some(), parallel.begin_block_v2.is_some()) {
+            (true, false) => bail!(
+                "a build that takes MIDI 2.0 and renders in parallel must export the wide pre-stage"
+            ),
+            (false, true) => {
+                bail!("a build exports the wide pre-stage without the wide-MIDI contract")
+            }
+            _ => {}
+        }
+        let instance = self.instance;
+        let at_least = |name: &str, capacity: usize, needed: usize| -> Result<()> {
+            if capacity < needed {
+                bail!("native build's {name} region holds {capacity}, fewer than {needed}");
+            }
+            Ok(())
+        };
+        let dispatch = Region::<u8>::of(api, instance, region::DISPATCH, "dispatch", false)?;
+        at_least("dispatch", dispatch.capacity, max_units * dispatch_stride)?;
+        let plan = Region::<u32>::of(api, instance, region::PLAN, "plan", false)?;
+        at_least("plan", plan.capacity, 2 + 2 * max_units)?;
+        let mix = Region::<f32>::of(api, instance, region::MIX, "mix", false)?;
+        at_least("mix", mix.capacity, max_units * mix_slot_samples)?;
+        let shared = Region::<u8>::of(api, instance, region::SHARED, "shared", false)?;
+        at_least("shared", shared.capacity, shared_capacity)?;
+        let reports = if report_stride > 0 {
+            let reports = Region::<u8>::of(api, instance, region::REPORTS, "report", false)?;
+            at_least("report", reports.capacity, max_units * report_stride)?;
+            Some(reports)
+        } else {
+            None
+        };
+        Ok(Some(NativeParallel {
+            api: parallel,
+            layout: ParallelLayout {
+                max_units,
+                dispatch_stride,
+                mix_slot_samples,
+                unit_channels: parallel.unit_channels as usize,
+                report_stride,
+                shared_capacity,
+            },
+            dispatch,
+            plan,
+            mix,
+            shared,
+            reports,
+        }))
+    }
+
+    fn parallel(&self) -> Result<&NativeParallel> {
+        self.parallel
+            .as_ref()
+            .context("portable plugin does not expose parallel render")
+    }
+
+    pub(crate) fn parallel_layout(&self) -> Option<ParallelLayout> {
+        self.parallel.as_ref().map(|parallel| parallel.layout)
+    }
+
+    /// The serial pre-stage on a coordinator instance; see the Wasmtime
+    /// backend's method of the same name, whose checks these are.
+    pub(crate) fn parallel_begin_block(
+        &mut self,
+        input: &[f32],
+        frames: u32,
+        midi: &[MidiEvent],
+        parameters: &[ParameterEvent],
+        midi2: &[MidiEvent2],
+        plan: &mut [ParallelPlanEntry],
+    ) -> Result<ParallelBlockPlan> {
+        let layout = self.parallel()?.layout;
+        if plan.len() < layout.max_units {
+            bail!("parallel plan buffer is smaller than max_units");
+        }
+        if frames == 0 || frames > self.maximum_frames {
+            bail!("portable plugin is not prepared for this audio block");
+        }
+        let input_samples = checked_samples(frames, self.prepared_input_channels)?;
+        if input.len() != input_samples {
+            bail!("audio buffer length does not match prepared input channels");
+        }
+        validate_realtime_events(
+            frames,
+            midi,
+            parameters,
+            self.midi.capacity,
+            self.parameters.capacity,
+        )?;
+        let capacity_midi2_events = self.midi2.as_ref().map_or(0, |wide| wide.capacity / 2);
+        if midi2.len() > capacity_midi2_events {
+            bail!("wide MIDI event count exceeds plugin capacity");
+        }
+        if midi2.iter().any(|event| event.frame >= frames) {
+            bail!("wide MIDI event is outside the audio block");
+        }
+        self.write_block_events(input, midi, parameters, midi2);
+        let (input_channels, output_channels) = (
+            self.prepared_input_channels as i32,
+            self.prepared_output_channels as i32,
+        );
+        let (midi_count, parameter_count, midi2_count) = (
+            midi.len() as i32,
+            parameters.len() as i32,
+            midi2.len() as i32,
+        );
+        let api = self.parallel()?.api;
+        let active = self.direct(|_, at| unsafe {
+            match api.begin_block_v2 {
+                Some(begin_block_v2) => begin_block_v2(
+                    at,
+                    frames as i32,
+                    input_channels,
+                    output_channels,
+                    midi_count,
+                    parameter_count,
+                    midi2_count,
+                ),
+                None => (api.begin_block)(
+                    at,
+                    frames as i32,
+                    input_channels,
+                    output_channels,
+                    midi_count,
+                    parameter_count,
+                ),
+            }
+        });
+        if active < 0 {
+            bail!("portable plugin begin_block failed with status {active}");
+        }
+        let active = active as usize;
+        if active > layout.max_units {
+            bail!("portable plugin announced {active} units beyond max_units");
+        }
+        let parallel = self.parallel()?;
+        // SAFETY: the instance is not running; the region is ours.
+        let words = unsafe { parallel.plan.slice() };
+        let shared_bytes = words[0] as usize;
+        if shared_bytes > layout.shared_capacity {
+            bail!(
+                "portable plugin announced {shared_bytes} shared bytes beyond capacity {}",
+                layout.shared_capacity
+            );
+        }
+        for (entry, words) in plan[..active].iter_mut().zip(words[2..].as_chunks::<2>().0) {
+            entry.unit = words[0];
+            entry.payload_bytes = words[1];
+        }
+        validate_parallel_plan(&plan[..active], layout.max_units, layout.dispatch_stride)?;
+        Ok(ParallelBlockPlan {
+            active_units: active,
+            shared_bytes,
+        })
+    }
+
+    /// The block's input and events into their regions, already checked.
+    fn write_block_events(
+        &mut self,
+        input: &[f32],
+        midi: &[MidiEvent],
+        parameters: &[ParameterEvent],
+        midi2: &[MidiEvent2],
+    ) {
+        // SAFETY: the instance is not running; the regions are ours, and
+        // every count was checked against its capacity.
+        unsafe {
+            self.input.slice_mut()[..input.len()].copy_from_slice(input);
+            for (slot, event) in self.midi.slice_mut().iter_mut().zip(midi) {
+                *slot = event.packed();
+            }
+            for (slot, event) in self.parameters.slice_mut().iter_mut().zip(parameters) {
+                *slot = rackforge_plugin_sdk::ParameterEvent {
+                    frame: event.frame,
+                    index: event.index,
+                    value: event.value,
+                };
+            }
+            if let Some(wide) = &mut self.midi2 {
+                for (slot, event) in wide
+                    .slice_mut()
+                    .as_chunks_mut::<2>()
+                    .0
+                    .iter_mut()
+                    .zip(midi2)
+                {
+                    let (head, tail) = event.packed();
+                    *slot = [head, tail];
+                }
+            }
+        }
+    }
+
+    pub(crate) fn parallel_read_shared(&self, shared: &mut [u8]) -> Result<()> {
+        let parallel = self.parallel()?;
+        if shared.len() > parallel.layout.shared_capacity {
+            bail!("shared payload exceeds the declared capacity");
+        }
+        // SAFETY: the instance is not running; the region is ours.
+        shared.copy_from_slice(&unsafe { parallel.shared.slice() }[..shared.len()]);
+        Ok(())
+    }
+
+    pub(crate) fn parallel_write_shared(&mut self, shared: &[u8]) -> Result<()> {
+        let capacity = self.parallel()?.layout.shared_capacity;
+        if shared.len() > capacity {
+            bail!("shared payload exceeds the declared capacity");
+        }
+        let region = &mut self.parallel.as_mut().expect("checked above").shared;
+        // SAFETY: as above.
+        let slice = unsafe { region.slice_mut() };
+        slice[..shared.len()].copy_from_slice(shared);
+        Ok(())
+    }
+
+    fn dispatch_at(&self, unit: u32, payload_bytes: usize) -> Result<usize> {
+        let layout = self.parallel()?.layout;
+        if unit as usize >= layout.max_units {
+            bail!("parallel dispatch unit {unit} is beyond max_units");
+        }
+        if payload_bytes > layout.dispatch_stride {
+            bail!("parallel dispatch payload exceeds the declared stride");
+        }
+        Ok(unit as usize * layout.dispatch_stride)
+    }
+
+    pub(crate) fn parallel_read_dispatch(&self, unit: u32, payload: &mut [u8]) -> Result<()> {
+        let at = self.dispatch_at(unit, payload.len())?;
+        // SAFETY: as above.
+        let region = unsafe { self.parallel()?.dispatch.slice() };
+        payload.copy_from_slice(&region[at..][..payload.len()]);
+        Ok(())
+    }
+
+    pub(crate) fn parallel_write_dispatch(&mut self, unit: u32, payload: &[u8]) -> Result<()> {
+        let at = self.dispatch_at(unit, payload.len())?;
+        let region = &mut self.parallel.as_mut().expect("checked above").dispatch;
+        // SAFETY: as above.
+        let slice = unsafe { region.slice_mut() };
+        slice[at..][..payload.len()].copy_from_slice(payload);
+        Ok(())
+    }
+
+    /// Renders one unit inside a worker instance; its audio, the unit's own
+    /// width, into `output`.
+    pub(crate) fn parallel_render_unit(
+        &mut self,
+        unit: u32,
+        payload_bytes: usize,
+        shared_bytes: usize,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+    ) -> Result<()> {
+        let parallel = self.parallel()?;
+        let layout = parallel.layout;
+        let api = parallel.api;
+        if unit as usize >= layout.max_units {
+            bail!("parallel render unit {unit} is beyond max_units");
+        }
+        if payload_bytes > layout.dispatch_stride {
+            bail!("parallel dispatch payload exceeds the declared stride");
+        }
+        if shared_bytes > layout.shared_capacity {
+            bail!("shared payload exceeds the declared capacity");
+        }
+        if frames == 0 || frames > self.maximum_frames {
+            bail!("portable plugin is not prepared for this audio block");
+        }
+        let input_samples = checked_samples(frames, self.prepared_input_channels)?;
+        let unit_width = layout.unit_width(self.prepared_output_channels as usize) as u32;
+        let output_samples = checked_samples(frames, unit_width)?;
+        if input.len() != input_samples || output.len() != output_samples {
+            bail!("audio buffer length does not match the unit's width");
+        }
+        if output_samples > self.output.capacity {
+            bail!("the unit's audio does not fit the output region");
+        }
+        // SAFETY: the instance is not running; the region is ours.
+        let slice = unsafe { self.input.slice_mut() };
+        slice[..input_samples].copy_from_slice(input);
+        let output_channels = self.prepared_output_channels as i32;
+        let status = self.direct(|_, at| unsafe {
+            (api.render_unit)(
+                at,
+                unit as i32,
+                payload_bytes as i32,
+                shared_bytes as i32,
+                frames as i32,
+                output_channels,
+            )
+        });
+        check_status(status, "parallel_render_unit")?;
+        // SAFETY: as above.
+        output.copy_from_slice(&unsafe { self.output.slice() }[..output_samples]);
+        Ok(())
+    }
+
+    fn report_at(&self, unit: u32, len: usize) -> Result<usize> {
+        let layout = self.parallel()?.layout;
+        if unit as usize >= layout.max_units {
+            bail!("parallel report unit {unit} is beyond max_units");
+        }
+        if len > layout.report_stride {
+            bail!("parallel report exceeds the declared stride");
+        }
+        Ok(unit as usize * layout.report_stride)
+    }
+
+    pub(crate) fn parallel_read_report(&self, unit: u32, report: &mut [u8]) -> Result<()> {
+        let at = self.report_at(unit, report.len())?;
+        if let Some(region) = &self.parallel()?.reports {
+            // SAFETY: as above.
+            report.copy_from_slice(&unsafe { region.slice() }[at..][..report.len()]);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn parallel_write_report(&mut self, unit: u32, report: &[u8]) -> Result<()> {
+        let at = self.report_at(unit, report.len())?;
+        if let Some(region) = &mut self.parallel.as_mut().expect("checked above").reports {
+            // SAFETY: as above.
+            let slice = unsafe { region.slice_mut() };
+            slice[at..][..report.len()].copy_from_slice(report);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn parallel_write_mix_slot(&mut self, unit: u32, samples: &[f32]) -> Result<()> {
+        let layout = self.parallel()?.layout;
+        if unit as usize >= layout.max_units {
+            bail!("parallel mix unit {unit} is beyond max_units");
+        }
+        if samples.len() > layout.mix_slot_samples {
+            bail!("parallel mix slot cannot hold this block");
+        }
+        let region = &mut self.parallel.as_mut().expect("checked above").mix;
+        // SAFETY: as above.
+        let slice = unsafe { region.slice_mut() };
+        slice[unit as usize * layout.mix_slot_samples..][..samples.len()].copy_from_slice(samples);
+        Ok(())
+    }
+
+    /// The serial post-stage on the coordinator, the final block into
+    /// `output`.
+    pub(crate) fn parallel_end_block(&mut self, output: &mut [f32], frames: u32) -> Result<()> {
+        let api = self.parallel()?.api;
+        if frames == 0 || frames > self.maximum_frames {
+            bail!("portable plugin is not prepared for this audio block");
+        }
+        let output_samples = checked_samples(frames, self.prepared_output_channels)?;
+        if output.len() != output_samples {
+            bail!("audio buffer length does not match prepared output channels");
+        }
+        let output_channels = self.prepared_output_channels as i32;
+        let status =
+            self.direct(|_, at| unsafe { (api.end_block)(at, frames as i32, output_channels) });
+        check_status(status, "parallel_end_block")?;
+        // SAFETY: as above.
+        output.copy_from_slice(&unsafe { self.output.slice() }[..output_samples]);
         Ok(())
     }
 }

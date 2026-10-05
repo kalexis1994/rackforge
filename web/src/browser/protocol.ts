@@ -16,6 +16,27 @@ export interface SeedFile {
   bytes: Uint8Array;
 }
 
+/** Control requests that cannot change files in the browser host's storage.
+ * In particular, the output meter is polled every 50 ms on the audio thread:
+ * treating it as a write copies the whole writable storage on every poll.
+ */
+const READ_ONLY_OPERATIONS = new Set([
+  "snapshot", "performance_snapshot", "events", "audio_snapshot", "output_meter",
+  "audio_input", "midi_sources", "plugin_presets", "plugin_preset",
+  "export_plugin_preset", "inspect_plugin_preset", "plugin_parameters",
+  "plugin_state_parameters", "controller_maps", "midi_activity",
+  "sequencer_status", "virtual_midi", "release_virtual_midi",
+]);
+
+export function requestChangesStorage(request: string): boolean {
+  try {
+    const operation = (JSON.parse(request) as { op?: unknown }).op;
+    return typeof operation !== "string" || !READ_ONLY_OPERATIONS.has(operation);
+  } catch {
+    return true;
+  }
+}
+
 export interface BootMessage {
   kind: "boot";
   /**
@@ -114,11 +135,12 @@ export type EngineCommand =
   | ControllerRestorePlanMessage;
 
 /**
- * Sent as soon as the processor exists. A port message posted before that is
- * not delivered, so the page waits for this before it boots the engine.
+ * Sent on the first render callback. This gives the page the actual quantum
+ * selected by the browser before it allocates the host's render buffers.
  */
 export interface ReadyMessage {
   kind: "ready";
+  frames: number;
 }
 
 export interface BootedMessage {

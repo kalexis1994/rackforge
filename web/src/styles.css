@@ -2257,12 +2257,25 @@ body {
   opacity: 0.6;
 }
 
-/* Each number keeps the width of its widest usual value, so the readout --
-   centred under the meter -- does not shift every time one gains or loses
-   a digit: the load up to "100%", the losses up to three digits. */
+/* Fixed widths and figures of one width, so the readout -- centred under
+   the meter -- does not shift every time one gains or loses a digit: the
+   load up to 999%, the losses up to 999+. A character is 1ch plus the
+   readout's 0.04em of tracking. */
 .audio-health-load,
-.audio-health-readout .audio-health-lost {
+.audio-health-lost {
+  display: inline-block;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.audio-health-load {
+  width: calc(4 * (1ch + 0.04em));
+  text-align: right;
+}
+
+.audio-health-lost {
+  width: calc(4 * (1ch + 0.04em));
+  text-align: left;
 }
 
 /* Wider than the meter's column, the readout was laid from the column's
@@ -2270,17 +2283,6 @@ body {
    box fits and the column centres it, over the meter. */
 .master-output-meter .audio-health-readout {
   margin-inline: -16px;
-}
-
-/* A character is 1ch plus the readout's 0.04em of tracking. */
-.audio-health-load {
-  min-width: calc(4 * (1ch + 0.04em));
-  text-align: end;
-}
-
-.audio-health-readout .audio-health-lost {
-  min-width: calc(3 * (1ch + 0.04em));
-  text-align: start;
 }
 
 /* The flight recorder's save mark: as quiet as the readout until pressed. */
@@ -2926,6 +2928,39 @@ body {
 .plugin-catalog-loader,
 .plugin-catalog-error {
   width: 100%;
+}
+
+.browser-start-gate {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 32px;
+  text-align: center;
+}
+
+.browser-start-gate__brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+}
+
+.browser-start-gate__brand .brand-mark {
+  width: 88px;
+  height: 88px;
+  flex-basis: 88px;
+}
+
+.browser-start-gate > button {
+  min-width: 200px;
 }
 
 .plugin-catalog-error {
@@ -8644,6 +8679,192 @@ body {
   display: flex;
   align-items: baseline;
   gap: 7px;
+}
+
+/* The key range: a piano's 88 keys with the range lit on them. */
+.key-range {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.key-range-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+
+.key-range-head strong {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.key-range-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rack-midi-link-editor .key-range-presets button {
+  min-height: 25px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.key-range-keyboard {
+  width: 100%;
+  height: auto;
+  display: block;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.key-range-white {
+  fill: rgba(206, 222, 229, 0.2);
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 0.6;
+}
+
+.key-range-white.in {
+  fill: #e9fbff;
+}
+
+.key-range-black {
+  fill: #081116;
+  stroke: rgba(0, 0, 0, 0.8);
+  stroke-width: 0.6;
+}
+
+.key-range-black.in {
+  fill: color-mix(in srgb, var(--acid) 62%, #04161c);
+}
+
+.key-range-white.in:nth-child(n) {
+  filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--acid) 45%, transparent));
+}
+
+.key-range-zone {
+  fill: rgba(206, 222, 229, 0.08);
+  stroke: rgba(98, 223, 241, 0.22);
+  stroke-width: 0.6;
+  stroke-dasharray: 2 2;
+}
+
+.key-range-zone.in {
+  fill: color-mix(in srgb, var(--acid) 55%, transparent);
+  stroke: var(--acid);
+}
+
+.key-range-zone-mark,
+.key-range-octave {
+  fill: var(--muted);
+  font-family: var(--mono);
+  font-size: 7px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
+.key-range-octave {
+  dominant-baseline: auto;
+}
+
+.key-range-middle-c {
+  fill: rgba(4, 16, 22, 0.55);
+  pointer-events: none;
+}
+
+.key-range-span {
+  stroke: var(--acid);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.key-range-flag {
+  fill: var(--acid);
+}
+
+.key-range-edges {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.key-range-edge {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.key-range-edge > span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.key-range-edge > div {
+  display: grid;
+  grid-template-columns: 26px 26px minmax(0, 1fr) 26px 26px;
+  gap: 4px;
+}
+
+.rack-midi-link-editor .key-range-edge button {
+  min-height: 32px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.key-range-edge output {
+  min-width: 0;
+  height: 32px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 5px;
+  padding-top: 8px;
+  border: 1px solid rgba(98, 223, 241, 0.2);
+  border-radius: 6px;
+  background: rgba(3, 12, 18, 0.86);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+
+.key-range-edge output:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+.key-range-edge output strong {
+  font-size: 12px;
+}
+
+.key-range-edge output small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.rack-midi-transpose {
+  display: grid;
+  grid-template-columns: minmax(0, 190px) minmax(0, 1fr);
+  align-items: end;
+  gap: 10px;
+}
+
+.rack-midi-transpose p {
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.rack-midi-transpose p.warning {
+  color: var(--warning, #d08770);
 }
 
 .rack-midi-velocity-section {

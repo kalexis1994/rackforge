@@ -9,10 +9,22 @@ import {
   rackGraphProblems,
   RACK_GRID,
   insertNodeIntoCable,
+  normalizeRackMidiTransform,
   removeSlotFromRack,
   tidyRackGraph,
 } from "./rackGraph";
 import type { AudioInputStatus, RackDefinition, RackSlot } from "./types";
+
+describe("MIDI link defaults", () => {
+  it("restores omitted Omni channels and other wire defaults", () => {
+    expect(normalizeRackMidiTransform({ note_low: 36 })).toMatchObject({
+      source_channels: [],
+      note_low: 36,
+      note_high: 127,
+      velocity_input_high: 127,
+    });
+  });
+});
 
 function slot(id: string, pluginId: string): RackSlot {
   return {

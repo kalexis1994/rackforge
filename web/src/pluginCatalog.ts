@@ -344,6 +344,11 @@ export function canOpenInPlay(plugin: PluginWebDescriptor): boolean {
   return pluginKind(plugin) === "instrument";
 }
 
+/** CONFIG is opt-in: an installed plugin must declare that surface itself. */
+export function declaresConfigSurface(plugin: PluginWebDescriptor): boolean {
+  return plugin.surfaces.some((surface) => surface.kind === "config");
+}
+
 /** The kinds the Plugin Manager lists, in the order it lists them. */
 export const PLUGIN_KIND_ORDER: readonly PluginKind[] = [
   "instrument",

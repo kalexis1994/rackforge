@@ -68,6 +68,7 @@ OFFICIAL_PLUGINS = (
             "branding/banner.png",
             "branding/splash.png",
             "web/play.html",
+            "web/config.html",
             "web/app.js",
             "web/app_bg.wasm",
             "web/styles.css",

@@ -320,7 +320,7 @@ describe("which controllers the editor shows", () => {
     expect(gone.inputs).toEqual([{ id: "pad-1", name: "Pad 1", kind: "pad", midi: { channel: 9, note: 36 } }]);
   });
 
-  it("shows a catalog keyboard only once it is plugged in or mapped", () => {
+  it("offers every supported catalog keyboard, with the connected one first", () => {
     const catalog = { ...keylab, runtime: "DeclarativeV1" };
     const launchkey = { ...catalog, id: "org.rackforge.novation-launchkey-mk3-49", name: "Launchkey 49 [MK3]" };
     const minilab = { ...catalog, id: "org.rackforge.arturia-minilab-3", name: "MiniLab 3" };
@@ -330,10 +330,12 @@ describe("which controllers the editor shows", () => {
       [{ controller_id: launchkey.id, source: { id: "alsa.lk", name: "Launchkey MK3 49" }, connected: true }],
       [emptyControllerMap(minilab.id, minilab.name)],
     );
-    expect(devices.map((device) => device.id)).toEqual([launchkey.id, keylab.id, minilab.id]);
+    expect(devices.map((device) => device.id)).toEqual([launchkey.id, keylab.id, minilab.id, oxygenPro.id]);
+    expect(devices[0].connected).toBe(true);
+    expect(devices[3].connected).toBe(false);
   });
 
-  it("does not list a catalog keyboard for its factory map alone", () => {
+  it("lists catalog keyboards even when they only have their factory map", () => {
     const catalog = { ...keylab, runtime: "DeclarativeV1" };
     const launchkey = { ...catalog, id: "org.rackforge.novation-launchkey-mk3-49", name: "Launchkey 49 [MK3]" };
     const flkey = { ...catalog, id: "org.rackforge.novation-flkey-49", name: "FLkey 49" };
@@ -343,11 +345,9 @@ describe("which controllers the editor shows", () => {
       [launchkey, flkey, mini, keylab],
       [{ controller_id: mini.id, source: { id: "alsa.mini", name: "Launchkey Mini MK3 MIDI" }, connected: true }],
       maps,
-      // The FLkey's map is the player's; the others are as RackForge offered
-      // them. The KeyLab is not a catalog package: it shows either way.
-      new Set([launchkey.id, mini.id, keylab.id]),
     );
-    expect(devices.map((device) => device.id).sort()).toEqual([flkey.id, keylab.id, mini.id].sort());
+    expect(devices.map((device) => device.id).sort()).toEqual([launchkey.id, flkey.id, mini.id, keylab.id].sort());
+    expect(devices[0].id).toBe(mini.id);
   });
 });
 

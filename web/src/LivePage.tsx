@@ -54,6 +54,7 @@ import {
 import {
   buildRackPluginInstances,
   rackPluginRole,
+  rackPluginsOfRole,
   type RackPluginRole,
 } from "./rackPluginSelection";
 import type {
@@ -1119,6 +1120,7 @@ function PerformanceConfig({
   const [editorDirty, setEditorDirty] = useState(false);
   const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
   const [editorResetEpoch, setEditorResetEpoch] = useState(0);
+  const [rackEditorEpoch, setRackEditorEpoch] = useState(0);
   const [rackWorkspaceId, setRackWorkspaceId] = useState<string | null>(null);
   const [songPartWorkspace, setSongPartWorkspace] = useState<{ id: string; name: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingPerformanceDelete | null>(null);
@@ -1212,6 +1214,11 @@ function PerformanceConfig({
   const selectItem = (id: string) => {
     if (selectedId === id && kind === "setlist") return;
     proceed(() => {
+      // A new Rack gains its permanent id on Save. That is not a new editor:
+      // remounting it would tear down its live preview, whose Android cleanup
+      // changes host mode and navigates away from the Rack workspace.
+      if (kind === "rack") setRackEditorEpoch((current) => current + 1);
+      if (kind === "song") setEditorResetEpoch((current) => current + 1);
       setSelectedId(id);
       if (kind === "rack") setRackWorkspaceId(id);
       setSongPartWorkspace(null);
@@ -1426,7 +1433,7 @@ function PerformanceConfig({
       <main className="config-editor">
         {kind === "rack" && (
           <RackEditor
-            key={`rack:${activeSelectedId ?? "empty"}`}
+            key={`rack:${rackEditorEpoch}`}
             rack={
               activeSelectedId === "new"
                 ? newRack()
@@ -1442,7 +1449,7 @@ function PerformanceConfig({
             onDirtyChange={setEditorDirty}
             onSaved={(id) => {
               setSelectedId(id);
-              setRackWorkspaceId(id);
+              if (rackWorkspaceId !== null) setRackWorkspaceId(id);
             }}
             onDeleted={() => {
               setSelectedId(null);
@@ -1452,10 +1459,10 @@ function PerformanceConfig({
         )}
         {kind === "song" && (
           <SongEditor
-            key={`song:${activeSelectedId ?? "empty"}:${editorResetEpoch}`}
+            key={`song:${editorResetEpoch}`}
             song={
               activeSelectedId === "new"
-                ? newSong(performance)
+                ? newSong(performance, rackInstances, plugins)
                 : performance.library.songs.find((item) => item.id === activeSelectedId)
             }
             performance={performance}
@@ -1661,26 +1668,35 @@ function PartLaneBindings({
   );
 }
 
-function newSongPart(performance: PerformanceSnapshot, name: string): SongPart {
+function newSongPart(
+  performance: PerformanceSnapshot,
+  name: string,
+  instrument?: PluginInstance,
+): SongPart {
   const rack = performance.library.racks[0];
+  const slots = rack || !instrument ? [] : [defaultSlot(instrument)];
   return {
     id: performanceId("part"),
     name,
     rack_id: rack?.id ?? "rack.song-part-placeholder",
     content: {
-      slots: [],
-      graph: rack ? graphFromRackReference(rack.id) : graphFromSlots([]),
+      slots,
+      graph: rack ? graphFromRackReference(rack.id) : graphFromSlots(slots),
     },
   };
 }
 
-function newSong(performance: PerformanceSnapshot): SongDefinition {
+function newSong(
+  performance: PerformanceSnapshot,
+  instances: PluginInstance[],
+  plugins: PluginWebDescriptor[],
+): SongDefinition {
   return {
     schema_version: 1,
     id: performanceId("song"),
     name: "New Song",
     enabled: true,
-    parts: [newSongPart(performance, "Intro")],
+    parts: [newSongPart(performance, "Intro", rackPluginsOfRole(instances, plugins, "instrument")[0])],
   };
 }
 
@@ -1999,6 +2015,7 @@ function RackEditor({
   const [previewStatus, setPreviewStatus] = useState<"idle" | "applying" | "ready">("idle");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const previewId = draft?.id;
+  const rackNameError = draft ? validationName(draft.name) : null;
   // Keep an immutable payload for the debounced preview. Depending on a
   // hand-picked fingerprint and reading the latest value from a ref allowed
   // graph edits to be visually committed without publishing the new Rack to
@@ -2006,7 +2023,11 @@ function RackEditor({
   // the effect dependency and guarantees that the timer sends that exact
   // revision.
   const transportDraft = draft ? normalizeRackGraphGeometry(draft) : undefined;
-  const previewPayload = transportDraft ? JSON.stringify(transportDraft) : null;
+  // An unfinished name is an editing state, not a preview request. Sending
+  // it to Core produces a technical error while the user is still typing.
+  const previewPayload = transportDraft && !rackNameError
+    ? JSON.stringify(transportDraft)
+    : null;
   const previewVoiceCount = rackPreviewVoiceCount(
     transportDraft,
     performance.library.racks,
@@ -2019,7 +2040,7 @@ function RackEditor({
     isInstrumentSlot,
   );
   const visiblePreviewStatus = previewVoiceCount === 0 ? "idle" : previewStatus;
-  const visiblePreviewError = previewVoiceCount === 0 ? null : previewError;
+  const visiblePreviewError = previewVoiceCount === 0 || rackNameError ? null : previewError;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
   const isNew = !!draft && !performance.library.racks.some((item) => item.id === draft.id);
   useEffect(() => {
@@ -2044,8 +2065,9 @@ function RackEditor({
     };
   }, [previewId, previewSupported]);
   useEffect(() => {
-    if (!previewSupported || previewPayload === null) return;
+    if (!previewSupported) return;
     const sequence = ++previewSequenceRef.current;
+    if (previewPayload === null) return;
     if (previewVoiceCount === 0) {
       if (!previewEngagedRef.current || !previewModeLiveRef.current) return;
       previewModeLiveRef.current = false;
@@ -2145,6 +2167,14 @@ function RackEditor({
   }, [draft, graphBlocking, instances]);
   const save = useCallback(async () => {
     if (!draft) return;
+    // The workspace Save key is disabled for an empty name. A keyboard save
+    // arriving anyway must not replace the editing hint with a red banner;
+    // the standard (non-immersive) form still needs its normal validation.
+    const nameError = validationName(draft.name);
+    if (nameError) {
+      if (!immersive) setError(nameError);
+      return;
+    }
     const nextError = validate();
     setError(nextError);
     if (nextError) return;
@@ -2165,7 +2195,7 @@ function RackEditor({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Rack.");
     }
-  }, [baseRevision, draft, onSaved, skipRackStep, validate]);
+  }, [baseRevision, draft, immersive, onSaved, skipRackStep, validate]);
   useEffect(() => {
     if (!immersive) return;
     const saveWorkspace = () => void save();
@@ -2220,20 +2250,25 @@ function RackEditor({
   const exitWorkspace = () => {
     window.dispatchEvent(new Event("rackforge:close-graph-workspace"));
   };
+  const renameRack = (name: string) => {
+    setDraft((current) => current ? { ...current, name } : current);
+    setError(null);
+    setPreviewError(null);
+  };
   const workspaceHeader = (
     <GraphWorkspaceHeader
       title="Rack Editor"
       nameLabel="Rack name"
       name={draft.name}
-      onName={(name) => setDraft({ ...draft, name })}
+      onName={renameRack}
       previewStatus={visiblePreviewStatus}
       dirty={dirty}
       isNew={isNew}
       pending={pending}
-      saveBlocked={graphBlocking ? `Cannot be saved. ${graphBlocking}` : null}
+      saveBlocked={rackNameError ? "Enter a Rack name to save." : graphBlocking ? `Cannot be saved. ${graphBlocking}` : null}
       onSave={() => void save()}
       onExit={exitWorkspace}
-      className="entity-rack"
+      className={`entity-rack${rackNameError ? " name-missing" : ""}`}
     />
   );
 
@@ -2270,7 +2305,7 @@ function RackEditor({
       ) : null}
       <BasicFields
         name={draft.name}
-        onName={(name) => setDraft({ ...draft, name })}
+        onName={renameRack}
       />
       <EditorSection
         title="Rack graph"
@@ -2504,6 +2539,12 @@ function SongEditor({
   const [draft, setDraft] = useState(() => (song ? clone(song) : undefined));
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
   const [confirmDialog, askConfirmation] = useConfirmation();
   const [selectedPartId, setSelectedPartId] = useState(song?.parts[0]?.id);
   const [pluginPicker, setPluginPicker] = useState<{
@@ -2581,7 +2622,7 @@ function SongEditor({
     return null;
   }, [draft, plugins]);
   const save = useCallback(async () => {
-    if (!draft) return;
+    if (!draft || pending || savingRef.current) return;
     const nextError = validationName(draft.name) ??
       (draft.parts.length === 0 ? "A Song needs at least one Part." : null) ??
       (draft.parts.find((part) => validationName(part.name)) ? "Every Part needs a valid name." : null) ??
@@ -2594,22 +2635,30 @@ function SongEditor({
       (graphBlocking ? `The Song cannot be saved. ${graphBlocking}` : null);
     setError(nextError);
     if (nextError) return;
+    savingRef.current = true;
+    setSaving(true);
+    const submitted = JSON.stringify(draft);
     try {
       const snapshot = await dispatchEdit(baseRevision, {
         kind: "put_song",
         song: draft,
       });
       const saved = snapshot.library.songs.find((item) => item.id === draft.id);
-      if (saved) {
+      if (!saved) throw new Error("The host did not return the saved Song. Check the library before retrying.");
+      if (draftRef.current && JSON.stringify(draftRef.current) === submitted) {
         skipSongStep();
         setDraft(clone(saved));
       }
       setBaseRevision(snapshot.revision);
+      setError(null);
       onSaved(draft.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Song.");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
-  }, [baseRevision, draft, graphBlocking, onSaved, skipSongStep]);
+  }, [baseRevision, draft, graphBlocking, onSaved, pending, skipSongStep]);
   const handleGraphOverlayChange = useCallback((open: boolean) => {
     window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
       detail: { open },
@@ -2651,22 +2700,35 @@ function SongEditor({
     }
   };
   const addPart = () => {
-    const part = newSongPart(performance, `Part ${draft.parts.length + 1}`);
-    setDraft({ ...draft, parts: [...draft.parts, part] });
-    setSelectedPartId(part.id);
+    const partId = performanceId("part");
+    const instrument = rackPluginsOfRole(instances, plugins, "instrument")[0];
+    setDraft((current) => {
+      if (!current || current.parts.length >= 64) return current;
+      const part = {
+        ...newSongPart(performance, `Part ${current.parts.length + 1}`, instrument),
+        id: partId,
+      };
+      return { ...current, parts: [...current.parts, part] };
+    });
+    setSelectedPartId(partId);
   };
   const movePart = (index: number, direction: -1 | 1) => {
-    const target = index + direction;
-    if (target < 0 || target >= draft.parts.length) return;
-    const parts = [...draft.parts];
-    [parts[index], parts[target]] = [parts[target], parts[index]];
-    setDraft({ ...draft, parts });
+    setDraft((current) => {
+      if (!current) return current;
+      const target = index + direction;
+      if (target < 0 || target >= current.parts.length) return current;
+      const parts = [...current.parts];
+      [parts[index], parts[target]] = [parts[target], parts[index]];
+      return { ...current, parts };
+    });
   };
   const removePart = (index: number) => {
     if (draft.parts.length === 1) return;
     const removed = draft.parts[index];
     const nextParts = draft.parts.filter((item) => item.id !== removed.id);
-    setDraft({ ...draft, parts: nextParts });
+    setDraft((current) => current && current.parts.length > 1
+      ? { ...current, parts: current.parts.filter((item) => item.id !== removed.id) }
+      : current);
     if (selectedPart?.id === removed.id) {
       setSelectedPartId(nextParts[Math.min(index, nextParts.length - 1)]?.id);
     }
@@ -2686,7 +2748,7 @@ function SongEditor({
       previewStatus={partPreview.status}
       dirty={dirty}
       isNew={isNew}
-      pending={pending}
+      pending={pending || saving}
       saveBlocked={graphBlocking ? `Cannot be saved. ${graphBlocking}` : null}
       onSave={() => void save()}
       onExit={exitWorkspace}
@@ -2700,7 +2762,7 @@ function SongEditor({
     >
       {immersive ? workspaceHeader : null}
       {confirmDialog}
-      <EditorHeader eyebrow={isNew ? "New Song" : "Song configuration"} title={draft.name} dirty={dirty || isNew} pending={pending} onSave={save} onReset={() => { setDraft(original ? clone(original) : newSong(performance)); setBaseRevision(performance.revision); setError(null); }} onDelete={isNew ? undefined : remove} />
+      <EditorHeader eyebrow={isNew ? "New Song" : "Song configuration"} title={draft.name} dirty={dirty || isNew} pending={pending || saving} onSave={save} onReset={() => { setDraft(original ? clone(original) : newSong(performance, instances, plugins)); setBaseRevision(performance.revision); setError(null); }} onDelete={isNew ? undefined : remove} />
       {error && <div className="form-error">{error}</div>}
       {partPreview.error ? <div className="form-error">Part preview: {partPreview.error}</div> : null}
       {partPreview.status !== "idle" ? (
@@ -2719,7 +2781,7 @@ function SongEditor({
         action={(
           <button
             type="button"
-            disabled={draft.parts.length >= 64}
+            disabled={pending || saving || draft.parts.length >= 64}
             onClick={addPart}
           >
             ＋ Add Part

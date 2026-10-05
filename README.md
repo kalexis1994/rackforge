@@ -93,20 +93,12 @@ Use **PLAY** when you want one sound quickly. Use **LIVE** when the arrangement
 itself matters. RackForge keeps instrument state separate from the performance
 graph, so changing stage routing does not rewrite the plugin.
 
-## Standard and Minimal editions
+## Native releases
 
-Native CI builds are published in two editions for every supported platform:
-
-- **Standard** includes Concert Grand and the officially pinned instruments —
-  today RF-106, RF-5, RF-7, RF-Organ, RF-Tines and RF-Musette — so a new
-  installation can be played immediately.
-- **Minimal** includes no instrument plugins. It keeps the complete RackForge
-  host, Plugin Manager, controller support, and performance tools so you can
-  install only the instruments you want.
-
-Both editions use the same runtime and can install the same `.rfplugin`
-packages. The edition only controls what is bundled at build time; it does not
-limit features or plugin compatibility.
+Each native release includes Concert Grand and the officially pinned instruments
+— today RF-106, RF-5, RF-7, RF-Organ, RF-Tines and RF-Musette — so a new installation can
+be played immediately. You can install other `.rfplugin` packages through the
+Plugin Manager.
 
 ## Instruments and portable plugins
 
@@ -315,6 +307,10 @@ provides:
 
 The same controller package is used on Windows, Linux x86-64, Android, and
 Raspberry Pi.
+
+The browser lists the same declarative controller catalog for inspection. Its
+Web MIDI control integration currently supports only the KeyLab Essential mk3;
+controller maps are saved by the native hosts, not by the browser demo.
 
 ## Save it, move it, play it
 

@@ -2,11 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   engineFailureEvent,
   linkedPackageMutationEvents,
+  requestChangesStorage,
   waitForLinkedStoragePublication,
   writableStorageFiles,
 } from "./protocol";
 
 describe("browser storage snapshots", () => {
+  it("does not snapshot storage for meter polls or playable MIDI", () => {
+    for (const op of ["output_meter", "virtual_midi", "release_virtual_midi", "sequencer_status"]) {
+      expect(requestChangesStorage(JSON.stringify({ op }))).toBe(false);
+    }
+    expect(requestChangesStorage(JSON.stringify({ op: "edit_performance" }))).toBe(true);
+    expect(requestChangesStorage("not JSON")).toBe(true);
+  });
   it("keeps plugin-private files while omitting exact packaged assets", () => {
     const packaged = "plugins/concert-grand/component.wasm";
     const program = "plugins/org.rackforge.rftines/programs/lab-1.rackforge-program.json";

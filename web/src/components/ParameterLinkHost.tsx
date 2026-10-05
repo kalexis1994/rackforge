@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import {
   type ControllerPackageSummary,
   defaultMode,
@@ -39,8 +40,16 @@ import type {
   PluginParameterSnapshot,
   RegisteredController,
 } from "../types";
+import {
+  type ParameterAssociation,
+  associationControl,
+  associationSource,
+  menuAssociationItems,
+  parameterAssociations,
+} from "../parameterAssociations";
 import { AsyncActionLabel } from "./AsyncSpinner";
 import { ModalDialog } from "./ModalDialog";
+import { ParameterAssociationsDialog } from "./ParameterAssociationsDialog";
 import { ModeFields } from "./controllers/ModeFields";
 
 /** The controllers attached here, their maps and their packages' controls. */
@@ -133,6 +142,14 @@ function applyCandidate(candidate: MidiLearnCandidate, draft: Draft): Draft {
   };
 }
 
+/** A parameter as the link menus need it: its id, name and description. */
+interface ParameterFacts {
+  index: number;
+  id: string | null;
+  name: string;
+  parameter?: PluginParameterDescriptor;
+}
+
 export function ParameterLinkHost({
   frameRef,
   frameLoaded,
@@ -163,17 +180,28 @@ export function ParameterLinkHost({
   const [controllerData, setControllerData] = useState<ControllerData | null>(null);
   // The map's mapping the dialog opens on, when no session link is there.
   const [editingMapped, setEditingMapped] = useState<{ controller_id: string; mapping: ControlMapping } | null>(null);
-  // The id of the parameter a menu is open on, with the index it was read for.
-  const [targetParameter, setTargetParameter] = useState<{ index: number; id: string | null } | null>(null);
+  // The session link the dialog edits; none for a mapping or a new link.
+  const [editingLink, setEditingLink] = useState<ParameterLink | null>(null);
+  // The parameter a menu is open on -- its id, name and description -- with
+  // the index it was read for.
+  const [targetParameter, setTargetParameter] = useState<ParameterFacts | null>(null);
   const targetParameterId = target && targetParameter?.index === target.parameterIndex ? targetParameter.id : null;
+  // The parameter whose associations the dialog lists, when there are more
+  // than the menu names.
+  const [associationsFor, setAssociationsFor] = useState<ParameterFacts | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const highlightRef = useRef<HTMLDivElement | null>(null);
-  const activeLink = target
-    ? links.find((link) => link.instance_id === instanceId && link.parameter_index === target.parameterIndex)
-    : undefined;
+  const linksOn = (parameterIndex: number) =>
+    links.filter((link) => link.instance_id === instanceId && link.parameter_index === parameterIndex);
   const mapsHere = Boolean(pluginId) && hostKeepsControllerMaps();
-  const mappedHere = target && pluginId && targetParameterId && controllerData
-    ? mappingsForParameter(controllerData.maps, pluginId, targetParameterId)
+  const mappedOn = (parameterId: string | null) =>
+    pluginId && parameterId && controllerData
+      ? mappingsForParameter(controllerData.maps, pluginId, parameterId)
+      : [];
+  const associationsHere = target ? parameterAssociations(linksOn(target.parameterIndex), mappedOn(targetParameterId)) : [];
+  const menuItems = menuAssociationItems(associationsHere.length);
+  const listedAssociations = associationsFor
+    ? parameterAssociations(linksOn(associationsFor.index), mappedOn(associationsFor.id))
     : [];
 
   const refreshControllers = useCallback(async () => {
@@ -182,20 +210,29 @@ export function ParameterLinkHost({
   }, [mapsHere]);
 
   useEffect(() => {
-    if (!target || !mapsHere) return;
+    if (!target) return;
     let active = true;
     loadParameters()
       .then((snapshot) => {
         if (!active) return;
         const parameter = snapshot.schema.parameters.find((item) => item.index === target.parameterIndex);
-        setTargetParameter({ index: target.parameterIndex, id: parameter?.id ?? null });
+        setTargetParameter({
+          index: target.parameterIndex,
+          id: parameter?.id ?? null,
+          name: parameter?.name ?? `Parameter ${target.parameterIndex}`,
+          parameter,
+        });
       })
       .catch(() => undefined);
-    loadControllerData()
-      .then((data) => {
-        if (active) setControllerData(data);
-      })
-      .catch(() => undefined);
+    // Where the host keeps no controller maps, only the parameter is read:
+    // its name heads the associations dialog.
+    if (mapsHere) {
+      loadControllerData()
+        .then((data) => {
+          if (active) setControllerData(data);
+        })
+        .catch(() => undefined);
+    }
     return () => {
       active = false;
     };
@@ -422,10 +459,41 @@ export function ParameterLinkHost({
     };
   }, [target]);
 
+  /** Opens the link dialog on one association, or on a new link. */
+  const openEditor = (on: Target, association?: ParameterAssociation) => {
+    setEditingLink(association?.kind === "session" ? association.link : null);
+    setEditingMapped(association?.kind === "controller"
+      ? { controller_id: association.controller_id, mapping: association.mapping }
+      : null);
+    setEditing(on);
+  };
+
+  /** Removes associations: session links one by one, each map once. */
+  const removeAssociations = async (targets: ParameterAssociation[]) => {
+    for (const association of targets) {
+      if (association.kind === "session") await removeParameterLink(association.link.id);
+    }
+    const byController = new Map<string, string[]>();
+    for (const association of targets) {
+      if (association.kind !== "controller") continue;
+      byController.set(association.controller_id, [
+        ...(byController.get(association.controller_id) ?? []),
+        association.mapping.id,
+      ]);
+    }
+    for (const [controllerId, mappingIds] of byController) {
+      const map = controllerData?.maps.find((candidate) => candidate.controller_id === controllerId);
+      if (!map || !pluginId) continue;
+      await saveControllerMap(mappingIds.reduce((next, id) => withoutMapping(next, pluginId, id), map));
+    }
+    await refreshControllers();
+    await requestSessionSnapshot();
+  };
+
   const menuLeft = target
     ? Math.max(8, Math.min(target.x + 4, window.innerWidth - 206))
     : 0;
-  const menuHeight = (activeLink ? 132 : 90) + mappedHere.length * 42 + (menuError ? 58 : 0);
+  const menuHeight = (menuItems === "one" ? 132 : 90) + (menuError ? 58 : 0);
   const menuTop = target
     ? Math.max(8, Math.min(target.y + 4, window.innerHeight - menuHeight - 8))
     : 0;
@@ -440,17 +508,33 @@ export function ParameterLinkHost({
           style={{ left: menuLeft, top: menuTop }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setEditingMapped(activeLink ? null : mappedHere[0] ?? null);
-              setEditing(target);
-              setTarget(null);
-            }}
-          >
-            {activeLink || mappedHere.length > 0 ? "Edit MIDI Link…" : "Link MIDI…"}
-          </button>
+          {menuItems === "dialog" ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setAssociationsFor(
+                  targetParameter?.index === target.parameterIndex
+                    ? targetParameter
+                    : { index: target.parameterIndex, id: null, name: `Parameter ${target.parameterIndex}` },
+                );
+                setTarget(null);
+              }}
+            >
+              MIDI associations ({associationsHere.length})…
+            </button>
+          ) : (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                openEditor(target, associationsHere[0]);
+                setTarget(null);
+              }}
+            >
+              {menuItems === "one" ? "Edit MIDI Link…" : "Link MIDI…"}
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -469,55 +553,55 @@ export function ParameterLinkHost({
           >
             {resetting ? "Resetting…" : "Reset to program"}
           </button>
-          {activeLink ? (
+          {menuItems === "one" ? (
             <button
               type="button"
               role="menuitem"
               className="danger"
+              title={`${associationSource(associationsHere[0])} · ${associationControl(associationsHere[0])}`}
               onClick={() => {
-                setTarget(null);
-                void removeParameterLink(activeLink.id).then(requestSessionSnapshot);
+                setMenuError(null);
+                removeAssociations(associationsHere)
+                  .then(() => setTarget(null))
+                  .catch((reason: unknown) => setMenuError(
+                    reason instanceof Error ? reason.message : "Could not remove this MIDI Link.",
+                  ));
               }}
             >
               Remove MIDI Link
             </button>
           ) : null}
-          {mappedHere.map((entry) => (
-            <button
-              key={`${entry.controller_id}:${entry.mapping.id}`}
-              type="button"
-              role="menuitem"
-              className="danger"
-              onClick={() => {
-                const map = controllerData?.maps.find((candidate) => candidate.controller_id === entry.controller_id);
-                if (!map || !pluginId) return;
-                setMenuError(null);
-                saveControllerMap(withoutMapping(map, pluginId, entry.mapping.id))
-                  .then(() => refreshControllers())
-                  .then(() => setTarget(null))
-                  .catch((reason: unknown) => setMenuError(
-                    reason instanceof Error ? reason.message : "Could not remove this mapping.",
-                  ));
-              }}
-            >
-              Remove {entry.controller_name} · {entry.mapping.input.name}
-            </button>
-          ))}
           {menuError ? <p className="parameter-link-context-error" role="alert">{menuError}</p> : null}
         </div>
       ) : null}
-      {editing ? (
+      {/* The dialogs are the window's, not the plugin area's: the area is
+          transformed, and a fixed backdrop inside it would centre on the
+          area -- above the screen when the area is taller or scrolled. */}
+      {associationsFor ? createPortal(
+        <ParameterAssociationsDialog
+          parameterName={associationsFor.name}
+          parameter={associationsFor.parameter}
+          associations={listedAssociations}
+          onAdd={() => openEditor({ parameterIndex: associationsFor.index, x: 0, y: 0 })}
+          onEdit={(association) => openEditor({ parameterIndex: associationsFor.index, x: 0, y: 0 }, association)}
+          onRemove={removeAssociations}
+          onClose={() => setAssociationsFor(null)}
+        />,
+        document.body,
+      ) : null}
+      {editing ? createPortal(
         <ParameterLinkDialog
           instanceId={instanceId}
           parameterIndex={editing.parameterIndex}
-          existing={links.find((link) => link.instance_id === instanceId && link.parameter_index === editing.parameterIndex)}
+          existing={editingLink ?? undefined}
           loadParameters={loadParameters}
           plugin={mapsHere && pluginId ? { plugin_id: pluginId, plugin_name: pluginName ?? pluginId } : undefined}
           controllerData={controllerData}
           mapped={editingMapped ?? undefined}
           onSaved={() => refreshControllers().catch(() => undefined)}
           onClose={() => setEditing(null)}
-        />
+        />,
+        document.body,
       ) : null}
     </>
   );
@@ -658,6 +742,14 @@ function ParameterLinkDialog({
     : null;
   const problem = parameter && effectiveMode ? modeProblem({ kind }, parameter, effectiveMode) : null;
 
+  const removeMapping = async (
+    entry: { controller_id: string; mapping: ControlMapping },
+    pluginIdToClear: string,
+  ) => {
+    const owner = controllerData?.maps.find((candidate) => candidate.controller_id === entry.controller_id);
+    if (owner) await saveControllerMap(withoutMapping(owner, pluginIdToClear, entry.mapping.id));
+  };
+
   const apply = async () => {
     const source = sources.find((candidate) => candidate.source.id === draft.sourceId);
     if (!source) {
@@ -681,14 +773,25 @@ function ParameterLinkDialog({
         const previous = map.plugins
           .find((entry) => entry.plugin_id === plugin.plugin_id)
           ?.mappings.find((mapping) => mapping.input.id === input.id && mapping.parameter_id === parameter.id);
-        await saveControllerMap(withMapping(map, plugin, {
-          id: previous?.id ?? newMappingId(),
+        const id = previous?.id ?? newMappingId();
+        let next = withMapping(map, plugin, {
+          id,
           input,
           parameter_id: parameter.id,
           mode: effectiveMode,
           ...(draft.invert ? { invert: true } : {}),
           ...(passThroughTouched ? { pass_through: draft.passThrough } : {}),
-        }));
+        });
+        // The mapping being edited becomes this one: moved to another control
+        // it leaves its old one, on this controller or another.
+        if (mapped && mapped.mapping.id !== id) {
+          if (mapped.controller_id === controller.controller_id) {
+            next = withoutMapping(next, plugin.plugin_id, mapped.mapping.id);
+          } else {
+            await removeMapping(mapped, plugin.plugin_id);
+          }
+        }
+        await saveControllerMap(next);
         // A session link on this parameter would win over the map; the
         // player chose the map.
         if (existing) await removeParameterLink(existing.id);
@@ -708,6 +811,11 @@ function ParameterLinkDialog({
           pass_through: draft.passThrough,
           ...(effectiveMode && effectiveMode.kind !== "direct" ? { mode: effectiveMode } : {}),
         });
+        // A controller mapping edited into a session link moves there.
+        if (mapped && plugin) {
+          await removeMapping(mapped, plugin.plugin_id);
+          onSaved();
+        }
       }
       await requestSessionSnapshot();
       onClose();

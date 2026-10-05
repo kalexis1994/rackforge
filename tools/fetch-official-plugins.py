@@ -164,12 +164,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Musette.rfplugin",
         "plugin_id": "org.rackforge.musette",
-        "version": "0.13.20",
+        "version": "0.13.21",
         "url": (
             "https://github.com/kalexis1994/RF-Musette/"
-            "releases/download/v0.13.20/RF-Musette.rfplugin"
+            "releases/download/v0.13.21/RF-Musette.rfplugin"
         ),
-        "sha256": "f796ec24bc29883f40982d818891ad08bce25c06922dc5e5a8468158f785710f",
+        "sha256": "7cfc4156c98ae4583fba55801262ee7f963249aea9b6b8541d0c52ab0f59f47c",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

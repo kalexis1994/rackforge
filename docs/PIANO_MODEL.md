@@ -2441,6 +2441,19 @@ in the time integrator remain pending. Dry bridge agreement does not validate
 air-returned distributed forces, coupled notes, musical fidelity or runtime.
 Numerical data remain unique under `local/`, with no new WAV/package in SHARED.
 
+The [direct loaded-board audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-carga-directa.md)
+feeds continuous Rayleigh forces back into both the 7392-coordinate parent
+and its 606-coordinate projection. Separable Ritz/transpose maps and cell
+FFT avoid dense modal air matrices. Block GMRES approves only the true
+original-force residual. Five tests match dense and independent solves,
+angular power and cell pressure. Across 83 sparse harmonic controls between
+60 and 6000 Hz, projected/full loaded pressure changes at most 0.618522%,
+mobility 0.255239%; power balance error is 1.615e-10. Angular and quadrature
+checks pass. The 192-by-144 run is rejected spatially: refining to 256-by-192
+changes pressure at 6 kHz by 1.018371%, above the unchanged 1% bound. A finer
+spatial check remains, as do a causal passive realization and projected-loss
+contact/coast integration. Harmonic power is not a live acoustic energy ledger.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

@@ -1052,3 +1052,19 @@ Siguiente: carga recíproca de estas formas, controles del sistema cargado y
 extensión del integrador para pérdidas de cola no diagonales. Datos nuevos
 únicos en `local/`; sin WAV nuevo ni actualización del paquete. Sigue pendiente
 la escucha, y la precisión seca no certifica fidelidad musical ni las 88 teclas.
+
+### 2026-10-05 — P6: carga directa del aire y control espacial pendiente
+
+La proyección pasiva queda en **379cc51**, por pedido del usuario.
+[Método y mediciones](RESULTADOS-P6-carga-directa.md). Se implementa la
+reacción Rayleigh continua sin matrices densas de carga ni factores FIR
+grandes; solver en bloque con residual original. Pasan cinco pruebas nuevas
+contra solve denso, solver independiente, mapas transpuestos, potencia y presión.
+
+En 83 controles entre 60 y 6000 Hz, proyección frente al padre cargado:
+máximo por puerto de presión 0,618522%, admitancia 0,255239%. Pasa balance
+armónico (1,615e−10), reciprocidad, puertos disipativos y cuadraturas. La
+integral angular independiente coincide. **No se aprueba la corrida 192×144**:
+refinar a 256×192 cambia presión a 6 kHz un 1,018371%, por encima del 1%.
+Se conserva el control fallido; siguiente: base 256×192 y contraste 320×240.
+Sin nuevo WAV ni paquete, datos nuevos pequeños sólo en `local/`.

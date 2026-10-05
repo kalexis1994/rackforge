@@ -1,0 +1,17 @@
+{
+  "checks": {
+    "board_position_relative": 5.0827507283651855e-14,
+    "board_velocity_relative": 3.0225248533399093e-13,
+    "final_state_max_relative": 1.779228846016007e-11,
+    "independent_total_energy_relative": 1.404523089790725e-14
+  },
+  "seconds": 71.1880000000001,
+  "maximum_full_tangent_fallbacks": 0,
+  "scope": "Full 4ms cold onset with independently integrated full angular radiation and unchanged nonlinear equations.",
+  "gates": {
+    "board": true,
+    "state": true,
+    "energy": true
+  },
+  "all_gates_passed": true
+}

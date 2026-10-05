@@ -1,0 +1,35 @@
+{
+  "C4_primitive_parameters_exactly_match": true,
+  "new_inspector_sha256": "80aa62910e4c1347ae07a1fe7e42024ce25bcdb30ab0766ac1b3152299737577",
+  "notes": [
+    64,
+    67,
+    72
+  ],
+  "velocity": 124,
+  "old_inspector_sha256": "b1df5706c123ea51b936ac46117198e860c86ef575b8bbab09db6dd5be58b83d",
+  "C4_checked_parameters": {
+    "transfer.csv": {
+      "length_m": "0.619020402431488",
+      "tension_n": "850",
+      "modal_mass_kg": "0.002508375560864806",
+      "hammer_mass_per_string_kg": "0.002285285387188196",
+      "hammer_speed_m_s": "6.4089555740356445"
+    },
+    "contact-end.csv": {
+      "stiffness_n_per_m_p": "755470784",
+      "exponent": "2.613793134689331",
+      "width_fraction": "0.020842738449573517",
+      "strike_fraction": "0.12220641"
+    }
+  },
+  "baseline_csv_sha256": {
+    "transfer.csv": "0cb57ffe16fea74fb857a0af3d443e6670992bad0f916283af279b87d183cb5f",
+    "contact-end.csv": "9e4633a05219de98bd734937885a2ece1c66b38500f59249322307fe28bff76f"
+  },
+  "fingerprints": {
+    "render": "0x232b085ed4248398",
+    "pedals": "0x4371ab4adc1542ab"
+  },
+  "rust_export_source_sha256": "49dc29ee04d6a13c13e35050d3d9f43a0f6f01f4ba1e2e8017e7847e945ffa41"
+}

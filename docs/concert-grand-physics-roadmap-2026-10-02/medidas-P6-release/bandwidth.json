@@ -1,0 +1,216 @@
+{
+  "structural_controls": {
+    "60": {
+      "low": {
+        "59": {
+          "relative_to_256": 0.03202254042693597,
+          "power_relative_db": -0.028138588900934534
+        },
+        "90": {
+          "relative_to_256": 0.020150914826617555,
+          "power_relative_db": -0.005189309549074121
+        }
+      },
+      "middle": {
+        "59": {
+          "relative_to_256": 1.0091657487754933,
+          "power_relative_db": -7.5667873726008015
+        },
+        "90": {
+          "relative_to_256": 0.8321112316413589,
+          "power_relative_db": -5.675507372392086
+        }
+      },
+      "upper": {
+        "59": {
+          "relative_to_256": 2.033391890321954,
+          "power_relative_db": 6.812514364003491
+        },
+        "90": {
+          "relative_to_256": 1.6102640110479496,
+          "power_relative_db": 4.706712183972289
+        }
+      }
+    },
+    "64": {
+      "low": {
+        "59": {
+          "relative_to_256": 0.03042661581919363,
+          "power_relative_db": -0.024568592372171526
+        },
+        "90": {
+          "relative_to_256": 0.017265441870198656,
+          "power_relative_db": -0.008073591210758518
+        }
+      },
+      "middle": {
+        "59": {
+          "relative_to_256": 0.9856042561713755,
+          "power_relative_db": -7.705458357081714
+        },
+        "90": {
+          "relative_to_256": 0.8049907601589937,
+          "power_relative_db": -5.077285832354114
+        }
+      },
+      "upper": {
+        "59": {
+          "relative_to_256": 0.8107248827318617,
+          "power_relative_db": -3.395309137198255
+        },
+        "90": {
+          "relative_to_256": 0.7480345160085653,
+          "power_relative_db": -5.785593481247525
+        }
+      }
+    },
+    "67": {
+      "low": {
+        "59": {
+          "relative_to_256": 0.04382610034718736,
+          "power_relative_db": -0.024052596686418716
+        },
+        "90": {
+          "relative_to_256": 0.020244568111402954,
+          "power_relative_db": -0.0057192577857459286
+        }
+      },
+      "middle": {
+        "59": {
+          "relative_to_256": 1.0062269868532587,
+          "power_relative_db": -7.164588259697996
+        },
+        "90": {
+          "relative_to_256": 0.805104294020988,
+          "power_relative_db": -4.819128896863168
+        }
+      },
+      "upper": {
+        "59": {
+          "relative_to_256": 0.8149244839902825,
+          "power_relative_db": -1.4949761198520484
+        },
+        "90": {
+          "relative_to_256": 0.739630882392983,
+          "power_relative_db": -4.635090849917043
+        }
+      }
+    },
+    "72": {
+      "low": {
+        "59": {
+          "relative_to_256": 0.06682112337512087,
+          "power_relative_db": -0.033339770068675924
+        },
+        "90": {
+          "relative_to_256": 0.026406981681326113,
+          "power_relative_db": 0.003584960041730905
+        }
+      },
+      "middle": {
+        "59": {
+          "relative_to_256": 1.0588004306076855,
+          "power_relative_db": -6.910835311600082
+        },
+        "90": {
+          "relative_to_256": 0.8595096971161567,
+          "power_relative_db": -5.1857459332390246
+        }
+      },
+      "upper": {
+        "59": {
+          "relative_to_256": 2.9279827709614885,
+          "power_relative_db": 9.918462395379832
+        },
+        "90": {
+          "relative_to_256": 1.9881825674095541,
+          "power_relative_db": 7.709977827148324
+        }
+      }
+    }
+  },
+  "audio_band_metrics": {
+    "C4-pilot": {
+      "early": {
+        "power": [
+          432095.4976795567,
+          1319.9750450535112,
+          58.62795797759922
+        ],
+        "upper_to_lower_db": -24.961405209123022
+      },
+      "sustain": {
+        "power": [
+          10965875.682476314,
+          54936.27456566812,
+          2419.241106027533
+        ],
+        "upper_to_lower_db": -22.814681293130793
+      }
+    },
+    "C5-pilot": {
+      "early": {
+        "power": [
+          111086.57899184532,
+          841.0788512550344,
+          116.11237707342528
+        ],
+        "upper_to_lower_db": -20.646628823993197
+      },
+      "sustain": {
+        "power": [
+          1718659.3318453666,
+          34722.96186266655,
+          4880.498151043319
+        ],
+        "upper_to_lower_db": -16.374566701518958
+      }
+    },
+    "C4-reference": {
+      "early": {
+        "power": [
+          292143.6505852662,
+          30517.223657485498,
+          2456.8221325551513
+        ],
+        "upper_to_lower_db": -9.47424215151128
+      },
+      "sustain": {
+        "power": [
+          4326477.380017847,
+          167968.50122994353,
+          2316.13115036011
+        ],
+        "upper_to_lower_db": -14.04958981345516
+      }
+    },
+    "C5-reference": {
+      "early": {
+        "power": [
+          388652.28436651896,
+          23305.697064447602,
+          865.4817560439154
+        ],
+        "upper_to_lower_db": -12.06263393360813
+      },
+      "sustain": {
+        "power": [
+          4429546.563237246,
+          61256.33764100233,
+          951.9426859628618
+        ],
+        "upper_to_lower_db": -18.525110753726544
+      }
+    }
+  },
+  "highest_available_mode_hz": 2965.076565621765,
+  "source_sha256": "5a53dccf387b8442aadfdec3a688af86215305f1d166ae3206c3d18df7093dbb",
+  "inputs_sha256": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-nota-1s\\C4-124-Piloto-fisico-1s.wav": "f58c67734f8b3f35f2a2923390ac1fcc333e710c76fcbe44f2c22e26edd6675c",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\72-124.wav": "b18823ea83de5b027477cb979aaa0c139cdda227d7634b6f13c1a4ff18bd5dc3",
+    "local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C4v16.wav": "fe91edcf580f3d1b055a87bf9911db52cccf934445f9e2b126ee1c3eb858b763",
+    "local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C5v16.wav": "5555d9e684563ec5c471d65e9cab822457ca29fee46d188085e9395afac39cae"
+  },
+  "scope": "Dry harmonic unit bridge force, same loss .046 and readout; diagnostic of modal truncation only. No air feedback, real note waveform or high-mode convergence claim. Reference windows are recording-start aligned, not fitted."
+}

@@ -1,0 +1,36 @@
+{
+  "criteria": {
+    "live_state_relative": 2e-08,
+    "live_work_relative": 2e-08,
+    "onset_board_relative": 1e-08,
+    "onset_state_relative": 1e-08,
+    "onset_energy_relative": 1e-09
+  },
+  "steps": 256,
+  "rate_hz": 768000,
+  "onset_report_sha256": "049163b86fe7009634c72be8ccd651a723bc0304331a9f7bc330d0ef1783990a",
+  "checks": {
+    "live_states_max_relative": 9.107697277751745e-12,
+    "live_work_relative": 2.1571968523913374e-15
+  },
+  "gates": {
+    "live_states": true,
+    "live_work": true
+  },
+  "reference_seconds": 10.390999999999622,
+  "accelerated_seconds": 0.8119999999998981,
+  "dynamics_speedup": 12.79679802955779,
+  "estimated_dynamics_seconds_for_one_second": 2435.9999999996944,
+  "scope": "Live 4ms-onset continuation; dynamics only, excluding angular radiation output, construction and microphone rendering.",
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1",
+    "blas_threads": 1
+  },
+  "source_sha256": {
+    "render-concert-grand-physical-note.py": "bcdd1aa22c176a30a783ef5e8ac33cfe1c4476bff0d29002ba01be376af01764",
+    "concert_grand_fast_contact.py": "901866daf5c4cd7e8c7ef5603de33f2aee5c18c944ec27ce7ba7b2e3d97834f3"
+  },
+  "all_gates_passed": true
+}

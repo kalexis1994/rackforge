@@ -1,0 +1,102 @@
+{
+  "events": [
+    {
+      "note": 60,
+      "velocity": 124,
+      "source_onset_s": 0.0,
+      "source_hold_s": 1.0,
+      "wav_onset_s": 0.1,
+      "clip_frames": 48167
+    },
+    {
+      "note": 64,
+      "velocity": 124,
+      "source_onset_s": 1.2,
+      "source_hold_s": 1.0,
+      "wav_onset_s": 1.3,
+      "clip_frames": 48167
+    },
+    {
+      "note": 67,
+      "velocity": 124,
+      "source_onset_s": 2.4,
+      "source_hold_s": 1.0,
+      "wav_onset_s": 2.5,
+      "clip_frames": 48167
+    },
+    {
+      "note": 72,
+      "velocity": 124,
+      "source_onset_s": 3.5999999999999996,
+      "source_hold_s": 1.0,
+      "wav_onset_s": 3.7,
+      "clip_frames": 48167
+    },
+    {
+      "note": 67,
+      "velocity": 124,
+      "source_onset_s": 4.8,
+      "source_hold_s": 1.0,
+      "wav_onset_s": 4.9,
+      "clip_frames": 48167
+    },
+    {
+      "note": 64,
+      "velocity": 124,
+      "source_onset_s": 6.0,
+      "source_hold_s": 1.0,
+      "wav_onset_s": 6.1,
+      "clip_frames": 48167
+    },
+    {
+      "note": 60,
+      "velocity": 124,
+      "source_onset_s": 7.199999999999999,
+      "source_hold_s": 1.0,
+      "wav_onset_s": 7.3,
+      "clip_frames": 48167
+    }
+  ],
+  "note_sources": {
+    "60": {
+      "report_path": "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-nota-1s\\render.json",
+      "report_sha256": "b8e5fb6fe496867194ad52bf5099331a8632fbb707bf25317ff20eac4a733fcf",
+      "audio_path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-nota-1s\\C4-124-Piloto-fisico-1s.wav",
+      "audio_sha256": "f58c67734f8b3f35f2a2923390ac1fcc333e710c76fcbe44f2c22e26edd6675c",
+      "clip_frames": 48167
+    },
+    "64": {
+      "report_path": "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-frase\\nota-64.json",
+      "report_sha256": "1535e95d652d406fe1bb0fc16045869be1c375ce568a1a947151cdc99c0342f4",
+      "audio_path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\64-124.wav",
+      "audio_sha256": "2e75a5f681b232eec5c65688bb7e17ae436a5426cd28ac43c25c36de537cc272",
+      "clip_frames": 48167
+    },
+    "67": {
+      "report_path": "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-frase\\nota-67.json",
+      "report_sha256": "8c8cb7a84d953e8ee80f5c13be0304755e08319cf3ba3f51bcd943a8cf9806f1",
+      "audio_path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\67-124.wav",
+      "audio_sha256": "cf9b52a3340cf80fbdc4b338032579663b28bacb6f671abf32938256913c5d79",
+      "clip_frames": 48167
+    },
+    "72": {
+      "report_path": "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-frase\\nota-72.json",
+      "report_sha256": "15cdc84890d76021baf13a92322136deb3e5a6ce2433a74557ba17df857cc535",
+      "audio_path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\72-124.wav",
+      "audio_sha256": "b18823ea83de5b027477cb979aaa0c139cdda227d7634b6f13c1a4ff18bd5dc3",
+      "clip_frames": 48167
+    }
+  },
+  "microphone_kernel_sha256": "07550958ac557be347da8979bf648aaac61917c85b1fb25887c299f4cfcd4943",
+  "audio_path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\Arpegio-C4-E4-G4-C5-Piloto-fisico.wav",
+  "audio_sha256": "300364cb0dc0d4b9c8ef640fc8121eec88a4fdb01b505503851665ad6d3ccf2a",
+  "audio_rate_hz": 48000,
+  "audio_channels": 2,
+  "audio_peak": 0.5157573819160461,
+  "audio_seconds": 8.603479166666666,
+  "common_gain_pa_to_full_scale": 0.25,
+  "source_sha256": "692de676de9de3ca1f8a6818fd346dd3480328e0e6dd2f9a18754c91ec40ea32",
+  "transformations": "Only remove existing listening silence and place each note at its stated onset. No pitch shift, per-note gain, additional fade, EQ or overlap.",
+  "scope": "Cold one-string note bank assembled into a monophonic diagnostic arpeggio. Note endings retain the 8ms source-file edit; not simulated note-off, repeated-note interaction, shared-board polyphony or a plugin performance.",
+  "factory_changed": false
+}

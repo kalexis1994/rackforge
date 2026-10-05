@@ -1,0 +1,191 @@
+{
+  "available_board": {
+    "count": 256,
+    "highest_hz": 2965.076565621765,
+    "retained_highest_hz": 1193.5079134853531
+  },
+  "geometry_m": [
+    [
+      0.55,
+      0.5,
+      0.15
+    ],
+    [
+      0.85,
+      0.5,
+      0.15
+    ]
+  ],
+  "fractional_delay_relative": 0.00011418745619170618,
+  "spatial_transfer_relative": 0.0013691969072921165,
+  "notes": {
+    "64": {
+      "early": {
+        "structural_acceleration": {
+          "power": [
+            41209560548.64328,
+            985443128.1828783,
+            3080347.8377797557
+          ],
+          "upper_to_lower_db": -16.200109956650707
+        },
+        "old_pressure": {
+          "power": [
+            45873892.72081609,
+            155067.89954038383,
+            528.4881755117586
+          ],
+          "upper_to_lower_db": -24.695660843153874
+        },
+        "near_pressure": {
+          "power": [
+            293743712.93620646,
+            1538568.3836806088,
+            871.5466917642276
+          ],
+          "upper_to_lower_db": -22.806058328683754
+        }
+      },
+      "sustain": {
+        "structural_acceleration": {
+          "power": [
+            1040956848125.8351,
+            40622785949.890175,
+            130534033.47521272
+          ],
+          "upper_to_lower_db": -14.072697321518062
+        },
+        "old_pressure": {
+          "power": [
+            1150059138.5954423,
+            6428289.339248356,
+            22379.46343218871
+          ],
+          "upper_to_lower_db": -22.511154288723652
+        },
+        "near_pressure": {
+          "power": [
+            7312533219.382141,
+            62968631.924194165,
+            36920.648472942805
+          ],
+          "upper_to_lower_db": -20.646890272305427
+        }
+      }
+    },
+    "67": {
+      "early": {
+        "structural_acceleration": {
+          "power": [
+            71020009902.52527,
+            419446533.8338793,
+            1276448.2513758312
+          ],
+          "upper_to_lower_db": -22.27384492424155
+        },
+        "old_pressure": {
+          "power": [
+            8598197.544036862,
+            103534.65375198633,
+            366.18192399161126
+          ],
+          "upper_to_lower_db": -19.177883782257272
+        },
+        "near_pressure": {
+          "power": [
+            138282041.13772172,
+            439162.1513548042,
+            564.3401907587886
+          ],
+          "upper_to_lower_db": -24.97583150702685
+        }
+      },
+      "sustain": {
+        "structural_acceleration": {
+          "power": [
+            1112059815857.4375,
+            17463355152.065575,
+            53406405.582600854
+          ],
+          "upper_to_lower_db": -18.02674329565162
+        },
+        "old_pressure": {
+          "power": [
+            215109582.32747185,
+            4312357.4056480015,
+            15343.343614293943
+          ],
+          "upper_to_lower_db": -16.964025343597992
+        },
+        "near_pressure": {
+          "power": [
+            2543083481.687723,
+            18329673.530325603,
+            23647.600219352396
+          ],
+          "upper_to_lower_db": -21.41645953391982
+        }
+      }
+    },
+    "72": {
+      "early": {
+        "structural_acceleration": {
+          "power": [
+            55498682375.14661,
+            349605318.5241419,
+            15133287.628523722
+          ],
+          "upper_to_lower_db": -21.82300938303667
+        },
+        "old_pressure": {
+          "power": [
+            12521043.36465568,
+            95506.85588774856,
+            13189.743702390382
+          ],
+          "upper_to_lower_db": -20.614245616115475
+        },
+        "near_pressure": {
+          "power": [
+            475398756.40092653,
+            2695153.821921044,
+            17104.330688022612
+          ],
+          "upper_to_lower_db": -22.437270180279402
+        }
+      },
+      "sustain": {
+        "structural_acceleration": {
+          "power": [
+            932409706964.9044,
+            14371858274.91491,
+            636216439.4180492
+          ],
+          "upper_to_lower_db": -17.932818030696968
+        },
+        "old_pressure": {
+          "power": [
+            193461283.4198505,
+            3941158.6175212134,
+            554317.6011139901
+          ],
+          "upper_to_lower_db": -16.338183599902678
+        },
+        "near_pressure": {
+          "power": [
+            7468746076.191532,
+            110643865.80201954,
+            720525.8673032045
+          ],
+          "upper_to_lower_db": -18.265013454019392
+        }
+      }
+    }
+  },
+  "inputs_sha256": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-primera-nota\\Microfonos-128k.npz": "07550958ac557be347da8979bf648aaac61917c85b1fb25887c299f4cfcd4943"
+  },
+  "near_kernel_sha256": "44111dd9ce0191abfae8c01b3550046c27802f33df9ca988f41916fc2bc8b311",
+  "scope": "Same loaded 59-mode trajectory; moving observation only. Near placement is hypothetical, not Steinway microphone identification."
+}

@@ -1,0 +1,52 @@
+{
+  "criteria": {
+    "fractional_delay_transfer": 0.0002,
+    "cell_quadrature": 1e-05,
+    "spatial_transfer": 0.01,
+    "capture_pressure": 0.001
+  },
+  "capture_pressure_relative": 2.3585189594769143e-07,
+  "gates": {
+    "capture_pressure": true
+  },
+  "trajectory_sha256": "47d4a2a9c588ad18335fbe5f794f64bfb9a7f9d74aefa7ffc3c61eeaeb3e2cae",
+  "trajectory_report_sha256": "59e39bfe6be9ee3f7075b330a947882eb0e80028111a4750592877d819ce012b",
+  "kernel_sha256": "07550958ac557be347da8979bf648aaac61917c85b1fb25887c299f4cfcd4943",
+  "physical_pressure_peak_pa": 2.0216430074588767,
+  "physical_duration_s": 0.25,
+  "microphone_geometry_m": [
+    [
+      0.55,
+      0.5,
+      0.66
+    ],
+    [
+      0.85,
+      0.5,
+      0.66
+    ]
+  ],
+  "audition_gain_pa_to_full_scale": 0.25,
+  "audio_rate_hz": 48000,
+  "audio_channels": 2,
+  "terminal_cosine_fade_s": 0.008,
+  "normalization": "One explicit common listening gain for both channels; no per-note or per-channel fitting.",
+  "scope": "One vertical C4 string at MIDI velocity 124, nonlinear SI pilot, not a full piano or an installed plugin. Source is sustained to the measured duration; the 8ms terminal fade is an edit, not damper physics.",
+  "unchecked": [
+    "59->90 structural convergence",
+    "long-sustain mechanical-rate refinement",
+    "independent full angular radiation integral over sustain",
+    "Steinway geometry/loss identification",
+    "unison",
+    "release/action/pedal",
+    "runtime integration"
+  ],
+  "source_sha256": {
+    "observe-concert-grand-physical-note.py": "40975f90f3156ff0052b49a7f21a7a2807ada19e47170a398a278ebc1c6212f5",
+    "concert_grand_cell_audio.py": "031c725f9ba43358146d827e6658b93dd01a5807a73a996ceededd40ba3bd0e0"
+  },
+  "audio_peak": 0.5053256701705291,
+  "audio_sha256": "00afcb595d6bab2edf76026747f47e71d43cfc93fb64fb8a7c854846a7cbcdc2",
+  "audio_seconds": 0.6534791666666667,
+  "seconds": 0.2969999999986612
+}

@@ -1,0 +1,353 @@
+{
+  "criteria": {
+    "structural_band_relative": 0.01,
+    "modal_cut_relative": 0.01,
+    "readout_spatial": 0.01,
+    "mass_normalization": 1e-08,
+    "modal_residual": 1e-08,
+    "reciprocity": 1e-11,
+    "passivity": 1e-11
+  },
+  "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+  "panel": {
+    "length": 1.4,
+    "width": 1.0,
+    "thickness": 0.008,
+    "density": 392,
+    "ex": 11500000000.0,
+    "ey": 470000000.0,
+    "gxy": 500000000.0,
+    "nuxy": 0.3
+  },
+  "beams": [
+    {
+      "axis": "y",
+      "position": 0.13999999999999999,
+      "width": 0.02,
+      "height": 0.02,
+      "young": 11500000000.0,
+      "density": 392,
+      "bow": 0.0
+    },
+    {
+      "axis": "y",
+      "position": 0.287,
+      "width": 0.02,
+      "height": 0.021,
+      "young": 11500000000.0,
+      "density": 392,
+      "bow": 0.0
+    },
+    {
+      "axis": "y",
+      "position": 0.427,
+      "width": 0.02,
+      "height": 0.02,
+      "young": 11500000000.0,
+      "density": 392,
+      "bow": 0.0
+    },
+    {
+      "axis": "y",
+      "position": 0.5698,
+      "width": 0.02,
+      "height": 0.022,
+      "young": 11500000000.0,
+      "density": 392,
+      "bow": 0.0
+    },
+    {
+      "axis": "y",
+      "position": 0.7041999999999999,
+      "width": 0.02,
+      "height": 0.021,
+      "young": 11500000000.0,
+      "density": 392,
+      "bow": 0.0
+    },
+    {
+      "axis": "y",
+      "position": 0.8497999999999999,
+      "width": 0.02,
+      "height": 0.02,
+      "young": 11500000000.0,
+      "density": 392,
+      "bow": 0.0
+    },
+    {
+      "axis": "y",
+      "position": 0.9911999999999999,
+      "width": 0.02,
+      "height": 0.022,
+      "young": 11500000000.0,
+      "density": 392,
+      "bow": 0.0
+    },
+    {
+      "axis": "y",
+      "position": 1.1228,
+      "width": 0.02,
+      "height": 0.021,
+      "young": 11500000000.0,
+      "density": 392,
+      "bow": 0.0
+    },
+    {
+      "axis": "y",
+      "position": 1.2628,
+      "width": 0.02,
+      "height": 0.02,
+      "young": 11500000000.0,
+      "density": 392,
+      "bow": 0.0
+    },
+    {
+      "axis": "x",
+      "position": 0.5,
+      "width": 0.03,
+      "height": 0.04,
+      "young": 10000000000.0,
+      "density": 660,
+      "bow": 0.0
+    }
+  ],
+  "boundary": "clamped",
+  "cells": [
+    192,
+    144
+  ],
+  "microphones_m": [
+    [
+      0.55,
+      0.5,
+      0.66
+    ],
+    [
+      0.85,
+      0.5,
+      0.66
+    ]
+  ],
+  "notes": [
+    60,
+    64,
+    67,
+    72
+  ],
+  "frequency_points": 1616,
+  "grids": [
+    {
+      "nx": 52,
+      "ny": 32,
+      "modes": 1664,
+      "modes_to_6000": 508,
+      "highest_mode_hz": 92052.71689588089,
+      "mass_error": 1.4553729961375545e-14,
+      "modal_residual": 3.3878310919456226e-11,
+      "reciprocity_relative": 0.0,
+      "minimum_dissipation_relative": 3.9795362619512835e-09,
+      "seconds": 3.3439999999973224,
+      "measurement_sha256": "bc2a49ac08acc0cf2e13bd4f5179a4dc40b6f0c7751b3ed9ee27e80e76909f18"
+    },
+    {
+      "nx": 60,
+      "ny": 40,
+      "modes": 2400,
+      "modes_to_6000": 527,
+      "highest_mode_hz": 122957.13057927343,
+      "mass_error": 2.0537926090361516e-14,
+      "modal_residual": 7.441020147061126e-11,
+      "reciprocity_relative": 0.0,
+      "minimum_dissipation_relative": 4.0770192212286435e-09,
+      "previous_grid_change": {
+        "mobility": {
+          "low": 0.0015569069486759568,
+          "middle": 0.025678808210094984,
+          "upper": 0.36501664522655114
+        },
+        "pressure": {
+          "low": 0.0021582783178281215,
+          "middle": 0.031631651079976945,
+          "upper": 0.2334183391627378
+        }
+      },
+      "seconds": 7.4060000000026776,
+      "measurement_sha256": "b75f7893dd492280adf479b0192c563333be62f4dda100571d049a23e582d36d"
+    },
+    {
+      "nx": 68,
+      "ny": 48,
+      "modes": 3264,
+      "modes_to_6000": 528,
+      "highest_mode_hz": 158307.01604475713,
+      "mass_error": 1.842982970174398e-14,
+      "modal_residual": 1.1851320241759915e-10,
+      "reciprocity_relative": 0.0,
+      "minimum_dissipation_relative": 4.1207812906000435e-09,
+      "previous_grid_change": {
+        "mobility": {
+          "low": 0.0009975649974068778,
+          "middle": 0.02087090532589002,
+          "upper": 0.10035766614432177
+        },
+        "pressure": {
+          "low": 0.0009101446425590395,
+          "middle": 0.033264261068026116,
+          "upper": 0.08372454978258884
+        }
+      },
+      "seconds": 15.062999999994645,
+      "measurement_sha256": "e2e4ad92fdd92e16516329f4db3ca2174f1ee7a990e4c62f7344fbb20d6f8314"
+    },
+    {
+      "nx": 76,
+      "ny": 56,
+      "modes": 4256,
+      "modes_to_6000": 528,
+      "highest_mode_hz": 197575.2083718502,
+      "mass_error": 3.305228811951056e-14,
+      "modal_residual": 1.6686073756363985e-10,
+      "reciprocity_relative": 0.0,
+      "minimum_dissipation_relative": 4.150087673378574e-09,
+      "previous_grid_change": {
+        "mobility": {
+          "low": 0.0007242512046010246,
+          "middle": 0.013507435356718629,
+          "upper": 0.0672647702670305
+        },
+        "pressure": {
+          "low": 0.0005088609794565578,
+          "middle": 0.015698474454521306,
+          "upper": 0.05927509502345942
+        }
+      },
+      "seconds": 28.296000000002095,
+      "measurement_sha256": "53dd52e3d990d64bad50a14f150e0a054c5f69ad800a1ec3f59ea73b8483d799"
+    }
+  ],
+  "cutoffs": {
+    "1200": {
+      "modes": 56,
+      "mobility": {
+        "low": 0.07708210649169799,
+        "middle": 0.8686299195910915,
+        "upper": 0.9341293647446234
+      },
+      "pressure": {
+        "low": 0.043985037125240926,
+        "middle": 0.9977031376030376,
+        "upper": 0.9979045507415925
+      }
+    },
+    "1500": {
+      "modes": 84,
+      "mobility": {
+        "low": 0.035230244321241326,
+        "middle": 0.7964477848024565,
+        "upper": 0.9286897985670716
+      },
+      "pressure": {
+        "low": 0.023350196800945015,
+        "middle": 0.8664967894329838,
+        "upper": 1.0133302566853357
+      }
+    },
+    "3000": {
+      "modes": 237,
+      "mobility": {
+        "low": 0.014456411883380137,
+        "middle": 0.4106314010968941,
+        "upper": 0.9601965212761076
+      },
+      "pressure": {
+        "low": 0.0018328678549377198,
+        "middle": 0.14698025200153686,
+        "upper": 0.9821066759719704
+      }
+    },
+    "6000": {
+      "modes": 528,
+      "mobility": {
+        "low": 0.006516753192381782,
+        "middle": 0.1262913163706416,
+        "upper": 0.5372938017601195
+      },
+      "pressure": {
+        "low": 0.00041833013347154855,
+        "middle": 0.0091481477536032,
+        "upper": 0.2078813096241029
+      }
+    },
+    "9000": {
+      "modes": 857,
+      "mobility": {
+        "low": 0.003338751327894167,
+        "middle": 0.06217764288591999,
+        "upper": 0.17790774988368446
+      },
+      "pressure": {
+        "low": 7.044408420878265e-05,
+        "middle": 0.0017790851402804866,
+        "upper": 0.023444529996766512
+      }
+    },
+    "12000": {
+      "modes": 1179,
+      "mobility": {
+        "low": 0.0020839223464001744,
+        "middle": 0.0382356060926873,
+        "upper": 0.10146170313706468
+      },
+      "pressure": {
+        "low": 5.2631726147932425e-05,
+        "middle": 0.0012736543055960345,
+        "upper": 0.007504354772672767
+      }
+    },
+    "18000": {
+      "modes": 1735,
+      "mobility": {
+        "low": 0.0010032463783270316,
+        "middle": 0.018252704462211732,
+        "upper": 0.04674330707850829
+      },
+      "pressure": {
+        "low": 1.940532851682129e-05,
+        "middle": 0.00033550144996432837,
+        "upper": 0.0026443855072349125
+      }
+    }
+  },
+  "gates": {
+    "spatial_structure": false,
+    "modal_cut": false,
+    "readout_spatial": true
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1",
+    "blas_threads": 1
+  },
+  "source_sha256": {
+    "audit-concert-grand-high-band-board.py": "02b75898bcdbb971cfb289a5335b8e7e3325214ba66feff4ec02be48562e8bc8",
+    "concert_grand_basis_readout.py": "ef9ce9e0b6f2e4d6e91b06425cb83264338c445ddec38f9e248f5d9e47dd73d8",
+    "concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95",
+    "concert_grand_cell_audio.py": "031c725f9ba43358146d827e6658b93dd01a5807a73a996ceededd40ba3bd0e0",
+    "audit-concert-grand-strip-band.py": "a4f2f947a866c14baa692d7aed906bcfa06a79dd2966185ad4815e11bf96d67a",
+    "concert_grand_finite_strip_plate.py": "89dedb688216c3f51efe59c646179049c60e0d3b44080f85a8272b1f4485dc4b"
+  },
+  "scope": "Structural and readout convergence of the assumed P2 panel through 6kHz, without reciprocal air feedback. Not a loaded sound, identified Steinway or factory change.",
+  "selected_cutoff_hz": null,
+  "readout_cell_change": {
+    "low": 6.272911405459108e-05,
+    "middle": 0.0010484834672307515,
+    "upper": 0.004789063609729446
+  },
+  "structural_asset_path": "local\\concert-grand-physics\\P6-ancho-finito-2026-10-05\\Panel-costillas-puente-banda-alta.npz",
+  "structural_asset_sha256": "0808ee17944b4d79b405900457f7b6292575b570451b29067d2c07c1051b9964",
+  "seconds": 114.81299999999464,
+  "all_structural_gates_passed": false,
+  "decision": "Structural prerequisite measured; reciprocal air load still required before new audio.",
+  "physical_idealization": "Finite-width rib/straight-bridge strips, same integrated line mass and EI; distinct from delta-line control."
+}

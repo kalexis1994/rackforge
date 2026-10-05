@@ -1,0 +1,132 @@
+{
+  "criteria": {
+    "structural_band_relative": 0.01,
+    "modal_cut_relative": 0.01,
+    "readout_spatial": 0.01,
+    "mass_normalization": 1e-08,
+    "modal_residual": 1e-08,
+    "reciprocity": 1e-11,
+    "passivity": 1e-11
+  },
+  "parent_report_sha256": "6560cc57871c3dd785216f0c0507fd3dbdeaaba4295ddd11821518bf27825b50",
+  "inputs_sha256": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "local\\concert-grand-physics\\P6-banda-alta-2026-10-05\\Transfer-76x56.npz": "e2802d8415776d7d72255011fdb54c1f63f095ae30464505d10d914f724116f9"
+  },
+  "grids": [
+    {
+      "nx": 76,
+      "ny": 56,
+      "active_coordinates": 2128,
+      "full_ritz_coordinates": 4256,
+      "active_modes_to_6000": 295,
+      "mass_error": 5.5072025782602386e-14,
+      "modal_residual": 1.7596192137920482e-10,
+      "same_grid_full_control": {
+        "mobility": {
+          "low": 1.7193884428661108e-10,
+          "middle": 7.746135431412062e-12,
+          "upper": 3.5792508337067113e-13
+        },
+        "pressure": {
+          "low": 2.6520807724780656e-10,
+          "middle": 1.1667425952211756e-11,
+          "upper": 2.4440501567221967e-12
+        }
+      },
+      "seconds": 9.328000000001339,
+      "measurement_sha256": "32b0542c657f313bbde8ab9e92ad4f7371b52518ce15f89d6022f774fd7e7a4a"
+    },
+    {
+      "nx": 108,
+      "ny": 88,
+      "active_coordinates": 4752,
+      "full_ritz_coordinates": 9504,
+      "active_modes_to_6000": 295,
+      "mass_error": 1.3291357572132758e-13,
+      "modal_residual": 6.42205516420696e-10,
+      "previous_grid_change": {
+        "mobility": {
+          "low": 0.0008546248883294258,
+          "middle": 0.0064749721009557575,
+          "upper": 0.016738245041229408
+        },
+        "pressure": {
+          "low": 0.0013967110233204605,
+          "middle": 0.018866867728717807,
+          "upper": 0.054935239715222996
+        }
+      },
+      "seconds": 55.51600000000326,
+      "measurement_sha256": "563916030fcd0f22628b5ee3bd139128d269c5a417b1a0fb014bb0a4056659a1"
+    },
+    {
+      "nx": 124,
+      "ny": 104,
+      "active_coordinates": 6448,
+      "full_ritz_coordinates": 12896,
+      "active_modes_to_6000": 296,
+      "mass_error": 2.902804590285891e-13,
+      "modal_residual": 2.571769977592161e-09,
+      "previous_grid_change": {
+        "mobility": {
+          "low": 0.00014909067311065624,
+          "middle": 0.00102379447972911,
+          "upper": 0.002593660257627482
+        },
+        "pressure": {
+          "low": 0.00022112205496966345,
+          "middle": 0.002826331942953999,
+          "upper": 0.01030494625890521
+        }
+      },
+      "seconds": 117.92199999999866,
+      "measurement_sha256": "7b044a076b21654e24f3927a18adb8795e657a7786de6cc5b813b3ea9d5d213a"
+    },
+    {
+      "nx": 132,
+      "ny": 112,
+      "active_coordinates": 7392,
+      "full_ritz_coordinates": 14784,
+      "active_modes_to_6000": 296,
+      "mass_error": 2.821589941296109e-13,
+      "modal_residual": 1.782563596799287e-09,
+      "previous_grid_change": {
+        "mobility": {
+          "low": 3.94530526074168e-05,
+          "middle": 0.0003545769416172088,
+          "upper": 0.0009487994809234633
+        },
+        "pressure": {
+          "low": 6.367794298597939e-05,
+          "middle": 0.0008725714480085071,
+          "upper": 0.00434552931507584
+        }
+      },
+      "seconds": 163.36000000000058,
+      "measurement_sha256": "c294a42b98c136bddaba5816004613d9ed1dfee24007eed85ff9a8ff16444527"
+    }
+  ],
+  "gates": {
+    "same_physics": true,
+    "spatial_structure": true,
+    "readout_spatial": true
+  },
+  "source_sha256": {
+    "audit-concert-grand-symmetric-band.py": "8259afcdf800347d5af26386d5288e68e49a24340eccf710a6c507ed02e4b903",
+    "concert_grand_symmetric_plate.py": "6d9be5cf41dd7ca778ae74964f8bc57cade1be2d7689a260284b4ce3ab5ca7ec",
+    "concert_grand_basis_readout.py": "ef9ce9e0b6f2e4d6e91b06425cb83264338c445ddec38f9e248f5d9e47dd73d8",
+    "audit-concert-grand-high-band-board.py": "02b75898bcdbb971cfb289a5335b8e7e3325214ba66feff4ec02be48562e8bc8"
+  },
+  "scope": "Same delta-line mechanical geometry and all modes in its exact reflection-symmetric vertical subspace. No air feedback, tonal fit or asymmetric/lateral piano claim.",
+  "readout_cell_change": {
+    "low": 6.202410714658269e-05,
+    "middle": 0.0011306868698463806,
+    "upper": 0.004650185081440213
+  },
+  "structural_asset_path": "local\\concert-grand-physics\\P6-simetria-banda-alta-2026-10-05\\Panel-simetrico-banda-alta.npz",
+  "structural_asset_sha256": "ecee61e1c1f9503dca79a67ff49cdd93abc4d8beda9fdc1458d7044856205af9",
+  "seconds": 541.7189999999973,
+  "all_spatial_gates_passed": true,
+  "next": "Modal/compliant-tail compression and reciprocal acoustic load still required before new listening."
+}

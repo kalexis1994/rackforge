@@ -1,0 +1,71 @@
+{
+  "note": 72,
+  "note_off_s": 1.0,
+  "duration_s": 0.5,
+  "damper": {
+    "coefficient_n_s_m": 0.6,
+    "center_fraction": 0.3,
+    "width_fraction": 0.08,
+    "quadrature_nodes": 16
+  },
+  "ramp_s": 0.03,
+  "cases": {
+    "64000": {
+      "initial_energy_j": 0.026942350373983907,
+      "final_energy_j": 0.025052642963099715,
+      "initial_string_board_energy_j": 0.001888091070052189,
+      "final_string_board_energy_j": 1.2175675177408888e-08,
+      "damper_heat_j": 0.001840167333768333,
+      "board_material_heat_j": 3.9802882034734906e-05,
+      "air_work_j": 8.108678570985549e-06,
+      "relaxation_heat_j": 8.282674932338847e-09,
+      "radiation_inferred_j": 9.737195081124193e-06,
+      "dynamics_s": 115.85900000000402,
+      "sha256": "0f2ea13a0990d7d0b6887095f2530c2744f4dafd3dea11fe8edf137421bc048a"
+    },
+    "128000": {
+      "initial_energy_j": 0.026941902269081833,
+      "final_energy_j": 0.025052641383459823,
+      "initial_string_board_energy_j": 0.0018876451805643416,
+      "final_string_board_energy_j": 1.0596035283294532e-08,
+      "damper_heat_j": 0.0018397158563631267,
+      "board_material_heat_j": 3.981990526169619e-05,
+      "air_work_j": 8.098822899347186e-06,
+      "relaxation_heat_j": 8.279137106145193e-09,
+      "radiation_inferred_j": 9.725123997187117e-06,
+      "dynamics_s": 223.51600000000326,
+      "sha256": "d500d863e4c334acac1d5a0b5e1218fbb485cdb6f37c55a8bf89c217cc7185bf"
+    }
+  },
+  "gates": {
+    "pressure": true,
+    "board": true,
+    "positive_inferred_radiation": true,
+    "passive_damper": true
+  },
+  "inputs_sha256": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\input\\72-124\\transfer.csv": "8c502bdba69b35edd8a18bffd28f4488b6c0f31d80f0dda5b589e16d1fde3efd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\input\\72-124\\contact-end.csv": "90dcefce16d34b65725de3ddc625bbb7f48ff3d11a0efb80e2535465e88f4bbd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-tabla-1500-refinada\\Wave128000-Cells192x144-Angle96x96-Modes90.npz": "586070dcdb91b14bad6d715a7ae4832586b610309773f9c6a3a57b53b96c9942",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\resumen-P6-contacto-1200-refinado.json": "049163b86fe7009634c72be8ccd651a723bc0304331a9f7bc330d0ef1783990a",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-primera-nota\\Microfonos-128k.npz": "07550958ac557be347da8979bf648aaac61917c85b1fb25887c299f4cfcd4943",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-frase\\nota-72.json": "15cdc84890d76021baf13a92322136deb3e5a6ce2433a74557ba17df857cc535",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\72-124\\Coast-64000.npz": "f0fe477249f9a8948d65cc3433e23f4273e18b4e12ad3b25c0e0fa3fbaaa0e41",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\72-124\\Coast-128000.npz": "92d12e86540ee1d7644f6f2027ff42bcd5f92735f257a9e14f2f7f33fbfd52c7"
+  },
+  "source_sha256": {
+    "render-concert-grand-physical-release.py": "a2b9ae3398bf10fef93acb78ceabf444534e6d4f899ebbe79b0062e1a427957a",
+    "concert_grand_damped_coast.py": "1c8e54ad6bb1911172c8dee07ea550c162700a89da8615c1f77ad1fc6c61f11f",
+    "concert_grand_polynomial_coast.py": "a8d3a0d2211eba20e962f92e2af213e58827150578ca549ea077b804cac1fcfd",
+    "concert_grand_exponential_coast.py": "11f7743e78fe40a53f253775ba8cc4c1d958e253b0871a4e645566be4605b945"
+  },
+  "scope": "Distributed viscous damper approximation with assumed geometry/drag/lowering. All existing string, board and acoustic states continue. No output fade, room or tonal correction.",
+  "comparison": {
+    "pressure_relative": 0.004293495547275268,
+    "position_relative": 0.0005206423569417125,
+    "velocity_relative": 0.0010215974842938
+  },
+  "all_gates_passed": true,
+  "seconds": 474.92199999999866
+}

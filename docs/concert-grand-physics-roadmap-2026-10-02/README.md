@@ -8,15 +8,23 @@ comparar el resultado audible; no identifican de forma única cada mecanismo rea
 
 Por pedido del usuario del 2026-10-04, los informes, planes, resúmenes y fuentes
 se mantienen en el repositorio como única copia. No duplicarlos en `C:\SHARED`
-ni crear allí ZIP de fuentes que ya conserva Git. `SHARED` puede contener los
-datos de medición y coeficientes no versionados necesarios para los ensayos,
-los paquetes entregables y los audios que el usuario solicite generar.
+ni crear allí ZIP de fuentes que ya conserva Git. Los cálculos nuevos se
+guardan en `local/concert-grand-physics/`, ignorado por Git. `SHARED` conserva
+los datos anteriores necesarios para reproducir controles, el paquete actual
+y, cuando se soliciten, los audios de escucha. No duplicar factores acústicos.
 
 El usuario pidió eliminar los audios existentes de `SHARED` y las copias
 idénticas de informes ya versionados: se eliminaron 2361 archivos de audio y
 134 informes/resúmenes duplicados. Las rutas históricas de escucha ya no
 contienen esos audios; se conservan en el repo sus parámetros y resultados.
 Los datos del ensayo de contacto compacto en curso permanecen en `SHARED`.
+
+El 2026-10-05 se eliminan además los siete WAVs recientes del piloto, seis
+paquetes obsoletos y un informe idéntico al del repo: 14 archivos, 28.432.210
+bytes. [Manifiesto de limpieza](limpieza-2026-10-05/shared-manifest.json).
+Las rutas de escucha registradas más abajo también son históricas; sus datos
+numéricos y resultados siguen disponibles. No se generan nuevos WAVs en esta
+etapa de cobertura estructural.
 
 ## Base y reglas de comparación
 
@@ -38,15 +46,26 @@ Los datos del ensayo de contacto compacto en curso permanecen en `SHARED`.
 
 ## Orden y estado
 
+La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
+refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.
+Se prioriza esa cobertura y su carga acústica antes de otra escucha musical
+del modelo. Se agregó un apagador resistivo distribuido como control de
+release, con geometría/pérdidas supuestas; no resuelve el timbre.
+Ver [diagnóstico, medidas y criterios](RESULTADOS-P6-release-y-banda.md).
+La [ampliación estructural](RESULTADOS-P6-banda-alta.md) pasa el refinamiento
+de admitancia/presión hasta 6 kHz en el sector vertical simétrico de la tabla
+supuesta. Faltan preservar la flexibilidad modal alta en una base compacta y
+construir su carga recíproca antes de volver a escuchar el modelo completo.
+
 | ID | Mecanismo | Representación actual / falta | Estado |
 | --- | --- | --- | --- |
 | P1a | Admitancia direccional del puente | La horizontal usa la misma familia de modos con un factor fijo; falta una segunda proyección mecánica independiente. | Piloto medido: pasivo, sin mejora consistente; escucha pendiente |
 | P1b | Dos polarizaciones por cuerda | Fábrica: tres verticales y una horizontal agregada. Prototipo: una horizontal independiente por cuerda, con proyección equivalente. Falta identificar propiedades direccionales reales. | Piloto medido: equivalencia verificada, sin mejora consistente |
 | P2 | Tabla ortótropa con costillas y puente | Piloto: placa ortótropa, nueve costillas discretas, puente recto/curvo; modos físicos bajo 800 Hz con complemento alto heredado. Geometría y acústica aún sin identificar. | Resolución y curva medidas: mejora desigual, sin selección |
-| P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
+| P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 modos verificadas a resolución común 192×144/128 kHz; ambas inicializaciones de contacto pasan. Se reutiliza un factor padre, sin copia adicional. Contactos/presión temporales siguen medidos con resolución anterior; faltan los nuevos bancos, convergencia estructural/completa, fuente sostenida, pérdidas y ambas caras/borde. | Cargas e inicializaciones comparables; nuevas trayectorias y selección audible pendientes |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. La tabla refinada 132×112 pasa presión/admitancia hasta 6 kHz y celdas de observación; simetría exacta del piloto vertical. Faltan compresión de flexibilidad alta, nueva carga recíproca, identificación y ambas caras/borde. | Cobertura estructural medida; nuevo modelo acoplado y escucha pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -867,3 +886,147 @@ El observador anterior aún requiere generalizar su base/grilla antes de usar
 estos bancos. Paquete sin cambios; sólo dos NPZ nuevos de medición en
 `C:\SHARED\Fisica-pendiente-2026-10-05\P6-tabla-1200-refinada`. Informes y
 fuentes tienen única copia en el repo.
+
+### 2026-10-05 — P6: banco de contactos refinados de 59 modos
+
+La carga seleccionada y ambos preflights quedaron en **f124550**, por pedido
+del usuario. [Resultados y alcance](RESULTADOS-P6-contacto-1200-refinado.md).
+Se completan cuatro contactos C4/124 a 384/768 kHz con 38232 estados acústicos
+y memoria viva entre golpes. Pasan cinco controles: energía, refinamientos
+frío/reiterado, secuencia persistente y prefijo del observador.
+
+Velocidad RMS del puente al refinar: 0,015692% / 0,037502%; máximos de
+energía/trabajo: 0,076833% / 0,005345%, dentro del 0,2%. Balance global máximo
+5,81e−13; presupuesto fino de la secuencia 5,18e−13. El prefijo vivo de 64
+pasos conserva estados/trabajos idénticos, con radiación relativa 3,55e−15.
+Las integraciones suman 18,1 minutos, además de inicialización/prefijo.
+
+Sigue medir los contactos equivalentes de 90 y observar ambas bases en SI
+con grilla común. Todavía no hay fuente sostenida ni audio de esta nueva
+física: el plugin instalado mantiene el sonido anterior. La primera escucha
+útil debe ser una nota sostenida controlada antes de MIDI/integración.
+Informes únicos en el repo; cuatro NPZ únicos de unos 3,28 MB en
+`C:\SHARED\Fisica-pendiente-2026-10-05\P6-contacto-1200-refinado`, sin copia
+del factor ni WAV de ventanas cortadas.
+
+### 2026-10-05 — P6: primera escucha física de una cuerda
+
+El usuario pidió avanzar hacia una primera nota audible. Se adelanta una
+escucha diagnóstica de C4/124 a la comparación estructural de 90, que sigue
+pendiente. [Resultados y reproducción](RESULTADOS-P6-primera-nota.md).
+Se continúa el contacto frío validado hasta 250 ms a 768 kHz, sin cambiar
+potencial no lineal, modos, carga ni memoria. El acelerador de las mismas
+ecuaciones pasa referencia viva y ataque completo; pasan siete tests nuevos.
+La continuación tarda 578,187 s incluyendo guardar el NPZ. No hay nuevos
+contactos ni retornos al tangente completo durante el sostenido.
+
+Micrófonos sobre la misma superficie 192×144, dos cápsulas a altura 0,66 m,
+retardos completos. Pasan retardo fraccionario, cuadratura, grilla y captura.
+La diferencia de presión al reducir captura 128→64 kHz es 0,00002359%
+en 60–6000 Hz. Primera escucha estéreo 48 kHz, ganancia común 0,25/Pa,
+fade final de edición 8 ms; no simula soltar tecla ni tres cuerdas al unísono.
+Audio único en `C:\SHARED\Fisica-pendiente-2026-10-05\P6-primera-nota\C4-124-Piloto-fisico-250ms.wav`.
+Trayectoria y kernel únicos en esa carpeta; informes sólo en el repo.
+
+No se selecciona un nuevo programa ni se cambia el paquete. Siguen abiertos
+refinamiento temporal del sostenido, 59→90, integral angular independiente
+del sostenido, identificación, unísono, apagador/acción/pedal y coste runtime.
+La radiación inferida del almacenamiento en esta continuación no reemplaza
+un balance cerrado por una segunda integral independiente. Ya hay una nota
+para escuchar; la fidelidad y la mejora perceptiva todavía deben evaluarse.
+
+### 2026-10-05 — P6: matemática del sostenido y coste medido
+
+El usuario cuestionó extrapolar unos 40 minutos para un segundo de nota.
+[Método, resultados y reproducción](RESULTADOS-P6-coast-exponencial.md).
+Se implementa AAVF con fases cuadráticas exactas, integral no lineal
+polinómica y composición simétrica con el puerto pasivo de aire. Se conservan
+todos los modos, parámetros y 38232 estados acústicos; sólo aplica al
+martillo separado. Pasan seis pruebas independientes y su repetición con
+la integral polinómica más un control de equivalencia, 13 ejecuciones.
+
+Desde el mismo ataque de 4 ms, se repiten los 246 ms restantes a
+64/128/256 kHz. Presión 64 vs 256: 0,053813%; B/V: 0,017496% / 0,039735%.
+128 vs 256: presión 0,013612%. Pasan refinamiento y pérdida inferida positiva.
+64 kHz es candidato para esta nota/intervalo; dinámica medida 54,724 s.
+Contra el midpoint anterior a 768 kHz la presión cambia 0,378119%.
+Los 578,187 s anteriores incluían controles/guardado; los 54,724 s nuevos
+excluyen esos costes y no se comparan como un speedup exacto.
+
+Estimación revisada: 4–6 minutos para un segundo reutilizando el ataque.
+Ese segundo sigue pendiente: medir 64/128 durante todo el sostenido antes
+de elegir otra escucha. El paquete y el WAV anterior siguen iguales.
+Informes únicos en el repo; trayectorias únicas en las dos carpetas
+`P6-coast-exponencial-prefix` / `P6-coast-exponencial-250ms` de SHARED.
+Siguen abiertos 59→90, identificación, unísono, acción/pedal y coste runtime.
+
+### 2026-10-05 — P6: primera nota sostenida de un segundo
+
+El usuario pidió renderizar la nota más larga antes de introducir más
+física. [Resultados y reproducción](RESULTADOS-P6-nota-1s.md). Se continúan
+las trayectorias de 250 ms a 64/128 kHz hasta un segundo, conservando todos
+sus estados. Sólo se guardan los segmentos nuevos; no se duplica el factor
+ni los prefijos. Las uniones de posición/velocidad son exactamente iguales.
+Pasan tres pruebas de continuidad/transformada sin impulso de empalme.
+
+Pasan los cuatro controles completos: presión 64 vs 128, 0,133475%; tabla
+B/V, 0,043449% / 0,095684%; captura, 0,00002939%; pérdida inferida positiva.
+No hay nuevos contactos ni tangentes completos. Dinámica adicional:
+164,203 / 296,297 s para 750 ms; ambos ensayos y exportación tardan
+555,516 s nuevos, incluyendo controles, sin recalcular ataque/prefijos.
+
+WAV único: `C:\SHARED\Fisica-pendiente-2026-10-05\P6-nota-1s\C4-124-Piloto-fisico-1s.wav`.
+Usa la trayectoria de 128 kHz, mismo kernel y ganancia 0,25/Pa; estéreo
+48 kHz, pico 0,505248. Un segundo de fuente, 1,403479 s de archivo por
+silencios/propagación, fade de edición 8 ms. Sigue siendo una cuerda del
+piloto SI. Paquete sin cambios. Informes únicos en el repo, dos extensiones
+únicas y audio en SHARED. Siguiente: escucha, comparación 59→90 y unísono;
+siguen pendientes identificación, radiación angular larga, acción/pedal y runtime.
+
+### 2026-10-05 — P6: primer contexto musical del piloto
+
+El usuario pidió una melodía para poder juzgar el modelo.
+[Banco, controles y alcance](RESULTADOS-P6-frase.md). Se simulan E4/G4/C5
+con sus propios parámetros de cuerda/contacto y proyección de puente. C4
+reutiliza su WAV de un segundo. El exportador ignorado se amplía para notas
+21–108; C4 conserva exactamente sus nueve parámetros primitivos y pasan
+las dos huellas de sonido de fábrica/pedal. No se modifica el motor de fábrica.
+
+Las tres notas pasan contacto 384/768 kHz, energía independiente (máximo
+5,973e−12), sostenido 64/128 kHz, captura y pérdida inferida positiva.
+Presión al refinar: E4 0,122554%, G4 0,223585%, C5 0,150925%. Se usa 128 kHz
+para la salida con la misma ganancia 0,25/Pa, sin ajustar niveles por nota.
+Los tres procesos independientes completan el banco en unos 17,4 minutos,
+incluyendo dos contactos y dos sostenidos por altura nueva.
+
+Primera frase: C4–E4–G4–C5–G4–E4–C4, notas separadas 1,2 s, fuente de 1 s
+por nota, archivo 8,603479 s. WAV único en
+`C:\SHARED\Fisica-pendiente-2026-10-05\P6-frase\Arpegio-C4-E4-G4-C5-Piloto-fisico.wav`.
+Cada altura es calculada físicamente. El ensamblado usa notas frías
+separadas, una cuerda por altura y el fade de edición existente; no acredita
+tabla compartida, acción/pedal ni reiteraciones vivas. Informes únicos en
+el repo, datos únicos en P6-frase y sin copia del C4, factor o kernel.
+Siguiente: escucha, 59→90 y unísono antes de ampliar a piezas polifónicas.
+
+### 2026-10-05 — P6: banda alta y simetría del piloto
+
+Por pedido del usuario se eliminan los audios recientes y paquetes obsoletos;
+los datos nuevos se guardan en `local/`, con informes únicos en el repo.
+[Resultados, controles y reproducción](RESULTADOS-P6-banda-alta.md).
+La base completa 76×56 falla presión alta (4,7128% al refinar) y ningún
+corte hasta 18 kHz conserva la admitancia al 1%. Distribuir la misma masa/EI
+de vigas sobre su ancho tampoco resuelve la convergencia; hipótesis no seleccionada.
+
+Se implementa la simetría exacta respecto del centro de esta geometría para
+fuerzas verticales y estado antisimétrico cero. El bloque 76×56 reproduce el
+sistema completo con máximo error integrado 2,6521e−10. Permite refinar a
+132×112 con 7392 coordenadas activas conservando todas sus frecuencias.
+Último refinamiento: presión alta 0,43455%, admitancia alta 0,09488%; celdas
+192×144 → 256×192: presión alta 0,46502%. Pasan los tres controles espaciales
+y ocho pruebas nuevas. No se modifica el paquete ni se produce otro WAV.
+
+Siguiente: proyección pasiva que conserve flexibilidad modal alta y nueva
+carga acústica recíproca de la misma superficie; después contacto, sostenido,
+liberación y escucha. La simetría no acredita fuerzas laterales ni una tabla
+real asimétrica. Siguen pendientes identificación, unísono, P4, ambas caras,
+acción/pedal y coste runtime. La medición seca no establece mejora de timbre.

@@ -1,0 +1,64 @@
+{
+  "windows_s": {
+    "attack": [
+      0,
+      0.12
+    ],
+    "sustain": [
+      0.15,
+      0.8
+    ]
+  },
+  "bands_hz": {
+    "low": [
+      40,
+      250
+    ],
+    "body": [
+      250,
+      1200
+    ]
+  },
+  "notes": {
+    "C4-pilot": {
+      "attack": {
+        "low_to_body_db": -25.401386109423413
+      },
+      "sustain": {
+        "low_to_body_db": -62.72699596197798
+      }
+    },
+    "C5-pilot": {
+      "attack": {
+        "low_to_body_db": -26.006057824003925
+      },
+      "sustain": {
+        "low_to_body_db": -61.45059011074112
+      }
+    },
+    "C4-reference": {
+      "attack": {
+        "low_to_body_db": -19.078245768572316
+      },
+      "sustain": {
+        "low_to_body_db": -37.100480226874794
+      }
+    },
+    "C5-reference": {
+      "attack": {
+        "low_to_body_db": -22.79665280315514
+      },
+      "sustain": {
+        "low_to_body_db": -37.47259146205068
+      }
+    }
+  },
+  "inputs_sha256": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-nota-1s\\C4-124-Piloto-fisico-1s.wav": "f58c67734f8b3f35f2a2923390ac1fcc333e710c76fcbe44f2c22e26edd6675c",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\72-124.wav": "b18823ea83de5b027477cb979aaa0c139cdda227d7634b6f13c1a4ff18bd5dc3",
+    "local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C4v16.wav": "fe91edcf580f3d1b055a87bf9911db52cccf934445f9e2b126ee1c3eb858b763",
+    "local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C5v16.wav": "5555d9e684563ec5c471d65e9cab822457ca29fee46d188085e9395afac39cae"
+  },
+  "source_sha256": "ee8eaeeba828b2905ad1cc6d329d14084071ba5266f117982f549bd27fb44c7f",
+  "scope": "Recording-start windows for reference; 100ms lead removed for pilot. Energy ratios only, not absolute calibrated SPL or a tonal correction."
+}

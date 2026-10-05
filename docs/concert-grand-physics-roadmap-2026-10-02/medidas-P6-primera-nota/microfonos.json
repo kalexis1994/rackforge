@@ -1,0 +1,56 @@
+{
+  "criteria": {
+    "fractional_delay_transfer": 0.0002,
+    "cell_quadrature": 1e-05,
+    "spatial_transfer": 0.01,
+    "capture_pressure": 0.001
+  },
+  "checks": {
+    "fractional_delay_max": 0.00011469248272336063,
+    "quadrature_max": 5.385103270206453e-14,
+    "spatial_max": 0.0010644467797897926
+  },
+  "gates": {
+    "fractional_delay": true,
+    "cell_quadrature": true,
+    "spatial": true
+  },
+  "all_gates_passed": true,
+  "geometry_m": [
+    [
+      0.55,
+      0.5,
+      0.66
+    ],
+    [
+      0.85,
+      0.5,
+      0.66
+    ]
+  ],
+  "cells": [
+    192,
+    144
+  ],
+  "modes": 59,
+  "sample_rate_hz": 128000,
+  "probe_frequency_hz": [
+    0.0,
+    261.6255653,
+    800.0,
+    1200.0,
+    2000.0,
+    4500.0,
+    6000.0
+  ],
+  "physical_units": "Pressure Pa from intrinsic board acceleration sqrt(kg)*m/s^2",
+  "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+  "contact_report_sha256": "049163b86fe7009634c72be8ccd651a723bc0304331a9f7bc330d0ef1783990a",
+  "seconds": 3.061999999999898,
+  "scope": "Same loaded constant-cell surface, rigid baffle, upper half-space. No room, EQ, extra damping or microphone pattern. Transfer convergence assessed through 6kHz.",
+  "source_sha256": {
+    "observe-concert-grand-physical-note.py": "40975f90f3156ff0052b49a7f21a7a2807ada19e47170a398a278ebc1c6212f5",
+    "concert_grand_cell_audio.py": "031c725f9ba43358146d827e6658b93dd01a5807a73a996ceededd40ba3bd0e0"
+  },
+  "kernel_sha256": "07550958ac557be347da8979bf648aaac61917c85b1fb25887c299f4cfcd4943"
+}

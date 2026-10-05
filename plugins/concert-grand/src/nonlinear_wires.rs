@@ -233,7 +233,15 @@ mod tests {
         writeln!(file,"note,velocity,harmonic,wire,frequency_hz,length_m,tension_n,modal_mass_kg,hammer_mass_per_string_kg,hammer_speed_m_s,q_m,velocity_over_omega_m,native_s,native_c,built,joint").unwrap();
         let mut end_file=std::io::BufWriter::new(std::fs::File::create(format!("{folder}/contact-end.csv")).unwrap());
         writeln!(end_file,"note,velocity,dt_s,processed_steps,positive_compression_steps,cap_steps,cap_reached,contact_time_s,string_energy_j,initial_hammer_energy_j,final_hammer_energy_j,stiffness_n_per_m_p,exponent,width_fraction,strike_fraction,final_hammer_speed_m_s").unwrap();
-        for note in [42u8,60,72,84,90] {for velocity in [60u8,124] {
+        let notes: Vec<u8> = match std::env::var("CG_P3_PROBE_NOTE") {
+            Ok(value) => {
+                let note = value.parse::<u8>().expect("MIDI note");
+                assert!((21..=108).contains(&note), "piano note 21..108");
+                vec![note]
+            }
+            Err(_) => vec![42,60,72,84,90],
+        };
+        for note in notes {for velocity in [60u8,124] {
             if let Ok(only)=std::env::var("CG_P3_PROBE_NOTE") {if note!=only.parse::<u8>().unwrap(){continue;}}
             if let Ok(only)=std::env::var("CG_P3_PROBE_VELOCITY") {if velocity!=only.parse::<u8>().unwrap(){continue;}}
             crate::bench::reset_every_knob();

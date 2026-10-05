@@ -1,0 +1,122 @@
+{
+  "audio_path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-release\\Arpegio-control-release.wav",
+  "audio_sha256": "4deae73fcf2aa4f0f5790db8b4e5310de65a0a8a6f185fba09aa68ed8b199f3d",
+  "audio_rate_hz": 48000,
+  "audio_seconds": 9.103479166666666,
+  "audio_peak": 0.5164070129394531,
+  "notes": {
+    "60": {
+      "source_paths_sha256": {
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-primera-nota\\C4-124-250ms.npz": "47d4a2a9c588ad18335fbe5f794f64bfb9a7f9d74aefa7ffc3c61eeaeb3e2cae",
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-coast-exponencial-250ms\\Coast-128000.npz": "d04ce328161dfd629fce24c14efbe402fc5ac945b22ccd74a8e65174c2186fe3",
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-nota-1s\\Extension-128000.npz": "8f6979ec73b8c9d6e14b7b0be583b2cb10ab24dbe79046151dfaa84f4c2f11fb",
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-release\\60\\Release-128000.npz": "ddbce08d31a2049606bfb29f9bad9135e31a2801e5f4fb90d60744f6978523d9",
+        "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-release\\nota-60.json": "3367955865eddeb32b27e6acdc293b7f5a99b38a15b547eb5c96df2762d14ae5"
+      },
+      "join_relative": {
+        "position": 0.0,
+        "velocity": 0.0
+      },
+      "hold_rms_pa": 0.7033976809667751,
+      "end_rms_pa": 3.5434006600375675e-05,
+      "tail_endpoint_relative_db": -85.95561340846764,
+      "release_duration_s": 0.5
+    },
+    "64": {
+      "source_paths_sha256": {
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\64-124\\Contact-768000.npz": "a75a0b3af100f73b7baf75bd7e1dc59ed8b5c309484beec9891a5a571b7a2433",
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\64-124\\Coast-128000.npz": "bdb6ca6196545450af0a2c50cfce238f5061aa630352d1e7c3f7d52b2ab2c184",
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-release\\64\\Release-128000.npz": "1072dfb732f5d732cd8783a595da173468280d5118b07966c8dbc5590c1891b2",
+        "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-release\\nota-64.json": "9484f14075129f5c47421f021c4ad9e12b9e5e1709ca8cc82956852fcdfdfe12"
+      },
+      "join_relative": {
+        "position": 0.0,
+        "velocity": 0.0
+      },
+      "hold_rms_pa": 0.6770277754242172,
+      "end_rms_pa": 9.470187298275806e-07,
+      "tail_endpoint_relative_db": -117.08495835579349,
+      "release_duration_s": 0.5
+    },
+    "67": {
+      "source_paths_sha256": {
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\67-124\\Contact-768000.npz": "5a4a88feca2699d2668a16e17787dab5ba76f3fd3e78fc8871a7b4737f2b3a30",
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\67-124\\Coast-128000.npz": "c918f5ad6a53e7639974d177f169b85da8a57bf48990628f1458a696f03c4fab",
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-release\\67\\Release-128000.npz": "319f4e90d999a4e59644e0e55bfdf7ce8f62e8f9edab2aa2974109e81c7c205b",
+        "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-release\\nota-67.json": "99cdc1cc0ac3fe4dee318083b5582eb170f2b976c3a2c7bec3eccb83e85cb00d"
+      },
+      "join_relative": {
+        "position": 0.0,
+        "velocity": 0.0
+      },
+      "hold_rms_pa": 0.29518900799230097,
+      "end_rms_pa": 9.345294627851199e-08,
+      "tail_endpoint_relative_db": -129.99014367347039,
+      "release_duration_s": 0.5
+    },
+    "72": {
+      "source_paths_sha256": {
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\72-124\\Contact-768000.npz": "1de388b9ace70709d70147583b0210e03cc588ff16b63f27184eed932716761d",
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\72-124\\Coast-128000.npz": "92d12e86540ee1d7644f6f2027ff42bcd5f92735f257a9e14f2f7f33fbfd52c7",
+        "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-release\\72\\Release-128000.npz": "d500d863e4c334acac1d5a0b5e1218fbb485cdb6f37c55a8bf89c217cc7185bf",
+        "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-release\\nota-72.json": "22af208d7ab09f9550c4905c472080d993195f608ace454fc84a50bf0b7dac22"
+      },
+      "join_relative": {
+        "position": 0.0,
+        "velocity": 0.0
+      },
+      "hold_rms_pa": 0.289350086377097,
+      "end_rms_pa": 4.665201159625242e-10,
+      "tail_endpoint_relative_db": -175.8510648287921,
+      "release_duration_s": 0.5
+    }
+  },
+  "events": [
+    {
+      "note": 60,
+      "velocity": 124,
+      "note_on_s": 0.1,
+      "note_off_s": 1.1
+    },
+    {
+      "note": 64,
+      "velocity": 124,
+      "note_on_s": 1.3,
+      "note_off_s": 2.3
+    },
+    {
+      "note": 67,
+      "velocity": 124,
+      "note_on_s": 2.5,
+      "note_off_s": 3.5
+    },
+    {
+      "note": 72,
+      "velocity": 124,
+      "note_on_s": 3.7,
+      "note_off_s": 4.7
+    },
+    {
+      "note": 67,
+      "velocity": 124,
+      "note_on_s": 4.9,
+      "note_off_s": 5.9
+    },
+    {
+      "note": 64,
+      "velocity": 124,
+      "note_on_s": 6.1,
+      "note_off_s": 7.1
+    },
+    {
+      "note": 60,
+      "velocity": 124,
+      "note_on_s": 7.3,
+      "note_off_s": 8.3
+    }
+  ],
+  "common_gain_pa_to_full_scale": 0.25,
+  "kernel_sha256": "07550958ac557be347da8979bf648aaac61917c85b1fb25887c299f4cfcd4943",
+  "source_sha256": "cd034ed4bc119ac01858842637b43320435713b10b9e2dc5da6f654ddefff771",
+  "scope": "Release-only control; original timbre untouched. Full continuous source with note-off, no edit fade, EQ or pitch shift. Sum of independent cold notes with overlapping release tails, not shared-body polyphony or factory change."
+}

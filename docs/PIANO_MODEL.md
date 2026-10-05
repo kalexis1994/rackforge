@@ -2310,6 +2310,120 @@ The next step is the cold/reiterated 384/768 kHz contact banks, followed by
 matched SI observation generalized to the refined source grid; factory,
 sustain and listening remain unchanged/pending.
 
+The [refined 59-mode temporal contact bank](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-contacto-1200-refinado.md)
+now completes cold/reiterated C4/124 contacts at 384/768 kHz with living
+string, board and 38232-state air preserved. All five bank gates pass.
+Bridge velocity RMS changes are 0.015692% / 0.037502%; maximum energy/work
+changes are 0.076833% / 0.005345%, below the unchanged 0.2% criterion.
+Maximum global budget error is 5.81e-13, and the fine two-contact ledger
+closes to 5.18e-13. The 64-step live observer prefix preserves identical
+states/work, with 3.55e-15 relative radiation difference; it is not a full
+scalar-trajectory comparison. Integration totals about 18.1 minutes before
+initialization/prefix costs. The next controlled basis measurement is the
+90-mode contact bank at this same resolution, then matched SI observation.
+Finite 4/8 ms source windows do not establish audible piano quality.
+
+At the user's request, a [first sustained C4 pilot](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-primera-nota.md)
+now extends the frozen cold onset to 250 ms at 768 kHz, preserving the full
+nonlinear string potential and all board/wave/relaxation states. The new
+offline solver accelerates the same converged AVF/midpoint equations; its
+live-prefix states agree within 9.11e-12 relative, and the full onset's
+independent energy ledger closes to 1.40e-14. The same 192×144 cell surface
+feeds retarded pressure to the two 0.66 m microphones; fractional-delay,
+quadrature, spatial-transfer and capture checks pass. The stereo listening
+WAV uses one common gain 0.25 full scale/Pa and an explicit terminal 8 ms
+editing fade. It is a one-string diagnostic, not identified Steinway or a
+factory voice. Long-sustain mechanical-rate and 59→90 convergence, independent
+angular radiation integration over the sustain, unison/action/pedal and
+runtime integration remain open. Factory and installed package are unchanged.
+
+A [separated-hammer AAVF coast study](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-coast-exponencial.md)
+now handles the quadratic mechanical phases analytically and the full
+nonlinear remainder by an exact polynomial discrete gradient, symmetrically
+split with the passive air/damping step. All modes and 38232 acoustic states
+remain; recontact still requires the contact solver. Six independent checks
+and their repetition with the polynomial integral plus its equivalence check
+pass (13 test executions). On the same 4→250 ms C4/124 continuation,
+64 vs 256 kHz changes complex pressure by 0.053813% in 60–6000 Hz and board
+B/V by 0.017496% / 0.039735%; 128 vs 256 changes pressure by 0.013612%.
+64 kHz is a candidate for this measured interval. Its dynamics take 54.724 s;
+the previous 578.187 s included storage checks and saving, so these are not
+identical timing scopes. Pressure differs 0.378119% from the previous
+768 kHz midpoint trajectory, which also has discretization error. The
+estimated one-second cost is now 4–6 minutes including checks, not a measured
+one-second result or a real-time claim. The full-second measurement follows
+below. Long angular radiation
+remains inferred rather than independently integrated; factory is unchanged.
+
+The subsequent [one-second C4/124 listening render](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-nota-1s.md)
+extends both measured 250 ms coasts, preserving their complete living states.
+No prefix/factor copy is made; only new 750 ms segments are saved. Source
+joins have exactly zero position/velocity mismatch, with three tests against
+independent polynomial-acceleration integrals and no artificial join impulse.
+Four full-note controls pass: pressure 64 vs 128 kHz differs 0.133475% in
+60–6000 Hz, board B/V 0.043449% / 0.095684%, capture pressure 0.00002939%,
+and storage-inferred radiation remains positive. New dynamics take
+164.203 / 296.297 s; both extensions, checks and output take 555.516 s,
+excluding the reused onset/prefix calculations. The listening WAV uses
+the finer 128 kHz trajectory, the same microphone kernel and common gain
+0.25 full scale/Pa, stereo 48 kHz, peak 0.505248. One second of source
+becomes a 1.403479 s file including silence/propagation and an 8 ms editing
+fade. It remains a one-string pilot with no modeled note-off. Full-second
+temporal sensitivity is now measured for this note; 59→90, identified
+geometry/losses, unison/action/pedal and runtime remain pending.
+
+A [first musical audition](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-frase.md)
+now places cold C4/E4/G4/C5 notes into a separated-note arpeggio. The new
+E4/G4/C5 pitches use their own wire/felt/hammer parameters and bridge
+projections, preserving the full SI modes and air, rather than shifting
+the C4 waveform. Only the ignored parameter-export test was extended to
+arbitrary piano notes; C4 primitives match exactly and both factory/pedal
+fingerprints pass. All three new notes pass 384/768 kHz contact refinement,
+independent onset energy (maximum 5.97e-12 relative), 64/128 kHz full-note
+pressure/board refinement, capture and positive inferred radiation.
+Pressure changes are 0.122554% / 0.223585% / 0.150925%. The 8.603479 s
+stereo 48 kHz phrase keeps gain 0.25 full scale/Pa, peak 0.515757. It
+assembles independently simulated one-string notes without overlap and
+retains their existing terminal edit; it does not establish shared-board
+polyphony, live re-strikes or modeled note-off/action. The factory package
+remains unchanged. The user rejected this phrase on 2026-10-05 for dullness,
+low definition and abrupt endings. Passing temporal refinement of the same
+truncated model is not structural bandwidth convergence or musical approval.
+
+The [release/bandwidth follow-up](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-release-y-banda.md)
+adds a passive distributed viscous string damper to the offline coast,
+preserving every living mechanical/acoustic state. Patch geometry, drag
+and lowering time are assumed; this is not a complete felt/action model.
+Four tests cover exact dissipation, open-damper equivalence, independently
+integrated radiation/energy and second-order convergence against DOP853.
+The prior readout has 59 structural modes only through 1193.5 Hz. A dry
+unit-force pressure comparison against the same plate's 256 modes changes
+the complex 1.2–3 kHz response by about 99–106%; even 90 modes differ by
+81–86%. These are diagnostic unloaded controls, not coupled audio, and
+256 modes reach only 2965 Hz. Moving the microphones closer does not
+consistently restore the missing attack brightness. Structural/reciprocal
+acoustic bandwidth through 6 kHz now takes priority before the next full
+model audition; the new release control does not establish improved timbre.
+
+The [wide-band structural follow-up](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-banda-alta.md)
+retains the hypothetical P2 geometry and extends the dry pressure/mobility
+audit through 6 kHz. A full 76-by-56 Ritz solve still fails spatial refinement;
+cutting modes at 6 kHz changes upper-band mobility by 25.83%. Distributing
+the same beam mass/EI over their declared widths does not resolve convergence
+and is not selected. Exact y-reflection symmetry of this straight centered
+bridge and vertical forcing permits refinement within its invariant sector.
+The 132-by-112 solve retains all 7392 active modes: last refinement changes
+upper-band pressure by 0.43455% and mobility by 0.09488%; cell refinement
+changes pressure by 0.46502%. All three spatial/equivalence gates pass.
+These are integrated complex norms over four ports/two capsules, not maximum
+errors at every frequency or a loaded listening render. Eight new tests pass.
+Asymmetric/lateral forcing can require the omitted parity sector. Passive
+high-mode flexibility compression and a new reciprocal acoustic load remain
+prerequisites before coupled note/audio verification. Old 59/90-mode air
+factors do not describe this refined basis. New numerical data are stored
+once under repo-local `local/concert-grand-physics/`; recent WAVs and obsolete
+packages in SHARED were removed at the user's request. Factory stays unchanged.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

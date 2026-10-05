@@ -1,0 +1,100 @@
+[
+  {
+    "path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\Arpegio-C4-E4-G4-C5-Piloto-fisico.wav",
+    "bytes": 3303794,
+    "reason": "requested cleanup of generated listening audio",
+    "canonical": null,
+    "sha256": "300364CB0DC0D4B9C8EF640FC8121EEC88A4FDB01B505503851665AD6D3CCF2A"
+  },
+  {
+    "path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\64-124.wav",
+    "bytes": 538994,
+    "reason": "requested cleanup of generated listening audio",
+    "canonical": null,
+    "sha256": "2E75A5F681B232EEC5C65688BB7E17AE436A5426CD28AC43C25C36DE537CC272"
+  },
+  {
+    "path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\67-124.wav",
+    "bytes": 538994,
+    "reason": "requested cleanup of generated listening audio",
+    "canonical": null,
+    "sha256": "CF9B52A3340CF80FBDC4B338032579663B28BACB6F671ABF32938256913C5D79"
+  },
+  {
+    "path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-frase\\notas\\72-124.wav",
+    "bytes": 538994,
+    "reason": "requested cleanup of generated listening audio",
+    "canonical": null,
+    "sha256": "B18823EA83DE5B027477CB979AAA0C139CDDA227D7634B6F13C1A4FF18BD5DC3"
+  },
+  {
+    "path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-nota-1s\\C4-124-Piloto-fisico-1s.wav",
+    "bytes": 538994,
+    "reason": "requested cleanup of generated listening audio",
+    "canonical": null,
+    "sha256": "F58C67734F8B3F35F2A2923390AC1FCC333E710C76FCBE44F2C22E26EDD6675C"
+  },
+  {
+    "path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-primera-nota\\C4-124-Piloto-fisico-250ms.wav",
+    "bytes": 250994,
+    "reason": "requested cleanup of generated listening audio",
+    "canonical": null,
+    "sha256": "00AFCB595D6BAB2EDF76026747F47E71D43CFC93FB64FB8A7C854846A7CBCDC2"
+  },
+  {
+    "path": "C:\\SHARED\\Fisica-pendiente-2026-10-05\\P6-release\\Arpegio-control-release.wav",
+    "bytes": 3495794,
+    "reason": "requested cleanup of generated listening audio",
+    "canonical": null,
+    "sha256": "4DEAE73FCF2AA4F0F5790DB8B4E5310DE65A0A8A6F185FBA09AA68ED8B199F3D"
+  },
+  {
+    "path": "C:\\SHARED\\10-PUENTE-experimento.json",
+    "bytes": 50497,
+    "reason": "byte-identical canonical report in repo",
+    "canonical": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-reactive-bridge-2026-09-30\\audition.json",
+    "sha256": "F551691F05279D22210B2E856FC5F01F0147E99A2AAFA5A5672D540D03A91D83"
+  },
+  {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.171.38-refit-v2.rfplugin",
+    "bytes": 3195455,
+    "reason": "obsolete Concert Grand package; current 0.172.0 retained",
+    "canonical": null,
+    "sha256": "F14DFFEACB95D08DC2C226BCD6840677BEA0F17043FF7620BBFE2AFC0A258ABF"
+  },
+  {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.171.39-programas.rfplugin",
+    "bytes": 3195469,
+    "reason": "obsolete Concert Grand package; current 0.172.0 retained",
+    "canonical": null,
+    "sha256": "7F64A41CDEF3E7497FA29D0F0C0CBD1CE74AF569AFB385CDE98A74A849B49131"
+  },
+  {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.171.40-cuerpo.rfplugin",
+    "bytes": 3195491,
+    "reason": "obsolete Concert Grand package; current 0.172.0 retained",
+    "canonical": null,
+    "sha256": "59EDE44B9DCDEBBC9A990596C7AFB61678B83B951A13B540EFC00990E944B5D6"
+  },
+  {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.171.41-medios.rfplugin",
+    "bytes": 3196211,
+    "reason": "obsolete Concert Grand package; current 0.172.0 retained",
+    "canonical": null,
+    "sha256": "0A47F3BD7EBB89B16EB9EF008A6BCBEA3A4E39A0F4D610E7B2B8605CAA92B940"
+  },
+  {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.171.42-cola.rfplugin",
+    "bytes": 3196274,
+    "reason": "obsolete Concert Grand package; current 0.172.0 retained",
+    "canonical": null,
+    "sha256": "C034226A06CF6077C7428975A82C413C89A009F351E42BF34F16341327F8056A"
+  },
+  {
+    "path": "C:\\SHARED\\RF-Concert-Grand-0.171.43-candidato-ataque.rfplugin",
+    "bytes": 3196255,
+    "reason": "obsolete Concert Grand package; current 0.172.0 retained",
+    "canonical": null,
+    "sha256": "F03E984EED25BC21C929586932894FB4D2436C697F429F62B4F8B07EAE42512F"
+  }
+]

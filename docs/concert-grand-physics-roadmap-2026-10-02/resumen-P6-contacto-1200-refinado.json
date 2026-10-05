@@ -1,0 +1,847 @@
+{
+  "baseline_commit": "f124550",
+  "criteria": {
+    "energy_budget": 1e-09,
+    "energy_work_change": 0.002,
+    "contact_time_change": 0.001,
+    "bridge_displacement_velocity_rms_change": 0.01,
+    "impulse_force_change": 0.002
+  },
+  "cases": {
+    "T72-384000-Cold": {
+      "rate_hz": 384000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.04693371904404984,
+      "initial_air_energy_j": 0.0,
+      "final_string_energy_j": 0.0281449842099184,
+      "final_board_energy_j": 0.00014311799198365194,
+      "final_hammer_energy_j": 0.01860833117635544,
+      "final_air_energy_j": 1.0438486479409986e-05,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 2.6720224587509853e-05,
+      "radiation_loss_j": 1.2695472537051772e-07,
+      "air_port_work_j": 1.0565441204780174e-05,
+      "work_into_board_j": 0.00018040365777593356,
+      "contact_time_s": 0.0018168372917953997,
+      "maximum_force_n": 25.554673647187787,
+      "impulse_n_s": 0.023868585870542317,
+      "negative_air_work_steps": 0,
+      "max_newton_iterations": 3,
+      "energy_checkpoints": [
+        {
+          "time_s": 0.0,
+          "stored_total_j": 0.04693371904404984,
+          "stored_air_j": 0.0,
+          "total_relative": 0.0,
+          "air_relative": 0.0,
+          "board_relative": 0.0
+        },
+        {
+          "time_s": 0.0005,
+          "stored_total_j": 0.04693371904404976,
+          "stored_air_j": 3.4245807767533524e-21,
+          "total_relative": 1.626289893441892e-15,
+          "air_relative": 4.808801006075233e-34,
+          "board_relative": 1.6079533131808648e-26
+        },
+        {
+          "time_s": 0.001,
+          "stored_total_j": 0.04693371904404967,
+          "stored_air_j": 1.338600966294658e-17,
+          "total_relative": 2.5133571080465603e-15,
+          "air_relative": 7.222177937657524e-31,
+          "board_relative": 2.352835350787718e-24
+        },
+        {
+          "time_s": 0.0015,
+          "stored_total_j": 0.046933719043100015,
+          "stored_air_j": 3.0937008738649695e-13,
+          "total_relative": 1.626289893441892e-15,
+          "air_relative": 1.5059948060255747e-26,
+          "board_relative": 2.464668071118426e-22
+        },
+        {
+          "time_s": 0.002,
+          "stored_total_j": 0.046933410602142185,
+          "stored_air_j": 1.0604038210550855e-07,
+          "total_relative": 1.1827562861395579e-15,
+          "air_relative": 3.1019018048131792e-21,
+          "board_relative": 1.4437942946039525e-18
+        },
+        {
+          "time_s": 0.0025,
+          "stored_total_j": 0.0469290314987576,
+          "stored_air_j": 2.3623459962083093e-06,
+          "total_relative": 1.1827562861395579e-15,
+          "air_relative": 4.150908596986363e-19,
+          "board_relative": 3.753865165970276e-17
+        },
+        {
+          "time_s": 0.003,
+          "stored_total_j": 0.04692331318365246,
+          "stored_air_j": 4.959380125069581e-06,
+          "total_relative": 8.870672146046684e-16,
+          "air_relative": 1.6603634387945453e-18,
+          "board_relative": 6.814709070530656e-17
+        },
+        {
+          "time_s": 0.0035,
+          "stored_total_j": 0.046914455821692645,
+          "stored_air_j": 8.917745510608014e-06,
+          "total_relative": 1.0349117503721132e-15,
+          "air_relative": 3.753865165970276e-18,
+          "board_relative": 1.4726701804960316e-16
+        },
+        {
+          "time_s": 0.004,
+          "stored_total_j": 0.0469068718647369,
+          "stored_air_j": 1.0438486479409986e-05,
+          "total_relative": 1.1827562861395579e-15,
+          "air_relative": 7.038497186194268e-18,
+          "board_relative": 1.790304925308901e-16
+        }
+      ],
+      "maximum_total_budget_relative_error": 2.5133571080465603e-15,
+      "maximum_air_budget_relative_error": 7.038497186194268e-18,
+      "maximum_board_budget_relative_error": 1.790304925308901e-16,
+      "final_interface_force_residual": 7.370743083812162e-15,
+      "final_interface_power_residual_w": 2.6454533008646308e-17,
+      "elapsed_s": 231.46900000000005,
+      "observer_batch_size": 64,
+      "budget_scope": "Independent storage evaluated each 0.5ms. Loss and port work accumulated every step. Small-fixture tests check every-step identity.",
+      "energy_passed": true
+    },
+    "T72-384000-Relaunch": {
+      "rate_hz": 384000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.0752322597324313,
+      "initial_air_energy_j": 1.0438486479409986e-05,
+      "final_string_energy_j": 0.04635719716225022,
+      "final_board_energy_j": 0.0003330922727352353,
+      "final_hammer_energy_j": 0.028430373482469677,
+      "final_air_energy_j": 2.5017159799555117e-05,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 7.142156571028476e-05,
+      "radiation_loss_j": 1.5158089466169775e-05,
+      "air_port_work_j": 2.9736762786313284e-05,
+      "work_into_board_j": 0.0002911326092481582,
+      "contact_time_s": 0.002249338223991209,
+      "maximum_force_n": 25.6863846182349,
+      "impulse_n_s": 0.026045548379685323,
+      "negative_air_work_steps": 0,
+      "max_newton_iterations": 3,
+      "energy_checkpoints": [
+        {
+          "time_s": 0.0,
+          "stored_total_j": 0.0752322597324313,
+          "stored_air_j": 1.0438486479409986e-05,
+          "total_relative": 0.0,
+          "air_relative": 0.0,
+          "board_relative": 0.0
+        },
+        {
+          "time_s": 0.0005,
+          "stored_total_j": 0.07522413905519863,
+          "stored_air_j": 1.1300263099371552e-05,
+          "total_relative": 7.37863669504107e-16,
+          "air_relative": 2.111044891846009e-18,
+          "board_relative": 4.826320309352999e-17
+        },
+        {
+          "time_s": 0.001,
+          "stored_total_j": 0.07521267733360028,
+          "stored_air_j": 9.493732098636952e-06,
+          "total_relative": 1.291261421632187e-15,
+          "air_relative": 4.402232281129544e-18,
+          "board_relative": 9.736979061140341e-17
+        },
+        {
+          "time_s": 0.0015,
+          "stored_total_j": 0.07520557428333506,
+          "stored_air_j": 9.736528368898474e-06,
+          "total_relative": 0.0,
+          "air_relative": 6.440094283391559e-18,
+          "board_relative": 1.0913539145539376e-16
+        },
+        {
+          "time_s": 0.002,
+          "stored_total_j": 0.07519542682022536,
+          "stored_air_j": 9.53900976234631e-06,
+          "total_relative": 9.223295868801336e-16,
+          "air_relative": 8.399143943024655e-18,
+          "board_relative": 1.5348140781677225e-16
+        },
+        {
+          "time_s": 0.0025,
+          "stored_total_j": 0.0751859143915878,
+          "stored_air_j": 1.1337478336560435e-05,
+          "total_relative": 1.291261421632187e-15,
+          "air_relative": 9.952872983423317e-18,
+          "board_relative": 1.9743617719152862e-16
+        },
+        {
+          "time_s": 0.003,
+          "stored_total_j": 0.0751750541476523,
+          "stored_air_j": 1.603686229791718e-05,
+          "total_relative": 1.291261421632187e-15,
+          "air_relative": 1.2609974820626827e-17,
+          "board_relative": 2.3166325170465856e-16
+        },
+        {
+          "time_s": 0.0035,
+          "stored_total_j": 0.07516060787504122,
+          "stored_air_j": 2.062626544366037e-05,
+          "total_relative": 1.8446591737602673e-15,
+          "air_relative": 1.6212824769377352e-17,
+          "board_relative": 2.5508177637153696e-16
+        },
+        {
+          "time_s": 0.004,
+          "stored_total_j": 0.0751456800772547,
+          "stored_air_j": 2.5017159799555117e-05,
+          "total_relative": 2.029125091136294e-15,
+          "air_relative": 2.157206406814375e-17,
+          "board_relative": 3.076833856232946e-16
+        }
+      ],
+      "maximum_total_budget_relative_error": 2.029125091136294e-15,
+      "maximum_air_budget_relative_error": 2.157206406814375e-17,
+      "maximum_board_budget_relative_error": 3.076833856232946e-16,
+      "final_interface_force_residual": 1.5667316284728822e-14,
+      "final_interface_power_residual_w": 1.3270634591222574e-16,
+      "elapsed_s": 257.54699999999957,
+      "observer_batch_size": 64,
+      "budget_scope": "Independent storage evaluated each 0.5ms. Loss and port work accumulated every step. Small-fixture tests check every-step identity.",
+      "energy_passed": true,
+      "preserved_living_states": true,
+      "relaunch_external_work_j": 0.028325387867694396,
+      "first_case": "T72-384000-Cold"
+    },
+    "T72-768000-Cold": {
+      "rate_hz": 768000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.04693371904404984,
+      "initial_air_energy_j": 0.0,
+      "final_string_energy_j": 0.028145056688323757,
+      "final_board_energy_j": 0.00014311786483059785,
+      "final_hammer_energy_j": 0.018608257842354804,
+      "final_air_energy_j": 1.0438598386651884e-05,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 2.6720997838266745e-05,
+      "radiation_loss_j": 1.270523430235843e-07,
+      "air_port_work_j": 1.0565650729678036e-05,
+      "work_into_board_j": 0.0001804045133985258,
+      "contact_time_s": 0.0018168456075258002,
+      "maximum_force_n": 25.555378021813823,
+      "impulse_n_s": 0.023868567698350378,
+      "negative_air_work_steps": 0,
+      "max_newton_iterations": 3,
+      "energy_checkpoints": [
+        {
+          "time_s": 0.0,
+          "stored_total_j": 0.04693371904404984,
+          "stored_air_j": 0.0,
+          "total_relative": 0.0,
+          "air_relative": 0.0,
+          "board_relative": 0.0
+        },
+        {
+          "time_s": 0.0005,
+          "stored_total_j": 0.046933719044064175,
+          "stored_air_j": 3.420807714681518e-21,
+          "total_relative": 3.0544681089554083e-13,
+          "air_relative": 3.221896674070406e-33,
+          "board_relative": 7.227202685887445e-27
+        },
+        {
+          "time_s": 0.001,
+          "stored_total_j": 0.04693371904406664,
+          "stored_air_j": 1.463915854162381e-17,
+          "total_relative": 3.589665328433558e-13,
+          "air_relative": 4.398962925664128e-30,
+          "board_relative": 5.709056549067721e-24
+        },
+        {
+          "time_s": 0.0015,
+          "stored_total_j": 0.04693371904308831,
+          "stored_air_j": 3.191893276217607e-13,
+          "total_relative": 3.938578432844728e-13,
+          "air_relative": 1.10798189300453e-25,
+          "board_relative": 1.4936026201931358e-20
+        },
+        {
+          "time_s": 0.002,
+          "stored_total_j": 0.04693341040682864,
+          "stored_air_j": 1.0610532266703331e-07,
+          "total_relative": 4.382112040147062e-13,
+          "air_relative": 2.650716087749444e-20,
+          "board_relative": 7.211752501546742e-17
+        },
+        {
+          "time_s": 0.0025,
+          "stored_total_j": 0.046929030808954414,
+          "stored_air_j": 2.362621039679281e-06,
+          "total_relative": 4.887740352471722e-13,
+          "air_relative": 2.6980905880411363e-18,
+          "board_relative": 1.6459254958485057e-16
+        },
+        {
+          "time_s": 0.003,
+          "stored_total_j": 0.046923312458083344,
+          "stored_air_j": 4.959621067976951e-06,
+          "total_relative": 5.22926123009452e-13,
+          "air_relative": 1.214591950335575e-17,
+          "board_relative": 2.0155368352671176e-16
+        },
+        {
+          "time_s": 0.0035,
+          "stored_total_j": 0.046914455013901006,
+          "stored_air_j": 8.917990078917134e-06,
+          "total_relative": 5.453984924461036e-13,
+          "air_relative": 2.9706067611476325e-17,
+          "board_relative": 3.314951700410675e-16
+        },
+        {
+          "time_s": 0.004,
+          "stored_total_j": 0.04690687099389581,
+          "stored_air_j": 1.0438598386651884e-05,
+          "total_relative": 5.807333364945229e-13,
+          "air_relative": 5.47198037654898e-17,
+          "board_relative": 3.5921602049746335e-16
+        }
+      ],
+      "maximum_total_budget_relative_error": 5.807333364945229e-13,
+      "maximum_air_budget_relative_error": 5.47198037654898e-17,
+      "maximum_board_budget_relative_error": 3.5921602049746335e-16,
+      "final_interface_force_residual": 1.2749586588237306e-14,
+      "final_interface_power_residual_w": -1.431146867680866e-17,
+      "elapsed_s": 281.84400000000005,
+      "observer_batch_size": 64,
+      "budget_scope": "Independent storage evaluated each 0.5ms. Loss and port work accumulated every step. Small-fixture tests check every-step identity.",
+      "energy_passed": true
+    },
+    "T72-768000-Relaunch": {
+      "rate_hz": 768000,
+      "duration_s": 0.004,
+      "initial_energy_j": 0.07523233219559083,
+      "initial_air_energy_j": 1.0438598386651884e-05,
+      "final_string_energy_j": 0.046358783176470145,
+      "final_board_energy_j": 0.000333093108993634,
+      "final_hammer_energy_j": 0.02842885409391484,
+      "final_air_energy_j": 2.501796581173808e-05,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 7.142529294648006e-05,
+      "radiation_loss_j": 1.5158557465688076e-05,
+      "air_port_work_j": 2.9737924890786757e-05,
+      "work_into_board_j": 0.0002911384620002718,
+      "contact_time_s": 0.0022493289286617756,
+      "maximum_force_n": 25.68041396372851,
+      "impulse_n_s": 0.026045243773586756,
+      "negative_air_work_steps": 0,
+      "max_newton_iterations": 3,
+      "energy_checkpoints": [
+        {
+          "time_s": 0.0,
+          "stored_total_j": 0.07523233219559083,
+          "stored_air_j": 1.0438598386651884e-05,
+          "total_relative": 0.0,
+          "air_relative": 0.0,
+          "board_relative": 0.0
+        },
+        {
+          "time_s": 0.0005,
+          "stored_total_j": 0.07522421088258154,
+          "stored_air_j": 1.129984031400796e-05,
+          "total_relative": 1.8999971189098176e-14,
+          "air_relative": 1.7349957573100143e-17,
+          "board_relative": 7.07654331315258e-17
+        },
+        {
+          "time_s": 0.001,
+          "stored_total_j": 0.07521274952419002,
+          "stored_air_j": 9.493628945391465e-06,
+          "total_relative": 2.3611614681597733e-14,
+          "air_relative": 3.3067375335623046e-17,
+          "board_relative": 1.5186143041138424e-16
+        },
+        {
+          "time_s": 0.0015,
+          "stored_total_j": 0.07520564641951556,
+          "stored_air_j": 9.736452302380541e-06,
+          "total_relative": 4.095139421339607e-14,
+          "air_relative": 4.7974152640480015e-17,
+          "board_relative": 1.5547056603841549e-16
+        },
+        {
+          "time_s": 0.002,
+          "stored_total_j": 0.07519549776670384,
+          "stored_air_j": 9.539315156625331e-06,
+          "total_relative": 7.71066791945926e-14,
+          "air_relative": 6.327499127892459e-17,
+          "board_relative": 2.8012131370456296e-16
+        },
+        {
+          "time_s": 0.0025,
+          "stored_total_j": 0.0751859852545748,
+          "stored_air_j": 1.1338188500776962e-05,
+          "total_relative": 9.79513077806906e-14,
+          "air_relative": 7.966794275616912e-17,
+          "board_relative": 3.3974842292399083e-16
+        },
+        {
+          "time_s": 0.003,
+          "stored_total_j": 0.075175124279682,
+          "stored_air_j": 1.6037788920283853e-05,
+          "total_relative": 1.0957264938178948e-13,
+          "air_relative": 1.0087970139842782e-16,
+          "board_relative": 3.5776265531656725e-16
+        },
+        {
+          "time_s": 0.0035,
+          "stored_total_j": 0.07516067799049332,
+          "stored_air_j": 2.0627348500906496e-05,
+          "total_relative": 1.2783475761208775e-13,
+          "air_relative": 1.292971529977171e-16,
+          "board_relative": 3.559612320773096e-16
+        },
+        {
+          "time_s": 0.004,
+          "stored_total_j": 0.07514574834519036,
+          "stored_air_j": 2.501796581173808e-05,
+          "total_relative": 1.5550461856708508e-13,
+          "air_relative": 1.659110803356286e-16,
+          "board_relative": 4.1432734502925713e-16
+        }
+      ],
+      "maximum_total_budget_relative_error": 1.5550461856708508e-13,
+      "maximum_air_budget_relative_error": 1.659110803356286e-16,
+      "maximum_board_budget_relative_error": 4.1432734502925713e-16,
+      "final_interface_force_residual": 1.0405198709267244e-14,
+      "final_interface_power_residual_w": 4.85722573273506e-17,
+      "elapsed_s": 313.95300000000043,
+      "observer_batch_size": 64,
+      "budget_scope": "Independent storage evaluated each 0.5ms. Loss and port work accumulated every step. Small-fixture tests check every-step identity.",
+      "energy_passed": true,
+      "preserved_living_states": true,
+      "relaunch_external_work_j": 0.028325461201695032,
+      "first_case": "T72-768000-Cold"
+    }
+  },
+  "comparisons": [
+    {
+      "left": "T72-384000-Cold",
+      "right": "T72-768000-Cold",
+      "changes": {
+        "final_string_energy_j": {
+          "relative_change": 2.575173543257805e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_board_energy_j": {
+          "relative_change": 8.884499097377794e-07,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_hammer_energy_j": {
+          "relative_change": 3.940938547669871e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_air_energy_j": {
+          "relative_change": 1.0720523747784087e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "material_heat_j": {
+          "relative_change": 2.8937944667042403e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "radiation_loss_j": {
+          "relative_change": 0.000768326272018899,
+          "limit": 0.002,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "relative_change": 1.9830761324888797e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "work_into_board_j": {
+          "relative_change": 4.742800366291946e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "contact_time_s": {
+          "relative_change": 4.57701544151845e-06,
+          "limit": 0.001,
+          "passed": true
+        },
+        "maximum_force_n": {
+          "relative_change": 2.756267684377586e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "impulse_n_s": {
+          "relative_change": 7.613440474679839e-07,
+          "limit": 0.002,
+          "passed": true
+        },
+        "board_position": {
+          "relative_change": 2.4465648877712853e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "board_velocity": {
+          "relative_change": 0.00010239605360934952,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_displacement_m": {
+          "relative_change": 2.6847814788860214e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_velocity_m_s": {
+          "relative_change": 0.00015692122118050568,
+          "limit": 0.01,
+          "passed": true
+        }
+      },
+      "passed": true
+    },
+    {
+      "left": "T72-384000-Relaunch",
+      "right": "T72-768000-Relaunch",
+      "changes": {
+        "final_string_energy_j": {
+          "relative_change": 3.42117310086498e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_board_energy_j": {
+          "relative_change": 2.510584506728532e-06,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_hammer_energy_j": {
+          "relative_change": 5.344529715537398e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "final_air_energy_j": {
+          "relative_change": 3.221733489564121e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "material_heat_j": {
+          "relative_change": 5.21837019008758e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "radiation_loss_j": {
+          "relative_change": 3.087361837433275e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "relative_change": 3.9078196536593634e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "work_into_board_j": {
+          "relative_change": 2.0102984928080658e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "contact_time_s": {
+          "relative_change": 4.1324900572817304e-06,
+          "limit": 0.001,
+          "passed": true
+        },
+        "maximum_force_n": {
+          "relative_change": 0.0002324983746299746,
+          "limit": 0.002,
+          "passed": true
+        },
+        "impulse_n_s": {
+          "relative_change": 1.1695267712397488e-05,
+          "limit": 0.002,
+          "passed": true
+        },
+        "board_position": {
+          "relative_change": 4.9516582971624965e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "board_velocity": {
+          "relative_change": 0.0001748122893730487,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_displacement_m": {
+          "relative_change": 6.123124597273474e-05,
+          "limit": 0.01,
+          "passed": true
+        },
+        "bridge_velocity_m_s": {
+          "relative_change": 0.00037502127193733594,
+          "limit": 0.01,
+          "passed": true
+        }
+      },
+      "passed": true
+    }
+  ],
+  "provenance": {
+    "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "coefficient_sha256": "586070dcdb91b14bad6d715a7ae4832586b610309773f9c6a3a57b53b96c9942",
+    "mass_source_sha256": "586070dcdb91b14bad6d715a7ae4832586b610309773f9c6a3a57b53b96c9942",
+    "support": {
+      "asset_sha256": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+      "modes": 59,
+      "x_m": 0.6420689655172414,
+      "y_m": 0.5,
+      "cutoff_hz": 1200.0,
+      "frequencies_hz": [
+        70.62213260234367,
+        139.24116527565243,
+        170.7420426662478,
+        178.13497442356172,
+        203.19352685899813,
+        225.34530232891365,
+        245.48269805313552,
+        285.6228947119935,
+        299.6450431535138,
+        313.243437148768,
+        313.85498725302,
+        353.7040759892574,
+        380.6291210022632,
+        404.6230827869208,
+        440.2095071338155,
+        510.7600846806116,
+        512.8937416057344,
+        529.5271284876352,
+        532.6223422708101,
+        542.9390671739197,
+        559.4716374951777,
+        564.4156101974451,
+        603.0403418480528,
+        633.107674392708,
+        635.6551400279947,
+        663.0433647346642,
+        665.3001251708085,
+        698.9054274754873,
+        713.443604425906,
+        737.7837713367302,
+        739.7396831036451,
+        748.6978413913473,
+        761.8394407351152,
+        777.7067002494059,
+        793.2442001051731,
+        814.577433446898,
+        843.3353905236611,
+        901.5572365102009,
+        911.641193302532,
+        976.5164418942323,
+        995.3824731203342,
+        1008.2619004787629,
+        1031.4848795951684,
+        1037.3593077633225,
+        1044.59278240834,
+        1060.4740328080063,
+        1061.2000323899874,
+        1069.3988867493497,
+        1075.6330344074436,
+        1080.1314536480834,
+        1087.3808260624585,
+        1106.1366382337071,
+        1129.8816942028086,
+        1136.5123520206744,
+        1153.5983611109716,
+        1154.55220928071,
+        1166.2116928309968,
+        1172.8675819615626,
+        1193.5079134853531
+      ],
+      "projection_kg_minus_half": [
+        0.8314296897088717,
+        -0.22141138758934814,
+        -4.261952616474287e-12,
+        3.434304902257609e-13,
+        -8.67161883495727e-12,
+        0.3930589655930641,
+        1.2007520749903635e-13,
+        0.33948571676164474,
+        0.46390255759021914,
+        0.07897179772271176,
+        4.841125574013152e-12,
+        -0.15734555359863078,
+        0.6606379314356585,
+        1.9836874873248243e-13,
+        -0.017529469330476943,
+        0.41149774527435706,
+        2.5194880092726873e-12,
+        1.6215806184845396e-12,
+        3.080830509459016e-13,
+        -0.031084863911778005,
+        -1.1314596768379726e-13,
+        2.7408878469755445e-13,
+        4.3395422190744336e-13,
+        -0.38426419185197225,
+        -2.100400896411897e-12,
+        0.01490443581762102,
+        -3.430367520880038e-13,
+        0.35845688054355035,
+        -0.035711703078511806,
+        6.662855850244842e-13,
+        0.11418886352380753,
+        5.3863681210329405e-14,
+        0.2783212008338538,
+        -0.010594342782750454,
+        -0.3864923440017556,
+        0.14838062859394885,
+        1.1065761038058074e-13,
+        -0.6392452617055755,
+        0.022260563486760088,
+        -1.290880547740951e-13,
+        9.763023926991806e-14,
+        2.0360714923414707e-13,
+        -2.6849647552051344e-14,
+        0.3231780249953876,
+        2.959023996211425e-13,
+        -0.009953301793759861,
+        1.3620551454750925e-13,
+        1.4756976165176376e-14,
+        -0.19629121589601306,
+        7.18032916051942e-14,
+        0.18252941171742365,
+        -0.13196940958542078,
+        2.8558953699618196e-13,
+        6.718056130021025e-13,
+        -4.906087302800378e-13,
+        0.0002638411809892105,
+        6.4214060252639594e-15,
+        0.07627677561299322,
+        0.1934476632244042
+      ]
+    },
+    "input_hashes": {
+      "contact-end.csv": "9e4633a05219de98bd734937885a2ece1c66b38500f59249322307fe28bff76f",
+      "transfer.csv": "0cb57ffe16fea74fb857a0af3d443e6670992bad0f916283af279b87d183cb5f"
+    },
+    "incident_speed_m_s": 6.4089555740356445,
+    "felt": {
+      "hammer_mass": 0.002285285387188196,
+      "stiffness": 755470784.0,
+      "exponent": 2.613793134689331,
+      "strike_fraction": 0.12220641,
+      "width_fraction": 0.020842738449573517,
+      "rate_damping_s_per_m": 0.0
+    },
+    "wire": {
+      "length": 0.619020402431488,
+      "linear_density": 0.008104338890970328,
+      "tension": 850.0,
+      "young": 200000000000.0,
+      "density": 7850.0
+    },
+    "transverse": 72,
+    "axial": 144,
+    "acoustic_states": 38232,
+    "criteria": {
+      "energy_budget": 1e-09,
+      "energy_work_change": 0.002,
+      "contact_time_change": 0.001,
+      "bridge_displacement_velocity_rms_change": 0.01,
+      "impulse_force_change": 0.002
+    },
+    "acoustic_discretization": {
+      "cells": [
+        192,
+        144
+      ],
+      "factor_rate_hz": 128000.0
+    },
+    "coefficient_selection": {
+      "parent_modes": 90,
+      "selected_modes": 59
+    },
+    "mechanical_coordinates": "Mixed-mass normalized; C maps to physical P2 modes. No instantaneous air mass.",
+    "environment": {
+      "python": "3.12.14",
+      "numpy": "2.3.5",
+      "scipy": "1.18.1",
+      "blas_threads_per_process": 1
+    },
+    "observer_batch_size": 64,
+    "relaunch": "Prescribed separated incident head at 4ms; string, board, wave and relaxation states preserved; external work recorded.",
+    "load_report_sha256": "1b6cda670ba21c17c652f070ffdf8783bf123a4e7a79f16cc6f1096234297c8d"
+  },
+  "selected_factory_profile": null,
+  "gates": {
+    "energy": true,
+    "cold_refinement": true,
+    "reiterated_refinement": true,
+    "persistent_sequence": true,
+    "observer_live_prefix": true
+  },
+  "scope": "C4/124 vertical one-string nonlinear SI contact, 59 P2 modes and 38232-state passive air; prescribed separated-head relaunch, not key action or audio.",
+  "contact_implementation_commit": "a526d50",
+  "source_sha256": {
+    "audit-concert-grand-bounded-contact.py": "e22307dad6f00c52188ed819594d1872f279bf29b0ce5fc7db914442f993e72f",
+    "concert_grand_air_coefficients.py": "0407e8c15d923cebe6b6f449f1d6d0e25639e7ca703f7e96b8795c1ac67a15f5",
+    "concert_grand_bounded_contact.py": "f409be8f044c4ec2a78a1e1e08f0f0c8a9f08e06cbd37f533d9de43e26141067",
+    "concert_grand_bounded_air.py": "cab4c544f9d1c79b229cb253dfefaff965a01cfe2887cd63267ef5ea07c593b9",
+    "concert_grand_rational_air.py": "ca2b4fc83ae26b4d08d4024a2aab29b150d28fe24715707ac300c05832acf469",
+    "concert_grand_acoustic_bath.py": "8acc2a8f74bf4f11828b08045b5f96ac10f9f336545f8199ed0d08235b1eba6f",
+    "concert_grand_surface_impedance.py": "8ad393eb161ef53aff727ec007ea22d87c4a0406e7c55be8c588654a5f01091a",
+    "concert_grand_moving_bridge.py": "6782e8e6df4ce0d86c8e7d8fec2c1e5115fc61563c5c3e4cdb411db5b78a2fd1",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "concert_grand_nonlinear_string.py": "f1c17115e3f296a12f5c51e14d888756e60303e33802f8873d43c6a746a4d0e6",
+    "concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95",
+    "audit-concert-grand-moving-bridge.py": "7f2636983618194fc4246bdda79a1640a041bb15d3a10fa27a55f2ccba7eaccb",
+    "audit-concert-grand-coupled-contact.py": "d3be447fe61704580540c48db1af7c70f5ed4adbeaf3ca6fb1b361de9077dc42"
+  },
+  "trajectory_sha256": {
+    "T72-384000-Cold": "0bbb6a9d141b06f38fb437361a79f246d028ac3a5a3fab1214c6c156fb55af87",
+    "T72-384000-Relaunch": "b8c3bde6728a7e7816656cd46ed73e591065e60256048c367d345d522e7cc3f4",
+    "T72-768000-Cold": "4250d4e14c0ab3da88504efd8a7b3f9112d015b608ca963adf1494c2b68164d4",
+    "T72-768000-Relaunch": "ac24ac9c424b8a548786c73213a316f439817cad62f62ec2c8881023e7fd3954"
+  },
+  "two_contact_sequences": [
+    {
+      "rate_hz": 384000,
+      "preserved_living_states": true,
+      "relaunch_continuity_relative_error": 9.220005642698385e-17,
+      "cumulative_budget_relative_error": 2.673801636382532e-15,
+      "passed": true
+    },
+    {
+      "rate_hz": 768000,
+      "preserved_living_states": true,
+      "relaunch_continuity_relative_error": 9.219996658546584e-17,
+      "cumulative_budget_relative_error": 5.175184124442197e-13,
+      "passed": true
+    }
+  ],
+  "observer_live_prefix": {
+    "rate_hz": 384000,
+    "steps": 64,
+    "duration_s": 0.00016666666666666666,
+    "board_modes": 59,
+    "acoustic_states": 38232,
+    "initial_wave_norm": 0.18014148552387996,
+    "initial_relaxation_norm": 0.08648290627134934,
+    "states_bitwise_equal_each_step": true,
+    "work_bitwise_equal_each_step": true,
+    "radiation_relative_error": 3.5471790841579446e-15,
+    "relative_limit": 1e-12,
+    "passed": true,
+    "scope": "Live prefix after prescribed relaunch; not a full scalar trajectory or performance benchmark.",
+    "first_case": "T72-384000-Cold",
+    "first_trajectory_sha256": "0bbb6a9d141b06f38fb437361a79f246d028ac3a5a3fab1214c6c156fb55af87"
+  },
+  "all_contact_gates_passed": true
+}

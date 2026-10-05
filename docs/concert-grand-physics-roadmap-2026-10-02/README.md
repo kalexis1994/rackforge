@@ -66,7 +66,7 @@ Falta construir su carga recíproca antes de volver a escuchar el modelo complet
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla refinada 132×112 y proyección pasiva 7392→606 pasan controles secos y cargados en frecuencia hasta 6 kHz; malla 256×192 contrastada con 320×240. Faltan realización causal, integrador de pérdidas proyectadas, identificación y ambas caras/borde. | Carga continua medida en puntos declarados; transitorios y escucha pendientes |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla refinada 132×112 y proyección pasiva 7392→606 pasan controles secos y cargados en frecuencia hasta 6 kHz; malla 256×192 contrastada con 320×240. Pérdidas completas conectadas a contacto/coast/diagnósticos; equivalencia y contacto mecánico inicial pasan. Faltan realización causal nueva, transitorios acoplados, identificación y ambas caras/borde. | Mecánica temporal preparada; nueva carga causal y escucha pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1085,3 +1085,20 @@ la corrida refinada completa tarda 542,828 s con pico de 2,10 GiB. No es una
 medición de audio en tiempo real. Siguiente: realización causal pasiva y
 contacto/coast/diagnósticos con la matriz completa de pérdidas proyectadas.
 El paquete instalado sigue en 0.172.0; no se dejan nuevos archivos en SHARED.
+
+### 2026-10-05 — P6: soporte temporal con pérdidas proyectadas completas
+
+La carga refinada queda en **40e3547**, por pedido del usuario.
+[Método y mediciones](RESULTADOS-P6-perdidas-proyectadas.md). El adaptador
+usa masa/rigidez reales y conserva la matriz completa de pérdidas tras el
+cambio modal. Fuerza y calor de contacto, ambos controles de aire y componentes
+usan esa matriz; coast y apagador mantienen sus términos mutuos.
+
+Pasan cinco pruebas nuevas contra coordenadas físicas/ODE y balances vivos,
+y tres regresiones de soporte/contacto anteriores. Con la tabla real de 606,
+en 83 puntos y once puertos, el cambio de coordenadas da error máximo de
+estado 1,068e−11 y de puertos 2,251e−12. Contacto inicial completo de 0,125 ms:
+balance de energía 5,843e−14, residual de fuerza 9,020e−15 N. No es una nota
+completa ni valida el timbre. La carga causal nueva sigue pendiente; deberá
+usar el mismo cambio de base para fuerzas y micrófonos. No se duplican datos
+ni se genera otro WAV/paquete.

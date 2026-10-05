@@ -53,7 +53,7 @@ class BoundedContact:
         old=self.system.interface(q,v,acceleration)
         physical=core.physical(q[:-1]);velocity=core.physical(v[:-1]);a=core.physical(acceleration[:-1])
         _,port=self.air.derivative((r,z),self.C@v);load=self.coupling*port
-        residual=a[core.sb]+core.omega**2*physical[core.sb]+core.viscous*velocity[core.sb]+load-core.phi*old['reaction_n']
+        residual=a[core.sb]+core.omega**2*physical[core.sb]+core.board_damping@velocity[core.sb]+load-core.phi*old['reaction_n']
         power=float(velocity[core.sb]@load)
         return dict(reaction_n=old['reaction_n'],power_into_board_w=old['power_into_support_w'],power_into_air_w=power,
             force_residual=float(np.linalg.norm(residual)),power_residual_w=old['power_residual_w']-power)

@@ -1,0 +1,567 @@
+{
+  "criteria": {
+    "congruence_relative": 1e-11,
+    "harmonic_state_relative": 1e-10,
+    "harmonic_port_relative": 1e-10,
+    "power_relative": 1e-10,
+    "time_energy_relative": 1e-09,
+    "interface_force_n": 1e-09,
+    "interface_power_w": 1e-09
+  },
+  "modes": 606,
+  "notes": [
+    60,
+    64,
+    67,
+    72,
+    36,
+    48,
+    53,
+    65,
+    69,
+    84,
+    96
+  ],
+  "rows": [
+    {
+      "frequency_hz": 60.0,
+      "state_relative": 2.1085007956483857e-17,
+      "port_relative": 5.889170089971348e-17,
+      "power_relative": 2.1415479332636253e-16
+    },
+    {
+      "frequency_hz": 65.40639132514966,
+      "state_relative": 1.1158755263267405e-17,
+      "port_relative": 4.930225668151711e-17,
+      "power_relative": 0.0
+    },
+    {
+      "frequency_hz": 69.91488382159352,
+      "state_relative": 3.737166641609417e-18,
+      "port_relative": 1.5937618027341754e-17,
+      "power_relative": 0.0
+    },
+    {
+      "frequency_hz": 70.62109476928639,
+      "state_relative": 3.459068157316649e-18,
+      "port_relative": 9.493249987094784e-19,
+      "power_relative": 0.0
+    },
+    {
+      "frequency_hz": 71.32730571697925,
+      "state_relative": 3.806522827017811e-18,
+      "port_relative": 1.187538149442231e-17,
+      "power_relative": 0.0
+    },
+    {
+      "frequency_hz": 72.6916595177153,
+      "state_relative": 5.717265971719516e-18,
+      "port_relative": 1.5200387307803575e-17,
+      "power_relative": 0.0
+    },
+    {
+      "frequency_hz": 88.06795605732418,
+      "state_relative": 4.147564935310245e-17,
+      "port_relative": 7.715236803185679e-17,
+      "power_relative": 1.5503387517982685e-16
+    },
+    {
+      "frequency_hz": 106.69676460233542,
+      "state_relative": 8.615668028267453e-17,
+      "port_relative": 1.0822359174971336e-16,
+      "power_relative": 3.6449476025916005e-16
+    },
+    {
+      "frequency_hz": 129.266081401913,
+      "state_relative": 6.340250049098821e-17,
+      "port_relative": 1.0964223690537848e-16,
+      "power_relative": 3.8814541875422903e-16
+    },
+    {
+      "frequency_hz": 130.8127826502993,
+      "state_relative": 5.5989229307905e-17,
+      "port_relative": 8.817972617682779e-17,
+      "power_relative": 2.7269174380744424e-16
+    },
+    {
+      "frequency_hz": 156.60943294095225,
+      "state_relative": 1.1506336276597722e-16,
+      "port_relative": 9.108708017523791e-17,
+      "power_relative": 6.360885706669002e-16
+    },
+    {
+      "frequency_hz": 174.61411571650194,
+      "state_relative": 2.0421330766129895e-16,
+      "port_relative": 1.1447292894621594e-16,
+      "power_relative": 4.607696501141208e-16
+    },
+    {
+      "frequency_hz": 189.73665961010286,
+      "state_relative": 2.4488615770685794e-16,
+      "port_relative": 1.1007043754619614e-16,
+      "power_relative": 7.480760594815198e-16
+    },
+    {
+      "frequency_hz": 229.87121097343723,
+      "state_relative": 9.632065754147613e-17,
+      "port_relative": 7.146558815247814e-17,
+      "power_relative": 4.6285476076529965e-16
+    },
+    {
+      "frequency_hz": 261.625565,
+      "state_relative": 2.755449339731343e-16,
+      "port_relative": 1.6485045649411564e-16,
+      "power_relative": 4.934417484476539e-16
+    },
+    {
+      "frequency_hz": 261.6255653005986,
+      "state_relative": 2.7554842786063476e-16,
+      "port_relative": 1.538374548712738e-16,
+      "power_relative": 3.3806268028839194e-16
+    },
+    {
+      "frequency_hz": 278.4953300167668,
+      "state_relative": 1.7504650306424533e-16,
+      "port_relative": 9.873915593847665e-17,
+      "power_relative": 2.7041573283106865e-16
+    },
+    {
+      "frequency_hz": 329.6275569128699,
+      "state_relative": 2.3161524234519356e-16,
+      "port_relative": 8.57357769132601e-17,
+      "power_relative": 5.427762694895369e-16
+    },
+    {
+      "frequency_hz": 337.4047951142096,
+      "state_relative": 2.763509244206637e-16,
+      "port_relative": 9.88387757133237e-17,
+      "power_relative": 6.671287452252654e-16
+    },
+    {
+      "frequency_hz": 349.2282314330039,
+      "state_relative": 2.6213997426608603e-16,
+      "port_relative": 9.691079366391955e-17,
+      "power_relative": 3.5741892670122123e-16
+    },
+    {
+      "frequency_hz": 391.99543598174927,
+      "state_relative": 2.0009507041822554e-16,
+      "port_relative": 8.71010839650756e-17,
+      "power_relative": 2.224908668910706e-16
+    },
+    {
+      "frequency_hz": 408.7752414347767,
+      "state_relative": 3.8917052310096723e-16,
+      "port_relative": 1.0726207186891348e-16,
+      "power_relative": 1.8748216044805366e-16
+    },
+    {
+      "frequency_hz": 440.0,
+      "state_relative": 6.349057434743868e-16,
+      "port_relative": 1.3851010099748739e-16,
+      "power_relative": 6.121494134683015e-16
+    },
+    {
+      "frequency_hz": 495.24251116081115,
+      "state_relative": 4.546509090886241e-16,
+      "port_relative": 1.1922124958426719e-16,
+      "power_relative": 4.692723676638479e-16
+    },
+    {
+      "frequency_hz": 523.2511306011972,
+      "state_relative": 4.341383709940792e-16,
+      "port_relative": 1.0438878854072163e-16,
+      "power_relative": 4.073650873915435e-16
+    },
+    {
+      "frequency_hz": 523.251131,
+      "state_relative": 4.3412837891030025e-16,
+      "port_relative": 1.2214970315241743e-16,
+      "power_relative": 6.132138705430088e-16
+    },
+    {
+      "frequency_hz": 600.0000000000003,
+      "state_relative": 1.063640706811727e-15,
+      "port_relative": 2.8726503746865406e-16,
+      "power_relative": 6.166714922348783e-16
+    },
+    {
+      "frequency_hz": 726.916595177153,
+      "state_relative": 5.866865884222991e-16,
+      "port_relative": 1.323808335064016e-16,
+      "power_relative": 6.80067451806782e-16
+    },
+    {
+      "frequency_hz": 880.679560573241,
+      "state_relative": 9.88999521619833e-16,
+      "port_relative": 1.799626577252209e-16,
+      "power_relative": 4.936980411512509e-16
+    },
+    {
+      "frequency_hz": 1025.9391726629633,
+      "state_relative": 1.7460208946821667e-15,
+      "port_relative": 3.910380454319571e-16,
+      "power_relative": 1.1956941265432702e-15
+    },
+    {
+      "frequency_hz": 1036.302194609054,
+      "state_relative": 1.6560090503130993e-15,
+      "port_relative": 3.917512283798659e-16,
+      "power_relative": 1.1411339207756153e-15
+    },
+    {
+      "frequency_hz": 1046.5022612023945,
+      "state_relative": 1.7509675353219106e-15,
+      "port_relative": 4.363130995626397e-16,
+      "power_relative": 1.317524038170371e-15
+    },
+    {
+      "frequency_hz": 1046.6652165551445,
+      "state_relative": 1.7535963121023632e-15,
+      "port_relative": 4.309478092755119e-16,
+      "power_relative": 1.293347135666438e-15
+    },
+    {
+      "frequency_hz": 1066.9676460233543,
+      "state_relative": 2.0643010995587055e-15,
+      "port_relative": 5.745517487784229e-16,
+      "power_relative": 1.298878334145521e-15
+    },
+    {
+      "frequency_hz": 1200.0,
+      "state_relative": 1.6654356017010142e-15,
+      "port_relative": 3.6871893372901945e-16,
+      "power_relative": 1.0092061141341216e-15
+    },
+    {
+      "frequency_hz": 1292.66081401913,
+      "state_relative": 2.301509583327551e-15,
+      "port_relative": 6.031852302852005e-16,
+      "power_relative": 1.5311035780409857e-15
+    },
+    {
+      "frequency_hz": 1449.8285723760719,
+      "state_relative": 2.832236659753646e-15,
+      "port_relative": 6.096873640218947e-16,
+      "power_relative": 1.429019806464869e-15
+    },
+    {
+      "frequency_hz": 1464.4733054303756,
+      "state_relative": 2.976821916479639e-15,
+      "port_relative": 6.42247918587764e-16,
+      "power_relative": 1.1348208676965678e-15
+    },
+    {
+      "frequency_hz": 1479.1180384846793,
+      "state_relative": 3.1796705241226496e-15,
+      "port_relative": 7.174547602624067e-16,
+      "power_relative": 1.2241532604330055e-15
+    },
+    {
+      "frequency_hz": 1566.0943294095207,
+      "state_relative": 3.22854357824723e-15,
+      "port_relative": 7.38382020959657e-16,
+      "power_relative": 1.1555579643523333e-15
+    },
+    {
+      "frequency_hz": 1863.1411051013592,
+      "state_relative": 3.960628347396166e-15,
+      "port_relative": 8.001153370444032e-16,
+      "power_relative": 1.2640063401834207e-15
+    },
+    {
+      "frequency_hz": 1881.9607122235952,
+      "state_relative": 4.13882717435317e-15,
+      "port_relative": 8.092572331582671e-16,
+      "power_relative": 9.511452511952538e-16
+    },
+    {
+      "frequency_hz": 1897.3665961010286,
+      "state_relative": 4.390702761707233e-15,
+      "port_relative": 8.475341480126036e-16,
+      "power_relative": 2.7002704128499998e-15
+    },
+    {
+      "frequency_hz": 1900.7803193458312,
+      "state_relative": 4.458054771912119e-15,
+      "port_relative": 8.644601716164071e-16,
+      "power_relative": 9.930008027777656e-16
+    },
+    {
+      "frequency_hz": 2093.004522404789,
+      "state_relative": 6.0231465300425e-15,
+      "port_relative": 1.3110784952494631e-15,
+      "power_relative": 1.349858600072707e-15
+    },
+    {
+      "frequency_hz": 2236.7122880488027,
+      "state_relative": 5.788366135917276e-15,
+      "port_relative": 1.0368925268721978e-15,
+      "power_relative": 2.092605154278894e-15
+    },
+    {
+      "frequency_hz": 2259.3053414634373,
+      "state_relative": 5.686585309235185e-15,
+      "port_relative": 9.924246371329878e-16,
+      "power_relative": 1.9758003204877612e-15
+    },
+    {
+      "frequency_hz": 2281.898394878072,
+      "state_relative": 5.584655884716725e-15,
+      "port_relative": 9.442203350788602e-16,
+      "power_relative": 1.477565360900433e-15
+    },
+    {
+      "frequency_hz": 2298.712109734372,
+      "state_relative": 5.663937988927712e-15,
+      "port_relative": 9.367750919484986e-16,
+      "power_relative": 1.994232421799186e-15
+    },
+    {
+      "frequency_hz": 2400.0,
+      "state_relative": 7.585816211436271e-15,
+      "port_relative": 1.2543141786302388e-15,
+      "power_relative": 1.5920752644637518e-15
+    },
+    {
+      "frequency_hz": 2609.403859443607,
+      "state_relative": 1.17267742835484e-14,
+      "port_relative": 1.8570634849081742e-15,
+      "power_relative": 2.3383188083800157e-15
+    },
+    {
+      "frequency_hz": 2635.761474185462,
+      "state_relative": 1.2911552853252797e-14,
+      "port_relative": 2.0627018902723296e-15,
+      "power_relative": 2.4817901706579384e-15
+    },
+    {
+      "frequency_hz": 2662.1190889273166,
+      "state_relative": 1.3969073857475852e-14,
+      "port_relative": 2.23872912184102e-15,
+      "power_relative": 2.744685925887604e-15
+    },
+    {
+      "frequency_hz": 2784.953300167665,
+      "state_relative": 1.5561318226898874e-14,
+      "port_relative": 2.8634417694966558e-15,
+      "power_relative": 2.0988102558820915e-15
+    },
+    {
+      "frequency_hz": 3018.391886642717,
+      "state_relative": 1.4027060251154935e-14,
+      "port_relative": 2.4977692942383667e-15,
+      "power_relative": 1.625972585016659e-15
+    },
+    {
+      "frequency_hz": 3048.880693578502,
+      "state_relative": 1.467038489276589e-14,
+      "port_relative": 2.6218485216176954e-15,
+      "power_relative": 1.812410466071318e-15
+    },
+    {
+      "frequency_hz": 3079.3695005142868,
+      "state_relative": 1.499565956293302e-14,
+      "port_relative": 2.659164338980971e-15,
+      "power_relative": 1.818804776880508e-15
+    },
+    {
+      "frequency_hz": 3374.0479511420963,
+      "state_relative": 2.5621380151781196e-14,
+      "port_relative": 3.674247474816903e-15,
+      "power_relative": 4.6797962908157294e-15
+    },
+    {
+      "frequency_hz": 3470.7303526687933,
+      "state_relative": 2.6376398308539828e-14,
+      "port_relative": 4.007912671572571e-15,
+      "power_relative": 3.420176582419124e-15
+    },
+    {
+      "frequency_hz": 3505.7882350189834,
+      "state_relative": 2.7253565697993784e-14,
+      "port_relative": 4.100748723604232e-15,
+      "power_relative": 3.716032661855455e-15
+    },
+    {
+      "frequency_hz": 3540.8461173691735,
+      "state_relative": 2.7517918390502325e-14,
+      "port_relative": 3.8881554061797435e-15,
+      "power_relative": 4.831073505313695e-15
+    },
+    {
+      "frequency_hz": 3600.0,
+      "state_relative": 2.5520175871283063e-14,
+      "port_relative": 3.2125617127686513e-15,
+      "power_relative": 2.9540819593039893e-15
+    },
+    {
+      "frequency_hz": 4003.00832193099,
+      "state_relative": 3.7753859013371605e-14,
+      "port_relative": 5.282423047324586e-15,
+      "power_relative": 3.1298347819752e-15
+    },
+    {
+      "frequency_hz": 4043.4427494252423,
+      "state_relative": 4.017702671190889e-14,
+      "port_relative": 5.3667632044963485e-15,
+      "power_relative": 5.9777935904927925e-15
+    },
+    {
+      "frequency_hz": 4083.8771769194946,
+      "state_relative": 4.4069839606399845e-14,
+      "port_relative": 5.842903973052878e-15,
+      "power_relative": 6.424866629031244e-15
+    },
+    {
+      "frequency_hz": 4087.752414347767,
+      "state_relative": 4.4496447132979023e-14,
+      "port_relative": 5.8993144612510285e-15,
+      "power_relative": 3.962556351081045e-15
+    },
+    {
+      "frequency_hz": 4424.961026474792,
+      "state_relative": 6.868380605142474e-14,
+      "port_relative": 1.0170151261782323e-14,
+      "power_relative": 4.841277481971209e-15
+    },
+    {
+      "frequency_hz": 4469.657602499789,
+      "state_relative": 7.173568020632196e-14,
+      "port_relative": 1.0316902165931443e-14,
+      "power_relative": 5.407200450109571e-15
+    },
+    {
+      "frequency_hz": 4514.354178524787,
+      "state_relative": 7.598444048501798e-14,
+      "port_relative": 1.066146048354309e-14,
+      "power_relative": 4.610068980261585e-15
+    },
+    {
+      "frequency_hz": 4800.0,
+      "state_relative": 1.3445226441772792e-13,
+      "port_relative": 1.9842479249115186e-14,
+      "power_relative": 7.808884325249277e-15
+    },
+    {
+      "frequency_hz": 4812.033795990991,
+      "state_relative": 1.3827379408032158e-13,
+      "port_relative": 2.0488621809670764e-14,
+      "power_relative": 6.5127185808353865e-15
+    },
+    {
+      "frequency_hz": 4860.640197970698,
+      "state_relative": 1.530460974942638e-13,
+      "port_relative": 2.3056811941628283e-14,
+      "power_relative": 1.3265867629873554e-14
+    },
+    {
+      "frequency_hz": 4909.246599950405,
+      "state_relative": 1.6522046557401325e-13,
+      "port_relative": 2.5027236612420937e-14,
+      "power_relative": 1.217466799204092e-14
+    },
+    {
+      "frequency_hz": 4952.425111608106,
+      "state_relative": 1.7687436161070842e-13,
+      "port_relative": 2.6753734971250008e-14,
+      "power_relative": 1.5435349133450693e-14
+    },
+    {
+      "frequency_hz": 5175.660628996281,
+      "state_relative": 2.671396620927484e-13,
+      "port_relative": 4.068163595472188e-14,
+      "power_relative": 2.9941368832787757e-14
+    },
+    {
+      "frequency_hz": 5227.940029289173,
+      "state_relative": 3.036408456860655e-13,
+      "port_relative": 4.681244808530487e-14,
+      "power_relative": 3.595612648756309e-14
+    },
+    {
+      "frequency_hz": 5280.2194295820655,
+      "state_relative": 3.4711994192052484e-13,
+      "port_relative": 5.3834851348883656e-14,
+      "power_relative": 4.2606667048004466e-14
+    },
+    {
+      "frequency_hz": 5534.68072767148,
+      "state_relative": 7.884647327066591e-13,
+      "port_relative": 1.2113543159912418e-13,
+      "power_relative": 1.5173974306847885e-13
+    },
+    {
+      "frequency_hz": 5590.586593607555,
+      "state_relative": 1.0123303739906133e-12,
+      "port_relative": 1.5479153315970183e-13,
+      "power_relative": 2.3664610530919083e-13
+    },
+    {
+      "frequency_hz": 5646.4924595436305,
+      "state_relative": 1.3387335932801642e-12,
+      "port_relative": 2.0886542791414372e-13,
+      "power_relative": 3.8191335752895957e-13
+    },
+    {
+      "frequency_hz": 5939.1234250597545,
+      "state_relative": 7.545260315191757e-12,
+      "port_relative": 1.5192189309942841e-12,
+      "power_relative": 2.7962522379985165e-12
+    },
+    {
+      "frequency_hz": 5999.114570767429,
+      "state_relative": 1.0643608165277916e-11,
+      "port_relative": 2.2413524867555404e-12,
+      "power_relative": 2.128250123311914e-12
+    },
+    {
+      "frequency_hz": 6000.0,
+      "state_relative": 1.068392877315273e-11,
+      "port_relative": 2.2509424751615946e-12,
+      "power_relative": 2.100832797735088e-12
+    }
+  ],
+  "mass_congruence": 1.4829971281086979e-15,
+  "stiffness_congruence": 1.591617924430748e-15,
+  "loss_congruence": 3.4626454972159064e-17,
+  "full_damping_minimum": 20.4113695514406,
+  "damping_offdiagonal_relative": 0.12174410062818514,
+  "parent_sha256": "56e7adc7daa4d87b05288a5f3c79959b31fe591ca99ca16a1a46d82434660196",
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "source_sha256": {
+    "audit-concert-grand-projected-support.py": "d9a10a20daa02fe5fbfe86850cbc07dc02b77973152f6e9c6808bce223939348",
+    "concert_grand_projected_support.py": "2c0331b75736717432bb7b43939518a72c19b9975182e822fb167de86ad066b5",
+    "concert_grand_moving_bridge.py": "19685edcf58c2e1e622641cb5758c6700cace9534b853d8e5c79108f7e19a5e7",
+    "concert_grand_bounded_contact.py": "d16a88a31156a49144b94d211ad1adf1862c9ce3153e4b79b5597687396e642f",
+    "concert_grand_bath_contact.py": "694c0b21259c24eaa269f0f2497c8b3fc355a368af917d2e4242d7065bdfbd09",
+    "concert_grand_exponential_coast.py": "11f7743e78fe40a53f253775ba8cc4c1d958e253b0871a4e645566be4605b945",
+    "concert_grand_damped_coast.py": "1c8e54ad6bb1911172c8dee07ea550c162700a89da8615c1f77ad1fc6c61f11f"
+  },
+  "time_pilot": {
+    "note": 60,
+    "seconds": 0.000125,
+    "steps": 192,
+    "dt": 6.510416666666666e-07,
+    "speed_m_s": 5.0,
+    "initial_energy_j": 0.024999999999999998,
+    "final_energy_j": 0.02462893119995103,
+    "heat_j": 0.00037106880005042793,
+    "energy_relative": 5.842548667089886e-14,
+    "interface_force_n": 9.020151501373183e-15,
+    "interface_power_w": 6.649208635946258e-20,
+    "scope": "Short mechanical contact only; no acoustic states, release, melody or timbral approval."
+  },
+  "gates": {
+    "congruence": true,
+    "state": true,
+    "port": true,
+    "power": true,
+    "passive": true,
+    "time_energy": true,
+    "interface": true
+  },
+  "all_gates_passed": true,
+  "seconds": 38.81199999999808,
+  "scope": "Coordinate adapter only, retaining complete projected mass/stiffness/damping. No causal air construction or audio."
+}

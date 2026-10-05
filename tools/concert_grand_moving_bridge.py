@@ -17,11 +17,20 @@ class Support:
     frequency:tuple
     projection:tuple  # b=sum(phi_j*B_j), B_j mass-normalized, phi in kg^-1/2
     loss:tuple        # viscous c_j=loss_j*omega_j, modal mass normalized
+    damping_matrix:tuple|None=None  # full C in the same mass-normalized basis
 
     def __post_init__(self):
         if not len(self.frequency)==len(self.projection)==len(self.loss) or not len(self.frequency):raise ValueError('support dimensions')
         if not np.isfinite(np.r_[self.frequency,self.projection,self.loss]).all():raise ValueError('nonfinite support')
         if min(self.frequency)<=0 or min(self.loss)<0:raise ValueError('support frequency/loss')
+        if self.damping_matrix is not None:
+            C=np.asarray(self.damping_matrix)
+            if (C.shape!=(len(self.frequency),len(self.frequency)) or np.iscomplexobj(C)
+                or not np.isfinite(C).all() or any(self.loss)):
+                raise ValueError('full real support damping requires zero legacy losses')
+            scale=max(float(np.linalg.norm(C,2)),1e-30)
+            if np.linalg.norm(C-C.T,2)>1e-12*scale:raise ValueError('symmetric support damping required')
+            if np.linalg.eigvalsh(C).min() < -1e-12*scale:raise ValueError('passive support damping required')
 
     @classmethod
     def oscillator(cls,mass=.25,frequency=180.,loss=.05,coupling=1.):
@@ -51,7 +60,11 @@ class MovingBridge:
         self.ns=self.base.size;self.nb=len(support.frequency);self.size=self.ns+self.nb
         self.sb=slice(self.ns,self.size);self.support=support;self.nonlinear=nonlinear
         self.phi=np.asarray(support.projection);self.omega=2*np.pi*np.asarray(support.frequency)
-        self.viscous=np.asarray(support.loss)*self.omega
+        self.board_damping=(np.diag(np.asarray(support.loss)*self.omega) if support.damping_matrix is None
+                            else np.array(support.damping_matrix,dtype=float))
+        # Compatibility for historical diagonal fixtures only. All physical
+        # forces and heat below use board_damping, including its mutual terms.
+        self.viscous=np.diag(self.board_damping).copy()
         n=np.arange(1,self.nt+1)
         self.cross_vector=wire.linear_density*wire.length*(-1.)**(n+1)/(n*np.pi*np.sqrt(wire.modal_mass))
         self.cross=np.zeros((self.ns,self.nb));self.cross[self.sv]=self.cross_vector[:,None]*self.phi
@@ -66,7 +79,7 @@ class MovingBridge:
         self.transform[:self.ns,self.sb]=-self.cross@self.board_transform
         self.transform[self.sb,self.sb]=self.board_transform
         self.inverse_transform=np.linalg.inv(self.transform)
-        damping_z=np.zeros((self.size,self.size));damping_z[self.sb,self.sb]=np.diag(self.viscous)
+        damping_z=np.zeros((self.size,self.size));damping_z[self.sb,self.sb]=self.board_damping
         self.damping=self.transform.T@damping_z@self.transform
         self.damping=(self.damping+self.damping.T)/2
 
@@ -137,7 +150,7 @@ class MovingBridge:
         total=self.energy(Q,P);string_e=total-board_e
         return dict(string_energy_j=string_e,support_energy_j=board_e,string_kinetic_j=string_k,
                     bridge_displacement_m=b,bridge_velocity_m_s=bd,
-                    support_loss_w=float(np.dot(self.viscous,zdot[self.sb]**2)),total_j=total)
+                    support_loss_w=float(zdot[self.sb]@self.board_damping@zdot[self.sb]),total_j=total)
 
 
 class BridgeHammer(HammerString):
@@ -165,10 +178,10 @@ class BridgeHammer(HammerString):
         elastic=core.wire.tension/core.wire.length*b
         if core.nonlinear:elastic+=core.wire.axial_rigidity/core.wire.length*np.dot(core.base.weight,strain*vx)
         reaction=self.lift_contact*force-elastic-float(core.cross_vector@za[core.sv])-core.lift_mass*ba
-        intrinsic=za[core.sb]+core.omega**2*z[core.sb]+core.viscous*zd[core.sb]
+        intrinsic=za[core.sb]+core.omega**2*z[core.sb]+core.board_damping@zd[core.sb]
         residual=intrinsic-core.phi*reaction
         board_power=float(zd[core.sb]@(za[core.sb]+core.omega**2*z[core.sb]))
-        loss=float(np.dot(core.viscous,zd[core.sb]**2))
+        loss=float(zd[core.sb]@core.board_damping@zd[core.sb])
         return dict(reaction_n=float(reaction),power_into_support_w=float(reaction*bd),support_energy_rate_w=board_power,
                     support_loss_w=loss,force_equation_residual=float(np.linalg.norm(residual)),
                     power_residual_w=float(reaction*bd-board_power-loss))

@@ -217,6 +217,11 @@ los diagnósticos también deben usar `C_board @ v` y `v.T @ C_board @ v`.
 El coast exponencial ya opera con una matriz `Db`, pero la construcción del
 soporte y esos balances deben generalizarse antes de aceptar la nueva tabla.
 
+Actualización: esa preparación mecánica se implementa y mide en
+[pérdidas proyectadas completas](RESULTADOS-P6-perdidas-proyectadas.md).
+Pasan equivalencia de coordenadas y contacto mecánico inicial de las 606;
+sigue pendiente construir e integrar su carga causal nueva de aire.
+
 Se conservarán estos datos pequeños y los factores necesarios una sola vez,
 con presupuesto de memoria/disco antes de construir un factor grande.
 Siguen abiertos ambas caras/borde, identificación del instrumento, unísono,

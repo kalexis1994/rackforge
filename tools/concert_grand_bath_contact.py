@@ -55,7 +55,7 @@ class BathContact:
         old=self.system.interface(q,v,acceleration)
         z=core.physical(q[:-1]);zd=core.physical(v[:-1]);za=core.physical(acceleration[:-1])
         force=self.coupling**2*(self.bath.tail_mass@za[core.sb])+self.coupling*(self.bath.projection.T@p)
-        residual=za[core.sb]+core.omega**2*z[core.sb]+core.viscous*zd[core.sb]+force-core.phi*old['reaction_n']
+        residual=za[core.sb]+core.omega**2*z[core.sb]+core.board_damping@zd[core.sb]+force-core.phi*old['reaction_n']
         power=float(zd[core.sb]@force)
         return dict(reaction_n=old['reaction_n'],power_into_board_w=old['power_into_support_w'],
             power_into_air_w=power,force_residual=float(np.linalg.norm(residual)),

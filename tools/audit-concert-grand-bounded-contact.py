@@ -7,6 +7,7 @@ import scipy
 from concert_grand_surface_impedance import RectangularLoad
 from concert_grand_bounded_air import BoundedAir
 from concert_grand_bounded_contact import BoundedContact
+from concert_grand_air_coefficients import load_prefix
 
 spec=spec_from_file_location('bounded_bridge_audit',Path(__file__).with_name('audit-concert-grand-moving-bridge.py'))
 bridge=module_from_spec(spec);spec.loader.exec_module(bridge)
@@ -134,6 +135,9 @@ def basis_contrast(args,report):
     previous=json.loads(args.basis_reference.read_text());current=report['provenance'];old=previous['provenance']
     if any(current[k]!=old[k] for k in ['asset_sha256','input_hashes','incident_speed_m_s','felt','wire','transverse','axial']):
         raise ValueError('basis comparison must preserve physical/contact inputs')
+    legacy=dict(cells=[128,96],factor_rate_hz=64000.)
+    if current.get('acoustic_discretization',legacy)!=old.get('acoustic_discretization',legacy):
+        raise ValueError('basis comparison must preserve acoustic discretization')
     if current['support']['frequencies_hz'][:old['support']['modes']]!=old['support']['frequencies_hz']:
         raise ValueError('ordered nested structural basis required')
     changes={}
@@ -171,7 +175,7 @@ def summarize(args):
             reiterated_refinement=bool([c for c in comparisons if c['left'].endswith('-Relaunch')]) and all(c['passed'] for c in comparisons if c['left'].endswith('-Relaunch'))),
         scope=f'C4/124 vertical one-string nonlinear SI contact, {provenance["support"]["modes"]} P2 modes and {provenance["acoustic_states"]}-state passive air; prescribed separated-head relaunch, not key action or audio.')
     report['contact_implementation_commit']='a526d50'
-    source_names=['audit-concert-grand-bounded-contact.py','concert_grand_bounded_contact.py',
+    source_names=['audit-concert-grand-bounded-contact.py','concert_grand_air_coefficients.py','concert_grand_bounded_contact.py',
         'concert_grand_bounded_air.py','concert_grand_rational_air.py','concert_grand_acoustic_bath.py','concert_grand_surface_impedance.py',
         'concert_grand_moving_bridge.py','concert_grand_coupled_contact.py','concert_grand_contact_study.py',
         'concert_grand_nonlinear_string.py','concert_grand_orthotropic_plate.py',
@@ -230,11 +234,12 @@ def summarize(args):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['input','asset','coefficients','mass','output']:p.add_argument('--'+name,type=Path,required=True)
-    p.add_argument('--phase',choices=['run','summary'],default='run');p.add_argument('--transverse',type=int,default=72)
+    p.add_argument('--phase',choices=['run','summary','preflight'],default='run');p.add_argument('--transverse',type=int,default=72)
     p.add_argument('--rates',type=int,nargs='+',default=[384000,768000]);p.add_argument('--relaunch',action='store_true');p.add_argument('--reference',type=Path)
     p.add_argument('--observer-batch',type=int,default=64)
     p.add_argument('--observer-probe-steps',type=int,default=0)
     p.add_argument('--cutoff',type=float,default=800.)
+    p.add_argument('--cells',type=int,nargs=2,default=[128,96])
     p.add_argument('--baseline-commit',default='919a3c5')
     p.add_argument('--load-report',type=Path)
     p.add_argument('--basis-reference',type=Path);p.add_argument('--basis-data',type=Path)
@@ -242,31 +247,47 @@ def main():
     p.add_argument('--reports',type=Path);p.add_argument('--summary',type=Path)
     args=p.parse_args()
     if not np.isfinite(args.cutoff) or args.cutoff<=0:p.error('positive finite cutoff required')
+    if min(args.cells)<2:p.error('at least two surface cells per axis required')
     if bool(args.basis_reference)!=bool(args.basis_data):p.error('--basis-reference and --basis-data required together')
     if args.observer_probe_steps<0 or (args.observer_probe_steps and not args.relaunch):p.error('live observer probe requires relaunch and nonnegative step count')
     suffix='' if args.cutoff==800 else f'-{args.cutoff:g}'
     args.reports=args.reports or documents/f'medidas-P6-contacto-compacto{suffix}'
     args.summary=args.summary or documents/f'resumen-P6-contacto-compacto{suffix}.json'
-    args.output.mkdir(parents=True,exist_ok=True);args.reports.mkdir(parents=True,exist_ok=True);args.summary.parent.mkdir(parents=True,exist_ok=True)
+    if args.phase!='preflight':
+        args.output.mkdir(parents=True,exist_ok=True);args.reports.mkdir(parents=True,exist_ok=True);args.summary.parent.mkdir(parents=True,exist_ok=True)
     if args.phase=='summary':summarize(args);return
     support,metadata=bridge.p2_support(args.asset,60,args.cutoff);system,speed=bridge.load(args.input,60,124,support,args.transverse)
     with np.load(args.asset) as d:
         mask=d['frequency']<=args.cutoff;model=dict(panel=json.loads(str(d['panel'])),nx=int(d['nx']),ny=int(d['ny']),boundary=str(d['boundary']),vectors=d['vectors'][:,mask])
-    surface=RectangularLoad.from_plate(model,128,96);x=surface.shapes.reshape(-1,surface.modes)
+    surface=RectangularLoad.from_plate(model,*args.cells);x=surface.shapes.reshape(-1,surface.modes)
     limit=surface.density*surface.speed*surface.hx*surface.hy*x.T@x
-    with np.load(args.mass) as d:mass=d['static_mass']
     with np.load(args.coefficients) as d:
-        if 'frequency_hz' in d and not np.array_equal(d['frequency_hz'],np.asarray(support.frequency)):raise ValueError('coefficient modal order does not match selected physical basis')
-        if 'high_limit' in d and np.linalg.norm(d['high_limit']-limit)>1e-10*np.linalg.norm(limit):raise ValueError('coefficient high limit does not match physical surface')
-        if 'static_mass' in d and np.linalg.norm(d['static_mass']-mass)>1e-10*np.linalg.norm(mass):raise ValueError('coefficient static mass does not match mass source')
-        air=BoundedAir(d['factor'],float(d['factor_rate']),mass,limit)
+        ordered='frequency_hz' in d
+        if not ordered:
+            factor=d['factor'];rate=float(d['factor_rate']);parent_modes=factor.shape[2]
+            selected_mass=d['static_mass'] if 'static_mass' in d else None
+            selected_limit=d['high_limit'] if 'high_limit' in d else None
+    if ordered:factor,rate,selected_mass,selected_limit,parent_modes=load_prefix(args.coefficients,support.frequency)
+    if args.mass.resolve()==args.coefficients.resolve() and selected_mass is not None:mass=selected_mass
+    else:
+        with np.load(args.mass) as d:
+            mass=d['static_mass']
+            if 'frequency_hz' in d:
+                if not np.array_equal(d['frequency_hz'][:surface.modes],np.asarray(support.frequency)):raise ValueError('mass source modal order changed')
+                mass=mass[:surface.modes,:surface.modes]
+    if mass.shape!=(surface.modes,surface.modes) or factor.shape[2]!=surface.modes:raise ValueError('selected mass/factor dimensions do not match physical support')
+    if selected_limit is not None and np.linalg.norm(selected_limit-limit)>1e-10*np.linalg.norm(limit):raise ValueError('coefficient high limit does not match physical surface')
+    if selected_mass is not None and np.linalg.norm(selected_mass-mass)>1e-10*np.linalg.norm(mass):raise ValueError('coefficient static mass does not match mass source')
+    air=BoundedAir(factor,rate,mass,limit);del factor
     if args.load_report:
         load=json.loads(args.load_report.read_text())
-        if not load['all_load_gates_passed'] or not all(load['gates'].values()) or load['cutoff_hz']!=args.cutoff or load['modes']!=air.modes or load['coefficient_sha256']!=digest(args.coefficients):raise ValueError('verified frozen load required')
+        if not load['all_load_gates_passed'] or not all(load['gates'].values()) or load['cutoff_hz']!=args.cutoff or load['modes']!=air.modes or load['cells']!=args.cells or load['factor_rate_hz']!=rate or load['coefficient_sha256']!=digest(args.coefficients):raise ValueError('verified frozen load with matched discretization required')
     coupled=BoundedContact(system,air)
     provenance=dict(asset_sha256=digest(args.asset),coefficient_sha256=digest(args.coefficients),mass_source_sha256=digest(args.mass),support=metadata,
         input_hashes={path.name:digest(path) for path in args.input.glob('*.csv')},incident_speed_m_s=speed,felt=vars(system.felt),wire=vars(system.string.wire),
         transverse=args.transverse,axial=2*args.transverse,acoustic_states=air.states,criteria=CRITERIA,
+        acoustic_discretization=dict(cells=args.cells,factor_rate_hz=rate),
+        coefficient_selection=dict(parent_modes=parent_modes,selected_modes=air.modes),
         mechanical_coordinates='Mixed-mass normalized; C maps to physical P2 modes. No instantaneous air mass.',
         environment=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__,blas_threads_per_process=1),
         observer_batch_size=args.observer_batch,
@@ -276,6 +297,8 @@ def main():
         old=json.loads(args.basis_reference.read_text())
         if not all(old['gates'].values()) or any(provenance[k]!=old['provenance'][k] for k in ['asset_sha256','input_hashes','incident_speed_m_s','felt','wire','transverse','axial']):
             raise ValueError('validated reference with unchanged physical inputs required')
+        if old['provenance'].get('acoustic_discretization',dict(cells=[128,96],factor_rate_hz=64000.))!=provenance['acoustic_discretization']:
+            raise ValueError('matched acoustic discretization required for basis reference')
         for rate in args.rates:
             for phase in ['Cold','Relaunch'] if args.relaunch else ['Cold']:
                 key=f'T{args.transverse}-{rate}-{phase}'
@@ -286,6 +309,11 @@ def main():
             if (args.reports/(key+'.json')).exists() or (args.output/(key+'.npz')).exists():raise ValueError('measured case already exists; preserve it')
     path=args.reports/'provenance.json'
     if path.exists() and json.loads(path.read_text())!=provenance:raise ValueError('frozen contact inputs changed; use a new output')
+    if args.phase=='preflight':
+        energy=coupled.energy(coupled.initial_state(speed))
+        print('preflight',json.dumps(dict(provenance=provenance,initial_energy_j=energy['total_j'],
+            scope='Initialization and frozen-load compatibility only; no time trajectory or contact gate measured.')),flush=True)
+        return
     write(path,provenance)
     for rate in args.rates:
         key=f'T{args.transverse}-{rate}-Cold'

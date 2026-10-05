@@ -13,6 +13,7 @@ from concert_grand_geometric_memory import GeometricMemory
 from concert_grand_rational_air import surface_factor_sparse
 from concert_grand_bounded_air import BoundedAir
 from concert_grand_orthotropic_plate import shape
+from concert_grand_air_coefficients import load_prefix
 
 CRITERIA=dict(factor_subspace=1e-10,mass_subspace=1e-10,mass_limit=1e-10,
     geometric_reference=1e-5,low_ZRX=.02,laplace=.02,high_Z=.02,
@@ -51,9 +52,18 @@ def transform(memory,points,rate=128000,quadrature=16):
 
 
 def build(args):
-    if args.coefficients.exists() or args.report.exists():raise ValueError('preserve existing experiment; choose new destinations')
+    if (not args.parent_coefficients and args.coefficients.exists()) or args.report.exists():raise ValueError('preserve existing experiment; choose new destinations')
     model=model_from_asset(args.asset,args.cutoff);surface=RectangularLoad.from_plate(model,*args.cells)
-    started=time.monotonic();H=surface_factor_sparse(surface,args.factor_rate,96,96)
+    started=time.monotonic();reuse=None
+    if args.parent_coefficients:
+        parent=json.loads(args.parent_report.read_text())
+        if not parent['all_load_gates_passed'] or not all(parent['gates'].values()) or parent['cells']!=args.cells or parent['factor_rate_hz']!=args.factor_rate or parent['inputs'][str(args.asset)]!=digest(args.asset) or parent['coefficient_sha256']!=digest(args.parent_coefficients):
+            raise ValueError('verified parent with matched asset and discretization required')
+        H,rate,parent_mass,parent_limit,parent_modes=load_prefix(args.parent_coefficients,model['frequency'])
+        if rate!=args.factor_rate or parent_modes<=surface.modes:raise ValueError('strictly larger parent at matched factor rate required')
+        reuse=dict(path=str(args.parent_coefficients),parent_report_sha256=digest(args.parent_report),parent_modes=parent_modes,selected_modes=surface.modes,
+            selection='Physical ordered prefix of factor/static mass/high limit; passive completion rebuilt independently; no factor copy saved.')
+    else:H=surface_factor_sparse(surface,args.factor_rate,96,96)
     with np.load(args.control) as data:old=data['factor'];old_rate=float(data['factor_rate'])
     if old_rate!=64000 or old.shape[2]!=35:raise ValueError('frozen 64k/96x96 35-mode control required')
     refined=args.cells!=[128,96] or args.factor_rate!=old_rate
@@ -64,23 +74,27 @@ def build(args):
     equivalence=rel(H[:,:,:35],old);del old
     mass=surface.added_mass_static(8);x=surface.shapes.reshape(-1,surface.modes)
     limit=surface.density*surface.speed*surface.hx*surface.hy*x.T@x
+    parent_error=dict(mass_relative=rel(parent_mass,mass),limit_relative=rel(parent_limit,limit)) if reuse else None
     with np.load(args.mass_control) as data:archived_mass=data['static_mass']
     archived_mass_change=rel(mass[:35,:35],archived_mass)
     mass_error=rel(mass[:35,:35],small.added_mass_static(8) if refined else archived_mass)
     report=dict(baseline_commit=args.baseline_commit,scope='Expanded intrinsic P2 modes, one baffled face; not a complete piano or listening result.',
         cutoff_hz=args.cutoff,modes=surface.modes,frequency_hz=model['frequency'].tolist(),cells=args.cells,factor_rate_hz=args.factor_rate,angular=[96,96],
         subspace_control='Independent 35-coordinate construction at the candidate spatial/temporal resolution' if refined else 'Archived unchanged 35-mode factor and mass',
+        coefficient_reuse=reuse,parent_target_checks=parent_error,
         inputs={str(path):digest(path) for path in [args.asset,args.control,args.mass_control,args.contact,args.memory_control]},criteria=CRITERIA,
         environment=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__,blas_threads=1),
         build=dict(taps=len(H),outputs=H.shape[1],factor_subspace_relative=equivalence,mass_subspace_relative=mass_error,
             archived_control_mass_relative_change=archived_mass_change,
             dc_relative=float(np.linalg.norm(H.sum(axis=0))/np.linalg.norm(H)),seconds=time.monotonic()-started),gates={})
     report['gates']['subspace']=equivalence<CRITERIA['factor_subspace'] and mass_error<CRITERIA['mass_subspace']
+    if reuse:report['gates']['subspace'] &= max(parent_error.values())<CRITERIA['mass_limit']
     if not report['gates']['subspace']:
         write(args.report,report);raise AssertionError('wider construction changes frozen subspace')
     args.coefficients.parent.mkdir(parents=True,exist_ok=True)
-    np.savez_compressed(args.coefficients,factor=H,factor_rate=args.factor_rate,static_mass=mass,high_limit=limit,
-        frequency_hz=model['frequency'],cutoff_hz=args.cutoff)
+    if not reuse:
+        np.savez_compressed(args.coefficients,factor=H,factor_rate=args.factor_rate,static_mass=mass,high_limit=limit,
+            frequency_hz=model['frequency'],cutoff_hz=args.cutoff)
     report['coefficient_sha256']=digest(args.coefficients);write(args.report,report)
     print('build',json.dumps(report['build']),flush=True)
 
@@ -95,9 +109,11 @@ def verify(args):
         report.pop(key,None)
     write(args.report,report)
     model=model_from_asset(args.asset,args.cutoff);surface=RectangularLoad.from_plate(model,*args.cells)
-    with np.load(args.coefficients) as data:
-        factor=data['factor'];report['build']['dc_relative']=float(np.linalg.norm(factor.sum(axis=0))/np.linalg.norm(factor))
-        air=BoundedAir(factor,float(data['factor_rate']),data['static_mass'],data['high_limit']);mass=data['static_mass'];limit=data['high_limit']
+    factor,rate,mass,limit,parent_modes=load_prefix(args.coefficients,model['frequency'])
+    if args.parent_coefficients:
+        if report['coefficient_reuse']['parent_report_sha256']!=digest(args.parent_report) or report['coefficient_reuse']['parent_modes']!=parent_modes:raise ValueError('frozen parent report/order changed')
+    report['build']['dc_relative']=float(np.linalg.norm(factor.sum(axis=0))/np.linalg.norm(factor))
+    air=BoundedAir(factor,rate,mass,limit)
     del factor
     report['completion']=dict(states=air.states,relaxation_time_s=air.relaxation.tau[[0,-1]].tolist(),
         mass_relative=rel(air.static_mass(),mass),limit_relative=rel(air.high_limit(),limit))
@@ -189,7 +205,7 @@ def verify(args):
         storage.append(dict(dt_s=dt,budget_relative=abs(after-before-dt*(velocity@force-power))/max(before,abs(dt*velocity@force),1e-30),radiation_power_w=power))
     report['storage']=storage;report['gates']['energy']=all(row['budget_relative']<CRITERIA['energy'] and row['radiation_power_w']>=0 for row in storage)
     report['verification_s']=time.monotonic()-started;report['all_load_gates_passed']=all(report['gates'].values());report['decision']='Load verification only: wider coupled nonlinear contacts, observation and listening still required; no factory selection.'
-    report['source_sha256']={name:digest(Path(__file__).with_name(name)) for name in ['audit-concert-grand-extended-board.py','concert_grand_surface_impedance.py','concert_grand_geometric_memory.py','concert_grand_rational_air.py','concert_grand_bounded_air.py']}
+    report['source_sha256']={name:digest(Path(__file__).with_name(name)) for name in ['audit-concert-grand-extended-board.py','concert_grand_air_coefficients.py','concert_grand_surface_impedance.py','concert_grand_geometric_memory.py','concert_grand_rational_air.py','concert_grand_bounded_air.py']}
     report['measurement_sha256']={name:digest(args.output/name) for name in ['transfer.npz','memory.npz']}
     write(args.report,report);print('gates',json.dumps(report['gates']),flush=True)
 
@@ -202,12 +218,15 @@ def main():
     p.add_argument('--cells',type=int,nargs=2,default=[128,96])
     p.add_argument('--spatial-cells',type=int,nargs=2,default=[192,144])
     p.add_argument('--factor-rate',type=int,default=64000)
+    p.add_argument('--parent-coefficients',type=Path)
+    p.add_argument('--parent-report',type=Path)
     p.add_argument('--report',type=Path,default=Path(__file__).resolve().parents[1]/'docs'/'concert-grand-physics-roadmap-2026-10-02'/'resumen-P6-tabla-1200.json')
     args=p.parse_args()
+    if bool(args.parent_coefficients)!=bool(args.parent_report):p.error('parent coefficients and verified parent report required together')
     if min(args.cells+args.spatial_cells)<2 or args.factor_rate<=0 or any(b<=a for a,b in zip(args.cells,args.spatial_cells)):p.error('positive factor rate and strictly finer spatial control required')
     args.output.mkdir(parents=True,exist_ok=True)
     modes=len(model_from_asset(args.asset,args.cutoff)['frequency'])
-    args.coefficients=args.output/f'Wave{args.factor_rate}-Cells{args.cells[0]}x{args.cells[1]}-Angle96x96-Modes{modes}.npz'
+    args.coefficients=args.parent_coefficients or args.output/f'Wave{args.factor_rate}-Cells{args.cells[0]}x{args.cells[1]}-Angle96x96-Modes{modes}.npz'
     if args.phase=='build':build(args)
     else:verify(args)
 

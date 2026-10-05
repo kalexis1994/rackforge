@@ -2292,6 +2292,24 @@ Since spatial/temporal refinement also changes common-mode loading, both
 resolution before isolating structural-basis pressure differences. Sustain,
 note/velocity coverage, listening and runtime reduction remain pending.
 
+The [matched-resolution 59-mode load audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-tabla-1200-refinada.md)
+now reuses the physical prefix of the archived 90-mode wave factor and
+mass/resistance targets, without another large coefficient file. Passive
+completion is rebuilt at dimension 59, not sliced from the 90-mode state
+realization. Independent surface targets and the control subspace match.
+All eleven load gates pass at the same 192x144-cell / 128 kHz resolution:
+maximum low Z/R/X error is 0.191491%, high complex error 0.599796%, finer-grid
+error 0.590889%, and spatial reference change 0.276164%. Distributed force
+RMS errors are 0.161068% / 0.321370%; the frozen C4 control gives 1.602188%
+/ 1.603161%. Live-state budget error is at most 6.44e-16 with 38232 states.
+Twenty targeted tests pass, including four physical-prefix checks. Contact
+initializations for both bases pass with identical 0.04693371904404984 J
+input energy, while recording/requiring matched acoustic discretization.
+These preflights advance no time and measure no contact trajectories.
+The next step is the cold/reiterated 384/768 kHz contact banks, followed by
+matched SI observation generalized to the refined source grid; factory,
+sustain and listening remain unchanged/pending.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

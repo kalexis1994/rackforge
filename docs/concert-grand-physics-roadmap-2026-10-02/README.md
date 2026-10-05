@@ -46,7 +46,7 @@ Los datos del ensayo de contacto compacto en curso permanecen en `SHARED`.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Carga de 90 modos bajo 1500 Hz verificada tras refinar celdas a 192×144 y factor a 128 kHz. Contactos/presión siguen medidos para 35/59 modos con la resolución anterior; hay que recalcular ambas bases a resolución común. Faltan convergencia estructural/banco completo, fuente sostenida, pérdidas y ambas caras/borde. | Puerto de 90 modos verificado; contactos ampliados y selección audible pendientes |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 modos verificadas a resolución común 192×144/128 kHz; ambas inicializaciones de contacto pasan. Se reutiliza un factor padre, sin copia adicional. Contactos/presión temporales siguen medidos con resolución anterior; faltan los nuevos bancos, convergencia estructural/completa, fuente sostenida, pérdidas y ambas caras/borde. | Cargas e inicializaciones comparables; nuevas trayectorias y selección audible pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -839,3 +839,31 @@ SI. Siguen abiertos sostenido, banco de notas/intensidades, identificación,
 ambas caras/borde, unísono, P4, graves, acción/pedal y coste de ejecución.
 Informes únicos en el repo, datos únicos en las rutas SHARED del informe,
 sin WAV ni copias de fuentes.
+
+### 2026-10-05 — P6: carga de 59 a resolución común e inicializaciones
+
+La corrección numérica de 90 modos quedó en **90c7cff**, por pedido del usuario.
+[Resultados y reproducción](RESULTADOS-P6-tabla-1200-refinada.md). Se seleccionan
+las primeras 59 columnas/targets del archivo padre de 90 y se reconstruye el
+completado pasivo en 59 coordenadas. No se duplica el factor ni se recortan
+estados de la carga mayor. Los targets coinciden con la superficie independiente
+y el subespacio de control coincide exactamente.
+
+Pasan los once controles de carga con los umbrales previos. Máximo Z/R/X
+bajo 1200 Hz: 0,191491%; complejo alto: 0,599796%; contra grilla fina:
+0,590889%; cambio espacial de referencia: 0,276164%. Fuerza distribuida RMS:
+0,161068% / 0,321370%; FrozenC4: 1,602188% / 1,603161%. Balance de estados
+vivos máximo: 6,44e−16. El puerto tiene 38232 estados.
+
+El banco de contacto acepta la grilla refinada y la selección del archivo
+padre, valida su carga y rechaza comparar bases con resoluciones diferentes.
+Los preflights de ambas bases pasan con energía inicial idéntica
+0,04693371904404984 J; comprueban inicialización, sin avanzar tiempo ni escribir
+trayectorias. Pasan 20 tests dirigidos, incluidos cuatro nuevos de selección.
+
+Siguiente: cuatro contactos temporales de cada base a 384/768 kHz, balances,
+continuidad y observador vivo; después presión SI con la superficie refinada.
+El observador anterior aún requiere generalizar su base/grilla antes de usar
+estos bancos. Paquete sin cambios; sólo dos NPZ nuevos de medición en
+`C:\SHARED\Fisica-pendiente-2026-10-05\P6-tabla-1200-refinada`. Informes y
+fuentes tienen única copia en el repo.

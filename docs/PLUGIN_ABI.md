@@ -434,3 +434,17 @@ and `prepare` among them, runs on a thread of the host's with a large stack
 it is made and prepared. `rackforge-plugin-sdk` exports the table from the same
 `export_processor!` that exports the component when the crate is built as a
 `cdylib` for a native target.
+
+A plugin's CI proves the "same plugin" for each build it can run, and packs
+them all into the one package:
+
+```text
+rackforge-core compare-native PACKAGE_DIRECTORY LIBRARY
+rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin
+  --native windows-x86_64=plugin.dll --native linux-aarch64=libplugin.so
+```
+
+`compare-native` plays every program the component publishes through both
+forms and fails on the first sample, or the first saved state, that differs.
+`pack-wasm` stores each build at `native/<platform>/` and writes the
+`[binaries]` table; it refuses a library that does not export the entry.

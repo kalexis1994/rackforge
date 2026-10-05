@@ -74,8 +74,8 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
             uninstall(plugin_id, store_root)
         }
         [command, package, output] if command == "pack" => pack(package, output),
-        [command, package, component, output] if command == "pack-wasm" => {
-            pack_wasm(package, component, output)
+        [command, package, component, output, natives @ ..] if command == "pack-wasm" => {
+            pack_wasm(package, component, output, &parse_native_builds(natives)?)
         }
         _ => Err(usage().into()),
     }
@@ -250,7 +250,56 @@ fn pack(package_path: &str, output_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn pack_wasm(package_path: &str, component_path: &str, output_path: &str) -> Result<(), String> {
+/// The `--native PLATFORM=PATH` pairs after `pack-wasm`'s arguments, in
+/// platform order, each platform once.
+fn parse_native_builds(arguments: &[String]) -> Result<Vec<(String, PathBuf)>, String> {
+    let mut builds = std::collections::BTreeMap::new();
+    let mut arguments = arguments.iter();
+    while let Some(argument) = arguments.next() {
+        if argument != "--native" {
+            return Err(format!("pack-wasm does not take {argument:?}"));
+        }
+        let pair = arguments.next().ok_or("--native needs PLATFORM=PATH")?;
+        let (platform, path) = pair.split_once('=').ok_or("--native needs PLATFORM=PATH")?;
+        // `<os>-<arch>` as Rust names them: what a host's
+        // `host_platform_key()` will look the build up by.
+        let valid = platform.split_once('-').is_some_and(|(os, arch)| {
+            [os, arch].iter().all(|part| {
+                !part.is_empty()
+                    && part
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            })
+        });
+        if !valid {
+            return Err(format!(
+                "{platform:?} is not a platform key such as linux-aarch64"
+            ));
+        }
+        if builds
+            .insert(platform.to_owned(), PathBuf::from(path))
+            .is_some()
+        {
+            return Err(format!("--native names {platform} twice"));
+        }
+    }
+    Ok(builds.into_iter().collect())
+}
+
+/// The symbol every native build of a portable processor exports.
+const NATIVE_ENTRY_SYMBOL: &[u8] = b"rackforge_portable_native_entry_v1";
+
+/// Packs a package with its component as built and, optionally, native builds
+/// of the same processor, each stored at `native/<platform>/<file>` and listed
+/// under `[binaries]` in the packed manifest. Whether a build is the same
+/// plugin as the component is not checked here but by `rackforge-core
+/// compare-native`, which a plugin's CI runs for each build it can execute.
+fn pack_wasm(
+    package_path: &str,
+    component_path: &str,
+    output_path: &str,
+    natives: &[(String, PathBuf)],
+) -> Result<(), String> {
     let package = fs::canonicalize(package_path).map_err(|error| error.to_string())?;
     let manifest_path = package.join("rackforge-plugin.toml");
     if !package.is_dir() || !manifest_path.is_file() {
@@ -279,10 +328,58 @@ fn pack_wasm(package_path: &str, component_path: &str, output_path: &str) -> Res
     let component_bytes = optimized_for_packing(component_bytes)?;
     warn_about_component(&component_bytes);
 
+    // The native builds, read and checked before anything is written.
+    if !natives.is_empty() && !manifest.binaries.is_empty() {
+        return Err("the manifest already lists native builds; pack-wasm writes them".into());
+    }
+    let mut native_files = Vec::new();
+    for (platform, path) in natives {
+        let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
+        if !bytes
+            .windows(NATIVE_ENTRY_SYMBOL.len())
+            .any(|window| window == NATIVE_ENTRY_SYMBOL)
+        {
+            return Err(format!(
+                "{} does not export the portable native entry: build the plugin with an SDK that does",
+                path.display()
+            ));
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("{} has no usable file name", path.display()))?;
+        native_files.push((platform, format!("native/{platform}/{name}"), bytes));
+    }
+    let manifest_text = if native_files.is_empty() {
+        manifest_text
+    } else {
+        let mut text = manifest_text;
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(
+            "\n# The same processor built for each platform, added when the package was\n\
+             # packed; a host runs one in place of the component only where it may.\n\
+             [binaries]\n",
+        );
+        for (platform, archived, _) in &native_files {
+            text.push_str(&format!("{platform} = \"{archived}\"\n"));
+        }
+        let packed: PluginManifest =
+            toml::from_str(&text).map_err(|error| format!("packed manifest: {error}"))?;
+        packed
+            .validate()
+            .map_err(|error| format!("packed manifest: {error}"))?;
+        text
+    };
+
     let declared_path = PathBuf::from(&declared.path);
     let mut files = Vec::new();
     collect_files(&package, &package, &mut files)?;
     files.retain(|relative| relative != &declared_path);
+    if files.iter().any(|relative| relative.starts_with("native")) {
+        return Err("the package directory has a native/ of its own; pack-wasm writes it".into());
+    }
     files.sort();
     let output = OpenOptions::new()
         .create_new(true)
@@ -298,6 +395,12 @@ fn pack_wasm(package_path: &str, component_path: &str, output_path: &str) -> Res
         archive
             .start_file(name, options)
             .map_err(|error| error.to_string())?;
+        if relative == Path::new("rackforge-plugin.toml") {
+            archive
+                .write_all(manifest_text.as_bytes())
+                .map_err(|error| error.to_string())?;
+            continue;
+        }
         let mut source = File::open(package.join(&relative)).map_err(|error| error.to_string())?;
         std::io::copy(&mut source, &mut archive).map_err(|error| error.to_string())?;
     }
@@ -307,6 +410,23 @@ fn pack_wasm(package_path: &str, component_path: &str, output_path: &str) -> Res
     archive
         .write_all(&component_bytes)
         .map_err(|error| error.to_string())?;
+    for (platform, archived, bytes) in &native_files {
+        // Executable where the platform reads the bit.
+        let executable = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Deflated)
+            .unix_permissions(0o755);
+        archive
+            .start_file(archived.as_str(), executable)
+            .map_err(|error| error.to_string())?;
+        archive
+            .write_all(bytes)
+            .map_err(|error| error.to_string())?;
+        println!(
+            "RFPLUGIN_NATIVE platform={platform} path={archived} bytes={} sha256={}",
+            bytes.len(),
+            hex_digest(&Sha256::digest(bytes))
+        );
+    }
     archive.finish().map_err(|error| error.to_string())?;
     let bytes = fs::read(output_path).map_err(|error| error.to_string())?;
     println!(
@@ -436,5 +556,52 @@ fn hex_digest(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store install-local PACKAGE.rfplugin STORE_ROOT [--official]\n  rackforge-store enable PLUGIN_ID STORE_ROOT\n  rackforge-store disable PLUGIN_ID STORE_ROOT\n  rackforge-store uninstall PLUGIN_ID STORE_ROOT\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin"
+    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store install-local PACKAGE.rfplugin STORE_ROOT [--official]\n  rackforge-store enable PLUGIN_ID STORE_ROOT\n  rackforge-store disable PLUGIN_ID STORE_ROOT\n  rackforge-store uninstall PLUGIN_ID STORE_ROOT\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin [--native PLATFORM=LIBRARY]..."
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arguments(text: &[&str]) -> Vec<String> {
+        text.iter().map(|argument| (*argument).to_owned()).collect()
+    }
+
+    #[test]
+    fn native_builds_are_named_by_platform_once_each() {
+        let builds = parse_native_builds(&arguments(&[
+            "--native",
+            "windows-x86_64=build/plugin.dll",
+            "--native",
+            "linux-aarch64=build/libplugin.so",
+        ]))
+        .unwrap();
+        assert_eq!(
+            builds,
+            vec![
+                (
+                    "linux-aarch64".to_owned(),
+                    PathBuf::from("build/libplugin.so")
+                ),
+                (
+                    "windows-x86_64".to_owned(),
+                    PathBuf::from("build/plugin.dll")
+                ),
+            ]
+        );
+        assert!(parse_native_builds(&[]).unwrap().is_empty());
+        for refused in [
+            &["--native"][..],
+            &["--native", "linux-aarch64"],
+            &["--native", "Linux-aarch64=x"],
+            &["--native", "linux=x"],
+            &["--native", "linux-aarch64=a", "--native", "linux-aarch64=b"],
+            &["--library", "x"],
+        ] {
+            assert!(
+                parse_native_builds(&arguments(refused)).is_err(),
+                "{refused:?}"
+            );
+        }
+    }
 }

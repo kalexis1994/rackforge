@@ -71,6 +71,7 @@ impl LoadedPlugin {
                     package,
                     resource_overrides,
                     data_root,
+                    Choice::Policy,
                 )?),
             })
         } else {
@@ -86,6 +87,35 @@ impl LoadedPlugin {
                 }),
             })
         }
+    }
+
+    /// Loads one named form of a portable package, whatever the store's
+    /// record says: for tools that hold a native build to its component.
+    ///
+    /// # Safety
+    ///
+    /// [`PortableForm::NativeBuild`] runs the library at its path in this
+    /// process, unsandboxed: the caller vouches for it.
+    pub unsafe fn load_portable_form(
+        package: &PluginPackage,
+        data_root: Option<&Path>,
+        form: PortableForm<'_>,
+    ) -> Result<Self> {
+        if package.manifest().portable_component().is_none() {
+            bail!("only a portable package has a component and native builds to compare");
+        }
+        let choice = match form {
+            PortableForm::Component => Choice::Component,
+            PortableForm::NativeBuild(path) => Choice::NativeBuild(path),
+        };
+        Ok(Self {
+            backend: LoadedBackend::Portable(PortableLoadedPlugin::load(
+                package,
+                &BTreeMap::new(),
+                data_root,
+                choice,
+            )?),
+        })
     }
 
     pub fn manifest(&self) -> &PluginManifest {
@@ -283,6 +313,34 @@ impl LoadedPlugin {
     }
 }
 
+/// A form of a portable package, named by a tool rather than chosen by the
+/// store's record (see [`LoadedPlugin::load_portable_form`]).
+pub enum PortableForm<'a> {
+    /// The `wasm-v1` component, in the sandbox.
+    Component,
+    /// The native build at this path.
+    NativeBuild(&'a Path),
+}
+
+/// Which form `PortableLoadedPlugin::load` runs.
+enum Choice<'a> {
+    /// What the store's record allows: see `native_build`.
+    Policy,
+    Component,
+    NativeBuild(&'a Path),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_named_native_build(path: &Path) -> Result<PortableModule> {
+    // SAFETY: forwarded from `LoadedPlugin::load_portable_form`.
+    unsafe { PortableModule::load_native_build(path) }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_named_native_build(_path: &Path) -> Result<PortableModule> {
+    bail!("the browser host runs no native builds")
+}
+
 /// Set to `off` to run every portable package's component, native builds or
 /// not: for comparing the two, and as a way out if a native build misbehaves
 /// on a machine.
@@ -375,6 +433,7 @@ impl PortableLoadedPlugin {
         package: &PluginPackage,
         resource_overrides: &BTreeMap<String, PathBuf>,
         data_root: Option<&Path>,
+        choice: Choice<'_>,
     ) -> Result<Self> {
         let component = package
             .manifest()
@@ -428,7 +487,12 @@ impl PortableLoadedPlugin {
             resources.insert(id, path);
         }
 
-        let module = match native_build(package) {
+        let native = match choice {
+            Choice::Policy => native_build(package),
+            Choice::Component => None,
+            Choice::NativeBuild(path) => Some(load_named_native_build(path)?),
+        };
+        let module = match native {
             Some(module) => module,
             None => {
                 let component_path = package

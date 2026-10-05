@@ -61,6 +61,11 @@ fn run() -> Result<()> {
                 &parameters,
             )
         }
+        "compare-native" if arguments.len() >= 3 => compare_native(
+            Path::new(&arguments[1]),
+            Path::new(&arguments[2]),
+            &arguments[3..],
+        ),
         "live" => run_live(&arguments[1..]),
         "resume" if arguments.len() == 2 => resume(Path::new(&arguments[1])),
         #[cfg(target_os = "linux")]
@@ -83,12 +88,202 @@ fn run() -> Result<()> {
              [--blocks COUNT] [--frames COUNT]\n  \
              rackforge-core live PACKAGE [--library FILE] [--resource ID=PATH]... \
              [--preset ID] [--data-root DIRECTORY]\n  \
+             rackforge-core compare-native PACKAGE LIBRARY [--seconds S] \
+             [--data-root DIRECTORY]\n  \
              rackforge-core resume STARTUP_CONFIG\n  \
              rackforge-core audio-list\n  \
              rackforge-core plugin-init DATA_ROOT PLUGIN_ID\n  \
              rackforge-core program-save DATA_ROOT RELATIVE_PATH DOCUMENT"
         ),
     }
+}
+
+/// Holds a native build to its package's component: every program the
+/// component publishes, played the same phrase through both, must come out
+/// the same bits, and leave the same state. Prints each program's
+/// fingerprint and both forms' cost; fails on the first sample that differs.
+///
+/// This is what lets a package carry native builds at all: a host runs one in
+/// place of the component only because they are the same plugin, and this
+/// is where a plugin's CI proves it for each platform it builds.
+fn compare_native(package_path: &Path, library: &Path, options: &[String]) -> Result<()> {
+    let mut seconds = 4.0_f64;
+    let mut data_root = None;
+    let mut options = options.iter();
+    while let Some(option) = options.next() {
+        match option.as_str() {
+            "--seconds" => {
+                seconds = options
+                    .next()
+                    .context("--seconds needs a value")?
+                    .parse()
+                    .context("--seconds must be a number")?;
+            }
+            "--data-root" => {
+                data_root = Some(PathBuf::from(
+                    options.next().context("--data-root needs a directory")?,
+                ));
+            }
+            other => bail!("compare-native does not take {other:?}"),
+        }
+    }
+    let package = PluginPackage::open(package_path)?;
+    let data_root = data_root.as_deref();
+    // SAFETY: an explicit command to run this library and this component.
+    let component = unsafe {
+        LoadedPlugin::load_portable_form(
+            &package,
+            data_root,
+            rackforge_core::PortableForm::Component,
+        )
+    }?;
+    let native = unsafe {
+        LoadedPlugin::load_portable_form(
+            &package,
+            data_root,
+            rackforge_core::PortableForm::NativeBuild(library),
+        )
+    }
+    .with_context(|| format!("loading native build {}", library.display()))?;
+
+    let (input_channels, output_channels) = match package.manifest().kind {
+        PluginKind::Effect => (2_u32, 2_u32),
+        PluginKind::Instrument => (0, 2),
+        PluginKind::MidiProcessor => bail!("a MIDI processor makes no sound to compare"),
+    };
+    const RATE: f64 = 48_000.0;
+    const FRAMES: u32 = 256;
+    let blocks = ((seconds * RATE) as usize).div_ceil(FRAMES as usize).max(1);
+    let events = comparison_phrase(blocks * FRAMES as usize);
+
+    let programs = component.create_instance()?.preset_catalog()?;
+    let mut program_ids: Vec<Option<String>> = programs
+        .presets
+        .iter()
+        .map(|preset| Some(preset.id.clone()))
+        .collect();
+    if program_ids.is_empty() {
+        program_ids.push(None);
+    }
+    let (mut component_time, mut native_time) = (0.0_f64, 0.0_f64);
+    for program in &program_ids {
+        let render = |plugin: &LoadedPlugin, time: &mut f64| -> Result<(Vec<u32>, Vec<u8>)> {
+            let mut instance = plugin.create_instance()?;
+            if let Some(program) = program {
+                instance.load_preset(program)?;
+            }
+            instance.activate(RATE, FRAMES, input_channels, output_channels)?;
+            let mut bits = Vec::with_capacity(blocks * (FRAMES * output_channels) as usize);
+            let mut output = vec![0.0_f32; (FRAMES * output_channels) as usize];
+            let mut input = vec![0.0_f32; (FRAMES * input_channels) as usize];
+            let mut next = 0;
+            for block in 0..blocks {
+                let start = block * FRAMES as usize;
+                for (index, sample) in input.iter_mut().enumerate() {
+                    // A fixed, broadband signal for an effect to work on.
+                    let n = (start * input_channels as usize + index) as u32;
+                    *sample = (n.wrapping_mul(2_654_435_761) >> 8) as f32 / (1 << 24) as f32 - 0.5;
+                }
+                let mut midi = Vec::new();
+                while next < events.len() && events[next].0 < start + FRAMES as usize {
+                    let (at, data) = events[next];
+                    midi.push(MidiEventV1 {
+                        frame: (at - start) as u32,
+                        length: 3,
+                        data,
+                    });
+                    next += 1;
+                }
+                let begun = Instant::now();
+                instance.process_interleaved(
+                    &input,
+                    &mut output,
+                    FRAMES,
+                    input_channels,
+                    output_channels,
+                    &midi,
+                    &[],
+                )?;
+                *time += begun.elapsed().as_secs_f64();
+                bits.extend(output.iter().map(|sample| sample.to_bits()));
+            }
+            Ok((bits, instance.save_state()?))
+        };
+        let (expected, expected_state) = render(&component, &mut component_time)?;
+        let (actual, actual_state) = render(&native, &mut native_time)?;
+        let label = program.as_deref().unwrap_or("(default)");
+        if let Some(index) = expected.iter().zip(&actual).position(|(a, b)| a != b) {
+            let frame = index / output_channels as usize;
+            bail!(
+                "program {label:?} differs at frame {frame} (block {}), channel {}: component {} native {}",
+                frame / FRAMES as usize,
+                index % output_channels as usize,
+                f32::from_bits(expected[index]),
+                f32::from_bits(actual[index])
+            );
+        }
+        if expected_state != actual_state {
+            bail!("program {label:?} leaves a different state natively");
+        }
+        let fingerprint = expected
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, bits| {
+                (hash ^ u64::from(*bits)).wrapping_mul(0x0100_0000_01b3)
+            });
+        println!("NATIVE_MATCH program={label} fingerprint={fingerprint:016x}");
+    }
+    let per_block = |seconds: f64| seconds * 1e6 / (blocks * program_ids.len()) as f64;
+    println!(
+        "NATIVE_BUILD_MATCHES programs={} blocks={} component_us_per_block={:.0} native_us_per_block={:.0} platform={}",
+        program_ids.len(),
+        blocks * program_ids.len(),
+        per_block(component_time),
+        per_block(native_time),
+        rackforge_plugin_api::host_platform_key()
+    );
+    Ok(())
+}
+
+/// A phrase that reaches most of what an instrument does: notes over the
+/// keyboard on three channels, at changing velocities, the modulation wheel
+/// and pitch bend moving, the sustain pedal down and up, then silence for
+/// the tails. `(frame, message)`, in order.
+fn comparison_phrase(length: usize) -> Vec<(usize, [u8; 3])> {
+    let mut events = Vec::new();
+    let step = 4_800; // a tenth of a second
+    let mut at = 0;
+    let mut beat = 0_usize;
+    while at + step * 4 < length.saturating_sub(48_000) {
+        let melody = 48 + ((beat * 7) % 36) as u8;
+        let velocity = 30 + ((beat * 37) % 97) as u8;
+        events.push((at, [0x90, melody, velocity]));
+        events.push((at + step * 3, [0x80, melody, 0]));
+        if beat.is_multiple_of(2) {
+            let bass = 36 + ((beat * 5) % 12) as u8;
+            events.push((at, [0x91, bass, 100]));
+            events.push((at + step, [0x81, bass, 0]));
+        } else {
+            for chord in [60_u8, 64, 67] {
+                events.push((at, [0x92, chord, 80]));
+                events.push((at + step, [0x82, chord, 0]));
+            }
+        }
+        events.push((at + step / 2, [0xB0, 1, ((beat * 23) % 128) as u8]));
+        let bend = (beat * 1_031) % 16_384;
+        events.push((at + step, [0xE0, (bend & 0x7f) as u8, (bend >> 7) as u8]));
+        if beat % 8 == 4 {
+            events.push((at, [0xB0, 64, 127]));
+        }
+        if beat % 8 == 7 {
+            events.push((at + step * 2, [0xB0, 64, 0]));
+        }
+        at += step * 2;
+        beat += 1;
+    }
+    events.push((at, [0xB0, 64, 0]));
+    events.push((at, [0xB0, 123, 0]));
+    events.sort_by_key(|(frame, data)| (*frame, data[0] & 0xf0 == 0x90));
+    events
 }
 
 fn validate_resource(package_path: &Path, resource_id: &str, path: &Path) -> Result<()> {

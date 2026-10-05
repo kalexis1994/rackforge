@@ -50,12 +50,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-5.rfplugin",
         "plugin_id": "org.rackforge.rf-5",
-        "version": "0.1.20",
+        "version": "0.1.21",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-5/"
-            "releases/download/v0.1.20/RF-5.rfplugin"
+            "releases/download/v0.1.21/RF-5.rfplugin"
         ),
-        "sha256": "e3017a15620de8ea2b44ae2b93c943b4c8b98a3fec76fb78f1e6515ceb1554ad",
+        "sha256": "b071665ce75236caba6af1a987bffa0cc7367dfd57e462db3b28d827453773dc",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -164,12 +164,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Musette.rfplugin",
         "plugin_id": "org.rackforge.musette",
-        "version": "0.13.19",
+        "version": "0.13.20",
         "url": (
             "https://github.com/kalexis1994/RF-Musette/"
-            "releases/download/v0.13.19/RF-Musette.rfplugin"
+            "releases/download/v0.13.20/RF-Musette.rfplugin"
         ),
-        "sha256": "7ebc2b313708f00c5d617b5cfa7e58d35a303a23a411286e65bf9adfad395621",
+        "sha256": "f796ec24bc29883f40982d818891ad08bce25c06922dc5e5a8468158f785710f",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

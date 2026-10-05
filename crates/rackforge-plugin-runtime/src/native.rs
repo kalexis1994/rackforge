@@ -1,9 +1,11 @@
 //! Wasmtime-backed host for RackForge `wasm-v1` processors.
 //!
 //! This is the backend used by every platform that runs RackForge as a native
-//! process. The browser backend in [`crate::browser`] implements the same
-//! public surface on top of the engine already present in the page.
+//! process, behind [`crate::portable`] beside the native builds of
+//! [`crate::library`]. The browser backend in [`crate::browser`] implements
+//! the same public surface on top of the engine already present in the page.
 
+use crate::portable::PortableModule;
 use crate::shared::{
     PARALLEL_PLAN_ENTRY_BYTES, PARALLEL_PLAN_HEADER_BYTES, PROGRAM_EDIT_BASIC,
     PROGRAM_EDIT_DECLARATIVE, PROGRAM_EDIT_KNOWN_CAPABILITIES, PROGRAM_EDIT_PREVIEW, byte_range,
@@ -230,11 +232,11 @@ impl PortableEngine {
                 import.name()
             );
         }
-        Ok(PortableModule {
+        Ok(PortableModule::from_wasm(WasmModule {
             module,
             metered,
             limits: self.limits,
-        })
+        }))
     }
 
     /// Asks a freshly built module whether it spends a real-time budget.
@@ -308,6 +310,11 @@ impl PortableEngine {
 /// module's `ExitDll` satisfies both by the host's own contract: components
 /// are released and audio is stopped before the module is unloaded.
 pub unsafe fn unload_process_handlers(modules: Vec<PortableModule>) -> Result<(), String> {
+    // A native build holds no Engine; it is unloaded by being dropped.
+    let modules: Vec<WasmModule> = modules
+        .into_iter()
+        .filter_map(PortableModule::into_wasm)
+        .collect();
     let Some(first) = modules.first() else {
         return Ok(());
     };
@@ -326,15 +333,15 @@ pub unsafe fn unload_process_handlers(modules: Vec<PortableModule>) -> Result<()
     })
 }
 
-pub struct PortableModule {
+pub struct WasmModule {
     module: Module,
     /// Whether this plugin spends a real-time budget, and so is metered.
     metered: bool,
     limits: RuntimeLimits,
 }
 
-impl PortableModule {
-    pub fn instantiate(&self) -> Result<PortableInstance> {
+impl WasmModule {
+    pub fn instantiate(&self) -> Result<WasmInstance> {
         let store_limits = StoreLimitsBuilder::new()
             .memory_size(self.limits.maximum_memory_bytes)
             .memories(1)
@@ -672,7 +679,7 @@ impl PortableModule {
         let save_state = typed(&instance, &mut store, "rackforge_save_state")?;
         let load_state = typed(&instance, &mut store, "rackforge_load_state")?;
         let process = typed(&instance, &mut store, "rackforge_process")?;
-        Ok(PortableInstance {
+        Ok(WasmInstance {
             store,
             memory,
             input_offset,
@@ -748,7 +755,7 @@ type ProcessV2Fn = TypedFunc<(i32, i32, i32, i32, i32, i32), i32>;
 /// The parallel pre-stage with the wide count: the same shape as `process_v2`.
 type ParallelBeginV2Fn = TypedFunc<(i32, i32, i32, i32, i32, i32), i32>;
 
-pub struct PortableInstance {
+pub struct WasmInstance {
     /// Whether this plugin spends a real-time budget, and so is metered.
     metered: bool,
     store: Store<HostState>,
@@ -793,7 +800,7 @@ pub struct PortableInstance {
     maximum_frames: u32,
 }
 
-impl PortableInstance {
+impl WasmInstance {
     pub fn load_resource_file(&mut self, id: &str, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         let file = File::open(path)
@@ -1026,10 +1033,6 @@ impl PortableInstance {
         )
     }
 
-    pub fn supports_program_editing(&self) -> bool {
-        self.program_editing_capabilities() != 0
-    }
-
     pub fn program_editing_capabilities(&self) -> u32 {
         self.program_api.as_ref().map_or(0, |api| api.capabilities)
     }
@@ -1146,36 +1149,6 @@ impl PortableInstance {
         )?;
         self.memory.data_mut(&mut self.store)[range].copy_from_slice(bytes);
         Ok(())
-    }
-
-    pub fn process_interleaved(
-        &mut self,
-        input: &[f32],
-        output: &mut [f32],
-        frames: u32,
-    ) -> Result<()> {
-        self.process_interleaved_with_events(input, output, frames, &[], &[])
-    }
-
-    pub fn process_interleaved_with_midi(
-        &mut self,
-        input: &[f32],
-        output: &mut [f32],
-        frames: u32,
-        midi: &[MidiEvent],
-    ) -> Result<()> {
-        self.process_interleaved_with_events(input, output, frames, midi, &[])
-    }
-
-    pub fn process_interleaved_with_events(
-        &mut self,
-        input: &[f32],
-        output: &mut [f32],
-        frames: u32,
-        midi: &[MidiEvent],
-        parameters: &[ParameterEvent],
-    ) -> Result<()> {
-        self.process_interleaved_with_midi2(input, output, frames, midi, parameters, &[])
     }
 
     /// The `MIDI_FAMILY_*` bits the component asked to receive wide; zero
@@ -1819,6 +1792,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::portable::PortableInstance;
 
     const GAIN: &str = r#"
         (module

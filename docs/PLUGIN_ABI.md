@@ -378,3 +378,54 @@ so before a plugin author does.
 - **Decline with `-3`** rather than pretending; the host handles it.
 - **Return the byte count** from the functions that produce data, and never
   more than the capacity you published.
+
+## Native builds of the same processor
+
+A package always carries its component, and may also carry the same
+processor built for particular platforms, listed under `binaries` beside
+`component` in the manifest:
+
+```toml
+component = "component.wasm"
+
+[binaries]
+windows-x86_64 = "native/windows-x86_64/plugin.dll"
+linux-aarch64 = "native/linux-aarch64/libplugin.so"
+```
+
+A platform is `<os>-<arch>` as Rust names them (`std::env::consts`):
+`windows-x86_64`, `linux-x86_64`, `linux-aarch64`, `android-aarch64`,
+`macos-aarch64`. A host with a build for its own platform, in a package it
+trusts, may run that build in place of the component; every other host runs
+the component, so a package with no native builds works everywhere, only
+slower. A native build is therefore held to being the same plugin: the same
+statuses for the same calls and the same samples for the same block.
+
+The build exports one symbol, `rackforge_portable_native_entry_v1`, a
+function with no arguments returning a pointer to a static table in C layout:
+
+| Field | |
+| --- | --- |
+| `struct_size: u32` | The table's size in bytes. Fields are only appended; a host reads the ones it knows. |
+| `native_abi_version: u32` | `0x0001_0000`. |
+| `portable_abi_version: u32` | What `rackforge_abi_version` returns. |
+| `midi2_families: u32` | What `rackforge_midi2_families` returns; 0 without the wide contract. |
+| `create`, `destroy` | Make and free an instance, which owns its processor and its buffers. |
+| `region(instance, region, *capacity) -> *mut u8` | A buffer's address, its capacity in elements written to `capacity`; null for a buffer the build does not have. |
+| `initialize` … `process` | One entry for each required export above, in the order the SDK's `NativeApiV1` lists them, each taking the instance first, then the export's own arguments, and returning its result. |
+| `process_v2` | Nullable: present exactly when the build takes the wide contract. |
+
+The buffers, by number, take the place of the `*_ptr` exports: input `0`,
+output `1`, MIDI `2`, parameter events `3`, transfer `4`, program input `5`,
+wide MIDI `6`. Their layouts are the ones above.
+
+A native build answers as a component that uses neither would: the host
+offers it no real-time budget, and it does not render in parallel. The host
+calls the real-time entries — `process`, `process_v2`, `set_parameter`,
+`get_parameter`, `reset`, `latency_frames` — on whatever thread it is on,
+which may be an audio thread with a small stack; everything else, `create`
+and `prepare` among them, runs on a thread of the host's with a large stack
+(64 MiB reserved), since a processor built by value can need megabytes while
+it is made and prepared. `rackforge-plugin-sdk` exports the table from the same
+`export_processor!` that exports the component when the crate is built as a
+`cdylib` for a native target.

@@ -1269,24 +1269,9 @@ fn read_archive_branding<R: Read + Seek>(
     }))
 }
 
+/// This host's platform key: see [`rackforge_plugin_api::host_platform_key`].
 pub fn repository_platform_key() -> Result<&'static str, RepositoryError> {
-    if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
-        Ok("linux-aarch64")
-    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        Ok("linux-x86_64")
-    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        Ok("windows-x86_64")
-    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        Ok("macos-aarch64")
-    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        Ok("macos-x86_64")
-    } else {
-        Err(RepositoryError::InvalidConfig(format!(
-            "unsupported platform {}-{}",
-            std::env::consts::OS,
-            std::env::consts::ARCH
-        )))
-    }
+    Ok(rackforge_plugin_api::host_platform_key())
 }
 
 fn selected_repository_id(selected: &SelectedArtifact) -> String {

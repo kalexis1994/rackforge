@@ -15,7 +15,7 @@ pub use manifest::{
     MAX_PLUGIN_AUDIO_CHANNELS, MidiInputBus, MidiProgramChangePolicy, PluginAudioContract,
     PluginBranding, PluginKind, PluginManifest, PluginMidiContract, PortableAbi, PortableComponent,
     ResourceKind, ResourceRequirement, RuntimeDescriptor, SuggestedChainEntry, WebSurface,
-    WebSurfaceKind, WebUi,
+    WebSurfaceKind, WebUi, host_platform_key,
 };
 #[cfg(feature = "package-validation")]
 pub use manifest::{

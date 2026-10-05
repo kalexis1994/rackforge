@@ -2274,6 +2274,24 @@ identification or convergence at 59 modes. The next structural step is 90
 modes below 1500 Hz, with recomputed load, contacts and matched observation;
 full sustain, the note/velocity bank and listening remain pending.
 
+The [90-mode air-load and discretization audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-tabla-1500.md)
+finds that the previous 128x96-cell / 64 kHz load fails two unchanged gates
+when expanded to 1500 Hz: high-band complex error reaches 2.243874% and
+spatial refinement exceeds 1%. Independent Duffy/hemisphere and temporal-warp
+diagnostics identify spatial and delay-realization accuracy as priorities;
+angular refinement has negligible effect at the failed 2416.667 Hz probe.
+The 192x144-cell / 128 kHz candidate passes all eleven gates against a
+256x192-cell reference. Maximum low Z/R/X error is 0.328458%, high complex
+error is 0.571678%, and eight finer-grid probes give 0.861880%. Distributed
+force RMS errors are 0.237616% / 0.455971%; the frozen C4 control is more
+demanding at 1.691295% / 1.692054%, still below 2%. Arbitrary-state energy
+error is at most 2.14e-16. Thirty-four targeted tests pass. The 58320-state
+load remains an offline benchmark, without factory changes or audible claims.
+Since spatial/temporal refinement also changes common-mode loading, both
+59- and 90-mode contact banks must be recomputed at the same validated
+resolution before isolating structural-basis pressure differences. Sustain,
+note/velocity coverage, listening and runtime reduction remain pending.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

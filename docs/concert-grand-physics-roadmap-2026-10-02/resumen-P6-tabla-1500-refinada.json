@@ -1,0 +1,310 @@
+{
+  "baseline_commit": "68a508a",
+  "scope": "Expanded intrinsic P2 modes, one baffled face; not a complete piano or listening result.",
+  "cutoff_hz": 1500.0,
+  "modes": 90,
+  "frequency_hz": [
+    70.62213260234367,
+    139.24116527565243,
+    170.7420426662478,
+    178.13497442356172,
+    203.19352685899813,
+    225.34530232891365,
+    245.48269805313552,
+    285.6228947119935,
+    299.6450431535138,
+    313.243437148768,
+    313.85498725302,
+    353.7040759892574,
+    380.6291210022632,
+    404.6230827869208,
+    440.2095071338155,
+    510.7600846806116,
+    512.8937416057344,
+    529.5271284876352,
+    532.6223422708101,
+    542.9390671739197,
+    559.4716374951777,
+    564.4156101974451,
+    603.0403418480528,
+    633.107674392708,
+    635.6551400279947,
+    663.0433647346642,
+    665.3001251708085,
+    698.9054274754873,
+    713.443604425906,
+    737.7837713367302,
+    739.7396831036451,
+    748.6978413913473,
+    761.8394407351152,
+    777.7067002494059,
+    793.2442001051731,
+    814.577433446898,
+    843.3353905236611,
+    901.5572365102009,
+    911.641193302532,
+    976.5164418942323,
+    995.3824731203342,
+    1008.2619004787629,
+    1031.4848795951684,
+    1037.3593077633225,
+    1044.59278240834,
+    1060.4740328080063,
+    1061.2000323899874,
+    1069.3988867493497,
+    1075.6330344074436,
+    1080.1314536480834,
+    1087.3808260624585,
+    1106.1366382337071,
+    1129.8816942028086,
+    1136.5123520206744,
+    1153.5983611109716,
+    1154.55220928071,
+    1166.2116928309968,
+    1172.8675819615626,
+    1193.5079134853531,
+    1208.2592070150085,
+    1208.756922260178,
+    1232.0921393739957,
+    1234.3454606735083,
+    1244.4605248880634,
+    1249.2366674307063,
+    1258.8726729124216,
+    1275.8878409332076,
+    1295.27930050813,
+    1297.1068767742322,
+    1311.5607315245916,
+    1328.4238574563758,
+    1332.346828143029,
+    1333.6629448103781,
+    1347.932999174982,
+    1351.1981505686738,
+    1351.6857002691515,
+    1355.3707739146553,
+    1375.1489227065465,
+    1403.1845868546645,
+    1415.2572566434676,
+    1424.7503396623893,
+    1439.890885223591,
+    1440.4091023325796,
+    1444.2407538473262,
+    1446.1792275945306,
+    1446.4524135376257,
+    1450.5277933310963,
+    1466.8076741394739,
+    1471.7717353872733,
+    1491.6456800848218
+  ],
+  "cells": [
+    192,
+    144
+  ],
+  "factor_rate_hz": 128000,
+  "angular": [
+    96,
+    96
+  ],
+  "subspace_control": "Independent 35-coordinate construction at the candidate spatial/temporal resolution",
+  "inputs": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-resolucion-aire\\Polar96\\Wave64000-Cells128x96-Angle96x96-Sparse.npz": "e3c5e6802d5543592d1ad5e3059d6fb5e571d229bf63e2bb42edfc7eb89bb315",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-03\\P6-estados-acusticos\\spectrum.npz": "60b383fdd94610cf33d3b7b920274d33405f88c98d12a06a2511ef7f1f56117f",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-contacto-compacto\\T72-384000-Cold.npz": "f909afbd5860fbc20fec453344afa89e5443596edbf3b53194497daf0929dc1e",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-kernel-geometrico\\Cells128x96-Rate128000-Q16.npz": "e1580c8684007164dd9ba232ee872275f5ad42bf757837a81ff724f7a1b639ae"
+  },
+  "criteria": {
+    "factor_subspace": 1e-10,
+    "mass_subspace": 1e-10,
+    "mass_limit": 1e-10,
+    "geometric_reference": 1e-05,
+    "low_ZRX": 0.02,
+    "laplace": 0.02,
+    "high_Z": 0.02,
+    "loaded_velocity": 0.05,
+    "reference_spatial_change": 0.01,
+    "memory_rms": 0.02,
+    "memory_late_peak": 0.01,
+    "energy": 1e-09
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.18.1",
+    "blas_threads": 1
+  },
+  "build": {
+    "taps": 647,
+    "outputs": 9216,
+    "factor_subspace_relative": 0.0,
+    "mass_subspace_relative": 0.0,
+    "archived_control_mass_relative_change": 0.0012779660457365768,
+    "dc_relative": 2.0067411850696829e-16,
+    "seconds": 171.4380000000001
+  },
+  "gates": {
+    "subspace": true,
+    "limits": true,
+    "reference": true,
+    "low_transfer": true,
+    "laplace": true,
+    "high_transfer": true,
+    "loaded_velocity": true,
+    "all_mode_drive": true,
+    "memory": true,
+    "spatial": true,
+    "energy": true
+  },
+  "coefficient_sha256": "586070dcdb91b14bad6d715a7ae4832586b610309773f9c6a3a57b53b96c9942",
+  "completion": {
+    "states": 58320,
+    "relaxation_time_s": [
+      4.650183209343183e-06,
+      7.749432653625415e-06
+    ],
+    "mass_relative": 3.624509050249558e-16,
+    "limit_relative": 4.495606391913268e-15
+  },
+  "reference_checks": {
+    "duffy_relative": 4.131399553364447e-08,
+    "time_refinement_relative": 5.888186144947913e-08,
+    "mass_relative": 9.185707592005205e-09,
+    "duffy_max_point_relative": 9.475161887569821e-08,
+    "time_refinement_max_point_relative": 1.4804517665282444e-07
+  },
+  "reference_probe_s": [
+    [
+      0.0,
+      376.99111843077515
+    ],
+    [
+      0.0,
+      1643.8419078755135
+    ],
+    [
+      0.0,
+      9424.77796076938
+    ],
+    [
+      0.0,
+      12566.370614359172
+    ],
+    [
+      0.0,
+      28274.33388230814
+    ],
+    [
+      0.0,
+      37699.11184307752
+    ],
+    [
+      20.0,
+      376.99111843077515
+    ],
+    [
+      50.0,
+      1643.8419078755135
+    ],
+    [
+      100.0,
+      9424.77796076938
+    ]
+  ],
+  "transfer": {
+    "low_points": 241,
+    "low_ZRX_max": [
+      0.0028599555327377493,
+      0.002564583542567134,
+      0.003284576701234021
+    ],
+    "laplace_max": 0.0025843611401442593,
+    "high_points": 61,
+    "high_complex_max": 0.00571678122681438,
+    "high_max_frequency_hz": 2416.6666666666665,
+    "loaded_velocity_max": 0.0007561414539476686,
+    "subspace_impedance_change": 0.009767734154600468
+  },
+  "memory": {
+    "FrozenC4": {
+      "rms_relative": 0.016912948597658913,
+      "late_peak_relative": 1.21224695869621e-16,
+      "normalizer": "Frozen original bath total-force RMS and initial peak",
+      "input_new_mode_velocity_l2": 0.0,
+      "excited_modes": 19,
+      "excited_new_modes": 0,
+      "spatial_fine_rms_relative": 0.01692053712966239,
+      "spatial_fine_late_peak_relative": 1.21224695869621e-16,
+      "reference_grid_rms_change": 0.00057943452797649
+    },
+    "C4Projected": {
+      "rms_relative": 0.0015732590588160699,
+      "late_peak_relative": 9.02471228739156e-17,
+      "normalizer": "Independent geometric reference RMS and initial peak; fixed before comparing candidate",
+      "input_new_mode_velocity_l2": 0.016193519439731286,
+      "excited_modes": 47,
+      "excited_new_modes": 28,
+      "spatial_fine_rms_relative": 0.003079750081895197,
+      "spatial_fine_late_peak_relative": 9.02471228739156e-17,
+      "reference_grid_rms_change": 0.0017706360187198864
+    },
+    "Distributed": {
+      "rms_relative": 0.002376158636757445,
+      "late_peak_relative": 8.768353829749074e-17,
+      "normalizer": "Independent geometric reference RMS and initial peak; fixed before comparing candidate",
+      "input_new_mode_velocity_l2": 0.020897443878378875,
+      "excited_modes": 90,
+      "excited_new_modes": 55,
+      "spatial_fine_rms_relative": 0.004559711432487948,
+      "spatial_fine_late_peak_relative": 8.768353829749074e-17,
+      "reference_grid_rms_change": 0.002545264993370818
+    }
+  },
+  "spatial": {
+    "cells": [
+      256,
+      192
+    ],
+    "frequency_hz": [
+      999.9999999999999,
+      1200.0,
+      1500.0,
+      1999.9999999999998,
+      2416.6666666666665,
+      3000.0,
+      4500.0,
+      6000.0
+    ],
+    "reference_complex_max_change": 0.00485577934480412,
+    "candidate_high_complex_max": 0.008618804743817633
+  },
+  "storage": [
+    {
+      "dt_s": 2.0833333333333333e-05,
+      "budget_relative": 1.3612820770631521e-16,
+      "radiation_power_w": 0.13844853966848175
+    },
+    {
+      "dt_s": 5.208333333333333e-06,
+      "budget_relative": 2.1422059562293856e-16,
+      "radiation_power_w": 0.5097954641440502
+    },
+    {
+      "dt_s": 1.3020833333333333e-06,
+      "budget_relative": 1.9560781191752962e-16,
+      "radiation_power_w": 0.8100036543210505
+    }
+  ],
+  "verification_s": 345.375,
+  "all_load_gates_passed": true,
+  "decision": "Load verification only: wider coupled nonlinear contacts, observation and listening still required; no factory selection.",
+  "source_sha256": {
+    "audit-concert-grand-extended-board.py": "799b90c21c4152078f445d598bd82aa25aa603a0d88db57eb22c67d4b7cba698",
+    "concert_grand_surface_impedance.py": "8ad393eb161ef53aff727ec007ea22d87c4a0406e7c55be8c588654a5f01091a",
+    "concert_grand_geometric_memory.py": "a7c37f0c4c052cb70f5139d4adff994126b972bf043a0938070d1a63131e61b7",
+    "concert_grand_rational_air.py": "ca2b4fc83ae26b4d08d4024a2aab29b150d28fe24715707ac300c05832acf469",
+    "concert_grand_bounded_air.py": "cab4c544f9d1c79b229cb253dfefaff965a01cfe2887cd63267ef5ea07c593b9"
+  },
+  "measurement_sha256": {
+    "transfer.npz": "d0030bd68ffe63ab83ed18390a53b32cd4273ccf98baaf512fd4aac916f1a8b4",
+    "memory.npz": "a38eb8a8992a43c9e358b190768d2463c6a5dbb0cee690832479bffda3c5bc79"
+  }
+}

@@ -52,25 +52,34 @@ def transform(memory,points,rate=128000,quadrature=16):
 
 def build(args):
     if args.coefficients.exists() or args.report.exists():raise ValueError('preserve existing experiment; choose new destinations')
-    model=model_from_asset(args.asset,args.cutoff);surface=RectangularLoad.from_plate(model,128,96)
-    started=time.monotonic();H=surface_factor_sparse(surface,64000,96,96)
+    model=model_from_asset(args.asset,args.cutoff);surface=RectangularLoad.from_plate(model,*args.cells)
+    started=time.monotonic();H=surface_factor_sparse(surface,args.factor_rate,96,96)
     with np.load(args.control) as data:old=data['factor'];old_rate=float(data['factor_rate'])
-    if old_rate!=64000 or H.shape[:2]!=old.shape[:2] or old.shape[2]!=35:raise ValueError('frozen 64k/96x96 35-mode control required')
+    if old_rate!=64000 or old.shape[2]!=35:raise ValueError('frozen 64k/96x96 35-mode control required')
+    refined=args.cells!=[128,96] or args.factor_rate!=old_rate
+    if refined:
+        del old
+        small=RectangularLoad(surface.length,surface.width,surface.shapes[:,:,:35])
+        old=surface_factor_sparse(small,args.factor_rate,96,96)
     equivalence=rel(H[:,:,:35],old);del old
     mass=surface.added_mass_static(8);x=surface.shapes.reshape(-1,surface.modes)
     limit=surface.density*surface.speed*surface.hx*surface.hy*x.T@x
-    with np.load(args.mass_control) as data:mass_error=rel(mass[:35,:35],data['static_mass'])
-    report=dict(baseline_commit='d35cb4a',scope='Expanded intrinsic P2 modes, one baffled face; not a complete piano or listening result.',
-        cutoff_hz=args.cutoff,modes=surface.modes,frequency_hz=model['frequency'].tolist(),cells=[128,96],factor_rate_hz=64000,angular=[96,96],
+    with np.load(args.mass_control) as data:archived_mass=data['static_mass']
+    archived_mass_change=rel(mass[:35,:35],archived_mass)
+    mass_error=rel(mass[:35,:35],small.added_mass_static(8) if refined else archived_mass)
+    report=dict(baseline_commit=args.baseline_commit,scope='Expanded intrinsic P2 modes, one baffled face; not a complete piano or listening result.',
+        cutoff_hz=args.cutoff,modes=surface.modes,frequency_hz=model['frequency'].tolist(),cells=args.cells,factor_rate_hz=args.factor_rate,angular=[96,96],
+        subspace_control='Independent 35-coordinate construction at the candidate spatial/temporal resolution' if refined else 'Archived unchanged 35-mode factor and mass',
         inputs={str(path):digest(path) for path in [args.asset,args.control,args.mass_control,args.contact,args.memory_control]},criteria=CRITERIA,
         environment=dict(python=platform.python_version(),numpy=np.__version__,scipy=scipy.__version__,blas_threads=1),
         build=dict(taps=len(H),outputs=H.shape[1],factor_subspace_relative=equivalence,mass_subspace_relative=mass_error,
+            archived_control_mass_relative_change=archived_mass_change,
             dc_relative=float(np.linalg.norm(H.sum(axis=0))/np.linalg.norm(H)),seconds=time.monotonic()-started),gates={})
     report['gates']['subspace']=equivalence<CRITERIA['factor_subspace'] and mass_error<CRITERIA['mass_subspace']
     if not report['gates']['subspace']:
         write(args.report,report);raise AssertionError('wider construction changes frozen subspace')
     args.coefficients.parent.mkdir(parents=True,exist_ok=True)
-    np.savez_compressed(args.coefficients,factor=H,factor_rate=64000,static_mass=mass,high_limit=limit,
+    np.savez_compressed(args.coefficients,factor=H,factor_rate=args.factor_rate,static_mass=mass,high_limit=limit,
         frequency_hz=model['frequency'],cutoff_hz=args.cutoff)
     report['coefficient_sha256']=digest(args.coefficients);write(args.report,report)
     print('build',json.dumps(report['build']),flush=True)
@@ -80,12 +89,12 @@ def verify(args):
     report=json.loads(args.report.read_text());started=time.monotonic()
     if report['criteria']!=CRITERIA or report['coefficient_sha256']!=digest(args.coefficients):raise ValueError('frozen coefficients/criteria changed')
     supplied={str(path):digest(path) for path in [args.asset,args.control,args.mass_control,args.contact,args.memory_control]}
-    if report['cutoff_hz']!=args.cutoff or supplied!=report['inputs']:raise ValueError('frozen physical/control inputs changed')
+    if report['cutoff_hz']!=args.cutoff or supplied!=report['inputs'] or report['cells']!=args.cells or report['factor_rate_hz']!=args.factor_rate:raise ValueError('frozen physical/control inputs changed')
     report['gates']={'subspace':report['gates']['subspace']}
     for key in ['completion','reference_checks','reference_probe_s','transfer','memory','spatial','storage','verification_s','all_load_gates_passed','decision','source_sha256','measurement_sha256']:
         report.pop(key,None)
     write(args.report,report)
-    model=model_from_asset(args.asset,args.cutoff);surface=RectangularLoad.from_plate(model,128,96)
+    model=model_from_asset(args.asset,args.cutoff);surface=RectangularLoad.from_plate(model,*args.cells)
     with np.load(args.coefficients) as data:
         factor=data['factor'];report['build']['dc_relative']=float(np.linalg.norm(factor.sum(axis=0))/np.linalg.norm(factor))
         air=BoundedAir(factor,float(data['factor_rate']),data['static_mass'],data['high_limit']);mass=data['static_mass'];limit=data['high_limit']
@@ -123,9 +132,10 @@ def verify(args):
     report['transfer']['subspace_impedance_change']=None
     with np.load(args.control) as data:
         old_factor=data['factor'];old_rate=float(data['factor_rate'])
-    old_surface=RectangularLoad(surface.length,surface.width,surface.shapes[:,:,:35])
+    old_model={**model,'frequency':model['frequency'][:35],'vectors':model['vectors'][:,:35]}
+    old_surface=RectangularLoad.from_plate(old_model,128,96)
     with np.load(args.mass_control) as data:old_mass=data['static_mass']
-    old_x=old_surface.shapes.reshape(-1,35);old_limit=surface.density*surface.speed*surface.hx*surface.hy*old_x.T@old_x
+    old_x=old_surface.shapes.reshape(-1,35);old_limit=old_surface.density*old_surface.speed*old_surface.hx*old_surface.hy*old_x.T@old_x
     old_air=BoundedAir(old_factor,old_rate,old_mass,old_limit);del old_factor
     report['transfer']['subspace_impedance_change']=max(rel(a[:35,:35],old_air.impedance(s)) for s,a in zip(points,actual));del old_air
     np.savez_compressed(args.output/'transfer.npz',laplace_s=points,geometric_impedance=reference,actual_impedance=actual,errors=errors,loaded_velocity_error=loaded)
@@ -155,18 +165,18 @@ def verify(args):
             excited_modes=int(np.count_nonzero(np.linalg.norm(velocity,axis=0)>np.linalg.norm(velocity)*1e-8)),
             excited_new_modes=int(np.count_nonzero(np.linalg.norm(velocity[:,35:],axis=0)>np.linalg.norm(velocity)*1e-8)))
         print('memory',name,json.dumps(rows[name]),flush=True)
-    spatial_surface=RectangularLoad.from_plate(model,192,144);spatial=GeometricMemory(spatial_surface)
-    high_control=2j*np.pi*np.array([1000.,1200.,2000.,3000.,4500.,6000.]);spatial_z,_,spatial_integral=transform(spatial,high_control)
+    spatial_surface=RectangularLoad.from_plate(model,*args.spatial_cells);spatial=GeometricMemory(spatial_surface)
+    high_control=2j*np.pi*np.unique([1000.,1200.,args.cutoff,2000.,2416.6666666666665,3000.,4500.,6000.]);spatial_z,_,spatial_integral=transform(spatial,high_control)
     control_z,_,_=transform(direct,high_control)
     spatial_changes=[rel(a,b) for a,b in zip(spatial_z,control_z)];spatial_error=[rel(air.impedance(s),b) for s,b in zip(high_control,spatial_z)]
     for name,velocity in drives.items():
         target=spatial.linear_drive_force(velocity,1/128000,round(.060*128000),16,spatial_integral)[::4]
-        rows[name]['spatial192_rms_relative']=float(np.linalg.norm(forces[name]-target)/normalizers[name])
-        rows[name]['spatial192_late_peak_relative']=float(np.linalg.norm((forces[name]-target)[axis>=.010],axis=1).max()/peaks[name])
+        rows[name]['spatial_fine_rms_relative']=float(np.linalg.norm(forces[name]-target)/normalizers[name])
+        rows[name]['spatial_fine_late_peak_relative']=float(np.linalg.norm((forces[name]-target)[axis>=.010],axis=1).max()/peaks[name])
         rows[name]['reference_grid_rms_change']=float(np.linalg.norm(target-targets[name])/normalizers[name])
-    report['memory']=rows;report['spatial']=dict(cells=[192,144],reference_complex_max_change=max(spatial_changes),candidate_high_complex_max=max(spatial_error))
+    report['memory']=rows;report['spatial']=dict(cells=args.spatial_cells,frequency_hz=(high_control.imag/(2*np.pi)).tolist(),reference_complex_max_change=max(spatial_changes),candidate_high_complex_max=max(spatial_error))
     report['gates']['all_mode_drive']=rows['Distributed']['excited_modes']==air.modes and rows['Distributed']['excited_new_modes']==air.modes-35
-    report['gates']['memory']=all(max(v['rms_relative'],v['spatial192_rms_relative'])<CRITERIA['memory_rms'] and max(v['late_peak_relative'],v['spatial192_late_peak_relative'])<CRITERIA['memory_late_peak'] for v in rows.values())
+    report['gates']['memory']=all(max(v['rms_relative'],v['spatial_fine_rms_relative'])<CRITERIA['memory_rms'] and max(v['late_peak_relative'],v['spatial_fine_late_peak_relative'])<CRITERIA['memory_late_peak'] for v in rows.values())
     report['gates']['spatial']=max(spatial_changes)<CRITERIA['reference_spatial_change'] and max(spatial_error)<CRITERIA['high_Z'] and all(v['reference_grid_rms_change']<CRITERIA['reference_spatial_change'] for v in rows.values())
     np.savez_compressed(args.output/'memory.npz',time_s=axis,drive_time_s=t,
         **{f'drive_{name}':value for name,value in drives.items()},
@@ -188,10 +198,16 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['asset','control','mass-control','contact','memory-control','output']:p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--cutoff',type=float,default=1200.);p.add_argument('--phase',choices=['build','verify'],required=True)
+    p.add_argument('--baseline-commit',default='d35cb4a')
+    p.add_argument('--cells',type=int,nargs=2,default=[128,96])
+    p.add_argument('--spatial-cells',type=int,nargs=2,default=[192,144])
+    p.add_argument('--factor-rate',type=int,default=64000)
     p.add_argument('--report',type=Path,default=Path(__file__).resolve().parents[1]/'docs'/'concert-grand-physics-roadmap-2026-10-02'/'resumen-P6-tabla-1200.json')
-    args=p.parse_args();args.output.mkdir(parents=True,exist_ok=True)
+    args=p.parse_args()
+    if min(args.cells+args.spatial_cells)<2 or args.factor_rate<=0 or any(b<=a for a,b in zip(args.cells,args.spatial_cells)):p.error('positive factor rate and strictly finer spatial control required')
+    args.output.mkdir(parents=True,exist_ok=True)
     modes=len(model_from_asset(args.asset,args.cutoff)['frequency'])
-    args.coefficients=args.output/f'Wave64000-Cells128x96-Angle96x96-Modes{modes}.npz'
+    args.coefficients=args.output/f'Wave{args.factor_rate}-Cells{args.cells[0]}x{args.cells[1]}-Angle96x96-Modes{modes}.npz'
     if args.phase=='build':build(args)
     else:verify(args)
 

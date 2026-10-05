@@ -1,0 +1,72 @@
+{
+  "baseline_commit": "68a508a",
+  "scope": "Two failed/high-band diagnostic probes; no candidate acceptance, new damping or full-resolution convergence claim.",
+  "criteria_changed": false,
+  "inputs": {
+    "C:\\SHARED\\Fisica-pendiente-2026-10-02\\P2-tabla-estructural\\Panel-costillas-puente.npz": "5469b9921b41ce4e3b752478e108c4a27be164306f5025317cf596bbb5f88fcd",
+    "C:\\SHARED\\Fisica-pendiente-2026-10-04\\P6-tabla-1500\\Wave64000-Cells128x96-Angle96x96-Modes90.npz": "8474ea26961f0e7a8f3e02d6bb17b39b5637b9eb22cffbb164c9ad2c148c442a",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\resumen-P6-tabla-1500.json": "63e6b2f6440110127d44a2caaa1273e7885d2052392f71efa3b7f8c0ebdc2d16"
+  },
+  "source_sha256": {
+    "audit-concert-grand-air-discretization.py": "98c6c9dee640113eeccae11b42d8c23b00a22961bccc5e360ddea98e9cd803ad",
+    "concert_grand_surface_impedance.py": "8ad393eb161ef53aff727ec007ea22d87c4a0406e7c55be8c588654a5f01091a",
+    "concert_grand_bounded_air.py": "cab4c544f9d1c79b229cb253dfefaff965a01cfe2887cd63267ef5ea07c593b9",
+    "concert_grand_rational_air.py": "ca2b4fc83ae26b4d08d4024a2aab29b150d28fe24715707ac300c05832acf469"
+  },
+  "rows": [
+    {
+      "frequency_hz": 2416.6666666666665,
+      "spatial128_to192": 0.013692575267106065,
+      "spatial192_to256": 0.004834885866894934,
+      "angular96_to192": 9.012174605631694e-13,
+      "angular192_to_duffy": 1.1610627449381168e-13,
+      "actual_complex_error": 0.022438742778762837,
+      "actual_resistance_error": 0.018662920728732272,
+      "actual_reactance_error": 0.03966714252376661,
+      "warp": {
+        "64000": {
+          "effective_frequency_hz": 2405.425198974663,
+          "wave_resistance_difference": 0.024659935463863317,
+          "actual_wave_vs_prediction": 0.004636599794120302,
+          "completed_prediction_error": 0.017677813255521167
+        },
+        "96000": {
+          "effective_frequency_hz": 2411.647163675931,
+          "wave_resistance_difference": 0.011023301938215447
+        },
+        "128000": {
+          "effective_frequency_hz": 2413.8385755696304,
+          "wave_resistance_difference": 0.00621281375044958
+        }
+      }
+    },
+    {
+      "frequency_hz": 6000.0,
+      "spatial128_to192": 0.009809851560764861,
+      "spatial192_to256": 0.0034525989418604437,
+      "angular96_to192": 5.816109817684564e-05,
+      "angular192_to_duffy": 3.380180649488221e-10,
+      "actual_complex_error": 0.009015329101920214,
+      "actual_resistance_error": 0.004899701083741193,
+      "actual_reactance_error": 5.9282774824865845,
+      "warp": {
+        "64000": {
+          "effective_frequency_hz": 5835.016180906698,
+          "wave_resistance_difference": 0.10284858290375491,
+          "actual_wave_vs_prediction": 0.027060221192281235,
+          "completed_prediction_error": 0.02629709790272612
+        },
+        "96000": {
+          "effective_frequency_hz": 5924.629640085486,
+          "wave_resistance_difference": 0.04824300355078214
+        },
+        "128000": {
+          "effective_frequency_hz": 5957.183464658636,
+          "wave_resistance_difference": 0.027671726561353263
+        }
+      }
+    }
+  ],
+  "measurement_sha256": "a0cfe24fd16948124363194901788abb0f9567d471b741fe8ed0bb8416e706e1",
+  "seconds": 79.10899999999992
+}

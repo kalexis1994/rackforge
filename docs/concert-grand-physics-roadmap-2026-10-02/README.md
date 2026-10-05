@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-04. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-05. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -46,7 +46,7 @@ Los datos del ensayo de contacto compacto en curso permanecen en `SHARED`.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Observación SI probada en una ventana de C4. | Piloto medido; fuente audible completa e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Carga/contactos de 59 modos bajo 1200 Hz verificados. Observación SI del ataque C4/124 pasa precisión: presión compleja de 8 ms cambia 11,83% frente a 35 modos con +1,10% de norma global. Faltan convergencia estructural/banco completo, fuente sostenida, pérdidas y ambas caras/borde. | Contacto y presión del ataque vertical C4/124 medidos; ninguna selección audible |
+| P6 | Radiación y carga acústica del aire | Carga de 90 modos bajo 1500 Hz verificada tras refinar celdas a 192×144 y factor a 128 kHz. Contactos/presión siguen medidos para 35/59 modos con la resolución anterior; hay que recalcular ambas bases a resolución común. Faltan convergencia estructural/banco completo, fuente sostenida, pérdidas y ambas caras/borde. | Puerto de 90 modos verificado; contactos ampliados y selección audible pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -810,3 +810,32 @@ fuente sostenida, banco de notas/intensidades, geometría/pérdidas identificada
 ambas caras/borde, unísono, P4, graves y acción/pedal. Paquete sin cambios.
 Sólo un NPZ derivado de 5,20 MB en `C:\SHARED\Fisica-pendiente-2026-10-04\P6-observacion-1200`;
 informes y fuentes tienen su copia única en el repo.
+
+### 2026-10-05 — P6: 90 modos y corrección de resolución acústica
+
+La comparación de presión anterior quedó en **68a508a**, por pedido del usuario.
+[Resultados y diagnóstico](RESULTADOS-P6-tabla-1500.md). Al ampliar a 90 modos,
+la carga 128×96/64 kHz pasa nueve de once controles: falla el máximo complejo
+alto, 2,243874% con límite 2%, y el refinamiento espacial. Se conserva el
+ensayo rechazado. El diagnóstico independiente localiza cambios espaciales
+de 1,369258% a 2416,667 Hz y una conversión temporal apreciable; doblar
+cuadratura angular apenas afecta ese punto. No se cambian umbrales.
+
+El candidato 192×144/128 kHz pasa los once controles, comparado con una
+referencia 256×192 y ocho puntos espaciales, incluido el fallido. Máximo Z/R/X
+bajo 1500 Hz: 0,328458%; máximo complejo alto: 0,571678%; contra grilla fina:
+0,861880%. Cambio máximo de referencia espacial: 0,485578%. La fuerza distribuida
+activa los 90 modos y da RMS 0,237616% / 0,455971%. FrozenC4 es el control
+más exigente, 1,691295% / 1,692054%, dentro del 2%. Balance vivo: 2,14e−16.
+Pasan 34 tests dirigidos. El puerto refinado tiene 58320 estados: sigue siendo
+un ensayo offline, sin selección ni modificación del paquete.
+
+La comparación de contactos/presión se posterga para usar **59 y 90 modos
+con la misma resolución acústica validada**. El cambio de grilla/tasa afecta
+también a los modos comunes; mezclarlo con el cambio de base impediría atribuir
+la diferencia. Siguiente: construir/verificar el puerto de 59 a esa resolución,
+repetir contacto frío/reiterado a 384/768 kHz en ambas bases y luego observación
+SI. Siguen abiertos sostenido, banco de notas/intensidades, identificación,
+ambas caras/borde, unísono, P4, graves, acción/pedal y coste de ejecución.
+Informes únicos en el repo, datos únicos en las rutas SHARED del informe,
+sin WAV ni copias de fuentes.

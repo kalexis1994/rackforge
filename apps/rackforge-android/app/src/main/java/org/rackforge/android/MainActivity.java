@@ -274,6 +274,7 @@ public final class MainActivity extends Activity {
     }
 
     private static native String installPluginFile(String archivePath, String storeRoot);
+    private static native String installBundledPluginFile(String archivePath, String storeRoot);
     private static native void cancelPluginInstall();
     private static native String inspectPluginFile(String archivePath, String storeRoot);
     private static native String installedPlugins(String storeRoot);
@@ -807,6 +808,18 @@ public final class MainActivity extends Activity {
     private String installPluginPackage(String archivePath, String storeRoot) {
         try {
             return installPluginFile(archivePath, storeRoot);
+        } finally {
+            forgetPluginRoots();
+        }
+    }
+
+    /**
+     * Installs a package from the official set this APK carries: it may correct a same-version
+     * copy, and its record says official, which lets it run its native build.
+     */
+    private String installBundledPluginPackage(String archivePath, String storeRoot) {
+        try {
+            return installBundledPluginFile(archivePath, storeRoot);
         } finally {
             forgetPluginRoots();
         }
@@ -4015,7 +4028,7 @@ public final class MainActivity extends Activity {
                 while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
             }
             try {
-                JSONObject descriptor = new JSONObject(installPluginPackage(
+                JSONObject descriptor = new JSONObject(installBundledPluginPackage(
                         temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
                 String pluginId = descriptor.getString("plugin_id");
                 boolean known = knownPlugins.contains(pluginId);

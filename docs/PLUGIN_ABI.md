@@ -395,11 +395,16 @@ linux-aarch64 = "native/linux-aarch64/libplugin.so"
 
 A platform is `<os>-<arch>` as Rust names them (`std::env::consts`):
 `windows-x86_64`, `linux-x86_64`, `linux-aarch64`, `android-aarch64`,
-`macos-aarch64`. A host with a build for its own platform, in a package it
-trusts, may run that build in place of the component; every other host runs
-the component, so a package with no native builds works everywhere, only
-slower. A native build is therefore held to being the same plugin: the same
-statuses for the same calls and the same samples for the same block.
+`macos-aarch64`. A native build runs unsandboxed, with the host's own
+rights, so a host runs one only for a package the release's official set laid
+down — the store's record for it says `official` — and only when the package
+does not render in parallel. Every other package, and every host without a
+build for its platform, runs the component: a package with no native builds
+works everywhere, only slower, and a build that will not load is reported
+(`PLUGIN_NATIVE_BUILD_FAILED`) and passed over for the component.
+`RACKFORGE_NATIVE_BUILDS=off` runs every component, for comparing the two. A
+native build is therefore held to being the same plugin: the same statuses
+for the same calls and the same samples for the same block.
 
 The build exports one symbol, `rackforge_portable_native_entry_v1`, a
 function with no arguments returning a pointer to a static table in C layout:

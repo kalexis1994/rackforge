@@ -4,7 +4,7 @@ use rackforge_plugin_api::{
     ParameterSchema, PluginBranding, PluginKind, ResourceRequirement, WebSurfaceKind,
     abi::ParameterEventV1,
 };
-use rackforge_repository::install_local_archive_replacing;
+use rackforge_repository::install_official_archive;
 #[cfg(windows)]
 use rackforge_resource_host::NativeResourceBrowser;
 use serde::Deserialize;
@@ -484,7 +484,7 @@ fn install_bundled_packages_at(root: &Path) -> Result<Vec<PathBuf>> {
             // every install fail, and a plug-in with no instruments has no
             // model, no view and nothing to draw: the editor opened black.
             installed.push(
-                install_local_archive_replacing(&store, bytes)
+                install_official_archive(&store, bytes)
                     .with_context(|| format!("installing bundled VST3 plugin {name}"))?
                     .path,
             );

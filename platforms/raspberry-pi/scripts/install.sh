@@ -53,7 +53,7 @@ if [[ ! -f "$bundled_default_marker" ]]; then
   if [[ -f "$bundled_plugin" && ${#installed_plugins[@]} -eq 0 ]]; then
     "$root/bin/rackforge-store" install-local \
       "$bundled_plugin" \
-      "$root/plugin-store"
+      "$root/plugin-store" --official
     "$root/bin/rackforge-store" enable \
       org.rackforge.concert-grand \
       "$root/plugin-store"
@@ -80,7 +80,7 @@ for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
   [[ "$(basename "$official_plugin")" == "RF-Concert-Grand.rfplugin" ]] && continue
   install_output="$("$root/bin/rackforge-store" install-local \
     "$official_plugin" \
-    "$root/plugin-store" --replace)"
+    "$root/plugin-store" --official)"
   printf '%s\n' "$install_output"
   # Read the id the store just reported. No pipeline here on purpose:
   # under `set -o pipefail` a `... | head -1` ends in SIGPIPE and takes

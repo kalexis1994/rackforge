@@ -54,8 +54,8 @@ use rackforge_plugin_api::{
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
     cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
-    install_local_archive_replacing, plugin_is_enabled, remove_plugin_user_data,
-    set_plugin_enabled, uninstall_plugin,
+    install_official_archive, plugin_is_enabled, remove_plugin_user_data, set_plugin_enabled,
+    uninstall_plugin,
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
@@ -8805,7 +8805,8 @@ fn install_bundled_default_plugin(options: &Options) -> Result<()> {
         fs::write(&marker, b"1\n")?;
         return Ok(());
     }
-    let installed = install_local_archive(store_root, bytes)
+    // Built with this release, as the official set is: see below.
+    let installed = install_official_archive(store_root, bytes)
         .context("installing the bundled default instrument")?;
     eprintln!(
         "DESKTOP_DEFAULT_PLUGIN id={} version={} path={} existing={}",
@@ -8837,7 +8838,7 @@ fn install_bundled_official_plugins(options: &Options) -> Result<()> {
         // what its versions contain. A same-version copy left by an earlier
         // build is corrected rather than kept: keeping it meant a player ran
         // a stale instrument that no release could ever replace.
-        let installed = install_local_archive_replacing(store_root, bytes)
+        let installed = install_official_archive(store_root, bytes)
             .with_context(|| format!("installing bundled official plugin {archive_name}"))?;
         if !known_plugin {
             set_plugin_enabled(store_root, &inspection.plugin_id, true).with_context(|| {

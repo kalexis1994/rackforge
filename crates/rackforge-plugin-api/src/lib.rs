@@ -4,12 +4,16 @@
 //! The binary boundary in [`abi`] deliberately uses only C-compatible values.
 
 pub mod abi;
+pub mod install;
 pub mod manifest;
 pub mod parameter;
 pub mod preset;
 pub mod program;
 pub mod state;
 
+pub use install::{
+    InstallationRecord, LOCAL_REPOSITORY_ID, OFFICIAL_REPOSITORY_ID, installation_record_for,
+};
 pub use manifest::{
     ApiRequirement, AudioBus, AudioBusLayout, BrandingAssetKind, Capability, MAIN_AUDIO_BUS_ID,
     MAX_PLUGIN_AUDIO_CHANNELS, MidiInputBus, MidiProgramChangePolicy, PluginAudioContract,

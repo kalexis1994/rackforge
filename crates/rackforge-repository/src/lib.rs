@@ -94,16 +94,9 @@ pub struct PluginArtifact {
     pub sha256: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct InstallationRecord {
-    pub schema_version: u32,
-    pub plugin_id: String,
-    pub version: String,
-    pub platform: String,
-    pub repository_id: String,
-    pub artifact_sha256: String,
-}
+/// What the store records beside each package; shared with the hosts that
+/// read it (`rackforge_plugin_api::install`).
+pub use rackforge_plugin_api::{InstallationRecord, LOCAL_REPOSITORY_ID, OFFICIAL_REPOSITORY_ID};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedRepository {
@@ -705,26 +698,28 @@ pub fn install_local_archive(
     install_local_archive_cancellable(store_root, bytes, &AtomicBool::new(false))
 }
 
-/// What to do when the store already holds this version with other bytes.
-///
-/// A version is immutable because saved state points at it: a package that
-/// changes underneath a reference is how a rack loads something other than
-/// what it saved. `Keep` is therefore the default everywhere.
-///
-/// `Replace` exists for one caller: a platform installer laying down the
-/// official set that shipped with the release. Those packages arrive pinned
-/// by URL and checked against a SHA-256 the source tree carries, so the
-/// release — not whatever a previous build left behind — is the authority on
-/// what that version contains.
+/// Where a package installed from a file came from, which decides what it may
+/// overwrite and what it is trusted with.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ExistingVersion {
-    Keep,
-    Replace,
+enum LocalSource {
+    /// A file a user chose. A version is immutable because saved state points
+    /// at it: a package that changes underneath a reference is how a rack
+    /// loads something other than what it saved. So a same-version package
+    /// with other bytes is refused.
+    User,
+    /// The official set the release carries, pinned by URL and checked
+    /// against a SHA-256 the source tree holds. The release -- not whatever a
+    /// previous build left behind -- is the authority on what its versions
+    /// contain, so a same-version copy with other bytes is replaced; and the
+    /// record says official, which is what lets a host run the package's
+    /// native build in place of its component.
+    Official,
 }
 
-/// Installs a local package, replacing a same-version package whose contents
-/// differ. See [`ExistingVersion::Replace`] for when that is legitimate.
-pub fn install_local_archive_replacing(
+/// Installs a package from the release's own official set. Only a host or a
+/// platform installer laying down the packages it was built with may call
+/// this: see [`OFFICIAL_REPOSITORY_ID`].
+pub fn install_official_archive(
     store_root: impl AsRef<Path>,
     bytes: &[u8],
 ) -> Result<InstalledPackage, RepositoryError> {
@@ -732,7 +727,7 @@ pub fn install_local_archive_replacing(
         store_root,
         bytes,
         &AtomicBool::new(false),
-        ExistingVersion::Replace,
+        LocalSource::Official,
     )
 }
 
@@ -744,14 +739,14 @@ pub fn install_local_archive_cancellable(
     bytes: &[u8],
     cancelled: &AtomicBool,
 ) -> Result<InstalledPackage, RepositoryError> {
-    install_local_archive_with(store_root, bytes, cancelled, ExistingVersion::Keep)
+    install_local_archive_with(store_root, bytes, cancelled, LocalSource::User)
 }
 
 fn install_local_archive_with(
     store_root: impl AsRef<Path>,
     bytes: &[u8],
     cancelled: &AtomicBool,
-    existing_version: ExistingVersion,
+    source: LocalSource,
 ) -> Result<InstalledPackage, RepositoryError> {
     if bytes.is_empty() || bytes.len() as u64 > MAX_PACKAGE_BYTES {
         return Err(RepositoryError::Integrity(
@@ -795,7 +790,11 @@ fn install_local_archive_with(
             plugin_id: manifest.id,
             version: manifest.version,
             platform: platform.into(),
-            repository_id: "local".into(),
+            repository_id: match source {
+                LocalSource::User => LOCAL_REPOSITORY_ID,
+                LocalSource::Official => OFFICIAL_REPOSITORY_ID,
+            }
+            .into(),
             artifact_sha256: hex_digest(Sha256::digest(bytes).as_slice()),
         };
 
@@ -808,7 +807,24 @@ fn install_local_archive_with(
                     already_installed: true,
                 });
             }
-            if existing_version == ExistingVersion::Keep {
+            // The same bytes from another source: the package stays, and the
+            // record keeps the more trusted of the two. The official set
+            // vouches for a copy a user installed earlier; a user installing
+            // an official package again takes nothing from it.
+            if existing.same_payload(&record) {
+                let record = if source == LocalSource::Official {
+                    write_json_atomic(&record_path, &record)?;
+                    record
+                } else {
+                    existing
+                };
+                return Ok(InstalledPackage {
+                    path: destination,
+                    record,
+                    already_installed: true,
+                });
+            }
+            if source == LocalSource::User {
                 return Err(RepositoryError::ImmutableConflict);
             }
             // The replacement is already staged and validated, so the old
@@ -1659,6 +1675,26 @@ fn validate_extracted_payload(
         presets.validate().map_err(|error| {
             RepositoryError::InvalidPackage(format!("invalid preset catalog: {error}"))
         })?;
+        // The native builds beside the component, every platform's: a host
+        // that may run one finds it whole and inside the package, and a host
+        // that may not never reads them.
+        for (platform, relative) in &manifest.binaries {
+            let path = resolve_existing(&root.join(relative)).map_err(|error| {
+                RepositoryError::InvalidPackage(format!(
+                    "native build for {platform} is unavailable: {error}"
+                ))
+            })?;
+            let metadata = fs::metadata(&path).map_err(|error| {
+                RepositoryError::InvalidPackage(format!(
+                    "native build for {platform} is unavailable: {error}"
+                ))
+            })?;
+            if !path.starts_with(root) || !metadata.is_file() || metadata.len() == 0 {
+                return Err(RepositoryError::InvalidPackage(format!(
+                    "native build for {platform} is missing or escaped the package: {relative:?}"
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -1936,6 +1972,48 @@ preset_catalog = "metadata/presets.json"
     /// The guarantee runs both ways: a version never changes under a
     /// reference by accident, and the release's own pinned package is
     /// allowed to correct a copy that no longer matches it.
+    /// Native builds beside a component are checked like the component:
+    /// whole, and inside the package, for every platform listed.
+    #[test]
+    fn native_builds_beside_a_component_must_be_in_the_package() {
+        let mut manifest = portable_manifest().to_vec();
+        manifest.extend_from_slice(
+            b"\n[binaries]\nlinux-aarch64 = \"native/linux-aarch64/libsynth.so\"\nwindows-x86_64 = \"native/windows-x86_64/synth.dll\"\n",
+        );
+        let package = |native: &[(&str, &[u8])]| {
+            let mut entries: Vec<(&str, &[u8])> = vec![
+                ("rackforge-plugin.toml", &manifest),
+                ("component.wasm", b"\0asm\x01\0\0\0"),
+                ("metadata/runtime.json", portable_runtime()),
+                ("metadata/parameters.json", portable_parameters()),
+                ("metadata/presets.json", portable_presets()),
+            ];
+            entries.extend_from_slice(native);
+            archive(&entries)
+        };
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-native-builds-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+
+        // One platform's build missing: the package is refused whole.
+        let partial = package(&[("native/linux-aarch64/libsynth.so", b"\x7fELF")]);
+        assert!(matches!(
+            install_local_archive(&root, &partial),
+            Err(RepositoryError::InvalidPackage(message)) if message.contains("windows-x86_64")
+        ));
+
+        let complete = package(&[
+            ("native/linux-aarch64/libsynth.so", b"\x7fELF"),
+            ("native/windows-x86_64/synth.dll", b"MZ"),
+        ]);
+        let installed = install_local_archive(&root, &complete).expect("complete package");
+        assert_eq!(installed.record.platform, "wasm-v1");
+        assert!(!installed.record.is_official());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn a_version_is_immutable_unless_the_release_replaces_it() {
         // A portable package, so the test builds a valid one on any host.
@@ -1971,9 +2049,20 @@ preset_catalog = "metadata/presets.json"
             Err(RepositoryError::ImmutableConflict)
         ));
 
+        // The same bytes from the official set vouch for the copy already
+        // there: nothing is rewritten but the record.
+        let vouched = install_official_archive(&root, &first).expect("official, same bytes");
+        assert!(vouched.already_installed);
+        assert!(vouched.record.is_official());
+        // A user installing them again takes nothing from that.
+        let again = install_local_archive(&root, &first).expect("same bytes, from a user");
+        assert!(again.already_installed);
+        assert!(again.record.is_official());
+
         // The release may correct it, and what lands is the new package.
-        let replaced = install_local_archive_replacing(&root, &rebuilt).expect("replacement");
+        let replaced = install_official_archive(&root, &rebuilt).expect("replacement");
         assert!(!replaced.already_installed);
+        assert!(replaced.record.is_official());
         assert_eq!(replaced.record.version, version);
         assert_eq!(replaced.record.plugin_id, plugin_id);
         let payload = std::fs::read(replaced.path.join("component.wasm")).expect("payload");

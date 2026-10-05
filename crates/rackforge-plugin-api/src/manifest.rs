@@ -1482,7 +1482,10 @@ mod tests {
             memory_limit_mib: None,
         });
         assert_eq!(candidate.validate(), Ok(()));
-        assert_eq!(candidate.binary_for("linux-aarch64"), Ok("lib/librackforge_gain.so"));
+        assert_eq!(
+            candidate.binary_for("linux-aarch64"),
+            Ok("lib/librackforge_gain.so")
+        );
     }
 
     #[test]

@@ -3,7 +3,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use rackforge_plugin_api::PluginManifest;
 use rackforge_repository::{
     RepositoryConfig, RepositoryFile, fetch_repository, install_archive, install_local_archive,
-    install_local_archive_replacing, repository_platform_key, set_plugin_enabled, uninstall_plugin,
+    install_official_archive, repository_platform_key, set_plugin_enabled, uninstall_plugin,
     verify_catalog,
 };
 use sha2::{Digest, Sha256};
@@ -54,10 +54,11 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
             install(config, repository_id, plugin_id, store_root, Some(version))
         }
         [command, package, store_root, flag]
-            if command == "install-local" && flag == "--replace" =>
+            if command == "install-local" && flag == "--official" =>
         {
             // Only a platform installer laying down the release's own
-            // pinned, hash-checked package may overwrite a version.
+            // pinned, hash-checked package: it may overwrite a version, and
+            // its record says official.
             install_local(package, store_root, true)
         }
         [command, package, store_root] if command == "install-local" => {
@@ -95,20 +96,21 @@ fn uninstall(plugin_id: &str, store_root: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn install_local(package_path: &str, store_root: &str, replace: bool) -> Result<(), String> {
+fn install_local(package_path: &str, store_root: &str, official: bool) -> Result<(), String> {
     let bytes = fs::read(package_path).map_err(|error| error.to_string())?;
-    let installed = if replace {
-        install_local_archive_replacing(store_root, &bytes)
+    let installed = if official {
+        install_official_archive(store_root, &bytes)
     } else {
         install_local_archive(store_root, &bytes)
     }
     .map_err(|error| error.to_string())?;
     println!(
-        "PLUGIN_INSTALLED id={} version={} path={} existing={} source=local",
+        "PLUGIN_INSTALLED id={} version={} path={} existing={} source={}",
         installed.record.plugin_id,
         installed.record.version,
         installed.path.display(),
-        installed.already_installed
+        installed.already_installed,
+        installed.record.repository_id
     );
     Ok(())
 }
@@ -434,5 +436,5 @@ fn hex_digest(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store install-local PACKAGE.rfplugin STORE_ROOT [--replace]\n  rackforge-store enable PLUGIN_ID STORE_ROOT\n  rackforge-store disable PLUGIN_ID STORE_ROOT\n  rackforge-store uninstall PLUGIN_ID STORE_ROOT\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin"
+    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store install-local PACKAGE.rfplugin STORE_ROOT [--official]\n  rackforge-store enable PLUGIN_ID STORE_ROOT\n  rackforge-store disable PLUGIN_ID STORE_ROOT\n  rackforge-store uninstall PLUGIN_ID STORE_ROOT\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin"
 }

@@ -397,8 +397,8 @@ A platform is `<os>-<arch>` as Rust names them (`std::env::consts`):
 `windows-x86_64`, `linux-x86_64`, `linux-aarch64`, `android-aarch64`,
 `macos-aarch64`. A native build runs unsandboxed, with the host's own
 rights, so a host runs one only for a package the release's official set laid
-down — the store's record for it says `official` — and only when the package
-does not render in parallel. Every other package, and every host without a
+down — the store's record for it says `official`. Every other package, and
+every host without a
 build for its platform, runs the component: a package with no native builds
 works everywhere, only slower, and a build that will not load is reported
 (`PLUGIN_NATIVE_BUILD_FAILED`) and passed over for the component.
@@ -419,15 +419,27 @@ function with no arguments returning a pointer to a static table in C layout:
 | `region(instance, region, *capacity) -> *mut u8` | A buffer's address, its capacity in elements written to `capacity`; null for a buffer the build does not have. |
 | `initialize` … `process` | One entry for each required export above, in the order the SDK's `NativeApiV1` lists them, each taking the instance first, then the export's own arguments, and returning its result. |
 | `process_v2` | Nullable: present exactly when the build takes the wide contract. |
+| `parallel` | Nullable: the parallel-render table, for a processor that renders in units. |
+
+The parallel-render table (`NativeParallelApiV1`) carries what the component's
+`rackforge_parallel_*` constants report — the ABI version, `max_units`, the
+dispatch stride, the unit's channels, the report stride, the shared capacity
+and the distance between two mix slots — and its four stages, each taking the
+instance first: `begin_block`, `begin_block_v2` (nullable, present exactly
+when `process_v2` is), `render_unit` and `end_block`. A host schedules a
+build's instances exactly as it schedules a component's, coordinator and
+workers alike.
 
 The buffers, by number, take the place of the `*_ptr` exports: input `0`,
 output `1`, MIDI `2`, parameter events `3`, transfer `4`, program input `5`,
-wide MIDI `6`. Their layouts are the ones above.
+wide MIDI `6`, and for a parallel build dispatch `7`, plan `8`, mix `9`,
+shared `10` and reports `11`. Their layouts are the ones above and in
+[PARALLEL_RENDER.md](PARALLEL_RENDER.md).
 
-A native build answers as a component that uses neither would: the host
-offers it no real-time budget, and it does not render in parallel. The host
-calls the real-time entries — `process`, `process_v2`, `set_parameter`,
-`get_parameter`, `reset`, `latency_frames` — on whatever thread it is on,
+A native build has no fuel, so the host offers it no real-time budget. The
+host calls the real-time entries — `process`, `process_v2`, `set_parameter`,
+`get_parameter`, `reset`, `latency_frames`, the parallel stages — on whatever
+thread it is on,
 which may be an audio thread with a small stack; everything else, `create`
 and `prepare` among them, runs on a thread of the host's with a large stack
 (64 MiB reserved), since a processor built by value can need megabytes while
@@ -445,6 +457,8 @@ rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin
 ```
 
 `compare-native` plays every program the component publishes through both
-forms and fails on the first sample, or the first saved state, that differs.
+forms — and, for a processor that renders in units, through the native
+build's units as a host schedules them — and fails on the first sample, or
+the first saved state, that differs.
 `pack-wasm` stores each build at `native/<platform>/` and writes the
 `[binaries]` table; it refuses a library that does not export the entry.

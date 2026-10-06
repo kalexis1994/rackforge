@@ -56,7 +56,9 @@ La [ampliación estructural](RESULTADOS-P6-banda-alta.md) pasa el refinamiento
 de admitancia/presión hasta 6 kHz en el sector vertical simétrico de la tabla
 supuesta. La [proyección pasiva](RESULTADOS-P6-proyeccion-pasiva.md) conserva
 esa flexibilidad con 606 coordenadas y pasa puertos/frecuencias reservados.
-Falta construir su carga recíproca antes de volver a escuchar el modelo completo.
+La carga recíproca de 606 pasa la grilla armónica/Laplace y prefijos cortos.
+Faltan transitorios completos y presión temporal antes de volver a escuchar
+el modelo completo.
 
 | ID | Mecanismo | Representación actual / falta | Estado |
 | --- | --- | --- | --- |
@@ -66,7 +68,7 @@ Falta construir su carga recíproca antes de volver a escuchar el modelo complet
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Padé2/derivada cuarta con 128×384/128 kHz pasa masa, 83 frecuencias y tres puntos Laplace: Z/R/X máximos 0,667%/0,495%/0,921%, presión 0,124%. Seis prefijos frío/continuado con 606 pasan energía independiente y refinamiento enlazados con fuerza en tiempos comunes. Captura desde puertos reconstruye exactamente memorias; certificado compacto completo pendiente. Faltan transitorios completos, identificación y ambas caras/borde. | Carga aprobada en grilla armónica/Laplace y prefijos de contacto; golpe/repetición/release completos pendientes |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Padé2/derivada cuarta con 128×384/128 kHz pasa masa, 83 frecuencias y tres puntos Laplace: Z/R/X máximos 0,667%/0,495%/0,921%, presión 0,124%. Seis prefijos frío/continuado con 606 pasan energía independiente y refinamiento enlazados con fuerza en tiempos comunes. Observación compacta acotada de rango 102 contiene las 18 medidas completas anteriores y pasa sus 12 controles; dinámica sin reducción. Faltan transitorios/flujo no nulo, identificación y ambas caras/borde. | Carga aprobada en grilla armónica/Laplace y prefijos de contacto; golpe/repetición/release completos pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1240,3 +1242,25 @@ de historias frente a 2,12 GB, sin descartar modos. Pico propio 2,699 GiB;
 del certificado compacto completo. Siguiente: certificado y coste compactos
 con golpe completo/radiación no nula, repetición, release y presión temporal.
 La puerta global sigue falsa; no hay nuevo audio ni paquete en SHARED.
+
+### 2026-10-06 — P6: observación del campo con residuo acotado
+
+[Método, cotas y medidas](RESULTADOS-P6-observador-acotado.md). Se acelera
+la observación independiente del campo mediante QR/SVD de memorias y
+puertos; las fuerzas y trayectorias conservan los 606 modos. Rango elegido:
+102. Las normas de los residuos completos se convierten en intervalos de
+almacenamiento/flujo, sin deducir radiación del balance. Tres pruebas pasan
+contra factores completos, incluida memoria viva y flujo no nulo.
+
+En la repetición de los seis prefijos, los 66 diagnósticos mecánicos
+comparados no cambian y las 18 energías anteriores quedan dentro de las
+cotas. Pasan 12 controles; máxima cota relativa con piso 1e−14 J:
+2,923294e−7. Balance total/aire con extremos adversos:
+3,258294e−13/5,490971e−16. Las salvaguardas de redondeo no son una prueba
+formal de aritmética de intervalos. Tiempo 1516,607 s, certificado 1390,795 s,
+pico 3,700088 GiB. La comparación de coste anterior no fue aislada;
+no valida tiempo real. Una sola R, informes únicos en el repo, sin WAV/paquete.
+
+Siguiente: duración suficiente para separación y flujo apreciable, con
+refinamiento/cotas medidos allí. Repetición natural, release, presión temporal
+y timbre siguen pendientes; la puerta global permanece falsa.

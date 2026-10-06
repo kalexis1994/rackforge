@@ -2601,6 +2601,25 @@ compact certificate or an isolated speed benchmark. Full hammer separation,
 natural repetition, release, time pressure, actual-property identification
 and timbral/factory approval remain pending. No new audio/package is produced.
 
+The subsequent [bounded field observer](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-observador-acotado.md)
+projects only independent field observation onto a QR/SVD data basis; the
+606-coordinate trajectories, full mutual losses and acoustic forces stay
+unchanged. All angular factors and outputs remain, with complete endpoint
+and input residuals bounded using trace(R[0]) = ||H||²_F. A rank-102 basis
+contains all 18 earlier full-certificate energies within its intervals;
+66 compared trajectory diagnostics are unchanged. All 12 prefix controls
+pass, including worst-case total/air budget bounds 3.258294e-13/5.490971e-16
+and maximum observation bound 2.923294e-7 relative to energy or the 1e-14 J
+floor. Three small independent tests cover omitted directions, nonzero
+flux and live memory. These are analytic projection bounds with numerical
+roundoff safeguards, not a formal floating-point interval proof.
+Measured total/certificate cost is 1516.607/1390.795 s, peak 3.700088 GiB;
+the earlier run was concurrent with other controls, so this is not an
+isolated algorithm speed benchmark or real-time qualification. Wave flux
+is still near zero and the hammer has not separated at 125+125 microseconds.
+Longer contact, natural repetition, release and time pressure remain pending;
+the overall gate stays false. No factory sound, audio or package changes.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

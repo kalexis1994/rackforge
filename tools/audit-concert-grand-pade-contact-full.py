@@ -21,6 +21,7 @@ from concert_grand_pade_air import FourthFactorBlocks, PadeAir, PadeBoundedAir
 from concert_grand_wave_cache import digest, save_wave_cache, load_wave_cache
 from concert_grand_pade_certificate import certificate_batch
 from concert_grand_pade_port_certificate import certificate_ports,replay_endpoints
+from concert_grand_bounded_observer import observation_basis,certificate_observer
 from concert_grand_moving_bridge import MovingBridge, BridgeHammer
 from concert_grand_nonlinear_string import Wire
 from concert_grand_coupled_contact import Felt
@@ -51,11 +52,18 @@ def main():
     p.add_argument('--compact-certificate', action='store_true')
     p.add_argument('--certificate-input-block', type=int, default=16)
     p.add_argument('--replay-preflight-only', action='store_true')
+    p.add_argument('--bounded-observer', action='store_true')
+    p.add_argument('--observer-svd-relative', type=float, default=1e-12)
+    p.add_argument('--compare-prefix-report', type=Path)
     a = p.parse_args()
     if a.report.exists():
         raise ValueError('new report required')
     if a.replay_preflight_only and not a.compact_certificate:
         raise ValueError('replay preflight requires compact port capture')
+    if a.bounded_observer and not a.compact_certificate:
+        raise ValueError('bounded observation requires full compact port capture')
+    if not 0<a.observer_svd_relative<1:
+        raise ValueError('positive relative observation-basis tolerance required')
     if (len(a.rates) < 2 or sorted(set(a.rates)) != a.rates or min(a.rates) <= 0
             or any(rate % min(a.rates) for rate in a.rates)
             or not np.isfinite(a.duration) or a.duration <= 0
@@ -120,7 +128,8 @@ def main():
         'concert_grand_pade_midpoint.py', 'concert_grand_fast_contact.py',
         'concert_grand_bounded_contact.py', 'concert_grand_moving_bridge.py',
         'concert_grand_nonlinear_string.py', 'concert_grand_coupled_contact.py',
-        'concert_grand_surface_impedance.py','concert_grand_pade_port_certificate.py'})
+        'concert_grand_surface_impedance.py','concert_grand_pade_port_certificate.py',
+        'concert_grand_bounded_observer.py'})
     r = dict(parent_sha256={str(a.full_report): digest(a.full_report)}, board_sha256=digest(a.board),
              source_sha256={name: digest(Path(__file__).with_name(name)) for name in sources},
              cache=str(a.cache), rate_factor=provider.rate, angular=approved['angular'], cells=approved['cells'],
@@ -133,6 +142,7 @@ def main():
              criteria=dict(energy_relative=1e-9, interface_force_n=1e-9, interface_power_w=1e-9,
                            mechanical_trace_relative=.01, force_impulse_relative=.002,
                            finest_pair_state_relative=.01, refinement_ratio=.35,
+                           observation_relative=1e-4,observation_floor_j=1e-14,
                            cache_control_absolute=1e-10),
              certificate_method='port replay' if a.compact_certificate else 'stored section inputs',
              force_observation='Constitutive force on common captured timestamps; raw AVF peak retained',
@@ -219,6 +229,8 @@ def main():
             history = np.empty((steps,n) if a.compact_certificate else (steps,provider.taps,n))
             trace = [np.r_[q0,v0]]
             common_forces = [physical_force(system,state)]
+            contact_seen = system.compression(state[0])>0
+            separation = None
             felt = material = relax = port = impulse = peak_force = 0.
             max_newton = 0
             begin = time.perf_counter()
@@ -229,6 +241,10 @@ def main():
                 state, stats = coupled.step(state,1/rate,True)
                 step_seconds.append(time.perf_counter()-step_start)
                 history[i] = stats['wave_inputs'][0] if a.compact_certificate else stats['wave_inputs']
+                if system.compression(state[0])>0:
+                    contact_seen = True
+                elif contact_seen and separation is None:
+                    separation = [i/rate,(i+1)/rate]
                 felt += stats['felt_loss_j']
                 material += stats['material_loss_j']
                 relax += stats['radiation_loss_j']
@@ -255,6 +271,7 @@ def main():
                        felt_heat_j=felt,material_heat_j=material,relaxation_loss_j=relax,air_port_work_j=port,
                        impulse_n_s=impulse,maximum_force_n=peak_force,minimum_step_heat_j=min_heat,
                        common_force_n=common_forces,maximum_common_force_n=max(common_forces),
+                       separation_bracket_s=separation,initial_compression_m=system.compression(q0),
                        newton_iterations_max=max_newton,compression_final_m=system.compression(state[0]),
                        interface=interface,certificate_before_index=before_index,certificate_after_index=after_index)
             r['cases'].append(row)
@@ -284,7 +301,17 @@ def main():
             return
     certificate_start = time.perf_counter()
     progress = lambda i:print('certificate block',i,flush=True) if i%16==0 else None
-    if a.compact_certificate:
+    observer = None
+    if a.bounded_observer:
+        Q,basis = observation_basis(air_wave,np.array(certificates),segments,a.observer_svd_relative)
+        r['observation_basis'] = basis
+        r['certificate_method'] = 'field projection with full residual bounds'
+        checkpoint()
+        print('observation rank',basis['rank'],'of',basis['full_modes'],flush=True)
+        energies,losses,observer = certificate_observer(air_wave,np.array(certificates),segments,Q,
+            progress=progress,input_block=a.certificate_input_block)
+        r['bounded_observer'] = observer
+    elif a.compact_certificate:
         energies,losses,replay = certificate_ports(air_wave,np.array(certificates),segments,
                                                  progress=progress,input_block=a.certificate_input_block)
         r['certificate_replay_relative'] = replay.tolist()
@@ -304,6 +331,25 @@ def main():
         row['air_budget_relative'] = abs(row['wave_final_j']+row['relaxation_final_j']
                                         -row['wave_initial_j']-row['relaxation_initial_j']
                                         +radiation-row['air_port_work_j'])/e0
+    if observer is not None:
+        for row,rad in zip(r['cases'],observer['radiation_intervals']):
+            before = observer['storage_intervals'][row['certificate_before_index']]
+            after = observer['storage_intervals'][row['certificate_after_index']]
+            row['wave_initial_interval'] = before
+            row['wave_final_interval'] = after
+            row['wave_radiation_interval'] = rad
+            total_lo = row['mechanical_final_j']+row['relaxation_final_j']+after['lower_j']
+            total_hi = row['mechanical_final_j']+row['relaxation_final_j']+after['upper_j']
+            initial_lo = row['mechanical_initial_j']+row['relaxation_initial_j']+before['lower_j']
+            initial_hi = row['mechanical_initial_j']+row['relaxation_initial_j']+before['upper_j']
+            heat = row['felt_heat_j']+row['material_heat_j']+row['relaxation_loss_j']
+            row['total_budget_bound_relative'] = max(abs(total_lo+heat+rad['lower_j']-initial_hi),
+                abs(total_hi+heat+rad['upper_j']-initial_lo))/initial_lo
+            constant = row['relaxation_final_j']-row['relaxation_initial_j']+row['relaxation_loss_j']-row['air_port_work_j']
+            row['air_budget_bound_relative'] = max(abs(after['lower_j']-before['upper_j']+rad['lower_j']+constant),
+                abs(after['upper_j']-before['lower_j']+rad['upper_j']+constant))/initial_lo
+            row['observation_error_relative'] = max(item['error_bound_j']/max(
+                item['estimate_j'],r['criteria']['observation_floor_j']) for item in [before,after,rad])
     # Preserve the expensive independent observations before gate assembly.
     r['stage'] = 'independent certificate measured'
     checkpoint()
@@ -351,6 +397,28 @@ def main():
         value is not None and value<.35 for value in r['force_refinement_ratios'].values())
     if a.compact_certificate:
         r['prefix_gates']['replayed_memories'] = max(r['certificate_replay_relative'])<1e-11
+    if observer is not None:
+        r['prefix_gates']['bounded_energy'] = max(max(row['total_budget_bound_relative'],
+            row['air_budget_bound_relative']) for row in r['cases'])<r['criteria']['energy_relative']
+        r['prefix_gates']['observation_precision'] = max(row['observation_error_relative'] for row in r['cases'])<r['criteria']['observation_relative']
+        r['observation_comparison'] = []
+        if a.compare_prefix_report is not None:
+            old = json.loads(a.compare_prefix_report.read_text())
+            if (old['stage']!='contact prefix audit completed' or old['cache_R_sha256']!=r['cache_R_sha256']
+                    or old['rates']!=r['rates'] or old['duration_s']!=r['duration_s']):
+                raise ValueError('matching independent full-observation report required')
+            r['parent_sha256'][str(a.compare_prefix_report)] = digest(a.compare_prefix_report)
+            for row in r['cases']:
+                exact = next(case for case in old['cases'] if case['phase']==row['phase'] and case['rate']==row['rate'])
+                for field,interval in [('wave_initial_j','wave_initial_interval'),('wave_final_j','wave_final_interval'),
+                                       ('wave_radiation_j','wave_radiation_interval')]:
+                    item = row[interval]
+                    r['observation_comparison'].append(dict(phase=row['phase'],rate=row['rate'],field=field,
+                        exact_j=exact[field],absolute_error_j=abs(row[field]-exact[field]),
+                        contained=bool(item['lower_j']<=exact[field]<=item['upper_j'])))
+            r['prefix_gates']['independent_observer_comparison'] = all(item['contained'] for item in r['observation_comparison'])
+    r['duration_checks'] = dict(cold_hammer_separated=all(row['separation_bracket_s'] is not None for row in r['cases'] if row['phase']=='Cold'),
+        nonzero_wave_radiation=any(row.get('wave_radiation_interval',{}).get('lower_j',row['wave_radiation_j'])>1e-14 for row in r['cases']))
     r['prefix_gates'] = {name:bool(value) for name,value in r['prefix_gates'].items()}
     r['contact_prefix_gates_passed'] = all(r['prefix_gates'].values())
     r['stage'] = 'contact prefix audit completed'

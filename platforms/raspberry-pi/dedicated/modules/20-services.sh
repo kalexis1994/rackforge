@@ -52,6 +52,37 @@ module_services_declare() {
     want_unit bluetooth.service disabled now
   fi
 
+  # The engine first. A service's default dependencies wait for every
+  # filesystem, and on Raspberry Pi OS that means the boot partition's
+  # device, its check and its mount: about 2 s of every boot in which the
+  # engine, which needs none of it, does not start. The engine needs the root
+  # filesystem (mounted by the initramfs), the journal, and udev to have
+  # announced the devices; a card announced a moment later it adopts by
+  # itself. PrivateTmp=disconnected gives it a private /tmp without waiting
+  # for the host's.
+  want_file /etc/systemd/system/rackforge-audio.service.d/30-dedicated-early.conf 644 <<EOF
+# Installed by rackforge-pi (dedicated profile).
+[Unit]
+DefaultDependencies=no
+After=systemd-journald.socket systemd-udev-trigger.service systemd-tmpfiles-setup-dev.service
+Conflicts=shutdown.target
+Before=shutdown.target
+RequiresMountsFor=$RACKFORGE_ROOT_RESOLVED
+
+[Service]
+PrivateTmp=disconnected
+EOF
+  # The path unit that starts the engine when it is first configured would
+  # otherwise hold it behind the same wait.
+  want_file /etc/systemd/system/rackforge-audio.path.d/30-dedicated-early.conf 644 <<'EOF'
+# Installed by rackforge-pi (dedicated profile).
+[Unit]
+DefaultDependencies=no
+After=-.mount
+Conflicts=shutdown.target
+Before=shutdown.target
+EOF
+
   # cloud-init configured the image on its first boot; it has nothing to do
   # on an instrument's later ones but spend time looking.
   if command -v cloud-init >/dev/null 2>&1 && [[ -z "$DEDICATED_ROOT" ]] &&

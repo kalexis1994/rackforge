@@ -763,8 +763,6 @@ pub struct LiveConfig {
 }
 
 fn discover_plugin_packages(primary: &Path) -> Result<Vec<PluginPackage>> {
-    let primary = PluginPackage::open(primary)?;
-    let primary_id = primary.manifest().id.clone();
     let root = env::var_os("RACKFORGE_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -773,13 +771,26 @@ fn discover_plugin_packages(primary: &Path) -> Result<Vec<PluginPackage>> {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("rackforge")
         });
+    // The store validated everything in its packages when it installed
+    // them, branding included; a package dropped into plugins/ by hand had
+    // no such check and gets it here.
+    let store = root.join("plugin-store/packages");
+    let open = |path: &Path| {
+        if path.starts_with(&store) {
+            PluginPackage::open_installed(path)
+        } else {
+            PluginPackage::open(path)
+        }
+    };
+    let primary = open(primary)?;
+    let primary_id = primary.manifest().id.clone();
     let mut selected = BTreeMap::<String, (Version, PluginPackage)>::new();
 
     let mut candidates = Vec::new();
     if let Ok(entries) = fs::read_dir(root.join("plugins")) {
         candidates.extend(entries.flatten().map(|entry| entry.path()));
     }
-    if let Ok(plugin_entries) = fs::read_dir(root.join("plugin-store/packages")) {
+    if let Ok(plugin_entries) = fs::read_dir(&store) {
         for plugin_entry in plugin_entries.flatten() {
             if let Ok(version_entries) = fs::read_dir(plugin_entry.path()) {
                 candidates.extend(version_entries.flatten().map(|entry| entry.path()));
@@ -791,7 +802,7 @@ fn discover_plugin_packages(primary: &Path) -> Result<Vec<PluginPackage>> {
         if !candidate.join("rackforge-plugin.toml").is_file() {
             continue;
         }
-        let package = match PluginPackage::open(&candidate) {
+        let package = match open(&candidate) {
             Ok(package) => package,
             Err(error) => {
                 eprintln!(
@@ -935,6 +946,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         None => (None, None, None, None, None, None, Vec::new()),
     };
     let packages = discover_plugin_packages(&config.package)?;
+    startup.step("packages_found");
     // What each installed plugin lays out for the keyboards, read while the
     // packages still name their roots.
     let control_layouts = crate::controller_layouts::control_layouts(
@@ -1000,6 +1012,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         );
         plugins.insert(loaded.manifest().id.clone(), loaded);
     }
+    startup.step("plugins_loaded");
     let primary_plugin = *plugins
         .get(&primary_id)
         .context("primary plugin failed to load")?;
@@ -1261,6 +1274,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
             (Vec::new(), Vec::new())
         }
     };
+    startup.step("instances_ready");
 
     let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
     let ConnectedMidiSources {
@@ -1516,11 +1530,13 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         }
         None => Vec::new(),
     };
+    startup.step("play_chain_ready");
     if let Some(checkpoint) = &checkpoint {
         checkpoint
             .save(&session)
             .context("saving initial LIVE session checkpoint")?;
     }
+    startup.step("checkpoint_saved");
     let initial_master_level = session.master_level;
     let initial_master_pan = session.master_pan;
     let session_store = SessionStore::shared(session)?;
@@ -1542,6 +1558,14 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         .as_ref()
         .map(|root| crate::PluginStorage::new(root.clone()));
     let state_store = Arc::new(Mutex::new(state_store));
+    let portable_plugins = plugins
+        .values()
+        .filter_map(|plugin| {
+            control::PortableControlPlugin::new(plugin)
+                .map(|runtime| (plugin.manifest().id.clone(), runtime))
+        })
+        .collect();
+    startup.step("control_runtimes_ready");
     let _control_server = control::start(
         &control_path,
         control::ControlServerOptions {
@@ -1559,13 +1583,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
                 .values()
                 .map(|plugin| (plugin.manifest().id.clone(), plugin.manifest().clone()))
                 .collect(),
-            portable_plugins: plugins
-                .values()
-                .filter_map(|plugin| {
-                    control::PortableControlPlugin::new(plugin)
-                        .map(|runtime| (plugin.manifest().id.clone(), runtime))
-                })
-                .collect(),
+            portable_plugins,
             midi_sources: shared_midi_sources.clone(),
             midi_observer,
             connected_midi_sources: Arc::clone(&connected_midi_sources),
@@ -2091,6 +2109,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     // ordinary scheduler, where blocking on the filesystem is harmless.
     let realtime_status = realtime::engage(realtime::DEFAULT_AUDIO_PRIORITY);
     println!("{realtime_status}");
+    // Locking the memory faults every page of it in: on a Pi, a measurable
+    // part of the start.
+    startup.step("memory_locked");
     // A process property rather than a thread one, and the two do not
     // substitute: a background process is slowed whatever its threads asked
     // for. Reported separately for the same reason it is requested separately.

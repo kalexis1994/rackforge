@@ -393,8 +393,6 @@ struct ControlContext {
 
 pub struct ControlServer {
     _server_thread: JoinHandle<()>,
-    _watchdog_thread: JoinHandle<()>,
-    _sources_thread: JoinHandle<()>,
 }
 
 pub struct ControlServerOptions {
@@ -463,6 +461,33 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         )
     })?;
 
+    // Bound now, the socket queues a client that connects from here on rather
+    // than refusing it. What the server needs before it answers -- every
+    // controller's factory maps, seeded and read back from the card -- is
+    // built on the server's own thread, off the engine's way to its first
+    // period: most of a second of a Pi's boot.
+    let path = socket_path.to_path_buf();
+    let server_thread = thread::Builder::new()
+        .name("rf-control".into())
+        .spawn(move || {
+            if let Err(error) = prepare_and_serve(listener, path, options) {
+                // Without a control server the engine plays but nothing can
+                // reach it; systemd starting it again is the better outcome.
+                eprintln!("CONTROL_SERVER_FAILED error={error:#}");
+                std::process::exit(1);
+            }
+        })
+        .context("spawning RackForge control server")?;
+    Ok(ControlServer {
+        _server_thread: server_thread,
+    })
+}
+
+fn prepare_and_serve(
+    listener: UnixListener,
+    path: PathBuf,
+    options: ControlServerOptions,
+) -> Result<()> {
     let factory_maps = crate::controller_layouts::factory_maps(
         &crate::controller_layouts::slotted_controllers(options.controllers_root.as_deref()),
         &options.control_layouts,
@@ -516,26 +541,19 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         next_draft_id: AtomicU64::new(1),
         next_midi_learn_id: AtomicU64::new(1),
     });
-    let path = socket_path.to_path_buf();
-    let server_context = Arc::clone(&context);
-    let server_thread = thread::Builder::new()
-        .name("rf-control".into())
-        .spawn(move || serve(listener, path, server_context))
-        .context("spawning RackForge control server")?;
-    let sources_context = Arc::clone(&context);
-    let watchdog_thread = thread::Builder::new()
+    let watchdog_context = Arc::clone(&context);
+    thread::Builder::new()
         .name("rf-audition".into())
-        .spawn(move || audition_watchdog(context))
+        .spawn(move || audition_watchdog(watchdog_context))
         .context("spawning RackForge audition watchdog")?;
-    let sources_thread = thread::Builder::new()
+    let sources_context = Arc::clone(&context);
+    thread::Builder::new()
         .name("rf-midi-sources".into())
         .spawn(move || follow_midi_sources(sources_context))
         .context("spawning RackForge MIDI source follower")?;
-    Ok(ControlServer {
-        _server_thread: server_thread,
-        _watchdog_thread: watchdog_thread,
-        _sources_thread: sources_thread,
-    })
+    println!("CONTROL_SERVING socket={}", path.display());
+    serve(listener, path, context);
+    Ok(())
 }
 
 /// How often the MIDI source registry is looked at for a keyboard the

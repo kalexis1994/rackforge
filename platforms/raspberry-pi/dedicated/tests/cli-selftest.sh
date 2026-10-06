@@ -23,7 +23,9 @@ printf 'processor\t: 0\nprocessor\t: 1\nprocessor\t: 2\nprocessor\t: 3\n' >"$roo
 printf 'MemTotal:        8007004 kB\n' >"$root/proc/meminfo"
 printf 'VERSION_CODENAME=trixie\n' >"$root/etc/os-release"
 printf 'dtparam=audio=on\ncamera_auto_detect=0\ndisplay_auto_detect=0\n[pi5]\ndtoverlay=nospi10\n[all]\n' >"$root/boot/firmware/config.txt"
-printf 'console=tty1 root=PARTUUID=1 rootwait\n' >"$root/boot/firmware/cmdline.txt"
+# Without a final newline, as Raspberry Pi OS writes it (the engine's own
+# self-test covers the other ending).
+printf 'console=tty1 root=PARTUUID=1 rootwait' >"$root/boot/firmware/cmdline.txt"
 printf '[Main]\nMechanism=none\n' >"$root/etc/rpi/swap.conf.d/10-rackforge-realtime.conf"
 for unit in apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer fstrim.timer \
   dpkg-db-backup.timer rpi-eeprom-update.service e2scrub_reap.service udisks2.service \

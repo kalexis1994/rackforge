@@ -318,6 +318,73 @@ jobs, man-db, e2scrub); move apt, fstrim and eeprom checks to an explicit
 *Prediction:* time to ready falls by at least 1 s; no background job starts
 during a two-hour soak.
 
+**Where a boot's time went** (Pi 4, before D3, from the kernel's start):
+userspace at 2.0 s; udev announced the boot partition at 4.1 s, its fsck
+took 0.8 s and its mount ended at 5.0 s; only then did `sysinit.target`
+let the engine start, at 5.5 s. The engine needs none of that partition.
+Inside the engine (the new `STARTUP_STEP` lines), its 4.7 s went to opening
+the plugin packages (1.65 s), loading them (0.7 s), instances (0.5 s), MIDI
+and audio (0.5 s), the control server (0.8 s) and locking memory (0.5 s).
+The 1.65 s was the engine decoding every plugin's banner, icon and splash
+PNG (some 17 MB from the card) on every start, which the store had already
+validated when it installed them and which the engine never shows. The
+control server's 0.8 s was seeding and reading every controller's factory
+maps before it opened its socket. The bootloader's configuration (boot
+order SD first, no network or UART waits) offers nothing to gain.
+
+**Built:**
+
+- The engine's unit no longer names `local-fs.target` and `sound.target`
+  (its default dependencies already order it after the filesystems, so a
+  normal install is unchanged); the dedicated profile's drop-in turns the
+  default dependencies off and orders it after the journal and udev alone,
+  with a private `/tmp` of its own (`PrivateTmp=disconnected`). The governor
+  unit is ordered after nothing.
+- The engine opens store-installed packages without decoding their
+  branding again; a package dropped into `plugins/` by hand is still fully
+  validated.
+- The control server binds its socket at once and builds the controller
+  maps on its own thread; a client that connects meanwhile is queued.
+- Services: scheduled maintenance (apt, man-db, e2scrub, fstrim, the dpkg
+  backup) only through `rackforge-pi maintenance`; no bootloader check or
+  e2scrub snapshot search at boot; no udisks2, no wait-online; Bluetooth
+  only with a paired device.
+
+**Result so far** (10 boots each, median and worst, seconds from the
+kernel's start):
+
+| | Engine started | First period | Web | SSH | Network |
+| --- | --- | --- | --- | --- | --- |
+| D1 | 6.0 | 10.2 (10.4) | 16.9 | 17.0 | 20.8 |
+| D2, CPU module only (5 boots) | 6.2 | 10.3 (10.4) | 17.1 | 17.2 | 20.2 |
+| D3, services and early start | 4.2 | 9.0 (9.25) | 15.8 | 15.9 | 18.9 |
+
+Starting 1.9 s earlier made the engine ready only 1.3 s earlier: it now
+starts while the rest of the system is still reading the card, and its own
+start grew from 4.2 to 4.8 s. On a Pi 4 the engine's start is bound by the
+card.
+
+With the branding and control-server changes in the engine (10 boots):
+
+| | Engine started | First period | Web | SSH | Network |
+| --- | --- | --- | --- | --- | --- |
+| D3 with the engine changes | 4.2 | **7.5 (7.6)** | 14.4 | 14.5 | 17.5 |
+
+2.7 s earlier than D1 from the kernel's start, and everything else more
+than 2 s earlier. The user measured about 20 s from power to sound before
+any of this; that puts the firmware, the bootloader and loading the kernel
+at about 9.5 s, so power to sound is now about 17 s.
+
+**The governor did not survive a reboot.** `verify` after the boots above
+found every core on ondemand: those boots ran with it. Two things set it
+after the unit: the CPU frequency driver registers late and starts on the
+kernel's default governor, and raspberrypi-sys-mods ships a udev rule that
+writes ondemand to every CPU as it appears. The CPU module now sets
+`cpufreq.default_governor` on the kernel command line and replaces the
+package's rule with one of the same name in `/etc/udev/rules.d`; after a
+reboot every core reads `performance` and `verify` passes. A marker saying
+"applied" would have reported success throughout.
+
 ### D4. Storage
 
 Volatile, size-capped journal; telemetry not written to the card every

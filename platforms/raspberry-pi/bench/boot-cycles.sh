@@ -20,22 +20,58 @@ records='~/bench/records'
 
 now() { date +%s.%N; }
 
+# Extra ssh options for every connection, from BENCH_SSH_OPTIONS -- for
+# instance `-o HostName=192.168.1.17` where the Pi's mDNS name resolves
+# only now and then.
+ssh() {
+  # shellcheck disable=SC2086
+  command ssh ${BENCH_SSH_OPTIONS:-} "$@"
+}
+
+# An ssh that fails to connect -- an mDNS name that does not resolve for a
+# moment, which happens -- is tried again rather than ending the run.
+remote() {
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    ssh -o ConnectTimeout=5 "$host" "$@" && return 0
+    local status=$?
+    ((status == 255)) || return "$status"
+    sleep 2
+  done
+  return 255
+}
+
+boot_id() {
+  ssh -o ConnectTimeout=5 -o BatchMode=yes "$host" cat /proc/sys/kernel/random/boot_id 2>/dev/null
+}
+
 for cycle in $(seq 1 "$count"); do
+  # The boot this cycle starts from. A name that briefly fails to resolve
+  # looks exactly like a Pi that went down; only a new boot id proves one.
+  previous=""
+  until previous="$(boot_id)" && [[ -n "$previous" ]]; do sleep 1; done
   ssh -o ConnectTimeout=5 "$host" 'sudo systemctl reboot' || true
   # Gone: SSH no longer connects.
   while ssh -o ConnectTimeout=2 -o BatchMode=yes "$host" true 2>/dev/null; do
     sleep 0.5
   done
   down="$(now)"
-  # Back: SSH answers.
-  until ssh -o ConnectTimeout=2 -o BatchMode=yes "$host" true 2>/dev/null; do
+  # Back: SSH answers, from a boot that is not the one this cycle left. A
+  # reboot whose ssh never connected left the same boot running; asked again.
+  asked="$(date +%s)"
+  until current="$(boot_id)" && [[ -n "$current" && "$current" != "$previous" ]]; do
+    if [[ "$current" == "$previous" ]] && (($(date +%s) - asked > 90)); then
+      ssh -o ConnectTimeout=5 "$host" 'sudo systemctl reboot' || true
+      asked="$(date +%s)"
+      down="$(now)"
+    fi
     sleep 0.5
   done
   up="$(now)"
   # Let the boot finish before reading it.
   sleep 30
   wall="$(awk -v up="$up" -v down="$down" 'BEGIN { printf "%.2f", up - down }')"
-  ssh "$host" "$bench boot-time --out $records/boot-$label-$cycle.json >/dev/null && \
+  remote "$bench boot-time --out $records/boot-$label-$cycle.json >/dev/null && \
     python3 - $records/boot-$label-$cycle.json $wall <<'EOF'
 import json, sys
 path, wall = sys.argv[1], float(sys.argv[2])

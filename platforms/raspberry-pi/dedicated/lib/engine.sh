@@ -277,8 +277,14 @@ set_token() {
   else
     words="$(tr ' ' '\n' <<<"$words" | grep -vxF -- "$token" | tr '\n' ' ' | sed 's/ $//')"
   fi
-  # cmdline.txt must stay one line.
-  printf '%s\n' "$words" >"$temporary"
+  # cmdline.txt must stay one line, ending as it ended: with a newline or,
+  # as Raspberry Pi OS writes it, without, so a revert gives back the same
+  # bytes.
+  if [[ -n "$(tail -c 1 "$file")" ]]; then
+    printf '%s' "$words" >"$temporary"
+  else
+    printf '%s\n' "$words" >"$temporary"
+  fi
   mv -f "$temporary" "$file"
 }
 

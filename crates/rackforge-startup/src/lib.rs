@@ -106,6 +106,16 @@ impl StartupTimeline {
         }
     }
 
+    /// Says that a step inside a phase finished, and when: where a start's
+    /// time goes, step by step, for whoever is making it shorter.
+    pub fn step(&self, name: &str) {
+        println!(
+            "STARTUP_STEP host={} step={name} elapsed_ms={}",
+            self.0.host,
+            self.elapsed().as_millis()
+        );
+    }
+
     pub fn highest(&self) -> Option<StartupPhase> {
         let rank = self.0.highest.load(Ordering::Acquire);
         (rank != 0).then(|| phase_from_rank(rank))

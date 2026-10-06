@@ -16,6 +16,11 @@ Runs on the Pi, as the RackForge user or root. Standard library only.
       per step, and the most voices each instrument held with nothing late.
       Restores the instrument and program that were selected.
 
+  rackforge-pi-bench soak [--minutes 120] [--play-every 5] [--out FILE]
+      Leaves the instrument running, playing a short chord now and then,
+      and records each minute what the engine counted and which units
+      systemd started: on a dedicated instrument, none start on their own.
+
   rackforge-pi-bench boot-time [--json]
       For the current boot: when the kernel started the engine, when the
       engine first played a period, when the interface and SSH listened,
@@ -594,6 +599,56 @@ def boot_time():
     return result
 
 
+# --- soak -----------------------------------------------------------------
+
+STARTED_UNIT = re.compile(r"systemd\[1\]: (?:Starting|Started) (\S+)")
+
+
+def soak(minutes, play_every):
+    """Leaves the instrument running for `minutes`, playing a short chord
+    every `play_every` minutes, and records each minute what the engine
+    counted and which units systemd started meanwhile: on a dedicated
+    instrument, nothing should start on its own while it plays."""
+    started = time.time()
+    record = {
+        "kind": "soak",
+        "started": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "minutes": minutes,
+        "revision": release_revision(),
+        "audio": audio_profile(),
+        "system": system_audit(),
+        "engine_before": engine_audit(),
+        "samples": [],
+    }
+    first = health()
+    previous = first
+    for minute in range(1, minutes + 1):
+        if play_every and minute % play_every == 0:
+            hold_step([60, 64, 67, 72], 5.0, 2.0)
+        time.sleep(max(0.0, started + minute * 60 - time.time()))
+        current = health()
+        record["samples"].append(
+            {
+                "minute": minute,
+                "health": counters_delta(previous, current),
+                "peak_percent": current["peak_percent"] if current else None,
+                "temperature_c": thermal()["temperature_c"],
+                "load_average": read("/proc/loadavg"),
+            }
+        )
+        previous = current
+    out = run("journalctl", "-o", "cat", "--no-pager", "--since", f"@{started:.0f}")
+    units = sorted({match.group(1) for match in STARTED_UNIT.finditer(out)})
+    record["units_started"] = units
+    record["engine_after"] = engine_audit()
+    record["restarts_during"] = (record["engine_after"].get("restarts") or 0) - (
+        record["engine_before"].get("restarts") or 0
+    )
+    record["health_total"] = counters_delta(first, health())
+    record["thermal_after"] = thermal()
+    return record
+
+
 # --- compare --------------------------------------------------------------
 
 
@@ -669,6 +724,10 @@ def main():
         "--master-level", type=int, help="master level during the run, 0-1000; restored after"
     )
     performance.add_argument("--out")
+    soaking = commands.add_parser("soak")
+    soaking.add_argument("--minutes", type=int, default=120)
+    soaking.add_argument("--play-every", type=int, default=5, help="minutes between chords; 0 never")
+    soaking.add_argument("--out")
     boot = commands.add_parser("boot-time")
     boot.add_argument("--json", action="store_true")
     boot.add_argument("--out")
@@ -701,6 +760,11 @@ def main():
             arguments.out,
             True,
         )
+    elif arguments.command == "soak":
+        record = soak(arguments.minutes, arguments.play_every)
+        emit(record, arguments.out, not arguments.out)
+        print(f"units started: {record['units_started']}")
+        print(f"engine health over the soak: {record['health_total']}, restarts {record['restarts_during']}")
     elif arguments.command == "boot-time":
         record = boot_time()
         if arguments.json or arguments.out:

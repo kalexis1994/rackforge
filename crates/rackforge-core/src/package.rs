@@ -15,6 +15,20 @@ pub struct PluginPackage {
 
 impl PluginPackage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let package = Self::open_installed(path)?;
+        validate_branding_assets(&package.manifest, &package.root)
+            .with_context(|| format!("validating branding in {}", package.root.display()))?;
+        Ok(package)
+    }
+
+    /// Opens a package the store installed, without decoding its branding
+    /// images again.
+    ///
+    /// The store validated them when it installed the package, and the audio
+    /// engine never shows them. Decoding every plugin's banner, icon and
+    /// splash on each start read some 17 MB from the card and inflated it, a
+    /// second and a half of a Pi's boot before the instrument could sound.
+    pub fn open_installed(path: impl AsRef<Path>) -> Result<Self> {
         let requested = path.as_ref();
         let manifest_path = if requested.is_dir() {
             requested.join(MANIFEST_FILE)
@@ -32,8 +46,6 @@ impl PluginPackage {
             .parent()
             .context("plugin manifest has no parent directory")?
             .to_path_buf();
-        validate_branding_assets(&manifest, &root)
-            .with_context(|| format!("validating branding in {}", root.display()))?;
         Ok(Self { root, manifest })
     }
 

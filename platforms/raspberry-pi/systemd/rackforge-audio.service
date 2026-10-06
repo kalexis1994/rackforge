@@ -1,7 +1,11 @@
 [Unit]
 Description=RackForge supervised low-latency audio engine
-After=local-fs.target sound.target rackforge-cpu-performance.service
-Wants=sound.target rackforge-cpu-performance.service
+# The default dependencies already order this after the filesystems. No
+# sound.target: the engine finds its devices itself, and adopts one that
+# appears after it started. Keeping both out of this list is what lets the
+# dedicated profile start the engine before the boot partition is checked.
+After=rackforge-cpu-performance.service
+Wants=rackforge-cpu-performance.service
 Before=rackforge-platform-host.service rackforge-controller-host.service NetworkManager.service
 StartLimitIntervalSec=0
 ConditionPathExists=@RACKFORGE_ROOT@/config/audio.toml

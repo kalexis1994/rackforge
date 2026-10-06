@@ -42,9 +42,11 @@ module_cpu_declare() {
 # Installed by rackforge-pi (dedicated profile).
 [Unit]
 Description=RackForge CPU placement: governor and interrupts
+# It writes to sysfs and needs nothing else: ordered after nothing, so the
+# engine, which waits for it, is not held behind the filesystem checks.
 DefaultDependencies=no
-After=sysinit.target
-Before=rackforge-audio.service
+Conflicts=shutdown.target
+Before=rackforge-audio.service shutdown.target
 
 [Service]
 Type=oneshot
@@ -60,6 +62,23 @@ $(
 WantedBy=multi-user.target
 EOF
   want_unit rackforge-cpu-performance.service enabled now
+  # Two things set the governor at boot after the unit has run, and both
+  # are answered. Found by `verify` after a reboot: every core read
+  # ondemand.
+  #
+  # The CPU frequency driver (cpufreq-dt, built in) registers late, once the
+  # firmware clocks are up, and starts each policy on the kernel's default
+  # governor: said on the command line, that default is the profile's.
+  want_token "cpufreq.default_governor=$GOVERNOR" present
+  # And raspberrypi-sys-mods ships a udev rule that writes ondemand to
+  # every CPU as it appears. A rule of the same name in /etc replaces the
+  # package's; the package's file is left as it is.
+  want_file /etc/udev/rules.d/60-ondemand-governor.rules 644 <<EOF
+# Installed by rackforge-pi (dedicated profile). Replaces the rule of the
+# same name in /usr/lib/udev/rules.d, which sets ondemand; removing this
+# file (rackforge-pi revert cpu) brings that one back.
+KERNEL=="cpu*", SUBSYSTEM=="cpu", ATTR{cpufreq/scaling_governor}="$GOVERNOR"
+EOF
 
   if [[ -n "$CPU_AUDIO$CPU_RENDER$CPU_WORKERS" ]]; then
     # Redirected, not piped: a pipe would declare the file in a subshell,

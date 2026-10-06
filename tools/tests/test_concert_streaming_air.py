@@ -10,6 +10,40 @@ from concert_grand_streaming_air import SurfaceFactorBlocks,StreamingRationalAir
 
 
 class StreamingAirTests(unittest.TestCase):
+    def test_real_paired_gram_preserves_dynamic_force_storage_and_limits(self):
+        rng=np.random.default_rng(524)
+        half=rng.normal(size=(7,3,3))
+        surface=RectangularLoad(.7,.4,np.concatenate((half,half[:,::-1]),axis=1))
+        for folded,smooth in [(False,True),(True,True),(True,False)]:
+            provider=SurfaceFactorBlocks(surface,16000,4,16,3,smooth=smooth,fold_y=folded)
+            complex_wave=StreamingRationalAir(provider,100_000_000,5,2)
+            real_wave=StreamingRationalAir(provider,100_000_000,5,2,real_gram=True)
+            self.assertEqual(real_wave.budget['gram_bytes']*2,complex_wave.budget['gram_bytes'])
+            np.testing.assert_allclose(real_wave.R,complex_wave.R,rtol=1e-11,atol=1e-11)
+            np.testing.assert_allclose(real_wave.static_mass(),complex_wave.static_mass(),rtol=1e-11,atol=1e-11)
+            for s in [1.,2j*np.pi*6000,10+13000j,1e8]:
+                np.testing.assert_allclose(real_wave.impedance(s),complex_wave.impedance(s),rtol=1e-11,atol=1e-11)
+            state=rng.normal(size=real_wave.zero_state().shape)*.01;v=rng.normal(size=3)*.1
+            for dt in [1/192000,.003]:
+                a,f,l=real_wave.midpoint(state,v,dt);b,g,k=complex_wave.midpoint(state,v,dt)
+                np.testing.assert_array_equal(a,b);np.testing.assert_allclose(f,g,rtol=1e-11,atol=1e-11)
+                self.assertAlmostEqual(l,k,delta=1e-11*max(k,1e-20))
+                energy=real_wave.energy(state)
+                self.assertAlmostEqual(energy,complex_wave.energy(state),delta=1e-11*energy)
+                self.assertLess(abs(real_wave.energy(a)-energy-dt*(v@f-l))/max(energy,abs(dt*v@f)),1e-11)
+            with self.assertRaises(MemoryError):StreamingRationalAir(provider,1,real_gram=True)
+
+    def test_real_gram_rejects_unpaired_factors(self):
+        provider,_,_=self.fixture()
+        original=provider.blocks
+        def broken():
+            for H in original():
+                H[0,1,0]+=1e-8
+                yield H
+        provider.blocks=broken
+        with self.assertRaisesRegex(ValueError,'reversed factor pairs'):
+            StreamingRationalAir(provider,100_000_000,real_gram=True)
+
     def test_folded_symmetric_surface_keeps_correlations_impedance_and_live_energy(self):
         rng=np.random.default_rng(435);half=rng.normal(size=(7,3,3))
         surface=RectangularLoad(.7,.4,np.concatenate((half,half[:,::-1]),axis=1))

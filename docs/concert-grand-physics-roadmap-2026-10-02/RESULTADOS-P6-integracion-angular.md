@@ -108,3 +108,7 @@ Después verificar el completado resistivo, límites, transferencia continua,
 semiplano derecho y transitorios. El paso siguiente sigue usando las mismas
 masas/rigideces/pérdidas; no es otra identificación del piano. No se acopla
 una onda incompleta al instrumento para escucha.
+
+Actualización posterior: [Gram real y preflight completo](RESULTADOS-P6-Gram-real.md).
+El completado finito y la pasividad pasan a 96×256/128 kHz. La precisión
+todavía se rechaza a 6 kHz; esta aprobación de masa conserva su alcance DC.

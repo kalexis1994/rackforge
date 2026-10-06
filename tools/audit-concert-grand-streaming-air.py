@@ -49,6 +49,7 @@ def main():
     p.add_argument('--rate',type=int,default=128000);p.add_argument('--polar',type=int,default=16)
     p.add_argument('--azimuth',type=int,default=32);p.add_argument('--direction-block',type=int,default=8)
     p.add_argument('--max-array-gib',type=float,default=8.)
+    p.add_argument('--fold-y',action='store_true');p.add_argument('--real-gram',action='store_true')
     a=p.parse_args()
     if a.report.exists():raise ValueError('new report required')
     if not np.isfinite(a.max_array_gib) or a.max_array_gib<=0:raise ValueError('positive memory budget')
@@ -69,9 +70,11 @@ def main():
     plain=SimpleNamespace(shapes=shapes,modes=n,nx=surface.nx,ny=surface.ny,
         hx=surface.hx,hy=surface.hy,length=surface.length,width=surface.width,
         density=surface.density,speed=surface.speed)
-    provider=SurfaceFactorBlocks(plain,a.rate,a.polar,a.azimuth,a.direction_block)
+    provider=SurfaceFactorBlocks(plain,a.rate,a.polar,a.azimuth,a.direction_block,fold_y=a.fold_y)
     r=dict(rate=a.rate,angular=[a.polar,a.azimuth],cells=parent['cells'],modes=n,notes=notes,
-        budget=provider.budget(),max_array_bytes=int(a.max_array_gib*2**30),
+        budget=provider.budget(real_gram=a.real_gram),max_array_bytes=int(a.max_array_gib*2**30),
+        real_gram=a.real_gram,fold_y=a.fold_y,symmetry_relative=provider.symmetry_relative,
+        logical_outputs=provider.logical_outputs,evaluated_outputs=provider.outputs,
         parent_sha256={str(a.loaded_report):digest(a.loaded_report),str(a.support_report):digest(a.support_report)},
         board_sha256=digest(a.board),source_sha256={name:digest(Path(__file__).with_name(name)) for name in [
             'audit-concert-grand-streaming-air.py','concert_grand_streaming_air.py','concert_grand_rational_air.py',
@@ -81,7 +84,8 @@ def main():
         preflight_only=True,all_gates_passed=False,
         scope='Causal construction preflight only. No full angular/spatial/frequency or coupled-time approval; no WAV or saved factor.')
     print('budget',json.dumps(r['budget']),flush=True)
-    wave=StreamingRationalAir(provider,r['max_array_bytes'],progress=lambda i:print('wave block',i,flush=True))
+    wave=StreamingRationalAir(provider,r['max_array_bytes'],real_gram=a.real_gram,
+        progress=lambda i:print('wave block',i,flush=True))
     r['wave_reciprocity_relative']=float(wave.reciprocity_error);r['wave_dc_relative']=wave.dc_error
     print('static mass reference',flush=True)
     target=direct_matrix(surface,0).real;target=(target+target.T)/2

@@ -66,7 +66,7 @@ Falta construir su carga recíproca antes de volver a escuchar el modelo complet
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Pérdidas completas preparadas para el tiempo. Construcción causal por bloques conserva el certificado. Masa residual 96×256 positiva a 128/64 kHz; preflights 16×32/32×64 siguen rechazados. Faltan construir/validar la carga completa, transitorios acoplados, identificación y ambas caras/borde. | Condición de masa resuelta por refinamiento angular; escucha nueva pendiente |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Pérdidas completas preparadas para el tiempo. Gram real equivalente conserva el certificado y baja memoria. Carga 96×256/128 kHz completa/pasiva, rechazada por precisión a 6 kHz (Z 10,013%; presión 1,059%). Faltan precisión causal, transitorios acoplados, identificación y ambas caras/borde. | Masa/completado resueltos; precisión alta y escucha pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1142,3 +1142,28 @@ modifica la masa restante. Pico de la corrida: 0,858 GiB, sin Gram ni
 correlaciones guardados. La condición de masa no valida aún la carga completa.
 Siguiente: Gram espectral real de las parejas, completado y controles de
 impedancia/transitorios con 96×256/128 kHz. Sin WAV ni paquete nuevo.
+
+### 2026-10-06 — P6: Gram real y carga completa rechazada en alta frecuencia
+
+El refinamiento angular queda en **d2ab0c6**, por pedido del usuario.
+[Método y mediciones](RESULTADOS-P6-Gram-real.md). El Gram de cada pareja
+invertida es real y simétrico; se calcula un triángulo con dos productos
+reales. Dos pruebas nuevas conservan correlaciones/masa/impedancia y fuerza,
+energía y pérdida de estados activos; pasan diez pruebas dirigidas en total.
+
+Con las 606 coordenadas y cuadratura 96×256/128 kHz, el completado finito y
+la pasividad pasan. Los controles de 60 y 1881,960712 Hz pasan precisión;
+el de 6 kHz se rechaza con los mismos límites: Z 10,012998%, R 8,618405%,
+X 12,349082%, presión C4 1,058836%. Admitancia máxima 0,231594% sí pasa.
+Tiempo 666,281 s; pico 4,294 GiB. No se guarda otro factor ni se genera WAV
+o paquete. Se separan ahora integral angular y efectos temporales con un
+sondeo de resistencia que no sustituye las puertas del candidato completo.
+
+El sondeo de 30 direcciones contiene las once respuestas continuas a 6 kHz
+(error de representación 1,614e−15) y ocho direcciones aleatorias. Su integral
+angular exacta coincide con Rayleigh a 5,758e−15. El error temporal domina:
+onda vs Rayleigh 9,753% a 128 kHz y 2,609% a 256 kHz; sólo el warp da 8,184%
+y 2,160%. Dos pruebas independientes adicionales pasan, doce en total.
+Esto localiza el defecto en el banco, sin aprobar toda la carga. Siguiente:
+retardo de mayor orden/refinamiento temporal, certificado vivo y condiciones
+de límites antes de repetir la carga completa. Sin WAV ni cambios de timbre.

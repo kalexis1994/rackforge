@@ -1,0 +1,67 @@
+{
+  "frequency_hz": 6000.0,
+  "modes": 606,
+  "probe_rank": 30,
+  "random_seed": 61006,
+  "random_probes": 8,
+  "angular": [
+    96,
+    256
+  ],
+  "cells": [
+    256,
+    192
+  ],
+  "notes": [
+    60,
+    64,
+    67,
+    72,
+    36,
+    48,
+    53,
+    65,
+    69,
+    84,
+    96
+  ],
+  "loaded_state_span_relative": 1.6144623324234262e-15,
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-carga-directa\\refinada.json": "56e7adc7daa4d87b05288a5f3c79959b31fe591ca99ca16a1a46d82434660196",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-perdidas-proyectadas\\soporte.json": "b853248a635dcaeb2684b9e5a3661902dc47d445ed4e517df7fe39951642ba20",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-aire-bloques\\carga96-real.json": "647b5438dc8d7f182eecd8416745cb2bd49621e1d5ef713751d81bc5d2e6f2e1"
+  },
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "source_sha256": {
+    "audit-concert-grand-wave-resistance.py": "c5b2abb651839472e85742a203d78d30691978a54cacbcc42d5bfac4b612b136",
+    "audit-concert-grand-streaming-air.py": "585d2c700e0d845f8a1f92f86a746a53f55e100bca2312ec1f5a44f9b14dd85d",
+    "concert_grand_streaming_air.py": "c90e961555007b301af7f0ceefac6e622808d0f446769c92475ea04b0d37fbe3",
+    "concert_grand_projected_support.py": "2c0331b75736717432bb7b43939518a72c19b9975182e822fb167de86ad066b5",
+    "concert_grand_real_surface.py": "42b86ed17942110d78b0f7806b21ac557e89628c4a61465ead02fe58d27534a8",
+    "concert_grand_matrixfree_air.py": "8b8feac2eba3e6ffd406cda0626957e275cceaaf0ade54b8462c85e5f40ab2f1"
+  },
+  "preflight_only": true,
+  "all_gates_passed": false,
+  "scope": "Resistance diagnostic on a real projected probe span only. No full-matrix, imaginary, limit, loaded transfer, transient or timbral approval.",
+  "angular_continuous_relative": 5.757739435114098e-15,
+  "rows": [
+    {
+      "rate": 128000.0,
+      "effective_frequency_hz": 5957.183464658636,
+      "continuous_warp_relative": 0.08184405064977159,
+      "warp_and_difference_relative": 0.09367807635012912,
+      "histogram_additional_relative": 0.0070923997483021296,
+      "wave_reference_relative": 0.09753140432412945
+    },
+    {
+      "rate": 256000.0,
+      "effective_frequency_hz": 5989.192064399784,
+      "continuous_warp_relative": 0.02159913624257748,
+      "warp_and_difference_relative": 0.025010914733728986,
+      "histogram_additional_relative": 0.001800323081346302,
+      "wave_reference_relative": 0.026093634320755094
+    }
+  ],
+  "seconds": 423.0,
+  "peak_working_set_bytes": 405708800
+}

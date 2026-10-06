@@ -244,6 +244,11 @@ pub struct PortableModule {
 }
 
 impl PortableModule {
+    /// Always false: the page runs components only, never a native build.
+    pub fn is_native_build(&self) -> bool {
+        false
+    }
+
     pub fn instantiate(&self) -> Result<PortableInstance> {
         // SAFETY: the handle is a live module produced by `rf_compile`.
         let handle = unsafe { host::rf_instantiate(self.handle.0) };
@@ -641,6 +646,11 @@ pub struct PortableInstance {
 }
 
 impl PortableInstance {
+    /// Always false: the page runs components only, never a native build.
+    pub fn is_native_build(&self) -> bool {
+        false
+    }
+
     /// The live module handle, used to name this component to the render
     /// pool: the page keeps the compiled bytes under the same handle.
     fn module_handle(&self) -> i32 {

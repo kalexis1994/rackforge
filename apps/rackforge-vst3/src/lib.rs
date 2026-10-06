@@ -644,6 +644,7 @@ struct RackForgeControllerShared {
     /// the editor asks for a snapshot only when it connects, so it went on
     /// showing the first instrument. A newer revision is now sent with the
     /// next meter reading, which the editor asks for continuously.
+    #[cfg(windows)]
     published_revision: Arc<AtomicU64>,
     handler: Arc<Mutex<Option<ComPtr<IComponentHandler>>>>,
     model: Arc<RwLock<Option<Arc<VstPluginModel>>>>,
@@ -966,6 +967,7 @@ impl RackForgeController {
             shared: RackForgeControllerShared {
                 level: Arc::new(AtomicU64::new(1.0_f64.to_bits())),
                 revision: Arc::new(AtomicU64::new(0)),
+                #[cfg(windows)]
                 published_revision: Arc::new(AtomicU64::new(0)),
                 handler: Arc::new(Mutex::new(None)),
                 catalog: Arc::new(catalog),

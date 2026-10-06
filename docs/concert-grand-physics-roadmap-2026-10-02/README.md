@@ -66,7 +66,7 @@ Falta construir su carga recíproca antes de volver a escuchar el modelo complet
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla refinada 132×112 y proyección pasiva 7392→606 pasan controles secos y cargados en frecuencia hasta 6 kHz; malla 256×192 contrastada con 320×240. Pérdidas completas conectadas a contacto/coast/diagnósticos; equivalencia y contacto mecánico inicial pasan. Faltan realización causal nueva, transitorios acoplados, identificación y ambas caras/borde. | Mecánica temporal preparada; nueva carga causal y escucha pendientes |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Pérdidas completas preparadas para el tiempo. Construcción causal por bloques conserva el certificado; preflights 16×32/32×64 rechazados por residual de masa y precisión. Faltan completado causal preciso, transitorios acoplados, identificación y ambas caras/borde. | Construcción acotada y rechazo medidos; escucha nueva pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1102,3 +1102,26 @@ balance de energía 5,843e−14, residual de fuerza 9,020e−15 N. No es una not
 completa ni valida el timbre. La carga causal nueva sigue pendiente; deberá
 usar el mismo cambio de base para fuerzas y micrófonos. No se duplican datos
 ni se genera otro WAV/paquete.
+
+### 2026-10-05 — P6: onda causal por bloques y rechazo temprano de masa
+
+La integración de pérdidas queda en **7257bc4**, por pedido del usuario.
+[Método y mediciones](RESULTADOS-P6-aire-bloques.md). Se construye el factor
+causal por bloques sin descartar direcciones/taps/modos; las correlaciones
+quedan en memoria y el certificado de energía/radiación regenera esos bloques.
+Tres pruebas coinciden con el factor completo y sus estados vivos. Otras tres
+verifican la identidad de masa por factor acumulado, evitando reservar Gram
+y correlaciones para ensayar un completado imposible.
+
+Los preflights de las 606 coordenadas con cuadraturas 16×32 y 32×64 conservan
+pasividad, pero **se rechazan**: el residual de masa es indefinido y la presión
+de la onda incompleta no cumple precisión. Refinar reduce el fallo; no se
+recortan autovalores ni se ajusta ganancia. Pico observado ~6,1 GiB sin factor
+guardado en disco. El control acumulado explora el siguiente refinamiento
+antes de construir otra correlación completa. No hay WAV ni paquete nuevo.
+
+El control acumulado reproduce el residual de 32×64 a 1,938e−14 y alcanza
+64×128 con pico de 0,857 GiB, evitando ~5,72 GB de arreglos. Ese residual
+también es negativo (mínimo −0,0016222293): completado rechazado antes de
+construir correlaciones. Siguiente: 96×256 y contraste de tasa, separando
+cuadratura angular de aproximación temporal antes de volver al contacto.

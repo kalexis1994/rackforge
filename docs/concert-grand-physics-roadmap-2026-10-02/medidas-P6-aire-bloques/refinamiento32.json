@@ -1,0 +1,181 @@
+{
+  "rate": 128000,
+  "angular": [
+    32,
+    64
+  ],
+  "cells": [
+    256,
+    192
+  ],
+  "modes": 606,
+  "notes": [
+    60,
+    64,
+    67,
+    72,
+    36,
+    48,
+    53,
+    65,
+    69,
+    84,
+    96
+  ],
+  "budget": {
+    "full_factor_bytes": 6423871488,
+    "gram_bytes": 3813378624,
+    "correlation_bytes": 1900813536,
+    "estimated_array_peak_bytes": 6297891360,
+    "factor_block_bytes": 50186496,
+    "fft_size": 1296
+  },
+  "max_array_bytes": 8589934592,
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-carga-directa\\refinada.json": "56e7adc7daa4d87b05288a5f3c79959b31fe591ca99ca16a1a46d82434660196",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-perdidas-proyectadas\\soporte.json": "b853248a635dcaeb2684b9e5a3661902dc47d445ed4e517df7fe39951642ba20"
+  },
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "source_sha256": {
+    "audit-concert-grand-streaming-air.py": "f185b282ca7b1e4bac76296962f1e6cbc3bf9b58418f84e311965248e9988464",
+    "concert_grand_streaming_air.py": "061d6fd4950ff8d7f28174894fdd4a18e28e9d047b6c4a5aac4ea260b8253c12",
+    "concert_grand_rational_air.py": "ca2b4fc83ae26b4d08d4024a2aab29b150d28fe24715707ac300c05832acf469",
+    "concert_grand_bounded_air.py": "cab4c544f9d1c79b229cb253dfefaff965a01cfe2887cd63267ef5ea07c593b9",
+    "concert_grand_projected_support.py": "2c0331b75736717432bb7b43939518a72c19b9975182e822fb167de86ad066b5",
+    "concert_grand_real_surface.py": "42b86ed17942110d78b0f7806b21ac557e89628c4a61465ead02fe58d27534a8",
+    "concert_grand_matrixfree_air.py": "8b8feac2eba3e6ffd406cda0626957e275cceaaf0ade54b8462c85e5f40ab2f1"
+  },
+  "criteria": {
+    "impedance_ZRX_relative": 0.02,
+    "loaded_port_relative": 0.01,
+    "passivity_relative": -1e-10
+  },
+  "preflight_only": true,
+  "all_gates_passed": false,
+  "scope": "Causal construction preflight only. No full angular/spatial/frequency or coupled-time approval; no WAV or saved factor.",
+  "wave_reciprocity_relative": 2.5536587611823567e-16,
+  "wave_dc_relative": 3.7085964059930196e-16,
+  "mass_residual_minimum": -0.00448619460231252,
+  "mass_residual_maximum": 0.005772691405843486,
+  "finite_completion": false,
+  "completion_rejection": "strictly positive residual required; no clipping",
+  "rows": [
+    {
+      "frequency_hz": 60.0,
+      "candidate": "wave only, incomplete limits",
+      "impedance_ZRX_relative": [
+        0.16016135481706714,
+        4.93287688739129e-06,
+        0.16559187252868507
+      ],
+      "mobility_relative": [
+        0.0029938877769525975,
+        0.002990829032690389,
+        0.002991636875994656,
+        0.002999648404249718,
+        0.003063626351405227,
+        0.0030216193846008227,
+        0.0030077129254392175,
+        0.0029907871423577722,
+        0.0029938418577255795,
+        0.003038813827152453,
+        0.00308452091362477
+      ],
+      "pressure_relative": [
+        0.0031166087771532865,
+        0.003117152712726967,
+        0.0031169756423250357,
+        0.0031155954515311116,
+        0.003096695247498775,
+        0.0031099862400815184,
+        0.0031136431451324067,
+        0.0031171507940939464,
+        0.003116581510243767,
+        0.0031069405907458037,
+        0.0030918763657252274
+      ],
+      "hermitian_minimum_relative": -5.76075235246814e-15
+    },
+    {
+      "frequency_hz": 1881.9607122235952,
+      "candidate": "wave only, incomplete limits",
+      "impedance_ZRX_relative": [
+        0.21011124438510423,
+        0.007178365060954501,
+        0.27161456866826256
+      ],
+      "mobility_relative": [
+        0.0034211667045511373,
+        0.002996696953069243,
+        0.0032080542186329708,
+        0.0047338633875815255,
+        0.005898981336387098,
+        0.004018644674785768,
+        0.0033173335022725287,
+        0.0029959893825585457,
+        0.0036619847218208636,
+        0.005115102410448912,
+        0.005245046430042618
+      ],
+      "pressure_relative": [
+        0.014899617972581193,
+        0.013526364826543538,
+        0.010197080207630793,
+        0.015146506780197418,
+        0.018702189074629266,
+        0.01258966517905142,
+        0.012340988877290864,
+        0.010410300134670486,
+        0.012196501930193903,
+        0.011494760170383906,
+        0.023600318358817405
+      ],
+      "hermitian_minimum_relative": -2.98775377310997e-17
+    },
+    {
+      "frequency_hz": 6000.0,
+      "candidate": "wave only, incomplete limits",
+      "impedance_ZRX_relative": [
+        0.8177870006916668,
+        0.7145080442656981,
+        0.9934522903863174
+      ],
+      "mobility_relative": [
+        0.014151432694503762,
+        0.009729032830525059,
+        0.011493573056462054,
+        0.01021516809328892,
+        0.01737257651176488,
+        0.011692130602023355,
+        0.010994890163160369,
+        0.00971486462035756,
+        0.012616935081303073,
+        0.011761175534441767,
+        0.01170478395211256
+      ],
+      "pressure_relative": [
+        0.14185519706941802,
+        0.025645732386524477,
+        0.06073444876769024,
+        0.02111499970824417,
+        0.04634987912130796,
+        0.03583724734402412,
+        0.03972706560898058,
+        0.02955547867312951,
+        0.062415255255979164,
+        0.0918516912771954,
+        0.01822284789893158
+      ],
+      "hermitian_minimum_relative": 5.130883198617228e-13
+    }
+  ],
+  "preflight_gates": {
+    "finite_completion": false,
+    "impedance": false,
+    "loaded": false,
+    "passive": true
+  },
+  "peak_working_set_bytes": 6546014208,
+  "seconds": 309.85899999999674,
+  "next": "Refine angular/rate construction and compare all frozen harmonic/spatial/Laplace/transient criteria before coupled listening. Incomplete limits are rejected, never repaired."
+}

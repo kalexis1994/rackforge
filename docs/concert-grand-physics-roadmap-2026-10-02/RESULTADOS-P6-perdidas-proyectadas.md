@@ -133,3 +133,8 @@ validar transitorios acoplados, contacto completo, sostenido y release antes
 de escuchar una nota o melodía nueva. Siguen pendientes ambas caras/borde,
 identificación de la tabla real, unísono y acción/pedal completos. No se
 genera audio ni se cambia el paquete instalado en esta etapa.
+
+Continuación: [construcción causal por bloques](RESULTADOS-P6-aire-bloques.md).
+Se conserva el certificado de la realización anterior sin almacenar el factor
+angular completo. Sus primeros preflights de 606 se rechazan por completado
+de masa y precisión; no validan todavía una carga causal para escucha.

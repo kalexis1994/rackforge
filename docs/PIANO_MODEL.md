@@ -2481,6 +2481,25 @@ complete note or coupled timbral test. The new causal air model must transform
 its forces and microphone observations through the same coordinate map;
 it remains to be built and validated. No new audio or package is generated.
 
+The [streaming causal construction](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-aire-bloques.md)
+now generates paired angular FIR factors in blocks, accumulating the same
+modal correlations while regenerating the positive storage/radiation certificate.
+Three tests reproduce complete-factor impedance and live-state work. This
+bounds angular-factor storage without dropping channels or diagonalizing the
+load. The actual 606-coordinate 16-by-32 and 32-by-64 angular preflights are
+rejected: the static-mass residual remains indefinite and incomplete wave
+pressure fails accuracy. No eigenvalue clipping or gain repair is applied.
+Peak working set is about 6.1 GiB; no large factor is saved. A cumulative-factor
+Gram computes the same DC wave mass before allocating correlations, verified
+by three further tests. It supplies an early gate for angular/rate refinement;
+it does not by itself validate full-band transfer, acoustic time energy or audio.
+The early mass scan reproduces the 32-by-64 correlation control to 1.938e-14
+and tests 64-by-128 without allocating about 5.72 GB of Gram/correlations;
+peak working set is 0.857 GiB. Its residual minimum remains negative
+(-0.0016222293), so that completion is also rejected. Next is finer angular
+mass integration and a separate factor-rate control, rather than repairing
+the residual or coupling an incomplete wave candidate to the piano.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

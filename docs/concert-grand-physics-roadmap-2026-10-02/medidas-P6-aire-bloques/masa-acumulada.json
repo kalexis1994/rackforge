@@ -1,0 +1,55 @@
+{
+  "rate": 128000,
+  "modes": 606,
+  "cells": [
+    256,
+    192
+  ],
+  "rows": [
+    {
+      "angular": [
+        32,
+        64
+      ],
+      "mass_residual_minimum": -0.004486194602312408,
+      "mass_residual_maximum": 0.005772691405843451,
+      "finite_mass_possible": false,
+      "seconds": 68.51600000000326,
+      "avoided_gram_and_correlation_bytes": 5714192160,
+      "correlation_control_eigen_relative": 1.9382581942149703e-14,
+      "equivalence_passed": true
+    },
+    {
+      "angular": [
+        64,
+        128
+      ],
+      "mass_residual_minimum": -0.0016222292988302576,
+      "mass_residual_maximum": 0.002917435615139535,
+      "finite_mass_possible": false,
+      "seconds": 272.1560000000027,
+      "avoided_gram_and_correlation_bytes": 5717130048
+    }
+  ],
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-carga-directa\\refinada.json": "56e7adc7daa4d87b05288a5f3c79959b31fe591ca99ca16a1a46d82434660196",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-perdidas-proyectadas\\soporte.json": "b853248a635dcaeb2684b9e5a3661902dc47d445ed4e517df7fe39951642ba20",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-aire-bloques\\refinamiento32.json": "89777921b5f86d12ca7507ef34dd825ee6bf08f41c0e26dae1c1f36b2b0565e3"
+  },
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "source_sha256": {
+    "audit-concert-grand-wave-mass.py": "e7395483db4b51ffe44fc4223ee1fcf9ae441b52900a10bda9761ce2816faa7e",
+    "concert_grand_wave_mass.py": "9f39e5636f7979c4a1a19f4e0fad1e8b60e4487a6aca50a450b08ed010373e7a",
+    "concert_grand_streaming_air.py": "061d6fd4950ff8d7f28174894fdd4a18e28e9d047b6c4a5aac4ea260b8253c12",
+    "audit-concert-grand-streaming-air.py": "f185b282ca7b1e4bac76296962f1e6cbc3bf9b58418f84e311965248e9988464",
+    "concert_grand_projected_support.py": "2c0331b75736717432bb7b43939518a72c19b9975182e822fb167de86ad066b5",
+    "concert_grand_real_surface.py": "42b86ed17942110d78b0f7806b21ac557e89628c4a61465ead02fe58d27534a8",
+    "concert_grand_matrixfree_air.py": "8b8feac2eba3e6ffd406cda0626957e275cceaaf0ade54b8462c85e5f40ab2f1"
+  },
+  "scope": "Exact discrete wave DC mass gate only. No correlations, causal transfer/transient or musical approval.",
+  "preflight_only": true,
+  "all_gates_passed": false,
+  "peak_working_set_bytes": 920170496,
+  "seconds": 346.92200000000594,
+  "next": "Only build a full correlation candidate after its unmodified mass residual passes; complete transfer/time gates still required."
+}

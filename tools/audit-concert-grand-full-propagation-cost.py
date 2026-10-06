@@ -110,9 +110,13 @@ def main():
     if not a.cache.resolve().is_relative_to(cache_root) or not a.cache.exists():
         raise ValueError('existing single local cache required')
     old = json.loads(a.contact_report.read_text())
+    # Reports before cold-only support encode phases in their cases.
+    old_phases = old.get('phases', list(dict.fromkeys(case['phase'] for case in old.get('cases', []))))
     if (old.get('stage')!='contact prefix audit completed' or not old.get('contact_prefix_gates_passed')
-            or old.get('phases')!=['Cold', 'Continued'] or old.get('duration_s')!=.0015
+            or old_phases!=['Cold', 'Continued'] or old.get('duration_s')!=.0015
             or old.get('rates')!=[192000,384000,768000]
+            or [(case['phase'],case['rate']) for case in old.get('cases',[])]
+               !=[(phase,rate) for phase in old_phases for rate in old['rates']]
             or digest(a.full_report) not in old.get('parent_sha256',{}).values()
             or digest(a.board)!=old.get('board_sha256')):
         raise ValueError('matched measured 3 ms full-board contact required')

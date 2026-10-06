@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-05. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-06. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -66,7 +66,7 @@ Falta construir su carga recíproca antes de volver a escuchar el modelo complet
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Pérdidas completas y Gram real preparados. Padé2/derivada cuarta recuperan precisión en sondeo de 30 (Z 0,706% a 6 kHz), con certificado vivo. Masa global del nuevo operador rechazada (mínimo −2,759e−6 a 96×256/128 kHz). Faltan masa/transferencia completas, adaptación de integradores rápidos, transitorios, identificación y ambas caras/borde. | Corrección temporal verificada en sondeo; masa global nueva pendiente |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Padé2/derivada cuarta con 128×384/128 kHz pasa masa, 83 frecuencias y tres puntos Laplace: Z/R/X máximos 0,667%/0,495%/0,921%, presión 0,124%. Integradores rápidos adaptados a dos estados y verificados en sistema pequeño. Faltan transitorios completos, identificación y ambas caras/borde. | Carga causal completa aprobada en la grilla armónica/Laplace; contacto completo pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1189,3 +1189,27 @@ No se reparan extremos propios ni se acopla ese completado al instrumento.
 separado, empezando por 128×384. Luego transferencia completa y adaptación
 de FastBoundedContact/ExponentialCoast a dos estados. Informes sólo en el
 repo; sin WAV ni paquete nuevo.
+
+### 2026-10-06 — P6: condición global e integración de dos estados
+
+La etapa de retardo y el rechazo a 96×256 quedan en **e11fe6d**.
+[Condición y pruebas nuevas](RESULTADOS-P6-carga-orden2-completa.md).
+Refinando sólo la cuadratura a 128×384, la masa pasa: mínimo +9,976987e−6,
+máximo 0,0006321346. El control anterior se reproduce a 1,983e−14. Corrida
+1006,234 s, pico 0,864 GiB; sin recorte ni ajuste de ganancia.
+
+Se adapta la recurrencia rápida de contacto/coast a las dos coordenadas
+persistentes. Tres pruebas nuevas contrastan una resolución matricial
+independiente, contacto con estado vivo/relanzamiento y sostenido contra
+DOP853; pasan también las nueve regresiones anteriores de Cayley. Son
+bancos pequeños, no aprobación temporal de las 606 coordenadas ni timbre.
+El auditor completo exige masa positiva antes de construir correlaciones
+y mide tres puntos antes de recorrer la grilla congelada de 83 frecuencias.
+
+Pasan los nueve gates de las 83 frecuencias y tres puntos Laplace. Z/R/X
+máximos 0,667445%/0,494951%/0,921198% a 6 kHz; movilidad 0,020731% y presión
+0,123714%. Masa por correlaciones reproduce el control acumulado a 7,615e−14;
+límites realizados al nivel de redondeo. Tiempo 1654,188 s y pico 4,338 GiB.
+La puerta general sigue falsa: faltan contacto/repetición y release completos,
+coste/observer temporal e identificación antes de escuchar o integrar al plugin.
+Sin WAV ni paquete nuevo; informes únicos en el repo.

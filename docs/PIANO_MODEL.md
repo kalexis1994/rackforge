@@ -2552,10 +2552,29 @@ Z/R/X and three right-half-plane points; maximum complex error is 0.706%.
 The full 606-coordinate mass test nevertheless rejects the new 96-by-256/
 128 kHz factor: residual minimum -2.75934e-6, maximum 0.0007889262. No clipping
 or gain repair is applied. That gate takes 509.906 s including legacy control
-and peaks at 0.862 GiB. Next is independent angular refinement (128-by-384
-first), then full transfer/time criteria. Fast contact and exponential coast
-still require adapting their Cayley-specific recurrence to the two-state
-section. No new audio or package is generated; no full timbral approval.
+and peaks at 0.862 GiB. That frozen rejection requires angular refinement
+before building a completed full-coordinate candidate.
+
+The subsequent [full-coordinate condition and two-state contact stage](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-carga-orden2-completa.md)
+refines only angular integration to 128-by-384, retaining the 128 kHz factor,
+fourth-order derivative, cells, modes and physical losses. Its full mass
+residual is strictly positive: minimum +9.976987e-6, maximum 0.0006321346;
+the legacy control agrees to 1.983e-14. Time including control is 1006.234 s,
+peak 0.864 GiB. This passes the mass condition, not all angular/band criteria.
+Fast contact and exponential coast now support persistent two-state Padé
+sections. Three small-system tests cover an independent dense midpoint ODE,
+live nonlinear contact/relaunch and coast refinement against DOP853; nine
+legacy Cayley regressions also pass. The completed 606-coordinate load passes
+all nine harmonic/Laplace gates on the frozen 83-frequency grid and three
+right-half-plane points. Maximum Z/R/X errors are 0.667445%/0.494951%/0.921198%
+at 6 kHz; maximum loaded mobility/pressure errors are 0.020731%/0.123714%.
+Correlation mass matches the cumulative-factor control to 7.615e-14;
+physical mass/resistance limits are realized to roundoff. Time is 1654.188 s,
+peak 4.338 GiB, with no saved second large acoustic asset. This is a harmonic
+audit, not note-rendering cost or continuous-band/timbral approval. The
+787194 live air states still require full-board contact/repetition, time-step,
+release and pressure-observer validation before listening or factory use.
+No new audio or package is generated; the overall gate remains false.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a

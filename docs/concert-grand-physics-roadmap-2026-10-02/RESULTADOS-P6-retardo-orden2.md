@@ -5,6 +5,10 @@
 las pérdidas completas y la base de 606 coordenadas; ensaya una aproximación
 temporal diferente, sin identificación de muestras ni ajuste de ganancia.
 
+Esta etapa queda congelada en **e11fe6d**. La continuación de masa global,
+transferencia e integración de dos estados se sigue en
+[condición global y contacto](RESULTADOS-P6-carga-orden2-completa.md).
+
 ## Retardo y pasividad
 
 Para `p=s/rate`, se reemplaza la sección de Cayley por:

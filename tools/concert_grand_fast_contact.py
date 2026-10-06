@@ -10,6 +10,8 @@ from scipy.linalg import cho_factor, cho_solve
 from scipy.signal import lfilter
 from concert_grand_bounded_contact import BoundedContact
 from concert_grand_coupled_contact import felt_divided_force
+from concert_grand_pade_air import PadeAir
+from concert_grand_pade_midpoint import PadeMidpoint
 
 
 class FastBoundedContact(BoundedContact):
@@ -17,8 +19,9 @@ class FastBoundedContact(BoundedContact):
         super().__init__(system, air, coupling)
         self.fast_cache = None
         # Contract all residues in one BLAS operation, in the same port order.
-        self.residue_matrix = np.ascontiguousarray(
-            air.wave.R[1:].transpose(1, 0, 2)).reshape(air.modes, -1)
+        self.pade = isinstance(air.wave, PadeAir)
+        self.residue_matrix = (None if self.pade else np.ascontiguousarray(
+            air.wave.R[1:].transpose(1, 0, 2)).reshape(air.modes, -1))
 
     def avf_gradient(self, a, b, dt):
         delta = b - a
@@ -42,15 +45,17 @@ class FastBoundedContact(BoundedContact):
         plus = np.eye(self.n)+h*self.system.damping+h*self.C.T@A@self.C
         H = np.zeros((self.n, self.n))
         H[:-1, :-1] = self.system.string.gradient_hessian(np.zeros(self.n-1))[1]
-        alpha = dt*self.air.wave.a/2
-        beta = (alpha-1)/(alpha+1)
+        wave_plan = PadeMidpoint(self.air.wave, dt) if self.pade else None
+        alpha = None if self.pade else dt*self.air.wave.a/2
+        beta = None if self.pade else (alpha-1)/(alpha+1)
         self.fast_cache = dict(dt=dt, A=A, plus=plus,
             # The AVF gradient's endpoint tangent of a quadratic potential
             # is H/2. The residual already multiplies that tangent by dt²/2.
             tangent=cho_factor(plus+.25*dt*dt*H),
             velocity_factor=cho_factor(np.eye(self.n)+h*self.system.damping),
             minus=np.eye(self.n)-h*self.system.damping,
-            alpha=alpha, beta=beta, powers=beta**np.arange(1,self.air.wave.order+1),
+            wave_plan=wave_plan, alpha=alpha, beta=beta,
+            powers=None if self.pade else beta**np.arange(1,self.air.wave.order+1),
             relaxation_alpha=dt/(2*self.air.relaxation.tau))
         return self.fast_cache
 
@@ -59,10 +64,13 @@ class FastBoundedContact(BoundedContact):
             raise ValueError('positive step')
         q, v, r, z = state
         cache = self._prepare(dt)
-        # u_j = beta*u_(j-1) + 2*r_j/(1+alpha). This is exactly the
-        # scalar allpass cascade recurrence, evaluated along rows in C.
-        offsets = lfilter([2/(1+cache['alpha'])], [1,-cache['beta']], r, axis=0)
-        constant = self.residue_matrix@offsets.ravel()
+        # Eliminate the living wave states before the nonlinear solve.
+        # Each allpass plan has its own recurrence and the same Schur port.
+        if self.pade:
+            constant, offsets = cache['wave_plan'].constant(r)
+        else:
+            offsets = lfilter([2/(1+cache['alpha'])], [1,-cache['beta']], r, axis=0)
+            constant = self.residue_matrix@offsets.ravel()
         constant -= self.air.relaxation.B@(z/(1+cache['relaxation_alpha']))
         external = self.C.T@constant
         candidate = q+dt*v
@@ -99,10 +107,13 @@ class FastBoundedContact(BoundedContact):
             raise RuntimeError('fast contact residual did not converge')
         center = (candidate-q)/dt
         boundary = self.C@center
-        inputs = np.empty((self.air.wave.order+1,self.air.modes))
-        inputs[0] = boundary
-        inputs[1:] = offsets+cache['powers'][:,None]*boundary
-        new_r = inputs[1:]+inputs[:-1]-r
+        if self.pade:
+            new_r, inputs = cache['wave_plan'].update(r, boundary, offsets)
+        else:
+            inputs = np.empty((self.air.wave.order+1,self.air.modes))
+            inputs[0] = boundary
+            inputs[1:] = offsets+cache['powers'][:,None]*boundary
+            new_r = inputs[1:]+inputs[:-1]-r
         new_z, _, relax_power = self.air.relaxation.midpoint(z,boundary,dt)
         load = cache['A']@boundary+constant
         next_v = cho_solve(cache['velocity_factor'], cache['minus']@v-dt*(g+self.C.T@load))

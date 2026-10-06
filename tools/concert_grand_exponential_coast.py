@@ -12,6 +12,8 @@ import numpy as np
 from scipy.linalg import eigh,cho_factor,cho_solve
 from scipy.signal import lfilter
 from concert_grand_bounded_contact import BoundedContact
+from concert_grand_pade_air import PadeAir
+from concert_grand_pade_midpoint import PadeMidpoint
 
 
 class ExponentialCoast(BoundedContact):
@@ -37,7 +39,9 @@ class ExponentialCoast(BoundedContact):
         self.Db=system.damping[core.sb,core.sb]
         residual=system.damping.copy();residual[core.sb,core.sb]=0
         if np.any(residual):raise ValueError('board-only material damping required')
-        self.residue_matrix=np.ascontiguousarray(air.wave.R[1:].transpose(1,0,2)).reshape(air.modes,-1)
+        self.pade=isinstance(air.wave,PadeAir)
+        self.residue_matrix=(None if self.pade else
+            np.ascontiguousarray(air.wave.R[1:].transpose(1,0,2)).reshape(air.modes,-1))
         self.mechanical_cache=None;self.air_cache=None
 
     def project(self,vector):
@@ -120,22 +124,29 @@ class ExponentialCoast(BoundedContact):
     def _air_prepare(self,dt):
         if self.air_cache is not None and self.air_cache['dt']==dt:return self.air_cache
         A=self.air.impedance(2/dt).real;h=dt/2
-        alpha=dt*self.air.wave.a/2;beta=(alpha-1)/(alpha+1)
-        self.air_cache=dict(dt=dt,A=A,alpha=alpha,beta=beta,
-            powers=beta**np.arange(1,self.air.wave.order+1),
+        wave_plan=PadeMidpoint(self.air.wave,dt) if self.pade else None
+        alpha=None if self.pade else dt*self.air.wave.a/2
+        beta=None if self.pade else (alpha-1)/(alpha+1)
+        self.air_cache=dict(dt=dt,A=A,wave_plan=wave_plan,alpha=alpha,beta=beta,
+            powers=None if self.pade else beta**np.arange(1,self.air.wave.order+1),
             relaxation_alpha=dt/(2*self.air.relaxation.tau),
             factor=cho_factor(np.eye(self.air.modes)+h*self.Db+h*self.Cb.T@A@self.Cb))
         return self.air_cache
 
     def air_step(self,state,dt,defer_radiation=False):
         q,v,r,z=state;core=self.system.string;cache=self._air_prepare(dt)
-        offsets=lfilter([2/(1+cache['alpha'])],[1,-cache['beta']],r,axis=0)
-        constant=self.residue_matrix@offsets.ravel()-self.air.relaxation.B@(z/(1+cache['relaxation_alpha']))
+        if self.pade:constant,offsets=cache['wave_plan'].constant(r)
+        else:
+            offsets=lfilter([2/(1+cache['alpha'])],[1,-cache['beta']],r,axis=0)
+            constant=self.residue_matrix@offsets.ravel()
+        constant-=self.air.relaxation.B@(z/(1+cache['relaxation_alpha']))
         center=cho_solve(cache['factor'],v[core.sb]-dt/2*self.Cb.T@constant)
         boundary=self.Cb@center;load=cache['A']@boundary+constant
-        inputs=np.empty((self.air.wave.order+1,self.air.modes));inputs[0]=boundary
-        inputs[1:]=offsets+cache['powers'][:,None]*boundary
-        new_r=inputs[1:]+inputs[:-1]-r
+        if self.pade:new_r,inputs=cache['wave_plan'].update(r,boundary,offsets)
+        else:
+            inputs=np.empty((self.air.wave.order+1,self.air.modes));inputs[0]=boundary
+            inputs[1:]=offsets+cache['powers'][:,None]*boundary
+            new_r=inputs[1:]+inputs[:-1]-r
         new_z,_,relax=self.air.relaxation.midpoint(z,boundary,dt)
         new_v=v.copy();new_v[core.sb]=2*center-v[core.sb]
         radiation=relax if defer_radiation else relax+self.air.wave.radiation_batch(inputs[None])[0]

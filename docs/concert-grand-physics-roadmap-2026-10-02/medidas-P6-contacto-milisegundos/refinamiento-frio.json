@@ -1,0 +1,187 @@
+{
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-milisegundos\\frio384-1536.json": "cca55e67802d1cac1d6761125bf42a66a932b72ad53188f213a269aa4aacca0f"
+  },
+  "criteria": {
+    "energy_work_relative": 0.002,
+    "near_zero_j": 1e-14
+  },
+  "rows": [
+    {
+      "phase": "Cold",
+      "rate": 384000,
+      "reference_rate": 1536000,
+      "changes": {
+        "wave_final_j": {
+          "reference_j": 1.1537054323421986e-07,
+          "absolute_error_j": 2.400418374063887e-11,
+          "relative": 0.00020806163399878167,
+          "maximum_difference_bound_j": 2.402748496178491e-11,
+          "bounded_relative": 0.00020826362356068985,
+          "near_zero": false,
+          "observation_intervals_used": true,
+          "passed": true
+        },
+        "relaxation_final_j": {
+          "reference_j": 3.1864650771144844e-10,
+          "absolute_error_j": 1.320765894027505e-14,
+          "relative": 4.1449250566509574e-05,
+          "maximum_difference_bound_j": 1.320765894027505e-14,
+          "bounded_relative": 4.1449250566509574e-05,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        },
+        "wave_radiation_j": {
+          "reference_j": 1.319325194688536e-12,
+          "absolute_error_j": 4.335873844635481e-15,
+          "relative": 0.0032864329902068507,
+          "maximum_difference_bound_j": 4.357265237575673e-15,
+          "bounded_relative": 0.0033026736760417537,
+          "near_zero": false,
+          "observation_intervals_used": true,
+          "passed": false
+        },
+        "relaxation_loss_j": {
+          "reference_j": 4.488189173316986e-11,
+          "absolute_error_j": 9.244817997620086e-15,
+          "relative": 0.00020598102354022936,
+          "maximum_difference_bound_j": 9.244817997620086e-15,
+          "bounded_relative": 0.00020598102354022936,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        },
+        "felt_heat_j": {
+          "reference_j": 0.004909230047813547,
+          "absolute_error_j": 1.1201306521387011e-07,
+          "relative": 2.2816829548201357e-05,
+          "maximum_difference_bound_j": 1.1201306521387011e-07,
+          "bounded_relative": 2.2816829548201357e-05,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        },
+        "material_heat_j": {
+          "reference_j": 4.200395083638908e-07,
+          "absolute_error_j": 8.329125788337453e-11,
+          "relative": 0.0001982938657551642,
+          "maximum_difference_bound_j": 8.329125788337453e-11,
+          "bounded_relative": 0.0001982938657551642,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "reference_j": 1.1573539095884428e-07,
+          "absolute_error_j": 2.403097207125317e-11,
+          "relative": 0.00020763719612610656,
+          "maximum_difference_bound_j": 2.403097207125317e-11,
+          "bounded_relative": 0.00020763719612610656,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        }
+      },
+      "passed": false
+    },
+    {
+      "phase": "Cold",
+      "rate": 768000,
+      "reference_rate": 1536000,
+      "changes": {
+        "wave_final_j": {
+          "reference_j": 1.1537054323421986e-07,
+          "absolute_error_j": 4.801207965102644e-12,
+          "relative": 4.161554440595341e-05,
+          "maximum_difference_bound_j": 4.824491642846389e-12,
+          "bounded_relative": 4.1817365112308215e-05,
+          "near_zero": false,
+          "observation_intervals_used": true,
+          "passed": true
+        },
+        "relaxation_final_j": {
+          "reference_j": 3.1864650771144844e-10,
+          "absolute_error_j": 2.6402883214269425e-15,
+          "relative": 8.285947774509632e-06,
+          "maximum_difference_bound_j": 2.6402883214269425e-15,
+          "bounded_relative": 8.285947774509632e-06,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        },
+        "wave_radiation_j": {
+          "reference_j": 1.319325194688536e-12,
+          "absolute_error_j": 8.683938866973084e-16,
+          "relative": 0.0006582106444971797,
+          "maximum_difference_bound_j": 8.897990805579469e-16,
+          "bounded_relative": 0.0006744404666905133,
+          "near_zero": false,
+          "observation_intervals_used": true,
+          "passed": true
+        },
+        "relaxation_loss_j": {
+          "reference_j": 4.488189173316986e-11,
+          "absolute_error_j": 1.8491296872839048e-15,
+          "relative": 4.11999052597266e-05,
+          "maximum_difference_bound_j": 1.8491296872839048e-15,
+          "bounded_relative": 4.11999052597266e-05,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        },
+        "felt_heat_j": {
+          "reference_j": 0.004909230047813547,
+          "absolute_error_j": 2.240332968011377e-08,
+          "relative": 4.563511887183139e-06,
+          "maximum_difference_bound_j": 2.240332968011377e-08,
+          "bounded_relative": 4.563511887183139e-06,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        },
+        "material_heat_j": {
+          "reference_j": 4.200395083638908e-07,
+          "absolute_error_j": 1.6658933076323795e-11,
+          "relative": 3.9660395616623143e-05,
+          "maximum_difference_bound_j": 1.6658933076323795e-11,
+          "bounded_relative": 3.9660395616623143e-05,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "reference_j": 1.1573539095884428e-07,
+          "absolute_error_j": 4.80656576828867e-12,
+          "relative": 4.15306478724204e-05,
+          "maximum_difference_bound_j": 4.80656576828867e-12,
+          "bounded_relative": 4.15306478724204e-05,
+          "near_zero": false,
+          "observation_intervals_used": false,
+          "passed": true
+        }
+      },
+      "passed": true
+    }
+  ],
+  "finest_pair_gates": {
+    "Cold": true
+  },
+  "finest_pair_work_passed": true,
+  "source_sha256": {
+    "audit-concert-grand-prefix-work-refinement.py": "615c9012b5bfb53428628751a85a77ddbb98c4f632058b8b01301cbf299ad9b0"
+  },
+  "rates": [
+    384000,
+    768000,
+    1536000
+  ],
+  "duration_s": 0.0015,
+  "phases": [
+    "Cold"
+  ],
+  "observation_comparison": "Worst endpoint differences when observation intervals are available; central values retained as diagnostics, unchanged 0.2% criterion.",
+  "preflight_only": true,
+  "all_gates_passed": false,
+  "scope": "Independent storage, radiation, material/felt heat and port work in each contact interval. No full wave-coordinate, pressure-waveform, separation or timbral accuracy claim."
+}

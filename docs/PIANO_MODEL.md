@@ -2620,6 +2620,29 @@ is still near zero and the hammer has not separated at 125+125 microseconds.
 Longer contact, natural repetition, release and time pressure remain pending;
 the overall gate stays false. No factory sound, audio or package changes.
 
+The subsequent [millisecond contact/field audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-contacto-milisegundos.md)
+extends assumed C4 to 1.5 ms cold plus 1.5 ms continuation at 192/384/768 kHz,
+retaining all 606 mechanical coordinates and living air memories. The first
+separation bracket is 1.634115–1.635417 ms at the finest rate. Repeated section
+replay would be costly; an incomplete run is preserved, then observation
+inputs are stored once in RAM. Four field tests and two interval-refinement
+tests pass; forces and physical parameters stay unchanged.
+The complete 3 ms-duration experiment passes 11 contact controls, with
+worst-case total/air budget bounds 2.414908e-11/1.864494e-11. Lower wave-flux
+bounds are 1.318446e-12 J cold and 3.533789e-8 J continued. Time is 2428.924 s,
+peak 8.678902 GiB. Cold flux refinement fails the unchanged 0.2% criterion
+at 0.264677%; continued refinement passes at 0.034568%.
+A directed cold-only 384/768/1536 kHz experiment passes all 11 controls and
+seven work/storage terms with worst flux change 0.067444%. Shared contacts
+reproduce exactly; field energies in bases of rank 241/189 mutually fit
+their intervals. Time is 2187.679 s, peak 7.400826 GiB; one authenticated R
+is reused. The original failure stays recorded. The directed cold endpoint
+is not spliced into the older continuation to claim a uniform 1536 kHz path.
+These are conditional numerical contact/energy checks, with analytical
+projection bounds and numerical rounding safeguards. Longer coast, time
+pressure, natural repetition/release, actual-property identification and
+timbral approval remain pending; no audio or factory package changes.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

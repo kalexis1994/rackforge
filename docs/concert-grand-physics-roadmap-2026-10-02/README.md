@@ -68,7 +68,7 @@ el modelo completo.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Padé2/derivada cuarta con 128×384/128 kHz pasa masa, 83 frecuencias y tres puntos Laplace: Z/R/X máximos 0,667%/0,495%/0,921%, presión 0,124%. Seis prefijos frío/continuado con 606 pasan energía independiente y refinamiento enlazados con fuerza en tiempos comunes. Observación compacta acotada de rango 102 contiene las 18 medidas completas anteriores y pasa sus 12 controles; dinámica sin reducción. Faltan transitorios/flujo no nulo, identificación y ambas caras/borde. | Carga aprobada en grilla armónica/Laplace y prefijos de contacto; golpe/repetición/release completos pendientes |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Padé2/derivada cuarta con 128×384/128 kHz pasa masa, 83 frecuencias y tres puntos Laplace: Z/R/X máximos 0,667%/0,495%/0,921%, presión 0,124%. Recorrido C4 supuesto de 3 ms conserva los 606 modos, separa el martillo cerca de 1,635 ms y pasa balance/observación con flujo no nulo. Refinamiento acotado del flujo frío falla 0,265% y pasa 0,0674% al subir a 768/1536 kHz; continuación pasa 0,0346%. Inputs de observación reutilizados en RAM. Faltan coast/presión temporal, repetición/release, identificación y ambas caras/borde. | Carga armónica y contactos/energías condicionados medidos; nota completa, presión temporal y timbre pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1264,3 +1264,32 @@ no valida tiempo real. Una sola R, informes únicos en el repo, sin WAV/paquete.
 Siguiente: duración suficiente para separación y flujo apreciable, con
 refinamiento/cotas medidos allí. Repetición natural, release, presión temporal
 y timbre siguen pendientes; la puerta global permanece falsa.
+
+### 2026-10-06 — P6: separación y flujo no nulo, con refinamiento frío dirigido
+
+[Método, ejecución interrumpida, medidas y siguientes pasos](RESULTADOS-P6-contacto-milisegundos.md).
+Se amplía C4 supuesto a 1,5+1,5 ms con los 606 modos y aire vivo. La
+separación aparece en las tres continuaciones: intervalo más fino
+1,634115–1,635417 ms. Se preserva una primera ejecución incompleta por coste
+de repetir 4032 updates en 384 bloques. **ea06e59** reutiliza una vez los
+inputs de observación y aplica el refinamiento a los extremos adversos
+de sus intervalos. Seis pruebas dirigidas pasan; física sin cambios.
+
+El ensayo completo de esta duración pasa 11 controles: máximo balance
+total/aire con cotas 2,414908e−11/1,864494e−11. Flujo con límite inferior
+1,318446e−12 J frío y 3,533789e−8 J continuado; el observador elige rango 241,
+sin reducir fuerzas/dinámica. Tiempo 2428,924 s, pico 8,678902 GiB. El flujo
+frío falla el refinamiento 0,264677% frente a 0,2%; continuación pasa 0,034568%.
+
+**09f151d** dirige otro banco sólo al frío, a 384/768/1536 kHz: pasan 11
+controles y sus siete términos energéticos. Cambio acotado del flujo:
+0,067444%. Los contactos compartidos reproducen exactamente sus diagnósticos;
+las energías observadas con rango 241/189 se contienen mutuamente en sus
+intervalos. Tiempo 2187,679 s, pico 7,400826 GiB. El fallo original permanece.
+No se mezcla un nuevo extremo frío con la continuación anterior para afirmar
+un recorrido uniforme a 1536 kHz. Una R, informes únicos, sin WAV/paquete.
+
+Siguiente: coste de propagación después de separar el martillo y presión
+temporal, después repetición natural/release y banco amplio. Las cotas de
+proyección tienen salvaguardas numéricas; no son una prueba formal de
+redondeo por intervalos. La puerta general y la aprobación del timbre siguen falsas.

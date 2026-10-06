@@ -32,7 +32,7 @@ system. The knob mode and the pedal are documented for the MiniLab 3 only
 | Touch strips | pitch bend; modulation CC 1 | Documented | UM 4.3 |
 | Pedal | the Sustain pedal type sends CC 64 | Documented, for the MiniLab 3 | ML3 (MCC 4.4.1) |
 | Transport (Shift + Pad 4–7) | **not declared** | — | UM 4.1 names the functions. Their CCs (105–108) are documented for the MiniLab 3; on the 37, Bitwig reads them on the DAW port in the DAW program, and no source gives their port in ARTURIA |
-| Slots and roles | as the MiniLab 3: faders `control-1.1`–`1.4`, knobs `control-2`, pads by note, modulation `mod-wheel`; the eight-knobs-and-four-faders rule | Convention | catalog README |
+| Slots and roles | as the MiniLab 3: faders `control-1.1`–`1.4`, knobs `control-2`, pads by number, modulation `mod-wheel`; the eight-knobs-and-four-faders rule | Convention | catalog README |
 
 ## Open questions, until someone with the hardware checks
 

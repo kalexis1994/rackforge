@@ -50,12 +50,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-5.rfplugin",
         "plugin_id": "org.rackforge.rf-5",
-        "version": "0.1.20",
+        "version": "0.1.21",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-5/"
-            "releases/download/v0.1.20/RF-5.rfplugin"
+            "releases/download/v0.1.21/RF-5.rfplugin"
         ),
-        "sha256": "e3017a15620de8ea2b44ae2b93c943b4c8b98a3fec76fb78f1e6515ceb1554ad",
+        "sha256": "b071665ce75236caba6af1a987bffa0cc7367dfd57e462db3b28d827453773dc",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -160,6 +160,36 @@ OFFICIAL_PLUGINS = (
             "web/play-programs.mjs",
             "web/rftines-format.mjs",
             "web/style.css",
+        ),
+    },
+    {
+        "filename": "RF-Musette.rfplugin",
+        "plugin_id": "org.rackforge.musette",
+        "version": "0.13.21",
+        "url": (
+            "https://github.com/kalexis1994/RF-Musette/"
+            "releases/download/v0.13.21/RF-Musette.rfplugin"
+        ),
+        "sha256": "7cfc4156c98ae4583fba55801262ee7f963249aea9b6b8541d0c52ab0f59f47c",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "metadata/control-layout.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/config.html",
+            "web/app.js",
+            "web/app_bg.wasm",
+            "web/styles.css",
+            "web/fonts/OFL-GrandHotel.txt",
+            "web/fonts/OFL-JosefinSans.txt",
         ),
     },
     {

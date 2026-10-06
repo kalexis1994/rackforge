@@ -409,6 +409,10 @@ pub struct VoiceSpec {
     /// meant yesterday. Panel edits used to live only in the running
     /// instance and every restart silently reset them.
     pub initial_state: Option<Vec<u8>>,
+    /// Whether the adjustments recorded since the program was chosen are
+    /// laid over it again; false drops them, as they were made on another
+    /// program (see `initial_state`).
+    pub restore_live_parameters: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -451,6 +455,59 @@ pub struct AudioDriverInfo {
     pub detail: String,
 }
 
+/// The rate a first start opens an output at. On Windows the device's own:
+/// WASAPI's shared mode runs at the mix format's rate. On Linux 48 kHz,
+/// RackForge's rate on every platform, wherever the output takes it: the
+/// desktop's sound server offers whatever rate its default device was last
+/// set to -- 44.1 kHz on a SteamOS handheld, measured -- and resamples
+/// anything else itself.
+#[cfg(windows)]
+fn preferred_sample_rate(output: &AudioOutputInfo) -> u32 {
+    output.default_sample_rate
+}
+
+#[cfg(not(windows))]
+fn preferred_sample_rate(output: &AudioOutputInfo) -> u32 {
+    const RACKFORGE_RATE: u32 = 48_000;
+    if output.sample_rates.contains(&RACKFORGE_RATE) {
+        RACKFORGE_RATE
+    } else {
+        output.default_sample_rate
+    }
+}
+
+/// The backend a first start opens: Windows' shared-mode WASAPI, which
+/// every device speaks; on Linux ALSA, whose default device is the desktop's
+/// sound server (PipeWire, or PulseAudio), so RackForge shares the card with
+/// everything else on the desktop rather than taking it.
+#[cfg(windows)]
+const PREFERRED_DRIVER: &str = "WASAPI";
+#[cfg(not(windows))]
+const PREFERRED_DRIVER: &str = "ALSA";
+
+/// What the ASIO driver asks of its host and cpal cannot pass on: resets,
+/// and its own settings window. ASIO is Windows' driver model; elsewhere the
+/// driver never asks and has no window.
+#[cfg(windows)]
+pub(crate) fn asio_driver_reset_requests() -> u64 {
+    asio_sys::driver_reset_requests()
+}
+
+#[cfg(not(windows))]
+pub(crate) fn asio_driver_reset_requests() -> u64 {
+    0
+}
+
+#[cfg(windows)]
+pub(crate) fn open_asio_control_panel() -> Result<(), String> {
+    asio_sys::open_control_panel().map_err(|error| error.to_string())
+}
+
+#[cfg(not(windows))]
+pub(crate) fn open_asio_control_panel() -> Result<(), String> {
+    Err("ASIO is a Windows driver model".into())
+}
+
 /// The row that says ASIO exists and this build cannot use it.
 ///
 /// Decided by whether cpal was compiled with an ASIO host, and by nothing
@@ -461,6 +518,7 @@ pub struct AudioDriverInfo {
 /// cached rows were spliced back in. The settings page keys its driver
 /// options by name, so it showed the unavailable one as selected and would
 /// not let the real one be chosen.
+#[cfg(any(windows, test))]
 fn asio_placeholder(asio_in_build: bool) -> Option<AudioDriverInfo> {
     (!asio_in_build).then(|| AudioDriverInfo {
         name: "ASIO".into(),
@@ -617,11 +675,15 @@ impl AudioInventory {
             });
         }
 
-        let asio_in_build = cpal::available_hosts()
-            .iter()
-            .any(|host| host.name() == "ASIO");
-        if let Some(placeholder) = asio_placeholder(asio_in_build) {
-            drivers.push(placeholder);
+        // ASIO is Windows' driver model: elsewhere nothing is missing.
+        #[cfg(windows)]
+        {
+            let asio_in_build = cpal::available_hosts()
+                .iter()
+                .any(|host| host.name() == "ASIO");
+            if let Some(placeholder) = asio_placeholder(asio_in_build) {
+                drivers.push(placeholder);
+            }
         }
         outputs.sort_by(|left, right| {
             left.driver
@@ -658,16 +720,20 @@ impl AudioInventory {
         let output = self
             .outputs
             .iter()
-            .find(|output| output.driver == "WASAPI" && output.is_default)
+            .find(|output| output.driver == PREFERRED_DRIVER && output.is_default)
             .or_else(|| self.outputs.iter().find(|output| output.is_default))
-            .or_else(|| self.outputs.iter().find(|output| output.driver == "WASAPI"))
+            .or_else(|| {
+                self.outputs
+                    .iter()
+                    .find(|output| output.driver == PREFERRED_DRIVER)
+            })
             .or_else(|| self.outputs.first())
-            .context("Windows has no available audio output")?;
+            .context("This computer has no available audio output")?;
         Ok(AudioPreferences {
             schema_version: AUDIO_SCHEMA_VERSION,
             driver: output.driver.clone(),
             output_device: output.name.clone(),
-            sample_rate_hz: output.default_sample_rate,
+            sample_rate_hz: preferred_sample_rate(output),
             // RackForge's buffer on every platform, where the output takes
             // it; the driver's own otherwise.
             buffer_frames: output
@@ -996,6 +1062,17 @@ impl DesktopAudio {
         if specs.is_empty() {
             bail!("no playable plugin is available for the audio engine");
         }
+        // The adjustments saved for a plugin whose program was not restored
+        // were made on another program: dropped now, before anything can
+        // fail, so a later start does not lay them over this one.
+        let mut live_parameter_store = LiveParameterStateStore::open(Some(data_root))?;
+        let mut dropped = false;
+        for spec in specs.iter().filter(|spec| !spec.restore_live_parameters) {
+            dropped |= live_parameter_store.clear_plugin(&spec.plugin.manifest().id);
+        }
+        if dropped {
+            live_parameter_store.flush()?;
+        }
 
         let host_id = cpal::available_hosts()
             .into_iter()
@@ -1046,7 +1123,6 @@ impl DesktopAudio {
             bail!("the selected audio output reports zero channels");
         }
 
-        let live_parameter_store = LiveParameterStateStore::open(Some(data_root))?;
         let live_parameter_targets = specs
             .iter()
             .map(|spec| LiveParameterTarget {
@@ -1305,10 +1381,13 @@ impl DesktopAudio {
 
     pub fn runtime_status(&self) -> AudioRuntimeStatus {
         let mut status = self.telemetry.snapshot(self.sample_rate);
-        let dropouts = asio_sys::driver_dropouts();
-        status.driver_overloads = dropouts.overloads;
-        status.driver_resyncs = dropouts.resyncs;
-        status.driver_skipped_buffers = dropouts.skipped_buffers;
+        #[cfg(windows)]
+        {
+            let dropouts = asio_sys::driver_dropouts();
+            status.driver_overloads = dropouts.overloads;
+            status.driver_resyncs = dropouts.resyncs;
+            status.driver_skipped_buffers = dropouts.skipped_buffers;
+        }
         if let Some(capture) = &self.capture_ring {
             status.capture_overruns = capture.overruns.load(Ordering::Relaxed);
             status.capture_underruns = capture.underruns.load(Ordering::Relaxed);
@@ -1968,6 +2047,7 @@ impl MidiPacket {
 }
 
 /// The performance counter, in the ticks the MIDI service stamps with.
+#[cfg(windows)]
 pub(crate) fn performance_counter() -> u64 {
     let mut ticks = 0i64;
     // SAFETY: a valid out-pointer; the call cannot fail on Windows XP and later.
@@ -1975,12 +2055,27 @@ pub(crate) fn performance_counter() -> u64 {
     ticks.max(0) as u64
 }
 
+#[cfg(windows)]
 fn performance_frequency() -> u64 {
     let mut frequency = 0i64;
     // SAFETY: as above.
     let _ =
         unsafe { windows::Win32::System::Performance::QueryPerformanceFrequency(&mut frequency) };
     frequency.max(1) as u64
+}
+
+/// The monotonic clock in nanoseconds since the first reading: Linux has no
+/// performance counter to share with a MIDI service, and nothing here needs
+/// one -- only a steady clock both the MIDI threads and the render read.
+#[cfg(not(windows))]
+pub(crate) fn performance_counter() -> u64 {
+    static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    ORIGIN.get_or_init(Instant::now).elapsed().as_nanos() as u64
+}
+
+#[cfg(not(windows))]
+fn performance_frequency() -> u64 {
+    1_000_000_000
 }
 
 /// Where in the block a message stamped `timestamp` belongs.
@@ -3191,8 +3286,11 @@ fn prepare_audio_voice(
             );
         }
     }
-    let restored_parameters: Vec<(u32, f64)> =
-        live_parameter_store.restored_values(&spec.plugin.manifest().id, spec.plugin.parameters());
+    let restored_parameters: Vec<(u32, f64)> = if spec.restore_live_parameters {
+        live_parameter_store.restored_values(&spec.plugin.manifest().id, spec.plugin.parameters())
+    } else {
+        Vec::new()
+    };
     for (parameter_index, value) in restored_parameters.iter().copied() {
         // A value the plugin refuses costs that one parameter, never the
         // instrument.
@@ -3718,9 +3816,17 @@ pub fn midi_source_descriptor(name: &str) -> Result<MidiSourceDescriptor> {
     })
 }
 
+/// Where a port's source id says it came from: its platform's MIDI API as
+/// midir reads it (WinMM on Windows, the ALSA sequencer on Linux).
+#[cfg(windows)]
+const MIDI_SOURCE_PREFIX: &str = "windows.midir";
+#[cfg(not(windows))]
+const MIDI_SOURCE_PREFIX: &str = "linux.midir";
+
 pub fn stable_midi_source_id(name: &str) -> Result<MidiSourceId> {
     let digest = Sha256::digest(name.trim().to_lowercase().as_bytes());
-    MidiSourceId::new(format!("windows.midir.{:x}", digest)).map_err(|error| anyhow::anyhow!(error))
+    MidiSourceId::new(format!("{MIDI_SOURCE_PREFIX}.{:x}", digest))
+        .map_err(|error| anyhow::anyhow!(error))
 }
 
 pub fn stable_midi_source_key(name: &str) -> MidiSourceKey {

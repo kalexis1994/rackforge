@@ -64,7 +64,7 @@ README).
 | Pads, DAW bank (BANK+ until DAW) | notes 0–11, channel 10, note-off on release | Official software ×2; Documented (the bank) | BW `RgbNoteButton(i)`; AB `elements.py` 42 (`channels=9`); BG p4 |
 | Pads, banks A–D | bank A from note 36 on channel 10; B–D an octave higher each | Documented | UM p20. Which port they use is not stated; the package does not describe them |
 | Held from instruments | every input (`plays = false`) | Convention | catalog README. The touch CCs above include CC 11 (expression) and the DAW pads' notes 0–11 are no instrument's |
-| Slots | faders 1–8 `control-1`, encoders 1–8 `control-2`; Rewind/Fast-forward `step`; Save, Quantize, Metro, Undo `switch-3.1`–`3.4`; pads none (they send 0–11, not 36–51); screen buttons none (the keyboard has pads) | Convention | catalog README |
+| Slots | faders 1–8 `control-1`, encoders 1–8 `control-2`; Rewind/Fast-forward `step`; Save, Quantize, Metro, Undo `switch-3.1`–`3.4`; DAW pads by number, 1–8 `switch-1`, 9–12 `switch-2.1`–`2.4`; screen buttons none (the keyboard has pads) | Convention | catalog README |
 | Roles | faders 1–8 as the "eight knobs and nine faders" rule, the master fader master level; encoders none (relative) | Convention | catalog README |
 | Transport | Play and Stop take the transport actions | Convention | catalog README |
 

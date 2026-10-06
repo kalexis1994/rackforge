@@ -168,6 +168,8 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo build --locked --release --target wasm32-unknown-unknown             -p rackforge-concert-grand             -p rackforge-parallel-demo-synth
+          # The example instrument's native build, held to its component.
+          cargo build --locked -p rackforge-parallel-demo-synth
           # `--ignored` runs ONLY these, which is the whole point of the step.
           cargo test --locked -p rackforge-core --test parallel_render -- --ignored
 

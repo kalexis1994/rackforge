@@ -138,7 +138,7 @@ name = "Pad 5"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 48 }
-slot = "switch-2.1"
+slot = "switch-1.5"
 
 [[inputs]]
 id = "pad-6"
@@ -146,7 +146,7 @@ name = "Pad 6"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 49 }
-slot = "switch-2.2"
+slot = "switch-1.6"
 
 [[inputs]]
 id = "pad-7"
@@ -154,7 +154,7 @@ name = "Pad 7"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 50 }
-slot = "switch-2.3"
+slot = "switch-1.7"
 
 [[inputs]]
 id = "pad-8"
@@ -162,7 +162,7 @@ name = "Pad 8"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 51 }
-slot = "switch-2.4"
+slot = "switch-1.8"
 
 [[inputs]]
 id = "pad-9"
@@ -170,7 +170,7 @@ name = "Pad 9"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 36 }
-slot = "switch-1.5"
+slot = "switch-2.1"
 
 [[inputs]]
 id = "pad-10"
@@ -178,7 +178,7 @@ name = "Pad 10"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 37 }
-slot = "switch-1.6"
+slot = "switch-2.2"
 
 [[inputs]]
 id = "pad-11"
@@ -186,7 +186,7 @@ name = "Pad 11"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 38 }
-slot = "switch-1.7"
+slot = "switch-2.3"
 
 [[inputs]]
 id = "pad-12"
@@ -194,7 +194,7 @@ name = "Pad 12"
 kind = "pad"
 group = "Pads"
 midi = { channel = 9, note = 39 }
-slot = "switch-1.8"
+slot = "switch-2.4"
 
 [[inputs]]
 id = "pad-13"

@@ -638,6 +638,14 @@ fn controller_event(frame: u32, channel: u16, controller: u16, value: f64) -> Mi
 struct RackForgeControllerShared {
     level: Arc<AtomicU64>,
     revision: Arc<AtomicU64>,
+    /// The revision of the last snapshot handed to the editor. A project's
+    /// state may reach the controller after the editor has drawn its first
+    /// one -- FL Studio reopens a project with its plug-in windows open -- and
+    /// the editor asks for a snapshot only when it connects, so it went on
+    /// showing the first instrument. A newer revision is now sent with the
+    /// next meter reading, which the editor asks for continuously.
+    #[cfg(windows)]
+    published_revision: Arc<AtomicU64>,
     handler: Arc<Mutex<Option<ComPtr<IComponentHandler>>>>,
     model: Arc<RwLock<Option<Arc<VstPluginModel>>>>,
     catalog: Arc<Vec<Arc<VstPluginModel>>>,
@@ -694,6 +702,12 @@ impl RackForgeControllerShared {
     #[cfg(windows)]
     fn revision(&self) -> u64 {
         self.revision.load(Ordering::Relaxed)
+    }
+
+    /// Whether the editor's last snapshot is older than the controller.
+    #[cfg(windows)]
+    fn editor_is_behind(&self) -> bool {
+        self.published_revision.load(Ordering::Relaxed) != self.revision()
     }
 
     #[cfg(windows)]
@@ -850,6 +864,46 @@ impl RackForgeControllerShared {
         Ok(model)
     }
 
+    /// The instrument a saved project names, from either half of its state.
+    ///
+    /// Selected afresh only if it is not the one already shown: a host may
+    /// hand back the controller's own state, with the program and values the
+    /// editor showed, before the processor's, and selecting the same
+    /// instrument again would put both back to its defaults.
+    fn restore_plugin(&self, plugin_id: &str) -> Result<(), String> {
+        if self
+            .model()
+            .is_some_and(|current| current.plugin_id == plugin_id)
+        {
+            return Ok(());
+        }
+        let index = self
+            .catalog
+            .iter()
+            .position(|model| model.plugin_id == plugin_id)
+            .ok_or_else(|| format!("Plugin {plugin_id} is not bundled with RackForge VST3"))?;
+        self.apply_plugin_selection(index).map(|_| ())
+    }
+
+    /// The program and parameter values the editor showed when the project
+    /// was saved, over the restored instrument's defaults.
+    fn restore_editor(&self, sound_id: Option<String>, values: &[(u32, f64)]) {
+        if !values.is_empty()
+            && let Ok(mut current) = self.values.write()
+        {
+            current.extend(values.iter().copied());
+        }
+        if let Some(sound_id) = sound_id
+            && self
+                .model()
+                .is_some_and(|model| model.preset_names.contains_key(&sound_id))
+            && let Ok(mut selected) = self.selected_sound_id.write()
+        {
+            *selected = Some(sound_id);
+        }
+        self.revision.fetch_add(1, Ordering::Relaxed);
+    }
+
     #[cfg(windows)]
     fn select_plugin_from_ui(&self, plugin_id: &str) -> Result<Arc<VstPluginModel>, String> {
         let catalog_index = self
@@ -913,6 +967,8 @@ impl RackForgeController {
             shared: RackForgeControllerShared {
                 level: Arc::new(AtomicU64::new(1.0_f64.to_bits())),
                 revision: Arc::new(AtomicU64::new(0)),
+                #[cfg(windows)]
+                published_revision: Arc::new(AtomicU64::new(0)),
                 handler: Arc::new(Mutex::new(None)),
                 catalog: Arc::new(catalog),
                 #[cfg(windows)]
@@ -948,18 +1004,15 @@ impl IEditControllerTrait for RackForgeController {
         let Ok(state) = decode_state(&bytes) else {
             return kResultFalse;
         };
-        if let Some(plugin_id) = state.plugin_id {
-            let Some(index) = self
-                .shared
-                .catalog
-                .iter()
-                .position(|model| model.plugin_id == plugin_id)
-            else {
-                return kResultFalse;
-            };
-            if self.shared.apply_plugin_selection(index).is_err() {
-                return kResultFalse;
-            }
+        diagnostic::write(format!(
+            "controller.setComponentState plugin={:?} current={:?}",
+            state.plugin_id,
+            self.shared.model().map(|model| model.plugin_id.clone())
+        ));
+        if let Some(plugin_id) = state.plugin_id
+            && self.shared.restore_plugin(plugin_id).is_err()
+        {
+            return kResultFalse;
         }
         self.shared.set_level(state.level);
         kResultOk
@@ -968,15 +1021,48 @@ impl IEditControllerTrait for RackForgeController {
         let Ok(bytes) = (unsafe { read_stream(stream) }) else {
             return kResultFalse;
         };
-        if bytes.len() != 8 {
+        let Ok(state) = decode_controller_state(&bytes) else {
+            diagnostic::write(format!(
+                "controller.setState unreadable, {} bytes",
+                bytes.len()
+            ));
             return kResultFalse;
+        };
+        diagnostic::write(format!(
+            "controller.setState plugin={:?} sound={:?} values={}",
+            state.plugin_id,
+            state.sound_id,
+            state.values.len()
+        ));
+        self.shared.set_level(state.level);
+        if let Some(plugin_id) = &state.plugin_id {
+            if self.shared.restore_plugin(plugin_id).is_err() {
+                return kResultFalse;
+            }
+            self.shared.restore_editor(state.sound_id, &state.values);
         }
-        self.shared
-            .set_level(f64::from_le_bytes(bytes.try_into().unwrap()));
         kResultOk
     }
     unsafe fn getState(&self, stream: *mut IBStream) -> tresult {
-        if unsafe { write_stream(stream, &self.shared.level().to_le_bytes()) }.is_ok() {
+        let model = self.shared.model();
+        let values = self
+            .shared
+            .values
+            .read()
+            .map(|values| values.clone())
+            .unwrap_or_default();
+        let bytes = encode_controller_state(
+            self.shared.level(),
+            model.as_ref().map(|model| model.plugin_id.as_str()),
+            self.shared
+                .selected_sound_id
+                .read()
+                .ok()
+                .and_then(|id| id.clone())
+                .as_deref(),
+            &values,
+        );
+        if unsafe { write_stream(stream, &bytes) }.is_ok() {
             kResultOk
         } else {
             kResultFalse
@@ -1830,6 +1916,106 @@ fn decode_state(bytes: &[u8]) -> Result<DecodedState<'_>, ()> {
     })
 }
 
+/// The controller's own state: what the editor showed -- the instrument, the
+/// program chosen in it and the parameter values -- beside the level.
+///
+/// It was the level alone, eight bytes. The processor's state carries the
+/// instrument and its sound, and is the only half a host has to hand back,
+/// so a project reopened in FL Studio played the instrument it was saved
+/// with under an editor showing the first one, and the program chosen in the
+/// editor was remembered nowhere at all. A host stores this beside the
+/// processor's and returns it with `setState`; eight bytes are still read as
+/// the level of a project saved before.
+const CONTROLLER_STATE_MAGIC: &[u8; 8] = b"RFVSTUI1";
+
+#[derive(Debug, PartialEq)]
+struct ControllerState {
+    level: f64,
+    plugin_id: Option<String>,
+    sound_id: Option<String>,
+    values: Vec<(u32, f64)>,
+}
+
+fn encode_controller_state(
+    level: f64,
+    plugin_id: Option<&str>,
+    sound_id: Option<&str>,
+    values: &BTreeMap<u32, f64>,
+) -> Vec<u8> {
+    let text = |bytes: &mut Vec<u8>, value: Option<&str>| {
+        let value = value.unwrap_or_default().as_bytes();
+        let length = u16::try_from(value.len()).unwrap_or(u16::MAX);
+        bytes.extend_from_slice(&length.to_le_bytes());
+        bytes.extend_from_slice(&value[..length as usize]);
+    };
+    let mut bytes = Vec::with_capacity(32 + values.len() * 12);
+    bytes.extend_from_slice(CONTROLLER_STATE_MAGIC);
+    bytes.extend_from_slice(&level.clamp(0.0, 1.0).to_le_bytes());
+    text(&mut bytes, plugin_id);
+    text(&mut bytes, sound_id);
+    bytes.extend_from_slice(&(values.len() as u32).to_le_bytes());
+    for (index, value) in values {
+        bytes.extend_from_slice(&index.to_le_bytes());
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    bytes
+}
+
+fn decode_controller_state(bytes: &[u8]) -> Result<ControllerState, ()> {
+    if bytes.len() == 8 {
+        let level = f64::from_le_bytes(bytes.try_into().map_err(|_| ())?);
+        if !level.is_finite() {
+            return Err(());
+        }
+        return Ok(ControllerState {
+            level: level.clamp(0.0, 1.0),
+            plugin_id: None,
+            sound_id: None,
+            values: Vec::new(),
+        });
+    }
+    let mut at: usize = 0;
+    let mut take = |length: usize| -> Result<&[u8], ()> {
+        let end = at.checked_add(length).ok_or(())?;
+        let slice = bytes.get(at..end).ok_or(())?;
+        at = end;
+        Ok(slice)
+    };
+    if take(8)? != CONTROLLER_STATE_MAGIC {
+        return Err(());
+    }
+    let level = f64::from_le_bytes(take(8)?.try_into().map_err(|_| ())?);
+    if !level.is_finite() {
+        return Err(());
+    }
+    let mut text = || -> Result<Option<String>, ()> {
+        let length = u16::from_le_bytes(take(2)?.try_into().map_err(|_| ())?) as usize;
+        let value = std::str::from_utf8(take(length)?).map_err(|_| ())?;
+        Ok((!value.is_empty()).then(|| value.to_owned()))
+    };
+    let plugin_id = text()?;
+    let sound_id = text()?;
+    let count = u32::from_le_bytes(take(4)?.try_into().map_err(|_| ())?) as usize;
+    let mut values = Vec::with_capacity(count.min(4096));
+    for _ in 0..count {
+        let index = u32::from_le_bytes(take(4)?.try_into().map_err(|_| ())?);
+        let value = f64::from_le_bytes(take(8)?.try_into().map_err(|_| ())?);
+        if !value.is_finite() {
+            return Err(());
+        }
+        values.push((index, value));
+    }
+    if at != bytes.len() {
+        return Err(());
+    }
+    Ok(ControllerState {
+        level: level.clamp(0.0, 1.0),
+        plugin_id,
+        sound_id,
+        values,
+    })
+}
+
 unsafe fn read_stream(stream: *mut IBStream) -> Result<Vec<u8>, ()> {
     let Some(stream) = (unsafe { ComRef::from_raw(stream) }) else {
         return Err(());
@@ -2032,6 +2218,84 @@ mod tests {
         assert_eq!(decoded.level, 0.75);
         assert_eq!(decoded.plugin_id, None);
         assert_eq!(decoded.plugin_state, &[7, 8, 9]);
+    }
+
+    /// The editor's state comes back as it went out: the instrument, the
+    /// program chosen in it and the values it showed.
+    #[test]
+    fn controller_state_round_trips_what_the_editor_showed() {
+        let values = BTreeMap::from([(0, 0.25), (3, -12.0), (40, 1.0)]);
+        let bytes = encode_controller_state(
+            0.5,
+            Some("org.rackforge.musette"),
+            Some("musette-paris"),
+            &values,
+        );
+        assert_eq!(
+            decode_controller_state(&bytes),
+            Ok(ControllerState {
+                level: 0.5,
+                plugin_id: Some("org.rackforge.musette".into()),
+                sound_id: Some("musette-paris".into()),
+                values: values.into_iter().collect(),
+            })
+        );
+        let empty = encode_controller_state(1.0, None, None, &BTreeMap::new());
+        let decoded = decode_controller_state(&empty).unwrap();
+        assert_eq!((decoded.plugin_id, decoded.sound_id), (None, None));
+    }
+
+    /// A project saved before the controller kept anything but its level.
+    #[test]
+    fn controller_state_reads_the_old_eight_bytes_as_the_level() {
+        let decoded = decode_controller_state(&0.75_f64.to_le_bytes()).unwrap();
+        assert_eq!(decoded.level, 0.75);
+        assert_eq!(decoded.plugin_id, None);
+        assert!(decoded.values.is_empty());
+    }
+
+    #[test]
+    fn controller_state_refuses_what_it_did_not_write() {
+        let bytes = encode_controller_state(
+            1.0,
+            Some("org.rackforge.rf-106"),
+            Some("pad"),
+            &BTreeMap::from([(1, 0.5)]),
+        );
+        assert!(decode_controller_state(&bytes[..bytes.len() - 1]).is_err());
+        let mut longer = bytes.clone();
+        longer.push(0);
+        assert!(decode_controller_state(&longer).is_err());
+        let mut foreign = bytes;
+        foreign[0] = b'X';
+        assert!(decode_controller_state(&foreign).is_err());
+    }
+
+    /// Restoring the instrument already shown keeps the program and values
+    /// already restored: a host may return the controller's own state before
+    /// the processor's, which names the same instrument.
+    #[test]
+    fn restoring_the_shown_instrument_keeps_the_restored_program_and_values() {
+        let controller = RackForgeController::new();
+        let shared = &controller.shared;
+        let Some(model) = shared.catalog.last().cloned() else {
+            return;
+        };
+        let Some(sound_id) = model.preset_names.keys().last().cloned() else {
+            return;
+        };
+        shared.restore_plugin(&model.plugin_id).unwrap();
+        shared.restore_editor(Some(sound_id.clone()), &[(0, 0.123)]);
+        let revision = shared.revision.load(Ordering::Relaxed);
+
+        shared.restore_plugin(&model.plugin_id).unwrap();
+
+        assert_eq!(
+            shared.selected_sound_id.read().unwrap().as_deref(),
+            Some(sound_id.as_str())
+        );
+        assert_eq!(shared.plugin_value(0), Some(0.123));
+        assert_eq!(shared.revision.load(Ordering::Relaxed), revision);
     }
 
     #[test]

@@ -73,6 +73,16 @@ pub fn default_root() -> Result<PathBuf> {
     if let Some(local) = env::var_os("LOCALAPPDATA") {
         return Ok(PathBuf::from(local).join("RackForge"));
     }
+    // Linux: the user's data directory, as the XDG specification names it
+    // (inside a Flatpak, the app's own under ~/.var/app).
+    #[cfg(target_os = "linux")]
+    if let Some(data) = env::var_os("XDG_DATA_HOME").filter(|data| !data.is_empty()) {
+        return Ok(PathBuf::from(data).join("RackForge"));
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(home) = env::var_os("HOME").filter(|home| !home.is_empty()) {
+        return Ok(PathBuf::from(home).join(".local/share/RackForge"));
+    }
     Ok(env::current_dir()?.join(".rackforge"))
 }
 

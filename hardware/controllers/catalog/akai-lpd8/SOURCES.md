@@ -68,7 +68,7 @@ Channels from 1.
 |---|---|---|---|
 | Held from instruments | the knobs (`plays = false`): no keys; CC 1–8 are modulation, breath, volume… to an instrument | Convention | catalog README |
 | The pads play | drum pads, as the MPD218's | Convention | catalog README |
-| Slots | knobs `control-1` (no faders); pads by note: 40–43 `switch-1.1`–`1.4`, 36–39 `switch-1.5`–`1.8` | Convention | catalog README |
+| Slots | knobs `control-1` (no faders); pads by number: 1–8 `switch-1.1`–`1.8` | Convention | catalog README |
 | Roles | the knobs as the rule for eight knobs and no faders | Convention | catalog README |
 
 ## Open questions, until someone with the hardware checks

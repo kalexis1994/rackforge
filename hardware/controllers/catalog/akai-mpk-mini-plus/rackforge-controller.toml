@@ -101,17 +101,17 @@ group = "Knobs"
 midi = { channel = 0, cc = 77 }
 slot = "control-1.8"
 
-# Pads: notes on channel 10. Bank A sends 36-43 and bank B 44-51, pad by
-# pad [AKA Pad1-16Note 36-51, PadChannel 10]. Pads 1-4 are the bottom row,
-# 5-8 the top one [Akai, "How To Program MPK mini Pads in a DAW"]. A pad
-# takes the slot of the note it sends, as on every keyboard in the catalog.
+# Pads: notes on channel 10. Bank A sends 36-43 and bank B 44-51, pad by pad
+# [AKA Pad1-16Note 36-51, PadChannel 10]. Pads 1-4 are the bottom row, 5-8 the
+# top one [Akai, "How To Program MPK mini Pads in a DAW"]. A pad takes the
+# slot of its number, as on every keyboard in the catalog.
 [[inputs]]
 id = "pad-1"
 name = "Pad 1"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 36 }
-slot = "switch-1.5"
+slot = "switch-1.1"
 
 [[inputs]]
 id = "pad-2"
@@ -119,7 +119,7 @@ name = "Pad 2"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 37 }
-slot = "switch-1.6"
+slot = "switch-1.2"
 
 [[inputs]]
 id = "pad-3"
@@ -127,7 +127,7 @@ name = "Pad 3"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 38 }
-slot = "switch-1.7"
+slot = "switch-1.3"
 
 [[inputs]]
 id = "pad-4"
@@ -135,7 +135,7 @@ name = "Pad 4"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 39 }
-slot = "switch-1.8"
+slot = "switch-1.4"
 
 [[inputs]]
 id = "pad-5"
@@ -143,7 +143,7 @@ name = "Pad 5"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 40 }
-slot = "switch-1.1"
+slot = "switch-1.5"
 
 [[inputs]]
 id = "pad-6"
@@ -151,7 +151,7 @@ name = "Pad 6"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 41 }
-slot = "switch-1.2"
+slot = "switch-1.6"
 
 [[inputs]]
 id = "pad-7"
@@ -159,7 +159,7 @@ name = "Pad 7"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 42 }
-slot = "switch-1.3"
+slot = "switch-1.7"
 
 [[inputs]]
 id = "pad-8"
@@ -167,7 +167,7 @@ name = "Pad 8"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 43 }
-slot = "switch-1.4"
+slot = "switch-1.8"
 
 [[inputs]]
 id = "pad-9"
@@ -175,7 +175,7 @@ name = "Pad 9"
 kind = "pad"
 group = "Pads, bank B"
 midi = { channel = 9, note = 44 }
-slot = "switch-2.5"
+slot = "switch-2.1"
 
 [[inputs]]
 id = "pad-10"
@@ -183,7 +183,7 @@ name = "Pad 10"
 kind = "pad"
 group = "Pads, bank B"
 midi = { channel = 9, note = 45 }
-slot = "switch-2.6"
+slot = "switch-2.2"
 
 [[inputs]]
 id = "pad-11"
@@ -191,7 +191,7 @@ name = "Pad 11"
 kind = "pad"
 group = "Pads, bank B"
 midi = { channel = 9, note = 46 }
-slot = "switch-2.7"
+slot = "switch-2.3"
 
 [[inputs]]
 id = "pad-12"
@@ -199,7 +199,7 @@ name = "Pad 12"
 kind = "pad"
 group = "Pads, bank B"
 midi = { channel = 9, note = 47 }
-slot = "switch-2.8"
+slot = "switch-2.4"
 
 [[inputs]]
 id = "pad-13"
@@ -207,7 +207,7 @@ name = "Pad 13"
 kind = "pad"
 group = "Pads, bank B"
 midi = { channel = 9, note = 48 }
-slot = "switch-2.1"
+slot = "switch-2.5"
 
 [[inputs]]
 id = "pad-14"
@@ -215,7 +215,7 @@ name = "Pad 14"
 kind = "pad"
 group = "Pads, bank B"
 midi = { channel = 9, note = 49 }
-slot = "switch-2.2"
+slot = "switch-2.6"
 
 [[inputs]]
 id = "pad-15"
@@ -223,7 +223,7 @@ name = "Pad 15"
 kind = "pad"
 group = "Pads, bank B"
 midi = { channel = 9, note = 50 }
-slot = "switch-2.3"
+slot = "switch-2.7"
 
 [[inputs]]
 id = "pad-16"
@@ -231,7 +231,7 @@ name = "Pad 16"
 kind = "pad"
 group = "Pads, bank B"
 midi = { channel = 9, note = 51 }
-slot = "switch-2.4"
+slot = "switch-2.8"
 
 # The wheels, fixed [UG p12 "pre-configured and cannot be edited"], on the
 # keyboard's channel: pitch bend, and modulation CC 1 [AKF ID_MOD = 1; BW

@@ -167,18 +167,18 @@ group = "Knobs, bank C"
 midi = { channel = 0, cc = 27 }
 slot = "control-3.6"
 
-# Pads: 16 in three pad banks [UG item 6], notes on channel 10: bank A
-# 36-51, bank B 52-67, bank C 68-83 [PR pad records; AB PAD_IDS, bank A,
-# PAD_CHANNEL 9]. Pad 1 is the bottom left [AB, top row first]. Bank A's
-# pads take the slot of the note they send, as on every keyboard in the
-# catalog; banks B and C have none.
+# Pads: 16 in three pad banks [UG item 6], notes on channel 10: bank A 36-51,
+# bank B 52-67, bank C 68-83 [PR pad records; AB PAD_IDS, bank A, PAD_CHANNEL
+# 9]. Pad 1 is the bottom left [AB, top row first]. Bank A's pads take the
+# slot of their number, as on every keyboard in the catalog; banks B and C
+# have none.
 [[inputs]]
 id = "pad-a1"
 name = "Pad 1 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 36 }
-slot = "switch-1.5"
+slot = "switch-1.1"
 
 [[inputs]]
 id = "pad-a2"
@@ -186,7 +186,7 @@ name = "Pad 2 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 37 }
-slot = "switch-1.6"
+slot = "switch-1.2"
 
 [[inputs]]
 id = "pad-a3"
@@ -194,7 +194,7 @@ name = "Pad 3 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 38 }
-slot = "switch-1.7"
+slot = "switch-1.3"
 
 [[inputs]]
 id = "pad-a4"
@@ -202,7 +202,7 @@ name = "Pad 4 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 39 }
-slot = "switch-1.8"
+slot = "switch-1.4"
 
 [[inputs]]
 id = "pad-a5"
@@ -210,7 +210,7 @@ name = "Pad 5 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 40 }
-slot = "switch-1.1"
+slot = "switch-1.5"
 
 [[inputs]]
 id = "pad-a6"
@@ -218,7 +218,7 @@ name = "Pad 6 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 41 }
-slot = "switch-1.2"
+slot = "switch-1.6"
 
 [[inputs]]
 id = "pad-a7"
@@ -226,7 +226,7 @@ name = "Pad 7 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 42 }
-slot = "switch-1.3"
+slot = "switch-1.7"
 
 [[inputs]]
 id = "pad-a8"
@@ -234,7 +234,7 @@ name = "Pad 8 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 43 }
-slot = "switch-1.4"
+slot = "switch-1.8"
 
 [[inputs]]
 id = "pad-a9"
@@ -242,7 +242,7 @@ name = "Pad 9 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 44 }
-slot = "switch-2.5"
+slot = "switch-2.1"
 
 [[inputs]]
 id = "pad-a10"
@@ -250,7 +250,7 @@ name = "Pad 10 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 45 }
-slot = "switch-2.6"
+slot = "switch-2.2"
 
 [[inputs]]
 id = "pad-a11"
@@ -258,7 +258,7 @@ name = "Pad 11 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 46 }
-slot = "switch-2.7"
+slot = "switch-2.3"
 
 [[inputs]]
 id = "pad-a12"
@@ -266,7 +266,7 @@ name = "Pad 12 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 47 }
-slot = "switch-2.8"
+slot = "switch-2.4"
 
 [[inputs]]
 id = "pad-a13"
@@ -274,7 +274,7 @@ name = "Pad 13 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 48 }
-slot = "switch-2.1"
+slot = "switch-2.5"
 
 [[inputs]]
 id = "pad-a14"
@@ -282,7 +282,7 @@ name = "Pad 14 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 49 }
-slot = "switch-2.2"
+slot = "switch-2.6"
 
 [[inputs]]
 id = "pad-a15"
@@ -290,7 +290,7 @@ name = "Pad 15 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 50 }
-slot = "switch-2.3"
+slot = "switch-2.7"
 
 [[inputs]]
 id = "pad-a16"
@@ -298,7 +298,7 @@ name = "Pad 16 (bank A)"
 kind = "pad"
 group = "Pads, bank A"
 midi = { channel = 9, note = 51 }
-slot = "switch-2.4"
+slot = "switch-2.8"
 
 [[inputs]]
 id = "pad-b1"

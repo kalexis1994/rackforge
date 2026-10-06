@@ -471,10 +471,18 @@ fn handle_session_command(
         .ok_or_else(|| "VST session request has no operation".to_owned())?;
     match operation {
         "snapshot" => Ok(vec![snapshot(shared)?]),
-        "output_meter" => Ok(vec![json!({
-            "status": "output_meter",
-            "meter": { "left_peak": 0.0, "right_peak": 0.0 },
-        })]),
+        "output_meter" => {
+            let mut messages = vec![json!({
+                "status": "output_meter",
+                "meter": { "left_peak": 0.0, "right_peak": 0.0 },
+            })];
+            // A change the editor did not ask for -- a project's state
+            // arriving after it drew -- reaches it here (`published_revision`).
+            if shared.editor_is_behind() {
+                messages.push(snapshot(shared)?);
+            }
+            Ok(messages)
+        }
         "performance_snapshot" => Ok(vec![json!({
             "status": "performance_snapshot",
             "snapshot": empty_performance_snapshot(),
@@ -673,6 +681,11 @@ fn plugin_descriptor(model: &VstPluginModel, shared: &RackForgeControllerShared)
         "plugin_id": model.plugin_id,
         "plugin_name": model.name,
         "version": model.version,
+        // The catalogue carries instruments only (`models_from_roots`). Said
+        // outright: PLAY's picker lists what is an instrument, and without
+        // the kind it listed nothing -- "No plugins installed" over the
+        // instrument that was playing.
+        "kind": "instrument",
         "active": true,
         "managed": false,
         "api_version": model.web_api_version,
@@ -703,12 +716,16 @@ fn snapshot(shared: &RackForgeControllerShared) -> Result<Value, String> {
     } else {
         vec!["play"]
     };
+    let revision = shared.revision();
+    shared
+        .published_revision
+        .store(revision, std::sync::atomic::Ordering::Relaxed);
     Ok(json!({
         "status": "snapshot",
         "snapshot": {
             "schema_version": 14,
             "session_id": "rackforge-vst3",
-            "revision": shared.revision(),
+            "revision": revision,
             "active_mode": "play",
             "master_level": (shared.level() * 1000.0).round(),
             "master_pan": 0,
@@ -1034,6 +1051,45 @@ mod initialization_script_tests {
                 .any(|surface| surface["kind"] == "config"),
             "a surface that cannot be served must not be listed either"
         );
+    }
+
+    /// A change the editor did not ask for -- a project's state arriving
+    /// after it drew its first snapshot -- reaches it with the next meter
+    /// reading, once.
+    #[test]
+    fn a_change_the_editor_did_not_ask_for_reaches_it_with_the_meter() {
+        let controller = super::super::RackForgeController::new();
+        let shared = &controller.shared;
+        if shared.model().is_none() {
+            return;
+        }
+        let meter = json!({ "op": "output_meter" });
+        snapshot(shared).expect("snapshot");
+        assert_eq!(
+            handle_session_command(&meter, shared).expect("meter").len(),
+            1
+        );
+
+        shared.set_level(0.3);
+        let messages = handle_session_command(&meter, shared).expect("meter");
+        assert_eq!(messages.len(), 2, "the newer state rides with the meter");
+        assert_eq!(messages[1]["status"], "snapshot");
+        assert_eq!(
+            handle_session_command(&meter, shared).expect("meter").len(),
+            1
+        );
+    }
+
+    /// PLAY's picker lists the plug-ins whose kind is "instrument"; a
+    /// descriptor without one was dropped, and the picker said "No plugins
+    /// installed" over the instrument that was playing.
+    #[test]
+    fn every_catalogued_plugin_says_it_is_an_instrument() {
+        let controller = super::super::RackForgeController::new();
+        for model in controller.shared.catalog.iter() {
+            let descriptor = plugin_descriptor(model, &controller.shared);
+            assert_eq!(descriptor["kind"], "instrument", "{}", model.plugin_id);
+        }
     }
 
     /// The storage routes answer over the same bridge the interface uses.

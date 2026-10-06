@@ -101,11 +101,16 @@ each keyboard the map the two make. The same rules place every keyboard:
   - The first row of knobs or encoders takes the next row, and a second
     encoder page or row the one after.
   - A keyboard without faders puts its first knob row in `control-1`.
-- **Pads, by the note they send:**
-  - 40–43 and 36–39 take `switch-1.1`–`1.8`.
-  - 48–51 and 44–47 take `switch-2.1`–`2.8`.
-  - A pad sends the same thing whatever the keyboard. On a 16-pad grid the
-    left half is bank 1.
+- **Pads, by the number their maker gives them:**
+  - Pads 1–8 take `switch-1.1`–`1.8`.
+  - Pads 9–16, or the second bank's 1–8, take `switch-2.1`–`2.8`.
+  - Pad 1 is the first switch on every keyboard, wherever its maker puts it
+    (the top left on an Arturia KeyLab or a Launchkey, the bottom left on
+    an Akai) and whatever note it sends. A pad that sends no note (a CC
+    button, a DAW clip pad) takes its number's slot too.
+  - A grid whose pads carry no numbers (an APC's clip grid) takes its two
+    bottom rows: the upper row's left half, then the lower row's, bank 1;
+    the right halves bank 2.
 - **A controller without pads:** its first row of eight buttons takes
   `switch-1`, and a second row `switch-2`.
 - **Arrows:**

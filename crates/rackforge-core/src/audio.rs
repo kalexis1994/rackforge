@@ -9,9 +9,10 @@ use rackforge_audio_api::{
     AudioSampleFormat, AudioStreamCapabilities, AudioTransport, AudioValueRange,
     COMMON_SAMPLE_RATES, UsbAudioIdentity, preferred_automatic_output,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 
 pub struct OpenedAudioOutput {
     pub pcm: PCM,
@@ -56,26 +57,12 @@ pub fn discover_audio_devices() -> Result<Vec<AudioDeviceDescriptor>> {
                 continue;
             }
             let address = format!("hw:{index},{pcm_device}");
-            let playback = playback_info.as_ref().and_then(|_| {
-                probe_stream(&address, Direction::Playback)
-                    .map_err(|error| {
-                        eprintln!(
-                            "AUDIO_STREAM_IGNORED backend={address} direction=playback reason={}",
-                            explain_probe_failure(&error)
-                        );
-                    })
-                    .ok()
-            });
-            let capture = capture_info.as_ref().and_then(|_| {
-                probe_stream(&address, Direction::Capture)
-                    .map_err(|error| {
-                        eprintln!(
-                            "AUDIO_STREAM_IGNORED backend={address} direction=capture reason={}",
-                            explain_probe_failure(&error)
-                        );
-                    })
-                    .ok()
-            });
+            let playback = playback_info
+                .as_ref()
+                .and_then(|_| probe_reported(&address, Direction::Playback));
+            let capture = capture_info
+                .as_ref()
+                .and_then(|_| probe_reported(&address, Direction::Capture));
             if playback.is_none() && capture.is_none() {
                 continue;
             }
@@ -493,6 +480,41 @@ fn explain_probe_failure(error: &anyhow::Error) -> String {
         );
     }
     text
+}
+
+/// The streams whose last probe failed, and why. The supervisor probes every
+/// two seconds, and a stream the engine itself holds answers "busy" every
+/// time -- as does one the desktop's sound server holds on a Linux desktop --
+/// so a failure is reported when it starts or its reason changes, and again
+/// only after the stream has opened in between.
+static FAILING_PROBES: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+
+fn probe_reported(address: &str, direction: Direction) -> Option<AudioStreamCapabilities> {
+    let label = match direction {
+        Direction::Playback => "playback",
+        Direction::Capture => "capture",
+    };
+    let key = format!("{address} {label}");
+    let probed = probe_stream(address, direction);
+    let mut failing = FAILING_PROBES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match probed {
+        Ok(capabilities) => {
+            failing.remove(&key);
+            Some(capabilities)
+        }
+        Err(error) => {
+            let reason = explain_probe_failure(&error);
+            if failing.get(&key) != Some(&reason) {
+                eprintln!(
+                    "AUDIO_STREAM_IGNORED backend={address} direction={label} reason={reason}"
+                );
+                failing.insert(key, reason);
+            }
+            None
+        }
+    }
 }
 
 fn probe_stream(address: &str, direction: Direction) -> Result<AudioStreamCapabilities> {

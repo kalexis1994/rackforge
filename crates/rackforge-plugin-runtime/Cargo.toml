@@ -1,6 +1,6 @@
 [package]
 name = "rackforge-plugin-runtime"
-description = "Host runtime for portable wasm-v1 RackForge plugins"
+description = "Host runtime for portable RackForge plugins: wasm-v1 components and their native builds"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,6 +17,10 @@ wasmtime.workspace = true
 # host reads.
 wasm-opt = { version = "0.116.1", default-features = false }
 sha2.workspace = true
+# Native builds of portable processors: the SDK defines their table, and
+# libloading opens the library that carries it.
+rackforge-plugin-sdk = { path = "../rackforge-plugin-sdk" }
+libloading.workspace = true
 
 [dev-dependencies]
 wat = "1.245"

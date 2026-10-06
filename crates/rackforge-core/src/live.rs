@@ -990,7 +990,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         .get(&primary_id)
         .context("primary plugin failed to load")?;
 
-    let live_parameter_store = LiveParameterStateStore::open(config.data_root.as_deref())?;
+    let mut live_parameter_store = LiveParameterStateStore::open(config.data_root.as_deref())?;
     let mut live_parameter_targets = Vec::with_capacity(plugins.len());
     let mut standalone_voices = Vec::with_capacity(plugins.len());
     let mut session_instances = Vec::with_capacity(plugins.len());
@@ -1014,10 +1014,15 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
                     .flatten()
             })
             .flatten();
-        let requested = if is_primary {
-            persisted_sound_id.as_deref().or(config.preset.as_deref())
+        let persisted = if is_primary {
+            persisted_sound_id.as_deref()
         } else {
             secondary_persisted.as_deref()
+        };
+        let requested = if is_primary {
+            persisted.or(config.preset.as_deref())
+        } else {
+            persisted
         };
         let selected = requested
             .and_then(|id| {
@@ -1036,8 +1041,19 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
                 plugin_id, preset.id, preset.name
             );
         }
-        let mut restored_parameters: Vec<(u32, f64)> =
-            live_parameter_store.restored_values(plugin_id, plugin.parameters());
+        // The player's live adjustments were made on the program the session
+        // left selected: they come back only with it. A program chosen
+        // instead -- the first, after the plugin was removed and installed
+        // again, or the saved one gone -- starts as it is, and the old
+        // adjustments are dropped rather than laid over it.
+        let program_restored =
+            persisted.is_some_and(|id| selected.is_some_and(|preset| preset.id == id));
+        let mut restored_parameters: Vec<(u32, f64)> = if program_restored {
+            live_parameter_store.restored_values(plugin_id, plugin.parameters())
+        } else {
+            live_parameter_store.clear_plugin(plugin_id);
+            Vec::new()
+        };
         // A value the plugin refuses -- a newer version narrowed its range,
         // or it never took the value that was saved -- costs that one
         // parameter, which keeps the preset's value. It must not keep the

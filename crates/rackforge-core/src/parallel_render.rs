@@ -2384,8 +2384,12 @@ mod tests {
         };
 
         // A wall-clock comparison on a shared runner is noisy: one stolen
-        // timeslice in the wrong run flips it. The structural claims stay
-        // strict on every attempt; the speed claim gets three tries.
+        // timeslice in the wrong run flips it, and the rest of this crate's
+        // tests run beside it on the same cores for the first seconds. The
+        // structural claims stay strict on every attempt; the speed claim
+        // gets several tries, spaced so that they outlast those neighbours
+        // rather than all landing inside the same contention.
+        const ATTEMPTS: u32 = 10;
         let mut attempt = 0;
         let (old_worst, old_snapshot, new_worst, new_snapshot, new_elapsed) = loop {
             attempt += 1;
@@ -2403,7 +2407,7 @@ mod tests {
                 MockSlot::single(light_ns),
                 MockSlot::single(light_ns),
             ]);
-            if new_worst < old_worst * 8 / 10 || attempt >= 3 {
+            if new_worst < old_worst * 8 / 10 || attempt >= ATTEMPTS {
                 break (
                     old_worst,
                     old_snapshot,
@@ -2415,6 +2419,7 @@ mod tests {
             eprintln!(
                 "noisy runner (attempt {attempt}): unit-aware {new_worst}ns vs                  indivisible {old_worst}ns; retrying"
             );
+            thread::sleep(Duration::from_millis(300));
         };
 
         let report = |label: &str, worst: u64, snapshot: &TelemetrySnapshot| {

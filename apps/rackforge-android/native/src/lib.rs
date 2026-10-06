@@ -47,8 +47,8 @@ use rackforge_plugin_api::{
 };
 use rackforge_repository::{
     PluginUserDataRemovalOptions, cleanup_uninstall_tombstones, inspect_local_archive,
-    install_local_archive_cancellable, plugin_is_enabled, remove_plugin_user_data,
-    set_plugin_enabled, uninstall_plugin,
+    install_local_archive_cancellable, install_official_archive, plugin_is_enabled,
+    remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
     ButtonPhase, HostActionBinding, HostControlBinding, HostControlTarget, InstanceId,
@@ -5024,6 +5024,36 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installPluginFile
             .with_context(|| format!("opening installed plugin {}", installed.path.display()))?;
         let mut descriptor = package_descriptor(&package, false);
         // A layout the new package carries reaches the keyboards' maps.
+        if let Err(error) = reoffer_android_factory_maps() {
+            eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}");
+        }
+        descriptor["already_installed"] = installed.already_installed.into();
+        descriptor["artifact_sha256"] = installed.record.artifact_sha256.into();
+        Ok(descriptor.to_string())
+    })();
+    result_string(&mut env, result)
+}
+
+/// Installs a package from the official set the APK carries, which the
+/// build fetched pinned by URL and SHA-256: like a user's install, except that
+/// it may correct a same-version copy and its record says official.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_installBundledPluginFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    archive_path: JString,
+    store_root: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let archive_path = PathBuf::from(java_string(&mut env, archive_path)?);
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        let bytes = std::fs::read(&archive_path)
+            .with_context(|| format!("reading bundled plugin {}", archive_path.display()))?;
+        let installed = install_official_archive(&store_root, &bytes)
+            .context("validating and installing the bundled plugin")?;
+        let package = PluginPackage::open(&installed.path)
+            .with_context(|| format!("opening installed plugin {}", installed.path.display()))?;
+        let mut descriptor = package_descriptor(&package, false);
         if let Err(error) = reoffer_android_factory_maps() {
             eprintln!("FACTORY_CONTROLLER_MAPS_FAILED error={error:#}");
         }

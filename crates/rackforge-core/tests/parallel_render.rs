@@ -8,7 +8,7 @@ use rackforge_core::midi2::Midi2Event;
 use rackforge_core::parallel_render::{
     ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob, process_slots_sequential,
 };
-use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
+use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, PortableForm};
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_plugin_runtime::{MAX_PARALLEL_UNITS, ParallelPlanEntry};
 use std::collections::BTreeMap;
@@ -728,30 +728,7 @@ fn an_inactive_unit_graph_still_renders_the_global_stage() {
 #[test]
 #[ignore = "requires the wasm32 build of rackforge-parallel-demo-synth"]
 fn the_packaged_parallel_demo_synth_matches_its_sequential_fallback() {
-    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap()
-        .to_path_buf();
-    let component =
-        workspace.join("target/wasm32-unknown-unknown/release/rackforge_parallel_demo_synth.wasm");
-    let package_source = workspace.join("plugins/parallel-demo-synth/package");
-    let root = std::env::temp_dir().join(format!(
-        "rackforge-parallel-demo-{}-{}",
-        std::process::id(),
-        SERIAL.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::create_dir_all(root.join("metadata")).unwrap();
-    for file in [
-        "rackforge-plugin.toml",
-        "metadata/runtime.json",
-        "metadata/parameters.json",
-        "metadata/presets.json",
-    ] {
-        fs::copy(package_source.join(file), root.join(file)).unwrap();
-    }
-    fs::copy(&component, root.join("component.wasm")).unwrap();
-    let package = PluginPackage::open(&root).unwrap();
+    let package = parallel_demo_package();
     // SAFETY: portable wasm-v1 packages execute inside the sandbox.
     let loaded = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), None) }.unwrap();
     let plugin: &'static LoadedPlugin = Box::leak(Box::new(loaded));
@@ -772,6 +749,95 @@ fn the_packaged_parallel_demo_synth_matches_its_sequential_fallback() {
             assert!(pool.process(voices, FRAMES, CHANNELS, 1_000_000_000));
         });
         assert_eq!(reference, produced, "workers={workers} diverged");
+    }
+}
+
+fn workspace() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap()
+        .to_path_buf()
+}
+
+/// The example instrument's package, around its built component.
+fn parallel_demo_package() -> PluginPackage {
+    let workspace = workspace();
+    let component =
+        workspace.join("target/wasm32-unknown-unknown/release/rackforge_parallel_demo_synth.wasm");
+    let package_source = workspace.join("plugins/parallel-demo-synth/package");
+    let root = std::env::temp_dir().join(format!(
+        "rackforge-parallel-demo-{}-{}",
+        std::process::id(),
+        SERIAL.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(root.join("metadata")).unwrap();
+    for file in [
+        "rackforge-plugin.toml",
+        "metadata/runtime.json",
+        "metadata/parameters.json",
+        "metadata/presets.json",
+    ] {
+        fs::copy(package_source.join(file), root.join(file)).unwrap();
+    }
+    fs::copy(&component, root.join("component.wasm")).unwrap();
+    PluginPackage::open(&root).unwrap()
+}
+
+/// The example instrument's native build, scheduled by the same pool over
+/// its own native worker instances, against its component. Ignored by
+/// default because it needs both builds:
+///
+/// ```text
+/// cargo build --release --target wasm32-unknown-unknown -p rackforge-parallel-demo-synth
+/// cargo build -p rackforge-parallel-demo-synth
+/// cargo test -p rackforge-core --test parallel_render -- --ignored
+/// ```
+#[test]
+#[ignore = "requires the wasm32 and native builds of rackforge-parallel-demo-synth"]
+fn the_parallel_demo_synths_native_build_renders_what_its_component_renders() {
+    let package = parallel_demo_package();
+    let library = workspace().join("target/debug").join(format!(
+        "{}rackforge_parallel_demo_synth{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_SUFFIX
+    ));
+    // SAFETY: the component runs sandboxed; the library is this repository's
+    // own build of the same instrument.
+    let component: &'static LoadedPlugin = Box::leak(Box::new(
+        unsafe { LoadedPlugin::load_portable_form(&package, None, PortableForm::Component) }
+            .unwrap(),
+    ));
+    let native: &'static LoadedPlugin = Box::leak(Box::new(
+        unsafe {
+            LoadedPlugin::load_portable_form(&package, None, PortableForm::NativeBuild(&library))
+        }
+        .expect("build the native library first"),
+    ));
+    assert!(native.runs_native_build());
+    assert_eq!(native.parallel_layout(), component.parallel_layout());
+
+    let telemetry = RenderTelemetry::new(1);
+    let mut classic = vec![TestVoice::create(component, false)];
+    let reference = render_scripted(&mut classic, "pad", |voices| {
+        process_slots_sequential(voices, FRAMES, CHANNELS, &telemetry);
+    });
+    assert!(reference.iter().flatten().any(|sample| *sample != 0.0));
+
+    let mut sequential = vec![TestVoice::create(native, false)];
+    let produced = render_scripted(&mut sequential, "pad", |voices| {
+        process_slots_sequential(voices, FRAMES, CHANNELS, &telemetry);
+    });
+    assert_eq!(reference, produced, "the native composed process diverged");
+
+    for workers in [2_usize, 3] {
+        let telemetry = RenderTelemetry::new(workers);
+        let mut pool = RenderPool::with_workers(workers, telemetry);
+        let mut voices = vec![TestVoice::create(native, true)];
+        let produced = render_scripted(&mut voices, "pad", |voices| {
+            assert!(pool.process(voices, FRAMES, CHANNELS, 1_000_000_000));
+        });
+        assert_eq!(reference, produced, "native workers={workers} diverged");
     }
 }
 

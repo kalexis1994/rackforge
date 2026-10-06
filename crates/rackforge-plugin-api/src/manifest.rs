@@ -496,6 +496,11 @@ pub struct PluginManifest {
     pub audio: Option<PluginAudioContract>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<PortableComponent>,
+    /// Native builds, by platform key (`linux-aarch64`, `linux-x86_64`,
+    /// `windows-x86_64`). Alone, they are the plug-in; beside a portable
+    /// `component`, each is the same plug-in built for one platform, which a
+    /// host on that platform may run in place of the component, and every
+    /// other host ignores.
     #[serde(default)]
     pub binaries: BTreeMap<String, String>,
     /// The effects this instrument would like after itself in PLAY, in
@@ -511,6 +516,17 @@ pub struct PluginManifest {
     /// absent, it is false, so no other plugin needs to say anything.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub play_source: bool,
+}
+
+/// This host's platform as a package's `binaries` names it: `<os>-<arch>`,
+/// the operating system and the processor as Rust names them --
+/// `linux-aarch64`, `linux-x86_64`, `windows-x86_64`, `android-aarch64`,
+/// `macos-aarch64`. Derived rather than listed, so a host built for a new
+/// platform has its key, and finds a build made for it, with nothing added
+/// here.
+pub fn host_platform_key() -> &'static str {
+    static KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH))
 }
 
 impl PluginManifest {
@@ -595,10 +611,11 @@ impl PluginManifest {
                 return Err(ManifestError::ParallelRenderRequiresAudioOutput);
             }
         }
-        match (&self.component, self.binaries.is_empty()) {
-            (None, true) => return Err(ManifestError::NoRuntime),
-            (Some(_), false) => return Err(ManifestError::AmbiguousRuntime),
-            _ => {}
+        // A portable component runs on every host; native binaries beside it
+        // are the same plug-in built for one platform each, which a host may
+        // prefer where it has one (`binaries`).
+        if self.component.is_none() && self.binaries.is_empty() {
+            return Err(ManifestError::NoRuntime);
         }
         if let Some(component) = &self.component {
             for path in [
@@ -801,6 +818,12 @@ impl PluginManifest {
         }
     }
 
+    /// The native build for this host's platform ([`host_platform_key`]), if
+    /// the package carries one.
+    pub fn host_binary(&self) -> Option<&str> {
+        self.binaries.get(host_platform_key()).map(String::as_str)
+    }
+
     pub fn binary_for(&self, platform: &str) -> Result<&str, ManifestError> {
         self.binaries
             .get(platform)
@@ -980,8 +1003,6 @@ pub enum ManifestError {
     ParallelRenderRequiresAudioOutput,
     #[error("manifest declares neither a portable component nor native binaries")]
     NoRuntime,
-    #[error("manifest cannot mix a portable component with native binaries")]
-    AmbiguousRuntime,
     #[error("portable component path must be a safe relative path: {0:?}")]
     UnsafeComponentPath(String),
     #[error("invalid resource id {0:?}")]
@@ -1423,8 +1444,34 @@ mod tests {
         assert_eq!(candidate.validate(), Ok(()));
     }
 
+    /// The derived key is the one packages already name their builds by on
+    /// the platforms that had them written out.
     #[test]
-    fn rejects_ambiguous_native_and_portable_payloads() {
+    fn the_host_platform_key_is_the_one_packages_name() {
+        let expected = if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+            Some("linux-aarch64")
+        } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            Some("linux-x86_64")
+        } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            Some("windows-x86_64")
+        } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            Some("macos-aarch64")
+        } else if cfg!(all(target_os = "android", target_arch = "aarch64")) {
+            Some("android-aarch64")
+        } else {
+            None
+        };
+        if let Some(expected) = expected {
+            assert_eq!(host_platform_key(), expected);
+        }
+        assert!(validate_identifier(host_platform_key(), false).is_ok());
+    }
+
+    /// A portable component with native builds of the same plug-in beside
+    /// it: the component runs everywhere, a native build where its platform
+    /// is the host's.
+    #[test]
+    fn accepts_a_portable_component_with_native_builds_beside_it() {
         let mut candidate = manifest();
         candidate.component = Some(PortableComponent {
             abi: PortableAbi::WasmV1,
@@ -1434,7 +1481,11 @@ mod tests {
             preset_catalog: "metadata/presets.json".into(),
             memory_limit_mib: None,
         });
-        assert_eq!(candidate.validate(), Err(ManifestError::AmbiguousRuntime));
+        assert_eq!(candidate.validate(), Ok(()));
+        assert_eq!(
+            candidate.binary_for("linux-aarch64"),
+            Ok("lib/librackforge_gain.so")
+        );
     }
 
     #[test]

@@ -378,3 +378,87 @@ so before a plugin author does.
 - **Decline with `-3`** rather than pretending; the host handles it.
 - **Return the byte count** from the functions that produce data, and never
   more than the capacity you published.
+
+## Native builds of the same processor
+
+A package always carries its component, and may also carry the same
+processor built for particular platforms, listed under `binaries` beside
+`component` in the manifest:
+
+```toml
+component = "component.wasm"
+
+[binaries]
+windows-x86_64 = "native/windows-x86_64/plugin.dll"
+linux-aarch64 = "native/linux-aarch64/libplugin.so"
+```
+
+A platform is `<os>-<arch>` as Rust names them (`std::env::consts`):
+`windows-x86_64`, `linux-x86_64`, `linux-aarch64`, `android-aarch64`,
+`macos-aarch64`. A native build runs unsandboxed, with the host's own
+rights, so a host runs one only for a package the release's official set laid
+down — the store's record for it says `official`. Every other package, and
+every host without a
+build for its platform, runs the component: a package with no native builds
+works everywhere, only slower, and a build that will not load is reported
+(`PLUGIN_NATIVE_BUILD_FAILED`) and passed over for the component.
+`RACKFORGE_NATIVE_BUILDS=off` runs every component, for comparing the two. A
+native build is therefore held to being the same plugin: the same statuses
+for the same calls and the same samples for the same block.
+
+The build exports one symbol, `rackforge_portable_native_entry_v1`, a
+function with no arguments returning a pointer to a static table in C layout:
+
+| Field | |
+| --- | --- |
+| `struct_size: u32` | The table's size in bytes. Fields are only appended; a host reads the ones it knows. |
+| `native_abi_version: u32` | `0x0001_0000`. |
+| `portable_abi_version: u32` | What `rackforge_abi_version` returns. |
+| `midi2_families: u32` | What `rackforge_midi2_families` returns; 0 without the wide contract. |
+| `create`, `destroy` | Make and free an instance, which owns its processor and its buffers. |
+| `region(instance, region, *capacity) -> *mut u8` | A buffer's address, its capacity in elements written to `capacity`; null for a buffer the build does not have. |
+| `initialize` … `process` | One entry for each required export above, in the order the SDK's `NativeApiV1` lists them, each taking the instance first, then the export's own arguments, and returning its result. |
+| `process_v2` | Nullable: present exactly when the build takes the wide contract. |
+| `parallel` | Nullable: the parallel-render table, for a processor that renders in units. |
+
+The parallel-render table (`NativeParallelApiV1`) carries what the component's
+`rackforge_parallel_*` constants report — the ABI version, `max_units`, the
+dispatch stride, the unit's channels, the report stride, the shared capacity
+and the distance between two mix slots — and its four stages, each taking the
+instance first: `begin_block`, `begin_block_v2` (nullable, present exactly
+when `process_v2` is), `render_unit` and `end_block`. A host schedules a
+build's instances exactly as it schedules a component's, coordinator and
+workers alike.
+
+The buffers, by number, take the place of the `*_ptr` exports: input `0`,
+output `1`, MIDI `2`, parameter events `3`, transfer `4`, program input `5`,
+wide MIDI `6`, and for a parallel build dispatch `7`, plan `8`, mix `9`,
+shared `10` and reports `11`. Their layouts are the ones above and in
+[PARALLEL_RENDER.md](PARALLEL_RENDER.md).
+
+A native build has no fuel, so the host offers it no real-time budget. The
+host calls the real-time entries — `process`, `process_v2`, `set_parameter`,
+`get_parameter`, `reset`, `latency_frames`, the parallel stages — on whatever
+thread it is on,
+which may be an audio thread with a small stack; everything else, `create`
+and `prepare` among them, runs on a thread of the host's with a large stack
+(64 MiB reserved), since a processor built by value can need megabytes while
+it is made and prepared. `rackforge-plugin-sdk` exports the table from the same
+`export_processor!` that exports the component when the crate is built as a
+`cdylib` for a native target.
+
+A plugin's CI proves the "same plugin" for each build it can run, and packs
+them all into the one package:
+
+```text
+rackforge-core compare-native PACKAGE_DIRECTORY LIBRARY
+rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin
+  --native windows-x86_64=plugin.dll --native linux-aarch64=libplugin.so
+```
+
+`compare-native` plays every program the component publishes through both
+forms — and, for a processor that renders in units, through the native
+build's units as a host schedules them — and fails on the first sample, or
+the first saved state, that differs.
+`pack-wasm` stores each build at `native/<platform>/` and writes the
+`[binaries]` table; it refuses a library that does not export the entry.

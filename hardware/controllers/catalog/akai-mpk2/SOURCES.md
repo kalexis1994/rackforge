@@ -40,7 +40,7 @@ convention only.
 | Control banks | three, A–C | Documented | UG item 14/15. Only bank A is declared: AB reads no other |
 | Pads (bank A) | notes on channel 2: 60 62 64 65 / 67 69 71 72 (225); up to 86 (249, 261), bottom row first | Official software (one source) | AB `Drum_Pads`, channel 1 zero-based, rows listed top first |
 | Pad banks | four | Documented | UG. Only bank A is declared |
-| Pad slots | the slot of the pad in the same place on a 36–51 grid | Convention | catalog README; these pads send other notes |
+| Pad slots | by number: pads 1–8 `switch-1`, 9–16 `switch-2` | Convention | catalog README |
 | Pitch-bend wheel, modulation wheel | pitch bend; CC 1 | Documented | UG items 3–4 |
 | Sustain pedal | CC 64 | Convention (the MIDI standard) | UG rear panel names the input; the preset's Footswitch Type includes Sustain |
 | Transport | Loop 114, Rewind 115, Fast-forward 116, Stop 117, Play 118, Record 119, channel 1 | Official software (one source); Documented (buttons, and the MIDI CC option) | AB `add_button`; UG item 25/28 |

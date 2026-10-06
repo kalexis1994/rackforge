@@ -26,7 +26,7 @@ tables every message. Bitwig's extension gives the port names on each system.
 | Buttons | round buttons CC 108 (top), 109 (bottom); arrows up 104, down 105; Track left 106, right 107; 0/127 | Documented | UG p11, MIDI Messages Table. The guide says Track < > work in InControl; they are declared as tabled |
 | Octave, InControl | send nothing in Basic Mapping (InControl sends note 10 in InControl mode) | Documented | UG MIDI Messages Table |
 | Held from instruments | the six buttons (`plays = false`) | Convention | catalog README |
-| Slots | rotaries `control-1` (no faders); pads by note; Track `step`, arrows `step-2` | Convention | catalog README |
+| Slots | rotaries `control-1` (no faders); pads by number (1–8, the top row, `switch-1`; 9–16 `switch-2`); Track `step`, arrows `step-2` | Convention | catalog README |
 | Roles | the eight-knobs-no-faders rule | Convention | catalog README |
 
 ## Open questions, until someone with the hardware checks

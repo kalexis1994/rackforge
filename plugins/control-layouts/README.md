@@ -46,8 +46,8 @@ Rules:
 | `control-1.1`–`control-1.8` | The eight continuous controls played most | faders; the knobs of a keyboard without faders |
 | `control-2.1`–`control-2.8` | The next eight | the knobs above the faders |
 | `control-3.1`–`control-3.8` | Eight more | a second encoder page, a Launch Control's second row |
-| `switch-1.1`–`switch-1.8` | The switches played most | pads bank 1 (notes 40–43, 36–39), a Launch Control's top buttons |
-| `switch-2.1`–`switch-2.8` | Second-level switches and sound variants | pads bank 2 (notes 48–51, 44–47) |
+| `switch-1.1`–`switch-1.8` | The switches played most | pads 1–8, by their maker's numbers; a Launch Control's top buttons |
+| `switch-2.1`–`switch-2.8` | Second-level switches and sound variants | pads 9–16, or bank B's 1–8 |
 | `switch-3.1`–`switch-3.8` | A keyboard's labelled buttons | Save/Capture, Quantise, Metronome/Click, Undo |
 | `step.down`, `step.up` | Step the main selector | ⏪ ⏩, track ◀ ▶ |
 | `step-2.down`, `step-2.up` | Step a second selector | Undo/Redo on the KeyLab, pad ▼ ▲ on a Launchkey |

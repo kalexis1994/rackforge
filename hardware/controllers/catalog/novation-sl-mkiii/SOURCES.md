@@ -54,7 +54,7 @@ DAW maker's script), **Convention** (the catalog README).
 | Identity Reply, for the record | `F0 7E id 06 02 00 20 29 01 01 00 00 …` (family `01 01`, member `00 00`) | Documented (the format); Official software (the values) | PR p16; AB `sysex.py` `DEVICE_FAMILY_CODE`, `DEVICE_FAMILY_MEMBER_CODE`. Not used: the port name singles the product out, and both sizes answer alike (AB `__init__.py`: one USB product id, 257) |
 | Held from instruments | every input (`plays = false`) | Convention | catalog README: the InControl port carries controls only |
 | Fn button | Shift (`modifier = true`) | Convention | catalog README ("an APC's Shift") |
-| Slots | faders `control-1`, knobs `control-2`; Track Left/Right `step`; Pads Up/Down `step-2`; pads and soft buttons none (pads send 96–119, not 36–51) | Convention | catalog README |
+| Slots | faders `control-1`, knobs `control-2`; Track Left/Right `step`; Pads Up/Down `step-2`; pads by number (1–8 `switch-1`, 9–16 `switch-2`); soft buttons none | Convention | catalog README |
 | Roles | faders 1–8 as the rule for rows of knobs and eight faders; no master level; knobs none (relative) | Convention | catalog README |
 | Transport | Play and Stop take the transport actions | Convention | catalog README |
 

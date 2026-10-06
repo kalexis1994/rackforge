@@ -48,7 +48,7 @@ with the joystick they alone described. Nothing below rests on them.
 | Transport release | Global "Trpt": On, or On/Off | Documented | UG p11. Which one is factory is not documented; a button acts on its press either way |
 | Sustain pedal | CC 64, channel 1 | Documented (the input); Official software (the CC) | UG rear panel item 2; BW `b040??` |
 | Other buttons | Arp, Tap Tempo, Note Repeat, Full Level, Octave, Bank A/B, Scales, Chords, Shift, Home, Prog Select, Seq Play/Stop and the encoder act on the keyboard itself | Documented | UG pp5–7. Not declared |
-| Slots | knobs `control-1`; pads by note; modulation wheel `mod-wheel`; << >> `step` | Convention | catalog README |
+| Slots | knobs `control-1`; pads by number (1–8 `switch-1`, 9–16 `switch-2`); modulation wheel `mod-wheel`; << >> `step` | Convention | catalog README |
 | Roles | knobs 1–4 cutoff, resonance, filter envelope amount, LFO rate; 5–8 attack, decay, sustain, release; Play and Stop take the transport | Convention | catalog README |
 
 ## Open questions, until someone with the hardware checks

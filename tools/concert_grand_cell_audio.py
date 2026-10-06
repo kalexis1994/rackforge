@@ -7,6 +7,7 @@ use the same analytic Hermite acceleration moments as the finite audit.
 """
 import numpy as np
 from scipy.fft import rfft, irfft, rfftfreq, next_fast_len
+from scipy.sparse import coo_matrix
 from concert_grand_cell_observer import CellObserver
 
 
@@ -30,8 +31,9 @@ def hermite_fft(time, position, velocity, size):
     return f,spectrum
 
 
-def retarded_kernel(observer,rate):
+def retarded_kernel(observer,rate,aggregation='sparse'):
     if not np.isfinite(rate) or rate<=0:raise ValueError('positive sample rate')
+    if aggregation not in ('sparse','reference'):raise ValueError('known cell aggregation required')
     delay=observer.distance/observer.surface.speed*rate
     if delay.min()<1:raise ValueError('microphones require at least one sample propagation')
     base=np.floor(delay).astype(int);u=delay-base
@@ -45,9 +47,17 @@ def retarded_kernel(observer,rate):
             bins=(base[:,mic]+shift).ravel()
             # Aggregate quadrature weights by delay before projecting modes;
             # this is the same signed cell shape integral, not random panning.
-            histogram=np.zeros((len(kernel),observer.shapes.shape[0]))
             cells=np.tile(np.arange(observer.shapes.shape[0]),len(observer.area))
-            np.add.at(histogram,(bins,cells),coefficients.ravel())
+            if aggregation=='reference':
+                histogram=np.zeros((len(kernel),observer.shapes.shape[0]))
+                np.add.at(histogram,(bins,cells),coefficients.ravel())
+            else:
+                # Every quadrature point has exactly one delay bin for this
+                # Lagrange tap. CSR keeps all signed weights and merges equal
+                # bins; it avoids allocating delay-by-cell zeros. No shape,
+                # cell, quadrature point or nonzero coefficient is dropped.
+                histogram=coo_matrix((coefficients.ravel(),(bins,cells)),
+                    shape=(len(kernel),observer.shapes.shape[0])).tocsr()
             kernel[:,mic]+=observer.surface.density/(2*np.pi)*(histogram@observer.shapes)
     return kernel
 

@@ -43,5 +43,15 @@ class CellAudioTests(unittest.TestCase):
         with self.assertRaises(ValueError):hermite_fft([0,.1,.21],np.zeros((3,1)),np.zeros((3,1)),8)
         with self.assertRaises(ValueError):hermite_fft([0,.1,.2],np.zeros((3,1)),np.zeros((3,1)),2)
 
+    def test_sparse_delay_aggregation_matches_all_signed_reference_cells(self):
+        rng=np.random.default_rng(61007)
+        surface=RectangularLoad(.31,.21,rng.normal(size=(5,4,7)))
+        for order in [2,4,6]:
+            observer=CellObserver(surface,[(.13,.09,.6),(.2,.14,1.2)],order)
+            sparse=retarded_kernel(observer,128000)
+            reference=retarded_kernel(observer,128000,'reference')
+            np.testing.assert_allclose(sparse,reference,rtol=3e-14,atol=2e-15)
+        with self.assertRaises(ValueError):retarded_kernel(observer,128000,'unknown')
+
 
 if __name__=='__main__':unittest.main()

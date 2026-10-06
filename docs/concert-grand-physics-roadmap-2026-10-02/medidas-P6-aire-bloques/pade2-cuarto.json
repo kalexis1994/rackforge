@@ -1,0 +1,129 @@
+{
+  "rate": 128000,
+  "modes": 606,
+  "probe_rank": 30,
+  "angular": [
+    96,
+    256
+  ],
+  "cells": [
+    256,
+    192
+  ],
+  "loaded_state_span_relative": 1.6144623324234262e-15,
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-carga-directa\\refinada.json": "56e7adc7daa4d87b05288a5f3c79959b31fe591ca99ca16a1a46d82434660196",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-perdidas-proyectadas\\soporte.json": "b853248a635dcaeb2684b9e5a3661902dc47d445ed4e517df7fe39951642ba20",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-aire-bloques\\resistencia-tasas.json": "71734b8178815a95059147f643347c0facc1955918d70b2c493610ab5d0af0e2"
+  },
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "source_sha256": {
+    "audit-concert-grand-pade-air.py": "62616000b2b930c10d4794ab12fc13397f944d8b1399a0dcdb5962179ef240bd",
+    "concert_grand_pade_air.py": "0583f7811ef5f15ec608fd66ca868fe3f7a7cf37d6a629a9112f9417ed8cb32e",
+    "concert_grand_streaming_air.py": "c90e961555007b301af7f0ceefac6e622808d0f446769c92475ea04b0d37fbe3",
+    "concert_grand_rational_air.py": "ca2b4fc83ae26b4d08d4024a2aab29b150d28fe24715707ac300c05832acf469",
+    "concert_grand_bounded_air.py": "cab4c544f9d1c79b229cb253dfefaff965a01cfe2887cd63267ef5ea07c593b9",
+    "concert_grand_surface_impedance.py": "8ad393eb161ef53aff727ec007ea22d87c4a0406e7c55be8c588654a5f01091a",
+    "audit-concert-grand-streaming-air.py": "585d2c700e0d845f8a1f92f86a746a53f55e100bca2312ec1f5a44f9b14dd85d",
+    "concert_grand_projected_support.py": "2c0331b75736717432bb7b43939518a72c19b9975182e822fb167de86ad066b5",
+    "concert_grand_real_surface.py": "42b86ed17942110d78b0f7806b21ac557e89628c4a61465ead02fe58d27534a8",
+    "concert_grand_matrixfree_air.py": "8b8feac2eba3e6ffd406cda0626957e275cceaaf0ade54b8462c85e5f40ab2f1"
+  },
+  "budget": {
+    "full_factor_bytes": 1916928000,
+    "unfolded_factor_bytes": 3833856000,
+    "gram_bytes": 4759200,
+    "correlation_bytes": 4680000,
+    "estimated_array_peak_bytes": 34057440,
+    "factor_block_bytes": 2496000,
+    "fft_size": 1320
+  },
+  "max_array_bytes": 1073741824,
+  "criteria": {
+    "probe_ZRX_relative": 0.02,
+    "probe_Laplace_relative": 0.02,
+    "passivity_relative": -1e-10
+  },
+  "preflight_only": true,
+  "all_gates_passed": false,
+  "scope": "30-coordinate contracted air probe only. No full modal residual/transfer, coupled-time, timbral or runtime approval.",
+  "resistance_ablation": {
+    "legacy_Cayley": 0.09753140432411635,
+    "legacy_Pade2": 0.03561562158608983,
+    "fourth_Cayley": 0.08431436616890003,
+    "fourth_Pade2": 0.0077346991276623376
+  },
+  "legacy_reproduction_error": 1.3100631690576847e-14,
+  "probe_mass_residual_minimum": 5.160900527422838e-05,
+  "probe_mass_residual_maximum": 0.0003725078010156555,
+  "probe_states": 38940,
+  "original_probe_states": 19470,
+  "poles_real": -384000,
+  "poles_imaginary_magnitude": 221702.50336881628,
+  "finite_completion": true,
+  "realized_mass_relative": 3.9087421903839917e-16,
+  "realized_limit_relative": 3.1197727347153767e-15,
+  "rows": [
+    {
+      "frequency_hz": 60.0,
+      "impedance_ZRX_relative": [
+        6.715207089905343e-05,
+        0.0007422096292104564,
+        8.666537664480248e-07
+      ],
+      "hermitian_minimum_relative": 2.2853842658764463e-06
+    },
+    {
+      "frequency_hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.002086017783317172,
+        0.0064970716166639015,
+        0.0008608440458801918
+      ],
+      "hermitian_minimum_relative": 0.0003216832560731248
+    },
+    {
+      "frequency_hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.007064837919249867,
+        0.0035465068314409986,
+        0.009256505736595933
+      ],
+      "hermitian_minimum_relative": 0.006509251195234585
+    }
+  ],
+  "laplace": [
+    {
+      "point": [
+        100.0,
+        4000.0
+      ],
+      "impedance_relative": 0.00073507977471762,
+      "hermitian_minimum_relative": 0.0008815687633146039
+    },
+    {
+      "point": [
+        1000.0,
+        20000.0
+      ],
+      "impedance_relative": 0.00287914301646464,
+      "hermitian_minimum_relative": 0.0046109473247913655
+    },
+    {
+      "point": [
+        5000.0,
+        40000.0
+      ],
+      "impedance_relative": 0.006034868121883596,
+      "hermitian_minimum_relative": 0.02890102210865373
+    }
+  ],
+  "probe_gates": {
+    "finite_completion": true,
+    "impedance": true,
+    "Laplace": true,
+    "passive": true
+  },
+  "seconds": 143.3119999999908,
+  "peak_working_set_bytes": 553533440
+}

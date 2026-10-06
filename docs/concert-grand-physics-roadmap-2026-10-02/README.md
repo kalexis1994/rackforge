@@ -66,7 +66,7 @@ Falta construir su carga recíproca antes de volver a escuchar el modelo complet
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Pérdidas completas preparadas para el tiempo. Gram real equivalente conserva el certificado y baja memoria. Carga 96×256/128 kHz completa/pasiva, rechazada por precisión a 6 kHz (Z 10,013%; presión 1,059%). Faltan precisión causal, transitorios acoplados, identificación y ambas caras/borde. | Masa/completado resueltos; precisión alta y escucha pendientes |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Pérdidas completas y Gram real preparados. Padé2/derivada cuarta recuperan precisión en sondeo de 30 (Z 0,706% a 6 kHz), con certificado vivo. Masa global del nuevo operador rechazada (mínimo −2,759e−6 a 96×256/128 kHz). Faltan masa/transferencia completas, adaptación de integradores rápidos, transitorios, identificación y ambas caras/borde. | Corrección temporal verificada en sondeo; masa global nueva pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1167,3 +1167,25 @@ y 2,160%. Dos pruebas independientes adicionales pasan, doce en total.
 Esto localiza el defecto en el banco, sin aprobar toda la carga. Siguiente:
 retardo de mayor orden/refinamiento temporal, certificado vivo y condiciones
 de límites antes de repetir la carga completa. Sin WAV ni cambios de timbre.
+
+### 2026-10-06 — P6: Padé de segundo orden y derivada cuarta
+
+El Gram real y el diagnóstico temporal quedan en **0c48a73**, por pedido del
+usuario. [Método, certificado y mediciones](RESULTADOS-P6-retardo-orden2.md).
+Cinco pruebas nuevas cubren transferencia, estabilidad, energía de estados
+arbitrarios, ODE independiente, Schur y tabla acoplada. Se mantiene un Gram
+real/taps iguales más dos, con dos coordenadas de estado por sección.
+
+En el sondeo congelado de 30, la resistencia de onda a 6 kHz pasa de 9,753%
+a **0,773%** con las dos correcciones; cada corrección aislada aún falla.
+El completado del sondeo tiene masa/límite realizados al nivel de redondeo;
+Z/R/X máximos 0,706%/0,650%/0,926%, y Laplace máximo 0,603%. Sus cuatro gates
+pasan, sin cambio de tasa/celdas/cuadratura/geometría ni ajuste de muestras.
+
+La puerta global reproduce el legado a 1,983e−14, pero **rechaza** la masa de
+la derivada nueva con 96×256/128 kHz: mínimo −2,75934e−6, máximo 0,0007889262.
+No se reparan extremos propios ni se acopla ese completado al instrumento.
+509,906 s con control y pico 0,862 GiB. Siguiente: refinamiento angular
+separado, empezando por 128×384. Luego transferencia completa y adaptación
+de FastBoundedContact/ExponentialCoast a dos estados. Informes sólo en el
+repo; sin WAV ni paquete nuevo.

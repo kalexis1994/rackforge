@@ -2536,6 +2536,27 @@ total). This localizes a temporal approximation error on the probe span;
 it does not validate full modal impedance, relaxation limits or time response.
 Higher-order passive delay and time refinement remain the next controls.
 
+The subsequent [second-order delay/fourth-order derivative audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-retardo-orden2.md)
+uses a stable continuous Padé [2/2] allpass with two states per section and
+an explicit positive lifted FIR storage certificate. Five new tests cover
+arbitrary live-state work, an independent polynomial ODE, Schur forces and a
+coupled board with mutual material losses. The symmetric three-tap factor
+correction produces a fourth-order derivative without losing the DC/Nyquist
+zeros or paired reversal. It changes wave mass, so the global mass gate is
+repeated. Its continuous high limit reads the polynomial at +1, not the
+alternating Cayley sum; its completion uses that correct endpoint.
+
+On the frozen thirty-direction probe, combined corrections reduce wave
+resistance error at 6 kHz from 9.753% to 0.773%. The completed probe passes
+Z/R/X and three right-half-plane points; maximum complex error is 0.706%.
+The full 606-coordinate mass test nevertheless rejects the new 96-by-256/
+128 kHz factor: residual minimum -2.75934e-6, maximum 0.0007889262. No clipping
+or gain repair is applied. That gate takes 509.906 s including legacy control
+and peaks at 0.862 GiB. Next is independent angular refinement (128-by-384
+first), then full transfer/time criteria. Fast contact and exponential coast
+still require adapting their Cayley-specific recurrence to the two-state
+section. No new audio or package is generated; no full timbral approval.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

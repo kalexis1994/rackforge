@@ -163,3 +163,7 @@ python tools/audit-concert-grand-streaming-air.py --loaded-report docs/concert-g
 El preflight no certifica banda completa ni una nueva escucha. Después
 corresponden los controles de banda/semiplano derecho, límites realizados y
 memoria transitoria, seguidos del contacto no lineal con estados persistentes.
+
+Actualización posterior: [retardo de segundo orden y derivada cuarta](RESULTADOS-P6-retardo-orden2.md).
+El nuevo sondeo recupera precisión; su masa global requiere otro refinamiento.
+Este preflight legado conserva su rechazo y sus fuentes en 0c48a73.

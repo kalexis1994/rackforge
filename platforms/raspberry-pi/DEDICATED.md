@@ -242,6 +242,71 @@ otherwise.
 *Prediction:* p99 and max block time fall measurably at the same polyphony,
 and stable polyphony rises.
 
+**Facts of the Pi 4 that bound the choices:** the USB controller sits behind
+PCIe, and its MSI cannot leave CPU 0 (writing its affinity is refused); the
+SD card and the SDIO Wi-Fi share one interrupt, and that one and Ethernet's
+can move. RF-Musette does not render in units, so all of it runs on the
+audio thread; Concert Grand (4 units) and RF-5 (5 units) spread over the
+workers.
+
+**Exploration** (edge plan: Concert Grand 8–24 voices, RF-Musette 6–12,
+20 s a step, two runs each; overruns/underruns and the peak per step):
+
+| Placement | Concert Grand 16 / 20 / 24 voices | RF-Musette 8 / 10 / 12 voices |
+| --- | --- | --- |
+| scheduler, `ondemand` | 1/0, 1/0, 1/0 at 116–142 % | 0–5/0, 16–18/0, 3583/80 |
+| scheduler, `performance` | 0–1/0, 0–1/0, 1/0 at 97–149 % | 0/0, 16/0, 3620/64 |
+| audio on 3, workers on 0, 1, 2 | 4/0, 37–46/0, 57–61/2–3 at 162–280 % | 0/0, 16/0, 3612/68 |
+| audio on 3, workers on 1, 2, 3 | 4–6/0, 31–52/0–1, 62–70/2 at 179–275 % | 0–12/0, 16/0, 3600/73 |
+| audio on 0 with the USB interrupt, workers on 1, 2, 3, storage and network interrupts on 1 | 5–6/0, 41–49/0, 63–65/2–3 at 150–264 % | 0–12/0, 16/0, 3611/92 |
+
+- `performance` helps a little: RF-Musette at 12 voices drops ~20 % fewer
+  periods (64–66 underruns against 80), and the stray overruns at 6 and 8
+  voices went.
+- Pinning hurts Concert Grand badly wherever the threads go: twice the
+  peak, dozens of overruns, audible dropouts past 20 voices. The
+  scheduler, free to move a worker off a busy core, does better than any
+  fixed placement tried.
+- Nothing moves RF-Musette: its audio thread alone on a core clear of the
+  interrupts plays exactly as it does anywhere else.
+
+A second round separated the causes, all with `performance`:
+
+| Placement | Concert Grand 16 / 20 / 24 voices | RF-Musette 8 / 10 / 12 voices |
+| --- | --- | --- |
+| audio on 3, workers free | 4–9/0, 32–49/0–1, 62–72/2–3 at 163–275 % | 0–1/0, 16–17/0, 3641/56 |
+| 2 workers | 1/0, 1–2/0, 1/0 at 102–157 % | 0–11/0, 16/0, 3626/63–92 |
+| 4 workers | 0/0, 0/0, 0–1/0 at 58–104 % | 0–9/0, 16/0, 3611/82–92 |
+
+- Pinning the audio thread alone is enough to do the damage: a worker the
+  scheduler puts on its core waits behind it, the audio thread being the
+  higher priority.
+- Four workers, one per core, give Concert Grand's four units a core each:
+  its peak falls from 97–149 % to 58–104 % and nothing is late up to 24
+  voices. The engine's default keeps a core back (CPUs − 1), which is right
+  where something else needs it; on a dedicated Pi 4 nothing does.
+
+**Chosen for the Pi 4:** `performance`, four workers, no affinity, the
+interrupts where they are. Applied through `rackforge-pi apply cpu`.
+
+**Result** (full plan, three runs, against D1):
+
+| Instrument | Stable voices, nothing late | Overruns, whole ramp | Peak at 16+ voices |
+| --- | --- | --- | --- |
+| Concert Grand | 24, 20, 24 (was 12, 12, 12) | 0, 1, 0 (20, 4, 5) | 80–102 % (123–133 %) |
+| RF-Musette Student 72 | 8, 8, 6 (8, 8, 8) | unchanged | unchanged |
+| RF-5 Slow Strings | 24, 24, 24 (24, 2, 24) | 0, 0, 0 (0, 1, 0) | 63 % (91 %) |
+| RF-Organ Straight 888 | 24 (24) | 0 (0) | 49 % (72 %) |
+
+Dropouts: none at any step for the three instruments that render in units,
+as before; RF-Musette's begin at 12 voices, as before. 49 °C, never
+throttled.
+
+**Met** for every instrument that renders in units: lower peaks and more
+stable voices. **Not met** for RF-Musette, which renders on the audio
+thread alone: no placement or governor moves it, and the 6 is a run in
+which 8 voices, which sit at 97–100 % of the period, went over once.
+
 ### D3. Services and maintenance
 
 Inventory, then a profile: keep audio, MIDI, controllers, the interface, SSH

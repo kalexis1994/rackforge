@@ -143,7 +143,7 @@ if [[ "$edition" == standard ]]; then
   shopt -u nullglob
 fi
 install -d "$release/platforms/raspberry-pi" "$release/hardware"
-for entry in appliance audio config etc provision sbin scripts systemd README.md install-release.sh
+for entry in appliance audio bench config dedicated etc provision sbin scripts systemd README.md install-release.sh
 do
   cp -a "$repository/platforms/raspberry-pi/$entry" \
     "$release/platforms/raspberry-pi/$entry"

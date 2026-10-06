@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# A pretend systemctl for the self-tests: each unit's enablement is a file
+# in $FAKE_UNITS holding enabled, disabled or masked; nothing ever runs.
+units="${FAKE_UNITS:?FAKE_UNITS names the directory of pretend units}"
+command="$1"
+shift
+[[ "${1:-}" == --now || "${1:-}" == --quiet ]] && shift
+case "$command" in
+  is-enabled)
+    if [[ ! -f "$units/$1" ]]; then
+      echo "Failed to get unit file state for $1: No such file or directory" >&2
+      exit 1
+    fi
+    cat "$units/$1"
+    [[ "$(cat "$units/$1")" == enabled ]]
+    ;;
+  enable) echo enabled >"$units/$1" ;;
+  disable) [[ -f "$units/$1" ]] && echo disabled >"$units/$1"; true ;;
+  mask) echo masked >"$units/$1" ;;
+  unmask) [[ "$(cat "$units/$1" 2>/dev/null)" == masked ]] && echo disabled >"$units/$1"; true ;;
+  is-active) echo inactive; exit 3 ;;
+  show) echo 0 ;;
+  daemon-reload | stop | start | restart) ;;
+  *) echo "pretend systemctl: $command" >&2; exit 1 ;;
+esac

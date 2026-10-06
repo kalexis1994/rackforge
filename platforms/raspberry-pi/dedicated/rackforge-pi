@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# Turns Raspberry Pi OS Lite into a RackForge instrument, and back.
+#
+#   rackforge-pi status                  what the machine is and what is applied
+#   rackforge-pi plan   [MODULE]         what apply would change
+#   rackforge-pi apply  [MODULE]         change it, recording what it replaces
+#   rackforge-pi verify [MODULE]         check the system against the profile
+#   rackforge-pi revert [MODULE]         put back what was there before
+#   rackforge-pi maintenance [--yes]     run the updates and upkeep the
+#                                        profile keeps from running on a
+#                                        schedule, now
+#
+# Options: --profile NAME (default: dedicated). Profiles live in profiles/,
+# modules in modules/. Everything is read from the system: the state
+# directory keeps originals and a journal, never a verdict.
+set -euo pipefail
+
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+profile_name=dedicated
+verb=""
+module=""
+assume_yes=0
+while (($#)); do
+  case "$1" in
+    --yes) assume_yes=1; shift ;;
+    --profile) profile_name="${2:?--profile needs a name}"; shift 2 ;;
+    --profile=*) profile_name="${1#*=}"; shift ;;
+    -h | --help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    status | plan | apply | verify | revert | maintenance)
+      [[ -z "$verb" ]] || { echo "one verb at a time" >&2; exit 2; }
+      verb="$1"; shift ;;
+    *)
+      [[ -n "$verb" && -z "$module" ]] || { echo "unexpected argument: $1" >&2; exit 2; }
+      module="$1"; shift ;;
+  esac
+done
+[[ -n "$verb" ]] || { sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
+
+if [[ -z "${DEDICATED_ROOT:-}" && "$(id -u)" -ne 0 ]]; then
+  case "$verb" in
+    apply | revert | verify | plan | maintenance)
+      exec sudo --preserve-env=RACKFORGE_USER,RACKFORGE_ROOT "$0" --profile "$profile_name" \
+        "$verb" ${module:+"$module"} $([[ $assume_yes == 1 ]] && echo --yes) ;;
+  esac
+fi
+
+source "$here/lib/engine.sh"
+source "$here/lib/hardware.sh"
+source "$here/../scripts/lib/install-env.sh"
+
+profile="$here/profiles/$profile_name.conf"
+[[ -f "$profile" ]] || die "no profile $profile_name in $here/profiles"
+# shellcheck source=profiles/dedicated.conf
+source "$profile"
+
+rackforge_resolve_install_environment || die "cannot tell which user RackForge runs as"
+detect_hardware
+
+declare -a MODULES=()
+for file in "$here"/modules/*.sh; do
+  name="$(basename "$file" .sh)"
+  name="${name#*-}"
+  source "$file"
+  MODULES+=("$name")
+done
+if [[ -n "$module" ]]; then
+  printf '%s\n' "${MODULES[@]}" | grep -qxF -- "$module" || die "no module $module (have: ${MODULES[*]})"
+fi
+
+for name in "${MODULES[@]}"; do
+  CURRENT_MODULE="$name"
+  "module_${name}_declare"
+done
+CURRENT_MODULE=""
+
+# Runtime facts a module can check beyond its resources: the governor in
+# force, the engine's threads as the kernel sees them.
+runtime_checks() {
+  local name failed=0
+  for name in "${MODULES[@]}"; do
+    [[ -n "$module" && "$name" != "$module" ]] && continue
+    if declare -F "module_${name}_check" >/dev/null; then
+      "module_${name}_check" || failed=1
+    fi
+  done
+  return "$failed"
+}
+
+after_apply() {
+  local name
+  for name in "${MODULES[@]}"; do
+    [[ -n "$module" && "$name" != "$module" ]] && continue
+    if declare -F "module_${name}_after" >/dev/null; then
+      "module_${name}_after"
+    fi
+  done
+}
+
+case "$verb" in
+  status)
+    print_hardware
+    printf 'profile      %s %s\n' "$PROFILE_ID" "$PROFILE_VERSION"
+    printf 'rackforge    user %s, root %s\n' "$RACKFORGE_USER_RESOLVED" "$RACKFORGE_ROOT_RESOLVED"
+    if engine_verify >/dev/null; then
+      echo "resources    all applied"
+    else
+      echo "resources    not all applied (rackforge-pi plan shows what)"
+    fi
+    runtime_checks || true
+    ;;
+  plan) engine_plan "$module" ;;
+  apply)
+    engine_apply "$module"
+    after_apply
+    if engine_verify "$module" && runtime_checks; then
+      echo "verified"
+    else
+      die "applied, but the system does not match (see above)"
+    fi
+    ;;
+  verify)
+    ok=1
+    engine_verify "$module" || ok=0
+    runtime_checks || ok=0
+    ((ok)) && echo "verified" || exit 1
+    ;;
+  revert)
+    engine_revert "$module"
+    after_apply
+    ;;
+  maintenance)
+    # Package updates and upkeep do real I/O and CPU work; the engine keeps
+    # its realtime priority through them, but a card busy with an upgrade
+    # is not something to play over. They run when the player says so.
+    if [[ "$assume_yes" != 1 ]]; then
+      printf 'Maintenance updates packages, trims the card and checks the bootloader.\n'
+      printf 'Do not play while it runs. Continue? [y/N] '
+      read -r answer
+      [[ "$answer" == [yY]* ]] || exit 1
+    fi
+    status=0
+    run_step() {
+      printf '\n== %s\n' "$*"
+      "$@" || { warn "failed: $*"; status=1; }
+    }
+    run_step apt-get update
+    run_step env DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
+    if command -v fstrim >/dev/null; then run_step fstrim --all --verbose; fi
+    if command -v mandb >/dev/null; then run_step mandb --quiet; fi
+    if [[ -x /usr/libexec/dpkg/dpkg-db-backup ]]; then run_step /usr/libexec/dpkg/dpkg-db-backup; fi
+    # Reports, never flashes: a bootloader update is the player's decision.
+    if command -v rpi-eeprom-update >/dev/null; then run_step rpi-eeprom-update; fi
+    exit "$status"
+    ;;
+esac

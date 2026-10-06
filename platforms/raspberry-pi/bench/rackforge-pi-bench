@@ -129,7 +129,15 @@ def dispatch(command):
     return response
 
 
+# The slowest control request of the current step, in ms: the control
+# thread and everything that is not realtime share the cores the render
+# workers leave, and this says whether they were left any.
+control_worst_ms = 0.0
+
+
 def midi(status, data1, data2):
+    global control_worst_ms
+    started = time.monotonic()
     response = request(
         {
             "op": "virtual_midi",
@@ -137,6 +145,7 @@ def midi(status, data1, data2):
             "message": {"status": status, "data1": data1, "data2": data2},
         }
     )
+    control_worst_ms = max(control_worst_ms, (time.monotonic() - started) * 1000)
     if response.get("status") == "error":
         raise RuntimeError(f"virtual MIDI: {response.get('message')}")
 
@@ -488,6 +497,8 @@ def perform(plan_name, hold, restrike, settle, master_level=None):
                 notes = instrument["notes"][:voices]
                 engine = engine_audit()
                 before = health()
+                global control_worst_ms
+                control_worst_ms = 0.0
                 since = time.time()
                 hold_step(notes, hold, restrike)
                 # Let the releases finish inside the step they belong to.
@@ -512,6 +523,7 @@ def perform(plan_name, hold, restrike, settle, master_level=None):
                     "minflt": (engine_after.get("minflt") or 0) - (engine.get("minflt") or 0),
                     "majflt": (engine_after.get("majflt") or 0) - (engine.get("majflt") or 0),
                     "temperature_c": thermal()["temperature_c"],
+                    "control_worst_ms": round(control_worst_ms, 1),
                 }
                 late = (step["health"] or {}).get("overruns", 0) + (step["health"] or {}).get(
                     "late_callbacks", 0

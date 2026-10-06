@@ -281,7 +281,7 @@ mod writer {
                 sender: sender.clone(),
             };
             let join = thread::Builder::new()
-                .name("rackforge-live-state".to_owned())
+                .name("rf-live-state".to_owned())
                 .spawn(move || {
                     let mut store = store;
                     let mut targets = targets;

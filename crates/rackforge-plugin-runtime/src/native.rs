@@ -125,51 +125,84 @@ impl PortableEngine {
     }
 
     fn configured(limits: RuntimeLimits, cache_directory: Option<&Path>) -> Result<Self> {
-        let configure = |metered: bool| -> Result<Config> {
-            let mut config = Config::new();
-            config.cranelift_opt_level(OptLevel::Speed);
-            config.consume_fuel(metered);
-            config.epoch_interruption(!metered);
-            config.wasm_multi_memory(false);
-            config.wasm_memory64(false);
-            if let Some(directory) = cache_directory {
-                let mut cache_config = CacheConfig::new();
-                // Wasmtime's own directory, beside -- never around -- the
-                // optimised components: its cleaner removes whatever files in
-                // its directory it did not write itself.
-                cache_config.with_directory(directory.join("compiled"));
-                config.cache(Some(Cache::new(cache_config).map_err(|error| {
-                    anyhow::anyhow!("creating RackForge portable code cache: {error}")
-                })?));
-            }
-            Ok(config)
-        };
-        let engine = |metered: bool| -> Result<Engine> {
-            Engine::new(&configure(metered)?)
-                .map_err(|error| anyhow::anyhow!("creating RackForge WebAssembly engine: {error}"))
-        };
-        let interrupted = engine(false)?;
-        // One thread per host, sleeping. Wasmtime reads the epoch from the
-        // engine on the guest's side, so nothing here touches a Store and
-        // nothing here runs on the audio thread.
-        let ticking = interrupted.clone();
-        std::thread::Builder::new()
-            .name("rackforge-epoch".to_owned())
-            .spawn(move || {
-                loop {
-                    std::thread::sleep(EPOCH_TICK);
-                    ticking.increment_epoch();
-                }
-            })
-            .context("starting the RackForge epoch ticker")?;
+        let (metered, interrupted) = shared_engines(cache_directory)?;
         Ok(Self {
-            metered: engine(true)?,
+            metered,
             interrupted,
             limits,
             cache_directory: cache_directory.map(Path::to_path_buf),
         })
     }
+}
 
+/// The two engines every component in the process is compiled with, one
+/// pair per code cache.
+///
+/// A host builds a `PortableEngine` per plugin, since each plugin brings its
+/// own limits, but the limits are the stores', not the engines'. An engine of
+/// its own per plugin cost a thread ticking its epoch a thousand times a
+/// second and a cache worker, per plugin: ten of each on an appliance with
+/// ten instruments, for no difference in what any of them does.
+fn shared_engines(cache_directory: Option<&Path>) -> Result<(Engine, Engine)> {
+    type Pair = (Option<PathBuf>, Engine, Engine);
+    static ENGINES: std::sync::OnceLock<std::sync::Mutex<Vec<Pair>>> = std::sync::OnceLock::new();
+    let mut engines = ENGINES
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| anyhow::anyhow!("the shared engine table is poisoned"))?;
+    if let Some((_, metered, interrupted)) = engines
+        .iter()
+        .find(|(directory, ..)| directory.as_deref() == cache_directory)
+    {
+        return Ok((metered.clone(), interrupted.clone()));
+    }
+    let configure = |metered: bool| -> Result<Config> {
+        let mut config = Config::new();
+        config.cranelift_opt_level(OptLevel::Speed);
+        config.consume_fuel(metered);
+        config.epoch_interruption(!metered);
+        config.wasm_multi_memory(false);
+        config.wasm_memory64(false);
+        if let Some(directory) = cache_directory {
+            let mut cache_config = CacheConfig::new();
+            // Wasmtime's own directory, beside -- never around -- the
+            // optimised components: its cleaner removes whatever files in
+            // its directory it did not write itself.
+            cache_config.with_directory(directory.join("compiled"));
+            config.cache(Some(Cache::new(cache_config).map_err(|error| {
+                anyhow::anyhow!("creating RackForge portable code cache: {error}")
+            })?));
+        }
+        Ok(config)
+    };
+    let engine = |metered: bool| -> Result<Engine> {
+        Engine::new(&configure(metered)?)
+            .map_err(|error| anyhow::anyhow!("creating RackForge WebAssembly engine: {error}"))
+    };
+    let interrupted = engine(false)?;
+    let metered = engine(true)?;
+    // One thread per engine pair, sleeping. Wasmtime reads the epoch from
+    // the engine on the guest's side, so nothing here touches a Store and
+    // nothing here runs on the audio thread.
+    let ticking = interrupted.clone();
+    std::thread::Builder::new()
+        .name("rf-epoch".to_owned())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(EPOCH_TICK);
+                ticking.increment_epoch();
+            }
+        })
+        .context("starting the RackForge epoch ticker")?;
+    engines.push((
+        cache_directory.map(Path::to_path_buf),
+        metered.clone(),
+        interrupted.clone(),
+    ));
+    Ok((metered, interrupted))
+}
+
+impl PortableEngine {
     /// The component this engine compiles for `bytes`: binaryen's optimised
     /// form when there is a cache to keep it in, the original otherwise.
     ///

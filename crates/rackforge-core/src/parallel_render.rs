@@ -785,8 +785,14 @@ impl TelemetrySnapshot {
 pub fn spawn_telemetry_publisher(telemetry: &Arc<RenderTelemetry>, interval: Duration) {
     let weak: Weak<RenderTelemetry> = Arc::downgrade(telemetry);
     let _ = thread::Builder::new()
-        .name("rackforge-render-telemetry".into())
+        .name("rf-telemetry".into())
         .spawn(move || {
+            // Started by the audio thread once it is realtime, and so
+            // realtime itself until it says otherwise.
+            if !crate::realtime::release_realtime() {
+                eprintln!("RENDER_TELEMETRY_REALTIME_KEPT");
+            }
+            crate::realtime::unpin_current_thread();
             let mut last = Instant::now();
             loop {
                 thread::sleep(interval);
@@ -980,8 +986,11 @@ impl RenderPool {
         let mut handles = Vec::with_capacity(requested);
         for index in 0..requested {
             let worker_shared = Arc::clone(&shared);
+            // Linux keeps 15 bytes of a thread's name. The engine's threads
+            // are named to be told apart within them, so that an audit of
+            // who holds a realtime policy can name each one.
             match thread::Builder::new()
-                .name(format!("rackforge-audio-worker-{index}"))
+                .name(format!("rf-render-{index}"))
                 .spawn(move || worker_main(index, worker_shared))
             {
                 Ok(handle) => handles.push(handle),
@@ -1154,7 +1163,23 @@ impl Drop for RenderPool {
 
 fn worker_main(index: usize, shared: Arc<PoolShared>) {
     let realtime_status = crate::realtime::engage(AUDIO_WORKER_PRIORITY);
-    println!("AUDIO_WORKER_READY index={index} {realtime_status}");
+    // Worker N on the Nth listed CPU, round the list, when the installation
+    // lists them; otherwise wherever the process may run, not on the core
+    // the audio thread that started it may have been pinned to.
+    let placement = match crate::realtime::cpus_from_env("RACKFORGE_RENDER_CPUS") {
+        Some(cpus) => {
+            let cpu = cpus[index % cpus.len()];
+            match crate::realtime::pin_current_thread(&[cpu]) {
+                Ok(()) => format!("cpu={cpu}"),
+                Err(errno) => format!("cpu=unpinned pin_errno={errno}"),
+            }
+        }
+        None => {
+            crate::realtime::unpin_current_thread();
+            "cpu=any".to_owned()
+        }
+    };
+    println!("AUDIO_WORKER_READY index={index} {placement} {realtime_status}");
     let mut observed = 0_u64;
     loop {
         let epoch = shared.epoch.load(Ordering::Acquire);

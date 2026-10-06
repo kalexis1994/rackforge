@@ -696,6 +696,10 @@ pub fn remember(plugin: &str, deadline_ns: u64, fuel: u64) {
             text.push_str(&format!("{plugin} {deadline} {fuel}\n"));
         }
     }
+    // The audio thread reads the store when it builds a voice; it must not
+    // wait on the card while this writes. The telemetry thread is the only
+    // writer, so the file cannot be written twice at once.
+    drop(guard);
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

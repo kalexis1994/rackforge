@@ -1,5 +1,6 @@
 use crate::PluginStorage;
 use crate::controller_map_store::{ControllerMapStore, export_rfmap};
+use crate::engine_health::EngineHealth;
 use crate::midi_activity::MidiActivityLog;
 use crate::parameter_link::{CompiledModifier, ParameterLinkTable};
 use crate::performance::PerformanceRepository;
@@ -352,6 +353,7 @@ struct ControlContext {
     audio_sender: SyncSender<AudioControlCommand>,
     audio_state: Arc<Mutex<AudioOutputState>>,
     output_meter: Arc<OutputMeter>,
+    engine_health: Arc<EngineHealth>,
     audio_input: AudioInputStatus,
     input_meter: Arc<InputMeter>,
     audio_state_path: PathBuf,
@@ -400,6 +402,8 @@ pub struct ControlServerOptions {
     pub audio_sender: SyncSender<AudioControlCommand>,
     pub audio_state: Arc<Mutex<AudioOutputState>>,
     pub output_meter: Arc<OutputMeter>,
+    /// What the audio thread counts: work per period, underruns, failures.
+    pub engine_health: Arc<EngineHealth>,
     /// What the engine captures, said once when it opened the input.
     pub audio_input: AudioInputStatus,
     pub input_meter: Arc<InputMeter>,
@@ -482,6 +486,7 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
         audio_sender: options.audio_sender,
         audio_state: options.audio_state,
         output_meter: options.output_meter,
+        engine_health: options.engine_health,
         audio_input: options.audio_input,
         input_meter: options.input_meter,
         audio_state_path: options.audio_state_path,
@@ -514,16 +519,16 @@ pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<Contro
     let path = socket_path.to_path_buf();
     let server_context = Arc::clone(&context);
     let server_thread = thread::Builder::new()
-        .name("rackforge-control".into())
+        .name("rf-control".into())
         .spawn(move || serve(listener, path, server_context))
         .context("spawning RackForge control server")?;
     let sources_context = Arc::clone(&context);
     let watchdog_thread = thread::Builder::new()
-        .name("rackforge-audition-watchdog".into())
+        .name("rf-audition".into())
         .spawn(move || audition_watchdog(context))
         .context("spawning RackForge audition watchdog")?;
     let sources_thread = thread::Builder::new()
-        .name("rackforge-midi-sources".into())
+        .name("rf-midi-sources".into())
         .spawn(move || follow_midi_sources(sources_context))
         .context("spawning RackForge MIDI source follower")?;
     Ok(ControlServer {
@@ -635,12 +640,13 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         },
         ControlRequest::OutputMeter => output_meter_response(context),
         ControlRequest::AudioInput => audio_input_response(context),
-        // The desktop host's own: its callback's health, its driver's panel,
-        // its flight recorder. The appliance has none of them, and says so
-        // rather than failing to build.
-        ControlRequest::AudioHealth
-        | ControlRequest::OpenAudioDriverPanel
-        | ControlRequest::SaveOutputCapture => error_response(
+        ControlRequest::AudioHealth => ControlResponse::AudioHealth {
+            health: context.engine_health.take(),
+        },
+        // The desktop host's own: its driver's panel and its flight
+        // recorder. The appliance has neither, and says so rather than
+        // failing to build.
+        ControlRequest::OpenAudioDriverPanel | ControlRequest::SaveOutputCapture => error_response(
             ControlErrorCode::Unavailable,
             "this host does not provide it",
             current_revision(context),
@@ -6115,6 +6121,7 @@ mod tests {
                     devices: vec![device],
                 })),
                 output_meter: Arc::new(OutputMeter::default()),
+                engine_health: Arc::new(EngineHealth::default()),
                 audio_input: AudioInputStatus {
                     availability: AudioInputAvailability::Open,
                     device_name: Some("Scarlett 2i2".into()),

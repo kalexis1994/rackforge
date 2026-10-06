@@ -32,6 +32,10 @@ use std::time::Duration;
 /// for the cable.
 pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+/// How many ticks keep probing after the card list changed: long enough for
+/// a USB interface to finish starting up and answer.
+const SCANS_AFTER_A_CHANGE: u32 = 3;
+
 /// Watches the inventory and asks for a restart when the binding goes stale.
 pub fn spawn(
     current_id: AudioDeviceId,
@@ -45,10 +49,34 @@ pub fn spawn(
         interval.as_millis()
     );
     thread::Builder::new()
-        .name("rackforge-audio-supervisor".into())
+        .name("rf-audio-watch".into())
         .spawn(move || {
+            // The card list is read through each card's control device and
+            // opens no stream. The full scan opens every PCM to probe it,
+            // and on a USB card that is traffic on the bus the interface is
+            // playing through. So the list is read every tick, and the scan
+            // runs only for a few ticks after the list changed -- a card
+            // just plugged in may not answer a probe at once.
+            let mut known = None;
+            let mut scans_left = 0_u32;
             loop {
                 thread::sleep(interval);
+                match present_audio_device_ids() {
+                    Ok(present) => {
+                        if known.as_ref() != Some(&present) {
+                            known = Some(present);
+                            scans_left = SCANS_AFTER_A_CHANGE;
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("AUDIO_SUPERVISOR_LIST_FAILED error={error:#}");
+                        scans_left = scans_left.max(1);
+                    }
+                }
+                if scans_left == 0 {
+                    continue;
+                }
+                scans_left -= 1;
                 match discover_audio_devices() {
                     Ok(devices) => {
                         match assess(&current_id, current_transport, &profile, &devices) {

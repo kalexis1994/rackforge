@@ -155,6 +155,30 @@ pub fn notify_service_ready(_status: &str) -> std::io::Result<bool> {
     Ok(false)
 }
 
+/// Tells a systemd `Type=notify` unit that its start is still making
+/// progress, and asks for `more` time from now.
+///
+/// A start that compiles plugins whose code is not cached yet -- the first
+/// after an update -- can outlast a start timeout sized for a warm cache.
+/// Asking per step keeps the timeout short for a start that hangs, and long
+/// enough for one that works. Other platforms safely receive `Ok(false)`.
+#[cfg(target_os = "linux")]
+pub fn notify_service_progress(status: &str, more: Duration) -> std::io::Result<bool> {
+    let Some(endpoint) = std::env::var_os("NOTIFY_SOCKET") else {
+        return Ok(false);
+    };
+    send_systemd_notification(
+        &endpoint,
+        &format!("EXTEND_TIMEOUT_USEC={}\nSTATUS={status}", more.as_micros()),
+    )?;
+    Ok(true)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn notify_service_progress(_status: &str, _more: Duration) -> std::io::Result<bool> {
+    Ok(false)
+}
+
 #[cfg(target_os = "linux")]
 fn send_systemd_notification(endpoint: &std::ffi::OsStr, message: &str) -> std::io::Result<()> {
     use std::os::linux::net::SocketAddrExt;

@@ -1,0 +1,732 @@
+#!/usr/bin/env python3
+"""Measure a RackForge appliance the same way every time.
+
+Runs on the Pi, as the RackForge user or root. Standard library only.
+
+  rackforge-pi-bench audit [--json]
+      What the engine and the system are actually doing: every engine
+      thread's policy, priority, nice and CPUs; locked and resident memory;
+      governors, temperature, throttling; where the USB, network and storage
+      interrupts land; swap. Read from /proc and /sys, never from a marker.
+
+  rackforge-pi-bench perform [--plan standard] [--hold 20] [--out FILE]
+      A scripted performance through the control socket: per instrument, a
+      polyphony ramp, each step held and re-struck. Records the engine's
+      health counters, its render telemetry, memory, faults and temperature
+      per step, and the most voices each instrument held with nothing late.
+      Restores the instrument and program that were selected.
+
+  rackforge-pi-bench boot-time [--json]
+      For the current boot: when the kernel started the engine, when the
+      engine first played a period, when the interface and SSH listened,
+      when the network came up.
+
+  rackforge-pi-bench compare BEFORE.json AFTER.json
+      The two records side by side.
+"""
+
+import argparse
+import datetime
+import json
+import os
+import platform
+import re
+import socket
+import subprocess
+import sys
+import time
+
+ROOT = os.environ.get("RACKFORGE_ROOT", os.path.expanduser("~/rackforge"))
+SOCKET = os.environ.get(
+    "RACKFORGE_CONTROL_SOCKET", os.path.join(ROOT, "state", "live-control.sock")
+)
+UNIT = "rackforge-audio.service"
+SESSION_SCHEMA_VERSION = 14
+CLIENT = "rackforge-pi-bench"
+
+# Each entry: instance, program, and the note pool the ramp draws from in
+# order, so voice N is always the same key. The pools stay inside each
+# instrument's range: the accordion's treble is F3-A6.
+PLANS = {
+    "standard": [
+        {
+            "label": "concert-grand",
+            "instance": "live.main.instrument.1",
+            "sound": "concert",
+            "notes": [60, 64, 67, 72, 55, 59, 62, 65, 69, 74, 77, 79, 81, 84,
+                      52, 57, 71, 76, 83, 86, 48, 53, 88, 91],
+        },
+        {
+            "label": "rf-musette-student-72",
+            "instance": "play.org.rackforge.musette",
+            "sound": "student-72",
+            "notes": [60, 64, 67, 72, 55, 59, 62, 65, 69, 74, 77, 79, 81, 84,
+                      57, 71, 76, 83, 86, 88, 91, 53, 54, 56],
+        },
+        {
+            "label": "rf-5-slow-strings",
+            "instance": "play.org.rackforge.rf-5",
+            "sound": "file2-26-slow-strings",
+            "notes": [60, 64, 67, 72, 55, 59, 62, 65, 69, 74, 77, 79, 81, 84,
+                      52, 57, 71, 76, 83, 86, 48, 53, 88, 91],
+        },
+        {
+            "label": "rf-organ-straight-888",
+            "instance": "play.org.rackforge.organ",
+            "sound": "straight-888",
+            "notes": [60, 64, 67, 72, 55, 59, 62, 65, 69, 74, 77, 79, 81, 84,
+                      52, 57, 71, 76, 83, 86, 48, 53, 88, 91],
+        },
+    ],
+}
+RAMP = [1, 2, 4, 6, 8, 10, 12, 16, 20, 24]
+
+# The steps that told configurations apart in the baseline, for exploring
+# quickly: each instrument from just below its edge to past it.
+PLANS["edge"] = [
+    {**PLANS["standard"][0], "ramp": [8, 12, 16, 20, 24]},
+    {**PLANS["standard"][1], "ramp": [6, 8, 10, 12]},
+]
+VELOCITY = 96
+
+
+# --- control socket -------------------------------------------------------
+
+
+def request(message, timeout=10.0):
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(timeout)
+        connection.connect(SOCKET)
+        connection.sendall((json.dumps(message) + "\n").encode())
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = connection.recv(1 << 20)
+            if not chunk:
+                break
+            data += chunk
+    return json.loads(data)
+
+
+_command_id = int(time.time())
+
+
+def dispatch(command):
+    global _command_id
+    _command_id += 1
+    response = request(
+        {
+            "op": "dispatch",
+            "envelope": {
+                "schema_version": SESSION_SCHEMA_VERSION,
+                "client_id": CLIENT,
+                "command_id": _command_id,
+                "command": command,
+            },
+        }
+    )
+    if response.get("status") == "error":
+        raise RuntimeError(f"{command['type']}: {response.get('message')}")
+    return response
+
+
+def midi(status, data1, data2):
+    response = request(
+        {
+            "op": "virtual_midi",
+            "client_id": CLIENT,
+            "message": {"status": status, "data1": data1, "data2": data2},
+        }
+    )
+    if response.get("status") == "error":
+        raise RuntimeError(f"virtual MIDI: {response.get('message')}")
+
+
+def health():
+    response = request({"op": "audio_health"})
+    if response.get("status") != "audio_health":
+        return None
+    return response["health"]
+
+
+# --- reading the system ---------------------------------------------------
+
+
+def read(path, default=None):
+    try:
+        with open(path) as handle:
+            return handle.read().strip()
+    except OSError:
+        return default
+
+
+def run(*command):
+    try:
+        return subprocess.run(
+            command, capture_output=True, text=True, timeout=30
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def engine_pid():
+    pid = run("systemctl", "show", "-p", "MainPID", "--value", UNIT)
+    return int(pid) if pid.isdigit() and pid != "0" else None
+
+
+POLICIES = {0: "other", 1: "fifo", 2: "rr", 3: "batch", 5: "idle", 6: "deadline"}
+
+
+def task_stat(path):
+    text = read(path)
+    if text is None:
+        return None
+    # The command name is in parentheses and may hold spaces.
+    head, _, rest = text.rpartition(")")
+    fields = rest.split()
+    # fields[0] is field 3 (state); field N is fields[N - 3].
+    return {
+        "comm": head.split("(", 1)[1],
+        "minflt": int(fields[10 - 3]),
+        "majflt": int(fields[12 - 3]),
+        "nice": int(fields[19 - 3]),
+        "processor": int(fields[39 - 3]),
+        "rtprio": int(fields[40 - 3]),
+        "policy": POLICIES.get(int(fields[41 - 3]), fields[41 - 3]),
+    }
+
+
+def status_fields(path, names):
+    values = {}
+    for line in (read(path) or "").splitlines():
+        key, _, value = line.partition(":")
+        if key in names:
+            values[key] = value.strip()
+    return values
+
+
+def kib(value):
+    match = re.match(r"(\d+)\s*kB", value or "")
+    return int(match.group(1)) if match else None
+
+
+def engine_audit():
+    pid = engine_pid()
+    if pid is None:
+        return {"running": False}
+    threads = []
+    for tid in sorted(os.listdir(f"/proc/{pid}/task"), key=int):
+        stat = task_stat(f"/proc/{pid}/task/{tid}/stat")
+        if stat is None:
+            continue
+        allowed = status_fields(f"/proc/{pid}/task/{tid}/status", {"Cpus_allowed_list"})
+        stat["tid"] = int(tid)
+        stat["cpus"] = allowed.get("Cpus_allowed_list")
+        stat["main"] = int(tid) == pid
+        threads.append(stat)
+    status = status_fields(
+        f"/proc/{pid}/status", {"VmSize", "VmLck", "VmRSS", "VmSwap", "Threads"}
+    )
+    process = task_stat(f"/proc/{pid}/stat")
+    limits = {}
+    for line in (read(f"/proc/{pid}/limits") or "").splitlines():
+        if line.startswith(("Max locked memory", "Max realtime priority")):
+            parts = line.split()
+            limits[" ".join(parts[:3])] = parts[3]
+    realtime = [t for t in threads if t["policy"] in ("fifo", "rr")]
+    # The audio thread is the main thread; the render workers are
+    # `rf-render-N`. Anything else holding a realtime policy got it by
+    # accident. (Engines before the threads were named `rf-*` called the
+    # workers `rackforge-audio`, which the supervisor shared.)
+    expected = [
+        t for t in realtime
+        if t["main"] or t["comm"].startswith("rf-render-") or t["comm"] == "rackforge-audio"
+    ]
+    return {
+        "running": True,
+        "pid": pid,
+        "threads": threads,
+        "realtime_threads": len(realtime),
+        "unexpected_realtime": [
+            f"{t['comm']}:{t['policy']}{t['rtprio']}"
+            for t in realtime
+            if t not in expected
+        ],
+        "vm_size_kib": kib(status.get("VmSize")),
+        "locked_kib": kib(status.get("VmLck")),
+        "rss_kib": kib(status.get("VmRSS")),
+        "swap_kib": kib(status.get("VmSwap")),
+        "minflt": process["minflt"] if process else None,
+        "majflt": process["majflt"] if process else None,
+        "limits": limits,
+        "restarts": int(run("systemctl", "show", "-p", "NRestarts", "--value", UNIT) or 0),
+    }
+
+
+def thermal():
+    temperature = read("/sys/class/thermal/thermal_zone0/temp")
+    throttled = run("vcgencmd", "get_throttled").partition("=")[2]
+    return {
+        "temperature_c": int(temperature) / 1000 if temperature else None,
+        "throttled": throttled or None,
+    }
+
+
+def interrupts():
+    lines = (read("/proc/interrupts") or "").splitlines()
+    if not lines:
+        return []
+    cpus = len(lines[0].split())
+    found = []
+    for line in lines[1:]:
+        parts = line.split()
+        if not parts or not parts[0].rstrip(":").isdigit():
+            continue
+        irq = parts[0].rstrip(":")
+        counts = [int(value) for value in parts[1 : 1 + cpus] if value.isdigit()]
+        name = " ".join(parts[1 + cpus :])
+        if not re.search(r"xhci|usb|eth|mmc|snd|dwc|pcie|rp1|nvme|wlan|brcmf", name, re.I):
+            continue
+        found.append(
+            {
+                "irq": int(irq),
+                "name": name,
+                "counts": counts,
+                "affinity": read(f"/proc/irq/{irq}/smp_affinity_list"),
+            }
+        )
+    return found
+
+
+def interrupt_threads():
+    out = run("ps", "-eLo", "tid,cls,rtprio,psr,comm")
+    threads = []
+    for line in out.splitlines()[1:]:
+        parts = line.split(None, 4)
+        if len(parts) == 5 and parts[4].startswith("irq/"):
+            threads.append(
+                {"tid": int(parts[0]), "class": parts[1], "rtprio": parts[2], "comm": parts[4]}
+            )
+    return threads
+
+
+def system_audit():
+    cpus = sorted(
+        (entry for entry in os.listdir("/sys/devices/system/cpu") if re.fullmatch(r"cpu\d+", entry)),
+        key=lambda entry: int(entry[3:]),
+    )
+    governors = {
+        cpu: {
+            "governor": read(f"/sys/devices/system/cpu/{cpu}/cpufreq/scaling_governor"),
+            "khz": int(read(f"/sys/devices/system/cpu/{cpu}/cpufreq/scaling_cur_freq", "0")),
+            "max_khz": int(read(f"/sys/devices/system/cpu/{cpu}/cpufreq/scaling_max_freq", "0")),
+        }
+        for cpu in cpus
+    }
+    swaps = (read("/proc/swaps") or "").splitlines()[1:]
+    memory = status_fields("/proc/meminfo", {"MemTotal", "MemAvailable"})
+    return {
+        "model": read("/proc/device-tree/model", "").rstrip("\x00"),
+        "kernel": platform.release(),
+        "kernel_build": run("uname", "-v"),
+        "preempt_rt": read("/sys/kernel/realtime") == "1",
+        "os": dict(
+            line.split("=", 1) for line in (read("/etc/os-release") or "").splitlines() if "=" in line
+        ).get("PRETTY_NAME", "").strip('"'),
+        "cmdline": read("/proc/cmdline"),
+        "memory_kib": kib(memory.get("MemTotal")),
+        "available_kib": kib(memory.get("MemAvailable")),
+        "cpus": governors,
+        "sched_rt_runtime_us": int(read("/proc/sys/kernel/sched_rt_runtime_us", "0")),
+        "swappiness": int(read("/proc/sys/vm/swappiness", "0")),
+        "swap": [line.split()[0] for line in swaps],
+        "interrupts": interrupts(),
+        "interrupt_threads": interrupt_threads(),
+        "thermal": thermal(),
+        "load_average": read("/proc/loadavg"),
+    }
+
+
+def release_revision():
+    for line in (read(os.path.join(ROOT, "current", "build-info.txt")) or "").splitlines():
+        if line.startswith("revision="):
+            return line.split("=", 1)[1][:12]
+    return None
+
+
+def audio_profile():
+    try:
+        snapshot = request({"op": "audio_snapshot"})["snapshot"]
+    except (OSError, KeyError, ValueError):
+        return None
+    profile = snapshot.get("active_profile") or {}
+    device = snapshot.get("active_device") or {}
+    return {
+        "device": device.get("name"),
+        "sample_rate_hz": profile.get("sample_rate_hz"),
+        "period_frames": profile.get("period_frames"),
+        "buffer_frames": profile.get("buffer_frames"),
+        "sample_format": profile.get("sample_format"),
+    }
+
+
+# --- render telemetry from the journal ------------------------------------
+
+RENDER_LINE = re.compile(r"AUDIO_RENDER_BLOCK (.*)")
+
+
+def render_blocks(since_epoch, until_epoch):
+    out = run(
+        "journalctl", "-u", UNIT, "-o", "cat", "--no-pager",
+        "--since", f"@{since_epoch:.3f}", "--until", f"@{until_epoch:.3f}",
+    )
+    blocks = []
+    for line in out.splitlines():
+        match = RENDER_LINE.search(line)
+        if match:
+            values = dict(pair.split("=", 1) for pair in match.group(1).split())
+            blocks.append({key: float(value) for key, value in values.items()})
+    return blocks
+
+
+def counters_delta(before, after):
+    if before is None or after is None:
+        return None
+    keys = ("overruns", "late_callbacks", "capture_glitches", "stream_errors", "midi_dropped")
+    return {key: after[key] - before[key] for key in keys}
+
+
+# --- the performance ------------------------------------------------------
+
+
+def select(instance, sound):
+    dispatch({"type": "select_plugin", "instance_id": instance})
+    dispatch({"type": "select_sound", "instance_id": instance, "sound_id": sound})
+
+
+def all_notes_off(notes):
+    for note in notes:
+        midi(0x80, note, 0)
+
+
+def hold_step(notes, hold, restrike):
+    """Holds `notes`, re-striking each every `restrike` seconds so that a
+    decaying instrument keeps the same number of voices sounding."""
+    for note in notes:
+        midi(0x90, note, VELOCITY)
+    started = time.monotonic()
+    next_strike = started + restrike
+    while True:
+        now = time.monotonic()
+        if now - started >= hold:
+            break
+        if now >= next_strike:
+            for note in notes:
+                midi(0x80, note, 0)
+                midi(0x90, note, VELOCITY)
+            next_strike += restrike
+        time.sleep(min(0.1, max(0.0, next_strike - now)))
+    all_notes_off(notes)
+
+
+def stable_voices(steps, strict):
+    """The most voices of the ramp before the first step that went wrong.
+
+    Strict: nothing late at all -- no period whose work outran it, no
+    render past its deadline. Otherwise only what is heard: a period the
+    device played with nothing written for it. A late period the buffer
+    absorbed is margin spent, not a click."""
+    stable = 0
+    for step in steps:
+        health = step.get("health") or {}
+        if strict:
+            wrong = not step["clean"]
+        else:
+            wrong = health.get("late_callbacks", 0) > 0 or health.get("stream_errors", 0) > 0
+        if wrong:
+            break
+        stable = step["voices"]
+    return stable
+
+
+def perform(plan_name, hold, restrike, settle, master_level=None):
+    snapshot = request({"op": "snapshot"})["snapshot"]
+    original_level = snapshot.get("master_level")
+    original_instance = snapshot.get("active_instance_id")
+    original_sound = next(
+        (
+            instance.get("selected_sound_id")
+            for instance in snapshot.get("instances", [])
+            if instance["instance_id"] == original_instance
+        ),
+        None,
+    )
+    record = {
+        "kind": "perform",
+        "plan": plan_name,
+        "hold_s": hold,
+        "restrike_s": restrike,
+        "ramp": RAMP,
+        "started": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "revision": release_revision(),
+        "audio": audio_profile(),
+        "system": system_audit(),
+        "engine_before": engine_audit(),
+        "instruments": [],
+    }
+    restarts_before = record["engine_before"].get("restarts")
+    try:
+        # The master gain is applied after every plugin has rendered, so a
+        # quieter run costs the same: only the listener is spared.
+        if master_level is not None:
+            dispatch({"type": "set_master_level", "level": master_level})
+        for instrument in PLANS[plan_name]:
+            print(f"== {instrument['label']}", flush=True)
+            select(instrument["instance"], instrument["sound"])
+            time.sleep(settle)
+            steps = []
+            for voices in instrument.get("ramp", RAMP):
+                notes = instrument["notes"][:voices]
+                engine = engine_audit()
+                before = health()
+                since = time.time()
+                hold_step(notes, hold, restrike)
+                # Let the releases finish inside the step they belong to.
+                time.sleep(1.0)
+                until = time.time()
+                after = health()
+                engine_after = engine_audit()
+                blocks = render_blocks(since, until)
+                step = {
+                    "voices": voices,
+                    "health": counters_delta(before, after),
+                    "load_percent": after["load_percent"] if after else None,
+                    "peak_percent": after["peak_percent"] if after else None,
+                    "render_avg_us": (
+                        round(sum(b["avg_us"] for b in blocks) / len(blocks)) if blocks else None
+                    ),
+                    "render_p99_us": max((b["p99_us"] for b in blocks), default=None),
+                    "render_max_us": max((b["max_us"] for b in blocks), default=None),
+                    "deadline_us": blocks[0]["deadline_us"] if blocks else None,
+                    "deadline_misses": sum(b["deadline_misses"] for b in blocks),
+                    "rss_kib": engine_after.get("rss_kib"),
+                    "minflt": (engine_after.get("minflt") or 0) - (engine.get("minflt") or 0),
+                    "majflt": (engine_after.get("majflt") or 0) - (engine.get("majflt") or 0),
+                    "temperature_c": thermal()["temperature_c"],
+                }
+                late = (step["health"] or {}).get("overruns", 0) + (step["health"] or {}).get(
+                    "late_callbacks", 0
+                )
+                step["clean"] = late == 0 and step["deadline_misses"] == 0
+                steps.append(step)
+                print(
+                    f"  {voices:>2} voices  p99 {step['render_p99_us']} us  max {step['render_max_us']} us"
+                    f"  peak {step['peak_percent'] or 0:.0f}%  health {step['health']}"
+                    f"  misses {step['deadline_misses']:.0f}  {'clean' if step['clean'] else 'LATE'}",
+                    flush=True,
+                )
+            record["instruments"].append(
+                {
+                    **instrument,
+                    "steps": steps,
+                    "stable_voices": stable_voices(steps, strict=True),
+                    "audible_stable_voices": stable_voices(steps, strict=False),
+                }
+            )
+    finally:
+        try:
+            request({"op": "release_virtual_midi", "client_id": CLIENT})
+        except (OSError, ValueError):
+            pass
+        if original_instance and original_sound:
+            try:
+                select(original_instance, original_sound)
+            except (OSError, RuntimeError, ValueError):
+                pass
+        if master_level is not None and original_level is not None:
+            try:
+                dispatch({"type": "set_master_level", "level": original_level})
+            except (OSError, RuntimeError, ValueError):
+                pass
+    record["engine_after"] = engine_audit()
+    record["restarts_during"] = (record["engine_after"].get("restarts") or 0) - (restarts_before or 0)
+    record["thermal_after"] = thermal()
+    record["finished"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    return record
+
+
+# --- boot time ------------------------------------------------------------
+
+MILESTONES = [
+    ("engine_started", UNIT, r"STARTUP_PHASE host=core phase=starting"),
+    ("engine_ready", UNIT, r"READY_TO_PLAY"),
+    ("engine_realtime", UNIT, r"REALTIME_(ENGAGED|DEGRADED)"),
+    ("web_ready", "rackforge-web.service", r"RACKFORGE_WEB_READY"),
+    ("ssh_listening", "ssh.service", r"Server listening"),
+    # The first real interface up; loopback activates first and says nothing.
+    ("network_up", "NetworkManager.service", r"device \((?!lo\))[^)]+\): Activation: successful"),
+]
+
+
+def boot_time():
+    result = {"kind": "boot", "boot_id": read("/proc/sys/kernel/random/boot_id")}
+    for name, unit, pattern in MILESTONES:
+        out = run("journalctl", "-b", "-u", unit, "-o", "short-monotonic", "--no-pager")
+        result[name + "_s"] = None
+        for line in out.splitlines():
+            match = re.match(r"\[\s*([\d.]+)\]\s+\S+\s+(.*)", line)
+            if match and re.search(pattern, match.group(2)):
+                result[name + "_s"] = float(match.group(1))
+                break
+    result["systemd_analyze"] = run("systemd-analyze")
+    result["revision"] = release_revision()
+    return result
+
+
+# --- compare --------------------------------------------------------------
+
+
+def compare(before_path, after_path):
+    with open(before_path) as handle:
+        before = json.load(handle)
+    with open(after_path) as handle:
+        after = json.load(handle)
+    if before.get("kind") != after.get("kind"):
+        sys.exit("the two records are of different kinds")
+    if before["kind"] == "boot":
+        for key in sorted(k for k in before if k.endswith("_s")):
+            print(f"{key:<22} {before[key]!s:>10} {after.get(key)!s:>10}")
+        return
+    for key in ("revision", "audio"):
+        if before.get(key) != after.get(key):
+            print(f"note: {key} differs: {before.get(key)} -> {after.get(key)}")
+    for label_before in before["instruments"]:
+        label = label_before["label"]
+        label_after = next((i for i in after["instruments"] if i["label"] == label), None)
+        if label_after is None:
+            continue
+        print(
+            f"== {label}: stable voices {label_before['stable_voices']} -> {label_after['stable_voices']}, "
+            f"without a dropout {stable_voices(label_before['steps'], False)} -> "
+            f"{stable_voices(label_after['steps'], False)}"
+        )
+        print(f"   {'voices':>6} {'p99 us':>15} {'max us':>15} {'late':>9} {'misses':>9}")
+        for step_before, step_after in zip(label_before["steps"], label_after["steps"]):
+            def late(step):
+                health = step.get("health") or {}
+                return health.get("overruns", 0) + health.get("late_callbacks", 0)
+            print(
+                f"   {step_before['voices']:>6} "
+                f"{step_before['render_p99_us']!s:>7}>{step_after['render_p99_us']!s:<7} "
+                f"{step_before['render_max_us']!s:>7}>{step_after['render_max_us']!s:<7} "
+                f"{late(step_before):>4}>{late(step_after):<4} "
+                f"{step_before['deadline_misses']:>4.0f}>{step_after['deadline_misses']:<4.0f}"
+            )
+    for key in ("rss_kib", "locked_kib", "realtime_threads"):
+        print(f"{key:<18} {before['engine_after'].get(key)!s:>12} {after['engine_after'].get(key)!s:>12}")
+    print(
+        f"{'temperature_c':<18} {before['thermal_after']['temperature_c']!s:>12} "
+        f"{after['thermal_after']['temperature_c']!s:>12}"
+    )
+
+
+# --- entry ----------------------------------------------------------------
+
+
+def emit(record, out, as_json):
+    text = json.dumps(record, indent=2)
+    if out:
+        with open(out, "w") as handle:
+            handle.write(text + "\n")
+        print(f"written {out}")
+    elif as_json:
+        print(text)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True)
+    audit = commands.add_parser("audit")
+    audit.add_argument("--json", action="store_true")
+    audit.add_argument("--out")
+    performance = commands.add_parser("perform")
+    performance.add_argument("--plan", default="standard", choices=sorted(PLANS))
+    performance.add_argument("--hold", type=float, default=20.0)
+    performance.add_argument("--restrike", type=float, default=2.0)
+    performance.add_argument("--settle", type=float, default=3.0)
+    performance.add_argument(
+        "--master-level", type=int, help="master level during the run, 0-1000; restored after"
+    )
+    performance.add_argument("--out")
+    boot = commands.add_parser("boot-time")
+    boot.add_argument("--json", action="store_true")
+    boot.add_argument("--out")
+    comparison = commands.add_parser("compare")
+    comparison.add_argument("before")
+    comparison.add_argument("after")
+    arguments = parser.parse_args()
+
+    if arguments.command == "audit":
+        record = {
+            "kind": "audit",
+            "revision": release_revision(),
+            "audio": audio_profile(),
+            "system": system_audit(),
+            "engine": engine_audit(),
+        }
+        if arguments.json or arguments.out:
+            emit(record, arguments.out, arguments.json)
+        else:
+            print_audit(record)
+    elif arguments.command == "perform":
+        emit(
+            perform(
+                arguments.plan,
+                arguments.hold,
+                arguments.restrike,
+                arguments.settle,
+                arguments.master_level,
+            ),
+            arguments.out,
+            True,
+        )
+    elif arguments.command == "boot-time":
+        record = boot_time()
+        if arguments.json or arguments.out:
+            emit(record, arguments.out, arguments.json)
+        else:
+            for key, value in record.items():
+                print(f"{key:<22} {value}")
+    else:
+        compare(arguments.before, arguments.after)
+
+
+def print_audit(record):
+    system = record["system"]
+    engine = record["engine"]
+    print(f"{system['model']} | {system['os']} | {system['kernel']} | PREEMPT_RT={system['preempt_rt']}")
+    print(f"release {record['revision']} | audio {record['audio']}")
+    for cpu, values in system["cpus"].items():
+        print(f"  {cpu}: {values['governor']} {values['khz'] // 1000} MHz")
+    print(f"  thermal {system['thermal']} | swap {system['swap']} | rt_runtime {system['sched_rt_runtime_us']}")
+    for irq in system["interrupts"]:
+        print(f"  irq {irq['irq']:>3} {irq['name']:<40} cpus={irq['affinity']} counts={irq['counts']}")
+    if not engine.get("running"):
+        print("engine: not running")
+        return
+    print(
+        f"engine pid {engine['pid']} | threads {len(engine['threads'])} | realtime {engine['realtime_threads']}"
+        f" | unexpected {engine['unexpected_realtime']}"
+    )
+    print(
+        f"  rss {engine['rss_kib']} KiB | locked {engine['locked_kib']} KiB | faults min {engine['minflt']}"
+        f" maj {engine['majflt']} | limits {engine['limits']} | restarts {engine['restarts']}"
+    )
+    for thread in engine["threads"]:
+        print(
+            f"  {thread['tid']:>6} {thread['comm']:<16} {thread['policy']:<6} rt={thread['rtprio']:<3}"
+            f" nice={thread['nice']:<4} cpu={thread['processor']} allowed={thread['cpus']}"
+        )
+
+
+if __name__ == "__main__":
+    main()

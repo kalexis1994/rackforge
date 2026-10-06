@@ -396,7 +396,7 @@ mod supervisor {
         let mut supervised =
             SupervisedMidiSources::new(supervised).context("validating supervised MIDI sources")?;
         thread::Builder::new()
-            .name("rackforge-midi-supervisor".into())
+            .name("rf-midi-watch".into())
             .spawn(move || {
                 let mut connections: BTreeMap<u32, MidiInputConnection<()>> = BTreeMap::new();
                 loop {

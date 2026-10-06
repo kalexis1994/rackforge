@@ -61,7 +61,7 @@ impl ControlThread {
     fn start() -> Result<Self> {
         let (jobs, queue) = mpsc::channel::<Job>();
         let thread = std::thread::Builder::new()
-            .name("rackforge-native-control".to_owned())
+            .name("rf-native-ctl".to_owned())
             .stack_size(CONTROL_STACK_BYTES)
             .spawn(move || {
                 for job in queue {

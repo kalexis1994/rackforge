@@ -70,6 +70,11 @@ const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
 /// nothing measurable, and fast enough that plugging an interface in feels
 /// like plugging an interface in.
 const OUTPUT_RESCAN_INTERVAL: Duration = Duration::from_secs(1);
+/// How much longer the engine's start may take, asked of systemd before each
+/// plugin loads: binaryen and Cranelift on a cold cache, on a Pi 4, with
+/// room to spare. A start that hangs still fails this long after its last
+/// plugin began.
+const PLUGIN_LOAD_ALLOWANCE: Duration = Duration::from_secs(60);
 const MASTER_LEVEL_SMOOTHING_FRAMES: u32 = 480;
 pub(crate) const VIRTUAL_MIDI_SOURCE_ID: &str = "rackforge.virtual.touch";
 
@@ -962,6 +967,15 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         } else {
             &BTreeMap::new()
         };
+        // Compiling a plugin whose code is not cached -- every one, the
+        // first start after an update -- takes seconds; the unit's start
+        // timeout is sized for a warm cache. Each plugin asks for its own.
+        if let Err(error) = crate::startup::notify_service_progress(
+            &format!("loading {}", package.manifest().id),
+            PLUGIN_LOAD_ALLOWANCE,
+        ) {
+            eprintln!("SYSTEMD_PROGRESS_FAILED error={error}");
+        }
         let binary = is_primary.then_some(config.binary.as_deref()).flatten();
         // Native libraries remain loaded for the process lifetime. RackForge never
         // unloads a plugin while an audio instance may still reference its ABI.
@@ -1520,6 +1534,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         devices: audio_devices,
     }));
     let output_meter = Arc::new(OutputMeter::default());
+    let engine_health = Arc::new(crate::engine_health::EngineHealth::default());
     let (control_sender, control_receiver) = mpsc::sync_channel(AUDIO_CONTROL_QUEUE_CAPACITY);
     let control_path = control_socket_path();
     let control_storage = config
@@ -1534,6 +1549,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
             audio_sender: control_sender,
             audio_state: Arc::clone(&audio_state),
             output_meter: Arc::clone(&output_meter),
+            engine_health: Arc::clone(&engine_health),
             audio_input: audio_input_status,
             input_meter: Arc::clone(&input_meter),
             audio_state_path: config.audio_state_path.clone(),
@@ -1598,6 +1614,7 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         render_mode: resolve_render_mode(initial_surface_mode, initial_rack_specs.len()),
         audio_state,
         output_meter,
+        engine_health,
         input_meter,
         live_parameter_writer: live_parameter_writer.handle(),
         startup,
@@ -1936,6 +1953,7 @@ struct AudioLoopContext<'a> {
     render_mode: AudioRenderMode,
     audio_state: Arc<Mutex<AudioOutputState>>,
     output_meter: Arc<OutputMeter>,
+    engine_health: Arc<crate::engine_health::EngineHealth>,
     input_meter: Arc<InputMeter>,
     live_parameter_writer: LiveParameterWriterHandle,
     startup: crate::startup::StartupTimeline,
@@ -1963,6 +1981,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         mut render_mode,
         audio_state,
         output_meter,
+        engine_health,
         input_meter,
         live_parameter_writer,
         startup,
@@ -2049,16 +2068,17 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     let mut sequencer_taps = crate::sequencer::TapTempoFold::new();
     let sequencer_tap_clock = Instant::now();
     let (retired_sender, retired_receiver) = mpsc::sync_channel::<RetiredAudioRuntime>(16);
-    let _retired_reclaimer = thread::Builder::new()
-        .name("rackforge-live-voice-reclaimer".into())
-        .spawn(move || {
-            while let Ok(retired) = retired_receiver.recv() {
-                match retired {
-                    RetiredAudioRuntime::Standalone(instance) => drop(instance),
-                    RetiredAudioRuntime::PortableRack(voices) => drop(voices.0),
+    let _retired_reclaimer =
+        thread::Builder::new()
+            .name("rf-reclaimer".into())
+            .spawn(move || {
+                while let Ok(retired) = retired_receiver.recv() {
+                    match retired {
+                        RetiredAudioRuntime::Standalone(instance) => drop(instance),
+                        RetiredAudioRuntime::PortableRack(voices) => drop(voices.0),
+                    }
                 }
-            }
-        })?;
+            })?;
     let mut deferred_retire = Vec::with_capacity(16);
     let mut startup_ready = false;
     // The wall clock that stands in for the device while there is none, and
@@ -2081,6 +2101,17 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     if let Some(remedy) = realtime_status.remedy() {
         eprintln!("REALTIME_REMEDY {remedy}");
     }
+    // Where the audio thread runs, when the installation says: a core kept
+    // clear of the interrupts and the system's own work. Unset, the
+    // scheduler places it.
+    if let Some(cpus) = realtime::cpus_from_env("RACKFORGE_AUDIO_CPUS") {
+        match realtime::pin_current_thread(&cpus) {
+            Ok(()) => println!("AUDIO_AFFINITY thread=audio cpus={cpus:?}"),
+            Err(errno) => {
+                eprintln!("AUDIO_AFFINITY_FAILED thread=audio cpus={cpus:?} errno={errno}")
+            }
+        }
+    }
     let render_telemetry = RenderTelemetry::new(parallel_render::MAX_RENDER_SLOTS);
     spawn_telemetry_publisher(&render_telemetry, Duration::from_secs(1));
     render_telemetry.set_slot_plugins(
@@ -2098,8 +2129,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     );
     let mut xruns = XrunMonitor::new(output_rate as u32, period_frames);
     let mut input_xruns = XrunMonitor::new(output_rate as u32, period_frames);
+    engine_health.set_period(period_frames, output_rate as u32);
+    // When the device last took a period, for the gap between two.
+    let mut last_handover: Option<Instant> = None;
 
     loop {
+        let period_started = Instant::now();
         // An engine with no output looks for one. The plugins were activated
         // at `active_profile` before any device was opened, and the inventory
         // only yields a device that profile validated against, so adopting one
@@ -2269,6 +2304,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         channels = snapshot.active_profile.channels as usize;
                         output_rate = snapshot.active_profile.sample_rate_hz as usize;
                         xruns.reconfigure(output_rate as u32, period_frames);
+                        engine_health.set_period(period_frames, output_rate as u32);
                         // The capture followed: same inputs, the new block.
                         input_xruns.reconfigure(output_rate as u32, period_frames);
                         device_input.resize(period_frames * capture_stream_channels, 0);
@@ -3389,8 +3425,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         }
 
         captured_input.fill(0.0);
+        // Waiting for the input's period is the device's time, not work.
+        let mut waited_for_input = Duration::ZERO;
         if let Some(capture) = input.as_mut() {
             let io = capture.pcm.io_i32()?;
+            let capture_xruns = input_xruns.total();
+            let waiting = Instant::now();
             read_period(
                 &capture.pcm,
                 &io,
@@ -3399,6 +3439,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 capture_stream_channels,
                 &mut input_xruns,
             )?;
+            waited_for_input = waiting.elapsed();
+            engine_health.record_capture_xruns(input_xruns.total() - capture_xruns);
             map_capture_channels(
                 &device_input,
                 capture_stream_channels,
@@ -3678,6 +3720,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         meter_frames += period_frames;
         match output.as_ref() {
             Some(current_output) => {
+                let work = period_started.elapsed().saturating_sub(waited_for_input);
+                let underruns = xruns.total();
                 let written = current_output
                     .pcm
                     .io_i32()
@@ -3692,6 +3736,17 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             &mut xruns,
                         )
                     });
+                let handover = Instant::now();
+                // The first period carries the engine's start -- locking its
+                // memory, starting the workers -- which is not playing.
+                if startup_ready {
+                    engine_health.record_period(
+                        work,
+                        last_handover.map(|last| handover.duration_since(last)),
+                    );
+                }
+                engine_health.record_underruns(xruns.total() - underruns);
+                last_handover = Some(handover);
                 match written {
                     Ok(()) => {
                         // The device is the clock again; the next silent block
@@ -3710,6 +3765,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             "AUDIO_OUTPUT_LOST id={} error={error}",
                             current_output.device.id
                         );
+                        engine_health.record_stream_error();
+                        last_handover = None;
                         output = None;
                         silent_deadline = None;
                         next_output_scan = Instant::now() + OUTPUT_RESCAN_INTERVAL;
@@ -3789,6 +3846,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             meter_frames = 0;
             meter_peak = 0.0;
             meter_clipped = 0;
+            engine_health.record_midi_dropped(dropped_events as u64);
             dropped_events = 0;
         }
     }

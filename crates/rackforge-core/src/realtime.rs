@@ -325,6 +325,118 @@ pub fn engage(priority: i32) -> RealtimeStatus {
     engage_platform(priority)
 }
 
+/// Puts the calling thread back on the ordinary scheduler.
+///
+/// A thread takes its creator's scheduling policy. One the audio thread
+/// starts after it engaged -- the telemetry publisher, a helper -- would
+/// otherwise run at the audio thread's priority, ahead of the render
+/// workers, doing work that formats, writes and blocks. Returns whether the
+/// thread is on the ordinary scheduler afterwards.
+pub fn release_realtime() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let parameters = libc::sched_param { sched_priority: 0 };
+        // SAFETY: `parameters` is a fully initialized `sched_param` and pid 0
+        // designates the calling thread. Leaving a realtime policy needs no
+        // privilege.
+        unsafe { libc::sched_setscheduler(0, libc::SCHED_OTHER, &parameters) == 0 }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
+/// A CPU list as the kernel writes one: `1`, `1,3`, `1-3`, `0,2-3`.
+pub fn parse_cpu_list(text: &str) -> Option<Vec<usize>> {
+    let mut cpus = Vec::new();
+    for part in text.trim().split(',') {
+        let (first, last): (usize, usize) = match part.split_once('-') {
+            Some((first, last)) => (first.trim().parse().ok()?, last.trim().parse().ok()?),
+            None => {
+                let cpu = part.trim().parse().ok()?;
+                (cpu, cpu)
+            }
+        };
+        if first > last || last >= 1024 {
+            return None;
+        }
+        cpus.extend(first..=last);
+    }
+    cpus.sort_unstable();
+    cpus.dedup();
+    (!cpus.is_empty()).then_some(cpus)
+}
+
+/// The CPUs the environment variable `name` lists, when it is set. A value
+/// that is not a CPU list is reported and ignored.
+pub fn cpus_from_env(name: &str) -> Option<Vec<usize>> {
+    let value = std::env::var(name).ok()?;
+    let cpus = parse_cpu_list(&value);
+    if cpus.is_none() {
+        eprintln!("AUDIO_AFFINITY_INVALID variable={name} value={value:?}");
+    }
+    cpus
+}
+
+/// The CPUs the process may run on, read before any thread narrowed its own.
+#[cfg(target_os = "linux")]
+static PROCESS_CPUS: std::sync::OnceLock<libc::cpu_set_t> = std::sync::OnceLock::new();
+
+/// Keeps the calling thread on `cpus`. Returns the error number when the
+/// kernel refused. Elsewhere than Linux nothing is pinned.
+pub fn pin_current_thread(cpus: &[usize]) -> Result<(), i32> {
+    #[cfg(target_os = "linux")]
+    {
+        PROCESS_CPUS.get_or_init(current_cpu_set);
+        // SAFETY: a zeroed `cpu_set_t` is the empty set.
+        let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+        for &cpu in cpus {
+            // SAFETY: `parse_cpu_list` bounds every CPU below CPU_SETSIZE.
+            unsafe { libc::CPU_SET(cpu, &mut set) };
+        }
+        set_current_cpu_set(&set)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = cpus;
+        Ok(())
+    }
+}
+
+/// Gives the calling thread back every CPU the process started with. A
+/// thread takes its creator's CPUs; one started by a pinned thread would
+/// otherwise share its one core.
+pub fn unpin_current_thread() {
+    #[cfg(target_os = "linux")]
+    if let Some(set) = PROCESS_CPUS.get() {
+        let _ = set_current_cpu_set(set);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn current_cpu_set() -> libc::cpu_set_t {
+    // SAFETY: a zeroed `cpu_set_t` is a valid buffer for the kernel to fill,
+    // and pid 0 designates the calling thread.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set);
+        set
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn set_current_cpu_set(set: &libc::cpu_set_t) -> Result<(), i32> {
+    // SAFETY: `set` is a fully initialized `cpu_set_t` of the size passed,
+    // and pid 0 designates the calling thread.
+    let result = unsafe { libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), set) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(last_errno())
+    }
+}
+
 /// Linux: `SCHED_FIFO` and locked memory, each against its own limit.
 #[cfg(target_os = "linux")]
 fn engage_platform(priority: i32) -> RealtimeStatus {
@@ -620,6 +732,19 @@ impl XrunMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cpu_lists_read_as_the_kernel_writes_them() {
+        assert_eq!(parse_cpu_list("3"), Some(vec![3]));
+        assert_eq!(parse_cpu_list("1,3"), Some(vec![1, 3]));
+        assert_eq!(parse_cpu_list("1-3"), Some(vec![1, 2, 3]));
+        assert_eq!(parse_cpu_list(" 0, 2-3 "), Some(vec![0, 2, 3]));
+        assert_eq!(parse_cpu_list("2,1-2"), Some(vec![1, 2]));
+        assert_eq!(parse_cpu_list(""), None);
+        assert_eq!(parse_cpu_list("3-1"), None);
+        assert_eq!(parse_cpu_list("a"), None);
+        assert_eq!(parse_cpu_list("4096"), None);
+    }
 
     #[test]
     fn requested_priority_is_clamped_into_the_platform_range() {

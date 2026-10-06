@@ -9,6 +9,7 @@ pub mod control;
 pub mod controller_layouts;
 pub mod controller_map_store;
 pub mod default_instrument;
+pub mod engine_health;
 /// The handshake between the interface and the native shell holding it.
 /// Outside every platform gate: Android and the VST3 editor both stamp it,
 /// and the record that holds the other languages to it is built anywhere.

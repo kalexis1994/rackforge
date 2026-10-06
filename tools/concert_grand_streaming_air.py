@@ -13,7 +13,7 @@ from concert_grand_bounded_air import BoundedAir,RelaxingMass
 
 
 class SurfaceFactorBlocks:
-    def __init__(self,surface,rate,polar=12,azimuth=24,direction_block=8,smooth=True):
+    def __init__(self,surface,rate,polar=12,azimuth=24,direction_block=8,smooth=True,fold_y=False):
         if (not np.isfinite(rate) or rate<=0 or polar<2 or azimuth<4
             or azimuth%2 or direction_block<1):raise ValueError('wave grid/block')
         self.surface=surface;self.rate=float(rate);self.block=int(direction_block);self.smooth=smooth
@@ -25,12 +25,27 @@ class SurfaceFactorBlocks:
         self.weights=np.repeat(w,len(az))*2*np.pi/azimuth
         extent=(abs(self.directions[:,0])*surface.length+abs(self.directions[:,1])*surface.width)/surface.speed
         self.histogram_order=int(np.ceil(extent.max()*rate))+2
-        self.taps=self.histogram_order+2+int(smooth);self.outputs=2*len(self.directions)
+        self.taps=self.histogram_order+2+int(smooth);self.logical_outputs=2*len(self.directions)
         xx,yy=np.meshgrid((np.arange(surface.nx)+.5)*surface.hx-surface.length/2,
             (np.arange(surface.ny)+.5)*surface.hy-surface.width/2,indexing='ij')
         self.positions=np.column_stack((xx.ravel(),yy.ravel()))
         self.shapes=np.asarray(surface.shapes).reshape(-1,self.modes)
         if not np.isfinite(self.shapes).all():raise ValueError('finite surface shapes')
+        self.fold_y=fold_y;self.symmetry_relative=None
+        if fold_y:
+            if azimuth%4:raise ValueError('folded grid requires azimuth divisible by four')
+            shapes=self.shapes.reshape(surface.nx,surface.ny,self.modes)
+            total=error=0.
+            for first in range(0,surface.nx,8):
+                part=shapes[first:first+8];difference=part-part[:,::-1]
+                total+=float(np.einsum('ijk,ijk->',part,part));error+=float(np.einsum('ijk,ijk->',difference,difference))
+            self.symmetry_relative=float(np.sqrt(error/max(total,1e-300)))
+            if self.symmetry_relative>1e-12:raise ValueError('folding requires an even-y surface; no symmetrization')
+            # Reflection in y identifies a second reversed pair. Its weight
+            # is included exactly via sqrt(2), not dropped or renormalized.
+            keep=np.tile(np.arange(len(az))<len(az)//2,polar)
+            self.directions=self.directions[keep];self.weights=2*self.weights[keep]
+        self.outputs=2*len(self.directions)
 
     def blocks(self):
         surface=self.surface;rate=self.rate;order=self.histogram_order;center=order/(2*rate)
@@ -66,6 +81,7 @@ class SurfaceFactorBlocks:
         # Explicit ndarray upper estimate; BLAS/FFT/interpreter overhead is
         # measured separately. Gram and correlation are independent of angle count.
         return dict(full_factor_bytes=t*self.outputs*n*8,
+            unfolded_factor_bytes=t*self.logical_outputs*n*8,
             gram_bytes=f*n*n*16,correlation_bytes=t*n*n*8,
             estimated_array_peak_bytes=(f*n*n*16+t*n*n*8+t*o*n*8+f*o*n*16
                 +min(f,frequency_block)*n*n*16+fft*min(n,row_block)*n*8+self.shapes.nbytes),

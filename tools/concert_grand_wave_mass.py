@@ -5,6 +5,7 @@ factor divided by rate. This is the same discrete/Cayley static mass, not
 an alternative fit or an approximation of the continuous Rayleigh target.
 """
 import numpy as np
+from scipy.linalg.blas import dsyrk
 
 
 def static_wave_mass(provider,progress=None):
@@ -14,6 +15,9 @@ def static_wave_mass(provider,progress=None):
         if np.linalg.norm(H.sum(axis=0))>1e-11*scale:raise ValueError('zero-DC factor required')
         # The last cumulative row is zero; omit only that exact endpoint.
         cumulative=np.cumsum(H,axis=0)[:-1].reshape(-1,provider.modes)
-        mass+=cumulative.T@cumulative/provider.rate
+        # A real Gram is symmetric. Compute one triangle, without changing
+        # the factor or discarding any cross-mode products.
+        triangle=dsyrk(1/provider.rate,cumulative,trans=1,lower=1)
+        mass+=np.tril(triangle)
         if progress is not None:progress(i+1)
-    return (mass+mass.T)/2
+    return mass+mass.T-np.diag(np.diag(mass))

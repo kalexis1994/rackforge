@@ -172,3 +172,8 @@ angular del temporal. Si el residual no cierra, revisar la integración de
 direcciones y considerar promedios sobre regiones angulares con certificado
 de energía, en lugar de reparar la matriz residual. Cualquier cambio de
 representación debe conservar el puerto físico y pasar transferencia.
+
+Continuación del 2026-10-06: [integración angular y contraste temporal](RESULTADOS-P6-integracion-angular.md).
+La masa residual 96×256 pasa a ser positiva a 128 y 64 kHz. Se conserva el
+rechazo de las cuadraturas anteriores. Esto permite intentar el completado;
+la impedancia y los transitorios del candidato completo siguen pendientes.

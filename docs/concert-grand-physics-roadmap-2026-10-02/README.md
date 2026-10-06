@@ -66,7 +66,7 @@ Falta construir su carga recíproca antes de volver a escuchar el modelo complet
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Pérdidas completas preparadas para el tiempo. Construcción causal por bloques conserva el certificado; preflights 16×32/32×64 rechazados por residual de masa y precisión. Faltan completado causal preciso, transitorios acoplados, identificación y ambas caras/borde. | Construcción acotada y rechazo medidos; escucha nueva pendiente |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Pérdidas completas preparadas para el tiempo. Construcción causal por bloques conserva el certificado. Masa residual 96×256 positiva a 128/64 kHz; preflights 16×32/32×64 siguen rechazados. Faltan construir/validar la carga completa, transitorios acoplados, identificación y ambas caras/borde. | Condición de masa resuelta por refinamiento angular; escucha nueva pendiente |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1125,3 +1125,20 @@ El control acumulado reproduce el residual de 32×64 a 1,938e−14 y alcanza
 también es negativo (mínimo −0,0016222293): completado rechazado antes de
 construir correlaciones. Siguiente: 96×256 y contraste de tasa, separando
 cuadratura angular de aproximación temporal antes de volver al contacto.
+
+### 2026-10-06 — P6: masa residual positiva tras refinamiento angular
+
+La construcción por bloques queda en **bee4f9c**, por pedido del usuario.
+[Método y mediciones](RESULTADOS-P6-integracion-angular.md). La simetría en y
+permite agrupar contribuciones angulares equivalentes con peso doble. Dos
+pruebas nuevas conservan correlaciones/fuerza/energía; ocho pruebas pasan.
+El control real 32×64 se reproduce a 1,983e−14 y tarda 34,860 s frente a
+68,516 s en el cálculo acumulado anterior.
+
+Con la misma superficie 256×192, la cuadratura 96×256 da residual de masa
+**positivo**: mínimo 1,283e−5 a 128 kHz y 2,793e−5 a 64 kHz. El rechazo
+anterior dependía decisivamente de la integración angular; la tasa temporal
+modifica la masa restante. Pico de la corrida: 0,858 GiB, sin Gram ni
+correlaciones guardados. La condición de masa no valida aún la carga completa.
+Siguiente: Gram espectral real de las parejas, completado y controles de
+impedancia/transitorios con 96×256/128 kHz. Sin WAV ni paquete nuevo.

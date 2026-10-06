@@ -10,6 +10,29 @@ from concert_grand_streaming_air import SurfaceFactorBlocks,StreamingRationalAir
 
 
 class StreamingAirTests(unittest.TestCase):
+    def test_folded_symmetric_surface_keeps_correlations_impedance_and_live_energy(self):
+        rng=np.random.default_rng(435);half=rng.normal(size=(7,3,3))
+        surface=RectangularLoad(.7,.4,np.concatenate((half,half[:,::-1]),axis=1))
+        full=StreamingRationalAir(SurfaceFactorBlocks(surface,16000,4,16),100_000_000)
+        provider=SurfaceFactorBlocks(surface,16000,4,16,fold_y=True)
+        folded=StreamingRationalAir(provider,100_000_000)
+        self.assertEqual(folded.outputs,full.outputs//2)
+        self.assertEqual(folded.states,full.states)
+        np.testing.assert_allclose(folded.R,full.R,rtol=1e-11,atol=1e-11)
+        for s in [3+500j,2j*np.pi*6000]:
+            np.testing.assert_allclose(folded.impedance(s),full.impedance(s),rtol=1e-11,atol=1e-11)
+        state=rng.normal(size=full.zero_state().shape)*.01;v=rng.normal(size=3)*.1
+        self.assertAlmostEqual(folded.energy(state),full.energy(state),delta=1e-11*full.energy(state))
+        a,f,l=folded.midpoint(state,v,1/192000);b,g,k=full.midpoint(state,v,1/192000)
+        np.testing.assert_array_equal(a,b);np.testing.assert_allclose(f,g,rtol=1e-11,atol=1e-11)
+        self.assertAlmostEqual(l,k,delta=1e-11*max(k,1e-20))
+
+    def test_fold_rejects_asymmetric_shapes_and_unpaired_angular_grid(self):
+        rng=np.random.default_rng(431);surface=RectangularLoad(.7,.4,rng.normal(size=(7,6,3)))
+        with self.assertRaises(ValueError):SurfaceFactorBlocks(surface,16000,4,16,fold_y=True)
+        surface=RectangularLoad(.7,.4,np.ones((7,6,3)))
+        with self.assertRaises(ValueError):SurfaceFactorBlocks(surface,16000,4,10,fold_y=True)
+
     def fixture(self,block=3):
         rng=np.random.default_rng(325);shapes=rng.normal(size=(7,5,3))
         surface=RectangularLoad(.7,.4,shapes)

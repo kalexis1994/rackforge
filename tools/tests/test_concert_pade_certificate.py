@@ -1,5 +1,6 @@
 """Batch certificate against independent stored-factor quadratics and cache."""
 import sys
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +13,7 @@ from concert_grand_streaming_air import SurfaceFactorBlocks, StreamingRationalAi
 from concert_grand_rational_air import RationalAir
 from concert_grand_pade_air import FourthFactorBlocks, PadeAir
 from concert_grand_pade_certificate import certificate_batch
-from concert_grand_wave_cache import save_wave_cache, load_wave_cache
+from concert_grand_wave_cache import save_wave_cache, load_wave_cache, attest_legacy_cache
 
 
 class CertificateTests(unittest.TestCase):
@@ -73,12 +74,48 @@ class CertificateTests(unittest.TestCase):
             del copy, b
             with self.assertRaises(ValueError):
                 load_wave_cache(path, provider, dict(identity, board='changed'))
+            other, _ = self.fixture()
+            other.provider.shapes = other.provider.shapes.copy()
+            other.provider.shapes[:,0] *= -1
+            with self.assertRaises(ValueError):
+                load_wave_cache(path,other,identity)
             # Corruption is rejected rather than silently rebuilt or repaired.
             with (path/'R.npy').open('r+b') as f:
                 f.seek(-8, 2)
                 f.write(b'corrupt!')
             with self.assertRaises(ValueError):
                 load_wave_cache(path, provider, identity)
+
+    def test_explicit_legacy_attestation_requires_completed_construction_controls(self):
+        provider, _ = self.fixture()
+        wave = StreamingRationalAir(provider,100_000_000,real_gram=True)
+        identity = dict(full_report_sha256='frozen',physical_source_sha256={'physical.py':'original'})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'cache'
+            metadata = save_wave_cache(path,wave,identity)
+            del metadata['provider_signature']
+            (path/'manifest.json').write_text(json.dumps(metadata))
+            with self.assertRaises(ValueError):
+                load_wave_cache(path,provider,identity)
+            report = dict(stage='construction',cache=str(path),cache_mass_control_relative=0.,
+                          cache_transfer_controls=[{'frozen_error_absolute':0.}]*3,
+                          parent_sha256={'full.json':'frozen'},source_sha256={'physical.py':'original'},
+                          cache_R_sha256=metadata['R_sha256'])
+            report_path = Path(tmp)/'measurement.json'
+            report_path.write_text(json.dumps(report))
+            with self.assertRaises(ValueError):
+                attest_legacy_cache(path,provider,identity,report_path)
+            # Binding the already verified R never approves the later contact
+            # certificate or its report writer. An unfinished construction
+            # above remains rejected even if it supplies matching fields.
+            report['stage'] = 'independent storage/radiation certificate'
+            report_path.write_text(json.dumps(report))
+            proof = attest_legacy_cache(path,provider,identity,report_path)
+            self.assertEqual(proof['R_sha256'],metadata['R_sha256'])
+            self.assertTrue(proof['provider_attestation']['construction_only'])
+            loaded, _ = load_wave_cache(path,provider,identity)
+            np.testing.assert_array_equal(loaded.R,wave.R)
+            del loaded
 
 
 if __name__ == '__main__':

@@ -53,7 +53,8 @@ def main():
     cache_root = Path('local/concert-grand-physics').resolve()
     if not a.cache.resolve().is_relative_to(cache_root):
         raise ValueError('one cache under local/concert-grand-physics required')
-    start = time.monotonic()
+    clock = time.get_clock_info('perf_counter')
+    start = time.perf_counter()
     approved = json.loads(a.full_report.read_text())
     if not approved['harmonic_gates_passed'] or not all(approved['harmonic_gates'].values()):
         raise ValueError('approved full-coordinate harmonic load required')
@@ -102,7 +103,8 @@ def main():
         Path(__file__).name, 'concert_grand_wave_cache.py', 'concert_grand_pade_certificate.py',
         'concert_grand_pade_midpoint.py', 'concert_grand_fast_contact.py',
         'concert_grand_bounded_contact.py', 'concert_grand_moving_bridge.py',
-        'concert_grand_nonlinear_string.py', 'concert_grand_coupled_contact.py'})
+        'concert_grand_nonlinear_string.py', 'concert_grand_coupled_contact.py',
+        'concert_grand_surface_impedance.py'})
     r = dict(parent_sha256={str(a.full_report): digest(a.full_report)}, board_sha256=digest(a.board),
              source_sha256={name: digest(Path(__file__).with_name(name)) for name in sources},
              cache=str(a.cache), rate_factor=provider.rate, angular=approved['angular'], cells=approved['cells'],
@@ -119,11 +121,12 @@ def main():
              wire=dict(length=.62,linear_density=.0081,tension=850,transverse=3),
              felt=dict(hammer_mass=.002,stiffness=7.5e8,exponent=2.6,strike=.125,width=.02,rate_loss=.1),
              incident_speed_m_s=5.,
+             timing_clock=dict(implementation=clock.implementation,resolution_s=clock.resolution),
              scope='Short C4 assumed-wire prefixes on all 606 board modes. Continued live contact, '
                    'not full separation/repetition, release, timbre or runtime approval.')
 
     def checkpoint():
-        r['seconds'] = time.monotonic()-start
+        r['seconds'] = time.perf_counter()-start
         r['peak_working_set_bytes'] = reference.peak_memory()
         a.report.parent.mkdir(parents=True, exist_ok=True)
         a.report.write_text(json.dumps(r, indent=2, allow_nan=False), encoding='utf-8')
@@ -196,13 +199,13 @@ def main():
             trace = [np.r_[q0,v0]]
             felt = material = relax = port = impulse = peak_force = 0.
             max_newton = 0
-            begin = time.monotonic()
+            begin = time.perf_counter()
             step_seconds = []
             min_heat = 0.
             for i in range(steps):
-                step_start = time.monotonic()
+                step_start = time.perf_counter()
                 state, stats = coupled.step(state,1/rate,True)
-                step_seconds.append(time.monotonic()-step_start)
+                step_seconds.append(time.perf_counter()-step_start)
                 history[i] = stats['wave_inputs']
                 felt += stats['felt_loss_j']
                 material += stats['material_loss_j']
@@ -215,12 +218,12 @@ def main():
                 if (i+1)%(rate//capture_rate) == 0:
                     trace.append(np.r_[state[0],state[1]])
                 if (i+1)%max(1,steps//4) == 0:
-                    print('contact',phase,rate,i+1,steps,'seconds',round(time.monotonic()-begin,3),flush=True)
+                    print('contact',phase,rate,i+1,steps,'seconds',round(time.perf_counter()-begin,3),flush=True)
             interface = coupled.interface(state)
             certificates.append(state[2].copy())
             after_index = len(certificates)-1
             parts = core.components(state[0][:-1],state[1][:-1])
-            row = dict(phase=phase,rate=rate,steps=steps,elapsed_s=time.monotonic()-begin,
+            row = dict(phase=phase,rate=rate,steps=steps,elapsed_s=time.perf_counter()-begin,
                        first_step_s=step_seconds[0],steady_step_median_s=float(np.median(step_seconds[1:])),
                        mechanical_initial_j=mechanical0,mechanical_final_j=system.energy(state[0],state[1]),
                        relaxation_initial_j=relaxation0,relaxation_final_j=air.relaxation.energy(state[3]),
@@ -237,10 +240,10 @@ def main():
             checkpoint()
     r['stage'] = 'independent storage/radiation certificate'
     checkpoint()
-    certificate_start = time.monotonic()
+    certificate_start = time.perf_counter()
     energies, losses = certificate_batch(provider,np.array(certificates),inputs,
                                         progress=lambda i:print('certificate block',i,flush=True) if i%16==0 else None)
-    r['certificate_seconds'] = time.monotonic()-certificate_start
+    r['certificate_seconds'] = time.perf_counter()-certificate_start
     for row, power in zip(r['cases'],losses):
         row['wave_initial_j'] = float(energies[row['certificate_before_index']])
         row['wave_final_j'] = float(energies[row['certificate_after_index']])
@@ -253,6 +256,9 @@ def main():
         row['air_budget_relative'] = abs(row['wave_final_j']+row['relaxation_final_j']
                                         -row['wave_initial_j']-row['relaxation_initial_j']
                                         +radiation-row['air_port_work_j'])/e0
+    # Preserve the expensive independent observations before gate assembly.
+    r['stage'] = 'independent certificate measured'
+    checkpoint()
     r['comparisons'] = []
     for phase_index, phase in enumerate(['Cold','Continued']):
         first = phase_index*len(a.rates)
@@ -284,6 +290,7 @@ def main():
         finest_board=max(row['board_endpoint_relative'] for row in fine)<.01,
         finest_force=max(max(row['impulse_relative'],row['peak_force_relative']) for row in fine)<.002,
         second_order=len(a.rates)>=3 and all(value is not None and value<.35 for value in r['refinement_ratios'].values()))
+    r['prefix_gates'] = {name:bool(value) for name,value in r['prefix_gates'].items()}
     r['contact_prefix_gates_passed'] = all(r['prefix_gates'].values())
     r['stage'] = 'contact prefix audit completed'
     r['next'] = 'Full hammer separation/repetition, release, broader strings and time pressure observation remain. '

@@ -52,7 +52,7 @@ def main():
     observer=CellObserver(provider.surface,microphones,4)
     rate=128000
     taps=int(np.floor(observer.distance.max()/observer.surface.speed*rate))+3
-    cells=shapes.shape[0]
+    cells=observer.shapes.shape[0]
     points=observer.distance.shape[0]*cells
     # Conservative COO+CSR scratch count; allocator/OS peak measured separately.
     sparse_scratch=points*(8+8+8+8+4)+4*(taps+1)

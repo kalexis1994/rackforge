@@ -1,0 +1,106 @@
+{
+  "stage": "full microphone kernel audit completed",
+  "all_gates_passed": false,
+  "preflight_only": true,
+  "criteria": {
+    "aggregation_relative": 1e-12,
+    "green_transfer_relative": 0.0002
+  },
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-aire-bloques\\carga128-pade2.json": "8a13401561448f4e573cfb463ff9d12294d70a4a680b914a48458fd1e6603a6e"
+  },
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "source_sha256": {
+    "audit-concert-grand-full-microphone-kernel.py": "382fc8850f5619219bebcf557588d5e398c3d013a2146e6854057cc90e812c7f",
+    "audit-concert-grand-pade-contact-full.py": "03e6be00b2e000eba32dd01cc02365954dde2ae1e1e9f926256588d821470c19",
+    "concert_grand_cell_observer.py": "8978333039a9ab2aa9e210dfc9fb9b141d6dab6b0489ad733c1795bddccc7d8a",
+    "concert_grand_cell_audio.py": "57c3bccf6c0bbe0c930794ccc5710f94b1a26873722e461f7ff72ef254acacf9"
+  },
+  "scope": "Full assumed board pressure operator only. No contact/coast trajectory or audible-note approval.",
+  "seconds": 7.282544899993809,
+  "peak_working_set_bytes": 1337593856,
+  "physical_source_sha256": {
+    "audit-concert-grand-pade-full.py": "df42377f10bd0be9607268d9c13fcfb6f7b74d6d15bd414cb414e0779aff9e12",
+    "audit-concert-grand-streaming-air.py": "585d2c700e0d845f8a1f92f86a746a53f55e100bca2312ec1f5a44f9b14dd85d",
+    "audit-concert-grand-wave-mass.py": "f50a624b56222a600c42a64f878abc23dee65dcf859c3285b9eb5c79bab23f34",
+    "concert_grand_bounded_air.py": "cab4c544f9d1c79b229cb253dfefaff965a01cfe2887cd63267ef5ea07c593b9",
+    "concert_grand_matrixfree_air.py": "8b8feac2eba3e6ffd406cda0626957e275cceaaf0ade54b8462c85e5f40ab2f1",
+    "concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95",
+    "concert_grand_pade_air.py": "0583f7811ef5f15ec608fd66ca868fe3f7a7cf37d6a629a9112f9417ed8cb32e",
+    "concert_grand_projected_support.py": "2c0331b75736717432bb7b43939518a72c19b9975182e822fb167de86ad066b5",
+    "concert_grand_rational_air.py": "ca2b4fc83ae26b4d08d4024a2aab29b150d28fe24715707ac300c05832acf469",
+    "concert_grand_real_surface.py": "42b86ed17942110d78b0f7806b21ac557e89628c4a61465ead02fe58d27534a8",
+    "concert_grand_streaming_air.py": "c90e961555007b301af7f0ceefac6e622808d0f446769c92475ea04b0d37fbe3",
+    "concert_grand_wave_mass.py": "158076e5be6bfc6c07b46a852ba420821cda413a631d5cae0230318297462a6a"
+  },
+  "modes": 606,
+  "cells": [
+    256,
+    192
+  ],
+  "rate": 128000,
+  "microphones": [
+    [
+      0.55,
+      0.5,
+      0.66
+    ],
+    [
+      0.85,
+      0.5,
+      0.66
+    ]
+  ],
+  "quadrature_order": 4,
+  "taps": 445,
+  "array_estimate_bytes": 4912404568,
+  "scratch_bytes": {
+    "dense_histogram": 911360,
+    "sparse_upper_estimate": 149240
+  },
+  "kernel_bytes": 4314720,
+  "kernel_seconds": {
+    "reference": 3.906915500003379,
+    "sparse": 0.590839300013613
+  },
+  "aggregation_relative": 8.613428386188262e-16,
+  "aggregation_maximum_absolute": 3.2526065174565133e-18,
+  "continuous_green_controls": [
+    {
+      "frequency_hz": 0.0,
+      "relative": 7.051528173964693e-16
+    },
+    {
+      "frequency_hz": 60.0,
+      "relative": 1.1508600686282185e-12
+    },
+    {
+      "frequency_hz": 261.0,
+      "relative": 4.1206712560794877e-10
+    },
+    {
+      "frequency_hz": 800.0,
+      "relative": 3.636756870111316e-08
+    },
+    {
+      "frequency_hz": 2000.0,
+      "relative": 1.4193591592614351e-06
+    },
+    {
+      "frequency_hz": 4500.0,
+      "relative": 3.623584103244882e-05
+    },
+    {
+      "frequency_hz": 6000.0,
+      "relative": 0.00011413303016491757
+    }
+  ],
+  "kernel_gates": {
+    "signed_aggregation": true,
+    "continuous_green": true,
+    "causal_first_arrival": true,
+    "source_unchanged": true
+  },
+  "kernel_gates_passed": true,
+  "next": "Time pressure and capture refinement with the full living contact/coast source; no rate or timbral approval here."
+}

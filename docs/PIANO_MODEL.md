@@ -2643,6 +2643,25 @@ projection bounds and numerical rounding safeguards. Longer coast, time
 pressure, natural repetition/release, actual-property identification and
 timbral approval remain pending; no audio or factory package changes.
 
+The following [full propagation cost preflight](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-propagacion-coste.md)
+keeps every residue, mode and living air coordinate. Batched section products
+avoid a transposed copy of R and retain the earlier contraction as control.
+The paired 3 ms contact reproduces the frozen endpoint; dynamics cost drops
+288.554873 to 243.634189 s (15.5675%), with maximum live-state difference
+1.056664e-14. Separated 0.5 ms coast cases at 64/128/256 kHz pass nine preflight
+controls; physical board differences against 256 kHz are 0.00209233% and
+0.000672160%, ratio 0.3212495. Total 622.373 s, peak 2.571152 GiB. This does
+not certify a new independent angular coast ledger or select an audible rate.
+Sparse aggregation of the same signed retarded cell weights prepares the
+full two-microphone kernel in 0.597817 versus 3.916595 s. All 49,152 cells
+and 606 shapes remain; kernel difference 8.613428e-16, worst Green-transfer
+error 0.0114133% at seven DC–6 kHz probes, below the unchanged 0.02% limit.
+Five fixture tests and four full kernel controls pass. An initial scratch
+count used surface rows rather than flattened cells; its report is preserved
+and the corrected budget/control is rerun. Time pressure from the living
+source, capture refinement, longer sustain and real-piano identification
+remain pending. No factory sound, WAV or package changes.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

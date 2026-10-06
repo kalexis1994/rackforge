@@ -60,6 +60,13 @@ La carga recíproca de 606 pasa la grilla armónica/Laplace y prefijos cortos.
 Faltan transitorios completos y presión temporal antes de volver a escuchar
 el modelo completo.
 
+El [control de coste y propagación](RESULTADOS-P6-propagacion-coste.md)
+reproduce el contacto y extiende el recorrido fino a 3,5 ms. La aplicación
+de la carga completa reduce el coste de dinámica 15–17%; el operador de los
+dos micrófonos se prepara unas 6,55 veces más rápido y pasa equivalencia
+y Green continuo. Faltan el balance angular independiente del nuevo coast
+y la presión de su trayectoria viva antes de seleccionar una tasa audible.
+
 | ID | Mecanismo | Representación actual / falta | Estado |
 | --- | --- | --- | --- |
 | P1a | Admitancia direccional del puente | La horizontal usa la misma familia de modos con un factor fijo; falta una segunda proyección mecánica independiente. | Piloto medido: pasivo, sin mejora consistente; escucha pendiente |
@@ -1293,3 +1300,27 @@ Siguiente: coste de propagación después de separar el martillo y presión
 temporal, después repetición natural/release y banco amplio. Las cotas de
 proyección tienen salvaguardas numéricas; no son una prueba formal de
 redondeo por intervalos. La puerta general y la aprobación del timbre siguen falsas.
+
+### 2026-10-06 — P6: contracción completa más rápida y coast separado
+
+[Método y mediciones](RESULTADOS-P6-propagacion-coste.md). **f8c614a** conserva
+la contracción anterior como control y usa productos por sección sobre la
+misma R de sólo lectura; no agrega otra matriz de 1,9 GB. Diez pruebas pasan.
+El contacto continuo de 3 ms a 768 kHz reproduce el extremo congelado;
+dinámica 288,554873→243,634189 s, reducción 15,5675%. Ambos kernels separan
+el martillo en el mismo intervalo y difieren < 1,057e−14 en estados vivos.
+
+Otros 0,5 ms de coast desde el mismo extremo, a 64/128/256 kHz, pasan nueve
+controles del preflight. Diferencias físicas de tabla frente a 256 kHz:
+0,00209233%/0,000672160%; razón 0,3212495. Coste de dinámica baja 15–17%.
+Tiempo total 622,373 s, pico 2,571152 GiB. No se selecciona aún una tasa para
+una nota: falta balance angular independiente y presión de la trayectoria.
+
+**27d0705** conserva todos los pesos de retardo con signo en COO/CSR;
+cinco pruebas de micrófonos pasan. En la tabla de 49.152 celdas, preparación
+3,916595→0,597817 s (6,55 veces), diferencia de kernel 8,613e−16 y error
+máximo contra Green continuo 0,0114133% en DC–6 kHz, bajo el límite 0,02%.
+Se conserva una medición inicial con presupuesto de scratch mal contado;
+**f9e7817** corrige el aplanado de las celdas y repite el control completo.
+Pasan cuatro controles del operador. No se genera audio, paquete ni copias
+en SHARED; la puerta global y la aprobación del timbre siguen pendientes.

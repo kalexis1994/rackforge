@@ -1,0 +1,369 @@
+{
+  "stage": "full propagation cost preflight completed",
+  "all_gates_passed": false,
+  "preflight_only": true,
+  "criteria": {
+    "kernel_state_relative": 1e-10,
+    "kernel_work_relative": 1e-10,
+    "frozen_endpoint_relative": 1e-10,
+    "board_refinement_relative": 0.01,
+    "refinement_ratio": 0.35
+  },
+  "source_sha256": {
+    "audit-concert-grand-full-propagation-cost.py": "ede7f67689cdd5505d0c2ad9d414e22870ab749d1af0b899aa990fbb2f42f18e",
+    "audit-concert-grand-pade-contact-full.py": "03e6be00b2e000eba32dd01cc02365954dde2ae1e1e9f926256588d821470c19",
+    "concert_grand_pade_midpoint.py": "45633e24c60755b7a476aa428328786ecc33e85ce0a05953aa4f49afbe7f120f",
+    "concert_grand_fast_contact.py": "afbb00aa3e06b696ce6478a1ad6875bdbbcff5c20c9899d0a648d05c96e15eec",
+    "concert_grand_exponential_coast.py": "645f8f8d4a94a87cb493ccfeae85f33fcf3a329e677778e964ad601a244380ee",
+    "concert_grand_wave_cache.py": "448c82b2544a1af8527c19f7f0184f28c762def11ba8ac805f41031e5c49e20a",
+    "concert_grand_bounded_contact.py": "d16a88a31156a49144b94d211ad1adf1862c9ce3153e4b79b5597687396e642f",
+    "concert_grand_moving_bridge.py": "19685edcf58c2e1e622641cb5758c6700cace9534b853d8e5c79108f7e19a5e7",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "concert_grand_nonlinear_string.py": "f1c17115e3f296a12f5c51e14d888756e60303e33802f8873d43c6a746a4d0e6"
+  },
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-aire-bloques\\carga128-pade2.json": "8a13401561448f4e573cfb463ff9d12294d70a4a680b914a48458fd1e6603a6e",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-milisegundos\\contacto-1p5ms-inputs.json": "a7ba174ebd607efc8f26e4cae5dffc6b169390c9b642f66620dafe93ed0fa75b"
+  },
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache": "local\\concert-grand-physics\\P6-carga-causal-2026-10-06",
+  "blas_environment": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1"
+  },
+  "scope": "606 board modes and all living acoustic states. Kernel equivalence and short separated coast refinement/cost only; no independent angular coast ledger, pressure, timbre or runtime approval.",
+  "seconds": 622.3731736999907,
+  "peak_working_set_bytes": 2760753152,
+  "physical_source_sha256": {
+    "audit-concert-grand-pade-full.py": "df42377f10bd0be9607268d9c13fcfb6f7b74d6d15bd414cb414e0779aff9e12",
+    "audit-concert-grand-streaming-air.py": "585d2c700e0d845f8a1f92f86a746a53f55e100bca2312ec1f5a44f9b14dd85d",
+    "audit-concert-grand-wave-mass.py": "f50a624b56222a600c42a64f878abc23dee65dcf859c3285b9eb5c79bab23f34",
+    "concert_grand_bounded_air.py": "cab4c544f9d1c79b229cb253dfefaff965a01cfe2887cd63267ef5ea07c593b9",
+    "concert_grand_matrixfree_air.py": "8b8feac2eba3e6ffd406cda0626957e275cceaaf0ade54b8462c85e5f40ab2f1",
+    "concert_grand_orthotropic_plate.py": "34370346bf0bd2e14116372c2d973ddb2630b58eadb6d24d836c788c32ac2e95",
+    "concert_grand_pade_air.py": "0583f7811ef5f15ec608fd66ca868fe3f7a7cf37d6a629a9112f9417ed8cb32e",
+    "concert_grand_projected_support.py": "2c0331b75736717432bb7b43939518a72c19b9975182e822fb167de86ad066b5",
+    "concert_grand_rational_air.py": "ca2b4fc83ae26b4d08d4024a2aab29b150d28fe24715707ac300c05832acf469",
+    "concert_grand_real_surface.py": "42b86ed17942110d78b0f7806b21ac557e89628c4a61465ead02fe58d27534a8",
+    "concert_grand_streaming_air.py": "c90e961555007b301af7f0ceefac6e622808d0f446769c92475ea04b0d37fbe3",
+    "concert_grand_wave_mass.py": "158076e5be6bfc6c07b46a852ba420821cda413a631d5cae0230318297462a6a"
+  },
+  "modes": 606,
+  "states": 787194,
+  "array_estimate_bytes": 5431656416,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "contact": {
+    "rate": 768000,
+    "duration_s": 0.003,
+    "initial_mechanical_j": 0.024999999999999998,
+    "cases": [
+      {
+        "kernel": "reference",
+        "dynamics_s": 288.5548726001143,
+        "step_median_s": 0.12418050000269432,
+        "mechanical_final_j": 0.020056248858866543,
+        "relaxation_final_j": 7.505647632269444e-09,
+        "final_wave_norm": 0.007416244307170915,
+        "compression_final_m": -0.0038408757736659426,
+        "separation_bracket_s": [
+          0.0016341145833333333,
+          0.0016354166666666667
+        ],
+        "iterations_max": 5,
+        "full_tangent_fallbacks": 0,
+        "felt_loss_j": 0.004933869303865402,
+        "material_loss_j": 6.8987438370677705e-06,
+        "radiation_loss_j": 4.475970175165597e-10,
+        "air_port_work_j": 2.983093416682304e-06
+      },
+      {
+        "kernel": "batched",
+        "dynamics_s": 243.6341894001671,
+        "step_median_s": 0.10483744999510236,
+        "mechanical_final_j": 0.020056248858866543,
+        "relaxation_final_j": 7.505647632269442e-09,
+        "final_wave_norm": 0.007416244307170918,
+        "compression_final_m": -0.0038408757736659426,
+        "separation_bracket_s": [
+          0.0016341145833333333,
+          0.0016354166666666667
+        ],
+        "iterations_max": 5,
+        "full_tangent_fallbacks": 0,
+        "felt_loss_j": 0.004933869303865402,
+        "material_loss_j": 6.8987438370677705e-06,
+        "radiation_loss_j": 4.4759701751655993e-10,
+        "air_port_work_j": 2.983093416682303e-06
+      }
+    ],
+    "comparison": {
+      "maximum_live_state_relative": [
+        3.728109628544059e-18,
+        2.2692427163551957e-17,
+        1.056664112835802e-14,
+        1.0049399454252957e-14
+      ],
+      "maximum_section_input_relative": 6.752608591963482e-15,
+      "cumulative_work_difference_j": {
+        "felt_loss_j": 0.0,
+        "material_loss_j": 0.0,
+        "radiation_loss_j": 2.5849394142282115e-25,
+        "air_port_work_j": 8.470329472543003e-22
+      },
+      "dynamics_ratio_batched_over_reference": 0.8443253347442193
+    }
+  },
+  "frozen_contact_comparison": {
+    "mechanical_final_j": 0.0,
+    "relaxation_final_j": 0.0,
+    "final_wave_norm": 0.0,
+    "compression_final_m": 0.0,
+    "air_port_work_j": 1.6940658945086007e-20,
+    "felt_heat_j": 2.1304572689340165e-16,
+    "material_heat_j": 6.776263578034403e-20,
+    "relaxation_loss_j": 0.0
+  },
+  "coast": [
+    {
+      "rate": 64000,
+      "duration_s": 0.0005,
+      "cases": [
+        {
+          "kernel": "reference",
+          "dynamics_s": 4.086776700045448,
+          "step_median_s": 0.12164874999871245,
+          "mechanical_final_j": 0.02005039538207754,
+          "relaxation_final_j": 8.331678604931929e-09,
+          "final_wave_norm": 0.009217848106950385,
+          "compression_final_m": -0.004524815753315743,
+          "separation_bracket_s": null,
+          "iterations_max": 5,
+          "full_tangent_fallbacks": 0,
+          "felt_loss_j": 0.0,
+          "material_loss_j": 4.132507652050061e-06,
+          "radiation_loss_j": 1.7606611930583673e-10,
+          "air_port_work_j": 1.7209691372113577e-06
+        },
+        {
+          "kernel": "batched",
+          "dynamics_s": 3.3997810000000754,
+          "step_median_s": 0.10280940000666305,
+          "mechanical_final_j": 0.02005039538207754,
+          "relaxation_final_j": 8.331678604931929e-09,
+          "final_wave_norm": 0.009217848106950385,
+          "compression_final_m": -0.004524815753315743,
+          "separation_bracket_s": null,
+          "iterations_max": 5,
+          "full_tangent_fallbacks": 0,
+          "felt_loss_j": 0.0,
+          "material_loss_j": 4.132507652050061e-06,
+          "radiation_loss_j": 1.7606611930583675e-10,
+          "air_port_work_j": 1.7209691372113572e-06
+        }
+      ],
+      "comparison": {
+        "maximum_live_state_relative": [
+          1.0646345536334321e-18,
+          2.1339021345188704e-18,
+          7.627419216993776e-17,
+          2.892284659196934e-16
+        ],
+        "maximum_section_input_relative": 3.136796076087975e-17,
+        "cumulative_work_difference_j": {
+          "felt_loss_j": 0.0,
+          "material_loss_j": 0.0,
+          "radiation_loss_j": 2.5849394142282115e-26,
+          "air_port_work_j": 4.235164736271502e-22
+        },
+        "dynamics_ratio_batched_over_reference": 0.8318979111244976
+      },
+      "final_interface": {
+        "reaction_n": -4.1804314125621005,
+        "power_into_board_w": 0.02379955249208166,
+        "power_into_air_w": 0.0019510325901069847,
+        "force_residual": 1.482638672367561e-14,
+        "power_residual_w": -3.165870343657673e-17
+      }
+    },
+    {
+      "rate": 128000,
+      "duration_s": 0.0005,
+      "cases": [
+        {
+          "kernel": "reference",
+          "dynamics_s": 8.040166199978557,
+          "step_median_s": 0.12106060000223806,
+          "mechanical_final_j": 0.020050396097630423,
+          "relaxation_final_j": 8.328323149097537e-09,
+          "final_wave_norm": 0.009217799303616247,
+          "compression_final_m": -0.004524815752026801,
+          "separation_bracket_s": null,
+          "iterations_max": 4,
+          "full_tangent_fallbacks": 0,
+          "felt_loss_j": 0.0,
+          "material_loss_j": 4.132382984432182e-06,
+          "radiation_loss_j": 1.7596169156114943e-10,
+          "air_port_work_j": 1.7203782557753825e-06
+        },
+        {
+          "kernel": "batched",
+          "dynamics_s": 6.829926999940653,
+          "step_median_s": 0.10159139999450417,
+          "mechanical_final_j": 0.02005039609763043,
+          "relaxation_final_j": 8.328323149097546e-09,
+          "final_wave_norm": 0.009217799303616245,
+          "compression_final_m": -0.0045248157520268,
+          "separation_bracket_s": null,
+          "iterations_max": 4,
+          "full_tangent_fallbacks": 0,
+          "felt_loss_j": 0.0,
+          "material_loss_j": 4.132382984432183e-06,
+          "radiation_loss_j": 1.759616915611494e-10,
+          "air_port_work_j": 1.7203782557753825e-06
+        }
+      ],
+      "comparison": {
+        "maximum_live_state_relative": [
+          1.5959957783528522e-17,
+          3.357342858322351e-16,
+          6.686334633476825e-16,
+          1.2370148173879043e-15
+        ],
+        "maximum_section_input_relative": 3.108140071616543e-16,
+        "cumulative_work_difference_j": {
+          "felt_loss_j": 0.0,
+          "material_loss_j": 8.470329472543003e-22,
+          "radiation_loss_j": 2.5849394142282115e-26,
+          "air_port_work_j": 0.0
+        },
+        "dynamics_ratio_batched_over_reference": 0.8494758478946453
+      },
+      "final_interface": {
+        "reaction_n": -4.180359798037176,
+        "power_into_board_w": 0.023799150130427108,
+        "power_into_air_w": 0.001949909977091219,
+        "force_residual": 1.846096633776908e-14,
+        "power_residual_w": -2.1467203015212988e-17
+      }
+    },
+    {
+      "rate": 256000,
+      "duration_s": 0.0005,
+      "cases": [
+        {
+          "kernel": "reference",
+          "dynamics_s": 15.51299020004808,
+          "step_median_s": 0.11996709999220911,
+          "mechanical_final_j": 0.020050396276654083,
+          "relaxation_final_j": 8.327484399639607e-09,
+          "final_wave_norm": 0.009217787060771396,
+          "compression_final_m": -0.004524815753075084,
+          "separation_bracket_s": null,
+          "iterations_max": 3,
+          "full_tangent_fallbacks": 0,
+          "felt_loss_j": 0.0,
+          "material_loss_j": 4.132351810294162e-06,
+          "radiation_loss_j": 1.7593583544251314e-10,
+          "air_port_work_j": 1.720230407618945e-06
+        },
+        {
+          "kernel": "batched",
+          "dynamics_s": 12.998720500079799,
+          "step_median_s": 0.10037644999829354,
+          "mechanical_final_j": 0.020050396276654083,
+          "relaxation_final_j": 8.327484399639605e-09,
+          "final_wave_norm": 0.009217787060771396,
+          "compression_final_m": -0.004524815753075084,
+          "separation_bracket_s": null,
+          "iterations_max": 3,
+          "full_tangent_fallbacks": 0,
+          "felt_loss_j": 0.0,
+          "material_loss_j": 4.132351810294162e-06,
+          "radiation_loss_j": 1.759358354425131e-10,
+          "air_port_work_j": 1.7202304076189451e-06
+        }
+      ],
+      "comparison": {
+        "maximum_live_state_relative": [
+          5.97981618760222e-19,
+          3.241459660109154e-18,
+          8.406340371933322e-16,
+          2.5469976453737343e-16
+        ],
+        "maximum_section_input_relative": 3.965941163466499e-16,
+        "cumulative_work_difference_j": {
+          "felt_loss_j": 0.0,
+          "material_loss_j": 0.0,
+          "radiation_loss_j": 2.5849394142282115e-26,
+          "air_port_work_j": 2.117582368135751e-22
+        },
+        "dynamics_ratio_batched_over_reference": 0.8379248831111562
+      },
+      "final_interface": {
+        "reaction_n": -4.180288388388354,
+        "power_into_board_w": 0.023798936514079737,
+        "power_into_air_w": 0.0019496681224581806,
+        "force_residual": 1.938354589318513e-14,
+        "power_residual_w": -4.163336342344337e-17
+      }
+    }
+  ],
+  "coast_refinement": {
+    "capture_rate": 64000,
+    "rates": [
+      64000,
+      128000,
+      256000
+    ],
+    "board_position_velocity_relative_to_finest": [
+      2.092331487116245e-05,
+      6.721604314738628e-06
+    ],
+    "ratio": 0.3212494939796885
+  },
+  "preflight_gates": {
+    "frozen_contact": true,
+    "live_kernel_equivalence": true,
+    "section_input_equivalence": true,
+    "work_equivalence": true,
+    "finest_coast_board": true,
+    "second_order_coast": true,
+    "zero_coast_felt": true,
+    "passive_material_relaxation": true,
+    "source_unchanged": true
+  },
+  "preflight_gates_passed": true,
+  "next": "Independent coast angular storage/flux and two-microphone temporal pressure before rate selection; short board refinement is not audible-note or whole-piano approval."
+}

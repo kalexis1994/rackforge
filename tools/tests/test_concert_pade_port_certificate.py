@@ -9,7 +9,7 @@ from concert_grand_surface_impedance import RectangularLoad
 from concert_grand_streaming_air import SurfaceFactorBlocks,StreamingRationalAir
 from concert_grand_pade_air import FourthFactorBlocks,PadeAir
 from concert_grand_rational_air import RationalAir
-from concert_grand_pade_port_certificate import certificate_ports
+from concert_grand_pade_port_certificate import certificate_ports,replay_endpoints
 
 
 class PortCertificateTests(unittest.TestCase):
@@ -41,6 +41,7 @@ class PortCertificateTests(unittest.TestCase):
             expected_losses.append(loss)
             work.append(w)
         energies,losses,replay = certificate_ports(wave,np.array(states),segments,input_block=4)
+        np.testing.assert_array_equal(replay_endpoints(wave,np.array(states),segments),replay)
         self.assertLess(float(replay.max()),1e-11)
         for state,energy in zip(states,energies):
             self.assertAlmostEqual(energy,reference.energy(state),delta=1e-11*max(energy,1e-10))

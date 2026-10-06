@@ -14,9 +14,13 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--prefix-report',type=Path,required=True)
     p.add_argument('--report',type=Path,required=True)
+    p.add_argument('--force-report',type=Path)
+    p.add_argument('--capture-report',type=Path)
     a = p.parse_args()
     if a.report.exists():
         raise ValueError('new report required')
+    if (a.force_report is None)!=(a.capture_report is None):
+        raise ValueError('both linked force/capture controls required')
     parent = json.loads(a.prefix_report.read_text())
     if parent['stage'] != 'contact prefix audit completed':
         raise ValueError('finished independent prefix measurements required')
@@ -48,11 +52,58 @@ def main():
              preflight_only=True,all_gates_passed=False,
              scope='Independent storage, radiation, material/felt heat and port work in the short prefix. '
                    'No full wave-coordinate, pressure-waveform, separation or timbral accuracy claim.')
+    if a.force_report is not None:
+        force = json.loads(a.force_report.read_text())
+        capture = json.loads(a.capture_report.read_text())
+        if (force['cache_R_sha256']!=parent['cache_R_sha256']
+                or capture['cache_R_sha256']!=parent['cache_R_sha256']
+                or capture['stage']!='compact capture/replay preflight completed'
+                or capture['rates']!=parent['rates'] or capture['duration_s']!=parent['duration_s']
+                or capture['modes']!=parent['modes']
+                or not set(parent['parent_sha256'].values()).issubset(force['parent_sha256'].values())
+                or capture['parent_sha256']!=parent['parent_sha256']):
+            raise ValueError('linked controls use different frozen board/load/prefixes')
+        measured = {(row['phase'],row['rate']):row for row in parent['cases']}
+        observed = {(row['phase'],row['rate']):row for row in force['rows']}
+        captured = {(row['phase'],row['rate']):row for row in capture['cases']}
+        if (observed.keys()!=measured.keys() or captured.keys()!=measured.keys()
+                or len(observed)!=len(force['rows']) or len(captured)!=len(capture['cases'])):
+            raise ValueError('matching complete case sets required')
+        reproduced = []
+        for key,row in measured.items():
+            other,read = captured[key],observed[key]
+            for column in ['impulse_n_s','maximum_force_n','mechanical_final_j',
+                           'compression_final_m','final_wave_norm','relaxation_final_j']:
+                reproduced.append(abs(row[column]-other[column])/max(abs(row[column]),1e-30))
+            for column,field in [('impulse_n_s','impulse_n_s'),('maximum_force_n','interval_average_peak_force_n')]:
+                reproduced.append(abs(row[column]-read[field])/max(abs(row[column]),1e-30))
+            if other['common_force_n']!=read['common_force_n']:
+                raise ValueError('different force histories on the common timestamp grid')
+        if max(reproduced)>=1e-10:
+            raise ValueError('linked controls do not reproduce measured contact diagnostics')
+        r['shared_contact_diagnostics_relative_max'] = max(reproduced)
+        for path in [a.force_report,a.capture_report]:
+            r['parent_sha256'][str(path)] = digest(path)
+        r['original_prefix_gates'] = parent['prefix_gates']
+        # Retain the failed interval-average maximum. The new force gate uses
+        # the same tolerance at common physical timestamps, proven separately.
+        gates = {name:value for name,value in parent['prefix_gates'].items() if name!='finest_force'}
+        fine = [row for row in parent['comparisons'] if row['rate']==parent['rates'][-2]]
+        gates['finest_impulse'] = max(row['impulse_relative'] for row in fine)<.002
+        gates.update({'aligned_'+name:value for name,value in force['common_force_gates'].items()})
+        gates['independent_work_refinement'] = r['finest_pair_work_passed']
+        gates['compact_endpoint_replay'] = capture['compact_replay_passed']
+        r['linked_prefix_gates'] = gates
+        r['linked_prefix_gates_passed'] = all(gates.values())
+        r['replaced_observable'] = 'Only the interval-average AVF maximum is replaced by constitutive force '
+        r['replaced_observable'] += 'on common timestamps; original failed gate retained, 0.2% tolerance unchanged.'
     a.report.parent.mkdir(parents=True,exist_ok=True)
     a.report.write_text(json.dumps(r,indent=2,allow_nan=False),encoding='utf-8')
     print('work refinement',r['finest_pair_gates'],flush=True)
     for row in finest_pair:
         print(row['phase'],{name:item['relative'] for name,item in row['changes'].items()},flush=True)
+    if 'linked_prefix_gates' in r:
+        print('linked prefix controls',r['linked_prefix_gates'],flush=True)
 
 
 if __name__=='__main__':

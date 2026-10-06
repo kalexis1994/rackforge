@@ -66,7 +66,7 @@ Falta construir su carga recíproca antes de volver a escuchar el modelo complet
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Padé2/derivada cuarta con 128×384/128 kHz pasa masa, 83 frecuencias y tres puntos Laplace: Z/R/X máximos 0,667%/0,495%/0,921%, presión 0,124%. Integradores rápidos adaptados a dos estados y verificados en sistema pequeño. Faltan transitorios completos, identificación y ambas caras/borde. | Carga causal completa aprobada en la grilla armónica/Laplace; contacto completo pendiente |
+| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Padé2/derivada cuarta con 128×384/128 kHz pasa masa, 83 frecuencias y tres puntos Laplace: Z/R/X máximos 0,667%/0,495%/0,921%, presión 0,124%. Seis prefijos frío/continuado con 606 pasan energía independiente y refinamiento enlazados con fuerza en tiempos comunes. Captura desde puertos reconstruye exactamente memorias; certificado compacto completo pendiente. Faltan transitorios completos, identificación y ambas caras/borde. | Carga aprobada en grilla armónica/Laplace y prefijos de contacto; golpe/repetición/release completos pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1213,3 +1213,30 @@ límites realizados al nivel de redondeo. Tiempo 1654,188 s y pico 4,338 GiB.
 La puerta general sigue falsa: faltan contacto/repetición y release completos,
 coste/observer temporal e identificación antes de escuchar o integrar al plugin.
 Sin WAV ni paquete nuevo; informes únicos en el repo.
+
+### 2026-10-06 — P6: prefijos vivos de 606 y captura compacta
+
+La carga completa queda en **6253412**. Fuentes del primer auditor en
+**c47e746**; corrección de escritura, controles de fuerza y primera recurrencia
+de reconstrucción compacta en **d850ef7**. [Método y medidas](RESULTADOS-P6-contacto-orden2-prefijos.md).
+Se completan seis prefijos C4 supuestos, frío/continuado, a tres tasas.
+125+125 microsegundos; no se relanza el martillo ni se resetea memoria.
+
+La primera ejecución pierde las medidas finales por un booleano NumPy
+no serializable. Se conserva su construcción/contactos incompletos y se
+repite reutilizando una única R autenticada de 1,91 GB. Pasan balance
+independiente (máximo total 3,251251e−13), reacción y refinamiento de
+trayectoria/tabla/impulso y términos energéticos (< 0,014268% en el par fino).
+El máximo AVF frío falla 0,635430% porque promedia intervalos distintos;
+la fuerza constitutiva en tiempos comunes da 0,000242279%, con razón de
+refinamiento ~0,2. Se conserva el fallo original y pasan doce controles
+enlazados del prefijo. La radiación de onda es casi nula a esta duración;
+falta precisión de la cola no nula. Repetición 1844,820 s, pico 6,589 GiB.
+
+Cinco pruebas de certificado/caché/reconstrucción pasan. La captura real
+desde puertos reconstruye exactamente los seis extremos acústicos: 3,26 MB
+de historias frente a 2,12 GB, sin descartar modos. Pico propio 2,699 GiB;
+146,390 s junto al otro auditor. No es un benchmark aislado ni validación
+del certificado compacto completo. Siguiente: certificado y coste compactos
+con golpe completo/radiación no nula, repetición, release y presión temporal.
+La puerta global sigue falsa; no hay nuevo audio ni paquete en SHARED.

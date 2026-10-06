@@ -2576,6 +2576,31 @@ audit, not note-rendering cost or continuous-band/timbral approval. The
 release and pressure-observer validation before listening or factory use.
 No new audio or package is generated; the overall gate remains false.
 
+The subsequent [full-coordinate nonlinear prefix audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-contacto-orden2-prefijos.md)
+keeps all 606 board coordinates, mutual material losses and living two-state
+acoustic memories. Cold/continued C4 prefixes each last 125 microseconds at
+384/768/1536 kHz; continuation uses the same finest cold endpoint at every
+rate, without a hammer relaunch. The first report loses its final certificate
+to a NumPy-boolean JSON error; the corrected repeat uses the same authenticated
+R cache. Independent maximum total/air budget errors are 3.251251e-13/
+3.096184e-23, normalized by initial total energy. Mechanical, board, impulse
+and work/storage refinement pass. The original cold AVF maximum fails because
+its averages span different intervals. Constitutive force observed at common
+timestamps passes the unchanged 0.2% tolerance, with maximum fine-pair change
+0.000242279% and refinement ratio about 0.2. Twelve linked prefix controls
+pass; the original failed observable remains recorded. Wave radiation is
+below the 1e-14 J comparison floor, so this does not validate a nonzero
+radiated tail. Repeat time is 1844.820 s, peak 6.589 GiB.
+A compact observation path retains port velocities and endpoint memories,
+then replays all sections for each angular block. Two tests match independent
+stored-factor energy/radiation/work and reject inconsistent endpoints.
+Actual full-board capture reproduces all six acoustic endpoints exactly,
+storing 3.26 MB of histories instead of 2.12 GB; peak 2.699 GiB, measured
+alongside the other audit. This is capture/replay validation, not the complete
+compact certificate or an isolated speed benchmark. Full hammer separation,
+natural repetition, release, time pressure, actual-property identification
+and timbral/factory approval remain pending. No new audio/package is produced.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

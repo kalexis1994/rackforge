@@ -20,6 +20,7 @@ from concert_grand_streaming_air import SurfaceFactorBlocks, StreamingRationalAi
 from concert_grand_pade_air import FourthFactorBlocks, PadeAir, PadeBoundedAir
 from concert_grand_wave_cache import digest, save_wave_cache, load_wave_cache
 from concert_grand_pade_certificate import certificate_batch
+from concert_grand_pade_port_certificate import certificate_ports,replay_endpoints
 from concert_grand_moving_bridge import MovingBridge, BridgeHammer
 from concert_grand_nonlinear_string import Wire
 from concert_grand_coupled_contact import Felt
@@ -32,6 +33,13 @@ reference = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reference)
 
 
+def physical_force(system,state):
+    q,v = state[:2]
+    f = system.felt
+    return float(f.stiffness*max(system.compression(q),0.)**f.exponent*np.exp(
+        np.clip(f.rate_damping_s_per_m*float(system.direction@v),-40,40)))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ['full-report', 'board', 'cache', 'report']:
@@ -40,15 +48,20 @@ def main():
     p.add_argument('--duration', type=float, default=.000125)
     p.add_argument('--direction-block', type=int, default=32)
     p.add_argument('--max-array-gib', type=float, default=8.)
+    p.add_argument('--compact-certificate', action='store_true')
+    p.add_argument('--certificate-input-block', type=int, default=16)
+    p.add_argument('--replay-preflight-only', action='store_true')
     a = p.parse_args()
     if a.report.exists():
         raise ValueError('new report required')
+    if a.replay_preflight_only and not a.compact_certificate:
+        raise ValueError('replay preflight requires compact port capture')
     if (len(a.rates) < 2 or sorted(set(a.rates)) != a.rates or min(a.rates) <= 0
             or any(rate % min(a.rates) for rate in a.rates)
             or not np.isfinite(a.duration) or a.duration <= 0
             or any(abs(round(rate*a.duration)-rate*a.duration) > 1e-9 for rate in a.rates)):
         raise ValueError('nested increasing rates and exact positive duration required')
-    if not np.isfinite(a.max_array_gib) or a.max_array_gib <= 0:
+    if not np.isfinite(a.max_array_gib) or a.max_array_gib <= 0 or a.certificate_input_block < 1:
         raise ValueError('positive memory budget')
     cache_root = Path('local/concert-grand-physics').resolve()
     if not a.cache.resolve().is_relative_to(cache_root):
@@ -92,9 +105,12 @@ def main():
                     rate=approved['rate'], angular=approved['angular'], derivative='fourth', fold_y=True)
     budget = provider.budget(real_gram=True)
     max_bytes = int(a.max_array_gib*2**30)
-    inputs_bytes = 2*sum(round(rate*a.duration) for rate in a.rates)*provider.taps*n*8
+    port_bytes = 2*sum(round(rate*a.duration) for rate in a.rates)*n*8
+    section_bytes = port_bytes*provider.taps
+    inputs_bytes = port_bytes if a.compact_certificate else section_bytes
+    replay_chunk_bytes = a.certificate_input_block*provider.taps*n*8 if a.compact_certificate else 0
     # Conservative separate construction/certificate estimates, not an OS cap.
-    certificate_bytes = (budget['correlation_bytes']+inputs_bytes+2*shapes.nbytes
+    certificate_bytes = (budget['correlation_bytes']+inputs_bytes+replay_chunk_bytes+2*shapes.nbytes
                          +5*budget['factor_block_bytes']+32*provider.taps*n*16
                          +128*2**20)
     if max(budget['estimated_array_peak_bytes'], certificate_bytes) > max_bytes:
@@ -104,18 +120,22 @@ def main():
         'concert_grand_pade_midpoint.py', 'concert_grand_fast_contact.py',
         'concert_grand_bounded_contact.py', 'concert_grand_moving_bridge.py',
         'concert_grand_nonlinear_string.py', 'concert_grand_coupled_contact.py',
-        'concert_grand_surface_impedance.py'})
+        'concert_grand_surface_impedance.py','concert_grand_pade_port_certificate.py'})
     r = dict(parent_sha256={str(a.full_report): digest(a.full_report)}, board_sha256=digest(a.board),
              source_sha256={name: digest(Path(__file__).with_name(name)) for name in sources},
              cache=str(a.cache), rate_factor=provider.rate, angular=approved['angular'], cells=approved['cells'],
              modes=n, states=approved['states'], rates=a.rates, duration_s=a.duration,
              array_estimates=dict(construction=budget['estimated_array_peak_bytes'],
-                                  certificate=certificate_bytes, section_inputs=inputs_bytes,
+                                  certificate=certificate_bytes, histories=inputs_bytes,
+                                  full_section_inputs=section_bytes, compact_port_inputs=port_bytes,
+                                  replay_chunk=replay_chunk_bytes,
                                   maximum=max_bytes),
              criteria=dict(energy_relative=1e-9, interface_force_n=1e-9, interface_power_w=1e-9,
                            mechanical_trace_relative=.01, force_impulse_relative=.002,
                            finest_pair_state_relative=.01, refinement_ratio=.35,
                            cache_control_absolute=1e-10),
+             certificate_method='port replay' if a.compact_certificate else 'stored section inputs',
+             force_observation='Constitutive force on common captured timestamps; raw AVF peak retained',
              cases=[], stage='construction', preflight_only=True, all_gates_passed=False,
              contact_prefix_gates_passed=False,
              wire=dict(length=.62,linear_density=.0081,tension=850,transverse=3),
@@ -182,6 +202,7 @@ def main():
     traces = []
     final_states = []
     capture_rate = min(a.rates)
+    r['capture_rate'] = capture_rate
     r['stage'] = 'contact prefixes'
     checkpoint()
     for phase in ['Cold','Continued']:
@@ -195,8 +216,9 @@ def main():
             relaxation0 = air.relaxation.energy(state[3])
             parts0 = core.components(q0[:-1],v0[:-1])
             steps = round(rate*a.duration)
-            history = np.empty((steps,provider.taps,n))
+            history = np.empty((steps,n) if a.compact_certificate else (steps,provider.taps,n))
             trace = [np.r_[q0,v0]]
+            common_forces = [physical_force(system,state)]
             felt = material = relax = port = impulse = peak_force = 0.
             max_newton = 0
             begin = time.perf_counter()
@@ -206,7 +228,7 @@ def main():
                 step_start = time.perf_counter()
                 state, stats = coupled.step(state,1/rate,True)
                 step_seconds.append(time.perf_counter()-step_start)
-                history[i] = stats['wave_inputs']
+                history[i] = stats['wave_inputs'][0] if a.compact_certificate else stats['wave_inputs']
                 felt += stats['felt_loss_j']
                 material += stats['material_loss_j']
                 relax += stats['radiation_loss_j']
@@ -217,6 +239,7 @@ def main():
                 min_heat = min(min_heat,stats['felt_loss_j'],stats['material_loss_j'],stats['radiation_loss_j'])
                 if (i+1)%(rate//capture_rate) == 0:
                     trace.append(np.r_[state[0],state[1]])
+                    common_forces.append(physical_force(system,state))
                 if (i+1)%max(1,steps//4) == 0:
                     print('contact',phase,rate,i+1,steps,'seconds',round(time.perf_counter()-begin,3),flush=True)
             interface = coupled.interface(state)
@@ -231,6 +254,7 @@ def main():
                        initial_wave_norm=float(np.linalg.norm(live[2])), final_wave_norm=float(np.linalg.norm(state[2])),
                        felt_heat_j=felt,material_heat_j=material,relaxation_loss_j=relax,air_port_work_j=port,
                        impulse_n_s=impulse,maximum_force_n=peak_force,minimum_step_heat_j=min_heat,
+                       common_force_n=common_forces,maximum_common_force_n=max(common_forces),
                        newton_iterations_max=max_newton,compression_final_m=system.compression(state[0]),
                        interface=interface,certificate_before_index=before_index,certificate_after_index=after_index)
             r['cases'].append(row)
@@ -240,9 +264,33 @@ def main():
             checkpoint()
     r['stage'] = 'independent storage/radiation certificate'
     checkpoint()
+    segments = None
+    if a.compact_certificate:
+        segments = [dict(initial_index=row['certificate_before_index'],final_index=row['certificate_after_index'],
+                         dt=1/row['rate'],velocity=history) for row,history in zip(r['cases'],inputs)]
+        replay = replay_endpoints(air_wave,np.array(certificates),segments)
+        r['certificate_replay_relative'] = replay.tolist()
+        r['compact_replay_passed'] = bool(max(replay)<1e-11)
+        r['captured_port_history_bytes'] = sum(history.nbytes for history in inputs)
+        if not r['compact_replay_passed']:
+            r['stage'] = 'rejected compact endpoint replay'
+            checkpoint()
+            raise AssertionError('compact histories differ from contact memories')
+        if a.replay_preflight_only:
+            r['stage'] = 'compact capture/replay preflight completed'
+            r['scope'] += ' This run stops before independent storage/radiation: no energy gate approval.'
+            checkpoint()
+            print('compact capture/replay passed',r['certificate_replay_relative'],r['seconds'],flush=True)
+            return
     certificate_start = time.perf_counter()
-    energies, losses = certificate_batch(provider,np.array(certificates),inputs,
-                                        progress=lambda i:print('certificate block',i,flush=True) if i%16==0 else None)
+    progress = lambda i:print('certificate block',i,flush=True) if i%16==0 else None
+    if a.compact_certificate:
+        energies,losses,replay = certificate_ports(air_wave,np.array(certificates),segments,
+                                                 progress=progress,input_block=a.certificate_input_block)
+        r['certificate_replay_relative'] = replay.tolist()
+    else:
+        energies, losses = certificate_batch(provider,np.array(certificates),inputs,
+                                            progress=progress,input_block=a.certificate_input_block)
     r['certificate_seconds'] = time.perf_counter()-certificate_start
     for row, power in zip(r['cases'],losses):
         row['wave_initial_j'] = float(energies[row['certificate_before_index']])
@@ -264,6 +312,7 @@ def main():
         first = phase_index*len(a.rates)
         finest = first+len(a.rates)-1
         errors = []
+        force_errors = []
         for index in range(first,finest):
             row, best = r['cases'][index],r['cases'][finest]
             mechanical_error = reference.relative(traces[index],traces[finest])
@@ -274,12 +323,19 @@ def main():
             end_error = max(reference.relative(bq,eq),reference.relative(bv,ev))
             impulse_error = abs(row['impulse_n_s']-best['impulse_n_s'])/max(abs(best['impulse_n_s']),1e-30)
             force_error = abs(row['maximum_force_n']-best['maximum_force_n'])/max(abs(best['maximum_force_n']),1e-30)
+            common_peak_error = abs(row['maximum_common_force_n']-best['maximum_common_force_n'])/max(
+                abs(best['maximum_common_force_n']),1e-30)
+            common_force_error = reference.relative(np.array(row['common_force_n']),np.array(best['common_force_n']))
             errors.append(mechanical_error)
+            force_errors.append(common_force_error)
             r['comparisons'].append(dict(phase=phase,rate=row['rate'],reference_rate=best['rate'],
                                         mechanical_trace_relative=mechanical_error,board_endpoint_relative=end_error,
                                         impulse_relative=impulse_error,peak_force_relative=force_error))
+            r['comparisons'][-1].update(common_peak_force_relative=common_peak_error,
+                                       common_force_trace_relative=common_force_error)
         # A finite finest reference gives approximately 0.2 for second-order error.
         r.setdefault('refinement_ratios',{})[phase] = float(errors[-1]/max(errors[-2],1e-30)) if len(errors)>=2 else None
+        r.setdefault('force_refinement_ratios',{})[phase] = float(force_errors[-1]/max(force_errors[-2],1e-30)) if len(force_errors)>=2 else None
     fine = [row for row in r['comparisons'] if row['rate'] == a.rates[-2]]
     r['prefix_gates'] = dict(
         independent_energy=max(max(row['total_budget_relative'],row['air_budget_relative']) for row in r['cases']) < 1e-9,
@@ -288,8 +344,13 @@ def main():
                   and max(abs(row['interface']['power_residual_w']) for row in r['cases'])<1e-9,
         finest_mechanics=max(row['mechanical_trace_relative'] for row in fine)<.01,
         finest_board=max(row['board_endpoint_relative'] for row in fine)<.01,
-        finest_force=max(max(row['impulse_relative'],row['peak_force_relative']) for row in fine)<.002,
+        finest_force=max(max(row['impulse_relative'],row['common_peak_force_relative'],
+                             row['common_force_trace_relative']) for row in fine)<.002,
         second_order=len(a.rates)>=3 and all(value is not None and value<.35 for value in r['refinement_ratios'].values()))
+    r['prefix_gates']['second_order_force'] = len(a.rates)>=3 and all(
+        value is not None and value<.35 for value in r['force_refinement_ratios'].values())
+    if a.compact_certificate:
+        r['prefix_gates']['replayed_memories'] = max(r['certificate_replay_relative'])<1e-11
     r['prefix_gates'] = {name:bool(value) for name,value in r['prefix_gates'].items()}
     r['contact_prefix_gates_passed'] = all(r['prefix_gates'].values())
     r['stage'] = 'contact prefix audit completed'

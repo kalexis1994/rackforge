@@ -1,0 +1,23 @@
+{
+  "source_commit": "c47e746",
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-orden2\\prefijos125us.json": "c974664e73e051ab3a855e78e161dc5b9bd17c1493cc3b7d74e18b646080a790",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-aire-bloques\\carga128-pade2.json": "8a13401561448f4e573cfb463ff9d12294d70a4a680b914a48458fd1e6603a6e"
+  },
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "attestation": {
+    "previous_manifest_sha256": "e0c7c18d588cbcfa38c1ee8412e1881d1510bac4d50d596d341a51fa92800d05",
+    "measured_report_sha256": "c974664e73e051ab3a855e78e161dc5b9bd17c1493cc3b7d74e18b646080a790",
+    "construction_only": true,
+    "measurement_stage": "independent storage/radiation certificate"
+  },
+  "provider_signature_checked": true,
+  "correlation_bytes_unchanged": true,
+  "source_sha256": {
+    "attest-concert-grand-wave-cache.py": "d7dd715f2a77f309e507a030fb2c37fa89ec46e465f8d4cdb30245a671e5fc75",
+    "concert_grand_wave_cache.py": "448c82b2544a1af8527c19f7f0184f28c762def11ba8ac805f41031e5c49e20a"
+  },
+  "scope": "Explicit provider binding of this session legacy cache only; no numerical or timbral change."
+}

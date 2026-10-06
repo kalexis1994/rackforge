@@ -1,0 +1,278 @@
+{
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-orden2\\prefijos125us-repetido.json": "18176d86f1c1068b738c8fae30730f87ba8765ff7616fd6be0282d684133367c",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-orden2\\fuerza-tiempo-comun.json": "78ca113ffc43439677f2f5c6ae1859cf1db528ba4a53a0a0a5cbb51e5d6b40fe",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-orden2\\captura-puertos.json": "6f5cdfcd134a524b9f552d17eddf8ea79f379ac8517cda72b169993da7c02f5e"
+  },
+  "criteria": {
+    "energy_work_relative": 0.002,
+    "near_zero_j": 1e-14
+  },
+  "rows": [
+    {
+      "phase": "Cold",
+      "rate": 384000,
+      "reference_rate": 1536000,
+      "changes": {
+        "wave_final_j": {
+          "reference_j": 3.097115852496504e-13,
+          "absolute_error_j": 1.133447878341898e-16,
+          "relative": 0.0003659688343360663,
+          "near_zero": false,
+          "passed": true
+        },
+        "relaxation_final_j": {
+          "reference_j": 3.07143978479407e-14,
+          "absolute_error_j": 1.2709340793479966e-17,
+          "relative": 0.0004137909802562542,
+          "near_zero": false,
+          "passed": true
+        },
+        "wave_radiation_j": {
+          "reference_j": 8.582713152677263e-30,
+          "absolute_error_j": 5.511464982062643e-30,
+          "relative": 5.511464982062643e-16,
+          "near_zero": true,
+          "passed": true
+        },
+        "relaxation_loss_j": {
+          "reference_j": 3.3070526679358455e-15,
+          "absolute_error_j": 3.0589779784949033e-18,
+          "relative": 0.0003058977978494903,
+          "near_zero": true,
+          "passed": true
+        },
+        "felt_heat_j": {
+          "reference_j": 0.0003710687743869949,
+          "absolute_error_j": 6.341172623504452e-09,
+          "relative": 1.708894162269531e-05,
+          "near_zero": false,
+          "passed": true
+        },
+        "material_heat_j": {
+          "reference_j": 2.5903923289478808e-11,
+          "absolute_error_j": 1.848093396014466e-14,
+          "relative": 0.0007134415028032035,
+          "near_zero": false,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "reference_j": 3.4373303576552497e-13,
+          "absolute_error_j": 1.2911310660345413e-16,
+          "relative": 0.00037562030171440293,
+          "near_zero": false,
+          "passed": true
+        }
+      },
+      "passed": true
+    },
+    {
+      "phase": "Cold",
+      "rate": 768000,
+      "reference_rate": 1536000,
+      "changes": {
+        "wave_final_j": {
+          "reference_j": 3.097115852496504e-13,
+          "absolute_error_j": 2.2772091053142514e-17,
+          "relative": 7.352676534455928e-05,
+          "near_zero": false,
+          "passed": true
+        },
+        "relaxation_final_j": {
+          "reference_j": 3.07143978479407e-14,
+          "absolute_error_j": 2.539613796189885e-18,
+          "relative": 8.268479847017928e-05,
+          "near_zero": false,
+          "passed": true
+        },
+        "wave_radiation_j": {
+          "reference_j": 8.582713152677263e-30,
+          "absolute_error_j": 5.250547474276854e-30,
+          "relative": 5.250547474276854e-16,
+          "near_zero": true,
+          "passed": true
+        },
+        "relaxation_loss_j": {
+          "reference_j": 3.3070526679358455e-15,
+          "absolute_error_j": 6.108134178243551e-19,
+          "relative": 6.10813417824355e-05,
+          "near_zero": true,
+          "passed": true
+        },
+        "felt_heat_j": {
+          "reference_j": 0.0003710687743869949,
+          "absolute_error_j": 1.2683146730671328e-09,
+          "relative": 3.4180043178313425e-06,
+          "near_zero": false,
+          "passed": true
+        },
+        "material_heat_j": {
+          "reference_j": 2.5903923289478808e-11,
+          "absolute_error_j": 3.6957765010856865e-15,
+          "relative": 0.00014267246161073875,
+          "near_zero": false,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "reference_j": 3.4373303576552497e-13,
+          "absolute_error_j": 2.5922518265928892e-17,
+          "relative": 7.54146839805405e-05,
+          "near_zero": false,
+          "passed": true
+        }
+      },
+      "passed": true
+    },
+    {
+      "phase": "Continued",
+      "rate": 384000,
+      "reference_rate": 1536000,
+      "changes": {
+        "wave_final_j": {
+          "reference_j": 6.688344560072124e-11,
+          "absolute_error_j": 1.5223904154607765e-14,
+          "relative": 0.0002276184191450148,
+          "near_zero": false,
+          "passed": true
+        },
+        "relaxation_final_j": {
+          "reference_j": 3.0453187783324024e-12,
+          "absolute_error_j": 5.94521376030746e-16,
+          "relative": 0.00019522467738379172,
+          "near_zero": false,
+          "passed": true
+        },
+        "wave_radiation_j": {
+          "reference_j": 1.7381784087801535e-26,
+          "absolute_error_j": 2.824760023981005e-27,
+          "relative": 2.8247600239810054e-13,
+          "near_zero": true,
+          "passed": true
+        },
+        "relaxation_loss_j": {
+          "reference_j": 1.5246316725609485e-13,
+          "absolute_error_j": 5.207665446666343e-17,
+          "relative": 0.00034156875659804067,
+          "near_zero": false,
+          "passed": true
+        },
+        "felt_heat_j": {
+          "reference_j": 0.002155954794524245,
+          "absolute_error_j": 4.4607831730519854e-08,
+          "relative": 2.0690522752989113e-05,
+          "near_zero": false,
+          "passed": true
+        },
+        "material_heat_j": {
+          "reference_j": 1.2997146944346373e-09,
+          "absolute_error_j": 3.7543726027990085e-13,
+          "relative": 0.00028886128770223087,
+          "near_zero": false,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "reference_j": 6.974080156321141e-11,
+          "absolute_error_j": 1.5870502184035807e-14,
+          "relative": 0.00022756409201364226,
+          "near_zero": false,
+          "passed": true
+        }
+      },
+      "passed": true
+    },
+    {
+      "phase": "Continued",
+      "rate": 768000,
+      "reference_rate": 1536000,
+      "changes": {
+        "wave_final_j": {
+          "reference_j": 6.688344560072124e-11,
+          "absolute_error_j": 3.0458565499897953e-15,
+          "relative": 4.5539767316607116e-05,
+          "near_zero": false,
+          "passed": true
+        },
+        "relaxation_final_j": {
+          "reference_j": 3.0453187783324024e-12,
+          "absolute_error_j": 1.1889535448458793e-16,
+          "relative": 3.904200615401396e-05,
+          "near_zero": false,
+          "passed": true
+        },
+        "wave_radiation_j": {
+          "reference_j": 1.7381784087801535e-26,
+          "absolute_error_j": 2.0956562461400372e-27,
+          "relative": 2.0956562461400373e-13,
+          "near_zero": true,
+          "passed": true
+        },
+        "relaxation_loss_j": {
+          "reference_j": 1.5246316725609485e-13,
+          "absolute_error_j": 1.0414331939850889e-17,
+          "relative": 6.830719922247034e-05,
+          "near_zero": false,
+          "passed": true
+        },
+        "felt_heat_j": {
+          "reference_j": 0.002155954794524245,
+          "absolute_error_j": 8.922294649198886e-09,
+          "relative": 4.138442360600502e-06,
+          "near_zero": false,
+          "passed": true
+        },
+        "material_heat_j": {
+          "reference_j": 1.2997146944346373e-09,
+          "absolute_error_j": 7.510779989002498e-14,
+          "relative": 5.7787913156353214e-05,
+          "near_zero": false,
+          "passed": true
+        },
+        "air_port_work_j": {
+          "reference_j": 6.974080156321141e-11,
+          "absolute_error_j": 3.1751662359196625e-15,
+          "relative": 4.55281006921288e-05,
+          "near_zero": false,
+          "passed": true
+        }
+      },
+      "passed": true
+    }
+  ],
+  "finest_pair_gates": {
+    "Cold": true,
+    "Continued": true
+  },
+  "finest_pair_work_passed": true,
+  "source_sha256": {
+    "audit-concert-grand-prefix-work-refinement.py": "f0b0356dbf1b75c6b145cc8f3a4e8b44deb38883c279a63820017035d88a40b7"
+  },
+  "preflight_only": true,
+  "all_gates_passed": false,
+  "scope": "Independent storage, radiation, material/felt heat and port work in the short prefix. No full wave-coordinate, pressure-waveform, separation or timbral accuracy claim.",
+  "shared_contact_diagnostics_relative_max": 0.0,
+  "original_prefix_gates": {
+    "independent_energy": true,
+    "nonnegative_loss": true,
+    "interface": true,
+    "finest_mechanics": true,
+    "finest_board": true,
+    "finest_force": false,
+    "second_order": true
+  },
+  "linked_prefix_gates": {
+    "independent_energy": true,
+    "nonnegative_loss": true,
+    "interface": true,
+    "finest_mechanics": true,
+    "finest_board": true,
+    "second_order": true,
+    "finest_impulse": true,
+    "aligned_common_force_trace": true,
+    "aligned_common_peak": true,
+    "aligned_second_order": true,
+    "independent_work_refinement": true,
+    "compact_endpoint_replay": true
+  },
+  "linked_prefix_gates_passed": true,
+  "replaced_observable": "Only the interval-average AVF maximum is replaced by constitutive force on common timestamps; original failed gate retained, 0.2% tolerance unchanged."
+}

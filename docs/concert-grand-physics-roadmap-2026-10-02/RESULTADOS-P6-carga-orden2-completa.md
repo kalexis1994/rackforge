@@ -162,6 +162,12 @@ P2 siguen siendo supuestas, no identificadas a partir del Steinway.
 
 ## Siguiente etapa
 
+La carga armónica y los integradores quedan congelados en **6253412**.
+La [etapa de prefijos no lineales completos en coordenadas](RESULTADOS-P6-contacto-orden2-prefijos.md)
+conserva los 606 modos y memoria viva; sus controles enlazados pasan.
+Ese alcance de 125+125 microsegundos no cierra el golpe, la repetición,
+el release ni la observación audible pendientes a continuación.
+
 1. Contacto frío y repetido con los 606 modos, las pérdidas completas y los
    dos estados acústicos persistentes; reacción, energía y refinamiento de paso.
 2. Reducir el coste del certificado por bloques conservando exactamente el

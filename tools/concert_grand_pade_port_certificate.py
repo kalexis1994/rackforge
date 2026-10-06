@@ -9,6 +9,21 @@ from scipy.fft import rfft, irfft, next_fast_len
 from concert_grand_pade_midpoint import PadeMidpoint
 
 
+def replay_endpoints(wave,states,segments):
+    """Check compact histories against recorded endpoints before field work."""
+    errors = []
+    for segment in segments:
+        initial = wave.validate(states[segment['initial_index']])
+        final = wave.validate(states[segment['final_index']])
+        state = initial.copy()
+        plan = PadeMidpoint(wave,segment['dt'])
+        for velocity in segment['velocity']:
+            state,_ = plan.update(state,velocity)
+        errors.append(float(np.linalg.norm(state-final)/max(
+            np.linalg.norm(initial),np.linalg.norm(final),1e-30)))
+    return np.array(errors)
+
+
 def certificate_ports(wave, states, segments, progress=None, input_block=16):
     provider = wave.base.provider
     states = np.asarray(states,dtype=float)

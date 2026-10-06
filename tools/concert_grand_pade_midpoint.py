@@ -11,11 +11,14 @@ from concert_grand_pade_air import PadeAir
 
 
 class PadeMidpoint:
-    def __init__(self, wave, dt):
+    def __init__(self, wave, dt, residue_kernel='batched'):
         if not isinstance(wave, PadeAir):
             raise ValueError('two-state Pade wave required')
         if not np.isfinite(dt) or dt <= 0:
             raise ValueError('positive finite time step')
+        if residue_kernel not in ('batched', 'reference'):
+            raise ValueError('known full residue contraction required')
+        self.residue_kernel = residue_kernel
         self.wave = wave
         self.dt = float(dt)
         self.h = dt * wave.rate / 2
@@ -31,7 +34,13 @@ class PadeMidpoint:
     def constant(self, state):
         offsets = self.offsets(state)
         # No modal-by-(sections*modal) copy of the full correlation tensor.
-        force = np.einsum('kmn,kn->m', self.wave.R[1:], offsets, optimize=False)
+        if self.residue_kernel == 'reference':
+            force = np.einsum('kmn,kn->m', self.wave.R[1:], offsets, optimize=False)
+        else:
+            # Batched BLAS matrix/vector products read the original contiguous
+            # section matrices. Only (sections, modes) outputs are allocated;
+            # no transposed modal-by-section copy of R and no modal reduction.
+            force = np.matmul(self.wave.R[1:], offsets[:, :, None])[:, :, 0].sum(axis=0)
         return force, offsets
 
     def update(self, state, velocity, offsets=None):

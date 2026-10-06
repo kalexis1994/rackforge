@@ -41,6 +41,91 @@ def physical_force(system,state):
         np.clip(f.rate_damping_s_per_m*float(system.direction@v),-40,40)))
 
 
+def prepare_reference(a):
+    """Shared frozen full surface/board preparation for numerical audits."""
+    approved = json.loads(a.full_report.read_text())
+    if not approved['harmonic_gates_passed'] or not all(approved['harmonic_gates'].values()):
+        raise ValueError('approved full-coordinate harmonic load required')
+    if digest(a.board) != approved['board_sha256']:
+        raise ValueError('changed projected board')
+    for name, sha in approved['source_sha256'].items():
+        if digest(Path(__file__).with_name(name)) != sha:
+            raise ValueError('changed physical construction source: '+name)
+    for path, sha in approved['parent_sha256'].items():
+        if digest(path) != sha:
+            raise ValueError('changed frozen parent: '+path)
+    with np.load(a.board) as d:
+        mechanical = {name: d[name] for name in [
+            'frequency', 'low_count', 'tail_mass', 'tail_stiffness', 'tail_damping', 'low_damping']}
+        geometry = dict(panel=json.loads(str(d['panel'])), boundary=str(d['boundary']),
+                        nx=int(d['nx']), ny=int(d['ny']), vectors=d['ritz_vectors'])
+        notes = d['test_notes'].tolist()
+    modal = ModalSupportMap.from_matrices(*projected_matrices(mechanical))
+    xs = geometry['panel']['length']*(.1+.8*(np.array(notes)-21)/87)
+    source_B = plate.shape(geometry, xs, np.full(len(xs), geometry['panel']['width']/2)).T
+    geometry['vectors'] = geometry['vectors'] @ modal.basis
+    surface = RealArithmeticSurface(geometry, approved['cells'])
+    n = surface.modes
+    if n != approved['modes'] or notes != approved['notes']:
+        raise ValueError('unchanged full board and ports required')
+    del geometry, mechanical
+    shapes = surface.forward(np.eye(n))
+    plain = SimpleNamespace(shapes=shapes, modes=n, nx=surface.nx, ny=surface.ny,
+                            hx=surface.hx, hy=surface.hy, length=surface.length,
+                            width=surface.width, density=surface.density, speed=surface.speed)
+    provider = FourthFactorBlocks(SurfaceFactorBlocks(
+        plain, approved['rate'], *approved['angular'], a.direction_block, fold_y=True))
+    identity = dict(format=1, board_sha256=digest(a.board), full_report_sha256=digest(a.full_report),
+                    physical_source_sha256=approved['source_sha256'], cells=approved['cells'],
+                    rate=approved['rate'], angular=approved['angular'], derivative='fourth', fold_y=True)
+    return approved,modal,source_B,notes,surface,provider,identity,shapes
+
+
+def construct_air(a,approved,provider,surface,identity,max_bytes,r,checkpoint):
+    """Authenticate the single cache and repeat frozen load controls."""
+    if a.cache.exists():
+        wave, metadata = load_wave_cache(a.cache, provider, identity)
+        r['cache_reused'] = True
+    else:
+        wave = StreamingRationalAir(provider, max_bytes, real_gram=True,
+                                   progress=lambda i: print('wave block', i, flush=True) if i%16 == 0 else None)
+        r['cache_reused'] = False
+        metadata = None
+    air_wave = PadeAir(wave)
+    target = reference.direct_matrix(surface, 0).real
+    target = (target+target.T)/2
+    limit = surface.density*surface.speed*surface.hx*surface.hy*(provider.shapes.T @ provider.shapes)
+    air = PadeBoundedAir(air_wave, target, limit)
+    residue = target-air_wave.static_mass()
+    eig = np.linalg.eigvalsh((residue+residue.T)/2)
+    mass_error = max(abs(eig.min()-approved['mass_residual_minimum']),
+                     abs(eig.max()-approved['mass_residual_maximum']))/approved['mass_residual_maximum']
+    r['cache_mass_control_relative'] = float(mass_error)
+    r['cache_transfer_controls'] = []
+    for old in approved['rows']:
+        hz = old['frequency_hz']
+        if hz not in [60.,1881.9607122235952,6000.]:
+            continue
+        s = 2j*np.pi*hz
+        z = air.impedance(s)
+        exact = reference.direct_matrix(surface, s)
+        errors = [reference.relative(z, exact), reference.relative(z.real, exact.real),
+                  reference.relative(z.imag, exact.imag)]
+        delta = max(abs(new-prior) for new, prior in zip(errors, old['impedance_ZRX_relative']))
+        r['cache_transfer_controls'].append(dict(hz=hz, impedance_ZRX_relative=errors,
+                                                 frozen_error_absolute=float(delta)))
+    if mass_error >= 1e-10 or max(row['frozen_error_absolute'] for row in r['cache_transfer_controls']) >= 1e-10:
+        r['stage'] = 'rejected construction equivalence'
+        checkpoint()
+        raise AssertionError('cache candidate differs from approved full load')
+    if metadata is None:
+        metadata = save_wave_cache(a.cache, wave, identity)
+    r['cache_R_sha256'] = metadata['R_sha256']
+    r['cache_R_bytes'] = (a.cache/'R.npy').stat().st_size
+    print('cache verified', r['cache_R_sha256'], flush=True)
+    return wave,air_wave,air
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ['full-report', 'board', 'cache', 'report']:
@@ -81,41 +166,8 @@ def main():
         raise ValueError('one cache under local/concert-grand-physics required')
     clock = time.get_clock_info('perf_counter')
     start = time.perf_counter()
-    approved = json.loads(a.full_report.read_text())
-    if not approved['harmonic_gates_passed'] or not all(approved['harmonic_gates'].values()):
-        raise ValueError('approved full-coordinate harmonic load required')
-    if digest(a.board) != approved['board_sha256']:
-        raise ValueError('changed projected board')
-    for name, sha in approved['source_sha256'].items():
-        if digest(Path(__file__).with_name(name)) != sha:
-            raise ValueError('changed physical construction source: '+name)
-    for path, sha in approved['parent_sha256'].items():
-        if digest(path) != sha:
-            raise ValueError('changed frozen parent: '+path)
-    with np.load(a.board) as d:
-        mechanical = {name: d[name] for name in [
-            'frequency', 'low_count', 'tail_mass', 'tail_stiffness', 'tail_damping', 'low_damping']}
-        geometry = dict(panel=json.loads(str(d['panel'])), boundary=str(d['boundary']),
-                        nx=int(d['nx']), ny=int(d['ny']), vectors=d['ritz_vectors'])
-        notes = d['test_notes'].tolist()
-    modal = ModalSupportMap.from_matrices(*projected_matrices(mechanical))
-    xs = geometry['panel']['length']*(.1+.8*(np.array(notes)-21)/87)
-    source_B = plate.shape(geometry, xs, np.full(len(xs), geometry['panel']['width']/2)).T
-    geometry['vectors'] = geometry['vectors'] @ modal.basis
-    surface = RealArithmeticSurface(geometry, approved['cells'])
+    approved,modal,source_B,notes,surface,provider,identity,shapes = prepare_reference(a)
     n = surface.modes
-    if n != approved['modes'] or notes != approved['notes']:
-        raise ValueError('unchanged full board and ports required')
-    del geometry, mechanical
-    shapes = surface.forward(np.eye(n))
-    plain = SimpleNamespace(shapes=shapes, modes=n, nx=surface.nx, ny=surface.ny,
-                            hx=surface.hx, hy=surface.hy, length=surface.length,
-                            width=surface.width, density=surface.density, speed=surface.speed)
-    provider = FourthFactorBlocks(SurfaceFactorBlocks(
-        plain, approved['rate'], *approved['angular'], a.direction_block, fold_y=True))
-    identity = dict(format=1, board_sha256=digest(a.board), full_report_sha256=digest(a.full_report),
-                    physical_source_sha256=approved['source_sha256'], cells=approved['cells'],
-                    rate=approved['rate'], angular=approved['angular'], derivative='fourth', fold_y=True)
     budget = provider.budget(real_gram=True)
     max_bytes = int(a.max_array_gib*2**30)
     port_bytes = len(phases)*sum(round(rate*a.duration) for rate in a.rates)*n*8
@@ -172,46 +224,7 @@ def main():
 
     checkpoint()
     print('array estimates', json.dumps(r['array_estimates']), flush=True)
-    if a.cache.exists():
-        wave, metadata = load_wave_cache(a.cache, provider, identity)
-        r['cache_reused'] = True
-    else:
-        wave = StreamingRationalAir(provider, max_bytes, real_gram=True,
-                                   progress=lambda i: print('wave block', i, flush=True) if i%16 == 0 else None)
-        r['cache_reused'] = False
-        metadata = None
-    air_wave = PadeAir(wave)
-    target = reference.direct_matrix(surface, 0).real
-    target = (target+target.T)/2
-    limit = surface.density*surface.speed*surface.hx*surface.hy*(provider.shapes.T @ provider.shapes)
-    air = PadeBoundedAir(air_wave, target, limit)
-    residue = target-air_wave.static_mass()
-    eig = np.linalg.eigvalsh((residue+residue.T)/2)
-    mass_error = max(abs(eig.min()-approved['mass_residual_minimum']),
-                     abs(eig.max()-approved['mass_residual_maximum']))/approved['mass_residual_maximum']
-    r['cache_mass_control_relative'] = float(mass_error)
-    r['cache_transfer_controls'] = []
-    for old in approved['rows']:
-        hz = old['frequency_hz']
-        if hz not in [60.,1881.9607122235952,6000.]:
-            continue
-        s = 2j*np.pi*hz
-        z = air.impedance(s)
-        exact = reference.direct_matrix(surface, s)
-        errors = [reference.relative(z, exact), reference.relative(z.real, exact.real),
-                  reference.relative(z.imag, exact.imag)]
-        delta = max(abs(new-prior) for new, prior in zip(errors, old['impedance_ZRX_relative']))
-        r['cache_transfer_controls'].append(dict(hz=hz, impedance_ZRX_relative=errors,
-                                                 frozen_error_absolute=float(delta)))
-    if mass_error >= 1e-10 or max(row['frozen_error_absolute'] for row in r['cache_transfer_controls']) >= 1e-10:
-        r['stage'] = 'rejected construction equivalence'
-        checkpoint()
-        raise AssertionError('cache candidate differs from approved full load')
-    if metadata is None:
-        metadata = save_wave_cache(a.cache, wave, identity)
-    r['cache_R_sha256'] = metadata['R_sha256']
-    r['cache_R_bytes'] = (a.cache/'R.npy').stat().st_size
-    print('cache verified', r['cache_R_sha256'], flush=True)
+    wave,air_wave,air = construct_air(a,approved,provider,surface,identity,max_bytes,r,checkpoint)
     core = MovingBridge(Wire(.62,.0081,850), modal.support(source_B[:,notes.index(60)]), transverse=3)
     system = BridgeHammer(core, Felt(.002,7.5e8,2.6,.125,.02,.1))
     coupled = FastBoundedContact(system, air)

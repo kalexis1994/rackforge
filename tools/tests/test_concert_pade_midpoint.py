@@ -60,6 +60,27 @@ class PadeMidpointTests(unittest.TestCase):
             self.assertLess(abs(energy1-energy0+loss-work)
                             / max(energy0, energy1, loss, abs(work)), 2e-11)
 
+    def test_residue_kernels_keep_live_force_and_memory(self):
+        rng = np.random.default_rng(61106)
+        H = rng.normal(size=(18, 6, 5))
+        H = np.diff(np.concatenate((np.zeros_like(H[:1]), H, np.zeros_like(H[:1]))), axis=0)
+        H[:, 1::2] = -H[::-1, ::2]
+        wave = PadeAir(RationalAir(H, 128000))
+        for rate in [64000, 384000, 1536000]:
+            ref = PadeMidpoint(wave, 1/rate, 'reference')
+            batched = PadeMidpoint(wave, 1/rate, 'batched')
+            state = rng.normal(size=(wave.order, 2, wave.modes))*.01
+            for _ in range(48):
+                velocity = rng.normal(size=wave.modes)
+                a, fa, ia = ref.midpoint_deferred(state, velocity)
+                b, fb, ib = batched.midpoint_deferred(state, velocity)
+                np.testing.assert_array_equal(a, b)
+                np.testing.assert_array_equal(ia, ib)
+                self.assertLess(np.linalg.norm(fa-fb)/max(np.linalg.norm(fa), 1e-30), 3e-14)
+                state = a
+        with self.assertRaises(ValueError):
+            PadeMidpoint(wave, 1/64000, 'unknown')
+
 
 if __name__ == '__main__':
     unittest.main()

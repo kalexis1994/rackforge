@@ -53,6 +53,7 @@ def main():
     p.add_argument('--certificate-input-block', type=int, default=16)
     p.add_argument('--replay-preflight-only', action='store_true')
     p.add_argument('--bounded-observer', action='store_true')
+    p.add_argument('--store-observer-inputs', action='store_true')
     p.add_argument('--observer-svd-relative', type=float, default=1e-12)
     p.add_argument('--compare-prefix-report', type=Path)
     a = p.parse_args()
@@ -62,6 +63,8 @@ def main():
         raise ValueError('replay preflight requires compact port capture')
     if a.bounded_observer and not a.compact_certificate:
         raise ValueError('bounded observation requires full compact port capture')
+    if a.store_observer_inputs and not a.bounded_observer:
+        raise ValueError('stored observer inputs require bounded observation')
     if not 0<a.observer_svd_relative<1:
         raise ValueError('positive relative observation-basis tolerance required')
     if (len(a.rates) < 2 or sorted(set(a.rates)) != a.rates or min(a.rates) <= 0
@@ -121,6 +124,9 @@ def main():
     certificate_bytes = (budget['correlation_bytes']+inputs_bytes+replay_chunk_bytes+2*shapes.nbytes
                          +5*budget['factor_block_bytes']+32*provider.taps*n*16
                          +128*2**20)
+    # Before selecting Q, budget its worst possible rank: all full coordinates.
+    observation_history_max = section_bytes if a.store_observer_inputs else 0
+    certificate_bytes += observation_history_max
     if max(budget['estimated_array_peak_bytes'], certificate_bytes) > max_bytes:
         raise MemoryError('declared construction/certificate budget exceeded')
     sources = sorted(set(approved['source_sha256']) | {
@@ -138,6 +144,7 @@ def main():
                                   certificate=certificate_bytes, histories=inputs_bytes,
                                   full_section_inputs=section_bytes, compact_port_inputs=port_bytes,
                                   replay_chunk=replay_chunk_bytes,
+                                  observation_history_maximum=observation_history_max,
                                   maximum=max_bytes),
              criteria=dict(energy_relative=1e-9, interface_force_n=1e-9, interface_power_w=1e-9,
                            mechanical_trace_relative=.01, force_impulse_relative=.002,
@@ -305,11 +312,13 @@ def main():
     if a.bounded_observer:
         Q,basis = observation_basis(air_wave,np.array(certificates),segments,a.observer_svd_relative)
         r['observation_basis'] = basis
+        r['observation_input_history_bytes'] = section_bytes*basis['rank']//n if a.store_observer_inputs else 0
         r['certificate_method'] = 'field projection with full residual bounds'
         checkpoint()
         print('observation rank',basis['rank'],'of',basis['full_modes'],flush=True)
         energies,losses,observer = certificate_observer(air_wave,np.array(certificates),segments,Q,
-            progress=progress,input_block=a.certificate_input_block)
+            progress=progress,input_block=a.certificate_input_block,
+            store_projected_inputs=a.store_observer_inputs)
         r['bounded_observer'] = observer
     elif a.compact_certificate:
         energies,losses,replay = certificate_ports(air_wave,np.array(certificates),segments,

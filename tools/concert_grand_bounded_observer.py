@@ -57,7 +57,8 @@ def energy_interval(estimate,amplitude_bound):
                 error_bound_j=max(float(estimate)-max(lo-margin,0.),hi+margin-float(estimate)))
 
 
-def certificate_observer(wave,states,segments,Q,progress=None,input_block=32):
+def certificate_observer(wave,states,segments,Q,progress=None,input_block=32,
+                         store_projected_inputs=False):
     provider = wave.base.provider
     states = np.asarray(states,dtype=float)
     Q = np.asarray(Q,dtype=float)
@@ -78,7 +79,7 @@ def certificate_observer(wave,states,segments,Q,progress=None,input_block=32):
     storage_size = np.sqrt(144*np.sum(projected[:,:,0,:]**2,axis=(1,2))+
                            12*np.sum(projected[:,:,1,:]**2,axis=(1,2)))
     storage_b = np.sqrt(provider.taps*gram_norm2/(2*provider.rate))*(storage_residual+gamma*storage_size)
-    plans,residual_input_integrals,replay = [],[],[]
+    plans,residual_input_integrals,replay,histories = [],[],[],[]
     for segment in segments:
         first,last,dt = segment['initial_index'],segment['final_index'],segment['dt']
         v = np.asarray(segment['velocity'],dtype=float)
@@ -88,10 +89,14 @@ def certificate_observer(wave,states,segments,Q,progress=None,input_block=32):
             raise ValueError('matching full port history and endpoint indices required')
         plan,mini = PadeMidpoint(wave,dt),PadeMidpoint(small,dt)
         full_state,reduced = states[first].copy(),projected[first].copy()
+        vq = v@Q
+        history = np.empty((len(v),provider.taps,Q.shape[1])) if store_projected_inputs else None
         integral = 0.
-        for velocity in v:
+        for i,(velocity,qvelocity) in enumerate(zip(v,vq)):
             full_state,u = plan.update(full_state,velocity)
-            reduced,uq = mini.update(reduced,velocity@Q)
+            reduced,uq = mini.update(reduced,qvelocity)
+            if history is not None:
+                history[i] = uq
             error = np.linalg.norm(u-uq@Q.T)+gamma*np.linalg.norm(uq)
             integral += dt*float(error**2)
         closure = float(np.linalg.norm(full_state-states[last])/max(
@@ -100,7 +105,8 @@ def certificate_observer(wave,states,segments,Q,progress=None,input_block=32):
             raise ValueError('full port replay does not reproduce endpoint memory')
         replay.append(closure)
         residual_input_integrals.append(integral)
-        plans.append((mini,first,dt,v@Q))
+        plans.append((mini,first,dt,vq))
+        histories.append(history)
     order = provider.taps-1
     size = next_fast_len(2*order)
     memory = projected.transpose(0,2,1,3).reshape(-1,order,Q.shape[1])
@@ -116,13 +122,16 @@ def certificate_observer(wave,states,segments,Q,progress=None,input_block=32):
         tails = irfft(field,n=size,axis=1)[:,order:2*order]
         energies += np.sum(tails*tails,axis=(1,2))/(2*provider.rate)
         observer = np.ascontiguousarray(hq.transpose(1,0,2)).reshape(H.shape[1],-1)
-        for (plan,first,dt,v),loss in zip(plans,losses):
+        for (plan,first,dt,v),loss,history in zip(plans,losses,histories):
             state = projected[first].copy()
             for begin in range(0,len(v),input_block):
                 chunk = v[begin:begin+input_block]
-                inputs = np.empty((len(chunk),provider.taps,Q.shape[1]))
-                for i,velocity in enumerate(chunk):
-                    state,inputs[i] = plan.update(state,velocity)
+                if history is None:
+                    inputs = np.empty((len(chunk),provider.taps,Q.shape[1]))
+                    for i,velocity in enumerate(chunk):
+                        state,inputs[i] = plan.update(state,velocity)
+                else:
+                    inputs = history[begin:begin+len(chunk)]
                 field = inputs.reshape(len(chunk),-1)@observer.T
                 loss[begin:begin+len(chunk)] += np.sum(field*field,axis=1)/2
         if progress is not None:
@@ -135,6 +144,8 @@ def certificate_observer(wave,states,segments,Q,progress=None,input_block=32):
     radiation = [energy_interval(float(power.sum()*dt),np.sqrt(gram_norm2*integral/2))
                  for power,(_,_,dt,_),integral in zip(losses,plans,residual_input_integrals)]
     return energies,losses,dict(rank=Q.shape[1],full_modes=wave.modes,storage_intervals=storage,
+        projected_inputs_stored=bool(store_projected_inputs),
+        projected_input_history_bytes=sum(h.nbytes for h in histories if h is not None),
         radiation_intervals=radiation,full_endpoint_replay_relative=replay,
         residual_input_integral=residual_input_integrals,factor_norm_relative_error=norm_error,
         factor_norm_squared=gram_norm2,roundoff_scope='analytic projection bounds with numerical '

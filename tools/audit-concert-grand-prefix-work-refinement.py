@@ -1,13 +1,46 @@
-"""Refine independent acoustic storage/work observables of frozen prefixes.
+"""Refine independent acoustic storage/work observables of frozen contacts.
 
 Use the previous contact bank's 0.2% work/storage criterion and 1e-14 J
 near-zero denominator. This does not infer wave-state or waveform accuracy.
 """
 import argparse
 import json
+import math
 from pathlib import Path
 
 from concert_grand_wave_cache import digest
+
+
+def energy_change(case,fine,column,criteria):
+    """Keep central diagnostics; gate against adverse observer endpoints."""
+    field = {'wave_final_j':'wave_final_interval',
+             'wave_radiation_j':'wave_radiation_interval'}.get(column)
+    def endpoints(row):
+        value = float(row[column])
+        if not math.isfinite(value):
+            raise ValueError('finite energy/work required')
+        item = row.get(field) if field is not None else None
+        if item is None:
+            return value,value
+        lo,hi,estimate = (float(item[key]) for key in ['lower_j','upper_j','estimate_j'])
+        if (not all(math.isfinite(x) for x in [lo,hi,estimate]) or not 0<=lo<=estimate<=hi
+                or not math.isclose(estimate,value,rel_tol=1e-12,abs_tol=1e-30)):
+            raise ValueError('matching nonnegative observation interval required')
+        return lo,hi
+    lo,hi = endpoints(case)
+    flo,fhi = endpoints(fine)
+    exact = float(fine[column])
+    absolute = abs(float(case[column])-exact)
+    relative = absolute/max(abs(exact),criteria['near_zero_j'])
+    # A signed work without an interval retains its absolute denominator.
+    minimum_reference = 0. if flo<=0<=fhi else min(abs(flo),abs(fhi))
+    bound = max(abs(lo-fhi),abs(hi-flo))
+    bounded = bound/max(minimum_reference,criteria['near_zero_j'])
+    return dict(reference_j=exact,absolute_error_j=absolute,relative=relative,
+                maximum_difference_bound_j=bound,bounded_relative=bounded,
+                near_zero=abs(exact)<criteria['near_zero_j'],
+                observation_intervals_used=bool(field and (field in case or field in fine)),
+                passed=bounded<criteria['energy_work_relative'])
 
 
 def main():
@@ -36,12 +69,7 @@ def main():
         for case in cases[:-1]:
             changes = {}
             for column in columns:
-                exact = fine[column]
-                denominator = max(abs(exact),criteria['near_zero_j'])
-                change = abs(case[column]-exact)/denominator
-                changes[column] = dict(reference_j=exact,absolute_error_j=abs(case[column]-exact),
-                                       relative=change,near_zero=abs(exact)<criteria['near_zero_j'],
-                                       passed=change<criteria['energy_work_relative'])
+                changes[column] = energy_change(case,fine,column,criteria)
             rows.append(dict(phase=phase,rate=case['rate'],reference_rate=fine['rate'],
                              changes=changes,passed=all(item['passed'] for item in changes.values())))
     finest_pair = [row for row in rows if row['rate']==parent['rates'][-2]]
@@ -49,8 +77,11 @@ def main():
              finest_pair_gates={row['phase']:row['passed'] for row in finest_pair},
              finest_pair_work_passed=all(row['passed'] for row in finest_pair),
              source_sha256={Path(__file__).name:digest(__file__)},
+             rates=parent['rates'],duration_s=parent['duration_s'],
+             observation_comparison='Worst endpoint differences when observation intervals are available; '
+                                    'central values retained as diagnostics, unchanged 0.2% criterion.',
              preflight_only=True,all_gates_passed=False,
-             scope='Independent storage, radiation, material/felt heat and port work in the short prefix. '
+             scope='Independent storage, radiation, material/felt heat and port work in each contact interval. '
                    'No full wave-coordinate, pressure-waveform, separation or timbral accuracy claim.')
     if a.force_report is not None:
         force = json.loads(a.force_report.read_text())
@@ -101,7 +132,7 @@ def main():
     a.report.write_text(json.dumps(r,indent=2,allow_nan=False),encoding='utf-8')
     print('work refinement',r['finest_pair_gates'],flush=True)
     for row in finest_pair:
-        print(row['phase'],{name:item['relative'] for name,item in row['changes'].items()},flush=True)
+        print(row['phase'],{name:item['bounded_relative'] for name,item in row['changes'].items()},flush=True)
     if 'linked_prefix_gates' in r:
         print('linked prefix controls',r['linked_prefix_gates'],flush=True)
 

@@ -71,6 +71,21 @@ class BoundedObserverTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'endpoint memory'):
             certificate_observer(wave,wrong,segments,np.eye(3))
 
+    def test_cached_observation_inputs_match_replay_with_living_memory(self):
+        _,wave,states,segments,_ = self.fixture()
+        Q = np.eye(3)[:,:2]
+        energy,power,bounds = certificate_observer(wave,states,segments,Q,input_block=4)
+        stored,stored_power,stored_bounds = certificate_observer(
+            wave,states,segments,Q,input_block=4,store_projected_inputs=True)
+        np.testing.assert_array_equal(stored,energy)
+        for a,b in zip(stored_power,power):
+            np.testing.assert_array_equal(a,b)
+        self.assertEqual(stored_bounds['storage_intervals'],bounds['storage_intervals'])
+        self.assertEqual(stored_bounds['radiation_intervals'],bounds['radiation_intervals'])
+        self.assertEqual(stored_bounds['full_endpoint_replay_relative'],bounds['full_endpoint_replay_relative'])
+        self.assertGreater(stored_bounds['projected_input_history_bytes'],0)
+        self.assertEqual(bounds['projected_input_history_bytes'],0)
+
 
 if __name__=='__main__':
     unittest.main()

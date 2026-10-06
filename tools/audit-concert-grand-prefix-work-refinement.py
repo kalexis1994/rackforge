@@ -61,7 +61,10 @@ def main():
     columns = ['wave_final_j','relaxation_final_j','wave_radiation_j','relaxation_loss_j',
                'felt_heat_j','material_heat_j','air_port_work_j']
     rows = []
-    for phase in ['Cold','Continued']:
+    phases = parent.get('phases',['Cold','Continued'])
+    if not phases or len(set(phases))!=len(phases) or any(phase not in ['Cold','Continued'] for phase in phases):
+        raise ValueError('explicit distinct contact phases required')
+    for phase in phases:
         cases = sorted([row for row in parent['cases'] if row['phase']==phase],key=lambda row:row['rate'])
         if len(cases)<2 or [row['rate'] for row in cases] != parent['rates']:
             raise ValueError('matching nested rates required')
@@ -77,7 +80,7 @@ def main():
              finest_pair_gates={row['phase']:row['passed'] for row in finest_pair},
              finest_pair_work_passed=all(row['passed'] for row in finest_pair),
              source_sha256={Path(__file__).name:digest(__file__)},
-             rates=parent['rates'],duration_s=parent['duration_s'],
+             rates=parent['rates'],duration_s=parent['duration_s'],phases=phases,
              observation_comparison='Worst endpoint differences when observation intervals are available; '
                                     'central values retained as diagnostics, unchanged 0.2% criterion.',
              preflight_only=True,all_gates_passed=False,

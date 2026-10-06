@@ -54,9 +54,11 @@ def main():
     p.add_argument('--replay-preflight-only', action='store_true')
     p.add_argument('--bounded-observer', action='store_true')
     p.add_argument('--store-observer-inputs', action='store_true')
+    p.add_argument('--cold-only', action='store_true')
     p.add_argument('--observer-svd-relative', type=float, default=1e-12)
     p.add_argument('--compare-prefix-report', type=Path)
     a = p.parse_args()
+    phases = ['Cold'] if a.cold_only else ['Cold','Continued']
     if a.report.exists():
         raise ValueError('new report required')
     if a.replay_preflight_only and not a.compact_certificate:
@@ -116,7 +118,7 @@ def main():
                     rate=approved['rate'], angular=approved['angular'], derivative='fourth', fold_y=True)
     budget = provider.budget(real_gram=True)
     max_bytes = int(a.max_array_gib*2**30)
-    port_bytes = 2*sum(round(rate*a.duration) for rate in a.rates)*n*8
+    port_bytes = len(phases)*sum(round(rate*a.duration) for rate in a.rates)*n*8
     section_bytes = port_bytes*provider.taps
     inputs_bytes = port_bytes if a.compact_certificate else section_bytes
     replay_chunk_bytes = a.certificate_input_block*provider.taps*n*8 if a.compact_certificate else 0
@@ -139,7 +141,7 @@ def main():
     r = dict(parent_sha256={str(a.full_report): digest(a.full_report)}, board_sha256=digest(a.board),
              source_sha256={name: digest(Path(__file__).with_name(name)) for name in sources},
              cache=str(a.cache), rate_factor=provider.rate, angular=approved['angular'], cells=approved['cells'],
-             modes=n, states=approved['states'], rates=a.rates, duration_s=a.duration,
+             modes=n, states=approved['states'], rates=a.rates, duration_s=a.duration,phases=phases,
              array_estimates=dict(construction=budget['estimated_array_peak_bytes'],
                                   certificate=certificate_bytes, histories=inputs_bytes,
                                   full_section_inputs=section_bytes, compact_port_inputs=port_bytes,
@@ -222,7 +224,7 @@ def main():
     r['capture_rate'] = capture_rate
     r['stage'] = 'contact prefixes'
     checkpoint()
-    for phase in ['Cold','Continued']:
+    for phase in phases:
         live = initial if phase == 'Cold' else final_states[len(a.rates)-1]
         for rate in a.rates:
             state = tuple(x.copy() for x in live)
@@ -363,7 +365,7 @@ def main():
     r['stage'] = 'independent certificate measured'
     checkpoint()
     r['comparisons'] = []
-    for phase_index, phase in enumerate(['Cold','Continued']):
+    for phase_index, phase in enumerate(phases):
         first = phase_index*len(a.rates)
         finest = first+len(a.rates)-1
         errors = []

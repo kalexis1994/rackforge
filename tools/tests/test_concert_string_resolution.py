@@ -18,7 +18,7 @@ from test_concert_pade_contact import fixture
 class StringResolutionTests(unittest.TestCase):
     def test_higher_order_potential_gradient_and_hessian_against_spatial_gauss(self):
         rng=np.random.default_rng(70107);wire=Wire(.62,.0081,850)
-        for nt,nl in [(6,12),(12,24),(24,48),(48,96),(48,192)]:
+        for nt,nl in [(6,12),(12,24),(24,48),(48,96),(48,192),(96,192),(96,384)]:
             fast=CosineString(wire,nt,nl,bending=True)
             dense=String(wire,nt,nl,quadrature=max(240,8*nl),bending=True)
             q=rng.normal(size=fast.size)*1e-6;q[fast.su]*=.05
@@ -45,7 +45,7 @@ class StringResolutionTests(unittest.TestCase):
 
     def test_high_order_quadrature_with_moving_endpoint_against_independent_gauss(self):
         rng=np.random.default_rng(89);wire=Wire(.62,.0081,850)
-        for nt,nl in [(24,48),(48,96),(48,192)]:
+        for nt,nl in [(24,48),(48,96),(48,192),(96,192),(96,384)]:
             core=MovingBridge(wire,Support((180.,600.),(.2,.1),(.01,.02)),nt,nl)
             q=rng.normal(size=core.size)*1e-6;q[core.su]*=.05
             energy=core.potential(q);g,H=core.gradient_hessian(q)

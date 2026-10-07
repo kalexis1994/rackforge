@@ -194,8 +194,10 @@ a 3072 kHz con historia de 650 taps y rango 606 en float64 consumirían
 presupuesto de 12 GiB del observador, incluso antes de sumar sus demás datos.
 Una posible alternativa matemática es evaluar el campo lineal en frecuencia
 con términos de estado **inicial y final** de cada sección Padé. Habría que
-demostrar equivalencia del flujo finito y medir su coste; no está implementada
-ni se infiere radiación del trabajo del puerto.
+demostrar equivalencia del flujo finito y medir su coste. Al cerrar este
+ensayo no estaba implementada. El [prototipo posterior](NOTA-P6-observador-ventana-finita.md)
+ya comprueba la identidad en cascadas sintéticas; aún no es un certificado
+completo ni una aceleración medida. No se infiere radiación del trabajo del puerto.
 
 Faltan esos certificados y una ventana más larga, además de los controles
 físicos posteriores. Las puertas generales y la aprobación del timbre siguen

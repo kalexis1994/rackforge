@@ -75,3 +75,25 @@ El helper por sí solo comprueba dimensiones/valores, no certifica que una
 memoria final dada proceda de ese puerto. No inferir esa relación del balance
 mecánico. Mantener presupuesto para espectro del puerto, bloque espectral,
 factor angular y estados; no materializar toda la historia de secciones.
+
+## Otra vía pendiente para contactos repetidos
+
+Este observador no acelera el contacto que está ejecutándose. La dinámica
+todavía contrae R completa por cada paso. Para un banco de una cuerda,
+`MovingBridge.physical/fields/pull_gradient` muestra que el acoplamiento
+vertical con la tabla pasa por el escalar `b = phi.T B` y una reacción en
+dirección phi. La tabla y el aire son lineales; la cuerda y el fieltro no.
+
+Se puede estudiar una respuesta impulsional discreta del subsistema lineal
+para reutilizarla entre contactos de la misma geometría/tasa, conservando
+la colisión no lineal. Antes de implementar esa eliminación hay que derivar
+el puerto con la **inercia compartida**: el levantamiento aporta masa a la
+tabla y términos cruzados con la aceleración de cuerda. La reacción no es
+sólo tensión ni fuerza del martillo. Además, la ventana debe ser causal,
+con su término instantáneo implícito y memoria inicial, sin periodizarla.
+
+Sería un método nuevo, aún sin implementar ni medir. Deberá reproducir
+trayectorias físicas, memoria acústica, fuerza, trabajo medido del puerto
+y presión del integrador completo antes de reemplazarlo. Si hay ahorro,
+será para múltiples contactos que comparten operador, no automáticamente
+para una primera nota ni para geometrías o tasas distintas.

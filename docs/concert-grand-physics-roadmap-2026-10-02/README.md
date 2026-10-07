@@ -64,8 +64,9 @@ El [control de coste y propagación](RESULTADOS-P6-propagacion-coste.md)
 reproduce el contacto y extiende el recorrido fino a 3,5 ms. La aplicación
 de la carga completa reduce el coste de dinámica 15–17%; el operador de los
 dos micrófonos se prepara unas 6,55 veces más rápido y pasa equivalencia
-y Green continuo. Faltan el balance angular independiente del nuevo coast
-y la presión de su trayectoria viva antes de seleccionar una tasa audible.
+y Green continuo. El balance angular independiente y la presión del coast
+corto ya se midieron en la etapa siguiente; eso no selecciona una tasa
+para una nota audible completa.
 
 El [balance angular y presión del coast](RESULTADOS-P6-coast-campo.md)
 cierra independientemente 0,5 ms después de ese ataque: trabajo fino cambia
@@ -76,6 +77,17 @@ controles vinculados de ese tramo. Antes de escuchar quedan duración,
 coste del certificado y resolución de cuerda: este banco usa tres modos
 transversales por dirección y seis axiales, no el banco audible amplio.
 
+El [barrido de cuerda](RESULTADOS-P6-resolucion-cuerda.md) amplía a 48 modos
+por dirección y pasa 11/13 controles. La fuerza máxima cambia con la base
+sin modificar el fieltro. Fallan 24→48 en presión alta (1,506794%, límite 1%)
+y contacto 768→1536 kHz (0,101373%, límite 0,1%); el banco aún no se adopta.
+El [ensayo dirigido](RESULTADOS-P6-resolucion-dirigida.md) separa ahora las
+dos resoluciones en una matriz 48/96 modos × 1536/3072 kHz, conservando
+la carga completa y todos los límites. Terminó **14/14 controles**: presión
+alta espacial máxima 0,038670% (<1%), temporal 0,025344% (<0,1%). Se usa el
+caso fino como referencia temprana para validar banda, coast/campo y duración;
+todavía no cambia el paquete de fábrica ni se aprueba una nota completa.
+
 | ID | Mecanismo | Representación actual / falta | Estado |
 | --- | --- | --- | --- |
 | P1a | Admitancia direccional del puente | La horizontal usa la misma familia de modos con un factor fijo; falta una segunda proyección mecánica independiente. | Piloto medido: pasivo, sin mejora consistente; escucha pendiente |
@@ -84,7 +96,7 @@ transversales por dirección y seis axiales, no el banco audible amplio.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Cargas de 59/90 verificadas. Frase de 59 rechazada por timbre/cortes; apagador resistivo como control. Tabla 132×112 y proyección 7392→606 pasan controles continuos secos/cargados hasta 6 kHz. Padé2/derivada cuarta con 128×384/128 kHz pasa masa, 83 frecuencias y tres puntos Laplace: Z/R/X máximos 0,667%/0,495%/0,921%, presión 0,124%. Recorrido C4 supuesto de 3 ms conserva los 606 modos, separa el martillo cerca de 1,635 ms y pasa balance/observación con flujo no nulo. Refinamiento acotado del flujo frío falla 0,265% y pasa 0,0674% al subir a 768/1536 kHz; continuación pasa 0,0346%. Inputs de observación reutilizados en RAM. Faltan coast/presión temporal, repetición/release, identificación y ambas caras/borde. | Carga armónica y contactos/energías condicionados medidos; nota completa, presión temporal y timbre pendientes |
+| P6 | Radiación y carga acústica del aire | Tabla 132×112 y proyección 7392→606 verificadas hasta 6 kHz; Padé2/derivada cuarta pasa masa, 83 frecuencias y tres puntos Laplace. Contacto de 3 ms y coast de 0,5 ms de C4 supuesto conservan todos los estados; el coast de tres modos pasa balance angular y presión. El barrido 3→48 pasa 11/13; la matriz dirigida 48/96 × 1536/3072 kHz pasa 14/14 con los mismos límites. Faltan banda superior de fuente/carga, certificado y propagación del banco refinado, duración, repetición/release, identificación y ambas caras/borde. | Convergencia de presión temprana en 0–6 kHz medida; campo refinado, nota completa y timbre pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1402,3 +1414,29 @@ Reproducción anterior exacta; pasan balances, impulso, captura, control axial
 y coast. Siguiente: matriz dirigida 48/96 modos y 1536/3072 kHz; comprobar
 banda de fuente/carga y presupuesto del certificado angular antes de ampliar
 ventana. No se adopta todavía 48 modos ni se cambia el plugin instalado.
+
+### 2026-10-07 — P6: matriz dirigida y observador finito con extremos vivos
+
+[Diseño y controles](RESULTADOS-P6-resolucion-dirigida.md). **27848bc**
+separa resolución transversal (48/96) y temporal de contacto (1536/3072 kHz)
+con idéntico coast a 256 kHz y todos los parámetros y límites anteriores.
+Siete pruebas pasan, incluida cuadratura independiente hasta 96/384 y
+detección de una banda fallida en cualquiera de las cuatro parejas.
+Reconstruye el banco anterior antes de comparar. Ensayo completo: **14/14**,
+3082,568 s (51,38 min), pico 3,287 GiB. Reproducción exacta del banco padre;
+máximo espacial de presión alta 0,038670% (<1%), temporal 0,025344% (<0,1%).
+Balance mecánico 3,19994e−12; impulso 5,16455e−15; refinamiento de trabajos
+máximo 0,00123338% (<0,2%). Fallos anteriores conservados. Referencia
+96/192 a 3072 kHz sólo para esta ventana temprana, sin aprobación global.
+Siguiente: banda relevante, campo y coast del banco refinado, luego duración.
+
+[Identidad finita y límites del prototipo](NOTA-P6-observador-ventana-finita.md).
+**7baa4d1** calcula entradas centradas de cada sección Padé mediante DFT
+de ventana finita, conservando memoria inicial y final. Tres pruebas pasan:
+replay escalar y Parseval, padding/paridad/bloques, 650 taps con memoria fría
+y viva. No modifica dinámica ni se adopta como certificado; todavía falta
+replay enlazado, almacenamiento independiente y coste con 606 modos/campo
+completo. Puede evitar historia de 27 GiB, pero no se promete aceleración.
+Se registra además la posible eliminación causal del subsistema lineal de
+tabla/aire para contactos repetidos del mismo operador. Debe conservar la
+inercia compartida y reacción completa; todavía no está implementada ni medida.

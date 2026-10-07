@@ -2729,6 +2729,20 @@ band checks and independent angular accounting before longer observations.
 The load is validated only through 6 kHz, whereas the 48-mode wire includes
 free frequencies up to 18.51 kHz. Finite-window pressure changes do not
 establish perceptual fidelity or convergence of a complete piano note.
+The directed follow-up freezes a 48/96-mode by 1536/3072-kHz contact matrix,
+testing both spatial rows and temporal columns rather than averaging them.
+It passes 14/14 directed gates in 3082.568 s (peak 3.287 GiB), reproducing
+the parent 48-mode baseline exactly. Maximum spatial high-band pressure
+error is 0.038670% against 1%; contact-time high-band error is 0.025344%
+against 0.1%. The old failures remain in their report. The fine 96/192-mode,
+3072-kHz contact is an early-window reference only; its full angular ledger,
+coast refinement and relevant source/load band still require verification.
+Global approval stays false, and factory sound is unchanged.
+A separate [finite-window observer prototype](concert-grand-physics-roadmap-2026-10-02/NOTA-P6-observador-ventana-finita.md)
+retains both live endpoints in the discrete Padé transform. It reproduces
+centered section inputs and Parseval flux in synthetic tests, including
+650 taps. It changes no dynamics; complete-field cost, endpoint replay and
+independent storage accounting remain required before certificate adoption.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a

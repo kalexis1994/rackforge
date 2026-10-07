@@ -2662,6 +2662,31 @@ and the corrected budget/control is rerun. Time pressure from the living
 source, capture refinement, longer sustain and real-piano identification
 remain pending. No factory sound, WAV or package changes.
 
+The [independent full coast field/pressure audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-coast-campo.md)
+closes a further 0.5 ms from the same living 3 ms contact endpoint. All
+606 board coordinates and air states remain; the bounded observation basis
+has rank 351, exact endpoint replay and regenerated factor norm. Worst
+total/air budget bounds are 4.583048e-11/4.555940e-11. Nonzero independent
+wave flux is 9.623702e-8 J at 256 kHz; finest bounded work refinement is
+0.0496604%, below the unchanged 0.2%. Finest pressure spectrum/time changes
+0.00121814%/0.00121680%; native capture decimation changes 0.00000111379%,
+below 0.1%. The 256 kHz microphone kernel matches Green pressure within
+0.000716863% at 101 DC–6 kHz probes. Thirteen directed tests pass.
+The original interpolated board order ratio 0.371841 fails the 0.35 gate
+and remains in its report. A separate common-native-time audit reproduces
+all linked dynamics/pressure diagnostics exactly and measures ratio
+0.321249494 without interpolation, using the preceding preflight's native
+time definition and unchanged limit. Four alignment and 16 linked controls
+pass; this is not uniform-order certification of the spline extension.
+An incomplete alignment attempt failed JSON serialization of NumPy booleans;
+it is preserved and rerun with Python boolean gates and a diagnostic checkpoint.
+Full field/pressure cost is 1419.592 s (1107.991 s certificate), peak
+4.308224 GiB; full alignment 285.662 s. Pressure is the padded contribution
+of a finite acceleration window, not a held-note release. This test wire
+has only three transverse modes per direction and six axial modes. Broader
+string resolution, cheaper field observation, duration and natural
+restrike/release remain before timbral listening or factory integration.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

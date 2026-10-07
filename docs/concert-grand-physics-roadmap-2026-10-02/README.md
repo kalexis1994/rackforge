@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-06. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-07. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -66,6 +66,15 @@ de la carga completa reduce el coste de dinámica 15–17%; el operador de los
 dos micrófonos se prepara unas 6,55 veces más rápido y pasa equivalencia
 y Green continuo. Faltan el balance angular independiente del nuevo coast
 y la presión de su trayectoria viva antes de seleccionar una tasa audible.
+
+El [balance angular y presión del coast](RESULTADOS-P6-coast-campo.md)
+cierra independientemente 0,5 ms después de ese ataque: trabajo fino cambia
+0,04966%, presión 0,00122% y captura 0,00000111%. Un diagnóstico interpolado
+de orden falla 0,37184; se conserva. La reproducción exacta en tiempos
+nativos comunes recupera 0,32125, con el límite 0,35 original. Pasan los
+controles vinculados de ese tramo. Antes de escuchar quedan duración,
+coste del certificado y resolución de cuerda: este banco usa tres modos
+transversales por dirección y seis axiales, no el banco audible amplio.
 
 | ID | Mecanismo | Representación actual / falta | Estado |
 | --- | --- | --- | --- |
@@ -1324,3 +1333,30 @@ Se conserva una medición inicial con presupuesto de scratch mal contado;
 **f9e7817** corrige el aplanado de las celdas y repite el control completo.
 Pasan cuatro controles del operador. No se genera audio, paquete ni copias
 en SHARED; la puerta global y la aprobación del timbre siguen pendientes.
+
+### 2026-10-07 — P6: balance angular independiente y presión de la trayectoria
+
+[Método, resultados y fallos conservados](RESULTADOS-P6-coast-campo.md).
+**e6c3a93** captura los tres coast desde el mismo extremo de 3 ms, conserva
+606 modos y memoria viva, y observa el factor angular completo con residuo
+acotado. Trece pruebas pasan. Base de observación 351, replay/norma 0;
+inputs 408.844.800 bytes en RAM. Máximos de balance total/aire con extremos
+adversos: 4,583e−11/4,556e−11. Flujo fino 9,623702e−8 J, límite inferior
+positivo; no se infiere del trabajo. Refinamiento fino de seis términos:
+máximo 0,0496604%, bajo 0,2%. Presión espectral/temporal 0,00121814%/
+0,00121680%, captura fina 0,00000111379%; pasan el 0,1% fijado. Kernel en
+101 sondas DC–6 kHz cambia < 0,000716863% contra Green continuo.
+
+El ensayo original pasa 12/13 controles: razón de tabla interpolada
+0,371841 falla < 0,35. **8558e69/d9cc07c** mide separadamente los tiempos
+físicos nativos comunes. Se conserva una tentativa incompleta por guardado
+de booleanos NumPy. La repetición reproduce exactamente dinámica, presión
+y el observable que falló; razón nativa 0,321249494, mismos límites.
+Pasan cuatro controles de alineación y 16 vinculados; el fallo spline queda
+en el padre, sin afirmar orden uniforme de la extensión interpolada.
+
+Campo/presión: 1419,592 s, certificado 1107,991 s, pico 4,308224 GiB.
+Alineación completa: 285,662 s, pico 2,847469 GiB. Faltan acelerar el
+certificado, ampliar cuerda (3 transversales/dirección y 6 axiales aquí),
+duración y repetición/release antes de una escucha. No se cambia fábrica,
+paquete ni se dejan audios o informes en SHARED. Puerta general falsa.

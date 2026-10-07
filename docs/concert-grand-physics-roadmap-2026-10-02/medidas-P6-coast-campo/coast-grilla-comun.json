@@ -1,0 +1,182 @@
+{
+  "stage": "coast common-time alignment completed",
+  "all_gates_passed": false,
+  "preflight_only": true,
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-coast-campo\\coast-0p5ms.json": "70219c1dfe69bbf3e85eb06fe71c4634837c8183b949f86a51179ced86436e0f",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-aire-bloques\\carga128-pade2.json": "8a13401561448f4e573cfb463ff9d12294d70a4a680b914a48458fd1e6603a6e"
+  },
+  "source_sha256": {
+    "audit-concert-grand-full-coast-field.py": "f9a945c34eb88168e81a6f78d22aa9ef0bc94cec3a4c0009b21bc72bc18e0ceb",
+    "audit-concert-grand-full-microphone-kernel.py": "8a29778c7129c6704d7e214142013a3eeda7a7ef4217fdee27d8d1a1b59487ac",
+    "audit-concert-grand-full-propagation-cost.py": "ede7f67689cdd5505d0c2ad9d414e22870ab749d1af0b899aa990fbb2f42f18e",
+    "audit-concert-grand-pade-contact-full.py": "03e6be00b2e000eba32dd01cc02365954dde2ae1e1e9f926256588d821470c19",
+    "audit-concert-grand-prefix-work-refinement.py": "615c9012b5bfb53428628751a85a77ddbb98c4f632058b8b01301cbf299ad9b0",
+    "concert_grand_bounded_contact.py": "d16a88a31156a49144b94d211ad1adf1862c9ce3153e4b79b5597687396e642f",
+    "concert_grand_bounded_observer.py": "9b84ae450fc59ef06ed28455295fe91427989ed5459d764a3fa96d427d1f033d",
+    "concert_grand_cell_audio.py": "57c3bccf6c0bbe0c930794ccc5710f94b1a26873722e461f7ff72ef254acacf9",
+    "concert_grand_cell_observer.py": "8978333039a9ab2aa9e210dfc9fb9b141d6dab6b0489ad733c1795bddccc7d8a",
+    "concert_grand_coast_measurements.py": "be00731ed5f60ce3b3e93c4c431540369749efec1b0e8a66461242dd5222a171",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "concert_grand_exponential_coast.py": "645f8f8d4a94a87cb493ccfeae85f33fcf3a329e677778e964ad601a244380ee",
+    "concert_grand_fast_contact.py": "afbb00aa3e06b696ce6478a1ad6875bdbbcff5c20c9899d0a648d05c96e15eec",
+    "concert_grand_moving_bridge.py": "19685edcf58c2e1e622641cb5758c6700cace9534b853d8e5c79108f7e19a5e7",
+    "concert_grand_nonlinear_string.py": "f1c17115e3f296a12f5c51e14d888756e60303e33802f8873d43c6a746a4d0e6",
+    "concert_grand_pade_midpoint.py": "45633e24c60755b7a476aa428328786ecc33e85ce0a05953aa4f49afbe7f120f",
+    "concert_grand_pade_port_certificate.py": "62a9fb7dc3dd3d5e955f4c4ef20a7fb247d8b190525ad4ea397e20cebdce8914",
+    "concert_grand_wave_cache.py": "448c82b2544a1af8527c19f7f0184f28c762def11ba8ac805f41031e5c49e20a",
+    "audit-concert-grand-coast-capture-grid.py": "7824e327ae5b1b12baa853428c8606722e01eb32e666e03759fc2db16efd1127"
+  },
+  "criteria": {
+    "reproduction_relative": 1e-10,
+    "refinement_ratio": 0.35
+  },
+  "original_coast_gates": {
+    "seed": true,
+    "complete_memory_replay": true,
+    "bounded_energy": true,
+    "observation_precision": true,
+    "nonnegative_loss": true,
+    "nonzero_wave_flux": true,
+    "refined_work": true,
+    "refined_board": true,
+    "second_order_board": false,
+    "refined_pressure": true,
+    "refined_capture": true,
+    "kernel": true,
+    "source_unchanged": true
+  },
+  "original_interpolated_ratio": 0.3718411362423653,
+  "scope": "Common native-time convergence of the already measured coast. Original interpolated failure retained; linked independent field/pressure gates only, no whole-note or timbre approval.",
+  "seconds": 285.66229549999116,
+  "peak_working_set_bytes": 3057446912,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "seed_reproduction": {
+    "mechanical_final_j": 0.0,
+    "relaxation_final_j": 0.0,
+    "final_wave_norm": 0.0,
+    "compression_final_m": 0.0
+  },
+  "cases": [
+    {
+      "rate": 64000,
+      "diagnostic_reproduction": {
+        "mechanical_final_j": 0.0,
+        "relaxation_final_j": 0.0,
+        "final_wave_norm": 0.0,
+        "compression_final_m": 0.0,
+        "felt_heat_j": 0.0,
+        "material_heat_j": 0.0,
+        "relaxation_loss_j": 0.0,
+        "air_port_work_j": 0.0
+      }
+    },
+    {
+      "rate": 128000,
+      "diagnostic_reproduction": {
+        "mechanical_final_j": 0.0,
+        "relaxation_final_j": 0.0,
+        "final_wave_norm": 0.0,
+        "compression_final_m": 0.0,
+        "felt_heat_j": 0.0,
+        "material_heat_j": 0.0,
+        "relaxation_loss_j": 0.0,
+        "air_port_work_j": 0.0
+      }
+    },
+    {
+      "rate": 256000,
+      "diagnostic_reproduction": {
+        "mechanical_final_j": 0.0,
+        "relaxation_final_j": 0.0,
+        "final_wave_norm": 0.0,
+        "compression_final_m": 0.0,
+        "felt_heat_j": 0.0,
+        "material_heat_j": 0.0,
+        "relaxation_loss_j": 0.0,
+        "air_port_work_j": 0.0
+      }
+    }
+  ],
+  "native_common_times": {
+    "capture_rate": 64000,
+    "samples": 33,
+    "differences_relative": [
+      2.0923314871464933e-05,
+      6.721604315132499e-06
+    ],
+    "ratio": 0.32124949399386876,
+    "interpolation_used": false
+  },
+  "interpolated_pressure_diagnostic_reproduction": [
+    {
+      "board_relative": 0.0,
+      "pressure_spectral_relative": 0.0,
+      "pressure_time_relative": 0.0
+    },
+    {
+      "board_relative": 0.0,
+      "pressure_spectral_relative": 0.0,
+      "pressure_time_relative": 0.0
+    }
+  ],
+  "reproduction_maximum_relative": 0.0,
+  "alignment_gates": {
+    "reproduced_field_dynamics_pressure": true,
+    "native_second_order": true,
+    "native_finest_board": true,
+    "source_unchanged": true
+  },
+  "linked_coast_gates": {
+    "seed": true,
+    "complete_memory_replay": true,
+    "bounded_energy": true,
+    "observation_precision": true,
+    "nonnegative_loss": true,
+    "nonzero_wave_flux": true,
+    "refined_work": true,
+    "refined_board": true,
+    "refined_pressure": true,
+    "refined_capture": true,
+    "kernel": true,
+    "source_unchanged": true,
+    "aligned_reproduced_field_dynamics_pressure": true,
+    "aligned_native_second_order": true,
+    "aligned_native_finest_board": true,
+    "aligned_source_unchanged": true
+  },
+  "linked_coast_gates_passed": true,
+  "changed_observable": "Order ratio on common native physical times, as in the prior cost preflight. Interpolated-grid ratio and its original failed gate retained; threshold unchanged."
+}

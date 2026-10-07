@@ -442,6 +442,71 @@ and an update path that works with it.
 
 *Prediction:* card writes during an hour of playing fall to near zero.
 
+**Measured first** (`rackforge-pi-bench soak --minutes 60 --play-every 1
+--switch-every 5`, with the D3 profile, the engine before the fixes
+below): 2.7 MB written to the root partition in an hour of playing with 12
+program changes, none to the boot partition; ~100 KB by the engine and
+~550 KB of ext4 journal commits. Writes are not the card's problem. Power
+cuts are.
+
+**Audited** every file the running system writes (engine, web server,
+plugin store, resource grants, controllers, the code cache). The saves
+that matter most -- programs, presets, the session checkpoint, Racks,
+Songs and Setlists -- were already written atomically. What was not, and
+what a power cut could have done:
+
+- A cut in the middle of saving a Rack, Song or Setlist left the save's
+  temporary file, and the engine refused to start on any file in the
+  library that was not a document.
+- An unreadable `config/audio.toml` stopped the engine every second.
+- `live-parameters.json`, written every few seconds of a moving control,
+  was removed before its replacement was renamed in.
+- An unreadable saved program failed its plugin, and for the primary
+  plugin the engine; an unreadable resource-grant store, the web server;
+  an unreadable controller record or package, the controller host.
+- Several writers renamed without syncing first, or removed the old file
+  before the rename.
+- Every step of the master fader wrote and synced the session twice.
+
+**Fixed** (all platforms, not only the Pi): one helper,
+`rackforge-atomic-file`, writes every runtime file (temporary, sync,
+rename, directory sync); readers start whatever they find. A user's
+documents -- Racks, Songs, programs -- are never moved or removed when
+they cannot be read, since they may be a newer RackForge's after a
+rollback: the library is then not used for that start (the engine plays
+with one in memory and writes nothing), and a program is passed over. The
+web server's PIN store alone still refuses to start on damage, since
+resetting the PIN to whoever asks first is no answer; it is written so
+that a power cut cannot damage it. The fader checkpoints once it rests.
+
+**Found on the way:** each program change cost about six overruns and one
+underrun -- an audible click -- because the engine loads the new program
+on the audio thread (77 overruns and 9 underruns in the hour, all at the
+changes). Not a storage matter; it is the D1 work left undone.
+
+**After the fixes:** 2.9 MB in the same hour (the soak moves no fader, and
+the directory syncs add a little), and 512 bytes to the boot partition --
+most likely FAT's access date, rewritten after `verify` read config.txt.
+The boot partition is FAT and the part of the card a power cut can least
+afford; mounting it without access times, or read-only outside
+maintenance and boot trials, is the next step toward a read-only base.
+
+**Power cut, while playing** (2026-10-07, the user pulled the plug with
+RF-Musette sounding; PLAY, Musette Paris, master at 800):
+
+- Back exactly as it was: PLAY, RF-Musette, Musette Paris, 800.
+- The root's ext4 journal recovered in 2 ms on mount; `systemd-fsck-root`
+  found it clean. No long check.
+- No unreadable file, stale temporary or fallback in the logs; `verify`
+  passed: the dedicated profile was intact.
+- Sound at 15 s from plugging in, by the user's stopwatch (first period
+  7.0 s after the kernel started: about 8 s of firmware). The KeyLab's
+  display came back at 19 s: the controller host was up at 7.5 s and the
+  keyboard answered at 9.8 s, but it reported healthy only at 15.8 s.
+
+Not yet run: a cut while a program is being saved, and while the master
+fader moves.
+
 ### D5. Profiles by hardware
 
 Pi 4 and Pi 5, RAM sizes, OS releases, peripherals in use. Budgets

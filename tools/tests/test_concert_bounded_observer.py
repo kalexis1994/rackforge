@@ -1,6 +1,7 @@
 """Observer intervals against independent full-factor storage and fields."""
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -134,6 +135,16 @@ class BoundedObserverTests(unittest.TestCase):
             certificate_observer(wave,states,segments,np.eye(3),factor_projection='unknown')
         with self.assertRaisesRegex(ValueError,'out of range'):
             certificate_observer(wave,states,segments,np.eye(3),factor_projection='cells',projection_probe_blocks=(999,))
+
+    def test_projected_norm_control_rejects_a_damaged_cell_factor_without_probes(self):
+        _,wave,states,segments,_=self.fixture()
+        def damaged(provider,Q):
+            view=projected_cell_provider(provider,Q)
+            view.provider.shapes=view.provider.shapes*1.0001
+            return view
+        with patch('concert_grand_cell_factor_projection.projected_cell_provider',side_effect=damaged):
+            with self.assertRaisesRegex(ValueError,'projected factor differs'):
+                certificate_observer(wave,states,segments,np.eye(3),factor_projection='cells')
 
 
 if __name__=='__main__':

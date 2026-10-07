@@ -1360,3 +1360,22 @@ Alineación completa: 285,662 s, pico 2,847469 GiB. Faltan acelerar el
 certificado, ampliar cuerda (3 transversales/dirección y 6 axiales aquí),
 duración y repetición/release antes de una escucha. No se cambia fábrica,
 paquete ni se dejan audios o informes en SHARED. Puerta general falsa.
+
+### 2026-10-07 — P6: alternativa lineal de proyección del campo
+
+[Operación, controles y coste](RESULTADOS-P6-proyeccion-celdas.md).
+**bc6a362** proyecta las formas de celda antes de sus histogramas mediante
+`L(S) Q = L(S Q)`. Conserva el factor completo para comprobar R[0] y mide
+también la norma proyectada; geometría, ángulos, derivada y taps sin cambios.
+Ocho pruebas del observador pasan, incluidas memoria viva, modos omitidos,
+variantes de derivada/reflexión y detección de un factor proyectado alterado.
+El ensayo completo pasa 17 controles. Dinámica/presión se reproducen con
+diferencia 0; máxima diferencia de campo 2,750478e−16, mismas cotas y
+refinamiento. Sin embargo, el certificado tarda 1488,233 s frente a
+1107,991 s históricos: 34,3182% más. En las tres sondas del mismo proceso,
+reconstruir el factor espacial proyectado cuesta 2,80–4,88 veces el producto
+denso que reemplaza. Se conserva la ruta anterior por defecto; la nueva
+queda como control opcional. Tiempo total 1798,766 s, pico 4,655491 GiB.
+Una R, informes sólo en repo, sin WAV/paquete ni cambios de timbre.
+Siguiente: ampliar parciales de cuerda con convergencia espectral antes de
+extender una escucha; no adoptar la alternativa más lenta para el banco actual.

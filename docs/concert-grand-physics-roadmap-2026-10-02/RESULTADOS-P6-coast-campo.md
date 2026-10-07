@@ -164,6 +164,9 @@ Su operación de observación `H @ Q` es lineal: estudiar mover la proyección
 a las formas de celda antes de construir los histogramas, conservando la
 medida del factor completo y sus cotas. Esa posible aceleración aún no se
 implementó ni midió; necesita comparación de campo/energía y coste.
+La implementación posterior y su ensayo se registran por separado en
+[proyección de celdas](RESULTADOS-P6-proyeccion-celdas.md); este documento
+conserva el coste y los resultados de la ruta anterior.
 Este banco conserva sólo **tres modos transversales por dirección y seis
 axiales** de la cuerda supuesta: son los del control de contacto, no la
 resolución amplia del piloto audible anterior. Antes de otra escucha hay
@@ -180,6 +183,10 @@ guardan sólo en el repo. No se duplica R ni se crean archivos en SHARED.
 
 Python 3.12.14, NumPy 2.3.5, SciPy 1.18.1, BLAS de un hilo y sin bytecode.
 Usar un destino nuevo para preservar informes:
+Estos auditores verifican SHA de fuentes congelados; reproducir el campo
+con **e6c3a93** y la alineación con **d9cc07c**. El observador modificado
+posteriormente requiere el auditor de proyección enlazado arriba, que
+autentica la referencia histórica y registra el cambio explícito.
 
 ```powershell
 python tools/audit-concert-grand-full-coast-field.py --full-report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-aire-bloques/carga128-pade2.json --board local/concert-grand-physics/P6-proyeccion-espacial-2026-10-05/Tabla-proyectada-pasiva.npz --cache local/concert-grand-physics/P6-carga-causal-2026-10-06 --cost-report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-propagacion-coste/pares-completos.json --microphone-report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-propagacion-coste/microfonos-completos.json --rates 64000 128000 256000 --duration .0005 --max-array-gib 12 --report NUEVO_CAMPO.json

@@ -2687,6 +2687,24 @@ has only three transverse modes per direction and six axial modes. Broader
 string resolution, cheaper field observation, duration and natural
 restrike/release remain before timbral listening or factory integration.
 
+An optional [cell projection for field observation](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-proyeccion-celdas.md)
+uses the linear identity `L(S) Q = L(S Q)` with unchanged geometry, angles,
+weights, derivative and taps. The full factor is still regenerated for its
+authenticated R[0] norm, and the projected norm is checked against
+`trace(Q.T R[0] Q)`. It supplies observations only; no physical forces or
+trajectories are reduced. Eight directed observer tests pass, including
+living-memory/full-factor comparisons and detection of a damaged projected
+factor without direct probes. The full audit passes 17 controls: dynamics
+and pressure reproduce exactly, maximum field difference 2.750478e-16,
+with unchanged energy bounds and refinement. However, its certificate
+takes 1488.233 s versus 1107.991 s historically, 34.3182% longer. Three
+same-process probes show projected spatial construction costs 2.80–4.88
+times the dense projection it replaces. The previous factor projection
+remains the default; the alternative is an explicit equivalence control,
+not an approved speed improvement for this bank. Total 1798.766 s, peak
+4.655491 GiB. Full-run timing is historical, not an isolated paired benchmark.
+Numerical margins do not constitute a formal interval-arithmetic proof.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

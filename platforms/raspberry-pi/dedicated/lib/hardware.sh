@@ -55,6 +55,35 @@ detect_hardware() {
   return 0
 }
 
+# Whether this boot is a trial: the firmware booted from tryboot.txt.
+booted_on_trial() {
+  [[ "$(od -An -tu4 --endian=big "$DEDICATED_ROOT/proc/device-tree/chosen/bootloader/tryboot" 2>/dev/null | tr -d ' ')" == 1 ]]
+}
+
+# Whether the kernel can mount the root filesystem by itself: the root is
+# ext4 on an SD card or a USB disk, with both built into the kernel, and
+# nothing -- encryption, LVM -- needs the initramfs to assemble it.
+root_mountable_without_initramfs() {
+  local config="$DEDICATED_ROOT/boot/config-$HW_KERNEL" device type
+  [[ -f "$config" ]] || return 1
+  grep -q '^CONFIG_EXT4_FS=y' "$config" || return 1
+  if [[ -n "$DEDICATED_ROOT" ]]; then
+    device="${HW_ROOT_DEVICE:-}"
+    type="${HW_ROOT_TYPE:-}"
+  else
+    device="$(findmnt -no SOURCE / 2>/dev/null)"
+    type="$(findmnt -no FSTYPE / 2>/dev/null)"
+  fi
+  [[ "$type" == ext4 ]] || return 1
+  case "$device" in
+    /dev/mmcblk*) grep -q '^CONFIG_MMC_BLOCK=y' "$config" || return 1 ;;
+    /dev/sd*) grep -q '^CONFIG_USB_STORAGE=y' "$config" || return 1 ;;
+    *) return 1 ;;
+  esac
+  # Anything listed to unlock or assemble at boot needs the initramfs.
+  ! grep -qsE '^[[:space:]]*[^#[:space:]]' "$DEDICATED_ROOT/etc/crypttab"
+}
+
 print_hardware() {
   printf 'board        %s (%s)\n' "$HW_BOARD" "$HW_MODEL"
   printf 'cpus         %s\n' "$HW_CPUS"

@@ -385,6 +385,54 @@ package's rule with one of the same name in `/etc/udev/rules.d`; after a
 reboot every core reads `performance` and `verify` passes. A marker saying
 "applied" would have reported success throughout.
 
+**Soak** (`rackforge-pi-bench soak`, 120 minutes, a chord every 5): no unit
+started on its own; no overrun, underrun or engine restart; peak 60 % of
+the period; 46–50 °C, never throttled; `performance` on every core
+throughout.
+
+**Result: met.** Time to the first period fell 2.7 s (the prediction asked
+for 1 s), and nothing started in the background during the soak.
+
+**The initramfs.** The firmware read an 11.8 MB initramfs beside the
+10.2 MB kernel; the initramfs unpacked, ran its udev, checked the root and
+mounted it at 1.81 s. The kernel builds in what this root needs (ext4 and
+the SD card's MMC block driver), and without an initramfs it mounts the
+root read-only by itself, at 1.16 s, after which `systemd-fsck-root` checks
+it ("rootfs: clean") before it is remounted read-write: the check is kept.
+Five boots each, through `tryboot`:
+
+| | First period, from the kernel | Before the kernel (estimate) |
+| --- | --- | --- |
+| with the initramfs, `performance` from boot | 7.34 (7.55) | baseline |
+| without | 6.78 (6.81) | 1.2 s less |
+
+About 1.8 s less from power to sound; with the user's 20 s from before,
+about 15 s now.
+
+A boot change decides whether the Pi boots at all, so the boot module
+never writes config.txt straight away. `apply` stages the change in
+`tryboot.txt` and `verify` reports it as pending; `rackforge-pi try-boot`
+restarts once from that file; `rackforge-boot-trial.service` checks, on that
+boot alone, that the engine played its first period, records the proof
+(the lines, the kernel, the board) and runs `apply boot`, which now moves
+the lines into config.txt and puts back what only the trial needed. A trial
+that fails or hangs is undone by unplugging the Pi. Once kept, the change
+stays across kernel updates: Raspberry Pi kernels have always built ext4
+and the SD card's driver in, and `rackforge-pi revert boot` brings the
+initramfs back at any time. Done on the Pi: the trial passed, config.txt carries
+`auto_initramfs=0`, and nothing of the trial is left.
+
+**D3 at its end** (5 ordinary boots after the trial; no initramfs loaded;
+`verify` passes):
+
+| | First period | Web | SSH | Network | Reboot, SSH gone to SSH back |
+| --- | --- | --- | --- | --- | --- |
+| D1 | 10.2 | 16.9 | 17.0 | 20.8 | 33.6 |
+| D3 | **6.8** (6.9) | 13.8 | 13.9 | 16.9 | 27.2 |
+
+The instrument sounds 3.4 s sooner after the kernel starts and a whole
+reboot is 6.4 s shorter. From power, about 15 s against the user's 20 s.
+
 ### D4. Storage
 
 Volatile, size-capped journal; telemetry not written to the card every

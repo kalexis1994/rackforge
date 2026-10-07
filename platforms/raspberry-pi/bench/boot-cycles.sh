@@ -16,6 +16,10 @@ host="${1:?host}"
 label="${2:?label}"
 count="${3:-10}"
 bench='~/bench/rackforge-pi-bench'
+# How each cycle restarts the Pi. BOOT_COMMAND='sudo reboot "0 tryboot"'
+# boots once from tryboot.txt instead of config.txt, which is how a boot
+# configuration is tried without risking the next one.
+boot_command="${BOOT_COMMAND:-sudo systemctl reboot}"
 records='~/bench/records'
 
 now() { date +%s.%N; }
@@ -50,7 +54,7 @@ for cycle in $(seq 1 "$count"); do
   # looks exactly like a Pi that went down; only a new boot id proves one.
   previous=""
   until previous="$(boot_id)" && [[ -n "$previous" ]]; do sleep 1; done
-  ssh -o ConnectTimeout=5 "$host" 'sudo systemctl reboot' || true
+  ssh -o ConnectTimeout=5 "$host" "$boot_command" || true
   # Gone: SSH no longer connects.
   while ssh -o ConnectTimeout=2 -o BatchMode=yes "$host" true 2>/dev/null; do
     sleep 0.5
@@ -61,7 +65,7 @@ for cycle in $(seq 1 "$count"); do
   asked="$(date +%s)"
   until current="$(boot_id)" && [[ -n "$current" && "$current" != "$previous" ]]; do
     if [[ "$current" == "$previous" ]] && (($(date +%s) - asked > 90)); then
-      ssh -o ConnectTimeout=5 "$host" 'sudo systemctl reboot' || true
+      ssh -o ConnectTimeout=5 "$host" "$boot_command" || true
       asked="$(date +%s)"
       down="$(now)"
     fi

@@ -346,9 +346,12 @@ revert_original() {
           ;;
         not-found)
           # A unit RackForge brought: it is disabled before its file goes,
-          # or its enablement links would outlive it.
+          # or its enablement links would outlive it. Not stopped: the one
+          # reverting it may be that unit itself (the boot trial's check),
+          # and a stop would wait on its own end; without links or a file
+          # it does not start again.
           "$DEDICATED_SYSTEMCTL" unmask "$target" 2>/dev/null || true
-          "$DEDICATED_SYSTEMCTL" disable --now "$target" 2>/dev/null || true
+          "$DEDICATED_SYSTEMCTL" disable "$target" 2>/dev/null || true
           ;;
         *)
           # static, generated: nothing RackForge can set back but the mask,

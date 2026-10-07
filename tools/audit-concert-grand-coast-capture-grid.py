@@ -112,10 +112,12 @@ def main():
         *(v for row in rows for v in row['diagnostic_reproduction'].values()),
         *(v for row in checks for v in row.values())])
     r['reproduction_maximum_relative']=largest
+    r['stage']='alignment diagnostics measured';checkpoint()
     r['alignment_gates']=dict(reproduced_field_dynamics_pressure=largest<1e-10,
         native_second_order=r['native_common_times']['ratio']<r['criteria']['refinement_ratio'],
         native_finest_board=errors[-1]<old['criteria']['board_relative'],
         source_unchanged=all(digest(Path(__file__).with_name(name))==sha for name,sha in r['source_sha256'].items()))
+    r['alignment_gates']={name:bool(value) for name,value in r['alignment_gates'].items()}
     linked={key:value for key,value in old['coast_gates'].items() if key!='second_order_board'}
     linked.update({'aligned_'+key:bool(value) for key,value in r['alignment_gates'].items()})
     r['linked_coast_gates']=linked;r['linked_coast_gates_passed']=all(linked.values())

@@ -2735,14 +2735,32 @@ It passes 14/14 directed gates in 3082.568 s (peak 3.287 GiB), reproducing
 the parent 48-mode baseline exactly. Maximum spatial high-band pressure
 error is 0.038670% against 1%; contact-time high-band error is 0.025344%
 against 0.1%. The old failures remain in their report. The fine 96/192-mode,
-3072-kHz contact is an early-window reference only; its full angular ledger,
-coast refinement and relevant source/load band still require verification.
+3072-kHz contact is an early-window reference only; its full contact angular
+ledger and relevant source/load band still require verification.
 Global approval stays false, and factory sound is unchanged.
+The [refined coast field audit](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-coast-refinado.md)
+reproduces that baseline exactly and measures independent angular storage
+and radiation over a living 0.5 ms continuation at 64/128/256 kHz. It passes
+15/16 gates in 2231.768 s (peak 4.853 GiB). Worst bounded energy discrepancy
+is 4.32661e-11; native board convergence ratio is 0.234935, below 0.35;
+fine complex-pressure error through 6 kHz is at most 0.00311481%.
+However, integrated radiation changes 0.274024% including observation
+bounds between 128 and 256 kHz, above the unchanged 0.2% limit. The measured
+difference dominates the observation uncertainty. Coast approval remains
+false; next add 512 kHz from the same authenticated endpoint before longer
+windows. This certifies neither the full contact ledger nor a whole note.
 A separate [finite-window observer prototype](concert-grand-physics-roadmap-2026-10-02/NOTA-P6-observador-ventana-finita.md)
 retains both live endpoints in the discrete Padé transform. It reproduces
 centered section inputs and Parseval flux in synthetic tests, including
-650 taps. It changes no dynamics; complete-field cost, endpoint replay and
-independent storage accounting remain required before certificate adoption.
+650 taps. Real refined-coast probes now reproduce complex field and flux
+in two angular blocks with maximum relative errors 2.25109e-13 and
+1.47126e-13. Their observation basis has rank 324; dynamics retain all 606
+coordinates and the established full angular certificate bounds the residual.
+On these short windows the spectral kernel takes 10.26-13.80 times the
+stored-input temporal field product, with shared generation/projection and
+replay preparation accounted separately. It changes no dynamics and is not
+adopted by default; long-window cost and complete certificate integration
+remain required before replacing the established observer.
 
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a

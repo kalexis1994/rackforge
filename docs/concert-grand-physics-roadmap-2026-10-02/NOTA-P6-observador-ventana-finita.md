@@ -63,10 +63,12 @@ Tres pruebas pasan en 0,337 s:
 ## Límites y siguiente paso
 
 Es un prototipo de observación, no un certificado del banco completo.
-Los 650 taps se prueban con tres modos; todavía no se ha medido su tiempo
-y memoria con 606 modos y los factores angulares completos. No se adopta
-por defecto ni se promete aceleración. Las tolerancias son comprobaciones
-numéricas, no cotas rigurosas de aritmética de intervalos.
+Los controles sintéticos anteriores prueban 650 taps con tres modos.
+El ensayo real añadido debajo mide dos bloques angulares con una base
+de observación de rango 324 sobre la dinámica de 606 coordenadas; aún
+no sustituye el certificado completo ni mide un contacto largo. No se adopta
+por defecto ni se promete aceleración. Las tolerancias de comparación son
+comprobaciones numéricas, no cotas rigurosas de aritmética de intervalos.
 
 Antes de certificar un recorrido físico: comprobar el replay del puerto
 contra sus extremos grabados, enlazar el factor autenticado y el almacenamiento
@@ -75,6 +77,37 @@ El helper por sí solo comprueba dimensiones/valores, no certifica que una
 memoria final dada proceda de ese puerto. No inferir esa relación del balance
 mecánico. Mantener presupuesto para espectro del puerto, bloque espectral,
 factor angular y estados; no materializar toda la historia de secciones.
+
+## 2026-10-07 — Sondas en el coast refinado real
+
+[Método, resultados y límite fallido](RESULTADOS-P6-coast-refinado.md).
+`tools/concert_grand_window_field_probe.py` enlaza las memorias inicial/final
+y puerto del recorrido físico de 96/192 modos de cuerda, tabla/aire completos.
+El certificado establecido sigue recorriendo todos los 384 bloques angulares
+y contabilizando almacenamiento y flujo independientes con residuo acotado.
+Las sondas son adicionales: bloques 0/192, tres tasas, dos FFT por ventana,
+12 comparaciones. La vista no modifica proveedor ni R físicos; pruebas
+sintéticas verifican equivalencia exacta del certificado con y sin vista.
+
+Replay completo del certificado: 0; replay proyectado de sonda máximo
+5,11995e−15. Campo complejo: 2,25109e−13; flujo por Parseval: 1,47126e−13,
+frente a 1e−10. Memorias y padding se conservan. La base de observación
+es 324/606, no una reducción de la dinámica; el certificado completo acota
+su residuo. El resultado de las sondas no extiende ese certificado a todo
+el método espectral ni al contacto de 3 ms.
+
+Kernel espectral local: 0,276–0,874 s; producto temporal con inputs guardados:
+0,0257–0,0793 s; replay/preparación: 0,304–1,690 s. Para cada pareja
+bloque/ventana el kernel espectral cuesta 10,26–13,80 veces el producto
+temporal. Generación/proyección comunes excluidas; el replay temporal se
+comparte entre bloques. El certificado con sondas dura 1123,168 s y el
+ensayo completo 2231,768 s, pico 4,853 GiB. No demuestra aceleración de
+ventanas largas ni resuelve todavía la historia de 27 GiB del contacto.
+
+El coast pasa **15/16**: la radiación 128→256 kHz cambia 0,274024% con
+cotas, por encima del límite 0,2%; los demás controles pasan. Las sondas
+correctas tampoco justifican aprobar ese paso temporal. Sigue comprobar
+256→512 kHz con el mismo endpoint y límites, conservando este fallo.
 
 ## Otra vía pendiente para contactos repetidos
 

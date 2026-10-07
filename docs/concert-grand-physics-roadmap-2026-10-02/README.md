@@ -87,6 +87,15 @@ la carga completa y todos los límites. Terminó **14/14 controles**: presión
 alta espacial máxima 0,038670% (<1%), temporal 0,025344% (<0,1%). Se usa el
 caso fino como referencia temprana para validar banda, coast/campo y duración;
 todavía no cambia el paquete de fábrica ni se aprueba una nota completa.
+El [ensayo de campo refinado](RESULTADOS-P6-coast-refinado.md) reconstruye
+ese contacto de referencia y mide independientemente el coast de 96/192:
+64/128/256 kHz desde el mismo extremo vivo, con comparaciones nativas de
+tabla, presión y certificado angular completo. Sondas espectrales separadas
+comprueban campo complejo y flujo sin sustituir la ruta temporal establecida.
+Termina **15/16**: pasa presión (máximo fino 0,00311481%), pero falla el
+refinamiento de radiación (0,274024% con cotas, límite 0,2%). Siguiente:
+añadir 512 kHz antes de ampliar duración. El prototipo espectral pasa
+fase/flujo en dos bloques; no demuestra ahorro de tiempo ni se adopta.
 
 | ID | Mecanismo | Representación actual / falta | Estado |
 | --- | --- | --- | --- |
@@ -96,7 +105,7 @@ todavía no cambia el paquete de fábrica ni se aprueba una nota completa.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Tabla 132×112 y proyección 7392→606 verificadas hasta 6 kHz; Padé2/derivada cuarta pasa masa, 83 frecuencias y tres puntos Laplace. Contacto de 3 ms y coast de 0,5 ms de C4 supuesto conservan todos los estados; el coast de tres modos pasa balance angular y presión. El barrido 3→48 pasa 11/13; la matriz dirigida 48/96 × 1536/3072 kHz pasa 14/14 con los mismos límites. Faltan banda superior de fuente/carga, certificado y propagación del banco refinado, duración, repetición/release, identificación y ambas caras/borde. | Convergencia de presión temprana en 0–6 kHz medida; campo refinado, nota completa y timbre pendientes |
+| P6 | Radiación y carga acústica del aire | Tabla 132×112 y proyección 7392→606 verificadas hasta 6 kHz; Padé2/derivada cuarta pasa masa, 83 frecuencias y tres puntos Laplace. Contacto de 3 ms y coast de 0,5 ms de C4 supuesto conservan todos los estados. El barrido 3→48 pasa 11/13; la matriz dirigida 48/96 × 1536/3072 kHz pasa 14/14. El coast refinado pasa 15/16: presión y balance angular medidos, flujo 128→256 falla 0,274024% frente a 0,2%; sigue 512 kHz. Faltan banda superior de fuente/carga, balance angular del contacto completo, duración, repetición/release, identificación y ambas caras/borde. | Presión temprana hasta 6 kHz convergente; tasa de coast, nota completa y timbre pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1440,3 +1449,25 @@ completo. Puede evitar historia de 27 GiB, pero no se promete aceleración.
 Se registra además la posible eliminación causal del subsistema lineal de
 tabla/aire para contactos repetidos del mismo operador. Debe conservar la
 inercia compartida y reacción completa; todavía no está implementada ni medida.
+
+### 2026-10-07 — P6: certificado angular desde la cuerda refinada
+
+[Resultados, fallo y reproducción](RESULTADOS-P6-coast-refinado.md).
+**0a6c1f7** añade el auditor de coast 96/192 y sondas espectrales sobre
+memorias vivas. Once pruebas pasan, tres nuevas y ocho controles existentes.
+El ensayo termina **15/16** en 2231,768 s (37,20 min), pico 4,853 GiB,
+reproduciendo exactamente contacto, coast y presión del padre.
+El certificado angular completo pasa replay, almacenamiento, flujo positivo,
+pérdidas y balance acotado máximo 4,32661e−11. Tabla nativa: razón 0,234935
+frente a 0,35; presión fina máxima hasta 6 kHz: 0,00311481% frente a 0,1%.
+
+Falla únicamente el refinamiento de radiación: 128→256 cambia 0,274024%
+con cotas frente a 0,2%; no se cambia el límite ni se aprueba el coast.
+Las 12 sondas en dos bloques pasan campo complejo/flujo a 2,25109e−13 /
+1,47126e−13. El kernel espectral cuesta 10,26–13,80 veces el producto
+temporal con inputs guardados; preparación/replay se mide aparte y se puede
+compartir. No se adopta como observador por defecto ni se promete ahorro
+global. Una R existente, historias en RAM, informe sólo en repo.
+Siguiente: 512 kHz desde el mismo seed antes de duración; después banda
+superior de fuente/carga y balance angular del contacto completo. No hay
+WAV ni paquete nuevo; aprobación global falsa, faltan release/unísono/escucha.

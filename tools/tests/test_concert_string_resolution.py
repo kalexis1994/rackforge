@@ -8,6 +8,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 from concert_grand_nonlinear_string import Wire,String
 from concert_grand_contact_study import CosineString
 from concert_grand_fast_contact import FastBoundedContact
+from concert_grand_moving_bridge import MovingBridge,Support
 from concert_grand_string_resolution import capture_contact,join_capture
 from concert_grand_exponential_coast import ExponentialCoast
 from concert_grand_coast_measurements import run_coast
@@ -41,6 +42,23 @@ class StringResolutionTests(unittest.TestCase):
         self.assertAlmostEqual(row['felt_heat_j']+row['material_heat_j'],heat,delta=1e-13)
         self.assertAlmostEqual(row['air_port_work_j'],work,delta=1e-13)
         self.assertEqual(len(t),17)
+
+    def test_high_order_quadrature_with_moving_endpoint_against_independent_gauss(self):
+        rng=np.random.default_rng(89);wire=Wire(.62,.0081,850)
+        for nt,nl in [(24,48),(48,96),(48,192)]:
+            core=MovingBridge(wire,Support((180.,600.),(.2,.1),(.01,.02)),nt,nl)
+            q=rng.normal(size=core.size)*1e-6;q[core.su]*=.05
+            energy=core.potential(q);g,H=core.gradient_hessian(q)
+            original=core.base
+            dense=String(wire,nt,nl,quadrature=max(240,8*nl),bending=True)
+            dense.ku=original.ku;dense.kv=original.kv;dense.nodes=len(dense.x)
+            dense.synthesize=lambda coefficients:np.cos(
+                np.pi*dense.x[:,None]/wire.length*np.arange(1,len(coefficients)+1))@coefficients
+            core.base=dense
+            expected=core.potential(q);dg,dH=core.gradient_hessian(q)
+            self.assertLess(abs(energy-expected)/expected,2e-11)
+            self.assertLess(np.linalg.norm(g-dg)/np.linalg.norm(dg),2e-11)
+            self.assertLess(np.linalg.norm(H-dH)/np.linalg.norm(dH),2e-11)
 
     def test_axial_modes_above_twice_transverse_are_unforced_in_this_galerkin_model(self):
         rng=np.random.default_rng(41);wire=Wire(.62,.0081,850)

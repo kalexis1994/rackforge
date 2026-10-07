@@ -1379,3 +1379,26 @@ queda como control opcional. Tiempo total 1798,766 s, pico 4,655491 GiB.
 Una R, informes sólo en repo, sin WAV/paquete ni cambios de timbre.
 Siguiente: ampliar parciales de cuerda con convergencia espectral antes de
 extender una escucha; no adoptar la alternativa más lenta para el banco actual.
+
+### 2026-10-07 — P6: resolución transversal/axial de cuerda con tabla completa
+
+[Método, umbrales y mediciones](RESULTADOS-P6-resolucion-cuerda.md).
+**ce94f3f** prepara la comparación de 3/6/12/24/48 modos por dirección,
+con 2N axiales y el mismo fieltro, puente, tabla y R. Compara presión temprana
+por bandas y temporal en 0–3,5 ms; usa coordenadas físicas comunes de tabla.
+Separa controles de paso de contacto, cierre axial 2N/4N y propagación desde
+el mismo extremo vivo. Cinco pruebas pasan contra cuadratura independiente,
+incluido el puente móvil, y trabajo mecánico/captura del integrador de referencia.
+La observación no deduce radiación del balance mecánico. Ventana corta,
+una cuerda supuesta; sin aprobación del timbre, WAV, fábrica ni paquetes.
+
+Ensayo terminado: **11/13 controles**, 2426,356 s, pico 3,153 GiB. El banco
+de tres modos sólo llega a 785,53 Hz de frecuencia transversal libre; al
+ampliar a 48 la fuerza máxima baja 25,3525→16,1850 N con el mismo fieltro.
+La colisión estaba limitada por la base, no sólo por la observación de tabla.
+Fallan presión compleja en 1980–6000 Hz para 24→48 (1,506794%, límite 1%)
+y contacto 768→1536 kHz (0,101373%, límite 0,1%). Se conservan ambos fallos.
+Reproducción anterior exacta; pasan balances, impulso, captura, control axial
+y coast. Siguiente: matriz dirigida 48/96 modos y 1536/3072 kHz; comprobar
+banda de fuente/carga y presupuesto del certificado angular antes de ampliar
+ventana. No se adopta todavía 48 modos ni se cambia el plugin instalado.

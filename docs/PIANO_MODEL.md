@@ -2705,6 +2705,31 @@ not an approved speed improvement for this bank. Total 1798.766 s, peak
 4.655491 GiB. Full-run timing is historical, not an isolated paired benchmark.
 Numerical margins do not constitute a formal interval-arithmetic proof.
 
+The subsequent [string-resolution study](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-resolucion-cuerda.md)
+compares 3/6/12/24/48 transverse modes per direction with 2N axial modes,
+preserving the same felt, wire, mixed-mass bridge and complete 606-coordinate
+board/air load. Five directed tests check higher-order energy/forces/Hessians
+against independent spatial quadrature, including the moving endpoint,
+axial closure above 2N, mechanical work and capture continuity. The study
+compares physical board coordinates and finite-window pressure at 0–3.5 ms,
+with separate contact-time, axial-resolution and living-coast controls.
+Mechanical work closure against measured air-port work is distinct from
+an independent angular storage/radiation certificate. These are modes of
+one assumed wire, not added unison strings or a factory sound change.
+The completed preflight passes 11/13 gates (2426.356 s, peak 3.153 GiB).
+Three modes reach only 785.53 Hz of free transverse frequency; increasing
+to 48 lowers peak contact force from 25.3525 to 16.1850 N without changing
+felt parameters. Resolution affects the collision, not only the observer.
+Two high-band pressure gates fail: 24→48 gives 1.506794% against 1%, and
+contact 768→1536 kHz gives 0.101373% against 0.1%. Both failures remain
+recorded; global and resolution approval remain false. Baseline reproduction
+is exact, and mechanical/impulse, capture, axial and coast controls pass.
+Next is a directed 48/96-mode, 1536/3072-kHz contact study, then source/load
+band checks and independent angular accounting before longer observations.
+The load is validated only through 6 kHz, whereas the 48-mode wire includes
+free frequencies up to 18.51 kHz. Finite-window pressure changes do not
+establish perceptual fidelity or convergence of a complete piano note.
+
 Sustained partials above ~2 kHz now die in fractions of a second (an extra
 loss term in the decay curve): bright *sustain* is a guitar's signature, a
 piano's treble energy lives in its attack.

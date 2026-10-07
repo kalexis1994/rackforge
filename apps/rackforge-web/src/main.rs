@@ -449,10 +449,11 @@ impl AuthManager {
     fn persist(&self, store: &AuthStore) -> Result<()> {
         let parent = self.path.parent().context("web auth path has no parent")?;
         fs::create_dir_all(parent)?;
-        let temporary = self.path.with_extension("json.new");
         let bytes = serde_json::to_vec_pretty(store).context("encoding RackForge web auth")?;
-        fs::write(&temporary, bytes).with_context(|| format!("writing {}", temporary.display()))?;
-        fs::rename(&temporary, &self.path)
+        // The web server will not start on a damaged auth file -- resetting
+        // the PIN to whoever asks first is not an answer -- so it is written
+        // the one way a power cut cannot damage.
+        rackforge_atomic_file::write(&self.path, bytes)
             .with_context(|| format!("installing {}", self.path.display()))
     }
 }
@@ -887,9 +888,9 @@ fn persist_web_config(path: &Path, web: &WebConfig) -> Result<()> {
     let text = toml::to_string_pretty(&root).context("formatting RackForge configuration")?;
     let parent = path.parent().context("RackForge config has no parent")?;
     fs::create_dir_all(parent)?;
-    let temporary = path.with_extension("toml.new");
-    fs::write(&temporary, text).with_context(|| format!("writing {}", temporary.display()))?;
-    fs::rename(&temporary, path).with_context(|| format!("installing {}", path.display()))
+    // The web server will not start on a damaged configuration.
+    rackforge_atomic_file::write(path, text)
+        .with_context(|| format!("installing {}", path.display()))
 }
 
 #[cfg(unix)]
@@ -1373,9 +1374,7 @@ async fn apply_controller_settings(
                 )
             })
             .collect::<String>();
-        let temporary = path.with_extension("tmp");
-        std::fs::write(&temporary, body)?;
-        std::fs::rename(&temporary, &path)?;
+        rackforge_atomic_file::write(&path, body)?;
         Ok(())
     })();
     write.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

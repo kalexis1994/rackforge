@@ -3891,6 +3891,7 @@ dependencies = [
 name = "rackforge-controller-package"
 version = "0.1.29"
 dependencies = [
+ "rackforge-atomic-file",
  "rackforge-control-profile",
  "rackforge-controller-api",
  "rackforge-midi-api",
@@ -4083,6 +4084,7 @@ version = "0.1.29"
 dependencies = [
  "anyhow",
  "libloading 0.8.9",
+ "rackforge-atomic-file",
  "rackforge-plugin-sdk",
  "sha2 0.10.9",
  "wasm-opt",
@@ -4110,6 +4112,7 @@ version = "0.1.29"
 dependencies = [
  "base64",
  "ed25519-dalek",
+ "rackforge-atomic-file",
  "rackforge-plugin-api",
  "semver",
  "serde",
@@ -4136,6 +4139,7 @@ version = "0.1.29"
 dependencies = [
  "base64",
  "getrandom 0.3.4",
+ "rackforge-atomic-file",
  "rackforge-resource-api",
  "serde",
  "serde_json",

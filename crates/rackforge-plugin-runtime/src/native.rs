@@ -240,7 +240,16 @@ impl PortableEngine {
             Some(optimized) if Module::from_binary(&self.interrupted, optimized).is_ok() => {
                 optimized
             }
-            _ => bytes,
+            // A cached form that no longer compiles -- cut short by a power
+            // cut -- is dropped, so the next start optimises again instead
+            // of compiling the slower original every time from now on.
+            Some(_) => {
+                if let Some(cache) = self.cache_directory.as_deref() {
+                    let _ = std::fs::remove_file(crate::optimize::cached_path(cache, bytes));
+                }
+                bytes
+            }
+            None => bytes,
         };
         let compile = |engine: &Engine| {
             Module::from_binary(engine, bytes).map_err(|error| {

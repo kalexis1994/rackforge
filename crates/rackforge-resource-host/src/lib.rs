@@ -185,8 +185,20 @@ impl NativeResourceBrowser {
             && path.is_file()
         {
             let bytes = fs::read(path).map_err(backend)?;
-            state.grants = serde_json::from_slice(&bytes)
-                .map_err(|error| ResourceError::Backend(error.to_string()))?;
+            match serde_json::from_slice(&bytes) {
+                Ok(grants) => state.grants = grants,
+                // Grants are permissions, and none is the safe set: a plugin
+                // asks again. A damaged store is moved aside, not allowed to
+                // keep the web server from starting.
+                Err(error) => {
+                    let moved = rackforge_atomic_file::quarantine(path);
+                    eprintln!(
+                        "RESOURCE_GRANTS_UNREADABLE path={} moved={:?} error={error}",
+                        path.display(),
+                        moved.as_ref().map(|to| to.display().to_string())
+                    );
+                }
+            }
         }
         for source in mounts {
             let root = fs::canonicalize(&source.root).map_err(backend)?;
@@ -1189,14 +1201,10 @@ fn persist_grants(path: &Path, grants: &[GrantRecord]) -> Result<(), ResourceErr
         ResourceError::Backend("resource grant store has no parent directory".into())
     })?;
     fs::create_dir_all(parent).map_err(backend)?;
-    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
     let bytes = serde_json::to_vec_pretty(grants)
         .map_err(|error| ResourceError::Backend(error.to_string()))?;
-    fs::write(&temporary, bytes).map_err(backend)?;
-    if path.exists() {
-        fs::remove_file(path).map_err(backend)?;
-    }
-    fs::rename(temporary, path).map_err(backend)
+    // Replaced in one rename, never removed first.
+    rackforge_atomic_file::write(path, bytes).map_err(backend)
 }
 
 fn random_handle() -> Result<String, ResourceError> {

@@ -14,7 +14,7 @@
 //! a program from starting.
 
 use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -66,7 +66,7 @@ pub fn copy(source: impl AsRef<Path>, destination: impl AsRef<Path>) -> io::Resu
 pub fn sync_directory(directory: impl AsRef<Path>) -> io::Result<()> {
     #[cfg(unix)]
     {
-        File::open(directory.as_ref())?.sync_all()
+        fs::File::open(directory.as_ref())?.sync_all()
     }
     #[cfg(not(unix))]
     {

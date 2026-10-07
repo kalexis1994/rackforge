@@ -12,6 +12,7 @@ anyhow.workspace = true
 # compiler is only a dependency of the native hosts.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wasmtime.workspace = true
+rackforge-atomic-file = { path = "../rackforge-atomic-file" }
 # Binaryen, run over every component before Cranelift compiles it (see
 # src/optimize.rs). Without its DWARF support: components carry none the
 # host reads.

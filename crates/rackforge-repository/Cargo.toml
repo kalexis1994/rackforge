@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 base64.workspace = true
 ed25519-dalek.workspace = true
+rackforge-atomic-file = { path = "../rackforge-atomic-file" }
 rackforge-plugin-api = { path = "../rackforge-plugin-api", features = ["package-validation"] }
 semver.workspace = true
 serde.workspace = true

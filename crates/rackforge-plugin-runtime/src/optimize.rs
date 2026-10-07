@@ -86,10 +86,5 @@ pub fn optimize(bytes: &[u8], scratch: &Path) -> Result<Vec<u8>, String> {
 pub fn store(path: &Path, optimized: &[u8]) -> Result<(), String> {
     let directory = path.parent().ok_or("cache path has no directory")?;
     fs::create_dir_all(directory).map_err(|error| error.to_string())?;
-    let partial = path.with_extension(format!("{}.partial", std::process::id()));
-    fs::write(&partial, optimized).map_err(|error| error.to_string())?;
-    fs::rename(&partial, path).map_err(|error| {
-        let _ = fs::remove_file(&partial);
-        error.to_string()
-    })
+    rackforge_atomic_file::write(path, optimized).map_err(|error| error.to_string())
 }

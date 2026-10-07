@@ -176,8 +176,20 @@ fn read_plugin_activation_document(
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    let document: PluginActivationDocument = serde_json::from_slice(&bytes)
-        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    let document: PluginActivationDocument = match serde_json::from_slice(&bytes) {
+        Ok(document) => document,
+        // Damaged, not newer: read as no document at all, which enables
+        // every installed plugin as a store without one always has, rather
+        // than leave every plugin list failing. The next change writes a
+        // whole one over it.
+        Err(error) => {
+            eprintln!(
+                "PLUGIN_ACTIVATION_UNREADABLE path={} error={error}",
+                path.display()
+            );
+            return Ok(None);
+        }
+    };
     if document.schema_version != PLUGIN_ACTIVATION_SCHEMA_VERSION {
         return Err(RepositoryError::InvalidPackage(format!(
             "unsupported plugin activation schema {}",
@@ -1741,19 +1753,8 @@ fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<(), Reposito
     let mut bytes = serde_json::to_vec_pretty(value)
         .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
     bytes.push(b'\n');
-    let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
-    let temporary = path.with_extension(format!("tmp-{}-{serial}", writer_discriminator()));
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)?;
-    file.write_all(&bytes)?;
-    file.sync_all()?;
-    drop(file);
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
-    fs::rename(&temporary, path)?;
+    // Replaced in one rename, never removed first, and the directory synced.
+    rackforge_atomic_file::write(path, bytes)?;
     Ok(())
 }
 

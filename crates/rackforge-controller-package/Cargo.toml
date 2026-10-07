@@ -6,6 +6,7 @@ license.workspace = true
 description = "Validated, versioned controller packages and installation store for RackForge"
 
 [dependencies]
+rackforge-atomic-file = { path = "../rackforge-atomic-file" }
 rackforge-control-profile = { path = "../rackforge-control-profile" }
 rackforge-controller-api = { path = "../rackforge-controller-api" }
 rackforge-midi-api = { path = "../rackforge-midi-api" }

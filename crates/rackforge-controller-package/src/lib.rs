@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
@@ -1352,6 +1352,9 @@ impl PackageStore {
             fs::create_dir_all(parent)?;
         }
         fs::rename(&staging, &destination)?;
+        if let Some(parent) = destination.parent() {
+            rackforge_atomic_file::sync_directory(parent)?;
+        }
         let output_allowed_version = self
             .read_active_record(id)
             .ok()
@@ -1437,7 +1440,13 @@ impl PackageStore {
             let Some(id) = path.file_stem().and_then(|value| value.to_str()) else {
                 continue;
             };
-            controllers.push(self.resolve(id)?);
+            // One controller whose record or package cannot be read is
+            // passed over: it must not keep every other controller -- and
+            // the controller host -- from starting.
+            match self.resolve(id) {
+                Ok(controller) => controllers.push(controller),
+                Err(error) => eprintln!("CONTROLLER_PACKAGE_UNREADABLE id={id} error={error}"),
+            }
         }
         controllers.sort_by(|left, right| left.record.id.cmp(&right.record.id));
         Ok(controllers)
@@ -1550,12 +1559,9 @@ impl PackageStore {
 
     fn write_active_record(&self, record: &InstallRecord) -> Result<(), PackageError> {
         let path = self.root.join("active").join(format!("{}.json", record.id));
-        let temporary = path.with_extension(format!("json.new-{}", std::process::id()));
-        let mut file = fs::File::create(&temporary)?;
-        serde_json::to_writer_pretty(&mut file, record)?;
-        file.write_all(b"\n")?;
-        file.sync_all()?;
-        fs::rename(&temporary, &path)?;
+        let mut bytes = serde_json::to_vec_pretty(record)?;
+        bytes.push(b'\n');
+        rackforge_atomic_file::write(&path, bytes)?;
         Ok(())
     }
 
@@ -1630,7 +1636,9 @@ fn copy_directory(
                     "controller package exceeds installation limits".into(),
                 ));
             }
-            fs::copy(entry.path(), target)?;
+            // On the card before the install record names the package: a
+            // power cut must not leave a record pointing at empty files.
+            rackforge_atomic_file::copy(entry.path(), target)?;
         } else {
             return Err(PackageError::UnsafePackage(format!(
                 "unsupported package entry {:?}",

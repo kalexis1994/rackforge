@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 base64.workspace = true
 getrandom.workspace = true
+rackforge-atomic-file = { path = "../rackforge-atomic-file" }
 rackforge-resource-api = { path = "../rackforge-resource-api" }
 serde.workspace = true
 serde_json.workspace = true

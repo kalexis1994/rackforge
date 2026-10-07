@@ -92,6 +92,13 @@ PLANS["edge"] = [
     {**PLANS["standard"][0], "ramp": [8, 12, 16, 20, 24]},
     {**PLANS["standard"][1], "ramp": [6, 8, 10, 12]},
 ]
+
+# Two RF-Musette programs, for a soak changing program within one instrument
+# (RF-Musette milestone 10l): every key's reeds are rebuilt after a change.
+PLANS["musette"] = [
+    PLANS["standard"][1],
+    {**PLANS["standard"][1], "label": "rf-musette-musette-paris", "sound": "musette-paris"},
+]
 VELOCITY = 96
 
 
@@ -640,11 +647,13 @@ def writes_between(before, after):
     return dict(sorted(by_name.items(), key=lambda item: -item[1]))
 
 
-def soak(minutes, play_every, switch_every=0):
+def soak(minutes, play_every, switch_every=0, switch_plan="standard"):
     """Leaves the instrument running for `minutes`, playing a short chord
     every `play_every` minutes, and records each minute what the engine
     counted and which units systemd started meanwhile: on a dedicated
-    instrument, nothing should start on its own while it plays."""
+    instrument, nothing should start on its own while it plays. Every
+    `switch_every` minutes it changes to the next of `switch_plan`'s
+    sounds, selecting the instrument only when it is another."""
     started = time.time()
     record = {
         "kind": "soak",
@@ -671,11 +680,23 @@ def soak(minutes, play_every, switch_every=0):
     first = health()
     previous = first
     switches = 0
+    active = original_instance
+    plan = PLANS[switch_plan]
     for minute in range(1, minutes + 1):
         if switch_every and minute % switch_every == 0:
             # Changing program as a player does between songs.
-            instrument = PLANS["standard"][switches % len(PLANS["standard"])]
-            select(instrument["instance"], instrument["sound"])
+            instrument = plan[switches % len(plan)]
+            if instrument["instance"] == active:
+                dispatch(
+                    {
+                        "type": "select_sound",
+                        "instance_id": active,
+                        "sound_id": instrument["sound"],
+                    }
+                )
+            else:
+                select(instrument["instance"], instrument["sound"])
+                active = instrument["instance"]
             switches += 1
         if play_every and minute % play_every == 0:
             hold_step([60, 64, 67, 72], 5.0, 2.0)
@@ -795,6 +816,9 @@ def main():
     soaking.add_argument(
         "--switch-every", type=int, default=0, help="minutes between program changes; 0 never"
     )
+    soaking.add_argument(
+        "--switch-plan", default="standard", choices=sorted(PLANS), help="the sounds changed between"
+    )
     soaking.add_argument("--out")
     boot = commands.add_parser("boot-time")
     boot.add_argument("--json", action="store_true")
@@ -829,7 +853,9 @@ def main():
             True,
         )
     elif arguments.command == "soak":
-        record = soak(arguments.minutes, arguments.play_every, arguments.switch_every)
+        record = soak(
+            arguments.minutes, arguments.play_every, arguments.switch_every, arguments.switch_plan
+        )
         emit(record, arguments.out, not arguments.out)
         print(f"units started: {record['units_started']}")
         print(f"written to storage: {record['disk_written_bytes']}")

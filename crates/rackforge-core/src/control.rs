@@ -2744,21 +2744,8 @@ fn persist_audio_output(path: &Path, profile: &AudioOutputProfile) -> Result<()>
         .validate()
         .context("validating audio output state")?;
     let bytes = toml::to_string_pretty(&document)?.into_bytes();
-    let temporary = path.with_extension(format!("toml.tmp.{}", std::process::id()));
-    {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .with_context(|| format!("creating {}", temporary.display()))?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-    }
-    if let Err(error) = fs::rename(&temporary, path) {
-        let _ = fs::remove_file(&temporary);
-        return Err(error).with_context(|| format!("replacing {}", path.display()));
-    }
-    Ok(())
+    rackforge_atomic_file::write(path, bytes)
+        .with_context(|| format!("replacing {}", path.display()))
 }
 
 fn begin_midi_learn(

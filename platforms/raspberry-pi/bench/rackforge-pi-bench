@@ -604,7 +604,43 @@ def boot_time():
 STARTED_UNIT = re.compile(r"systemd\[1\]: (?:Starting|Started) (\S+)")
 
 
-def soak(minutes, play_every):
+def disk_writes():
+    """Bytes written to each block device and partition since boot."""
+    written = {}
+    for line in (read("/proc/diskstats") or "").splitlines():
+        fields = line.split()
+        if len(fields) >= 10 and re.fullmatch(r"(mmcblk\d+(p\d+)?|sd[a-z]\d*|nvme\d+n\d+(p\d+)?)", fields[2]):
+            written[fields[2]] = int(fields[9]) * 512
+    return written
+
+
+def process_writes():
+    """What each process has written to storage, by command name. Other
+    users' processes are readable only as root."""
+    written = {}
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        io = read(f"/proc/{pid}/io")
+        if not io:
+            continue
+        match = re.search(r"^write_bytes: (\d+)", io, re.M)
+        comm = read(f"/proc/{pid}/comm", "?")
+        if match:
+            written[pid] = (comm, int(match.group(1)))
+    return written
+
+
+def writes_between(before, after):
+    by_name = {}
+    for pid, (comm, total) in after.items():
+        earlier = before.get(pid, (comm, 0))[1]
+        if total > earlier:
+            by_name[comm] = by_name.get(comm, 0) + total - earlier
+    return dict(sorted(by_name.items(), key=lambda item: -item[1]))
+
+
+def soak(minutes, play_every, switch_every=0):
     """Leaves the instrument running for `minutes`, playing a short chord
     every `play_every` minutes, and records each minute what the engine
     counted and which units systemd started meanwhile: on a dedicated
@@ -620,9 +656,27 @@ def soak(minutes, play_every):
         "engine_before": engine_audit(),
         "samples": [],
     }
+    snapshot = request({"op": "snapshot"})["snapshot"]
+    original_instance = snapshot.get("active_instance_id")
+    original_sound = next(
+        (
+            instance.get("selected_sound_id")
+            for instance in snapshot.get("instances", [])
+            if instance["instance_id"] == original_instance
+        ),
+        None,
+    )
+    disks_before = disk_writes()
+    processes_before = process_writes()
     first = health()
     previous = first
+    switches = 0
     for minute in range(1, minutes + 1):
+        if switch_every and minute % switch_every == 0:
+            # Changing program as a player does between songs.
+            instrument = PLANS["standard"][switches % len(PLANS["standard"])]
+            select(instrument["instance"], instrument["sound"])
+            switches += 1
         if play_every and minute % play_every == 0:
             hold_step([60, 64, 67, 72], 5.0, 2.0)
         time.sleep(max(0.0, started + minute * 60 - time.time()))
@@ -637,6 +691,17 @@ def soak(minutes, play_every):
             }
         )
         previous = current
+    disks_after = disk_writes()
+    record["disk_written_bytes"] = {
+        device: disks_after[device] - disks_before.get(device, 0) for device in disks_after
+    }
+    record["written_by"] = writes_between(processes_before, process_writes())
+    record["program_switches"] = switches
+    if switches and original_instance and original_sound:
+        try:
+            select(original_instance, original_sound)
+        except (OSError, RuntimeError, ValueError):
+            pass
     out = run("journalctl", "-o", "cat", "--no-pager", "--since", f"@{started:.0f}")
     units = sorted({match.group(1) for match in STARTED_UNIT.finditer(out)})
     record["units_started"] = units
@@ -727,6 +792,9 @@ def main():
     soaking = commands.add_parser("soak")
     soaking.add_argument("--minutes", type=int, default=120)
     soaking.add_argument("--play-every", type=int, default=5, help="minutes between chords; 0 never")
+    soaking.add_argument(
+        "--switch-every", type=int, default=0, help="minutes between program changes; 0 never"
+    )
     soaking.add_argument("--out")
     boot = commands.add_parser("boot-time")
     boot.add_argument("--json", action="store_true")
@@ -761,9 +829,11 @@ def main():
             True,
         )
     elif arguments.command == "soak":
-        record = soak(arguments.minutes, arguments.play_every)
+        record = soak(arguments.minutes, arguments.play_every, arguments.switch_every)
         emit(record, arguments.out, not arguments.out)
         print(f"units started: {record['units_started']}")
+        print(f"written to storage: {record['disk_written_bytes']}")
+        print(f"written by: {record['written_by']}")
         print(f"engine health over the soak: {record['health_total']}, restarts {record['restarts_during']}")
     elif arguments.command == "boot-time":
         record = boot_time()

@@ -1210,8 +1210,20 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
     // A first boot starts with an EMPTY library on every platform: the
     // performer builds their first Rack deliberately instead of inheriting
     // an invented one. Existing libraries load exactly as persisted.
+    //
+    // A library that cannot be loaded -- a document a power cut damaged,
+    // one that names another that had to be moved aside -- must not keep
+    // the instrument silent. It plays with an empty library held in memory
+    // alone, which writes nothing, and the library on disk stays as it is
+    // for whoever repairs it.
     let mut performance_repository =
-        PerformanceRepository::load_or_empty(config.data_root.as_deref())?;
+        match PerformanceRepository::load_or_empty(config.data_root.as_deref()) {
+            Ok(repository) => repository,
+            Err(error) => {
+                eprintln!("PERFORMANCE_LIBRARY_UNAVAILABLE action=empty-in-memory error={error:#}");
+                PerformanceRepository::load_or_empty(None)?
+            }
+        };
     let migrated = performance_repository.migrate_legacy_plugin_states(
         &primary_plugin.manifest().id,
         |program_id| {
@@ -1531,10 +1543,12 @@ pub fn run(mut config: LiveConfig) -> Result<()> {
         None => Vec::new(),
     };
     startup.step("play_chain_ready");
-    if let Some(checkpoint) = &checkpoint {
-        checkpoint
-            .save(&session)
-            .context("saving initial LIVE session checkpoint")?;
+    // A checkpoint that cannot be written -- a full or read-only card --
+    // costs the next start its memory of this one, not this performance.
+    if let Some(checkpoint) = &checkpoint
+        && let Err(error) = checkpoint.save(&session)
+    {
+        eprintln!("SESSION_CHECKPOINT_SAVE_FAILED at=start error={error:#}");
     }
     startup.step("checkpoint_saved");
     let initial_master_level = session.master_level;

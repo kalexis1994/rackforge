@@ -91,14 +91,8 @@ impl ControllerMapStore {
             schema_version: CONTROLLER_SETTINGS_SCHEMA_VERSION,
             takeover,
         };
-        let temporary = path.with_extension(format!("json.new-{}", std::process::id()));
-        fs::write(&temporary, serde_json::to_vec_pretty(&settings)?)
-            .with_context(|| format!("writing {}", temporary.display()))?;
-        fs::rename(&temporary, path).with_context(|| {
-            let _ = fs::remove_file(&temporary);
-            format!("replacing {}", path.display())
-        })?;
-        Ok(())
+        rackforge_atomic_file::write(path, serde_json::to_vec_pretty(&settings)?)
+            .with_context(|| format!("replacing {}", path.display()))
     }
 
     /// Every stored map, by controller id. A file that does not read as a
@@ -335,14 +329,8 @@ fn file_name(controller_id: &str) -> Result<String> {
 }
 
 fn write_map(path: &Path, map: &ControllerMap) -> Result<()> {
-    let temporary = path.with_extension(format!("json.new-{}", std::process::id()));
-    let bytes = serde_json::to_vec_pretty(map)?;
-    fs::write(&temporary, bytes).with_context(|| format!("writing {}", temporary.display()))?;
-    fs::rename(&temporary, path).with_context(|| {
-        let _ = fs::remove_file(&temporary);
-        format!("replacing {}", path.display())
-    })?;
-    Ok(())
+    rackforge_atomic_file::write(path, serde_json::to_vec_pretty(map)?)
+        .with_context(|| format!("replacing {}", path.display()))
 }
 
 enum Stored {

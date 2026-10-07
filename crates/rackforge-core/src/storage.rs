@@ -210,16 +210,24 @@ impl PluginStorage {
         let mut paths = Vec::new();
         collect_program_paths(&plugin.root, &mut paths)?;
         paths.sort();
-        paths
-            .into_iter()
-            .map(|path| {
-                let relative = path
-                    .strip_prefix(&plugin.root)
-                    .context("saved program escaped its plugin namespace")?;
-                self.load_program(plugin_id, relative)
-                    .with_context(|| format!("loading saved program {}", path.display()))
-            })
-            .collect()
+        let mut programs = Vec::with_capacity(paths.len());
+        for path in paths {
+            let relative = path
+                .strip_prefix(&plugin.root)
+                .context("saved program escaped its plugin namespace")?;
+            // One program that cannot be read -- damaged, or saved by a
+            // newer RackForge than a rollback returned to -- is passed over
+            // and left as it is, not allowed to stop the plugin, and with it
+            // perhaps the engine, from starting.
+            match self.load_program(plugin_id, relative) {
+                Ok(program) => programs.push(program),
+                Err(error) => eprintln!(
+                    "PROGRAM_UNREADABLE plugin={plugin_id} path={} error={error:#}",
+                    path.display()
+                ),
+            }
+        }
+        Ok(programs)
     }
 }
 

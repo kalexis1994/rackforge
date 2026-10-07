@@ -1,0 +1,6 @@
+[package]
+name = "rackforge-atomic-file"
+description = "Files written so that a power cut leaves the old content or the new, never half of either"
+version.workspace = true
+edition.workspace = true
+license.workspace = true

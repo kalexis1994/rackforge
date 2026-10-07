@@ -308,15 +308,28 @@ impl PerformanceRepository {
         Ok(migrated)
     }
 
+    /// Reads the library from disk. A document that cannot be read makes
+    /// the whole load fail -- after every other has been read and the reason
+    /// logged -- rather than hand back a library missing it: what follows a
+    /// load writes and prunes, and a library read in part would prune what
+    /// it could not see. The engine then plays with a library in memory and
+    /// the one on disk stays as it is.
     fn load(&mut self) -> Result<()> {
         let Some(root) = &self.root else {
             return Ok(());
         };
-        self.library.racks = load_documents(&root.join("racks"))?;
-        self.library.songs = load_documents(&root.join("songs"))?;
-        self.library.setlists = load_documents(&root.join("setlists"))?;
-        self.library.patterns = load_documents(&root.join("patterns"))?;
-        self.library.sequencer_tabs = load_documents(&root.join("sequencer-tabs"))?;
+        let mut skipped = 0;
+        self.library.racks = load_documents(&root.join("racks"), &mut skipped)?;
+        self.library.songs = load_documents(&root.join("songs"), &mut skipped)?;
+        self.library.setlists = load_documents(&root.join("setlists"), &mut skipped)?;
+        self.library.patterns = load_documents(&root.join("patterns"), &mut skipped)?;
+        self.library.sequencer_tabs = load_documents(&root.join("sequencer-tabs"), &mut skipped)?;
+        if skipped > 0 {
+            bail!(
+                "{skipped} performance document(s) in {} could not be read; the library is left as it is",
+                root.display()
+            );
+        }
         Ok(())
     }
 
@@ -476,7 +489,7 @@ fn bootstrap_library(bootstrap: PerformanceBootstrap) -> Result<PerformanceLibra
     Ok(library)
 }
 
-fn load_documents<T: DeserializeOwned>(directory: &Path) -> Result<Vec<T>> {
+fn load_documents<T: DeserializeOwned>(directory: &Path, skipped: &mut usize) -> Result<Vec<T>> {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -484,31 +497,57 @@ fn load_documents<T: DeserializeOwned>(directory: &Path) -> Result<Vec<T>> {
             return Err(error).with_context(|| format!("reading {}", directory.display()));
         }
     };
+    // A power cut in the middle of a save leaves the save's temporary file,
+    // which is removed; anything that is not a document is passed over. A
+    // document that cannot be read is counted -- the caller declines a
+    // library read in part -- and left exactly where it is: it may be
+    // damaged, or written by a newer RackForge than the one a rollback
+    // returned to, and moving it would hide it from that newer one. Each of
+    // these used to stop the engine from starting.
     let mut paths = Vec::new();
     for entry in entries {
         let entry = entry.with_context(|| format!("enumerating {}", directory.display()))?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') && name.contains(".tmp") {
+            match fs::remove_file(&path) {
+                Ok(()) => eprintln!(
+                    "PERFORMANCE_STALE_TEMPORARY_REMOVED path={}",
+                    path.display()
+                ),
+                Err(error) => eprintln!(
+                    "PERFORMANCE_STALE_TEMPORARY_KEPT path={} error={error}",
+                    path.display()
+                ),
+            }
+            continue;
+        }
         let file_type = entry.file_type()?;
-        if file_type.is_symlink() || !file_type.is_file() {
-            bail!(
-                "performance library contains a non-regular file {}",
-                entry.path().display()
-            );
+        let is_document = !file_type.is_symlink()
+            && file_type.is_file()
+            && path.extension().and_then(|extension| extension.to_str()) == Some("json");
+        if !is_document {
+            eprintln!("PERFORMANCE_FILE_IGNORED path={}", path.display());
+            continue;
         }
-        if entry
-            .path()
-            .extension()
-            .and_then(|extension| extension.to_str())
-            != Some("json")
-        {
-            bail!(
-                "performance library contains an unsupported file {}",
-                entry.path().display()
-            );
-        }
-        paths.push(entry.path());
+        paths.push(path);
     }
     paths.sort();
-    paths.into_iter().map(|path| read_document(&path)).collect()
+    let mut documents = Vec::with_capacity(paths.len());
+    for path in paths {
+        match read_document(&path) {
+            Ok(document) => documents.push(document),
+            Err(error) => {
+                *skipped += 1;
+                eprintln!(
+                    "PERFORMANCE_DOCUMENT_UNREADABLE path={} error={error:#}",
+                    path.display()
+                );
+            }
+        }
+    }
+    Ok(documents)
 }
 
 fn read_document<T: DeserializeOwned>(path: &Path) -> Result<T> {
@@ -752,6 +791,46 @@ mod tests {
         song.parts[0].rack_id = RackId::new("rack.missing").unwrap();
         fs::write(&song_path, serde_json::to_vec(&song).unwrap()).unwrap();
         assert!(PerformanceRepository::load_or_bootstrap(Some(&root), bootstrap()).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_save_cut_short_by_a_power_cut_does_not_stop_the_next_start() {
+        let root = temporary_root("cut-short");
+        let repository =
+            PerformanceRepository::load_or_bootstrap(Some(&root), bootstrap()).unwrap();
+        let racks = root.join("performance/racks");
+        // What write_document leaves when the power goes before its rename.
+        let leftover = racks.join(".rack.imported.json.tmp.4242");
+        fs::write(&leftover, b"{\"schema_vers").unwrap();
+        let reopened = PerformanceRepository::load_or_bootstrap(Some(&root), bootstrap()).unwrap();
+        assert_eq!(reopened.library().racks, repository.library().racks);
+        assert!(!leftover.exists(), "the leftover is cleared");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_document_is_left_as_it_is_and_nothing_is_written() {
+        let root = temporary_root("unreadable");
+        PerformanceRepository::load_or_bootstrap(Some(&root), bootstrap()).unwrap();
+        let damaged = root.join("performance/songs/song.imported.current.json");
+        fs::write(&damaged, b"{\"schema_version\": 1, \"id\": ").unwrap();
+        let racks_before = fs::read_dir(root.join("performance/racks"))
+            .unwrap()
+            .count();
+        assert!(PerformanceRepository::load_or_empty(Some(&root)).is_err());
+        assert_eq!(
+            fs::read(&damaged).unwrap(),
+            b"{\"schema_version\": 1, \"id\": ",
+            "the document stays where it is, as it is"
+        );
+        assert_eq!(
+            fs::read_dir(root.join("performance/racks"))
+                .unwrap()
+                .count(),
+            racks_before,
+            "a library read in part is not pruned"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

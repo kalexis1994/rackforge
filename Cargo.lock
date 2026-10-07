@@ -3764,6 +3764,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-atomic-file"
+version = "0.1.29"
+
+[[package]]
 name = "rackforge-audio-api"
 version = "0.1.29"
 dependencies = [
@@ -3908,6 +3912,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "midir",
+ "rackforge-atomic-file",
  "rackforge-audio-api",
  "rackforge-control-api",
  "rackforge-controller-api",
@@ -4253,6 +4258,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "mime_guess",
+ "rackforge-atomic-file",
  "rackforge-control-api",
  "rackforge-controller-package",
  "rackforge-plugin-api",

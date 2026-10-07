@@ -703,7 +703,9 @@ pub fn remember(plugin: &str, deadline_ns: u64, fuel: u64) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(&path, text);
+    // Rewritten while the player plays: replaced whole, never truncated in
+    // place, so a power cut leaves the old budgets or the new.
+    let _ = rackforge_atomic_file::write(&path, text);
 }
 
 #[cfg(test)]

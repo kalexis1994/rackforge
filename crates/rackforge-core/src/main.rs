@@ -401,10 +401,28 @@ struct AudioStartupSection {
 #[cfg(target_os = "linux")]
 fn resume(path: &Path) -> Result<()> {
     let _audio_instance = audio_instance::AudioEngineGuard::acquire(&audio_engine_lock_path())?;
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading audio startup config {}", path.display()))?;
-    let config: AudioStartupConfig = toml::from_str(&text)
-        .with_context(|| format!("parsing audio startup config {}", path.display()))?;
+    let read = |path: &Path| -> Result<AudioStartupConfig> {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading audio startup config {}", path.display()))?;
+        toml::from_str(&text)
+            .with_context(|| format!("parsing audio startup config {}", path.display()))
+    };
+    // A configuration a power cut damaged must not keep the instrument
+    // silent, restarting every second: the engine starts from the one the
+    // installer seeded beside it, and the damaged file stays as it is for
+    // the interface to write again.
+    let config = match read(path) {
+        Ok(config) => config,
+        Err(error) => {
+            let seed = path.with_file_name("audio.toml.example");
+            eprintln!(
+                "AUDIO_CONFIG_UNREADABLE path={} fallback={} error={error:#}",
+                path.display(),
+                seed.display()
+            );
+            read(&seed).context("the installer's audio configuration is unreadable too")?
+        }
+    };
     if !matches!(config.schema_version, 1 | 2 | AUDIO_STARTUP_SCHEMA_VERSION) {
         bail!(
             "unsupported audio startup schema {} in {}",

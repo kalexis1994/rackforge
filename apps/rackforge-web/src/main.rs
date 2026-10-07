@@ -1704,12 +1704,10 @@ fn write_startup_plugin(
     // A preset belongs to the old instrument and must not be applied to the
     // fallback package after Core restarts.
     table.remove("preset");
-    let temporary = audio_config_path.with_extension("toml.plugin-uninstall-new");
-    fs::write(&temporary, toml::to_string_pretty(&document)?)
-        .with_context(|| format!("writing {}", temporary.display()))?;
-    fs::rename(&temporary, audio_config_path)
-        .with_context(|| format!("replacing {}", audio_config_path.display()))?;
-    Ok(())
+    // The file the engine starts from: replaced whole and on the card before
+    // it counts as written.
+    rackforge_atomic_file::write(audio_config_path, toml::to_string_pretty(&document)?)
+        .with_context(|| format!("replacing {}", audio_config_path.display()))
 }
 
 fn ensure_startup_plugin(root: &Path, package_root: &Path) -> Result<bool> {
@@ -1738,19 +1736,19 @@ fn deactivate_startup_plugin(audio_config_path: &Path) -> Result<Vec<u8>> {
     let previous = fs::read(audio_config_path)
         .with_context(|| format!("reading {}", audio_config_path.display()))?;
     let inactive = audio_config_path.with_extension("toml.inactive");
-    let temporary = audio_config_path.with_extension("toml.inactive-new");
-    fs::write(&temporary, &previous).with_context(|| format!("writing {}", temporary.display()))?;
-    fs::rename(&temporary, &inactive)
+    rackforge_atomic_file::write(&inactive, &previous)
         .with_context(|| format!("replacing {}", inactive.display()))?;
     fs::remove_file(audio_config_path)
         .with_context(|| format!("deactivating {}", audio_config_path.display()))?;
+    if let Some(parent) = audio_config_path.parent() {
+        rackforge_atomic_file::sync_directory(parent)
+            .with_context(|| format!("syncing {}", parent.display()))?;
+    }
     Ok(previous)
 }
 
 fn restore_startup_plugin(audio_config_path: &Path, previous: &[u8]) -> Result<()> {
-    let temporary = audio_config_path.with_extension("toml.plugin-uninstall-rollback");
-    fs::write(&temporary, previous).with_context(|| format!("writing {}", temporary.display()))?;
-    fs::rename(&temporary, audio_config_path)
+    rackforge_atomic_file::write(audio_config_path, previous)
         .with_context(|| format!("restoring {}", audio_config_path.display()))
 }
 

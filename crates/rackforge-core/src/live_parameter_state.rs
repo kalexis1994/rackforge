@@ -2,8 +2,7 @@ use anyhow::{Context, Result};
 use rackforge_plugin_api::{ParameterKind, ParameterSchema};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const LIVE_PARAMETER_STATE_SCHEMA_VERSION: u32 = 1;
@@ -47,6 +46,9 @@ pub struct LiveParameterStateStore {
 impl LiveParameterStateStore {
     pub fn open(data_root: Option<&Path>) -> Result<Self> {
         let path = data_root.map(|root| root.join("states").join(LIVE_PARAMETER_STATE_FILE));
+        if let Some(path) = &path {
+            recover_from_earlier_writer(path);
+        }
         let document = match path.as_ref().filter(|path| path.exists()) {
             Some(path) => {
                 let bytes = fs::read(path)
@@ -144,45 +146,42 @@ impl LiveParameterStateStore {
             .context("live parameter state has no parent")?;
         fs::create_dir_all(parent)
             .with_context(|| format!("creating live parameter state dir {}", parent.display()))?;
-        let temporary = path.with_extension("json.tmp");
         let bytes = serde_json::to_vec_pretty(&self.document)
             .context("serializing live parameter state")?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temporary)
-            .with_context(|| {
-                format!(
-                    "opening temporary live parameter state {}",
-                    temporary.display()
-                )
-            })?;
-        file.write_all(&bytes).with_context(|| {
-            format!(
-                "writing temporary live parameter state {}",
-                temporary.display()
-            )
-        })?;
-        file.sync_all().with_context(|| {
-            format!(
-                "syncing temporary live parameter state {}",
-                temporary.display()
-            )
-        })?;
-        drop(file);
-        if path.exists() {
-            fs::remove_file(path)
-                .with_context(|| format!("replacing live parameter state {}", path.display()))?;
-        }
-        fs::rename(&temporary, path)
-            .with_context(|| format!("committing live parameter state {}", path.display()))?;
-        #[cfg(unix)]
-        if let Ok(directory) = fs::File::open(parent) {
-            let _ = directory.sync_all();
-        }
+        // Written while the player plays, every few seconds of a moving
+        // control: the old file is replaced in one rename, never removed
+        // first, so a power cut cannot leave no file at all.
+        rackforge_atomic_file::write(path, &bytes)
+            .with_context(|| format!("writing live parameter state {}", path.display()))?;
         self.dirty = false;
         Ok(())
+    }
+}
+
+/// RackForge before 0.1.30 removed the state file before renaming its
+/// `.json.tmp` over it. A power cut between the two left the temporary file
+/// alone -- complete, since it had been synced -- and no state: it is put
+/// back in place rather than every override being lost. A leftover beside
+/// an intact file is only debris.
+fn recover_from_earlier_writer(path: &Path) {
+    let leftover = path.with_extension("json.tmp");
+    if !leftover.exists() {
+        return;
+    }
+    let outcome = if path.exists() {
+        fs::remove_file(&leftover).map(|()| "removed")
+    } else {
+        fs::rename(&leftover, path).map(|()| "recovered")
+    };
+    match outcome {
+        Ok(action) => eprintln!(
+            "LIVE_PARAMETER_STATE_LEFTOVER action={action} path={}",
+            leftover.display()
+        ),
+        Err(error) => eprintln!(
+            "LIVE_PARAMETER_STATE_LEFTOVER action=kept path={} error={error}",
+            leftover.display()
+        ),
     }
 }
 

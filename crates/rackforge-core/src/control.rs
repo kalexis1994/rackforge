@@ -385,6 +385,8 @@ struct ControlContext {
     plugin_output_channels: u32,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
+    /// When the master level or pan last moved with no checkpoint since.
+    deferred_checkpoint: Mutex<Option<Instant>>,
     dispatch_lock: Mutex<()>,
     lease_deadline: Mutex<Option<LeaseDeadline>>,
     next_draft_id: AtomicU64,
@@ -536,6 +538,7 @@ fn prepare_and_serve(
         plugin_output_channels: options.plugin_output_channels,
         storage: options.storage,
         checkpoint: options.checkpoint,
+        deferred_checkpoint: Mutex::new(None),
         dispatch_lock: Mutex::new(()),
         lease_deadline: Mutex::new(None),
         next_draft_id: AtomicU64::new(1),
@@ -551,6 +554,11 @@ fn prepare_and_serve(
         .name("rf-midi-sources".into())
         .spawn(move || follow_midi_sources(sources_context))
         .context("spawning RackForge MIDI source follower")?;
+    let checkpoint_context = Arc::clone(&context);
+    thread::Builder::new()
+        .name("rf-checkpoint".into())
+        .spawn(move || write_deferred_checkpoints(checkpoint_context))
+        .context("spawning RackForge checkpoint writer")?;
     println!("CONTROL_SERVING socket={}", path.display());
     serve(listener, path, context);
     Ok(())
@@ -5753,17 +5761,26 @@ fn command_applied_without_events(
     }
 }
 
+/// How long the master level and pan must rest before the checkpoint takes
+/// them. A fader sends a level for every step it moves, and each used to be
+/// a checkpoint written and synced to the card twice.
+const FADER_CHECKPOINT_DELAY: Duration = Duration::from_secs(1);
+
 fn record_command_events(
     context: &ControlContext,
     command: CommandRef,
     events: Vec<SessionEvent>,
 ) -> ControlResponse {
+    let fader_moved = events.iter().any(|event| {
+        matches!(
+            event,
+            SessionEvent::MasterLevelChanged { .. } | SessionEvent::MasterPanChanged { .. }
+        )
+    });
     let should_checkpoint = events.iter().any(|event| {
         matches!(
             event,
-            SessionEvent::MasterLevelChanged { .. }
-                | SessionEvent::MasterPanChanged { .. }
-                | SessionEvent::ActiveModeChanged { .. }
+            SessionEvent::ActiveModeChanged { .. }
                 | SessionEvent::ActiveInstanceChanged { .. }
                 | SessionEvent::LiveBrowseModeChanged { .. }
                 | SessionEvent::LiveTargetActivated { .. }
@@ -5791,6 +5808,14 @@ fn record_command_events(
         },
         Err(_) => return internal_error("session store lock is poisoned", None),
     };
+    if let Ok(mut deferred) = context.deferred_checkpoint.lock() {
+        if checkpoint_state.is_some() {
+            // Written now, and with it whatever the fader left pending.
+            *deferred = None;
+        } else if fader_moved {
+            *deferred = Some(Instant::now());
+        }
+    }
     if let (Some(checkpoint), Some(state)) = (&context.checkpoint, checkpoint_state.as_ref())
         && let Err(error) = checkpoint.save(state)
     {
@@ -5801,6 +5826,42 @@ fn record_command_events(
         command_id: command.command_id,
         revision,
         events,
+    }
+}
+
+/// Writes the checkpoint the fader left pending, once it has rested.
+fn write_deferred_checkpoints(context: Arc<ControlContext>) {
+    loop {
+        thread::sleep(FADER_CHECKPOINT_DELAY / 4);
+        let due = match context.deferred_checkpoint.lock() {
+            Ok(mut deferred) => match *deferred {
+                Some(moved) if moved.elapsed() >= FADER_CHECKPOINT_DELAY => {
+                    *deferred = None;
+                    true
+                }
+                _ => false,
+            },
+            Err(_) => {
+                eprintln!("SESSION_CHECKPOINT_ERROR deferred checkpoint lock is poisoned");
+                return;
+            }
+        };
+        if !due {
+            continue;
+        }
+        let Some(checkpoint) = &context.checkpoint else {
+            continue;
+        };
+        let state = match context.store.lock() {
+            Ok(store) => store.snapshot(),
+            Err(_) => {
+                eprintln!("SESSION_CHECKPOINT_ERROR session store lock is poisoned");
+                return;
+            }
+        };
+        if let Err(error) = checkpoint.save(&state) {
+            eprintln!("SESSION_CHECKPOINT_ERROR {error:#}");
+        }
     }
 }
 
@@ -6207,6 +6268,7 @@ mod tests {
                 plugin_maximum_frames: 128,
                 plugin_output_channels: 2,
                 checkpoint: None,
+                deferred_checkpoint: Mutex::new(None),
                 dispatch_lock: Mutex::new(()),
                 lease_deadline: Mutex::new(None),
                 next_draft_id: AtomicU64::new(1),
@@ -6811,6 +6873,10 @@ mod tests {
                 )
         ));
         assert_eq!(context.store.lock().unwrap().state().master_level, level);
+        assert!(
+            context.deferred_checkpoint.lock().unwrap().is_some(),
+            "a fader's move is checkpointed once the fader rests, not on every step"
+        );
         audio.join().unwrap();
     }
 

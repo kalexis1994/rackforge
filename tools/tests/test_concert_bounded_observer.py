@@ -9,6 +9,7 @@ from concert_grand_streaming_air import SurfaceFactorBlocks,StreamingRationalAir
 from concert_grand_pade_air import FourthFactorBlocks,PadeAir
 from concert_grand_rational_air import RationalAir
 from concert_grand_bounded_observer import certificate_observer,observation_basis
+from concert_grand_cell_factor_projection import projected_cell_provider
 
 
 class BoundedObserverTests(unittest.TestCase):
@@ -85,6 +86,54 @@ class BoundedObserverTests(unittest.TestCase):
         self.assertEqual(stored_bounds['full_endpoint_replay_relative'],bounds['full_endpoint_replay_relative'])
         self.assertGreater(stored_bounds['projected_input_history_bytes'],0)
         self.assertEqual(bounds['projected_input_history_bytes'],0)
+
+    def test_cell_projection_matches_fields_storage_flux_and_residual_bounds(self):
+        reference,wave,states,segments,flux = self.fixture()
+        for Q in [np.linalg.qr(np.random.default_rng(94).normal(size=(3,3)))[0],np.eye(3)[:,:2]]:
+            direct,power,bounds = certificate_observer(wave,states,segments,Q,input_block=4,
+                                                      store_projected_inputs=True)
+            cells,cpower,cbounds = certificate_observer(wave,states,segments,Q,input_block=4,
+                store_projected_inputs=True,factor_projection='cells',projection_probe_blocks=(0,2,5))
+            np.testing.assert_allclose(cells,direct,rtol=1e-12,atol=1e-18)
+            for a,b in zip(power,cpower):np.testing.assert_allclose(a,b,rtol=1e-12,atol=1e-18)
+            for exact,interval in zip(flux,cbounds['radiation_intervals']):
+                self.assertLessEqual(interval['lower_j'],exact)
+                self.assertGreaterEqual(interval['upper_j'],exact)
+            for state,interval in zip(states,cbounds['storage_intervals']):
+                self.assertLessEqual(interval['lower_j'],reference.energy(state))
+                self.assertGreaterEqual(interval['upper_j'],reference.energy(state))
+            for key in ['full_endpoint_replay_relative','residual_input_integral','factor_norm_relative_error']:
+                self.assertEqual(bounds[key],cbounds[key])
+            self.assertLess(max(p['relative'] for p in cbounds['factor_projection']['probe_results']),1e-12)
+
+    def test_cell_projection_preserves_folded_geometry_and_all_derivative_variants(self):
+        rng=np.random.default_rng(19)
+        shapes=rng.normal(size=(6,4,3));shapes=(shapes+shapes[:,::-1])/2
+        Q=np.linalg.qr(rng.normal(size=(3,3)))[0][:,:2]
+        for fold in [False,True]:
+            for derivative in ['raw','smooth','fourth']:
+                base=SurfaceFactorBlocks(RectangularLoad(.7,.4,shapes),16000,4,8,3,
+                                         smooth=derivative!='raw',fold_y=fold)
+                provider=FourthFactorBlocks(base) if derivative=='fourth' else base
+                original=base.shapes.copy();view=projected_cell_provider(provider,Q)
+                for H,hq in zip(provider.blocks(),view.blocks(),strict=True):
+                    expected=(H.reshape(-1,3)@Q).reshape(hq.shape)
+                    np.testing.assert_allclose(hq,expected,rtol=1e-10,atol=1e-13)
+                    np.testing.assert_array_equal(hq[:,1::2],-hq[::-1,::2])
+                np.testing.assert_array_equal(base.shapes,original)
+                self.assertEqual(base.modes,3)
+                self.assertIs(view.directions,provider.directions)
+                self.assertIs(view.weights,provider.weights)
+                self.assertIs(view.positions,provider.positions)
+                self.assertEqual(view.taps,provider.taps)
+                self.assertEqual(view.outputs,provider.outputs)
+
+    def test_invalid_projection_method_and_probe_are_rejected(self):
+        _,wave,states,segments,_=self.fixture()
+        with self.assertRaisesRegex(ValueError,'factor projection'):
+            certificate_observer(wave,states,segments,np.eye(3),factor_projection='unknown')
+        with self.assertRaisesRegex(ValueError,'out of range'):
+            certificate_observer(wave,states,segments,np.eye(3),factor_projection='cells',projection_probe_blocks=(999,))
 
 
 if __name__=='__main__':

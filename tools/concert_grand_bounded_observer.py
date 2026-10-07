@@ -11,6 +11,7 @@ from scipy.linalg import qr,svd
 from scipy.fft import rfft,irfft,next_fast_len
 from concert_grand_pade_air import PadeAir
 from concert_grand_pade_midpoint import PadeMidpoint
+from concert_grand_cell_factor_projection import observation_factor_blocks
 
 
 class _ObservationSections(PadeAir):
@@ -58,7 +59,7 @@ def energy_interval(estimate,amplitude_bound):
 
 
 def certificate_observer(wave,states,segments,Q,progress=None,input_block=32,
-                         store_projected_inputs=False):
+                         store_projected_inputs=False,factor_projection='factor',projection_probe_blocks=()):
     provider = wave.base.provider
     states = np.asarray(states,dtype=float)
     Q = np.asarray(Q,dtype=float)
@@ -114,9 +115,12 @@ def certificate_observer(wave,states,segments,Q,progress=None,input_block=32,
     energies = np.zeros(len(memory))
     losses = [np.zeros(len(v)) for _,_,_,v in plans]
     factor_norm_measured = 0.
-    for block,H in enumerate(provider.blocks()):
+    projected_norm_measured = 0.
+    projection_stats = {}
+    for block,(H,hq) in enumerate(observation_factor_blocks(
+            provider,Q,factor_projection,projection_probe_blocks,projection_stats)):
         factor_norm_measured += float(np.sum(H*H))
-        hq = (H.reshape(-1,wave.modes)@Q).reshape(H.shape[0],H.shape[1],Q.shape[1])
+        projected_norm_measured += float(np.einsum('tom,tom->',hq,hq))
         F = rfft(hq,n=size,axis=0)
         field = np.einsum('fom,bfm->bfo',F,S,optimize=True)
         tails = irfft(field,n=size,axis=1)[:,order:2*order]
@@ -139,14 +143,20 @@ def certificate_observer(wave,states,segments,Q,progress=None,input_block=32,
     norm_error = abs(factor_norm_measured-gram_norm2)/gram_norm2
     if norm_error>=1e-10:
         raise ValueError('regenerated factor differs from authenticated R norm')
+    projected_norm_expected = float(np.einsum('mr,mr->',Q,wave.R[0]@Q))
+    projected_norm_error = abs(projected_norm_measured-projected_norm_expected)/max(projected_norm_expected,1e-300)
+    if projected_norm_error>=1e-10:
+        raise ValueError('projected factor differs from authenticated projected R norm')
     energies = energies.reshape(len(states),2)@np.array([144.,12.])
     storage = [energy_interval(e,b) for e,b in zip(energies,storage_b)]
     radiation = [energy_interval(float(power.sum()*dt),np.sqrt(gram_norm2*integral/2))
                  for power,(_,_,dt,_),integral in zip(losses,plans,residual_input_integrals)]
     return energies,losses,dict(rank=Q.shape[1],full_modes=wave.modes,storage_intervals=storage,
+        factor_projection=projection_stats,
         projected_inputs_stored=bool(store_projected_inputs),
         projected_input_history_bytes=sum(h.nbytes for h in histories if h is not None),
         radiation_intervals=radiation,full_endpoint_replay_relative=replay,
         residual_input_integral=residual_input_integrals,factor_norm_relative_error=norm_error,
+        projected_factor_norm_relative_error=projected_norm_error,
         factor_norm_squared=gram_norm2,roundoff_scope='analytic projection bounds with numerical '
         'roundoff safeguards, not a formal interval-arithmetic certificate')

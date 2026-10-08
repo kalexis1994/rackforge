@@ -647,18 +647,21 @@ def writes_between(before, after):
     return dict(sorted(by_name.items(), key=lambda item: -item[1]))
 
 
-def soak(minutes, play_every, switch_every=0, switch_plan="standard"):
+def soak(minutes, play_every, switch_every=0, switch_plan="standard", chord_after=0.0):
     """Leaves the instrument running for `minutes`, playing a short chord
     every `play_every` minutes, and records each minute what the engine
     counted and which units systemd started meanwhile: on a dedicated
     instrument, nothing should start on its own while it plays. Every
     `switch_every` minutes it changes to the next of `switch_plan`'s
-    sounds, selecting the instrument only when it is another."""
+    sounds, selecting the instrument only when it is another, and plays
+    that minute's chord `chord_after` seconds later."""
     started = time.time()
     record = {
         "kind": "soak",
         "started": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "minutes": minutes,
+        "switch_plan": switch_plan,
+        "chord_after": chord_after,
         "revision": release_revision(),
         "audio": audio_profile(),
         "system": system_audit(),
@@ -698,6 +701,7 @@ def soak(minutes, play_every, switch_every=0, switch_plan="standard"):
                 select(instrument["instance"], instrument["sound"])
                 active = instrument["instance"]
             switches += 1
+            time.sleep(chord_after)
         if play_every and minute % play_every == 0:
             hold_step([60, 64, 67, 72], 5.0, 2.0)
         time.sleep(max(0.0, started + minute * 60 - time.time()))
@@ -819,6 +823,12 @@ def main():
     soaking.add_argument(
         "--switch-plan", default="standard", choices=sorted(PLANS), help="the sounds changed between"
     )
+    soaking.add_argument(
+        "--chord-after",
+        type=float,
+        default=0.0,
+        help="seconds from a change to that minute's chord",
+    )
     soaking.add_argument("--out")
     boot = commands.add_parser("boot-time")
     boot.add_argument("--json", action="store_true")
@@ -854,7 +864,11 @@ def main():
         )
     elif arguments.command == "soak":
         record = soak(
-            arguments.minutes, arguments.play_every, arguments.switch_every, arguments.switch_plan
+            arguments.minutes,
+            arguments.play_every,
+            arguments.switch_every,
+            arguments.switch_plan,
+            arguments.chord_after,
         )
         emit(record, arguments.out, not arguments.out)
         print(f"units started: {record['units_started']}")

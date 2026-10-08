@@ -93,9 +93,15 @@ ese contacto de referencia y mide independientemente el coast de 96/192:
 tabla, presión y certificado angular completo. Sondas espectrales separadas
 comprueban campo complejo y flujo sin sustituir la ruta temporal establecida.
 Termina **15/16**: pasa presión (máximo fino 0,00311481%), pero falla el
-refinamiento de radiación (0,274024% con cotas, límite 0,2%). Siguiente:
-añadir 512 kHz antes de ampliar duración. El prototipo espectral pasa
+refinamiento de radiación (0,274024% con cotas, límite 0,2%). Ese fallo
+motivó añadir 512 kHz antes de ampliar duración. El prototipo espectral pasa
 fase/flujo en dos bloques; no demuestra ahorro de tiempo ni se adopta.
+El [refinamiento a 512 kHz](RESULTADOS-P6-coast-512.md) cierra **15/15**:
+flujo 256→512 **0,0690548%** con cotas (<0,2%), presión fina máxima
+**0,000761170%**. Se autentica y reutiliza un único estado completo de
+6,31 MB, evitando repetir 16,99 min de contacto. Sólo se valida este
+coast de 0,5 ms; siguen banda superior de fuente/carga y balance angular
+del contacto completo antes de ampliar duración. 128→512 sigue fallando.
 
 | ID | Mecanismo | Representación actual / falta | Estado |
 | --- | --- | --- | --- |
@@ -105,7 +111,7 @@ fase/flujo en dos bloques; no demuestra ahorro de tiempo ni se adopta.
 | P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
 | P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
-| P6 | Radiación y carga acústica del aire | Tabla 132×112 y proyección 7392→606 verificadas hasta 6 kHz; Padé2/derivada cuarta pasa masa, 83 frecuencias y tres puntos Laplace. Contacto de 3 ms y coast de 0,5 ms de C4 supuesto conservan todos los estados. El barrido 3→48 pasa 11/13; la matriz dirigida 48/96 × 1536/3072 kHz pasa 14/14. El coast refinado pasa 15/16: presión y balance angular medidos, flujo 128→256 falla 0,274024% frente a 0,2%; sigue 512 kHz. Faltan banda superior de fuente/carga, balance angular del contacto completo, duración, repetición/release, identificación y ambas caras/borde. | Presión temprana hasta 6 kHz convergente; tasa de coast, nota completa y timbre pendientes |
+| P6 | Radiación y carga acústica del aire | Tabla 132×112 y proyección 7392→606 verificadas hasta 6 kHz; Padé2/derivada cuarta pasa masa, 83 frecuencias y tres puntos Laplace. Contacto de 3 ms y coast de 0,5 ms de C4 supuesto conservan todos los estados. El barrido 3→48 pasa 11/13; la matriz dirigida 48/96 × 1536/3072 kHz pasa 14/14. Coast 128→256 falla flujo 0,274024%; el ensayo 128/256/512 pasa 15/15: flujo fino 0,0690548% con cotas frente a 0,2%. Estado físico único autenticado reutilizable. Faltan banda superior de fuente/carga, balance angular del contacto completo, duración, repetición/release, identificación y ambas caras/borde. | Coast de 0,5 ms a 256 frente a 512 convergente; banda superior, nota completa y timbre pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
@@ -1471,3 +1477,29 @@ global. Una R existente, historias en RAM, informe sólo en repo.
 Siguiente: 512 kHz desde el mismo seed antes de duración; después banda
 superior de fuente/carga y balance angular del contacto completo. No hay
 WAV ni paquete nuevo; aprobación global falsa, faltan release/unísono/escucha.
+
+### 2026-10-07 — P6: refinamiento a 512 y estado reutilizable
+
+[Ensayo, incidencia y resultados finales](RESULTADOS-P6-coast-512.md).
+**90cfd00** agrega 128/256/512 kHz con todos los límites anteriores y
+una cápsula única del contacto completo. Cinco pruebas pasan. Al detectar
+un booleano NumPy no serializable, se interrumpe el primer certificado a
+336/384 bloques; sus resultados angulares no se dan por medidos. Su
+checkpoint físico/presión queda en repo como procedencia del estado.
+**9e80a33** corrige el escritor y agrega autenticación del productor
+histórico desde Git para continuar desde la misma cápsula; tres regresiones
+pasan, incluida serialización de intervalos reales del observador.
+
+El nuevo certificado completo termina **15/15** en **1251,862 s (20,86 min)**,
+1152,779 s de certificado, pico 4,914 GiB. Reproducción de estado,
+continuaciones y presión del padre: error 0; seis intervalos angulares del
+padre solapan, replay 0, balance adverso acotado máximo 4,32294e−11.
+Flujo 256→512: **0,0690548%** con cotas (<0,2%); presión alta fina
+**0,000761170%** (<0,1%). 128→512 conserva fallo de radiación 0,342584%.
+256 pasa sólo para este coast de 0,5 ms, sin aprobación global ni de timbre.
+
+Una cápsula completa de **6,31 MB** evita **16,99 min** de contacto;
+no guarda R ni historias, no acelera el campo angular y no se duplica en
+SHARED. Fuente/carga/estado originales autenticados y verificados contra
+el operador actual. Sigue banda superior de fuente/carga, balance del
+contacto completo y luego duración/release. Sin audio ni paquete nuevo.

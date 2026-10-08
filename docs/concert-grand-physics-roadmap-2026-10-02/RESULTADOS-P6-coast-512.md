@@ -73,10 +73,72 @@ Presión compleja fina 256→512: 60–480 **0,000149475%**, 480–1980
 temporal DC–6 kHz **0,000318921%**. Todas <0,1%. Kernel **0,0000449256%**
 (<0,02%). Base de observación **346/606**; dinámica completa.
 
-Pendiente el certificado angular y el refinamiento de flujo. Conservar
-`all_gates_passed=false` aun si pasa este coast: faltan banda superior de
-fuente/carga, balance angular del contacto completo, mayor duración,
-release, unísono, identificación real y escucha.
+### Certificado completo de la continuación reutilizada
+
+Informe final [coast-512k-validado.json](medidas-P6-coast-campo/coast-512k-validado.json):
+**15/15 criterios**, `coast_gates_passed=true`, `all_gates_passed=false`.
+Duración de la ejecución reutilizada **1251,862 s (20,86 min)**, certificado
+angular **1152,779 s (19,21 min)**; pico **4,914 GiB**. Estos tiempos
+excluyen la primera ejecución interrumpida. La cápsula evitó repetir
+**1019,376 s (16,99 min)** de contacto, cuyo costo original se conserva
+como dato heredado. No acelera la generación angular ni la primera nota.
+
+Las comprobaciones nuevas de energía mecánica, relajación, norma de onda y
+compresión del estado contra el operador actual dan **0**; las dos
+continuaciones y sus presiones vuelven a dar **0** respecto al padre.
+La presión del contacto completo permanece enlazada al checkpoint original,
+sin inventar una nueva medición de esa ventana en la ejecución reutilizada.
+
+| Control angular | Medida | Resultado |
+| --- | --- | --- |
+| Replay de memorias completo | 0 en las tres tasas | <1e−11; pasa |
+| Norma completa/proyectada contra R | 0 / 4,30521e−16 | pasan controles del observador |
+| Base de observación | rango 346/606; cola 9,78200e−13 | no reduce dinámica |
+| Intervalos del padre 128/256 | seis solapamientos verdaderos | reproduce campo anterior |
+| Balance adverso total/aire con cotas | máximo 4,32294e−11 relativo a energía inicial | <1e−9; pasa |
+| Precisión almacenamiento/flujo | máximo 1,53739e−6 relativo | <1e−4; pasa |
+| Calor/potencia de onda | no negativos; potencia mínima global 1,45569e−7 W | pasa |
+| Captura de presión a 512 | 0,000000360889% | <0,1%; pasa |
+
+Flujo integrado a 128/256/512: **2,118341850 / 2,124156041 /
+2,125617355 nJ**. La referencia fina tiene cota inferior **2,125614087 nJ**;
+las tres son estrictamente positivas. El refinamiento **256→512** cambia
+**0,0687478%** observado o **0,0690548%** incluyendo cotas: pasa **0,2%**
+sin modificar umbral, fuerza, fieltro, estado inicial ni duración. Diferencia
+observada **1,46131e−12 J**, máxima diferencia acotada **1,46784e−12 J**.
+El cambio 128→512 sigue fallando (**0,342584%** con cotas); se conserva.
+
+| Término fino 256→512 | Cambio relativo, con cotas cuando corresponde | Límite |
+| --- | --- | --- |
+| Almacenamiento final de onda | 0,000988579% | <0,2% |
+| Flujo radiado | 0,0690548% | <0,2% |
+| Relajación final | 0,00308154% | <0,2% |
+| Calor de relajación | 0,00871356% | <0,2% |
+| Calor material | 0,000147776% | <0,2% |
+| Trabajo del puerto | 0,00217233% | <0,2% |
+
+En el extremo de referencia quedan **4,859733037 µJ** en onda y
+**10,868805407 nJ** en relajación; el flujo se mide independientemente,
+no como resto del trabajo del puerto. Hashes de fuentes, padres, tabla,
+R, payload y manifiesto verificados de nuevo al terminar; criterios,
+geometría y micrófonos idénticos al padre. El escritor guarda correctamente
+los booleanos nativos de los seis controles de solapamiento.
+
+## Decisión y siguiente paso
+
+**256 kHz pasa frente a 512 sólo en este coast de 0,5 ms** desde esta
+C4 supuesta. Se usa 512 como referencia de este control; no seleccionar
+todavía una tasa para nota completa o tiempo real. Conservar el fallo
+128→256 del informe anterior y 128→512 del nuevo.
+
+Sigue **medir la banda relevante de fuente/carga por encima de 6 kHz**,
+separando contribución de modos físicos y efecto de ventana finita; no
+equiparar automáticamente energía de cuerda con sonido en el micrófono.
+Luego balance angular del contacto completo y refinamiento de duración.
+La cápsula autenticada permite esos nuevos controles del sostenido sin
+volver a integrar el contacto, pero no contiene su historia B/V.
+Quedan release, unísono, identificación real y escucha; aprobación global
+falsa, sin WAV nuevo ni modificación del paquete instalado 0.172.0.
 
 ### Reparación del escritor y continuación autenticada
 

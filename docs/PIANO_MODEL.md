@@ -2746,9 +2746,28 @@ is 4.32661e-11; native board convergence ratio is 0.234935, below 0.35;
 fine complex-pressure error through 6 kHz is at most 0.00311481%.
 However, integrated radiation changes 0.274024% including observation
 bounds between 128 and 256 kHz, above the unchanged 0.2% limit. The measured
-difference dominates the observation uncertainty. Coast approval remains
-false; next add 512 kHz from the same authenticated endpoint before longer
-windows. This certifies neither the full contact ledger nor a whole note.
+difference dominates the observation uncertainty. That audit leaves coast
+approval false and calls for 512 kHz from the same authenticated endpoint
+before longer windows. It certifies neither the full contact ledger nor a whole note.
+The [512-kHz coast refinement](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-coast-512.md)
+now passes 15/15 specific gates with unchanged criteria. Radiation changes
+0.0690548% including bounds between 256 and 512 kHz, below 0.2%; 128 versus
+512 still fails at 0.342584%. Fine complex pressure changes at most
+0.000761170%; bounded energy discrepancy is at most 4.32294e-11.
+The established observer regenerates all angular blocks; full replay is
+exact, and the six old storage/flux intervals overlap the new intervals.
+Thus 256 kHz passes against 512 for this 0.5 ms coast only, without selecting
+a rate for longer notes or approving timbre. Source/load bandwidth above
+6 kHz and the full contact angular ledger remain next.
+A single 6.31-MB local endpoint capsule retains all four physical states
+without copying R or histories. Its hashes, historical producer in Git,
+physical sources, parents and current-operator energy/norm/compression are
+checked before reuse. A first field run was interrupted to correct NumPy
+boolean JSON serialization; its angular values were not persisted or used.
+The complete repeated certificate takes 1251.862 s, including 1152.779 s of
+angular observation (peak 4.914 GiB), without repeating 1019.376 s of contact.
+Whole-contact pressure remains an authenticated inherited measurement;
+old coast pressures and field are recomputed. Global approval stays false.
 A separate [finite-window observer prototype](concert-grand-physics-roadmap-2026-10-02/NOTA-P6-observador-ventana-finita.md)
 retains both live endpoints in the discrete Padé transform. It reproduces
 centered section inputs and Parseval flux in synthetic tests, including

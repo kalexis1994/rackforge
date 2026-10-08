@@ -54,8 +54,48 @@ completa; integración de bandas con sus extremos obligatorios. La prueba
 analítica usa cuadratura más alta para su intervalo deliberadamente grande;
 el diagnóstico físico controla órdenes 8/12 en cada paso nativo.
 
-Pendiente la ejecución sobre la fuente física. Comando desde la raíz:
+Comando desde la raíz:
 
 ```text
 python tools/audit-concert-grand-source-band.py --report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-banda-superior/fuente-carga-24k.json
 ```
+
+Primera ejecución completa: **6/9 controles**, 130,549 s. Fallan captura de
+fuente, integración en frecuencia y captura de presión. Se conserva el
+[informe](medidas-P6-banda-superior/fuente-carga-24k.json) y sus límites.
+Reproducción física exacta; cuadraturas de tiempo, micrófono, carga y
+refinamiento de celdas pasan. No se aprueba todavía el diagnóstico numérico.
+
+En Hann, la banda 12–24 kHz de A cambia **0,348854%** entre 256/512
+(límite 0,1%); la sonda de presión a 24 kHz cambia **0,756371%**.
+La integración 250→125 Hz cambia hasta **1,236941%** en la pequeña cola
+Hann de 6–12 kHz, frente a 0,1%. No eliminar esa cola ni relajar límites.
+
+La acción de carga supera 2% desde 10 kHz: **2,06477 / 3,34065 /
+21,2811 / 52,0742 / 69,4099%** a 10/12/16/20/24 kHz sobre las mismas
+celdas. Es un diagnóstico direccional del aproximante vigente, no un fallo
+de pasividad o una medida de error audible. Debe reproducirse con fuente
+refinada antes de concluir. Los valores de ventana inicial son provisionales.
+
+## Refinamiento fijado después de esos fallos
+
+- Conservar el primer informe y la herramienta, sin alterar sus fuentes.
+  Autenticarlos antes de continuar desde la misma cápsula/carga.
+- Tres continuaciones nativas **512/1024/2048 kHz**, mismas condiciones
+  y 0,5 ms; comparar finalmente 1024→2048. Esto refina integración
+  mecánica y captura Hermite conjuntamente, no sólo un muestreo posterior.
+  No se aprueba un balance angular nuevo a esas tasas.
+- Tres grillas de frecuencia **125/62,5/31,25 Hz**, mismos extremos;
+  comparar finalmente 62,5→31,25. Mantener **todos los umbrales**.
+- Reproducir física, ocho integrales espectrales por ventana y presión
+  de la ejecución anterior a 512 kHz en su grilla de 125 Hz (<1e−10).
+- Repetir las sondas de micrófono/carga con la fuente más fina y ambas
+  superficies; no heredar convergencia direccional de una fuente distinta.
+  Conservar comparación contra la tasa gruesa, no usarla para aprobar.
+- Mismo control de hashes al terminar, sin R, WAV o historias nuevas.
+
+```text
+python tools/audit-concert-grand-source-band-refinement.py --report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-banda-superior/fuente-carga-24k-refinado.json
+```
+
+Resultados del refinamiento pendientes.

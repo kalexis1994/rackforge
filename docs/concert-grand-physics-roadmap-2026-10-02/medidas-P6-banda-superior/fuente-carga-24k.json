@@ -1,0 +1,774 @@
+{
+  "stage": "finite-window high-band source and directional load diagnostic completed",
+  "all_gates_passed": false,
+  "preflight_only": true,
+  "criteria": {
+    "reproduction_relative": 1e-10,
+    "source_relative": 0.001,
+    "frequency_integral_relative": 0.001,
+    "time_quadrature_relative": 1e-10,
+    "pressure_capture_relative": 0.001,
+    "pressure_cell_quadrature_relative": 0.0002,
+    "load_cell_quadrature_relative": 0.0002,
+    "load_cell_refinement_relative": 0.02,
+    "directional_load_relative": 0.02
+  },
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "source_sha256": {
+    "audit-concert-grand-cell-factor-projection.py": "d93a600e5b021c4654e7273bbf98d80cf319c5a941cfe18b7d582f4990400b42",
+    "audit-concert-grand-coast-512.py": "be3e3592f3f738d961d23735372398369a663c7507fe67b6cc26df40d798e160",
+    "audit-concert-grand-full-coast-field.py": "f9a945c34eb88168e81a6f78d22aa9ef0bc94cec3a4c0009b21bc72bc18e0ceb",
+    "audit-concert-grand-full-microphone-kernel.py": "8a29778c7129c6704d7e214142013a3eeda7a7ef4217fdee27d8d1a1b59487ac",
+    "audit-concert-grand-full-propagation-cost.py": "ede7f67689cdd5505d0c2ad9d414e22870ab749d1af0b899aa990fbb2f42f18e",
+    "audit-concert-grand-pade-contact-full.py": "03e6be00b2e000eba32dd01cc02365954dde2ae1e1e9f926256588d821470c19",
+    "audit-concert-grand-prefix-work-refinement.py": "615c9012b5bfb53428628751a85a77ddbb98c4f632058b8b01301cbf299ad9b0",
+    "audit-concert-grand-refined-coast-field.py": "29899b4d7947f64d4317c20033c0a3befc0e637144b60d0d8c5eefb6c0813ec4",
+    "audit-concert-grand-source-band.py": "20fa07823131b78113983099870f05b4f65fdb10de34b16dec8984941f952778",
+    "audit-concert-grand-string-resolution-directed.py": "ae777d11f5b9432f0b48677a00a740219424f63c41bb90c5f195622b6d21678c",
+    "audit-concert-grand-string-resolution.py": "dd39b6c302790396e8fe6b2ca63b8cb597f36fcbe4981cb83286565c77ad6eb1",
+    "concert_grand_bounded_contact.py": "d16a88a31156a49144b94d211ad1adf1862c9ce3153e4b79b5597687396e642f",
+    "concert_grand_bounded_observer.py": "e7ceb7d890fa4348b9b31f7a3f4ae15c6d8fa1c9468b6a52d9b594f06aba8a1e",
+    "concert_grand_cell_audio.py": "57c3bccf6c0bbe0c930794ccc5710f94b1a26873722e461f7ff72ef254acacf9",
+    "concert_grand_cell_factor_projection.py": "a0b0f08776e26c54a57466dd3206ee20841eeaa56cc2e20b6a31696b2284b06e",
+    "concert_grand_cell_observer.py": "8978333039a9ab2aa9e210dfc9fb9b141d6dab6b0489ad733c1795bddccc7d8a",
+    "concert_grand_coast_measurements.py": "be00731ed5f60ce3b3e93c4c431540369749efec1b0e8a66461242dd5222a171",
+    "concert_grand_contact_seed.py": "4a9083ceb3dc980cc8f3a65bf6eebc35bb24daf261f1fca1a6bc5495629335e6",
+    "concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "concert_grand_exponential_coast.py": "645f8f8d4a94a87cb493ccfeae85f33fcf3a329e677778e964ad601a244380ee",
+    "concert_grand_fast_contact.py": "afbb00aa3e06b696ce6478a1ad6875bdbbcff5c20c9899d0a648d05c96e15eec",
+    "concert_grand_moving_bridge.py": "19685edcf58c2e1e622641cb5758c6700cace9534b853d8e5c79108f7e19a5e7",
+    "concert_grand_nonlinear_string.py": "f1c17115e3f296a12f5c51e14d888756e60303e33802f8873d43c6a746a4d0e6",
+    "concert_grand_pade_midpoint.py": "45633e24c60755b7a476aa428328786ecc33e85ce0a05953aa4f49afbe7f120f",
+    "concert_grand_pade_port_certificate.py": "62a9fb7dc3dd3d5e955f4c4ef20a7fb247d8b190525ad4ea397e20cebdce8914",
+    "concert_grand_pade_window_spectrum.py": "1bbfeb45fdc94d6b8207b42a6b863e70ab369099f5a58d8db3c9359013605f1b",
+    "concert_grand_seed_resume.py": "bb18c3244b2d5c544b3ecbfe5593aab63f2b3a057560f5c1c18f3fae9973e16f",
+    "concert_grand_string_resolution.py": "bdc96f36b273accbc60b9a87191c2ccfb2ae309ebd6821da3d72f4bf12b5a2db",
+    "concert_grand_wave_cache.py": "448c82b2544a1af8527c19f7f0184f28c762def11ba8ac805f41031e5c49e20a",
+    "concert_grand_window_field_probe.py": "cdeeb8c9914231ecce8a57bd2838c3e74ae1aa842dd2a2c16f346ea6dcb3ec01",
+    "concert_grand_window_spectra.py": "ba4f6dfdb7d3fd4c62dcffae7430607aeed96eed52345e3ec5c9cb741269b65c"
+  },
+  "parent_sha256": {
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-coast-campo\\coast-512k-validado.json": "aa2035357468a013ec8d8bbaaca80aae1563187f4fd4124da858d8b561e0c9cd",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-coast-campo\\coast-512k.json": "9305c4c3b9d149098bdb245387b6952fcab2e51bf06a1a2449b90a8e765c668d"
+  },
+  "geometry": {
+    "wire": {
+      "length_m": 0.62,
+      "linear_density_kg_m": 0.0081,
+      "tension_n": 850.0,
+      "young_pa": 200000000000.0,
+      "density_kg_m3": 7850.0
+    },
+    "felt": {
+      "mass_kg": 0.002,
+      "stiffness": 750000000.0,
+      "exponent": 2.6,
+      "strike_fraction": 0.125,
+      "width_fraction": 0.02,
+      "rate_damping_s_m": 0.1
+    },
+    "bending": "Euler",
+    "vertical_moving_endpoint": true,
+    "incident_speed_m_s": 5.0,
+    "board_coordinates": 606
+  },
+  "microphones": [
+    [
+      0.55,
+      0.5,
+      0.66
+    ],
+    [
+      0.85,
+      0.5,
+      0.66
+    ]
+  ],
+  "rates": [
+    256000,
+    512000
+  ],
+  "duration_s": 0.0005,
+  "start_after_contact_s": 0.003,
+  "probe_frequencies_hz": [
+    6000.0,
+    8000.0,
+    10000.0,
+    12000.0,
+    16000.0,
+    20000.0,
+    24000.0
+  ],
+  "scope": "Finite 3-3.5 ms board source window, rectangular and Hann observation; directional harmonic load probes, not live-memory replay, full-operator bandwidth certificate, radiation ledger, whole note or timbre.",
+  "cases": [
+    {
+      "rate": 256000,
+      "steps": 128,
+      "duration_s": 0.0005,
+      "dynamics_and_capture_s": 13.48638689998188,
+      "mechanical_initial_j": 0.02303399362623068,
+      "mechanical_final_j": 0.02302699818734321,
+      "relaxation_initial_j": 6.679393081123104e-09,
+      "relaxation_final_j": 1.0869140332889948e-08,
+      "initial_wave_norm": 0.007147952825301998,
+      "final_wave_norm": 0.00925700838573921,
+      "compression_final_m": -0.004878898845465313,
+      "minimum_step_heat_j": 0.0,
+      "mechanical_iterations_max": 5,
+      "full_tangent_fallbacks": 0,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 4.886304502086777e-06,
+      "relaxation_loss_j": 2.6173230908800994e-10,
+      "air_port_work_j": 2.10913428021341e-06,
+      "reproduction_relative": {
+        "mechanical_final_j": 0.0,
+        "relaxation_final_j": 0.0,
+        "final_wave_norm": 0.0,
+        "compression_final_m": 0.0,
+        "felt_heat_j": 0.0,
+        "material_heat_j": 0.0,
+        "relaxation_loss_j": 0.0,
+        "air_port_work_j": 0.0
+      },
+      "source": {
+        "rectangular": {
+          "velocity_squared_transform_integrals": {
+            "0-6000": 1.8846998920919637e-08,
+            "6000-12000": 3.0423001555988465e-10,
+            "12000-24000": 1.519995345140557e-10,
+            "0-24000": 1.930322847099358e-08
+          },
+          "acceleration_squared_transform_integrals": {
+            "0-6000": 0.1658772199105139,
+            "6000-12000": 0.003374519933460593,
+            "12000-24000": 0.001614719733187078,
+            "0-24000": 0.1708664595771616
+          },
+          "velocity_above_6k_fraction": 0.02363488318855593,
+          "acceleration_above_6k_fraction": 0.02919964327109253,
+          "velocity_time_quadrature_relative": 1.6214716656258099e-15,
+          "frequency_integral_relative": {
+            "velocity": {
+              "0-6000": 0.0007246539241439239,
+              "6000-12000": 0.0006499783486497025,
+              "12000-24000": 0.00015852473700347277,
+              "0-24000": 0.0007190191193454839
+            },
+            "acceleration": {
+              "0-6000": 0.00013667747124842828,
+              "6000-12000": 0.0005272319362608259,
+              "12000-24000": 0.0001303297493107075,
+              "0-24000": 0.00014433072302571932
+            }
+          }
+        },
+        "hann": {
+          "velocity_squared_transform_integrals": {
+            "0-6000": 7.5153038560425e-09,
+            "6000-12000": 4.743624218061658e-13,
+            "12000-24000": 1.1856572574939741e-14,
+            "0-24000": 7.51579007503688e-09
+          },
+          "acceleration_squared_transform_integrals": {
+            "0-6000": 0.06253053409215203,
+            "6000-12000": 2.244460293495348e-05,
+            "12000-24000": 1.7133715231524802e-07,
+            "0-24000": 0.06255315003223931
+          },
+          "velocity_above_6k_fraction": 6.469299827785832e-05,
+          "acceleration_above_6k_fraction": 0.0003615475811467957,
+          "velocity_time_quadrature_relative": 1.5025935000539436e-14,
+          "frequency_integral_relative": {
+            "velocity": {
+              "0-6000": 0.0002462429294176718,
+              "6000-12000": 0.008053445425364425,
+              "12000-24000": 0.001491031104018555,
+              "0-24000": 0.000246737648185497
+            },
+            "acceleration": {
+              "0-6000": 0.00014112680671188977,
+              "6000-12000": 0.012369408200463653,
+              "12000-24000": 0.000979983958598376,
+              "0-24000": 0.00014551671589657116
+            }
+          }
+        }
+      }
+    },
+    {
+      "rate": 512000,
+      "steps": 256,
+      "duration_s": 0.0005,
+      "dynamics_and_capture_s": 26.953720399993472,
+      "mechanical_initial_j": 0.02303399362623068,
+      "mechanical_final_j": 0.023026998240386416,
+      "relaxation_initial_j": 6.679393081123104e-09,
+      "relaxation_final_j": 1.0868805406515047e-08,
+      "initial_wave_norm": 0.007147952825301998,
+      "final_wave_norm": 0.009257005848210348,
+      "compression_final_m": -0.004878898798784438,
+      "minimum_step_heat_j": 0.0,
+      "mechanical_iterations_max": 4,
+      "full_tangent_fallbacks": 0,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 4.886297281327018e-06,
+      "relaxation_loss_j": 2.6170950486476754e-10,
+      "air_port_work_j": 2.1090884637751656e-06,
+      "reproduction_relative": {
+        "mechanical_final_j": 0.0,
+        "relaxation_final_j": 0.0,
+        "final_wave_norm": 0.0,
+        "compression_final_m": 0.0,
+        "felt_heat_j": 0.0,
+        "material_heat_j": 0.0,
+        "relaxation_loss_j": 0.0,
+        "air_port_work_j": 0.0
+      },
+      "source": {
+        "rectangular": {
+          "velocity_squared_transform_integrals": {
+            "0-6000": 1.8847004250195333e-08,
+            "6000-12000": 3.042300395159813e-10,
+            "12000-24000": 1.5199954405248661e-10,
+            "0-24000": 1.9303233833763805e-08
+          },
+          "acceleration_squared_transform_integrals": {
+            "0-6000": 0.16587721764620075,
+            "6000-12000": 0.0033745176753565698,
+            "12000-24000": 0.0016147185958152997,
+            "0-24000": 0.17086645391737265
+          },
+          "velocity_above_6k_fraction": 0.023634878357556052,
+          "acceleration_above_6k_fraction": 0.029199624366199797,
+          "velocity_time_quadrature_relative": 2.0616353055189172e-15,
+          "frequency_integral_relative": {
+            "velocity": {
+              "0-6000": 0.0007246540882407245,
+              "6000-12000": 0.0006499780283013178,
+              "12000-24000": 0.00015852474090935254,
+              "0-24000": 0.0007190192757382519
+            },
+            "acceleration": {
+              "0-6000": 0.00013667817834499114,
+              "6000-12000": 0.0005272287933537765,
+              "12000-24000": 0.00013032525444878418,
+              "0-24000": 0.00014433130006148506
+            }
+          }
+        },
+        "hann": {
+          "velocity_squared_transform_integrals": {
+            "0-6000": 7.515306180969155e-09,
+            "6000-12000": 4.74363639089346e-13,
+            "12000-24000": 1.1856573802860859e-14,
+            "0-24000": 7.515792401182047e-09
+          },
+          "acceleration_squared_transform_integrals": {
+            "0-6000": 0.06253053220822768,
+            "6000-12000": 2.2445533677503424e-05,
+            "12000-24000": 1.7127991199798807e-07,
+            "0-24000": 0.06255314902181719
+          },
+          "velocity_above_6k_fraction": 6.469314038207555e-05,
+          "acceleration_above_6k_fraction": 0.0003615615511476993,
+          "velocity_time_quadrature_relative": 2.1089876646427823e-14,
+          "frequency_integral_relative": {
+            "velocity": {
+              "0-6000": 0.0002462429461080873,
+              "6000-12000": 0.00805345760003524,
+              "12000-24000": 0.0014910236663083433,
+              "0-24000": 0.0002467376667429792
+            },
+            "acceleration": {
+              "0-6000": 0.00014112668453182786,
+              "6000-12000": 0.012369298693328524,
+              "12000-24000": 0.0009803090811815688,
+              "0-24000": 0.000145516736607903
+            }
+          }
+        }
+      }
+    }
+  ],
+  "seconds": 130.54850830000942,
+  "peak_working_set_bytes": 3433246720,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "seed_resume": {
+    "checkpoint_sha256": "9305c4c3b9d149098bdb245387b6952fcab2e51bf06a1a2449b90a8e765c668d",
+    "producer_commit": "90cfd00a7363b12bb404f607c85c7955cab0876e",
+    "historical_producer_sha256": "042b9b97f9465bb39dbb539ca1600b0366b8c0fe86b1e47e860cf4fa104405e7",
+    "payload_sha256": "ac300d8aa8699b70d3d0d25bcffeab88096946fe0555c1718b52ec9a3ab95894",
+    "manifest_sha256": "73d3101d559021be2159de07380768a8bdea65d259991ea30142af16611c4cbd",
+    "payload_bytes": 6314406,
+    "manifest_bytes": 5068
+  },
+  "seed_consistency_relative": {
+    "mechanical": 0.0,
+    "relaxation": 0.0,
+    "wave_norm": 0.0,
+    "compression": 0.0
+  },
+  "frequency_grid_hz": [
+    0.0,
+    60.0,
+    125.0,
+    250.0,
+    375.0,
+    480.0,
+    500.0,
+    625.0,
+    750.0,
+    875.0,
+    1000.0,
+    1125.0,
+    1250.0,
+    1375.0,
+    1500.0,
+    1625.0,
+    1750.0,
+    1875.0,
+    1980.0,
+    2000.0,
+    2125.0,
+    2250.0,
+    2375.0,
+    2500.0,
+    2625.0,
+    2750.0,
+    2875.0,
+    3000.0,
+    3125.0,
+    3250.0,
+    3375.0,
+    3500.0,
+    3625.0,
+    3750.0,
+    3875.0,
+    4000.0,
+    4125.0,
+    4250.0,
+    4375.0,
+    4500.0,
+    4625.0,
+    4750.0,
+    4875.0,
+    5000.0,
+    5125.0,
+    5250.0,
+    5375.0,
+    5500.0,
+    5625.0,
+    5750.0,
+    5875.0,
+    6000.0,
+    6125.0,
+    6250.0,
+    6375.0,
+    6500.0,
+    6625.0,
+    6750.0,
+    6875.0,
+    7000.0,
+    7125.0,
+    7250.0,
+    7375.0,
+    7500.0,
+    7625.0,
+    7750.0,
+    7875.0,
+    8000.0,
+    8125.0,
+    8250.0,
+    8375.0,
+    8500.0,
+    8625.0,
+    8750.0,
+    8875.0,
+    9000.0,
+    9125.0,
+    9250.0,
+    9375.0,
+    9500.0,
+    9625.0,
+    9750.0,
+    9875.0,
+    10000.0,
+    10125.0,
+    10250.0,
+    10375.0,
+    10500.0,
+    10625.0,
+    10750.0,
+    10875.0,
+    11000.0,
+    11125.0,
+    11250.0,
+    11375.0,
+    11500.0,
+    11625.0,
+    11750.0,
+    11875.0,
+    12000.0,
+    12125.0,
+    12250.0,
+    12375.0,
+    12500.0,
+    12625.0,
+    12750.0,
+    12875.0,
+    13000.0,
+    13125.0,
+    13250.0,
+    13375.0,
+    13500.0,
+    13625.0,
+    13750.0,
+    13875.0,
+    14000.0,
+    14125.0,
+    14250.0,
+    14375.0,
+    14500.0,
+    14625.0,
+    14750.0,
+    14875.0,
+    15000.0,
+    15125.0,
+    15250.0,
+    15375.0,
+    15500.0,
+    15625.0,
+    15750.0,
+    15875.0,
+    16000.0,
+    16125.0,
+    16250.0,
+    16375.0,
+    16500.0,
+    16625.0,
+    16750.0,
+    16875.0,
+    17000.0,
+    17125.0,
+    17250.0,
+    17375.0,
+    17500.0,
+    17625.0,
+    17750.0,
+    17875.0,
+    18000.0,
+    18125.0,
+    18250.0,
+    18375.0,
+    18500.0,
+    18625.0,
+    18750.0,
+    18875.0,
+    19000.0,
+    19125.0,
+    19250.0,
+    19375.0,
+    19500.0,
+    19625.0,
+    19750.0,
+    19875.0,
+    20000.0,
+    20125.0,
+    20250.0,
+    20375.0,
+    20500.0,
+    20625.0,
+    20750.0,
+    20875.0,
+    21000.0,
+    21125.0,
+    21250.0,
+    21375.0,
+    21500.0,
+    21625.0,
+    21750.0,
+    21875.0,
+    22000.0,
+    22125.0,
+    22250.0,
+    22375.0,
+    22500.0,
+    22625.0,
+    22750.0,
+    22875.0,
+    23000.0,
+    23125.0,
+    23250.0,
+    23375.0,
+    23500.0,
+    23625.0,
+    23750.0,
+    23875.0,
+    24000.0
+  ],
+  "source_capture_relative": {
+    "rectangular": {
+      "velocity": {
+        "0-6000": 9.472905793184187e-07,
+        "6000-12000": 2.1853817071652503e-06,
+        "12000-24000": 2.4789939381690798e-06,
+        "0-24000": 9.999060532388817e-07
+      },
+      "acceleration": {
+        "0-6000": 5.810941514675017e-06,
+        "6000-12000": 3.165796427648853e-05,
+        "12000-24000": 7.630142002626259e-05,
+        "0-24000": 1.0372682337726031e-05
+      }
+    },
+    "hann": {
+      "velocity": {
+        "0-6000": 8.024225258008921e-07,
+        "6000-12000": 2.4900031957901134e-05,
+        "12000-24000": 0.00012830307552520802,
+        "0-24000": 8.419868464789255e-07
+      },
+      "acceleration": {
+        "0-6000": 4.9929612659808115e-06,
+        "6000-12000": 0.00017336492962274902,
+        "12000-24000": 0.0034885434927107283,
+        "0-24000": 8.308329544649189e-06
+      }
+    }
+  },
+  "pressure_probes": [
+    {
+      "frequency_hz": 6000.0,
+      "hann_transform_pa_s": [
+        [
+          -3.678597943428028e-07,
+          2.5075032532094524e-07
+        ],
+        [
+          -1.2792556575974858e-06,
+          3.896809070909315e-07
+        ]
+      ],
+      "cell_quadrature_relative": 2.1394158424616237e-14,
+      "source_capture_relative": 7.091286315426189e-05
+    },
+    {
+      "frequency_hz": 8000.0,
+      "hann_transform_pa_s": [
+        [
+          1.8511693719654323e-07,
+          1.608367070056561e-07
+        ],
+        [
+          -8.506000438278033e-08,
+          7.76536369543732e-08
+        ]
+      ],
+      "cell_quadrature_relative": 1.3843498840278923e-13,
+      "source_capture_relative": 0.00011829033684229205
+    },
+    {
+      "frequency_hz": 10000.0,
+      "hann_transform_pa_s": [
+        [
+          -4.1324186192322616e-09,
+          3.454694947680227e-08
+        ],
+        [
+          -6.687602092799829e-08,
+          8.360090648068707e-09
+        ]
+      ],
+      "cell_quadrature_relative": 3.548462972022251e-13,
+      "source_capture_relative": 0.0007838508702645383
+    },
+    {
+      "frequency_hz": 12000.0,
+      "hann_transform_pa_s": [
+        [
+          -1.3937637248351571e-08,
+          1.4714815433134594e-08
+        ],
+        [
+          -2.5086293807614924e-08,
+          -1.814064657850372e-08
+        ]
+      ],
+      "cell_quadrature_relative": 1.021216931503177e-12,
+      "source_capture_relative": 0.0015179570387026794
+    },
+    {
+      "frequency_hz": 16000.0,
+      "hann_transform_pa_s": [
+        [
+          7.549107567675501e-10,
+          -7.59629558889877e-09
+        ],
+        [
+          4.227905127783306e-09,
+          -5.046719327032831e-09
+        ]
+      ],
+      "cell_quadrature_relative": 3.784731368700008e-12,
+      "source_capture_relative": 0.003810156231434808
+    },
+    {
+      "frequency_hz": 20000.0,
+      "hann_transform_pa_s": [
+        [
+          2.4753627988366996e-09,
+          7.868233312202242e-10
+        ],
+        [
+          2.1973209938081266e-09,
+          1.2336047237312354e-09
+        ]
+      ],
+      "cell_quadrature_relative": 4.714593679622819e-12,
+      "source_capture_relative": 0.003613337423913806
+    },
+    {
+      "frequency_hz": 24000.0,
+      "hann_transform_pa_s": [
+        [
+          -8.066611398105454e-10,
+          1.1207364640579607e-09
+        ],
+        [
+          -7.32289986040415e-10,
+          8.466632420819168e-10
+        ]
+      ],
+      "cell_quadrature_relative": 1.1361111337527406e-11,
+      "source_capture_relative": 0.007563713164972538
+    }
+  ],
+  "load_cells": [
+    [
+      256,
+      192
+    ],
+    [
+      512,
+      384
+    ]
+  ],
+  "load_probes": [
+    {
+      "frequency_hz": 6000.0,
+      "source_velocity_transform_norm": 2.0393145146675163e-08,
+      "load_action_norm": 121.74916807935321,
+      "load_cell_quadrature_relative": 3.3455770011865194e-12,
+      "load_cell_refinement_relative": 0.018261178851917307,
+      "causal_vs_same_cells_relative": 0.0051228873770453945,
+      "causal_vs_refined_cells_relative": 0.020242883133117683,
+      "directional_load_within_inherited_2percent": true
+    },
+    {
+      "frequency_hz": 8000.0,
+      "source_velocity_transform_norm": 7.010785429877503e-09,
+      "load_action_norm": 102.72019977256721,
+      "load_cell_quadrature_relative": 5.233326816682976e-12,
+      "load_cell_refinement_relative": 0.004340567047866872,
+      "causal_vs_same_cells_relative": 0.011515736665537405,
+      "causal_vs_refined_cells_relative": 0.011713537221484592,
+      "directional_load_within_inherited_2percent": true
+    },
+    {
+      "frequency_hz": 10000.0,
+      "source_velocity_transform_norm": 3.386996799823296e-09,
+      "load_action_norm": 101.61604493564855,
+      "load_cell_quadrature_relative": 6.633861891877277e-12,
+      "load_cell_refinement_relative": 0.0024704989269280766,
+      "causal_vs_same_cells_relative": 0.020647690295938048,
+      "causal_vs_refined_cells_relative": 0.020320977335735554,
+      "directional_load_within_inherited_2percent": false
+    },
+    {
+      "frequency_hz": 12000.0,
+      "source_velocity_transform_norm": 1.9057469871807977e-09,
+      "load_action_norm": 101.2144548080029,
+      "load_cell_quadrature_relative": 8.051948166986565e-12,
+      "load_cell_refinement_relative": 0.002688144036637099,
+      "causal_vs_same_cells_relative": 0.03340648493903132,
+      "causal_vs_refined_cells_relative": 0.0331499034649696,
+      "directional_load_within_inherited_2percent": false
+    },
+    {
+      "frequency_hz": 16000.0,
+      "source_velocity_transform_norm": 7.816926234909423e-10,
+      "load_action_norm": 100.85468328384856,
+      "load_cell_quadrature_relative": 1.1017376203787937e-11,
+      "load_cell_refinement_relative": 0.0023417258300734056,
+      "causal_vs_same_cells_relative": 0.21281123497867854,
+      "causal_vs_refined_cells_relative": 0.21256517392184404,
+      "directional_load_within_inherited_2percent": false
+    },
+    {
+      "frequency_hz": 20000.0,
+      "source_velocity_transform_norm": 3.9525690265526903e-10,
+      "load_action_norm": 100.69642489770834,
+      "load_cell_quadrature_relative": 1.4219918031682197e-11,
+      "load_cell_refinement_relative": 0.0017094545905011397,
+      "causal_vs_same_cells_relative": 0.5207424541992803,
+      "causal_vs_refined_cells_relative": 0.5201729842900263,
+      "directional_load_within_inherited_2percent": false
+    },
+    {
+      "frequency_hz": 24000.0,
+      "source_velocity_transform_norm": 2.272093201185383e-10,
+      "load_action_norm": 100.61444075725429,
+      "load_cell_quadrature_relative": 1.7746452375206377e-11,
+      "load_cell_refinement_relative": 0.0016713374115591955,
+      "causal_vs_same_cells_relative": 0.6940994145896497,
+      "causal_vs_refined_cells_relative": 0.6934979356855135,
+      "directional_load_within_inherited_2percent": false
+    }
+  ],
+  "diagnostic_gates": {
+    "reproduction": true,
+    "source_capture": false,
+    "time_quadrature": true,
+    "frequency_integration": false,
+    "pressure_capture": false,
+    "pressure_quadrature": true,
+    "load_quadrature": true,
+    "load_cells": true,
+    "source_and_cache_unchanged": true
+  },
+  "diagnostic_gates_passed": false
+}

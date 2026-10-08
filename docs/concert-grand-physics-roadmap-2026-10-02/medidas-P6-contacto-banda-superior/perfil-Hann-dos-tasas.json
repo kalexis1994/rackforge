@@ -1,0 +1,66 @@
+{
+  "stage": "two-rate Hann local-velocity original-acceleration profile completed",
+  "all_gates_passed": false,
+  "preflight_only": true,
+  "criteria": {
+    "reproduction_relative": 1e-10,
+    "source_relative": 0.001,
+    "frequency_integral_relative": 0.001,
+    "time_quadrature_relative": 1e-10,
+    "pressure_capture_relative": 0.001,
+    "pressure_cell_quadrature_relative": 0.0002,
+    "load_cell_quadrature_relative": 0.0002,
+    "load_cell_refinement_relative": 0.02,
+    "directional_load_relative": 0.02,
+    "analytic_oracle_relative": 1e-10,
+    "mechanical_budget_relative": 1e-09,
+    "impulse_relative": 1e-09,
+    "capture_decimation_relative": 0.001
+  },
+  "source_sha256": {
+    "audit-concert-grand-hann-profile.py": "b4a31bb7cc164b104e6a467eca63043958af13fbf66ed1fc42be30bf58d199ac",
+    "concert_grand_hann_observation.py": "75432ea643eaa4d67127a82ae30a70969a6c13f7f296d2931014b6b83f0628e7"
+  },
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-banda-superior\\Hann-gruesa-malla16.json": "36a02807722c69761a8b90a174f2bb9bd47d7ec3dad68f58a2b4f5a62477e6c8",
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-banda-superior\\Hann-local-malla.json": "e711917db126bc1a47556edf6319e9bd4df542be0a52be3c0e4f7554deb166d9"
+  },
+  "cases": [
+    {
+      "rate": 1536000,
+      "velocity_local_maximum": 9.009339926691693e-11,
+      "acceleration_original_maximum": 4.720796714862833e-12,
+      "velocity_local_passed": true,
+      "acceleration_original_passed": true,
+      "experimental_acceleration_local_maximum": 1.0602449084611368e-10,
+      "experimental_acceleration_local_passed": false
+    },
+    {
+      "rate": 3072000,
+      "velocity_local_maximum": 2.6036130783135694e-11,
+      "acceleration_original_maximum": 6.148363453244062e-12,
+      "velocity_local_passed": true,
+      "acceleration_original_passed": true,
+      "experimental_acceleration_local_maximum": 9.603830170241153e-11,
+      "experimental_acceleration_local_passed": true
+    }
+  ],
+  "profile_oracle_passed": true,
+  "original_diagnostic_gates": {
+    "contact_reproduction": true,
+    "endpoint_exact": true,
+    "mechanical_budget": true,
+    "impulse": true,
+    "nonnegative_heat": true,
+    "analytic_oracle": false,
+    "contact_temporal": false,
+    "capture_decimation": true,
+    "frequency_integration": false,
+    "pressure_quadrature": true,
+    "load_quadrature": true,
+    "load_cells": false,
+    "source_and_cache_unchanged": true
+  },
+  "scope": "Nine original oracle frequencies per rate, local V and established analytic A of the same live Hermite source/window. No new dynamics or replacement of temporal, spectral-band, spatial/operator gates.",
+  "decision": "Keep original analytic A; experimental local A failed 1e-10 at coarse 24 kHz. Preserve that failure and its source report."
+}

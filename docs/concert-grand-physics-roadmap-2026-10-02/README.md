@@ -1590,3 +1590,32 @@ su error relativo de banda **2,03722%** sigue fallando. No es un umbral audible.
 Sigue tasa gruesa con Hann local y sonda de 16 kHz a 2048; después resolver
 paso/carga, ledger angular y duración/release con presupuesto. Puerto discreto
 todavía sin implementar; global falso, plugin instalado intacto.
+
+### 2026-10-08 — P6: cierre de Hann de V y sonda de 16 kHz
+
+[Diseño, fallo de A y resultados](RESULTADOS-P6-Hann-gruesa-malla16.md).
+**9d2e588** agrega contacto grueso a 1536 kHz y reutilización autenticada
+del vector fino de 16 kHz; tres pruebas pasan. Ensayo **816,736 s
+(13,61 min)**, contacto **516,391 s (8,61 min)**, pico **4,309 GiB**.
+Trece medidas físicas reproducidas con error 0, misma R/cápsula; no volver
+a integrar contacto fino ni guardar otras historias/vectores.
+
+**11/12 controles locales**: V local pasa 1e−10 con **9,00934e−11**;
+A local falla por **1,06024e−10**. Se conserva el fallo. A analítica
+anterior pasa **4,72080e−12** en gruesa y **6,14836e−12** en fina.
+**d9fd3bd** implementa y mide por separado V local/A anterior de la misma
+trayectoria/ventana; tres pruebas pasan y perfil de ambas tasas aprobado,
+sin cambiar el límite ni sobrescribir productores/gates anteriores.
+
+Sonda 16 kHz: cambio 512→1024 conserva fallo **2,55585%**; 1024→2048
+da **0,651384%**, cuadratura 12/16 **1,15314e−15**. Reproducción del
+padre exacta. Z vigente frente a 2048 sigue difiriendo **16,3568%**.
+Las siete sondas pasan su refinamiento direccional con referencias mixtas
+(seis hasta 1024, una hasta 2048); no es convergencia de operador uniforme.
+La dirección de fuente temporal sigue cambiando hasta **2,28763%**.
+
+Se cierran Hann de V y refinamiento de esta sonda. Mantener pendientes
+temporal alto y carga frente a malla fina. Sigue presupuesto/método del
+ledger angular del contacto y derivación/validación del puerto discreto
+para reutilizar tabla/aire antes de más contactos largos. Después duración,
+release, unísono e identificación/escucha. Global falso, sin audio/paquete.

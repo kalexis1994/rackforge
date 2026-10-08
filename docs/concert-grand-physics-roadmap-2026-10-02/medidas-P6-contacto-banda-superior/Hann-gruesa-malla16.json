@@ -1,0 +1,381 @@
+{
+  "stage": "coarse local Hann and saved 16-kHz mesh diagnostic completed",
+  "all_gates_passed": false,
+  "preflight_only": true,
+  "source_sha256": {
+    "audit-concert-grand-contact-hann-coarse.py": "d8e8b44d6cc0cfc4db326e0a17df8ca10e3e5b463055c2a491b578ec3c2b063e",
+    "concert_grand_saved_source.py": "cde9116c1fd4619a2379127d5fb13df3806222bf644a0cba3f35b1461ab1f07b",
+    "concert_grand_local_hann.py": "b5e6991f631bce2c712f7b91672ff02b42df53c9424f1d992c40af18630bec99",
+    "concert_grand_local_hann_controls.py": "c625d4ff43ed903b35f8e80c81f0688a12c99fe58ca7222c82b3c7d9ae7a6e9d"
+  },
+  "parent_sha256": {
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-banda-superior\\contacto-24k.json": "3f53ed59ba4fbc1767f94dbb033af1a7b89a4bfba91d1ed6e10ba17c9a268dee",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-banda-superior\\Hann-local-malla.json": "e711917db126bc1a47556edf6319e9bd4df542be0a52be3c0e4f7554deb166d9",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-banda-superior\\Hann-local-malla-validado.json": "b46ab31b70245404e6be0766785a4f2639b1faf39b0b526ed3faabdcda13bb16"
+  },
+  "criteria": {
+    "reproduction_relative": 1e-10,
+    "source_relative": 0.001,
+    "frequency_integral_relative": 0.001,
+    "time_quadrature_relative": 1e-10,
+    "pressure_capture_relative": 0.001,
+    "pressure_cell_quadrature_relative": 0.0002,
+    "load_cell_quadrature_relative": 0.0002,
+    "load_cell_refinement_relative": 0.02,
+    "directional_load_relative": 0.02,
+    "analytic_oracle_relative": 1e-10,
+    "mechanical_budget_relative": 1e-09,
+    "impulse_relative": 1e-09,
+    "capture_decimation_relative": 0.001
+  },
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "rate": 1536000,
+  "duration_s": 0.003,
+  "incident_speed_m_s": 5.0,
+  "transverse": 96,
+  "axial": 192,
+  "scope": "Coarse nine-frequency local-Hann control; fine controls inherited. 16-kHz harmonic action on a saved original source, not a new physical trajectory, full spectral convergence, operator or live-memory certificate.",
+  "original_diagnostic_gates": {
+    "contact_reproduction": true,
+    "endpoint_exact": true,
+    "mechanical_budget": true,
+    "impulse": true,
+    "nonnegative_heat": true,
+    "analytic_oracle": false,
+    "contact_temporal": false,
+    "capture_decimation": true,
+    "frequency_integration": false,
+    "pressure_quadrature": true,
+    "load_quadrature": true,
+    "load_cells": false,
+    "source_and_cache_unchanged": true
+  },
+  "seconds": 816.7359446999617,
+  "peak_working_set_bytes": 4626620416,
+  "array_estimates": {
+    "estimated_bytes": 9568311072,
+    "maximum_bytes": 12884901888,
+    "mesh_phase_bytes": 7516192768,
+    "finest_fft_points": 12582912,
+    "angular_history_bytes": 0,
+    "phases_sequential": true,
+    "explanation": "Inherited conservative contact allowance; mesh adds twelve complex and eight real FFT-sized arrays to a 4-GiB base. Native histories deleted before mesh phase; not an OS memory cap."
+  },
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "seed_provenance": {
+    "checkpoint_sha256": "9305c4c3b9d149098bdb245387b6952fcab2e51bf06a1a2449b90a8e765c668d",
+    "producer_commit": "90cfd00a7363b12bb404f607c85c7955cab0876e",
+    "historical_producer_sha256": "042b9b97f9465bb39dbb539ca1600b0366b8c0fe86b1e47e860cf4fa104405e7",
+    "payload_sha256": "ac300d8aa8699b70d3d0d25bcffeab88096946fe0555c1718b52ec9a3ab95894",
+    "manifest_sha256": "73d3101d559021be2159de07380768a8bdea65d259991ea30142af16611c4cbd",
+    "payload_bytes": 6314406,
+    "manifest_bytes": 5068
+  },
+  "contact_reproduction_relative": {
+    "mechanical_initial_j": 0.0,
+    "mechanical_final_j": 0.0,
+    "relaxation_final_j": 0.0,
+    "final_wave_norm": 0.0,
+    "compression_final_m": 0.0,
+    "minimum_step_heat_j": 0.0,
+    "peak_centered_contact_force_n": 0.0,
+    "contact_impulse_n_s": 0.0,
+    "hammer_momentum_change_n_s": 0.0,
+    "felt_heat_j": 0.0,
+    "material_heat_j": 0.0,
+    "relaxation_loss_j": 0.0,
+    "air_port_work_j": 0.0
+  },
+  "contact": {
+    "rate": 1536000,
+    "steps": 4608,
+    "duration_s": 0.003,
+    "dynamics_and_capture_s": 516.3908522999845,
+    "mechanical_initial_j": 0.024999999999999998,
+    "mechanical_final_j": 0.023033991921810052,
+    "relaxation_final_j": 6.679372814248118e-09,
+    "final_wave_norm": 0.007147941729738976,
+    "compression_final_m": -0.003451111262724466,
+    "maximum_mechanical_budget_relative": 2.4207025273170757e-12,
+    "minimum_step_heat_j": 0.0,
+    "peak_centered_contact_force_n": 16.18453736771408,
+    "contact_impulse_n_s": 0.01612275593542102,
+    "hammer_momentum_change_n_s": 0.016122755935420972,
+    "impulse_momentum_relative": 3.0126522737120597e-15,
+    "separation_brackets_s": [
+      [
+        0.0018229166666666667,
+        0.0018235677083333333
+      ]
+    ],
+    "newton_iterations_max": 5,
+    "full_tangent_fallbacks": 0,
+    "felt_heat_j": 0.001956859967434172,
+    "material_heat_j": 6.383685415300267e-06,
+    "relaxation_loss_j": 5.221934880021435e-10,
+    "air_port_work_j": 2.7644253213782493e-06
+  },
+  "oracle_frequency_hz": [
+    0.0,
+    60.0,
+    6000.0,
+    8000.0,
+    10000.0,
+    12000.0,
+    16000.0,
+    20000.0,
+    24000.0
+  ],
+  "local_spectra_s": 0.13329379999777302,
+  "local_truncation_bounds": {
+    "window_weight_absolute": 2.2480487774584946e-32,
+    "exponential_moment_absolute": 2.160195122926374e-58
+  },
+  "local_oracle_relative": {
+    "velocity": [
+      1.488159119346671e-15,
+      2.3023065614143696e-15,
+      4.951460635679559e-14,
+      2.383212305092456e-13,
+      9.405418794801817e-13,
+      1.562422139123283e-12,
+      6.2565065506343385e-12,
+      2.5484819262593276e-11,
+      9.009339926691693e-11
+    ],
+    "acceleration": [
+      4.502774234286861e-16,
+      1.440748957055415e-15,
+      4.433096380905396e-15,
+      1.9091475262953157e-13,
+      3.5036498231950624e-13,
+      2.126102692948966e-13,
+      2.74380756870996e-12,
+      3.1576968971004436e-12,
+      1.0602449084611368e-10
+    ]
+  },
+  "original_global_oracle_relative": {
+    "velocity": [
+      1.536214445298734e-15,
+      2.161671662895731e-15,
+      5.144679861103169e-14,
+      2.1932857648156285e-12,
+      6.378722501794505e-12,
+      1.1234237061087176e-11,
+      4.689750698264291e-11,
+      4.291546600973903e-11,
+      4.963091922102649e-10
+    ],
+    "acceleration": [
+      5.368773086249127e-16,
+      1.1490176318590916e-15,
+      5.55617749778309e-15,
+      3.108487303527698e-14,
+      9.191301193224868e-14,
+      7.158814968556251e-14,
+      2.712971925103859e-13,
+      7.628786800111646e-13,
+      4.720796714862833e-12
+    ]
+  },
+  "original_velocity_oracle_order12_16_relative": [
+    3.7905932980929415e-15,
+    3.632350633729606e-15,
+    3.879161023775787e-14,
+    4.0150316786220475e-13,
+    1.2537425013592152e-12,
+    2.2437036816308235e-12,
+    6.069363147871844e-12,
+    1.4043342071743737e-11,
+    4.247016270800201e-11
+  ],
+  "local_order8_12_relative": [
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  ],
+  "local_block_relative": [
+    [
+      1.8962634850503162e-16,
+      1.52332242246282e-16,
+      2.5475665971411703e-14,
+      3.0570618930342144e-13,
+      7.520333061495704e-13,
+      6.298079853437555e-13,
+      2.8330919229845554e-12,
+      9.410474764465916e-12,
+      8.80194793339105e-12
+    ],
+    [
+      2.844934240108983e-16,
+      3.115799632796714e-16,
+      4.468284221660676e-15,
+      2.448000681183768e-14,
+      7.164887448984153e-14,
+      5.751085526266958e-14,
+      2.296063303646631e-13,
+      7.350927194966751e-13,
+      1.657871428612981e-12
+    ]
+  ],
+  "source_direction_temporal_relative": {
+    "original_global_hann_velocity": [
+      {
+        "frequency_hz": 6000.0,
+        "relative": 0.0022562350877351543
+      },
+      {
+        "frequency_hz": 8000.0,
+        "relative": 0.005145080333007167
+      },
+      {
+        "frequency_hz": 10000.0,
+        "relative": 0.008510532601282728
+      },
+      {
+        "frequency_hz": 12000.0,
+        "relative": 0.013835782774506965
+      },
+      {
+        "frequency_hz": 16000.0,
+        "relative": 0.022876293740601142
+      },
+      {
+        "frequency_hz": 20000.0,
+        "relative": 0.021082662421451997
+      },
+      {
+        "frequency_hz": 24000.0,
+        "relative": 0.015912034771270806
+      }
+    ],
+    "local_hann_velocity": [
+      {
+        "frequency_hz": 6000.0,
+        "relative": 0.002256235087732586
+      },
+      {
+        "frequency_hz": 8000.0,
+        "relative": 0.005145080332990552
+      },
+      {
+        "frequency_hz": 10000.0,
+        "relative": 0.008510532600939041
+      },
+      {
+        "frequency_hz": 12000.0,
+        "relative": 0.013835782774858753
+      },
+      {
+        "frequency_hz": 16000.0,
+        "relative": 0.022876293739837184
+      },
+      {
+        "frequency_hz": 20000.0,
+        "relative": 0.021082662422591613
+      },
+      {
+        "frequency_hz": 24000.0,
+        "relative": 0.015912034773309013
+      }
+    ]
+  },
+  "load_16k": {
+    "frequency_hz": 16000.0,
+    "source_velocity_transform_norm": 2.4597292491317985e-11,
+    "cells": [
+      [
+        512,
+        384
+      ],
+      [
+        1024,
+        768
+      ],
+      [
+        2048,
+        1536
+      ]
+    ],
+    "inherited_refinement_relative": 0.025558514965461614,
+    "finest_refinement_relative": 0.006513841379879292,
+    "finest_quadrature_relative": 1.1531446304744148e-15,
+    "causal_vs_1024_relative": 0.1593053492831664,
+    "causal_vs_2048_relative": 0.1635682880006887,
+    "reproduction_relative": {
+      "refinement": 0.0,
+      "causal_vs_1024": 0.0,
+      "source_norm": 0.0
+    }
+  },
+  "local_controls": {
+    "contact_reproduction": true,
+    "mechanical_budget": true,
+    "impulse": true,
+    "nonnegative_heat": true,
+    "coarse_local_oracle": false,
+    "local_order": true,
+    "local_blocks": true,
+    "inherited_fine_local_oracle": true,
+    "mesh_reproduction": true,
+    "mesh_16k": true,
+    "mesh_quadrature": true,
+    "source_and_cache_unchanged": true
+  },
+  "local_controls_passed": false,
+  "two_rate_local_hann_oracle_passed": false,
+  "all_seven_directional_mesh_controls_passed": true
+}

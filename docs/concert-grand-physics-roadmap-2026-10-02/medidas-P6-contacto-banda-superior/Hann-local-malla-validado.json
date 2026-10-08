@@ -1,0 +1,60 @@
+{
+  "stage": "canonical fine contact local Hann and mesh diagnostic completed",
+  "all_gates_passed": false,
+  "preflight_only": true,
+  "source_sha256": {
+    "audit-concert-grand-contact-local-finalize.py": "ad9e9e23a25f2a340be23becda1cea609063f52c062da78cff7e7e381886d5f0",
+    "concert_grand_local_hann_controls.py": "c625d4ff43ed903b35f8e80c81f0688a12c99fe58ca7222c82b3c7d9ae7a6e9d"
+  },
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-banda-superior\\Hann-local-malla.json": "e711917db126bc1a47556edf6319e9bd4df542be0a52be3c0e4f7554deb166d9"
+  },
+  "criteria": {
+    "reproduction_relative": 1e-10,
+    "source_relative": 0.001,
+    "frequency_integral_relative": 0.001,
+    "time_quadrature_relative": 1e-10,
+    "pressure_capture_relative": 0.001,
+    "pressure_cell_quadrature_relative": 0.0002,
+    "load_cell_quadrature_relative": 0.0002,
+    "load_cell_refinement_relative": 0.02,
+    "directional_load_relative": 0.02,
+    "analytic_oracle_relative": 1e-10,
+    "mechanical_budget_relative": 1e-09,
+    "impulse_relative": 1e-09,
+    "capture_decimation_relative": 0.001
+  },
+  "original_diagnostic_gates": {
+    "contact_reproduction": true,
+    "endpoint_exact": true,
+    "mechanical_budget": true,
+    "impulse": true,
+    "nonnegative_heat": true,
+    "analytic_oracle": false,
+    "contact_temporal": false,
+    "capture_decimation": true,
+    "frequency_integration": false,
+    "pressure_quadrature": true,
+    "load_quadrature": true,
+    "load_cells": false,
+    "source_and_cache_unchanged": true
+  },
+  "local_controls": {
+    "contact_reproduction": true,
+    "endpoint_exact": true,
+    "fine_local_oracle": true,
+    "local_order": true,
+    "local_blocks": true,
+    "load_reproduction": true,
+    "finest_load_quadrature": true,
+    "fine_load_cells": false,
+    "source_and_cache_unchanged": true
+  },
+  "measurement_seconds": 1523.050096299965,
+  "peak_working_set_bytes": 5643677696,
+  "measurement_checkpoint": "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-banda-superior\\Hann-local-malla.json",
+  "scope": "Fine contact only; local Hann V/A versus untouched original oracles. No replacement of old two-rate analytic or temporal gates. Harmonic directional load refinement only; no live-memory or angular certificate.",
+  "incident": "All seven measured probes saved before scalar-only maximum_nested rejected lists. Producer/checkpoint frozen; controls closed here without reintegration or duplicated vectors. Original two-rate failures remain unchanged.",
+  "local_controls_passed": false,
+  "finalization_seconds": 1.127531700010877
+}

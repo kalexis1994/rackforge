@@ -1557,3 +1557,36 @@ Siguiente: Hann estable, contribución absoluta por banda y malla relevante;
 guardar sólo vectores espectrales pequeños de sondas para reutilizarlas.
 Después ledger angular/duración/release, con la eliminación lineal todavía
 pendiente de implementación y validación. Global falso, sin audio/paquete.
+
+### 2026-10-08 — P6: Hann local y malla de sondas reutilizables
+
+[Diseño, resultados e incidencia de cierre](RESULTADOS-P6-Hann-local.md).
+**beeb90a** agrega pesos Hann locales antes de la contracción espectral,
+espaciados reales, momentos acotados y suma compensada; seis pruebas pasan
+(Hann y contribución absoluta). Una reconstrucción fina 3072 kHz reproduce
+trece medidas físicas con error 0 y los cuatro arrays finales exactamente.
+Medición **1523,050 s (25,38 min)**, contacto **1023,455 s (17,06 min)**,
+pico **5,256 GiB**; misma R/cápsula y ganancias.
+
+V Hann a 24 kHz baja de **4,37686e−10** global a **2,60361e−11** local;
+V/A locales pasan 1e−10 en nueve sondas, A máxima **9,60383e−11** pasa
+con poco margen. Orden local 8/12: 0; bloques: máximo 9,74113e−12.
+La tasa gruesa no se vuelve a medir; sus gates permanecen sin reemplazar.
+
+Rayleigh 512×384→1024×768 pasa 2% en seis de siete sondas; **16 kHz
+falla con 2,55585%**. Cuadratura 12/16 máxima 2,48363e−15. Z vigente
+frente a 1024 difiere 5,36621% a 6 kHz, 15,9305% a 16 kHz y 72,4386%
+a 24 kHz; no aprobar el operador ni cambiar R a partir de estas acciones.
+Guardar siete vectores complejos por método permite próximas mallas sin
+reconstruir el contacto; sólo datos pequeños en informe, sin historias/WAV.
+
+Al resumir, el helper antiguo rechaza listas después de guardar las siete
+sondas. Productor/checkpoint congelados; cierre independiente autentica
+datos/archivos y termina **8/9 controles locales**, conservando el fallo.
+Dos regresiones del cierre pasan, sin repetir dinámica ni duplicar vectores.
+Contribución absoluta del error Hann 12–24 kHz a presión total: **0,000271615%**;
+su error relativo de banda **2,03722%** sigue fallando. No es un umbral audible.
+
+Sigue tasa gruesa con Hann local y sonda de 16 kHz a 2048; después resolver
+paso/carga, ledger angular y duración/release con presupuesto. Puerto discreto
+todavía sin implementar; global falso, plugin instalado intacto.

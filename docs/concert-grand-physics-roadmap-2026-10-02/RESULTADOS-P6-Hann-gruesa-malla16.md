@@ -47,3 +47,27 @@ release, unísono o timbre. No reemplazar los gates de contacto anteriores
 por los locales ni escoger banda física sólo por el tamaño de una cola.
 
 Resultados pendientes.
+
+## Control adicional diseñado tras medir Hann gruesa
+
+La trayectoria gruesa reprodujo trece medidas físicas con error 0. V local
+pasa el límite **1e−10**, máxima **9,00934e−11** a 24 kHz. A local da
+**1,06024e−10** y falla; no cambiar el límite ni borrar el ensayo. La A
+analítica anterior da **4,72080e−12** máxima en la gruesa y **6,14836e−12**
+en la fina: ya pasaba con margen mayor.
+
+Se fija un **perfil separado de observación**: pesos locales para V,
+integración analítica original para A. Ambas integran V/A reales de la
+misma trayectoria Hermite y la misma Hann en aritmética exacta; no implica
+fuerzas nuevas, amplitudes distintas, ajuste de frecuencias o diferenciación
+de una variable enventanada. El helper anterior no se modifica.
+
+El control enlazará los informes al terminar el ensayo actual, con las
+nueve frecuencias y **mismo límite**, conservando el fallo experimental
+de A local y todos los gates anteriores. No reconstruir física ni duplicar
+vectores. Tres pruebas comprueban fase absoluta/extremos sin fuerza de
+ventana, conservación de fallos y rechazo de límites/datos incompatibles.
+
+```text
+python tools/audit-concert-grand-hann-profile.py --coarse docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-contacto-banda-superior/Hann-gruesa-malla16.json --fine docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-contacto-banda-superior/Hann-local-malla.json --report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-contacto-banda-superior/perfil-Hann-dos-tasas.json
+```

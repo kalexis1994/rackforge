@@ -1527,3 +1527,33 @@ certificado de 60–6000 Hz. No está medido el efecto audible ni su causa inter
 Siguiente: fuente/presión del contacto completo y presupuesto del ledger
 angular antes de elegir banda o duración. Misma R/cápsula; historias en RAM,
 informes sólo en repo, sin WAV, SHARED o modificación de fábrica/paquete.
+
+### 2026-10-08 — P6: fuente/presión del ataque completo y cuadratura analítica
+
+[Diseño y resultados](RESULTADOS-P6-contacto-banda-superior.md). **b59d947**
+agrega momentos uniformes por bloques y reconstrucción 0–3 ms de C4,
+96/192 modos, 1536/3072 kHz; cinco pruebas pasan. Ensayo completo **9/13**,
+**1711,709 s (28,53 min)**, pico **4,895 GiB**. Reproducción física exacta
+de ambas tasas y de los cuatro arrays de la cápsula al terminar a 3072.
+El espectro de V/A, 772 frecuencias/dos ventanas, cuesta **2,280/4,288 s**;
+la dinámica sigue costando **521,827/1001,169 s**. Sin nuevas historias o R.
+
+Fallan oracle de V Hann a 24 kHz (máximo 4,96601e−10, límite 1e−10),
+convergencia temporal de colas Hann (A alta 2,23017%, límite 0,1%),
+integración por trapecios (0,484016%, límite 0,1%) y celdas de carga
+(9,50396%, límite 2%). **a0e5335** agrega identidad Simpson sobre grillas
+altas uniformes, tres pruebas y derivación del puerto con inercia completa.
+Control posterior autenticado: integración **0,0184258%**, mismos límites,
+sin contacto nuevo; quedan **10/13**, conservando todos los demás fallos.
+
+Presión global 1536→3072 cambia **0,00245269%** en Hann; banda 6–24 aporta
+**0,103420%** rectangular o **0,000365104%** Hann a la norma total. No prueba
+irrelevancia audible, ausencia de modos altos o causa de falta de cuerpo.
+Acción de carga contra malla fina: **4,43480% a 6 kHz**, **14,3412% a
+16 kHz**, **72,4721% a 24 kHz**; distinta dirección de fuente que el coast.
+No ampliar aprobación de carga, retirar modos o retocar fieltro por estos datos.
+
+Siguiente: Hann estable, contribución absoluta por banda y malla relevante;
+guardar sólo vectores espectrales pequeños de sondas para reutilizarlas.
+Después ledger angular/duración/release, con la eliminación lineal todavía
+pendiente de implementación y validación. Global falso, sin audio/paquete.

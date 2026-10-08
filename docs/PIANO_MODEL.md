@@ -2790,6 +2790,30 @@ The audible effect and attribution between angular/spatial factor, delay
 lift and limit completion remain unmeasured. Next is source/pressure of
 the full 0–3 ms contact and its angular-ledger budget before changing load
 bandwidth or duration. No new audio, installed package or timbre approval.
+The [full-contact high-band diagnostic](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-contacto-banda-superior.md)
+reconstructs 0–3 ms at 1536/3072 kHz with the same 96/192-mode string.
+Both contacts reproduce their measured physics exactly; all four final
+arrays at 3072 kHz equal the authenticated capsule exactly. Five tests
+cover blocked uniform Hermite moments against independent/original
+observers. V/A at 772 frequencies with both windows takes 2.280/4.288 s;
+dynamics still takes 521.827/1001.169 s. Total 1711.709 s, peak 4.895 GiB.
+The initial diagnostic passes 9/13: Hann velocity oracle at 24 kHz, temporal
+high-band convergence, trapezoid integration and load cells fail. A separate
+authenticated Simpson identity on uniform high bands fixes integration
+(0.0184258%, limit 0.1%) without replaying contact; three tests pass.
+It leaves the other failures intact, thus 10/13 and global approval false.
+The oracle discrepancy is at most 4.96601e-10 versus 1e-10; Hann high-band
+acceleration changes 2.23017% versus 0.1%. Whole-band Hann pressure changes
+0.00245269%, and its 6–24 kHz norm fraction is 0.000365104% versus 0.103420%
+rectangular: small contribution for this assumed C4, not an audibility claim.
+The contact's source directions expose 9.50396% cell-refinement error
+(limit 2%); causal load action differs from refined Rayleigh by 4.43480%
+at 6 kHz, 14.3412% at 16 kHz and 72.4721% at 24 kHz. These differ from
+coast probes and do not extend operator approval. Next: stable local Hann
+weights, absolute band-error contribution and relevant mesh resolution,
+then full angular ledger/duration. No new R, trace files, audio or factory
+changes. The documented inertial bridge port remains an unimplemented
+route to reuse linear responses across contact banks.
 A separate [finite-window observer prototype](concert-grand-physics-roadmap-2026-10-02/NOTA-P6-observador-ventana-finita.md)
 retains both live endpoints in the discrete Padé transform. It reproduces
 centered section inputs and Parseval flux in synthetic tests, including

@@ -1,0 +1,193 @@
+{
+  "stage": "absolute contact error contribution diagnostic completed",
+  "all_gates_passed": false,
+  "preflight_only": true,
+  "source_sha256": {
+    "audit-concert-grand-contact-relevance.py": "0387bcdc93483ba9764c668853241d00d288829c866b13ead57626e8c24a26ed",
+    "concert_grand_band_relevance.py": "e2ab5e2a0bdc523360bf687cf1dc60df96025fd1ba648d68da4b2c978c74a75b"
+  },
+  "parent_sha256": {
+    "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-contacto-banda-superior\\contacto-24k.json": "3f53ed59ba4fbc1767f94dbb033af1a7b89a4bfba91d1ed6e10ba17c9a268dee"
+  },
+  "criteria": {
+    "reproduction_relative": 1e-10,
+    "source_relative": 0.001,
+    "frequency_integral_relative": 0.001,
+    "time_quadrature_relative": 1e-10,
+    "pressure_capture_relative": 0.001,
+    "pressure_cell_quadrature_relative": 0.0002,
+    "load_cell_quadrature_relative": 0.0002,
+    "load_cell_refinement_relative": 0.02,
+    "directional_load_relative": 0.02,
+    "analytic_oracle_relative": 1e-10,
+    "mechanical_budget_relative": 1e-09,
+    "impulse_relative": 1e-09,
+    "capture_decimation_relative": 0.001
+  },
+  "original_diagnostic_gates": {
+    "contact_reproduction": true,
+    "endpoint_exact": true,
+    "mechanical_budget": true,
+    "impulse": true,
+    "nonnegative_heat": true,
+    "analytic_oracle": false,
+    "contact_temporal": false,
+    "capture_decimation": true,
+    "frequency_integration": false,
+    "pressure_quadrature": true,
+    "load_quadrature": true,
+    "load_cells": false,
+    "source_and_cache_unchanged": true
+  },
+  "scope": "Same raw trapezoid partition and errors; no failed gate replaced, no source scaling, perceptibility claim or physical integration.",
+  "contact_temporal_error_contributions": {
+    "rectangular": {
+      "velocity": {
+        "bands": {
+          "0-6000": {
+            "reference_squared_norm": 2.8486260438027986e-08,
+            "error_squared_norm": 1.7054744018425614e-17,
+            "band_relative_error": 2.44683611706633e-05,
+            "error_relative_to_total": 2.4394183816045024e-05
+          },
+          "6000-12000": {
+            "reference_squared_norm": 1.1617663758059853e-10,
+            "error_squared_norm": 3.3510524158528273e-19,
+            "band_relative_error": 5.3707038967194894e-05,
+            "error_relative_to_total": 3.419434584194721e-06
+          },
+          "12000-24000": {
+            "reference_squared_norm": 5.732767775428226e-11,
+            "error_squared_norm": 5.544224974516063e-20,
+            "band_relative_error": 3.109841448513235e-05,
+            "error_relative_to_total": 1.3908622239721507e-06
+          }
+        },
+        "reconstructed_total_relative_error": 2.4671911856454346e-05,
+        "stored_total_relative_error": 2.467191185645435e-05
+      },
+      "acceleration": {
+        "bands": {
+          "0-6000": {
+            "reference_squared_norm": 0.4101341454321153,
+            "error_squared_norm": 7.390525447777981e-09,
+            "band_relative_error": 0.00013423775937414486,
+            "error_relative_to_total": 0.000133716793011824
+          },
+          "6000-12000": {
+            "reference_squared_norm": 0.0021711599924261063,
+            "error_squared_norm": 4.476496482036496e-10,
+            "band_relative_error": 0.0004540704187398437,
+            "error_relative_to_total": 3.2909207012607326e-05
+          },
+          "12000-24000": {
+            "reference_squared_norm": 0.001030865947943749,
+            "error_squared_norm": 1.5067461618225863e-10,
+            "band_relative_error": 0.000382312897955443,
+            "error_relative_to_total": 1.909274361549688e-05
+          }
+        },
+        "reconstructed_total_relative_error": 0.00013902420472109423,
+        "stored_total_relative_error": 0.00013902420472109423
+      },
+      "pressure": {
+        "bands": {
+          "0-6000": {
+            "reference_squared_norm": 0.00019743285166601358,
+            "error_squared_norm": 1.6033559977622516e-13,
+            "band_relative_error": 2.84974021527804e-05,
+            "error_relative_to_total": 2.8482662383583644e-05
+          },
+          "6000-12000": {
+            "reference_squared_norm": 1.8904507911652492e-07,
+            "error_squared_norm": 1.3111865914141493e-14,
+            "band_relative_error": 0.00026335984695076496,
+            "error_relative_to_total": 8.145126832562281e-06
+          },
+          "12000-24000": {
+            "reference_squared_norm": 1.535067700656522e-08,
+            "error_squared_norm": 9.609852061665844e-16,
+            "band_relative_error": 0.0002502041933668682,
+            "error_relative_to_total": 2.205077981420816e-06
+          }
+        },
+        "reconstructed_total_relative_error": 2.9706354816434205e-05,
+        "stored_total_relative_error": 2.9706354816434205e-05
+      }
+    },
+    "hann": {
+      "velocity": {
+        "bands": {
+          "0-6000": {
+            "reference_squared_norm": 4.005262347910445e-09,
+            "error_squared_norm": 4.153856801308668e-18,
+            "band_relative_error": 3.220403399154822e-05,
+            "error_relative_to_total": 3.220397224391701e-05
+          },
+          "6000-12000": {
+            "reference_squared_norm": 1.5345897290759513e-14,
+            "error_squared_norm": 1.2937854174651218e-19,
+            "band_relative_error": 0.0029035879294303474,
+            "error_relative_to_total": 5.683486191734892e-06
+          },
+          "12000-24000": {
+            "reference_squared_norm": 1.3431526367150556e-17,
+            "error_squared_norm": 4.027048292076461e-21,
+            "band_relative_error": 0.017315328464494815,
+            "error_relative_to_total": 1.0027140542041497e-06
+          }
+        },
+        "reconstructed_total_relative_error": 3.271701818707073e-05,
+        "stored_total_relative_error": 3.271701818707073e-05
+      },
+      "acceleration": {
+        "bands": {
+          "0-6000": {
+            "reference_squared_norm": 0.08154971607450427,
+            "error_squared_norm": 2.0415240198899774e-09,
+            "band_relative_error": 0.00015822169049812857,
+            "error_relative_to_total": 0.00015819843480379566
+          },
+          "6000-12000": {
+            "reference_squared_norm": 2.3911243529861023e-05,
+            "error_squared_norm": 2.556065696247575e-10,
+            "band_relative_error": 0.003269526973481365,
+            "error_relative_to_total": 5.5977170373970184e-05
+          },
+          "12000-24000": {
+            "reference_squared_norm": 6.66759465659e-08,
+            "error_squared_norm": 3.316235357532792e-11,
+            "band_relative_error": 0.02230170556313129,
+            "error_relative_to_total": 2.0162649845173513e-05
+          }
+        },
+        "reconstructed_total_relative_error": 0.00016901692467391052,
+        "stored_total_relative_error": 0.00016901692467391052
+      },
+      "pressure": {
+        "bands": {
+          "0-6000": {
+            "reference_squared_norm": 5.422829066214311e-05,
+            "error_squared_norm": 2.851777457363713e-14,
+            "band_relative_error": 2.293215445682888e-05,
+            "error_relative_to_total": 2.2932112593684766e-05
+          },
+          "6000-12000": {
+            "reference_squared_norm": 1.970264168805028e-10,
+            "error_squared_norm": 3.704229868211454e-15,
+            "band_relative_error": 0.0043359746549184175,
+            "error_relative_to_total": 8.264854535198478e-06
+          },
+          "12000-24000": {
+            "reference_squared_norm": 9.639610242514256e-13,
+            "error_squared_norm": 4.0006955302873944e-16,
+            "band_relative_error": 0.02037220385326175,
+            "error_relative_to_total": 2.7161515623528233e-06
+          }
+        },
+        "reconstructed_total_relative_error": 2.4526864614277504e-05,
+        "stored_total_relative_error": 2.4526864614277504e-05
+      }
+    }
+  }
+}

@@ -2768,6 +2768,28 @@ The complete repeated certificate takes 1251.862 s, including 1152.779 s of
 angular observation (peak 4.914 GiB), without repeating 1019.376 s of contact.
 Whole-contact pressure remains an authenticated inherited measurement;
 old coast pressures and field are recomputed. Global approval stays false.
+The [high-band window diagnostic](concert-grand-physics-roadmap-2026-10-02/RESULTADOS-P6-banda-superior.md)
+now measures this same 0.5 ms coast through 24 kHz, observing actual V/A
+with rectangular and Hann windows rather than differentiating a tapered
+displacement. Four independent tests pass. Its first 256/512-kHz run fails
+three controls (6/9), retained in the report; refinement to 512/1024/2048 kHz
+and 125/62.5/31.25-Hz frequency grids passes 9/9 with unchanged limits.
+Maximum fine source, microphone and integral changes are 0.0215987%,
+0.0455909% and 0.0776924%, all below 0.1%; previous measurements reproduce
+exactly. Runtime is 407.429 s, peak 3.323 GiB, with the same R and endpoint.
+Above 6 kHz the acceleration norm fraction is 2.91969% rectangular versus
+0.0360188% Hann: substantial endpoint sensitivity, not proof of absent
+physical high modes or a whole-note energy measure. Harmonic load actions
+on refined source directions differ from continuous Rayleigh by 2.06477%
+at 10 kHz, 21.2811% at 16 kHz and 69.4099% at 24 kHz on the current cells.
+Against refined cells the 6-kHz probe also slightly exceeds 2% (2.02431%).
+These are directional diagnostics, not a live-memory Fourier replay or
+full-operator bandwidth approval; the approved band stays 60–6000 Hz.
+Passing the diagnostic controls does not approve the failing load probes.
+The audible effect and attribution between angular/spatial factor, delay
+lift and limit completion remain unmeasured. Next is source/pressure of
+the full 0–3 ms contact and its angular-ledger budget before changing load
+bandwidth or duration. No new audio, installed package or timbre approval.
 A separate [finite-window observer prototype](concert-grand-physics-roadmap-2026-10-02/NOTA-P6-observador-ventana-finita.md)
 retains both live endpoints in the discrete Padé transform. It reproduces
 centered section inputs and Parseval flux in synthetic tests, including

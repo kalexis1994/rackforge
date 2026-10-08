@@ -1503,3 +1503,27 @@ no guarda R ni historias, no acelera el campo angular y no se duplica en
 SHARED. Fuente/carga/estado originales autenticados y verificados contra
 el operador actual. Sigue banda superior de fuente/carga, balance del
 contacto completo y luego duración/release. Sin audio ni paquete nuevo.
+
+### 2026-10-08 — P6: banda superior de fuente y carga, con controles de ventana
+
+[Diseño, fallos y resultados](RESULTADOS-P6-banda-superior.md). **61931ea**
+agrega observación rectangular/Hann de V/A sin alterar dinámica ni derivar
+una posición enventanada; cuatro pruebas pasan. El primer diagnóstico
+256/512 termina **6/9** en 130,549 s: fallan fuente alta, integración en
+frecuencia y captura de presión. **44d6c1b** conserva esos fallos y agrega
+512/1024/2048 y grillas 125/62,5/31,25 Hz con los mismos límites.
+
+Refinamiento completo **9/9** en **407,429 s**, pico **3,323 GiB**;
+reproducción física/espectral/presión exacta, fuente fina máxima 0,0215987%,
+presión 0,0455909%, integración 0,0776924% (límites 0,1%). Global falso.
+Entre 6–24 kHz, fracción de norma de A rectangular/Hann **2,91969 /
+0,0360188%**: fuerte sensibilidad a extremos, sin afirmar ausencia de modos
+altos. Sondas de carga con fuente fina: error de acción contra Rayleigh
+en la malla vigente **2,06477% a 10 kHz**, **21,2811% a 16 kHz**,
+**69,4099% a 24 kHz**. Contra la malla fina, 6 kHz alcanza 2,02431%.
+Pasar controles de diagnóstico no aprueba esas sondas ni amplía el operador
+certificado de 60–6000 Hz. No está medido el efecto audible ni su causa interna.
+
+Siguiente: fuente/presión del contacto completo y presupuesto del ledger
+angular antes de elegir banda o duración. Misma R/cápsula; historias en RAM,
+informes sólo en repo, sin WAV, SHARED o modificación de fábrica/paquete.

@@ -98,4 +98,90 @@ refinada antes de concluir. Los valores de ventana inicial son provisionales.
 python tools/audit-concert-grand-source-band-refinement.py --report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-banda-superior/fuente-carga-24k-refinado.json
 ```
 
-Resultados del refinamiento pendientes.
+## Resultados del refinamiento
+
+[Informe completo](medidas-P6-banda-superior/fuente-carga-24k-refinado.json):
+**9/9 controles de diagnóstico**, 407,429 s (6,79 min), pico **3,323 GiB**.
+Global falso. Las medidas físicas y las 16 integrales espectrales anteriores
+a 512 kHz se reproducen con error **0**; también la presión. Consistencia
+de los cuatro estados con el operador: **0**. Hashes verificados dentro
+de la ejecución y otra vez al terminar, con criterios idénticos al padre.
+
+| Control fino | Medida relativa máxima | Límite |
+| --- | --- | --- |
+| Fuente 1024→2048, V/A, ambas ventanas/bandas | 0,0215987% | 0,1% |
+| Presión 1024→2048, siete sondas | 0,0455909% | 0,1% |
+| Integración en frecuencia 62,5→31,25 Hz | 0,0776924% | 0,1% |
+| Cuadratura temporal 8/12 de V | 3,58737e−14 | 1e−10 |
+| Cuadratura de micrófono 4/8 | 1,13380e−11 | 0,02% |
+| Cuadratura de carga 8/12 | 1,77465e−11 | 0,02% |
+| Celdas de carga 256×192→512×384 | 1,82614% | 2% |
+
+Los controles gruesos siguen sin pasar: fuente Hann 12–24 kHz,
+512→2048, **0,108009%**; presión a 24 kHz **0,230725%**;
+integración Hann 6–12 kHz, 125→62,5 Hz, **0,310459%**. No se usan
+para aprobar ni se ocultan. Tabla en 257 tiempos nativos comunes a
+512 kHz: errores 512→2048 **4,31821e−7**, 1024→2048 **8,31448e−8**,
+razón **0,192545**, sin interpolar; diagnóstico adicional.
+
+### Sensibilidad a los extremos de la ventana
+
+Fracción de la norma espectral integrada entre 6 y 24 kHz respecto a
+0–24 kHz, a 2048 kHz y grilla de 31,25 Hz:
+
+| Fuente de tabla | Rectangular | Hann |
+| --- | --- | --- |
+| Velocidad | 2,36349% | 0,00645364% |
+| Aceleración | 2,91969% | 0,0360188% |
+
+Las integrales de norma de V son **1,93003e−8 / 7,51540e−9** y las
+de A **0,170861 / 0,0625512**, rectangular/Hann. No se igualan ganancias
+entre ventanas: Hann atenúa también contenido legítimo. Estos resultados
+demuestran sensibilidad importante a los extremos del tramo, sin demostrar
+que todo el contenido alto sea artificial o que falten/sobren modos físicos.
+Los tiempos de la transformada son locales: cero corresponde a los 3 ms
+del contacto. Las sondas complejas conservan esa referencia de fase.
+
+### Error de acción de carga con la fuente refinada
+
+Cada sonda usa las 606 coordenadas. La dirección de V cambia como máximo
+**1,79371e−5** entre 1024/2048; repetir todas las integrales confirma el
+resultado. Sin modificar R, relajación, fieltro, geometría o parámetros:
+
+| Frecuencia | Z causal frente a Rayleigh, mismas celdas | Frente a celdas refinadas |
+| --- | --- | --- |
+| 6 kHz | 0,512289% | 2,02431% |
+| 8 kHz | 1,15157% | 1,17136% |
+| 10 kHz | 2,06477% | 2,03209% |
+| 12 kHz | 3,34065% | 3,31498% |
+| 16 kHz | 21,2811% | 21,2565% |
+| 20 kHz | 52,0744% | 52,0174% |
+| 24 kHz | 69,4099% | 69,3497% |
+
+El límite de 2% se supera desde 10 kHz sobre la malla vigente; contra la
+malla refinada también lo supera ligeramente la sonda de 6 kHz. La malla
+y el aproximante producen errores distintos: conservar ambas columnas.
+Pasar los nueve controles de diagnóstico **no significa pasar estas sondas**
+ni extender la certificación completa de carga a la banda alta. Tampoco se
+ha aislado qué parte del error corresponde al factor espacial/angular, al
+lift Padé o a la relajación que completa sus límites; no atribuirlo sin un
+ensayo adicional. La carga sigue pasiva por su construcción aprobada.
+
+## Decisión y siguiente paso
+
+El diagnóstico ya es reproducible y converge con los mismos límites;
+conservar los tres fallos iniciales y sus controles gruesos. La cola alta
+del coast tiene fuerte sensibilidad a la ventana y el aproximante de
+carga tiene errores direccionales grandes a 16–24 kHz. **No tenemos aún
+una medida de su efecto audible**, ni una explicación comprobada de la
+falta de cuerpo frente al Steinway.
+
+Siguiente: medir espectro de fuente y presión del **contacto completo
+0–3 ms**, con resolución de contacto autenticada, extremos vivos y los
+controles de ventana/captura aquí probados, antes de elegir una banda nueva
+o rediseñar la carga. La cápsula no contiene esa historia: requiere una
+reconstrucción del contacto o una eliminación lineal validada. Coordinarlo
+con el ledger angular del contacto, cuyo presupuesto de memoria sigue
+pendiente; no guardar una historia de 27 GiB. Después duración/release,
+unísono, identificación real y escucha. Sin WAV, duplicados en SHARED ni
+cambio de fábrica/paquete instalado 0.172.0.

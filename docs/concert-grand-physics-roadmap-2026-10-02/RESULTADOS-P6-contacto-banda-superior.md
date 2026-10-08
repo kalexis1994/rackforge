@@ -63,3 +63,28 @@ El ledger angular del contacto y su presupuesto siguen pendientes.
 ## Resultados
 
 Pendientes de la ejecución completa.
+
+### Control de cuadratura diseñado durante la reconstrucción fina
+
+La trayectoria gruesa terminó en **521,827 s** y reproduce exactamente
+las medidas físicas del padre. Sus observaciones detectan dos límites
+numéricos: la integración Hann de presión en 6–12 kHz cambia **0,483898%**
+entre 62,5/31,25 Hz, frente a 0,1%; Hann de V a 24 kHz difiere del oracle
+**4,96601e−10**, frente a 1e−10. Son datos parciales de esa tasa; no
+equivalen al resultado del contacto fino ni se aprueba todavía el ensayo.
+
+Para el primero se fija una comprobación adicional **sin volver a integrar
+el contacto**: en las dos bandas altas, la grilla guardada es uniforme,
+por lo que `S_h=(4 T_h−T_2h)/3` reproduce exactamente los pesos de Simpson
+compuesto sobre los mismos datos. Comparar 62,5→31,25 Hz de esas normas,
+manteniendo 0,1%. Debajo de 6 kHz hay puntos adicionales y se conservan
+trapecios; la norma total suma las tres bandas. No extrapolar la identidad
+a una grilla irregular, cambiar fuente/ganancia, recortar valores negativos
+o esconder el resultado anterior. Tres pruebas pasan (0,003 s), incluida
+igualdad con Simpson independiente para una curva oscilatoria y exactitud
+para polinomio cúbico. El informe de control heredará todos los otros
+controles originales; **no corrige ni aprueba el fallo del oracle**.
+
+```text
+python tools/audit-concert-grand-contact-quadrature.py --parent docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-contacto-banda-superior/contacto-24k.json --report docs/concert-grand-physics-roadmap-2026-10-02/medidas-P6-contacto-banda-superior/cuadratura-contacto-24k.json
+```

@@ -130,3 +130,51 @@ trayectorias físicas, memoria acústica, fuerza, trabajo medido del puerto
 y presión del integrador completo antes de reemplazarlo. Si hay ahorro,
 será para múltiples contactos que comparten operador, no automáticamente
 para una primera nota ni para geometrías o tasas distintas.
+
+### 2026-10-08 — Puerto que debe conservar una eliminación lineal
+
+Derivación desde `MovingBridge.mass/fields/gradient_hessian` y
+`BridgeHammer.interface`, en las **coordenadas físicas** anteriores al
+Cholesky. No es todavía un método implementado o validado. Sea B la tabla
+mass normalized, b=phiᵀB, qᵥ la cuerda vertical, c=`cross_vector`,
+mₗ=μL/3 y Uₛ(q,b) el potencial de cuerda, incluido el levantamiento.
+La parte cinética que enlaza ambos subsistemas es
+
+```text
+T = |q̇|²/2 + |Ḃ|²/2 + (cᵀq̇ᵥ)ḃ + mₗ ḃ²/2 + mₕ ẋₕ²/2.
+```
+
+El gradiente de Uₛ respecto a B pasa por phi. El aire y el amortiguamiento
+de tabla siguen siendo operadores completos en sus 606 coordenadas:
+
+```text
+B̈ + C_B Ḃ + K_B B + F_air = phi r
+r = lift_contact F_h − ∂Uₛ/∂b − cᵀq̈ᵥ − mₗ b̈.
+q̈ᵥ + c b̈ + ∂Uₛ/∂qᵥ = (shape/√modal_mass) F_h.
+```
+
+La expresión de r coincide con la reacción usada por el código. El puerto
+no recibe sólo la fuerza del martillo: contiene la reacción elástica no
+lineal y las **dos contribuciones inerciales**. El término de levantamiento
+se conserva en r; no se retira del sistema físico. En frecuencia, con
+estado inicial frío, la respuesta del subsistema desnudo de tabla/aire sería
+
+```text
+G_B(s) = [s²I + s C_B + K_B + s Z_air(s)]⁻¹ phi
+B(s) = G_B(s) r(s),       b(s) = [phiᵀG_B(s)] r(s).
+```
+
+Esto explica el posible ahorro para un banco que comparte tabla, aire,
+phi y tasa: su respuesta lineal puede prepararse una vez. **No autoriza**
+aplicar directamente una convolución continua/FFT al integrador vigente.
+Hay que derivar la respuesta **discreta AVF/midpoint**, incluir el término
+implícito del paso actual, todos los términos de aceleración y las memorias
+iniciales; una cápsula viva aporta una solución homogénea adicional.
+
+Antes de usarla, exigir reproducción de posición/velocidad de cuerda y
+tabla, fuerza/compresión, los cuatro estados completos, trabajo del puerto,
+calor y presión con los límites vigentes. Guardar sólo la respuesta que
+realmente necesite reutilizarse, dentro de un presupuesto explícito. Una
+respuesta escalar de b no basta para certificar presión o campo angular:
+deben poder reconstruirse B y la memoria del aire. Tampoco prometer ahorro
+para la primera preparación, cuyo costo todavía no se ha medido.

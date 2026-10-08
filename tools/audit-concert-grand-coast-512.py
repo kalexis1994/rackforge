@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 from concert_grand_wave_cache import digest
 from concert_grand_contact_seed import save_seed,overlapping_intervals
+from concert_grand_seed_resume import authenticated_seed
 from concert_grand_string_resolution import capture_contact,join_capture,pressure_observation,compare_observation
 from concert_grand_coast_measurements import run_coast,field_balance
 from concert_grand_bounded_observer import observation_basis,certificate_observer
@@ -23,12 +24,21 @@ anchor=prior.anchor;field=prior.field;native_comparison=prior.native_comparison
 RATES=(128000,256000,512000)
 
 
+def prior_field_overlap(rows,parent):
+    return {str(row['rate']):{key:bool(overlapping_intervals(row[key],
+        next(c for c in parent['cases'] if c['rate']==row['rate'])[key]))
+        for key in ['wave_initial_interval','wave_final_interval','wave_radiation_interval']}
+        for row in rows}
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['full-report','resolution-report','coast-reference-report','board','cache','seed','report']:
         p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--direction-block',type=int,default=32)
     p.add_argument('--max-array-gib',type=float,default=12.)
+    p.add_argument('--seed-reference-report',type=Path)
+    p.add_argument('--seed-producer-commit')
     a=p.parse_args()
     if a.report.exists():raise ValueError('new report required')
     if not np.isfinite(a.max_array_gib) or a.max_array_gib<=0 or a.direction_block<1:
@@ -36,9 +46,10 @@ def main():
     root=Path('local/concert-grand-physics').resolve()
     if not a.cache.exists() or not a.cache.resolve().is_relative_to(root):
         raise ValueError('existing single local cache required')
-    if (not a.seed.resolve().is_relative_to(root) or a.seed.suffix!='.npz'
-            or a.seed.exists() or a.seed.with_suffix('.json').exists()):
-        raise ValueError('new unique local contact seed required')
+    if bool(a.seed_reference_report)!=bool(a.seed_producer_commit):raise ValueError('both seed provenance arguments required')
+    if not a.seed.resolve().is_relative_to(root) or a.seed.suffix!='.npz':raise ValueError('unique local seed required')
+    if not a.seed_reference_report and (a.seed.exists() or a.seed.with_suffix('.json').exists()):
+        raise ValueError('existing seed requires authenticated resume')
     old=json.loads(a.resolution_report.read_text());parent=json.loads(a.coast_reference_report.read_text())
     if (old.get('stage')!='full board directed string resolution preflight completed'
             or not old.get('directed_gates_passed') or not all(old['directed_gates'].values())
@@ -55,7 +66,7 @@ def main():
             if digest(Path(__file__).with_name(name))!=sha:raise ValueError('changed frozen source: '+name)
         for name,sha in report['parent_sha256'].items():
             if digest(name)!=sha:raise ValueError('changed frozen parent: '+name)
-    sources=set(parent['source_sha256'])|{Path(__file__).name,'concert_grand_contact_seed.py'}
+    sources=set(parent['source_sha256'])|{Path(__file__).name,'concert_grand_contact_seed.py','concert_grand_seed_resume.py'}
     criteria=parent['criteria'].copy();start=time.perf_counter()
     r=dict(stage='construction',all_gates_passed=False,preflight_only=True,criteria=criteria,
         source_sha256={name:digest(Path(__file__).with_name(name)) for name in sorted(sources)},
@@ -83,11 +94,26 @@ def main():
     if r['cache_R_sha256']!=parent['cache_R_sha256']:raise ValueError('changed acoustic load')
     core=field.MovingBridge(field.Wire(.62,.0081,850),modal.support(Bsource[:,notes.index(60)]),transverse=96,axial=192)
     system=field.BridgeHammer(core,field.Felt(.002,7.5e8,2.6,.125,.02,.1))
-    r['stage']='reconstructing measured 96-mode contact';checkpoint()
-    seed,contact,t,B,V=capture_contact(field.FastBoundedContact(system,air),5.,3072000,.003,
-        lambda i,n:print('contact',i,n,flush=True))
+    if a.seed_reference_report:
+        seed,seed_reference,seed_proof=authenticated_seed(a.seed_reference_report,a.seed,a.seed_producer_commit,r)
+        contact=seed_reference['contact']
+        checks=dict(mechanical=anchor.reference.difference(system.energy(seed[0],seed[1]),contact['mechanical_final_j']),
+            relaxation=anchor.reference.difference(air.relaxation.energy(seed[3]),contact['relaxation_final_j']),
+            wave_norm=anchor.reference.difference(float(np.linalg.norm(seed[2])),contact['final_wave_norm']),
+            compression=anchor.reference.difference(system.compression(seed[0]),contact['compression_final_m']))
+        if max(checks.values())>=criteria['seed_relative']:raise ValueError('seed inconsistent with current physical operator')
+        r['seed_resume']=dict(**seed_proof,physical_consistency_relative=checks)
+        r['parent_sha256'][str(a.seed_reference_report)]=seed_proof['checkpoint_sha256']
+        r['baseline_reproduction']=seed_reference['baseline_reproduction']
+        r['baseline_reproduction_scope']='Contact and whole-window pressure reproduction inherited from authenticated checkpoint; old coast pressures recomputed in this run.'
+        print('authenticated living seed reused',flush=True)
+    else:
+        r['stage']='reconstructing measured 96-mode contact';checkpoint()
+        seed,contact,t,B,V=capture_contact(field.FastBoundedContact(system,air),5.,3072000,.003,
+            lambda i,n:print('contact',i,n,flush=True))
+        contact_trace=(t,B,V)
     if contact['compression_final_m']>=0:raise AssertionError('separated contact endpoint required')
-    r['contact']=contact;contact_trace=(t,B,V)
+    r['contact']=contact
     states=[seed[2].copy()];segments=[];traces=[];pilot=field.ExponentialCoast(system,air)
     observer=CellObserver(provider.surface,r['microphones'],4)
     frequency=np.r_[0.,np.arange(60.,6001.,60.)]
@@ -100,9 +126,11 @@ def main():
             lambda i,n:print('coast',rate,i,n,flush=True))
         states.append(final[2].copy());segments.append(dict(initial_index=0,final_index=len(states)-1,dt=1/rate,velocity=ports))
         r['cases'].append(row);traces.append((tc,Bc,Vc));checkpoint()
-    _,whole=pressure_observation(join_capture(contact_trace,traces[1]),frequency,legacy_H,legacy_kernel,256000)
-    directed=next(c for c in old['cases'] if c['case']==anchor.case_key(96,3072000))
-    r['baseline_reproduction']=anchor.baseline_differences(dict(contact=contact,coast=r['cases'][1],pressure=whole),directed)
+    if not a.seed_reference_report:
+        _,whole=pressure_observation(join_capture(contact_trace,traces[1]),frequency,legacy_H,legacy_kernel,256000)
+        directed=next(c for c in old['cases'] if c['case']==anchor.case_key(96,3072000))
+        r['baseline_reproduction']=anchor.baseline_differences(dict(contact=contact,coast=r['cases'][1],pressure=whole),directed)
+        del whole,contact_trace,t,B,V
     r['coast_reproduction']={}
     for i,rate in enumerate(RATES[:-1]):
         reference=next(c for c in parent['cases'] if c['rate']==rate)
@@ -114,13 +142,17 @@ def main():
     reproduction=[r['baseline_reproduction'],*r['coast_reproduction'].values()]
     if max(v for row in reproduction for group in row.values() for v in group.values())>=criteria['seed_relative']:
         raise AssertionError('changed measured contact/coast/pressure')
-    bindings=dict(source_sha256=r['source_sha256'],parent_sha256=r['parent_sha256'],
-        board_sha256=r['board_sha256'],cache_R_sha256=r['cache_R_sha256'],geometry=r['geometry'],
-        contact_rate=r['contact_rate'],contact_duration_s=.003,incident_speed_m_s=5.)
-    loaded,seed_identity=save_seed(a.seed,seed,bindings)
-    if not all(np.array_equal(x,y) for x,y in zip(seed,loaded)):raise AssertionError('changed seed round trip')
+    if a.seed_reference_report:
+        seed_identity={key:seed_proof[key] for key in ['payload_sha256','manifest_sha256','payload_bytes','manifest_bytes']}
+    else:
+        bindings=dict(source_sha256=r['source_sha256'],parent_sha256=r['parent_sha256'],
+            board_sha256=r['board_sha256'],cache_R_sha256=r['cache_R_sha256'],geometry=r['geometry'],
+            contact_rate=r['contact_rate'],contact_duration_s=.003,incident_speed_m_s=5.)
+        loaded,seed_identity=save_seed(a.seed,seed,bindings)
+        if not all(np.array_equal(x,y) for x,y in zip(seed,loaded)):raise AssertionError('changed seed round trip')
+        del loaded
     r['contact_seed']=dict(path=str(a.seed),**seed_identity,roundtrip_exact=True)
-    del loaded,legacy_H,legacy_kernel,pressure,whole,contact_trace,t,B,V,final
+    del legacy_H,legacy_kernel,pressure,final
     r['native_common_times']=native_comparison(traces,RATES);observations=[]
     for row,trace in zip(r['cases'],traces):
         observation,pressure=pressure_observation(trace,frequency,H,kernel,512000)
@@ -141,10 +173,7 @@ def main():
         row['wave_power_minimum_w']=float(powers[i].min())
         row['observation_error_relative']=max(interval['error_bound_j']/max(interval['estimate_j'],criteria['observation_floor_j'])
             for interval in [row['wave_initial_interval'],row['wave_final_interval'],row['wave_radiation_interval']])
-    r['prior_field_reproduction']={str(row['rate']):{key:overlapping_intervals(row[key],
-        next(c for c in parent['cases'] if c['rate']==row['rate'])[key])
-        for key in ['wave_initial_interval','wave_final_interval','wave_radiation_interval']}
-        for row in r['cases'][:-1]}
+    r['prior_field_reproduction']=prior_field_overlap(r['cases'][:-1],parent)
     r['work_refinement']=[]
     for row in r['cases'][:-1]:
         changes={key:field.work.energy_change(row,r['cases'][-1],key,

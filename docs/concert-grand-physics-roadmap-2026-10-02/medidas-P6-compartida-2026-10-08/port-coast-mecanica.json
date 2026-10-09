@@ -1,0 +1,31 @@
+{
+  "scope": "606-board/9-wire nonlinear MECHANICAL-only initial fundamental displacement benchmark, NOT post-hammer/loaded-air pressure or audition",
+  "reference_hz": 128000,
+  "reference_global_carrier_seconds": 4.001025900011882,
+  "physical_duration_s": 0.002,
+  "cases": [
+    {
+      "rate_hz": 16000,
+      "seconds": 0.5206566999549977,
+      "final_state_relative": 0.24590482164026412,
+      "mechanical_energy_relative": 1.8118363041583388e-13
+    },
+    {
+      "rate_hz": 32000,
+      "seconds": 0.9413950000307523,
+      "final_state_relative": 0.18774970324948537,
+      "mechanical_energy_relative": 2.825626791109363e-13
+    },
+    {
+      "rate_hz": 64000,
+      "seconds": 1.6335604999912903,
+      "final_state_relative": 0.13758076549949955,
+      "mechanical_energy_relative": 3.5838750478785176e-13
+    }
+  ],
+  "approved_for_audio": false,
+  "source_sha256": {
+    "concert_grand_port_coast.py": "3919d003c0998b6b1ddfca8ea2aa6645bc938005cda48c52a1c5e95df1c70a79",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c"
+  }
+}

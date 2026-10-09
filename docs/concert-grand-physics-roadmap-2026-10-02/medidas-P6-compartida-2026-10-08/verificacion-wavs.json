@@ -1,0 +1,99 @@
+{
+  "scope": "Independent WAV verification and same-gain note-off windows; no new acoustic or temporal convergence certificate.",
+  "lead_s": 0.1,
+  "gain_per_pa": 0.25,
+  "cases": [
+    {
+      "pedal": true,
+      "path": "C:\\SHARED\\Piano-fisica-compartida-2026-10-08\\Frase-fisica-pedal.wav",
+      "sha256": "f0f8c49e3d630fb3f79637d895a304e938ad829e4baae5d6b91172db857ce7f5",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "subtype": "FLOAT",
+      "seconds": 2.103479166666667,
+      "peak": 0.3315926194190979,
+      "tail_rms": 3.434378928770736e-08,
+      "windows": [
+        {
+          "label": "first_held",
+          "physical_start_s": 0.02,
+          "physical_end_s": 0.1,
+          "rms": 0.11588282026215352
+        },
+        {
+          "label": "after_C4_off",
+          "physical_start_s": 0.18,
+          "physical_end_s": 0.24,
+          "rms": 0.08344441478376204
+        },
+        {
+          "label": "after_G4_off",
+          "physical_start_s": 0.43,
+          "physical_end_s": 0.49,
+          "rms": 0.06200776005988227
+        },
+        {
+          "label": "after_C5_off",
+          "physical_start_s": 0.68,
+          "physical_end_s": 0.74,
+          "rms": 0.04492414579219051
+        },
+        {
+          "label": "after_restrike_off",
+          "physical_start_s": 0.93,
+          "physical_end_s": 1.03,
+          "rms": 0.0879207129449726
+        }
+      ]
+    },
+    {
+      "pedal": false,
+      "path": "C:\\SHARED\\Piano-fisica-compartida-2026-10-08\\Frase-fisica-sin-pedal.wav",
+      "sha256": "887e0285493ce21a543a45d2833e48d2a5735cbb5599446d03e915c1d7fc319d",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "subtype": "FLOAT",
+      "seconds": 2.103479166666667,
+      "peak": 0.26882076263427734,
+      "tail_rms": 3.397288062503849e-08,
+      "windows": [
+        {
+          "label": "first_held",
+          "physical_start_s": 0.02,
+          "physical_end_s": 0.1,
+          "rms": 0.1160068459467575
+        },
+        {
+          "label": "after_C4_off",
+          "physical_start_s": 0.18,
+          "physical_end_s": 0.24,
+          "rms": 0.023536030076507904
+        },
+        {
+          "label": "after_G4_off",
+          "physical_start_s": 0.43,
+          "physical_end_s": 0.49,
+          "rms": 0.00343470599506207
+        },
+        {
+          "label": "after_C5_off",
+          "physical_start_s": 0.68,
+          "physical_end_s": 0.74,
+          "rms": 0.001087194223287753
+        },
+        {
+          "label": "after_restrike_off",
+          "physical_start_s": 0.93,
+          "physical_end_s": 1.03,
+          "rms": 0.018929158576998405
+        }
+      ]
+    }
+  ],
+  "between_note_off_rms_ratio_pedal_to_no_pedal": {
+    "after_C4_off": 3.5453903871006136,
+    "after_G4_off": 18.053294852318704,
+    "after_C5_off": 41.32117778949992,
+    "after_restrike_off": 4.644723778256507
+  }
+}

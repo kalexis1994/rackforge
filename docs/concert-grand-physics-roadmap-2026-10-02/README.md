@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-07. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-08. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -45,6 +45,24 @@ etapa de cobertura estructural.
   el 2026-10-03; no se selecciona ni empaqueta automáticamente un piloto.
 
 ## Orden y estado
+
+El usuario rechazó la maqueta MIDI de cuatro muestras transpuestas por su
+sonido y falta de resonancia. Se prioriza una trayectoria de cuerdas vivas
+sobre una sola tabla y un solo aire, con unísonos, reiteración y apagadores.
+Ver [integración y límites](RESULTADOS-P6-tabla-compartida.md). Las escuchas
+de golpes aislados y esa maqueta no validan un instrumento polifónico completo.
+La frase compartida C4–G4–C5 ya produjo un WAV físico: el usuario percibió
+más cuerpo y resonancia. Se conserva como referencia para ampliar el banco
+de cuerdas. El control sin pedal se corrige para iniciar con apagadores
+cerrados y evitar que una subida redundante los abra; la comparación ya
+terminó y ambos WAV pasan formato/finitud/clipping y hashes. Se conservan
+en `C:\SHARED\Piano-fisica-compartida-2026-10-08` con la misma ganancia.
+El backend por lotes conserva las ecuaciones y pasa equivalencia contra el
+solver original: el prefijo de coast medido corre 1,557 veces más rápido.
+El refinamiento local de presión pasa el 1 %, pero los estados internos
+cambian hasta 5,52 % en release a 16/32 kHz. Sigue resolver dispersión del
+contacto y refinar el sostenido/release antes de ampliar el banco con F4.
+Ver medidas, alcance y próxima hipótesis en el mismo informe de integración.
 
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.
@@ -107,13 +125,21 @@ del contacto completo antes de ampliar duración. 128→512 sigue fallando.
 | --- | --- | --- | --- |
 | P1a | Admitancia direccional del puente | La horizontal usa la misma familia de modos con un factor fijo; falta una segunda proyección mecánica independiente. | Piloto medido: pasivo, sin mejora consistente; escucha pendiente |
 | P1b | Dos polarizaciones por cuerda | Fábrica: tres verticales y una horizontal agregada. Prototipo: una horizontal independiente por cuerda, con proyección equivalente. Falta identificar propiedades direccionales reales. | Piloto medido: equivalencia verificada, sin mejora consistente |
-| P2 | Tabla ortótropa con costillas y puente | Piloto: placa ortótropa, nueve costillas discretas, puente recto/curvo; modos físicos bajo 800 Hz con complemento alto heredado. Geometría y acústica aún sin identificar. | Resolución y curva medidas: mejora desigual, sin selección |
-| P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI con contacto, resolución Euler, golpes sobre cuerda en movimiento y soporte vertical recíproco verificados. Primera escucha diagnóstica C4/124 de 250 ms con potencial no lineal completo. | Piloto audible de una cuerda; banco amplio e integración pendientes |
+| P2 | Tabla ortótropa con costillas y puente | Piloto anterior: modos físicos bajo 800 Hz y complemento alto heredado. Ensayo SI actual: tabla física proyectada a 606 coordenadas, compartida por nueve cuerdas. Geometría y acústica aún sin identificar. | Integración audible parcial; no seleccionada para fábrica |
+| P3 | Intercambio no lineal transversal/longitudinal | Núcleo SI Euler extensible, dos direcciones transversales y movimiento axial por cuerda. Ensayo actual: nueve cuerdas, contacto sobre movimiento vivo y soporte vertical recíproco compartido. | Primera frase física C4/G4/C5 audible; banco y convergencia polifónica pendientes |
+| P3l | Pérdidas propias de las cuerdas | El núcleo SI disipa por tabla/aire, fieltro y apagadores; no tiene pérdidas internas del acero ni arrastre aéreo directo de cuerda. | Pendiente; parámetros por identificar |
 | P4 | Dispersión Timoshenko | Escalera rígida simplificada; faltan cizallamiento e inercia de rotación. | Pendiente |
-| P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Piloto SI: soporte vertical con inercia compartida y contacto recíproco de una cuerda. Faltan unísono y demás direcciones. | Parcial: mecánica vertical medida; integración pendiente |
+| P5 | Contacto integrado con el puente | Fábrica: sin devolución de movimiento durante el contacto. Ensayo SI: tres contactos de cuerda por cabeza, tres teclas y una tabla, con inercia compartida y trabajo de relanzamiento registrado. Faltan las demás direcciones y el teclado completo. | Parcial: unísonos/tabla vertical compartida audibles; identificación pendiente |
 | P6 | Radiación y carga acústica del aire | Tabla 132×112 y proyección 7392→606 verificadas hasta 6 kHz; Padé2/derivada cuarta pasa masa, 83 frecuencias y tres puntos Laplace. Contacto de 3 ms y coast de 0,5 ms de C4 supuesto conservan todos los estados. El barrido 3→48 pasa 11/13; la matriz dirigida 48/96 × 1536/3072 kHz pasa 14/14. Coast 128→256 falla flujo 0,274024%; el ensayo 128/256/512 pasa 15/15: flujo fino 0,0690548% con cotas frente a 0,2%. Estado físico único autenticado reutilizable. Faltan banda superior de fuente/carga, balance angular del contacto completo, duración, repetición/release, identificación y ambas caras/borde. | Coast de 0,5 ms a 256 frente a 512 convergente; banda superior, nota completa y timbre pendientes |
 
 El orden es una prioridad de investigación, no una afirmación de causalidad.
+
+La escucha actual de dos segundos utiliza una reducción acústica pasiva a
+192 direcciones de estado, con error de presión heredado de 9,202 % frente
+al límite de 5 %; no reemplaza los certificados del operador completo ni
+valida la presión de todos los nuevos estados cargados. Véanse el
+[ensayo compartido](RESULTADOS-P6-tabla-compartida.md) y sus límites. El
+estado histórico P6 de la tabla anterior describe el operador completo.
 P1 se relaciona con el sostenido/unísono percibido; P2 puede afectar el cuerpo
 y la irregularidad del teclado; P3 la evolución con intensidad; P4 principalmente
 la dispersión de parciales altos. Cada efecto debe verificarse al implementarlo.
@@ -1619,3 +1645,26 @@ temporal alto y carga frente a malla fina. Sigue presupuesto/método del
 ledger angular del contacto y derivación/validación del puerto discreto
 para reutilizar tabla/aire antes de más contactos largos. Después duración,
 release, unísono e identificación/escucha. Global falso, sin audio/paquete.
+
+### 2026-10-08 — P6: prioridad de escucha del prototipo actual
+
+[Diseño y límites de la escucha](RESULTADOS-P6-escucha-actual.md).
+Se mantienen las 606 coordenadas mecánicas y la cuerda no lineal 96/192;
+se reduce sólo la propagación acústica mediante una congruencia pasiva y
+dos ramas positivas que conservan masa estática y límite resistivo.
+La relajación original se conserva al 99,9 %. Tres pruebas pasan.
+
+La reducción de 192 coordenadas acústicas **falla** el umbral del 5 % de
+presión en nueve controles independientes: máximo **9,2021 %**. Se registra
+como escucha diagnóstica explícita, sin aprobar el operador completo ni
+reutilizar su cápsula. Primera comparación corta a 16/32/64/128 kHz contra
+128: presión 60–6000 Hz cambia **1,94714 / 0,917188 / 0,0232943 / 0 %**.
+Se elige 16 kHz sólo para este prototipo, con ataque a 768 kHz hasta la
+separación, observación a 128 kHz y WAV a 48 kHz. No es convergencia de
+duración completa o de todo el teclado.
+
+Render de C4, F4, G4 y C5 a intensidad 84, tecla sostenida 350 ms y apagador
+distribuido con 650 ms de cola, sin fade ni EQ. Audio sólo en
+`C:/SHARED/Piano-actual-2026-10-08`; informes en el repo, ninguna R/cápsula
+completa adicional. Se preservan los pendientes anteriores y falta unísono,
+identificación y validación de duración. Global falso; plugin instalado intacto.

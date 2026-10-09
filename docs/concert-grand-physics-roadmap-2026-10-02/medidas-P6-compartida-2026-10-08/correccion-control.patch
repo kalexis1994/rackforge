@@ -1,0 +1,88 @@
+--- a/tools/render-concert-grand-shared-phrase.py
++++ b/tools/render-concert-grand-shared-phrase.py
+@@ -22,7 +22,7 @@
+     SharedContact,SharedCoast,SharedDampers)
+ from concert_grand_nonlinear_string import Wire
+ from concert_grand_coupled_contact import Felt
+-from concert_grand_damped_coast import engagement
++from concert_grand_damper_control import DamperControl
+ from concert_grand_cell_observer import CellObserver
+ from concert_grand_cell_audio import retarded_kernel,pressure_fft
+ import concert_grand_orthotropic_plate as plate
+@@ -100,8 +100,7 @@
+     schedule=[(0.,'on',60,84),(.14,'off',60,0),(.25,'on',67,84),
+         (.39,'off',67,0),(.50,'on',72,84),(.64,'off',72,0),
+         (.75,'on',60,84),(.89,'off',60,0),(1.05,'pedal_off',0,0)]
+-    cursor=0;keys={key:False for key in system.keys}
+-    changed={key:0. for key in system.keys};is_pedal=pedal
++    cursor=0;controller=DamperControl(system.keys,pedal)
+     def board(q):
+         return system.string.board_transform@q[system.string.sb]
+     q,v=state[:2];times=[0.];B=[board(q)];V=[board(v)]
+@@ -113,25 +112,19 @@
+         now=tick/fine
+         while cursor<len(schedule) and round(schedule[cursor][0]*fine)<=tick:
+             _,kind,key,velocity=schedule[cursor];cursor+=1
++            controller.event(kind,key,now)
+             if kind=='on':
+-                keys[key]=True;changed[key]=now
+                 before_q=state[0][:system.string.size].copy()
+                 before_v=state[1][:system.string.size].copy()
+                 state,external=system.launch(state,key,5.*(velocity/124)**1.5)
+                 if not np.array_equal(before_q,state[0][:system.string.size]) or not np.array_equal(before_v,state[1][:system.string.size]):
+                     raise AssertionError('launch reset a live wire or board')
+                 work+=external;launches.append(dict(time_s=now,key=key,external_work_j=external))
+-            elif kind=='off':
+-                keys[key]=False;changed[key]=now
+-            else:
+-                is_pedal=False
+-                for k in keys:
+-                    if not keys[k]:changed[k]=now
+         in_contact=system.compression(state[0])>=-1e-12
+         # Finish each fine contact interval on the same coarse time grid.
+         dt=1/fine if in_contact or tick%coarse else 1/rate
+         step=1 if dt==1/fine else coarse
+-        levels={key:0. if is_pedal or keys[key] else engagement(now+dt/2-changed[key]) for key in keys}
++        levels=controller.levels(now+dt/2)
+         vel,heat0=dampers.dissipate(state[1],dt/2,levels)
+         if in_contact or step==1:
+             middle,stats=contact.step((state[0],vel,state[2],state[3]),dt,True)
+@@ -142,7 +135,7 @@
+                 if 'recontact' not in str(error):raise
+                 # No state advance was accepted; retry at the contact rate.
+                 dt=1/fine;step=1
+-                levels={key:0. if is_pedal or keys[key] else engagement(now+dt/2-changed[key]) for key in keys}
++                levels=controller.levels(now+dt/2)
+                 vel,heat0=dampers.dissipate(state[1],dt/2,levels)
+                 middle,stats=contact.step((state[0],vel,state[2],state[3]),dt,True)
+         vel,heat1=dampers.dissipate(middle[1],dt/2,levels)
+@@ -181,7 +174,9 @@
+     p.add_argument('--choir',type=int,choices=[1,3],default=3)
+     p.add_argument('--duration',type=float,default=2.)
+     p.add_argument('--rate',type=int,choices=[16000,32000,64000,128000],default=16000)
+-    p.add_argument('--control',action='store_true')
++    controls=p.add_mutually_exclusive_group()
++    controls.add_argument('--control',action='store_true')
++    controls.add_argument('--control-only',action='store_true')
+     args=p.parse_args()
+     if args.report.exists() or args.duration<1.1:
+         raise ValueError('new report and a complete phrase/release required')
+@@ -189,7 +184,8 @@
+     report=dict(stage='shared physical phrase construction',all_gates_passed=False,
+         sampled_audio_used=False,single_shared_board=True,single_shared_air=True,
+         source_sha256={name:digest(Path(__file__).with_name(name)) for name in [
+-            Path(__file__).name,'concert_grand_shared_strings.py','concert_grand_audition_air.py']},
++            Path(__file__).name,'concert_grand_shared_strings.py','concert_grand_audition_air.py',
++            'concert_grand_damper_control.py']},
+         scope='Assumed three-note register, three-wire choirs; existing Euler/extensible string and vertical bridge. '
+               'Not full keyboard, in-plane plate coupling, Timoshenko, identified felt/materials, room or plugin.',
+         keys=[60,67,72],wires_per_key=args.choir,transverse=args.transverse,axial=2*args.transverse,
+@@ -204,7 +200,7 @@
+     report['wire_tuning_offsets_cents']=cents
+     report['mechanical_coordinates']=system.size
+     args.audio_dir.mkdir(parents=True,exist_ok=True)
+-    for pedal in ([True,False] if args.control else [True]):
++    for pedal in ([False] if args.control_only else [True,False] if args.control else [True]):
+         report['stage']='live shared phrase, pedal '+str(pedal);save()
+         def progress(value):report['progress']=value;save()
+         t,B,V,metrics=trajectory(system,air,pedal,args.duration,args.rate,progress)

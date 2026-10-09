@@ -1,0 +1,299 @@
+{
+  "stage": "completed local speed and refinement audit",
+  "all_gates_passed": false,
+  "full_phrase_convergence": false,
+  "scope": "Same 606-board, nine wires, 96/192 modes, frozen rank-192 air. Local source-interval retarded pressure and all living states. Not a full-keyboard, full-air or waveform certificate.",
+  "pressure_metric": "Pressure contributed by the tested finite source interval, including its delayed tail; not the complete microphone history before that interval.",
+  "source_sha256": {
+    "measure-concert-grand-shared-kernels.py": "782e0404d5d1f38e8b5599b816b76650ce3c271dc7e10c1be0eae713c0f5cff2",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46",
+    "concert_grand_audition_air.py": "de66a1c93f5a5a8b89adf485e87f22a2c8428bbd9f9e794b8790dab441f62eb6"
+  },
+  "cases": [
+    {
+      "label": "contact_equivalence",
+      "reference": {
+        "seconds": 18.541999799956102,
+        "rate_hz": 768000,
+        "source_duration_s": 0.0005,
+        "felt_heat_j": 0.0006978618760315914,
+        "board_material_heat_j": 6.614194236858926e-22,
+        "damper_heat_j": 0.0,
+        "max_felt_force_n": 13.448248619782701,
+        "final_compression_m": 0.0010297873252360856
+      },
+      "batched": {
+        "seconds": 16.72892160003539,
+        "rate_hz": 768000,
+        "source_duration_s": 0.0005,
+        "felt_heat_j": 0.0006978618760315914,
+        "board_material_heat_j": 6.614194235839643e-22,
+        "damper_heat_j": 0.0,
+        "max_felt_force_n": 13.448248619782701,
+        "final_compression_m": 0.0010297873252360856
+      },
+      "speed_ratio": 1.108379861133241,
+      "pressure_relative": 5.016122448927757e-10,
+      "state_relative": [
+        1.1859461120847042e-20,
+        7.26980872066943e-17,
+        6.058514567524884e-10,
+        4.426199516286922e-10
+      ],
+      "equivalence_passed": true
+    },
+    {
+      "seconds": 65.12866689998191,
+      "rate_hz": 768000,
+      "source_duration_s": 0.002,
+      "felt_heat_j": 0.0010126433539218646,
+      "board_material_heat_j": 4.4402426108509863e-08,
+      "damper_heat_j": 0.0,
+      "max_felt_force_n": 13.54151141724626,
+      "final_compression_m": -0.000725912675138363,
+      "label": "cold_contact",
+      "pressure_peak_pa": 0.19556041047879238,
+      "next_rate_hz": 1536000,
+      "pressure_relative_to_next": 0.00010868006217396628,
+      "mechanical_state_relative_to_next": 3.339829567398633e-05,
+      "wave_state_relative_to_next": 0.00018669788119980206,
+      "relaxation_state_relative_to_next": 0.00010465229712744227,
+      "local_pressure_1_percent_passed": true
+    },
+    {
+      "seconds": 129.3725050999783,
+      "rate_hz": 1536000,
+      "source_duration_s": 0.002,
+      "felt_heat_j": 0.0010126419620255778,
+      "board_material_heat_j": 4.441138270597602e-08,
+      "damper_heat_j": 0.0,
+      "max_felt_force_n": 13.541502525927655,
+      "final_compression_m": -0.0007259138986839494,
+      "label": "cold_contact",
+      "pressure_peak_pa": 0.19557587763047313
+    },
+    {
+      "label": "coast_equivalence",
+      "reference": {
+        "seconds": 2.5947401999728754,
+        "rate_hz": 16000,
+        "source_duration_s": 0.002,
+        "felt_heat_j": 0.0,
+        "board_material_heat_j": 1.0872246846292185e-05,
+        "damper_heat_j": 0.0,
+        "max_felt_force_n": 0.0,
+        "final_compression_m": -0.0042566219483252885
+      },
+      "batched": {
+        "seconds": 1.6670031999819912,
+        "rate_hz": 16000,
+        "source_duration_s": 0.002,
+        "felt_heat_j": 0.0,
+        "board_material_heat_j": 1.0872246846292185e-05,
+        "damper_heat_j": 0.0,
+        "max_felt_force_n": 0.0,
+        "final_compression_m": -0.0042566219483252885
+      },
+      "speed_ratio": 1.5565298254981794,
+      "pressure_relative": 3.0395072133486397e-14,
+      "state_relative": [
+        3.29308763741472e-17,
+        7.326125508583103e-16,
+        2.314277735054233e-15,
+        3.727813747309416e-15
+      ],
+      "equivalence_passed": true
+    },
+    {
+      "seconds": 7.627217299945187,
+      "rate_hz": 16000,
+      "source_duration_s": 0.01,
+      "felt_heat_j": 0.0,
+      "board_material_heat_j": 7.276898240195328e-05,
+      "damper_heat_j": 0.0,
+      "max_felt_force_n": 0.0,
+      "final_compression_m": -0.009996739555352767,
+      "label": "loaded_coast",
+      "pressure_peak_pa": 1.3304139727906747,
+      "next_rate_hz": 32000,
+      "pressure_relative_to_next": 0.0036584173014008975,
+      "mechanical_state_relative_to_next": 0.013646420882590413,
+      "wave_state_relative_to_next": 0.052618297187874835,
+      "relaxation_state_relative_to_next": 0.004619553279575535,
+      "local_pressure_1_percent_passed": true
+    },
+    {
+      "seconds": 14.543597600015346,
+      "rate_hz": 32000,
+      "source_duration_s": 0.01,
+      "felt_heat_j": 0.0,
+      "board_material_heat_j": 7.295752050774236e-05,
+      "damper_heat_j": 0.0,
+      "max_felt_force_n": 0.0,
+      "final_compression_m": -0.009996738366911872,
+      "label": "loaded_coast",
+      "pressure_peak_pa": 1.3305323618651095,
+      "next_rate_hz": 64000,
+      "pressure_relative_to_next": 0.0006971985206486188,
+      "mechanical_state_relative_to_next": 0.00045073923485898097,
+      "wave_state_relative_to_next": 0.012758432537325741,
+      "relaxation_state_relative_to_next": 0.0011011385652305624,
+      "local_pressure_1_percent_passed": true
+    },
+    {
+      "seconds": 28.933457100007217,
+      "rate_hz": 64000,
+      "source_duration_s": 0.01,
+      "felt_heat_j": 0.0,
+      "board_material_heat_j": 7.300319323543548e-05,
+      "damper_heat_j": 0.0,
+      "max_felt_force_n": 0.0,
+      "final_compression_m": -0.009996737662558028,
+      "label": "loaded_coast",
+      "pressure_peak_pa": 1.3308176359128123
+    },
+    {
+      "seconds": 79.1077752999845,
+      "rate_hz": 768000,
+      "source_duration_s": 0.002,
+      "felt_heat_j": 0.0009852582669719642,
+      "board_material_heat_j": 1.6926916780287855e-05,
+      "damper_heat_j": 0.0,
+      "max_felt_force_n": 13.404460619040789,
+      "final_compression_m": -0.0004944136183383063,
+      "label": "living_restrike",
+      "pressure_peak_pa": 1.079100892222094,
+      "next_rate_hz": 1536000,
+      "pressure_relative_to_next": 9.486027787150308e-05,
+      "mechanical_state_relative_to_next": 0.012826036990545851,
+      "wave_state_relative_to_next": 0.00041575228167609193,
+      "relaxation_state_relative_to_next": 6.945152675413323e-05,
+      "local_pressure_1_percent_passed": true
+    },
+    {
+      "seconds": 146.52071369998157,
+      "rate_hz": 1536000,
+      "source_duration_s": 0.002,
+      "felt_heat_j": 0.0009852575110983037,
+      "board_material_heat_j": 1.6927001748461838e-05,
+      "damper_heat_j": 0.0,
+      "max_felt_force_n": 13.40453082586739,
+      "final_compression_m": -0.0004944099486827197,
+      "label": "living_restrike",
+      "pressure_peak_pa": 1.079084921616126
+    },
+    {
+      "seconds": 32.25854960002471,
+      "rate_hz": 16000,
+      "source_duration_s": 0.04,
+      "felt_heat_j": 0.0,
+      "board_material_heat_j": 0.00019689996640141638,
+      "damper_heat_j": 0.0021508756860910343,
+      "max_felt_force_n": 0.0,
+      "final_compression_m": -0.009999913891625401,
+      "label": "pedal_release",
+      "pressure_peak_pa": 1.0036825289251305,
+      "next_rate_hz": 32000,
+      "pressure_relative_to_next": 0.006571016645481643,
+      "mechanical_state_relative_to_next": 0.05521260565258354,
+      "wave_state_relative_to_next": 0.08625576906099565,
+      "relaxation_state_relative_to_next": 0.010781038031833773,
+      "local_pressure_1_percent_passed": true
+    },
+    {
+      "seconds": 61.474990999966394,
+      "rate_hz": 32000,
+      "source_duration_s": 0.04,
+      "felt_heat_j": 0.0,
+      "board_material_heat_j": 0.00019788252898365663,
+      "damper_heat_j": 0.0021521130566338467,
+      "max_felt_force_n": 0.0,
+      "final_compression_m": -0.009999927144233516,
+      "label": "pedal_release",
+      "pressure_peak_pa": 1.0047133911883228,
+      "next_rate_hz": 64000,
+      "pressure_relative_to_next": 0.001380996404204237,
+      "mechanical_state_relative_to_next": 0.007388186349745744,
+      "wave_state_relative_to_next": 0.021110824162826884,
+      "relaxation_state_relative_to_next": 0.002151712004925551,
+      "local_pressure_1_percent_passed": true
+    },
+    {
+      "seconds": 116.37173640000401,
+      "rate_hz": 64000,
+      "source_duration_s": 0.04,
+      "felt_heat_j": 0.0,
+      "board_material_heat_j": 0.00019815696863820792,
+      "damper_heat_j": 0.0021520693352844312,
+      "max_felt_force_n": 0.0,
+      "final_compression_m": -0.009999933925219624,
+      "label": "pedal_release",
+      "pressure_peak_pa": 1.0045098511648012
+    }
+  ],
+  "total_seconds": 820.7191699999967,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "warm_state": {
+    "physical_time_s": 0.04,
+    "prior_contact_rate_hz": 1536000,
+    "prior_coast_rate_hz": 16000,
+    "all_dampers_open": true,
+    "metrics": {
+      "seconds": 29.44929089996731,
+      "rate_hz": 16000,
+      "source_duration_s": 0.038,
+      "felt_heat_j": 0.0,
+      "board_material_heat_j": 0.0003394022066802882,
+      "damper_heat_j": 0.0,
+      "max_felt_force_n": 0.0,
+      "final_compression_m": -0.009994538874921965
+    },
+    "scope": "Identical local initial condition for refinement; preceding trajectory is not converged."
+  },
+  "restrike_external_work_j": 0.0040941436953537335,
+  "algebraic_equivalence_passed": true,
+  "local_pressure_refinement_passed": true,
+  "source_and_board_unchanged": true
+}

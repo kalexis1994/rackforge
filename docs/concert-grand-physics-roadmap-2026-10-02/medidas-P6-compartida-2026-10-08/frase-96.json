@@ -1,0 +1,81 @@
+{
+  "stage": "live shared phrase, pedal True",
+  "all_gates_passed": false,
+  "sampled_audio_used": false,
+  "single_shared_board": true,
+  "single_shared_air": true,
+  "source_sha256": {
+    "render-concert-grand-shared-phrase.py": "4a88c29ec668a31a1232585fa4be19a7a0ffd475f69b33dc9d4c757b75525cf2",
+    "concert_grand_shared_strings.py": "87e9e7a9b335ead2f001f4b121eb1353c3233f5c3991d6a9f7c78426d86f5631",
+    "concert_grand_audition_air.py": "de66a1c93f5a5a8b89adf485e87f22a2c8428bbd9f9e794b8790dab441f62eb6"
+  },
+  "scope": "Assumed three-note register, three-wire choirs; existing Euler/extensible string and vertical bridge. Not full keyboard, in-plane plate coupling, Timoshenko, identified felt/materials, room or plugin.",
+  "keys": [
+    60,
+    67,
+    72
+  ],
+  "wires_per_key": 3,
+  "transverse": 96,
+  "axial": 192,
+  "coast_rate_hz": 16000,
+  "contact_rate_hz": 768000,
+  "capture_rate_hz": 128000,
+  "complete_polyphonic_temporal_convergence": false,
+  "audio_files": [],
+  "cases": [],
+  "seconds": 115.00272739998763,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "wire_tuning_offsets_cents": [
+    -0.4,
+    0.0,
+    0.6
+  ],
+  "mechanical_coordinates": 4065,
+  "progress": {
+    "physical_time_s": 0.00019270833333333333,
+    "duration_s": 2.0,
+    "elapsed_s": 50.12717499997234,
+    "pedal": true
+  }
+}

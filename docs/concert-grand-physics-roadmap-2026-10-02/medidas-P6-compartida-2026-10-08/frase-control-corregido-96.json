@@ -1,0 +1,130 @@
+{
+  "stage": "live shared physical phrase completed",
+  "all_gates_passed": false,
+  "sampled_audio_used": false,
+  "single_shared_board": true,
+  "single_shared_air": true,
+  "source_sha256": {
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_audition_air.py": "de66a1c93f5a5a8b89adf485e87f22a2c8428bbd9f9e794b8790dab441f62eb6",
+    "concert_grand_damper_control.py": "bd38482212fea96774f361c15b9c5f4fb37ed9653e5081f2e14fdb15eeeeed9a"
+  },
+  "scope": "Assumed three-note register, three-wire choirs; existing Euler/extensible string and vertical bridge. Not full keyboard, in-plane plate coupling, Timoshenko, identified felt/materials, room or plugin.",
+  "keys": [
+    60,
+    67,
+    72
+  ],
+  "wires_per_key": 3,
+  "transverse": 96,
+  "axial": 192,
+  "coast_rate_hz": 16000,
+  "contact_rate_hz": 768000,
+  "capture_rate_hz": 128000,
+  "complete_polyphonic_temporal_convergence": false,
+  "audio_files": [
+    {
+      "path": "C:\\SHARED\\Piano-fisica-compartida-2026-10-08\\Frase-fisica-sin-pedal.wav",
+      "sha256": "887e0285493ce21a543a45d2833e48d2a5735cbb5599446d03e915c1d7fc319d",
+      "seconds": 2.103479166666667
+    }
+  ],
+  "cases": [
+    {
+      "seconds": 1672.5969074999448,
+      "felt_heat_j": 0.004471231049561215,
+      "damper_heat_j": 0.004402770974047115,
+      "material_heat_j": 0.0043581789316975445,
+      "external_head_work_j": 0.027409068770686336,
+      "launches": [
+        {
+          "time_s": 0.0,
+          "key": 60,
+          "external_work_j": 0.007771642442348359
+        },
+        {
+          "time_s": 0.25,
+          "key": 67,
+          "external_work_j": 0.007771642442348358
+        },
+        {
+          "time_s": 0.5,
+          "key": 72,
+          "external_work_j": 0.007771642442348358
+        },
+        {
+          "time_s": 0.75,
+          "key": 60,
+          "external_work_j": 0.00409414144364126
+        }
+      ],
+      "maximum_felt_force_n": 15.428295879597798,
+      "sympathetic_G4_before_strike_m": 4.175786595855249e-06,
+      "max_coast_iterations": 7,
+      "final_mechanical_j": 0.01325548616253155,
+      "radiation_ledger_deferred": true,
+      "complete_energy_certificate": false,
+      "pedal": false,
+      "pressure_peak_pa": 1.0754343109284856,
+      "audio_peak": 0.26882076263427734,
+      "held_rms": 0.0688164234161377,
+      "final_rms": 3.397288139694865e-08
+    }
+  ],
+  "seconds": 1751.9414953999803,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "wire_tuning_offsets_cents": [
+    -0.4,
+    0.0,
+    0.6
+  ],
+  "mechanical_coordinates": 4065,
+  "progress": {
+    "physical_time_s": 1.9643125,
+    "duration_s": 2.0,
+    "elapsed_s": 1651.5326316999854,
+    "pedal": false
+  },
+  "source_and_cache_unchanged": true
+}

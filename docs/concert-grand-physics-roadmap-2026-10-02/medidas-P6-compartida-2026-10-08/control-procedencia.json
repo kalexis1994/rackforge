@@ -1,0 +1,9 @@
+{
+  "original_driver_sha256": "f63f635d328a93547875cad4bf747adf50e3365d8bf26bb6862a3d2f25127081",
+  "corrected_driver_sha256": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46",
+  "reconstruction": "Reverse unified patch; serialize reconstructed text using original newline convention.",
+  "original_newlines": "LF",
+  "original_pedal_schedule_preserved": true,
+  "controller_tests_passed": 4,
+  "original_control_aborted": true
+}

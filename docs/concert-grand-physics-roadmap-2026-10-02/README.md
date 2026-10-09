@@ -71,6 +71,15 @@ presión y estados. El release 32/64 kHz aún cambia 2,105 % en la onda;
 64/128 kHz baja a 0,527 %. Son ensayos locales, no certificado global ni
 aceleración del coste completo. Siguen C5/velocidades altas, fuerza y primera
 separación, transición entre solvers y frase completa antes de ampliar con F4.
+El [control de fuerza y registros](RESULTADOS-P6-contacto-registros.md) termina
+en 17,91 min: C5/124, C4/124 y C5/84 pasan presión/estados/curva/impulso al
+1 % local con contacto a 128 kHz; presión máxima 0,007094 %, onda máxima
+0,105577 %. Los intervalos nativos de separación solapan sus referencias,
+sin recontactos observados. La transferencia de 2 ms a coast conserva los
+arrays bajo 1e-8. El descenso inicial de apagador 64/128 kHz pasa, pero la
+onda cambia 0,917074 % en sólo 8 ms: poco margen, no cola completa aprobada.
+Sigue integración y control de la frase completa, presión por bandas/coste;
+después F4. La selección audible y el gate acústico global siguen pendientes.
 
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.

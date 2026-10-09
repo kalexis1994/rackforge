@@ -133,6 +133,23 @@ completo con las dos mitades anteriores es una hipótesis, no una causa
 probada. Después mejorar la evaluación dentro del paso con controles de
 trabajo/campo/coste, y volver a duración/release y F4. Gates globales pendientes.
 
+El [control cuadrático del puerto conjunto](RESULTADOS-P6-puerto-cuadratico.md)
+termina en 2,87 min: sin residuo no lineal, 128 kHz todavía falla la banda
+superior Hann con 1,481 %. La explicación exclusiva por la no linealidad
+queda descartada. Replay exacto, medición y trabajo pasan; ablación sólo
+diagnóstica, con el cambio de potencial registrado aparte de las pérdidas.
+La [composición de dos intervalos no lineales](RESULTADOS-P6-puerto-dos-intervalos.md)
+añade tres pruebas que pasan (energía, ODE independiente y equivalencia
+cuadrática). Ensayo físico de 3,92 min: mejora el error mecánico acotado
+32 kHz de 1,266 a 0,053 %, pero 128 kHz todavía falla Hann con 1,500 %.
+A 256 pasa localmente con 0,365 %, tardando 2,337× el splitting previo
+128 de la misma ejecución; se rechaza como aceleración del renderer.
+Fuentes/datos/grillas/ledger/cotas verificados independientemente, sin
+WAV ni duplicados de R/estado. Sigue respuesta de fase del sistema lineal
+acoplado frente a matriz/ODE exacta y puerto de mayor orden en banco pequeño;
+después trabajo/coste en banco grande, duración/release y F4 para escucha.
+No retocar física para compensar error numérico. Gates globales pendientes.
+
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.
 Se prioriza esa cobertura y su carga acústica antes de otra escucha musical

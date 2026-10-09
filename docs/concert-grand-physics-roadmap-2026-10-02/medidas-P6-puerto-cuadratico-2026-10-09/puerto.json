@@ -1,0 +1,761 @@
+{
+  "stage": "completed quadratic coupled port coast controls",
+  "all_gates_passed": false,
+  "approved_for_audition": false,
+  "complete_polyphonic_temporal_convergence": false,
+  "scope": "Quadratic ablation of C4/84, three keys, 8ms after unchanged full nonlinear 2ms contact state. All dampers open; fixed 128kHz microphone operator. Local pressure and endpoint state bounds only.",
+  "base_report_sha256": "aa281f3c3494621e9f500b604165722e97f9c67f76f8816ac3c5215219446886",
+  "controls_report_sha256": "f8a9ee1ebf69ce6e29f1a65db5543bd603f276e9a47e02245f2ac7fc7de15940",
+  "base_state_sha256": "d4ccfd58dbdbbca11c8183e314879dd742e41f93c7a734dba7c5210a45a539c0",
+  "base_spectra_sha256": "c52cae1fdee7e236cd0d3844c98c0d3aa6f20959a4bb5a18e4ba866c758b1a59",
+  "source_sha256": {
+    "measure-concert-grand-native-bands.py": "215a8f7ab4530b9718f0da846decf6590417b552d3e5641b3e47f34e19d8de0f",
+    "concert_grand_band_diagnostics.py": "6589fb3d567855e6b05188e6e52145ad232acaec688bacef93359f11bb3ef242",
+    "concert_grand_uniform_spectra.py": "f1ed9bc37a149f0bbf92019e4664b0e332da7206b1116fed966d318672e69417",
+    "concert_grand_window_spectra.py": "ba4f6dfdb7d3fd4c62dcffae7430607aeed96eed52345e3ec5c9cb741269b65c",
+    "concert_grand_cell_audio.py": "57c3bccf6c0bbe0c930794ccc5710f94b1a26873722e461f7ff72ef254acacf9",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46",
+    "concert_grand_audition_air.py": "de66a1c93f5a5a8b89adf485e87f22a2c8428bbd9f9e794b8790dab441f62eb6",
+    "measure-concert-grand-coast-bands.py": "71c7bf15b019f1e78e662d77ac9ff3ef83be02796228986fd52cd4ac04461b06",
+    "measure-concert-grand-coast-controls.py": "2d58a5818753ebf4b078f61170d34da360bb07034ffa5a011b6f073bf718b24a",
+    "concert_grand_coast_controls.py": "15e18a826264fab642ad1c5361b93e7427e666553e57e630b6cfc30c5f4e1654",
+    "measure-concert-grand-port-quadratic.py": "85088c385ea536a935fe75e370d4aca484289402823e0ff0822dc771cfabfda9",
+    "concert_grand_port_avf_coast.py": "1843388694a9b0a8bc82721d6fe6ac05a1d2de8f8d997bd37327be1765cc6cc5"
+  },
+  "criteria": {
+    "band_relative": 0.01,
+    "hermite_oracle_relative": 1e-10,
+    "band_energy_grid_relative": 0.001,
+    "band_error_grid_absolute": 0.0001,
+    "mechanical_work_relative": 1e-09,
+    "replay_relative": 1e-10,
+    "state_bound_relative": 0.01
+  },
+  "cases": [
+    {
+      "rate_hz": 128000,
+      "duration_s": 0.008,
+      "seconds": 18.945696100010537,
+      "native_frames": 1025,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 5.082690393985225e-05,
+      "maximum_discrete_work_force_n": 0.0,
+      "final_compression_m": -0.010000004623780819,
+      "label": "reference128",
+      "spectrum_keys": {
+        "rectangular": "reference128_rectangular",
+        "hann": "reference128_hann"
+      },
+      "full_nonlinear_geometry": false,
+      "mechanical_work_balance_j": 9.640657955105325e-16,
+      "mechanical_work_relative": 1.42630624566353e-13,
+      "mechanical_work_passed": true,
+      "hann_oracle_relative": 1.1795728396838396e-12,
+      "hann_oracle_passed": true,
+      "windows": {
+        "rectangular": {
+          "total_relative": 3.953293202688464e-05,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 1.1938616307476419e-05,
+              "reference_energy_share": 0.8303601686304551,
+              "absolute_relative_to_total": 1.0878956718646427e-05
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 8.880904447981054e-05,
+              "reference_energy_share": 0.1679550272478454,
+              "absolute_relative_to_total": 3.6396003762719704e-05
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.00027283992120681524,
+              "reference_energy_share": 0.0014994980043180218,
+              "absolute_relative_to_total": 1.056527635857695e-05
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.00021044744559991875,
+              "reference_energy_share": 0.0001853061173813813,
+              "absolute_relative_to_total": 2.8647619320087965e-06
+            }
+          ],
+          "all_bands_1_percent_passed": true,
+          "grid_error_absolute": [
+            5.009763769791911e-09,
+            5.461390329063946e-08,
+            2.1929478699850118e-08,
+            6.7199506541466315e-09
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 0.00014447844757015105,
+            "800-2500": 0.0005803079970170266,
+            "2500-6000": 3.33122994764512e-05,
+            "6000-12000": 2.574818022460512e-05
+          },
+          "energy_grid_passed": true
+        },
+        "hann": {
+          "total_relative": 4.079880961996283e-05,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 9.953995800023792e-06,
+              "reference_energy_share": 0.7799443095414857,
+              "absolute_relative_to_total": 8.790817216730255e-06
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 8.474117673843161e-05,
+              "reference_energy_share": 0.22002954241287676,
+              "absolute_relative_to_total": 3.974980369448819e-05
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.0005116094192565113,
+              "reference_energy_share": 2.6129881031388015e-05,
+              "absolute_relative_to_total": 2.615214092775398e-06
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.0045627337622606455,
+              "reference_energy_share": 1.8164606056870792e-08,
+              "absolute_relative_to_total": 6.149476129012425e-07
+            }
+          ],
+          "all_bands_1_percent_passed": true,
+          "grid_error_absolute": [
+            3.4686992687340233e-09,
+            1.5800337734825408e-09,
+            3.450531689693469e-08,
+            1.1202651768911498e-08
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 9.817833474423665e-06,
+            "800-2500": 7.935892363253316e-07,
+            "2500-6000": 0.0002659349410745193,
+            "6000-12000": 5.162359922539217e-05
+          },
+          "energy_grid_passed": true
+        }
+      },
+      "replay_relative": {
+        "rectangular": 0.0,
+        "hann": 0.0
+      },
+      "state_bound_to512": {
+        "mechanical": 9.355812240060608e-06,
+        "wave": 0.0010528154481175454,
+        "relaxation": 0.00014059101705091393
+      },
+      "state_bound_passed": true,
+      "measurement_controls_passed": true,
+      "local_controls_passed": true
+    },
+    {
+      "rate_hz": 32000,
+      "duration_s": 0.008,
+      "seconds": 5.383481400029268,
+      "native_frames": 257,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 5.076281294604961e-05,
+      "maximum_discrete_work_force_n": 0.0,
+      "final_compression_m": -0.010000004850895323,
+      "label": "coupled32000",
+      "spectrum_keys": {
+        "rectangular": "coupled32000_rectangular",
+        "hann": "coupled32000_hann"
+      },
+      "full_nonlinear_geometry": false,
+      "mechanical_work_balance_j": 1.4799359654427136e-16,
+      "mechanical_work_relative": 2.1895205913567412e-14,
+      "mechanical_work_passed": true,
+      "hann_oracle_relative": 4.58716807791918e-12,
+      "hann_oracle_passed": true,
+      "windows": {
+        "rectangular": {
+          "total_relative": 0.0005783631005282651,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 0.00015904261453573686,
+              "reference_energy_share": 0.8303601686304551,
+              "absolute_relative_to_total": 0.00014492615185824506
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 0.0013016499806663053,
+              "reference_energy_share": 0.1679550272478454,
+              "absolute_relative_to_total": 0.000533446315874335
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.004265256026402713,
+              "reference_energy_share": 0.0014994980043180218,
+              "absolute_relative_to_total": 0.00016516501126267295
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.002989258546819398,
+              "reference_energy_share": 0.0001853061173813813,
+              "absolute_relative_to_total": 4.06919364853695e-05
+            }
+          ],
+          "all_bands_1_percent_passed": true,
+          "grid_error_absolute": [
+            2.7742067461696473e-08,
+            7.287621841462789e-07,
+            4.088857748305724e-08,
+            2.0812174300784136e-08
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 0.00014452704510814485,
+            "800-2500": 0.0005806575266127378,
+            "2500-6000": 3.2364423136810316e-05,
+            "6000-12000": 2.567221737126424e-05
+          },
+          "energy_grid_passed": true
+        },
+        "hann": {
+          "total_relative": 0.0006145624856633938,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 0.000141987239381236,
+              "reference_energy_share": 0.7799443095414857,
+              "absolute_relative_to_total": 0.00012539525770199602
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 0.0012566076502575198,
+              "reference_energy_share": 0.22002954241287676,
+              "absolute_relative_to_total": 0.0005894408048274756
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.022784544435532007,
+              "reference_energy_share": 2.6129881031388015e-05,
+              "absolute_relative_to_total": 0.00011646865648381473
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.22961192995608778,
+              "reference_energy_share": 1.8164606056870792e-08,
+              "absolute_relative_to_total": 3.094620803607552e-05
+            }
+          ],
+          "all_bands_1_percent_passed": false,
+          "grid_error_absolute": [
+            1.8429913460637787e-08,
+            5.0038270458553635e-09,
+            5.034043371647534e-06,
+            6.205451108826088e-06
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 9.820451615016879e-06,
+            "800-2500": 8.013017673835776e-07,
+            "2500-6000": 0.0002605843555061327,
+            "6000-12000": 4.720895874310571e-05
+          },
+          "energy_grid_passed": true
+        }
+      },
+      "state_relative_to128": {
+        "mechanical": 9.540478715563066e-05,
+        "wave": 0.016709189147712473,
+        "relaxation": 0.0019495618905494582
+      },
+      "state_bound_to512": {
+        "mechanical": 0.00010476149198496669,
+        "wave": 0.017779596288290248,
+        "relaxation": 0.0020904269984893683
+      },
+      "speedup_vs_replayed128": 3.5192275578229983,
+      "state_bound_passed": false,
+      "measurement_controls_passed": true,
+      "local_controls_passed": false
+    },
+    {
+      "rate_hz": 64000,
+      "duration_s": 0.008,
+      "seconds": 10.699291299970355,
+      "native_frames": 513,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 5.0812531344100345e-05,
+      "maximum_discrete_work_force_n": 0.0,
+      "final_compression_m": -0.010000004700357258,
+      "label": "coupled64000",
+      "spectrum_keys": {
+        "rectangular": "coupled64000_rectangular",
+        "hann": "coupled64000_hann"
+      },
+      "full_nonlinear_geometry": false,
+      "mechanical_work_balance_j": 4.700626281446685e-16,
+      "mechanical_work_relative": 6.954434702464551e-14,
+      "mechanical_work_passed": true,
+      "hann_oracle_relative": 2.4961577382774428e-12,
+      "hann_oracle_passed": true,
+      "windows": {
+        "rectangular": {
+          "total_relative": 0.00014257006274865513,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 3.9219611500862965e-05,
+              "reference_energy_share": 0.8303601686304551,
+              "absolute_relative_to_total": 3.57385181876412e-05
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 0.00032066390181613333,
+              "reference_energy_share": 0.1679550272478454,
+              "absolute_relative_to_total": 0.00013141549540848373
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.0010607720882937163,
+              "reference_energy_share": 0.0014994980043180218,
+              "absolute_relative_to_total": 4.1076651161296234e-05
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.0007032972225714415,
+              "reference_energy_share": 0.0001853061173813813,
+              "absolute_relative_to_total": 9.57378743356418e-06
+            }
+          ],
+          "all_bands_1_percent_passed": true,
+          "grid_error_absolute": [
+            6.521656846896211e-09,
+            1.7967984410202035e-07,
+            8.713029368747488e-09,
+            3.4048672705074e-09
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 0.00014448593296245704,
+            "800-2500": 0.0005803379784496965,
+            "2500-6000": 3.3142327096946644e-05,
+            "6000-12000": 2.5717421499593662e-05
+          },
+          "energy_grid_passed": true
+        },
+        "hann": {
+          "total_relative": 0.000151540471470673,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 3.556751032783411e-05,
+              "reference_energy_share": 0.7799443095414857,
+              "absolute_relative_to_total": 3.1411253171857666e-05
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 0.0003091610153306001,
+              "reference_energy_share": 0.22002954241287676,
+              "absolute_relative_to_total": 0.00014501910573312451
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.0058147083244358974,
+              "reference_energy_share": 2.6129881031388015e-05,
+              "absolute_relative_to_total": 2.9723274402457438e-05
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.05928047479250339,
+              "reference_energy_share": 1.8164606056870792e-08,
+              "absolute_relative_to_total": 7.989593161631372e-06
+            }
+          ],
+          "all_bands_1_percent_passed": false,
+          "grid_error_absolute": [
+            4.493487390141158e-09,
+            1.2481577632886785e-09,
+            1.3007243972150417e-06,
+            1.6797022901124392e-06
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 9.816409893281808e-06,
+            "800-2500": 7.881604373594087e-07,
+            "2500-6000": 0.0002645734368196262,
+            "6000-12000": 4.9301667446655095e-05
+          },
+          "energy_grid_passed": true
+        }
+      },
+      "state_relative_to128": {
+        "mechanical": 2.1234084734019287e-05,
+        "wave": 0.0033432848457480317,
+        "relaxation": 0.00037876055710413297
+      },
+      "state_bound_to512": {
+        "mechanical": 3.0590095636189753e-05,
+        "wave": 0.004399620155798638,
+        "relaxation": 0.0005194048244869889
+      },
+      "speedup_vs_replayed128": 1.7707430865129385,
+      "state_bound_passed": true,
+      "measurement_controls_passed": true,
+      "local_controls_passed": false
+    },
+    {
+      "rate_hz": 128000,
+      "duration_s": 0.008,
+      "seconds": 20.727170199970715,
+      "native_frames": 1025,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 5.0824962566205894e-05,
+      "maximum_discrete_work_force_n": 0.0,
+      "final_compression_m": -0.010000004662182751,
+      "label": "coupled128000",
+      "spectrum_keys": {
+        "rectangular": "coupled128000_rectangular",
+        "hann": "coupled128000_hann"
+      },
+      "full_nonlinear_geometry": false,
+      "mechanical_work_balance_j": 8.034819012382732e-16,
+      "mechanical_work_relative": 1.1887272210574309e-13,
+      "mechanical_work_passed": true,
+      "hann_oracle_relative": 1.1454696219847564e-12,
+      "hann_oracle_passed": true,
+      "windows": {
+        "rectangular": {
+          "total_relative": 3.458594829065507e-05,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 9.609775454670217e-06,
+              "reference_energy_share": 0.8303601686304551,
+              "absolute_relative_to_total": 8.756821440169614e-06
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 7.778793964021406e-05,
+              "reference_energy_share": 0.1679550272478454,
+              "absolute_relative_to_total": 3.187929968645334e-05
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.00025575608013515664,
+              "reference_energy_share": 0.0014994980043180218,
+              "absolute_relative_to_total": 9.903732764114235e-06
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.00016642095859306132,
+              "reference_energy_share": 0.0001853061173813813,
+              "absolute_relative_to_total": 2.2654417377542088e-06
+            }
+          ],
+          "all_bands_1_percent_passed": true,
+          "grid_error_absolute": [
+            1.4894674004000124e-09,
+            4.358370012738915e-08,
+            9.962790494932178e-10,
+            6.078834652713336e-10
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 0.00014447605535083952,
+            "800-2500": 0.0005802615523586852,
+            "2500-6000": 3.3328898403128804e-05,
+            "6000-12000": 2.575165140139557e-05
+          },
+          "energy_grid_passed": true
+        },
+        "hann": {
+          "total_relative": 3.684754726624149e-05,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 8.823772240069292e-06,
+              "reference_energy_share": 0.7799443095414857,
+              "absolute_relative_to_total": 7.79266643093442e-06
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 7.50153548538409e-05,
+              "reference_energy_share": 0.22002954241287676,
+              "absolute_relative_to_total": 3.5187682591622874e-05
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.0014489423167725344,
+              "reference_energy_share": 2.6129881031388015e-05,
+              "absolute_relative_to_total": 7.406615718586458e-06
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.014811808342178918,
+              "reference_energy_share": 1.8164606056870792e-08,
+              "absolute_relative_to_total": 1.996278252768524e-06
+            }
+          ],
+          "all_bands_1_percent_passed": false,
+          "grid_error_absolute": [
+            9.523264217738478e-10,
+            2.546722780984124e-10,
+            3.2748666204448357e-07,
+            5.128592699289031e-07
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 9.815367783772011e-06,
+            "800-2500": 7.847572984776008e-07,
+            "2500-6000": 0.0002656085359762361,
+            "6000-12000": 5.113827797675885e-05
+          },
+          "energy_grid_passed": true
+        }
+      },
+      "state_relative_to128": {
+        "mechanical": 8.47262066659515e-06,
+        "wave": 2.2878449031051708e-05,
+        "relaxation": 4.5173209494364763e-05
+      },
+      "state_bound_to512": {
+        "mechanical": 1.7828512174903894e-05,
+        "wave": 0.001075717983933166,
+        "relaxation": 0.00018577057749274495
+      },
+      "speedup_vs_replayed128": 0.9140512630150209,
+      "state_bound_passed": true,
+      "measurement_controls_passed": true,
+      "local_controls_passed": false
+    },
+    {
+      "rate_hz": 256000,
+      "duration_s": 0.008,
+      "seconds": 41.8958064999897,
+      "native_frames": 2049,
+      "felt_heat_j": 0.0,
+      "material_heat_j": 5.082807041119607e-05,
+      "maximum_discrete_work_force_n": 0.0,
+      "final_compression_m": -0.010000004652632802,
+      "label": "coupled256000",
+      "spectrum_keys": {
+        "rectangular": "coupled256000_rectangular",
+        "hann": "coupled256000_hann"
+      },
+      "full_nonlinear_geometry": false,
+      "mechanical_work_balance_j": 6.619393076202906e-16,
+      "mechanical_work_relative": 9.79319226037927e-14,
+      "mechanical_work_passed": true,
+      "hann_oracle_relative": 3.1133900805435915e-13,
+      "hann_oracle_passed": true,
+      "windows": {
+        "rectangular": {
+          "total_relative": 7.892032278691774e-06,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 2.319482938294609e-06,
+              "reference_energy_share": 0.8303601686304551,
+              "absolute_relative_to_total": 2.113607963055457e-06
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 1.7748763196928554e-05,
+              "reference_energy_share": 0.1679550272478454,
+              "absolute_relative_to_total": 7.273854322865594e-06
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 5.5814683133080964e-05,
+              "reference_energy_share": 0.0014994980043180218,
+              "absolute_relative_to_total": 2.161331631966011e-06
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 3.572666550751327e-05,
+              "reference_energy_share": 0.0001853061173813813,
+              "absolute_relative_to_total": 4.863370567971163e-07
+            }
+          ],
+          "all_bands_1_percent_passed": true,
+          "grid_error_absolute": [
+            1.4648546321412113e-10,
+            1.0008885517635228e-08,
+            6.055722613222984e-10,
+            2.8021204548188535e-10
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 0.00014447361128600011,
+            "800-2500": 0.0005802426672865124,
+            "2500-6000": 3.337497883593166e-05,
+            "6000-12000": 2.5761222589459898e-05
+          },
+          "energy_grid_passed": true
+        },
+        "hann": {
+          "total_relative": 8.482890908946715e-06,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 2.1978171877805346e-06,
+              "reference_energy_share": 0.7799443095414857,
+              "absolute_relative_to_total": 1.940990287892287e-06
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 1.7146321039941625e-05,
+              "reference_energy_share": 0.22002954241287676,
+              "absolute_relative_to_total": 8.04287740214081e-06
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.0003536297928564407,
+              "reference_energy_share": 2.6129881031388015e-05,
+              "absolute_relative_to_total": 1.8076633914351807e-06
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.0036080785373337884,
+              "reference_energy_share": 1.8164606056870792e-08,
+              "absolute_relative_to_total": 4.862828732295585e-07
+            }
+          ],
+          "all_bands_1_percent_passed": true,
+          "grid_error_absolute": [
+            5.4382191130566894e-12,
+            3.0262578189644684e-11,
+            8.192764847336472e-08,
+            1.248638014234027e-07
+          ],
+          "grid_error_passed": true,
+          "energy_grid_relative": {
+            "60-800": 9.815105124655332e-06,
+            "800-2500": 7.838985991437397e-07,
+            "2500-6000": 0.0002658693189891981,
+            "6000-12000": 5.163384002093707e-05
+          },
+          "energy_grid_passed": true
+        }
+      },
+      "state_relative_to128": {
+        "mechanical": 9.182929780385377e-06,
+        "wave": 0.0008440771660270745,
+        "relaxation": 0.00011918328222820352
+      },
+      "state_bound_to512": {
+        "mechanical": 1.8538827934212824e-05,
+        "wave": 0.0018977812716244164,
+        "relaxation": 0.0002597910553779814
+      },
+      "speedup_vs_replayed128": 0.45220984348433996,
+      "state_bound_passed": true,
+      "measurement_controls_passed": true,
+      "local_controls_passed": true
+    }
+  ],
+  "seconds": 172.00890090002213,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "ablation_switch": {
+    "full_mechanical_energy_j": 0.006758953171507709,
+    "quadratic_mechanical_energy_j": 0.006759178110883479,
+    "intentional_energy_change_j": 2.249393757699364e-07,
+    "reset_arrays": false,
+    "remove_coordinates": false,
+    "original_nonlinear_unchanged": true
+  },
+  "spectral_data": {
+    "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-puerto-cuadratico-2026-10-09\\presion.npz",
+    "sha256": "38bd59e229c8ea8383c7b6f9854e3828fa49eef9574ddb7e6e856f5bf45f8eca",
+    "bytes": 714495
+  },
+  "state_bound_method": "e(actual,512) <= e(actual,128)*(1+e(128,512))+e(128,512); all local endpoint norms, same physical metric.",
+  "initial_state_unchanged": true,
+  "source_and_cache_unchanged": true
+}

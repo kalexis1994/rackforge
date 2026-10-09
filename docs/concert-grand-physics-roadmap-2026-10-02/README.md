@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-08. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-09. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -63,6 +63,14 @@ El refinamiento local de presión pasa el 1 %, pero los estados internos
 cambian hasta 5,52 % en release a 16/32 kHz. Sigue resolver dispersión del
 contacto y refinar el sostenido/release antes de ampliar el banco con F4.
 Ver medidas, alcance y próxima hipótesis en el mismo informe de integración.
+La [extensión de portadoras al contacto](RESULTADOS-P6-contacto-portadoras.md)
+pasa pruebas de trabajo/pérdidas y contraste continuo independiente. En
+prefijos C4/84, el contacto a 128 kHz corre 12,56/18,87 veces más rápido
+que las referencias finas de ataque/reiteración, con errores pequeños de
+presión y estados. El release 32/64 kHz aún cambia 2,105 % en la onda;
+64/128 kHz baja a 0,527 %. Son ensayos locales, no certificado global ni
+aceleración del coste completo. Siguen C5/velocidades altas, fuerza y primera
+separación, transición entre solvers y frase completa antes de ampliar con F4.
 
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.

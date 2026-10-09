@@ -112,6 +112,26 @@ operador responsable y fuente continua contra las referencias, con coste
 y balance de trabajo. Coast 128 pasa sólo 8 ms y cuesta 6,42× frente a 16
 en ese prefijo. No hay aprobación global ni cambio de timbre/fábrica.
 Después duración/release y banco con F4 para escucha.
+El [control cuadrático del coast](RESULTADOS-P6-coast-cuadratico.md) termina
+en 4,98 min: el error de onda 16 kHz persiste en 7,056 % sin residuo
+no lineal. Refinar sólo el aire lo empeora a 10,303 % (macro 16) y 6,751 %
+(macro 32). El flujo mecánico libre coincide en extremos, pero su fuente
+Hermite cambia 18,155 % en la banda superior Hann. Los controles de
+medición y trabajo pasan; las ablaciones no se seleccionan como piano.
+Se conserva un primer fallo del script por nombre de referencia, corregido
+y repetido con el mismo estado, fuentes reconstruibles y umbrales intactos.
+El [paso de puerto conjunto](RESULTADOS-P6-puerto-acoplado.md) añade trabajo
+acoplado y mantiene toda la física. Cuatro pruebas nuevas pasan entre
+ambas etapas, incluida energía acústica y ODE independiente del método.
+Su ensayo físico termina en 3,53 min: 128 kHz falla 6–12 kHz Hann con
+1,825 %; 256 kHz pasa localmente con 0,378 %, pero cuesta 1,697× frente
+al backend anterior de 128 kHz. Se rechaza como aceleración del renderer.
+Todos los controles y hashes se verifican independientemente; no hay
+WAVs nuevos. Sigue contrastar el puerto conjunto cuadrático para separar
+la precisión de su residuo AVF del puerto; comparar el AVF de tramo
+completo con las dos mitades anteriores es una hipótesis, no una causa
+probada. Después mejorar la evaluación dentro del paso con controles de
+trabajo/campo/coste, y volver a duración/release y F4. Gates globales pendientes.
 
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.

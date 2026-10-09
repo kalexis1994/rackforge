@@ -80,6 +80,18 @@ arrays bajo 1e-8. El descenso inicial de apagador 64/128 kHz pasa, pero la
 onda cambia 0,917074 % en sólo 8 ms: poco margen, no cola completa aprobada.
 Sigue integración y control de la frase completa, presión por bandas/coste;
 después F4. La selección audible y el gate acústico global siguen pendientes.
+La [integración completa de la frase](RESULTADOS-P6-frase-integrada.md) termina
+en 33,24 min, con contacto 128 kHz, coast 16 kHz y estados vivos conservados.
+Cuatro pruebas nuevas pasan. La contracción exacta del aire con un layout
+contiguo compartido en RAM mejora 9 % los prefijos de coast, sin otra R al
+disco. Las frases con/sin pedal tardan 15,79/15,22 min frente a 29,15/27,88:
+**1,845/1,831× en el recorrido completo**. WAVs verificados en
+`C:\SHARED\Piano-contacto-integrado-2026-10-09`.
+El error global 0,036646/0,026404 % pasa el 1 %, pero las bandas altas fallan:
+2,047/2,623 % en 2,5–6 kHz y 10,108/8,463 % en 6–12 kHz, de energía pequeña.
+Se conserva el fallo sin cambiar el umbral. Sigue atribución contra referencias
+temporales/capturas más finas, luego banco con F4; no retocar timbre a partir
+del error contra un control grueso. Gate acústico y temporal global pendientes.
 
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.

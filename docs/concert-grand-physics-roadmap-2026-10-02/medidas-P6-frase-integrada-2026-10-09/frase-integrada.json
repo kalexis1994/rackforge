@@ -1,0 +1,516 @@
+{
+  "stage": "completed packed-air and full integrated phrase comparison",
+  "all_gates_passed": false,
+  "approved_for_audition": false,
+  "complete_polyphonic_temporal_convergence": false,
+  "complete_energy_certificate": false,
+  "sampled_audio_used": false,
+  "keys": [
+    60,
+    67,
+    72
+  ],
+  "wires_per_key": 3,
+  "contact_rate_hz": 128000,
+  "coast_rate_hz": 16000,
+  "capture_rate_hz": 128000,
+  "output_rate_hz": 48000,
+  "pressure_gain_per_pa": 0.25,
+  "lead_s": 0.1,
+  "source_sha256": {
+    "render-concert-grand-integrated-phrase.py": "9317b5bc61e768638028677e738690e719ef9bf13f063dfcf9d73c8d4e962a33",
+    "concert_grand_integrated_phrase.py": "018b19a265bf5669ed3b9ec51ba1d67610b9d6643633919b686cbadb3b584557",
+    "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_damper_control.py": "bd38482212fea96774f361c15b9c5f4fb37ed9653e5081f2e14fdb15eeeeed9a",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46",
+    "concert_grand_audition_air.py": "de66a1c93f5a5a8b89adf485e87f22a2c8428bbd9f9e794b8790dab441f62eb6"
+  },
+  "kernel_cases": [
+    {
+      "label": "living_coast_packed_16k",
+      "rate_hz": 16000,
+      "duration_s": 0.008,
+      "reference_seconds": 4.446865000005346,
+      "packed_seconds": 4.078449499967974,
+      "speed_ratio": 1.0903322451437159,
+      "state_relative": [
+        7.813439755019533e-18,
+        1.2477134351181961e-15,
+        6.148417539505431e-15,
+        4.558634814460746e-15
+      ],
+      "mechanical_relative": 2.5277468074427874e-15,
+      "pressure_relative": 1.947056936324852e-14,
+      "felt_heat_absolute_difference_j": 0.0,
+      "material_heat_absolute_difference_j": 2.0328790734103208e-20,
+      "equivalence_1e_8_passed": true,
+      "baseline_profile_duration_s": 0.002,
+      "baseline_profile": [
+        {
+          "file": "measure-concert-grand-shared-kernels.py",
+          "line": 24,
+          "function": "run",
+          "calls": 1,
+          "own_seconds": 0.0067108,
+          "cumulative_seconds": 1.1388775
+        },
+        {
+          "file": "concert_grand_exponential_coast.py",
+          "line": 159,
+          "function": "step",
+          "calls": 32,
+          "own_seconds": 0.0047069,
+          "cumulative_seconds": 1.1266243
+        },
+        {
+          "file": "concert_grand_shared_strings.py",
+          "line": 409,
+          "function": "mechanical_step",
+          "calls": 64,
+          "own_seconds": 0.010214,
+          "cumulative_seconds": 0.5801124000000001
+        },
+        {
+          "file": "concert_grand_exponential_coast.py",
+          "line": 136,
+          "function": "air_step",
+          "calls": 32,
+          "own_seconds": 0.056632300000000003,
+          "cumulative_seconds": 0.5417727
+        },
+        {
+          "file": "concert_grand_audition_air.py",
+          "line": 69,
+          "function": "constant",
+          "calls": 32,
+          "own_seconds": 0.0018701000000000002,
+          "cumulative_seconds": 0.3552274
+        },
+        {
+          "file": "concert_grand_pade_midpoint.py",
+          "line": 34,
+          "function": "constant",
+          "calls": 32,
+          "own_seconds": 0.3103203,
+          "cumulative_seconds": 0.35335730000000004
+        },
+        {
+          "file": "concert_grand_shared_kernels.py",
+          "line": 46,
+          "function": "nonlinear_avf",
+          "calls": 380,
+          "own_seconds": 0.0731509,
+          "cumulative_seconds": 0.2802809
+        },
+        {
+          "file": "concert_grand_shared_kernels.py",
+          "line": 87,
+          "function": "project",
+          "calls": 508,
+          "own_seconds": 0.16186060000000002,
+          "cumulative_seconds": 0.1619264
+        },
+        {
+          "file": "concert_grand_shared_kernels.py",
+          "line": 98,
+          "function": "unproject",
+          "calls": 444,
+          "own_seconds": 0.11567090000000001,
+          "cumulative_seconds": 0.1157157
+        },
+        {
+          "file": "_backend.py",
+          "line": 19,
+          "function": "__ua_function__",
+          "calls": 760,
+          "own_seconds": 0.0010762,
+          "cumulative_seconds": 0.1116858
+        },
+        {
+          "file": "_realtransforms_backend.py",
+          "line": 8,
+          "function": "_execute",
+          "calls": 760,
+          "own_seconds": 0.0020281,
+          "cumulative_seconds": 0.1096546
+        },
+        {
+          "file": "realtransforms.py",
+          "line": 8,
+          "function": "_r2r",
+          "calls": 760,
+          "own_seconds": 0.0025719000000000002,
+          "cumulative_seconds": 0.10367530000000001
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method scipy.fft._duccfft.pyduccfft.dct>",
+          "calls": 760,
+          "own_seconds": 0.09497040000000001,
+          "cumulative_seconds": 0.09497040000000001
+        },
+        {
+          "file": "concert_grand_audition_air.py",
+          "line": 72,
+          "function": "update",
+          "calls": 32,
+          "own_seconds": 0.0034558,
+          "cumulative_seconds": 0.07964030000000001
+        },
+        {
+          "file": "concert_grand_pade_midpoint.py",
+          "line": 46,
+          "function": "update",
+          "calls": 32,
+          "own_seconds": 0.07185180000000001,
+          "cumulative_seconds": 0.0761845
+        },
+        {
+          "file": "_realtransforms_backend.py",
+          "line": 48,
+          "function": "idct",
+          "calls": 380,
+          "own_seconds": 0.00028230000000000003,
+          "cumulative_seconds": 0.0706759
+        },
+        {
+          "file": "concert_grand_shared_kernels.py",
+          "line": 33,
+          "function": "physical",
+          "calls": 760,
+          "own_seconds": 0.042257100000000006,
+          "cumulative_seconds": 0.0444897
+        },
+        {
+          "file": "concert_grand_pade_midpoint.py",
+          "line": 29,
+          "function": "offsets",
+          "calls": 32,
+          "own_seconds": 0.0173922,
+          "cumulative_seconds": 0.040659400000000005
+        }
+      ]
+    },
+    {
+      "label": "living_coast_packed_64k",
+      "rate_hz": 64000,
+      "duration_s": 0.002,
+      "reference_seconds": 4.180777499976102,
+      "packed_seconds": 3.8299237999599427,
+      "speed_ratio": 1.09160853279113,
+      "state_relative": [
+        2.2012993158797546e-17,
+        2.244501867589162e-15,
+        3.4631557326634958e-15,
+        1.069318215336066e-14
+      ],
+      "mechanical_relative": 4.1121340348910166e-15,
+      "pressure_relative": 3.4544659994149654e-14,
+      "felt_heat_absolute_difference_j": 0.0,
+      "material_heat_absolute_difference_j": 7.453889935837843e-20,
+      "equivalence_1e_8_passed": true
+    },
+    {
+      "label": "contact_packed_128k",
+      "rate_hz": 128000,
+      "duration_s": 0.002,
+      "reference_seconds": 8.542371499992441,
+      "packed_seconds": 8.032451600010972,
+      "speed_ratio": 1.0634824740158748,
+      "state_relative": [
+        7.50879639397557e-17,
+        1.1618861649826724e-15,
+        9.626651449893914e-14,
+        2.7311207106092442e-14
+      ],
+      "mechanical_relative": 2.3722199885137996e-15,
+      "pressure_relative": 5.30426269921566e-13,
+      "felt_heat_absolute_difference_j": 0.0,
+      "material_heat_absolute_difference_j": 2.3161057151484775e-22,
+      "equivalence_1e_8_passed": true
+    }
+  ],
+  "cases": [
+    {
+      "seconds": 947.5399965000106,
+      "pedal": true,
+      "felt_heat_j": 0.004734227943477955,
+      "material_heat_j": 0.005838721413783983,
+      "damper_heat_j": 0.001439360078771627,
+      "external_head_work_j": 0.027408991800980716,
+      "launches": [
+        {
+          "time_s": 0.0,
+          "key": 60,
+          "external_work_j": 0.007771642442348359
+        },
+        {
+          "time_s": 0.25,
+          "key": 67,
+          "external_work_j": 0.00777164244234836
+        },
+        {
+          "time_s": 0.5,
+          "key": 72,
+          "external_work_j": 0.00777164244234836
+        },
+        {
+          "time_s": 0.75,
+          "key": 60,
+          "external_work_j": 0.004094064473935639
+        }
+      ],
+      "maximum_felt_force_n": 15.510405573541227,
+      "max_mechanical_iterations": 7,
+      "contact_steps": 800,
+      "coast_steps": 31900,
+      "recontact_retries": 0,
+      "sympathetic_G4_before_strike_modal_norm_m": 2.7965784020919375e-05,
+      "final_mechanical_j": 0.013898987370357201,
+      "radiation_ledger_deferred": true,
+      "complete_energy_certificate": false,
+      "waveform_relative": 0.0003664604549332062,
+      "bands": [
+        {
+          "lower_hz": 0,
+          "upper_hz": 60,
+          "reference_energy_share": 1.5929022259854885e-05,
+          "relative_error": 8.189605556611297e-06,
+          "absolute_error_relative_to_full": 3.268568150345376e-08
+        },
+        {
+          "lower_hz": 60,
+          "upper_hz": 800,
+          "reference_energy_share": 0.9756016461553485,
+          "relative_error": 0.000136801819653812,
+          "absolute_error_relative_to_full": 0.00013512264452770836
+        },
+        {
+          "lower_hz": 800,
+          "upper_hz": 2500,
+          "reference_energy_share": 0.024360098407425042,
+          "relative_error": 0.0021283628544736728,
+          "absolute_error_relative_to_full": 0.0003321889561445147
+        },
+        {
+          "lower_hz": 2500,
+          "upper_hz": 6000,
+          "reference_energy_share": 1.2263645945839609e-05,
+          "relative_error": 0.020471236264903665,
+          "absolute_error_relative_to_full": 7.168922287416248e-05
+        },
+        {
+          "lower_hz": 6000,
+          "upper_hz": 12000,
+          "reference_energy_share": 1.733455080685829e-08,
+          "relative_error": 0.10108351124030591,
+          "absolute_error_relative_to_full": 1.3308730025866708e-05
+        },
+        {
+          "lower_hz": 12000,
+          "upper_hz": 24001,
+          "reference_energy_share": 1.0045434470044212e-05,
+          "relative_error": 0.00606214190499288,
+          "absolute_error_relative_to_full": 1.9213675904132506e-05
+        }
+      ],
+      "waveform_1_percent_passed": true,
+      "bands_60_12000_1_percent_passed": false,
+      "audio_peak": 0.33167216181755066,
+      "final_rms": 5.3279420915727476e-08,
+      "full_trajectory_speed_ratio": 1.845092228251872,
+      "comparison_scope": "Reproduction of accepted coarse-16k reference; not a temporal convergence certificate."
+    },
+    {
+      "seconds": 913.2748608000111,
+      "pedal": false,
+      "felt_heat_j": 0.0044713004966244725,
+      "material_heat_j": 0.004358057589007781,
+      "damper_heat_j": 0.004402687261424769,
+      "external_head_work_j": 0.027408991800980713,
+      "launches": [
+        {
+          "time_s": 0.0,
+          "key": 60,
+          "external_work_j": 0.007771642442348359
+        },
+        {
+          "time_s": 0.25,
+          "key": 67,
+          "external_work_j": 0.007771642442348359
+        },
+        {
+          "time_s": 0.5,
+          "key": 72,
+          "external_work_j": 0.007771642442348358
+        },
+        {
+          "time_s": 0.75,
+          "key": 60,
+          "external_work_j": 0.0040940644739356335
+        }
+      ],
+      "maximum_felt_force_n": 15.428218460416883,
+      "max_mechanical_iterations": 7,
+      "contact_steps": 808,
+      "coast_steps": 31899,
+      "recontact_retries": 0,
+      "sympathetic_G4_before_strike_modal_norm_m": 4.175775224094346e-06,
+      "final_mechanical_j": 0.013255545479212972,
+      "radiation_ledger_deferred": true,
+      "complete_energy_certificate": false,
+      "waveform_relative": 0.0002640396459855262,
+      "bands": [
+        {
+          "lower_hz": 0,
+          "upper_hz": 60,
+          "reference_energy_share": 2.8299823770534077e-05,
+          "relative_error": 4.275035563371217e-06,
+          "absolute_error_relative_to_full": 2.2742154072771786e-08
+        },
+        {
+          "lower_hz": 60,
+          "upper_hz": 800,
+          "reference_energy_share": 0.9740593173678239,
+          "relative_error": 8.372960136640836e-05,
+          "absolute_error_relative_to_full": 8.263646409596855e-05
+        },
+        {
+          "lower_hz": 800,
+          "upper_hz": 2500,
+          "reference_energy_share": 0.02588224501101911,
+          "relative_error": 0.0014101617584552464,
+          "absolute_error_relative_to_full": 0.0002268662566328358
+        },
+        {
+          "lower_hz": 2500,
+          "upper_hz": 6000,
+          "reference_energy_share": 1.4587321294320458e-05,
+          "relative_error": 0.026229527320557323,
+          "absolute_error_relative_to_full": 0.00010017935671503989
+        },
+        {
+          "lower_hz": 6000,
+          "upper_hz": 12000,
+          "reference_energy_share": 1.6635343332967133e-08,
+          "relative_error": 0.08462702725461664,
+          "absolute_error_relative_to_full": 1.091503090498117e-05
+        },
+        {
+          "lower_hz": 12000,
+          "upper_hz": 24001,
+          "reference_energy_share": 1.5533840748652093e-05,
+          "relative_error": 0.009023459451679842,
+          "absolute_error_relative_to_full": 3.5564155080389374e-05
+        }
+      ],
+      "waveform_1_percent_passed": true,
+      "bands_60_12000_1_percent_passed": false,
+      "audio_peak": 0.26877743005752563,
+      "final_rms": 4.3024357304698934e-08,
+      "full_trajectory_speed_ratio": 1.83142773253912,
+      "comparison_scope": "Reproduction of accepted coarse-16k reference; not a temporal convergence certificate."
+    }
+  ],
+  "audio_files": [
+    {
+      "path": "C:\\SHARED\\Piano-contacto-integrado-2026-10-09\\Frase-integrada-pedal.wav",
+      "sha256": "98581b13696dfc734f5a2dc232baf936c827ae870bb0e1bbd187217c53a3fc76",
+      "frames": 100967,
+      "seconds": 2.103479166666667,
+      "pedal": true
+    },
+    {
+      "path": "C:\\SHARED\\Piano-contacto-integrado-2026-10-09\\Frase-integrada-sin-pedal.wav",
+      "sha256": "87e7399025574f6cb18632f3ca9a9a2949bf85852f2af63ab83c504d15e8a181",
+      "frames": 100967,
+      "seconds": 2.103479166666667,
+      "pedal": false
+    }
+  ],
+  "references": [
+    {
+      "pedal": true,
+      "path": "C:\\SHARED\\Piano-fisica-compartida-2026-10-08\\Frase-fisica-pedal.wav",
+      "sha256": "f0f8c49e3d630fb3f79637d895a304e938ad829e4baae5d6b91172db857ce7f5",
+      "report": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-compartida-2026-10-08\\frase-bloques-96.json",
+      "report_sha256": "28f6432fc953aa7ccf7fb2090bd7994fc0587930ed3cf3e16855ed6440fd573b"
+    },
+    {
+      "pedal": false,
+      "path": "C:\\SHARED\\Piano-fisica-compartida-2026-10-08\\Frase-fisica-sin-pedal.wav",
+      "sha256": "887e0285493ce21a543a45d2833e48d2a5735cbb5599446d03e915c1d7fc319d",
+      "report": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-compartida-2026-10-08\\frase-control-corregido-96.json",
+      "report_sha256": "352f147d807864b9f05c42dd573c53d990b5d3d52cdf688df9b0122c7c1e825d"
+    }
+  ],
+  "seconds": 1994.381295100029,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "packing": {
+    "bytes": 191397888,
+    "seconds": 0.03382359998067841,
+    "shared_by_contact_and_coast": true,
+    "disk_cache_written": false
+  },
+  "paired_warm_state": {
+    "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P6-contacto-portadoras-2026-10-09\\Estado-comun-40ms.npz",
+    "sha256": "e02828c141d633ee914dc777b5902117cb04b675b5918e8a7d7cf09a3c0b0761",
+    "history_converged": false
+  },
+  "backend": "packed exact RAM residues",
+  "progress": {
+    "physical_time_s": 1.967875,
+    "duration_s": 2.0,
+    "seconds": 900.5583154999767,
+    "pedal": false,
+    "contact_steps": 808,
+    "coast_steps": 31385,
+    "recontact_retries": 0
+  },
+  "reference_reproduction_passed": false,
+  "source_and_cache_unchanged": true
+}

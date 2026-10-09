@@ -92,6 +92,26 @@ El error global 0,036646/0,026404 % pasa el 1 %, pero las bandas altas fallan:
 Se conserva el fallo sin cambiar el umbral. Sigue atribución contra referencias
 temporales/capturas más finas, luego banco con F4; no retocar timbre a partir
 del error contra un control grueso. Gate acústico y temporal global pendientes.
+La [atribución por bandas nativas](RESULTADOS-P6-bandas-nativas.md) completa
+contactos C4/C5/84 y un coast común de 8 ms. La referencia de contacto
+768 kHz cambia 2,004/1,170 % en 6–12 kHz Hann frente a 3072 kHz;
+portadoras 128 kHz bajan a 0,296/0,252 %. La captura 128 kHz del contacto
+fino aporta sólo 0,00344/0,00196 %. Los controles de contacto pasan.
+La primera grilla del coast falla y se preserva. El refinamiento a
+6,25 Hz y referencia 512 kHz pasa todos los controles de medición:
+coast 16/32/64 kHz cambia 63,937/4,852/2,001 % en la banda superior Hann;
+128 kHz baja a 0,453 %. Esa banda tiene poca energía. A 16 kHz hay tanto
+error dinámico (onda 7,054 %) como de reconstrucción Hermite; interpolar
+a 128 no recupera lo perdido. Corregir sólo la captura no basta.
+Cuatro pruebas y verificación independiente de datos/hashes pasan.
+Los dos ensayos completados suman 31,04 min; no se generan WAVs nuevos.
+Un único estado C4/84 de 2 ms, autenticado y compacto, queda en `local/`.
+Sigue aislar el error dinámico del coast con un control cuadrático que
+separe residuo no lineal y composición mecánica–aire; luego ensayar el
+operador responsable y fuente continua contra las referencias, con coste
+y balance de trabajo. Coast 128 pasa sólo 8 ms y cuesta 6,42× frente a 16
+en ese prefijo. No hay aprobación global ni cambio de timbre/fábrica.
+Después duración/release y banco con F4 para escucha.
 
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.

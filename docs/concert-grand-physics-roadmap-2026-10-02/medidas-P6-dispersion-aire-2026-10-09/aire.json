@@ -1,0 +1,394 @@
+{
+  "stage": "completed actual acoustic harmonic warp controls",
+  "all_gates_passed": false,
+  "approved_for_audition": false,
+  "source_sha256": {
+    "measure-concert-grand-native-bands.py": "215a8f7ab4530b9718f0da846decf6590417b552d3e5641b3e47f34e19d8de0f",
+    "concert_grand_band_diagnostics.py": "6589fb3d567855e6b05188e6e52145ad232acaec688bacef93359f11bb3ef242",
+    "concert_grand_uniform_spectra.py": "f1ed9bc37a149f0bbf92019e4664b0e332da7206b1116fed966d318672e69417",
+    "concert_grand_window_spectra.py": "ba4f6dfdb7d3fd4c62dcffae7430607aeed96eed52345e3ec5c9cb741269b65c",
+    "concert_grand_cell_audio.py": "57c3bccf6c0bbe0c930794ccc5710f94b1a26873722e461f7ff72ef254acacf9",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46",
+    "concert_grand_audition_air.py": "de66a1c93f5a5a8b89adf485e87f22a2c8428bbd9f9e794b8790dab441f62eb6",
+    "measure-concert-grand-coast-bands.py": "71c7bf15b019f1e78e662d77ac9ff3ef83be02796228986fd52cd4ac04461b06",
+    "measure-concert-grand-coast-controls.py": "2d58a5818753ebf4b078f61170d34da360bb07034ffa5a011b6f073bf718b24a",
+    "concert_grand_coast_controls.py": "15e18a826264fab642ad1c5361b93e7427e666553e57e630b6cfc30c5f4e1654",
+    "measure-concert-grand-air-warp.py": "ad3d360151be9ed0cffe5478c65a593abbed691b984af0fe7f03ca9ae6d73bab"
+  },
+  "base_report_sha256": "f8a9ee1ebf69ce6e29f1a65db5543bd603f276e9a47e02245f2ac7fc7de15940",
+  "scope": "Actual rank192 reduced acoustic operator of the 606-coordinate prototype. Harmonic impedance and displacement-load matrices, not full trajectory, loaded resonance or microphone pressure. No Gauss replacement selected.",
+  "cases": [
+    {
+      "frequency_hz": 261.625565,
+      "rate_hz": 32000,
+      "midpoint_frequency_hz": 261.68311345815647,
+      "frequency_warp_relative": 0.0002199649646488222,
+      "impedance_relative": 0.00033324353501737296,
+      "displacement_load_relative": 0.0002819408899195602,
+      "physical_impedance_norm": 370.5106233942614,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 261.625565,
+      "rate_hz": 64000,
+      "midpoint_frequency_hz": 261.6399492668966,
+      "frequency_warp_relative": 5.4980356742451164e-05,
+      "impedance_relative": 8.329097449682785e-05,
+      "displacement_load_relative": 7.046916872605198e-05,
+      "physical_impedance_norm": 370.5106233942614,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 261.625565,
+      "rate_hz": 128000,
+      "midpoint_frequency_hz": 261.62916088879103,
+      "frequency_warp_relative": 1.3744409079752273e-05,
+      "impedance_relative": 2.08214995976652e-05,
+      "displacement_load_relative": 1.7616289045060858e-05,
+      "physical_impedance_norm": 370.5106233942614,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 261.625565,
+      "rate_hz": 256000,
+      "midpoint_frequency_hz": 261.6264639610776,
+      "frequency_warp_relative": 3.4360597658267267e-06,
+      "impedance_relative": 5.205297153034957e-06,
+      "displacement_load_relative": 4.404009567549307e-06,
+      "physical_impedance_norm": 370.5106233942614,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 391.995436,
+      "rate_hz": 32000,
+      "midpoint_frequency_hz": 392.18906879922537,
+      "frequency_warp_relative": 0.0004939669737007435,
+      "impedance_relative": 0.0009761270391292887,
+      "displacement_load_relative": 0.000883709907785377,
+      "physical_impedance_norm": 538.8868704253975,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 391.995436,
+      "rate_hz": 64000,
+      "midpoint_frequency_hz": 392.0438226883333,
+      "frequency_warp_relative": 0.00012343686657945163,
+      "impedance_relative": 0.00024389390025221036,
+      "displacement_load_relative": 0.00022081391288636043,
+      "physical_impedance_norm": 538.8868704253975,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 391.995436,
+      "rate_hz": 128000,
+      "midpoint_frequency_hz": 392.0075313283719,
+      "frequency_warp_relative": 3.085578876960149e-05,
+      "impedance_relative": 6.096486226922142e-05,
+      "displacement_load_relative": 5.519638268385254e-05,
+      "physical_impedance_norm": 538.8868704253975,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 391.995436,
+      "rate_hz": 256000,
+      "midpoint_frequency_hz": 391.99845974812285,
+      "frequency_warp_relative": 7.713732980363375e-06,
+      "impedance_relative": 1.5240677321118193e-05,
+      "displacement_load_relative": 1.3798652237293318e-05,
+      "physical_impedance_norm": 538.8868704253975,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 523.251131,
+      "rate_hz": 32000,
+      "midpoint_frequency_hz": 523.7118835315163,
+      "frequency_warp_relative": 0.0008805571631267384,
+      "impedance_relative": 0.0021552948044354886,
+      "displacement_load_relative": 0.002027899514636682,
+      "physical_impedance_norm": 709.3029233088221,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 523.251131,
+      "rate_hz": 64000,
+      "midpoint_frequency_hz": 523.3662279169729,
+      "frequency_warp_relative": 0.00021996496548970512,
+      "impedance_relative": 0.0005382670088968619,
+      "displacement_load_relative": 0.0005065064878752894,
+      "physical_impedance_norm": 709.3029233088221,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 523.251131,
+      "rate_hz": 128000,
+      "midpoint_frequency_hz": 523.2798995339583,
+      "frequency_warp_relative": 5.4980356952727405e-05,
+      "impedance_relative": 0.00013453197075391954,
+      "displacement_load_relative": 0.00012659735052246088,
+      "physical_impedance_norm": 709.3029233088221,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 523.251131,
+      "rate_hz": 256000,
+      "midpoint_frequency_hz": 523.2583227776233,
+      "frequency_warp_relative": 1.37444091321548e-05,
+      "impedance_relative": 3.363081903144605e-05,
+      "displacement_load_relative": 3.1647508211916164e-05,
+      "physical_impedance_norm": 709.3029233088221,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 1000.0,
+      "rate_hz": 32000,
+      "midpoint_frequency_hz": 1003.2251965664246,
+      "frequency_warp_relative": 0.003225196566424726,
+      "impedance_relative": 0.013391183064724952,
+      "displacement_load_relative": 0.013217688662724195,
+      "physical_impedance_norm": 1242.2473122977933,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 1000.0,
+      "rate_hz": 64000,
+      "midpoint_frequency_hz": 1000.8039653559875,
+      "frequency_warp_relative": 0.0008039653559877014,
+      "impedance_relative": 0.0033372583696606507,
+      "displacement_load_relative": 0.00329580792989327,
+      "physical_impedance_norm": 1242.2473122977933,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 1000.0,
+      "rate_hz": 128000,
+      "midpoint_frequency_hz": 1000.200846011001,
+      "frequency_warp_relative": 0.00020084601100101018,
+      "impedance_relative": 0.0008336479964857829,
+      "displacement_load_relative": 0.0008234049726343787,
+      "physical_impedance_norm": 1242.2473122977933,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 1000.0,
+      "rate_hz": 256000,
+      "midpoint_frequency_hz": 1000.0502024280562,
+      "frequency_warp_relative": 5.020242805620079e-05,
+      "impedance_relative": 0.00020837021348970916,
+      "displacement_load_relative": 0.00020581692201848323,
+      "physical_impedance_norm": 1242.2473122977933,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 2500.0,
+      "rate_hz": 32000,
+      "midpoint_frequency_hz": 2551.439225248581,
+      "frequency_warp_relative": 0.020575690099432276,
+      "impedance_relative": 0.1491004249472353,
+      "displacement_load_relative": 0.14805878139992681,
+      "physical_impedance_norm": 2080.486741226343,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 2500.0,
+      "rate_hz": 64000,
+      "midpoint_frequency_hz": 2512.6259140348666,
+      "frequency_warp_relative": 0.005050365613946672,
+      "impedance_relative": 0.03703987648903743,
+      "displacement_load_relative": 0.03693285899402772,
+      "physical_impedance_norm": 2080.486741226343,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 2500.0,
+      "rate_hz": 128000,
+      "midpoint_frequency_hz": 2503.142194917676,
+      "frequency_warp_relative": 0.0012568779670703023,
+      "impedance_relative": 0.009222520509881935,
+      "displacement_load_relative": 0.009205291687486683,
+      "physical_impedance_norm": 2080.486741226343,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 2500.0,
+      "rate_hz": 256000,
+      "midpoint_frequency_hz": 2500.784661108591,
+      "frequency_warp_relative": 0.00031386444343639575,
+      "impedance_relative": 0.0023029551704931723,
+      "displacement_load_relative": 0.0022992400760081947,
+      "physical_impedance_norm": 2080.486741226343,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 6000.0,
+      "rate_hz": 32000,
+      "midpoint_frequency_hz": 6806.011717969034,
+      "frequency_warp_relative": 0.13433528632817238,
+      "impedance_relative": 0.6570406213248575,
+      "displacement_load_relative": 0.6395315309354757,
+      "physical_impedance_norm": 2619.342675776053,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 6000.0,
+      "rate_hz": 64000,
+      "midpoint_frequency_hz": 6179.727893330146,
+      "frequency_warp_relative": 0.029954648888357527,
+      "impedance_relative": 0.29612933916640455,
+      "displacement_load_relative": 0.2940103278497906,
+      "physical_impedance_norm": 2619.342675776053,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 6000.0,
+      "rate_hz": 128000,
+      "midpoint_frequency_hz": 6043.751847717319,
+      "frequency_warp_relative": 0.007291974619553221,
+      "impedance_relative": 0.07921614682693502,
+      "displacement_load_relative": 0.07908513399610467,
+      "physical_impedance_norm": 2619.342675776053,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 6000.0,
+      "rate_hz": 256000,
+      "midpoint_frequency_hz": 6010.866637394651,
+      "frequency_warp_relative": 0.0018111062324417393,
+      "impedance_relative": 0.019800190341466368,
+      "displacement_load_relative": 0.019794884226442308,
+      "physical_impedance_norm": 2619.342675776053,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 10000.0,
+      "rate_hz": 32000,
+      "midpoint_frequency_hz": 15244.301119233825,
+      "frequency_warp_relative": 0.5244301119233825,
+      "impedance_relative": 0.3248006985450606,
+      "displacement_load_relative": 0.37292433620121207,
+      "physical_impedance_norm": 2126.70448037533,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 10000.0,
+      "rate_hz": 64000,
+      "midpoint_frequency_hz": 10888.971446301768,
+      "frequency_warp_relative": 0.08889714463017673,
+      "impedance_relative": 0.1584079310435908,
+      "displacement_load_relative": 0.1707479614536628,
+      "physical_impedance_norm": 2126.70448037533,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 10000.0,
+      "rate_hz": 128000,
+      "midpoint_frequency_hz": 10205.756900994324,
+      "frequency_warp_relative": 0.020575690099432276,
+      "impedance_relative": 0.047696142713716916,
+      "displacement_load_relative": 0.05083966535205617,
+      "physical_impedance_norm": 2126.70448037533,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 10000.0,
+      "rate_hz": 256000,
+      "midpoint_frequency_hz": 10050.503656139466,
+      "frequency_warp_relative": 0.005050365613946672,
+      "impedance_relative": 0.012483691816404217,
+      "displacement_load_relative": 0.013288541224528647,
+      "physical_impedance_norm": 2126.70448037533,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 12000.0,
+      "rate_hz": 32000,
+      "midpoint_frequency_hz": 24590.977416395,
+      "frequency_warp_relative": 1.0492481180329167,
+      "impedance_relative": 0.49915290327234296,
+      "displacement_load_relative": 0.480363013032575,
+      "physical_impedance_norm": 1947.059377071428,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 12000.0,
+      "rate_hz": 64000,
+      "midpoint_frequency_hz": 13612.023435938068,
+      "frequency_warp_relative": 0.13433528632817238,
+      "impedance_relative": 0.08417495083658627,
+      "displacement_load_relative": 0.11143763947374999,
+      "physical_impedance_norm": 1947.059377071428,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 12000.0,
+      "rate_hz": 128000,
+      "midpoint_frequency_hz": 12359.455786660292,
+      "frequency_warp_relative": 0.029954648888357527,
+      "impedance_relative": 0.023151142210390184,
+      "displacement_load_relative": 0.031070214945722735,
+      "physical_impedance_norm": 1947.059377071428,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    },
+    {
+      "frequency_hz": 12000.0,
+      "rate_hz": 256000,
+      "midpoint_frequency_hz": 12087.503695434638,
+      "frequency_warp_relative": 0.007291974619553221,
+      "impedance_relative": 0.006130181674277643,
+      "displacement_load_relative": 0.008133920394542648,
+      "physical_impedance_norm": 1947.059377071428,
+      "criterion": "No acoustic/microphone convergence gate inferred from this matrix norm."
+    }
+  ],
+  "seconds": 82.11405709997052,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "data": {
+    "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P6-dispersion-aire-2026-10-09\\operadores.npz",
+    "sha256": "94e964bff7b14b75c8899f522981549d977a9b60e75116aa735d5d5820141001",
+    "bytes": 225639645
+  },
+  "source_and_cache_unchanged": true
+}

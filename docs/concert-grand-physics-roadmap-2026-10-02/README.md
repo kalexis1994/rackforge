@@ -150,6 +150,21 @@ acoplado frente a matriz/ODE exacta y puerto de mayor orden en banco pequeño;
 después trabajo/coste en banco grande, duración/release y F4 para escucha.
 No retocar física para compensar error numérico. Gates globales pendientes.
 
+El [análisis de fase lineal y dispersión del aire](RESULTADOS-P6-fase-lineal.md)
+añade tres pruebas que pasan y una referencia exponencial contrastada con ODE.
+El banco pequeño no reproduce el fallo grande; Gauss en el bloque acoplado
+empeora la fase de las portadoras y se rechaza. Se mide entonces el mismo
+operador acústico real de rango 192/606 coordenadas, sin ataque nuevo:
+a 128 kHz la matriz de carga armónica cambia 7,909 % a 6 kHz y 5,084 %
+a 10 kHz por la discretización midpoint. No son errores de micrófono.
+Ocho frecuencias/cuatro tasas y hashes/normas verificados; informes sólo
+repo, matrices reutilizables sólo caché local, ninguna otra R ni audio.
+Sigue implementar dos etapas Gauss sólo en el aire con una rama compleja
+y su conjugada, fuerza media y radiación de ambas etapas; conservar las
+portadoras mecánicas y trabajo de puerto. Derivación documentada, todavía
+sin selección: equivalencia/pasividad/coste primero, luego coast auténtico,
+duración/release y F4. Gates globales y precisión acústica siguen pendientes.
+
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.
 Se prioriza esa cobertura y su carga acústica antes de otra escucha musical

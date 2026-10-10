@@ -1,0 +1,185 @@
+{
+  "stage": "completed actual Gauss air harmonic constant-port controls",
+  "all_gates_passed": false,
+  "approved_for_audition": false,
+  "source_sha256": {
+    "measure-concert-grand-native-bands.py": "215a8f7ab4530b9718f0da846decf6590417b552d3e5641b3e47f34e19d8de0f",
+    "concert_grand_band_diagnostics.py": "6589fb3d567855e6b05188e6e52145ad232acaec688bacef93359f11bb3ef242",
+    "concert_grand_uniform_spectra.py": "f1ed9bc37a149f0bbf92019e4664b0e332da7206b1116fed966d318672e69417",
+    "concert_grand_window_spectra.py": "ba4f6dfdb7d3fd4c62dcffae7430607aeed96eed52345e3ec5c9cb741269b65c",
+    "concert_grand_cell_audio.py": "57c3bccf6c0bbe0c930794ccc5710f94b1a26873722e461f7ff72ef254acacf9",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46",
+    "concert_grand_audition_air.py": "de66a1c93f5a5a8b89adf485e87f22a2c8428bbd9f9e794b8790dab441f62eb6",
+    "measure-concert-grand-coast-bands.py": "71c7bf15b019f1e78e662d77ac9ff3ef83be02796228986fd52cd4ac04461b06",
+    "measure-concert-grand-coast-controls.py": "2d58a5818753ebf4b078f61170d34da360bb07034ffa5a011b6f073bf718b24a",
+    "concert_grand_coast_controls.py": "15e18a826264fab642ad1c5361b93e7427e666553e57e630b6cfc30c5f4e1654",
+    "measure-concert-grand-air-warp.py": "ad3d360151be9ed0cffe5478c65a593abbed691b984af0fe7f03ca9ae6d73bab",
+    "measure-concert-grand-gauss-response.py": "d2ac1feea7304022cb346a9e8c9735035d40c66c341db8fc8c0b61b803370545",
+    "concert_grand_gauss_response.py": "ab55b88437f6a0b3272402bc095ccb8a9a18f13521dd6f1fb2f628f019c9cf62"
+  },
+  "warp_report_sha256": "0f08d6589e0784787314d198c474f596f4ef4608bb68c81cb7c4dee7baec9f7b",
+  "original_operator_data_sha256": "94e964bff7b14b75c8899f522981549d977a9b60e75116aa735d5d5820141001",
+  "cases": [
+    {
+      "frequency_hz": 6000.0,
+      "rate_hz": 32000,
+      "load_relative": 0.15047020790124757,
+      "midpoint_load_relative": 0.6395315309354757,
+      "reference_row_energy_key": "physical5_load_row_energy",
+      "delta_row_energy_key": "gauss5_32000_delta_row_energy",
+      "reciprocity_relative": 1.0046230130196552e-15
+    },
+    {
+      "frequency_hz": 6000.0,
+      "rate_hz": 64000,
+      "load_relative": 0.04313065719640811,
+      "midpoint_load_relative": 0.2940103278497906,
+      "reference_row_energy_key": "physical5_load_row_energy",
+      "delta_row_energy_key": "gauss5_64000_delta_row_energy",
+      "reciprocity_relative": 1.020764710535151e-15
+    },
+    {
+      "frequency_hz": 6000.0,
+      "rate_hz": 128000,
+      "load_relative": 0.006927691642424544,
+      "midpoint_load_relative": 0.07908513399610467,
+      "reference_row_energy_key": "physical5_load_row_energy",
+      "delta_row_energy_key": "gauss5_128000_delta_row_energy",
+      "reciprocity_relative": 1.0294129349506238e-15
+    },
+    {
+      "frequency_hz": 6000.0,
+      "rate_hz": 256000,
+      "load_relative": 0.0025722303314826053,
+      "midpoint_load_relative": 0.019794884226442308,
+      "reference_row_energy_key": "physical5_load_row_energy",
+      "delta_row_energy_key": "gauss5_256000_delta_row_energy",
+      "reciprocity_relative": 1.0363552882736144e-15
+    },
+    {
+      "frequency_hz": 10000.0,
+      "rate_hz": 32000,
+      "load_relative": 0.29460800226057454,
+      "midpoint_load_relative": 0.37292433620121207,
+      "reference_row_energy_key": "physical6_load_row_energy",
+      "delta_row_energy_key": "gauss6_32000_delta_row_energy",
+      "reciprocity_relative": 8.7154176304788e-16
+    },
+    {
+      "frequency_hz": 10000.0,
+      "rate_hz": 64000,
+      "load_relative": 0.1081141796545847,
+      "midpoint_load_relative": 0.1707479614536628,
+      "reference_row_energy_key": "physical6_load_row_energy",
+      "delta_row_energy_key": "gauss6_64000_delta_row_energy",
+      "reciprocity_relative": 9.602987132101193e-16
+    },
+    {
+      "frequency_hz": 10000.0,
+      "rate_hz": 128000,
+      "load_relative": 0.021847953688752253,
+      "midpoint_load_relative": 0.05083966535205617,
+      "reference_row_energy_key": "physical6_load_row_energy",
+      "delta_row_energy_key": "gauss6_128000_delta_row_energy",
+      "reciprocity_relative": 1.0003486834487717e-15
+    },
+    {
+      "frequency_hz": 10000.0,
+      "rate_hz": 256000,
+      "load_relative": 0.00726649729917448,
+      "midpoint_load_relative": 0.013288541224528647,
+      "reference_row_energy_key": "physical6_load_row_energy",
+      "delta_row_energy_key": "gauss6_256000_delta_row_energy",
+      "reciprocity_relative": 1.0321987781134154e-15
+    },
+    {
+      "frequency_hz": 12000.0,
+      "rate_hz": 32000,
+      "load_relative": 0.35549133975633634,
+      "midpoint_load_relative": 0.480363013032575,
+      "reference_row_energy_key": "physical7_load_row_energy",
+      "delta_row_energy_key": "gauss7_32000_delta_row_energy",
+      "reciprocity_relative": 7.506975330493307e-16
+    },
+    {
+      "frequency_hz": 12000.0,
+      "rate_hz": 64000,
+      "load_relative": 0.15294689582528367,
+      "midpoint_load_relative": 0.11143763947374999,
+      "reference_row_energy_key": "physical7_load_row_energy",
+      "delta_row_energy_key": "gauss7_64000_delta_row_energy",
+      "reciprocity_relative": 8.71623761513565e-16
+    },
+    {
+      "frequency_hz": 12000.0,
+      "rate_hz": 128000,
+      "load_relative": 0.03399376735720104,
+      "midpoint_load_relative": 0.031070214945722735,
+      "reference_row_energy_key": "physical7_load_row_energy",
+      "delta_row_energy_key": "gauss7_128000_delta_row_energy",
+      "reciprocity_relative": 9.235609543271523e-16
+    },
+    {
+      "frequency_hz": 12000.0,
+      "rate_hz": 256000,
+      "load_relative": 0.010798420074034986,
+      "midpoint_load_relative": 0.008133920394542648,
+      "reference_row_energy_key": "physical7_load_row_energy",
+      "delta_row_energy_key": "gauss7_256000_delta_row_energy",
+      "reciprocity_relative": 9.428642963386004e-16
+    }
+  ],
+  "scope": "Actual rank192/606 port air; harmonic Gauss response under constant interval velocity. No matrix/operator copy to disk, contact, living coast or microphone error.",
+  "seconds": 62.89079250005307,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "data": {
+    "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-respuesta-Gauss-2026-10-10\\normas.npz",
+    "sha256": "03f0857c8b1c3317d6a84af26c93ad14c5693f6bf53ade7bbc0427f4c6dcdbe9",
+    "bytes": 72572
+  },
+  "source_and_cache_unchanged": true
+}

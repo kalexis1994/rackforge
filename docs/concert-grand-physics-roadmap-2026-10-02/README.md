@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-09. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-10. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -164,6 +164,21 @@ y su conjugada, fuerza media y radiación de ambas etapas; conservar las
 portadoras mecánicas y trabajo de puerto. Derivación documentada, todavía
 sin selección: equivalencia/pasividad/coste primero, luego coast auténtico,
 duración/release y F4. Gates globales y precisión acústica siguen pendientes.
+
+El [paso Gauss sólo del aire](RESULTADOS-P6-aire-Gauss.md) ya se implementa
+con un único GEMV real de residuos y dos paquetes independientes de radiación.
+Cuatro pruebas pasan: etapas reales/complejas con memoria, respuesta armónica,
+trabajo completo y ODE no lineal. Ensayo grande 4,59 min: 128 kHz mejora Hann
+alto a 1,268 %, pero sigue fallando y empeora onda a una cota 2,200 %
+(inferior 1,985 %). A 256 pasa sólo el tramo con 0,327 % y cuesta 3,076×
+el splitting 128 de la misma ejecución; rechazar como aceleración.
+Respuesta real armónica en 1,05 min: a 128 la carga 6/10 kHz mejora a
+0,693/2,185 % frente a 7,909/5,084 %, pero 12 kHz empeora a 3,399 %.
+Corregir el operador aislado no basta para el estado acoplado completo.
+Fuentes/datos/ledger/cotas verificadas, sin R/estado/audio duplicado. Sigue
+dos velocidades y fuerzas de puerto emparejadas con las mitades mecánicas,
+equivalencia/work/coste primero; luego mismo coast, duración/release y F4.
+Hipótesis registrada, no causa exclusiva demostrada. Gates globales falsos.
 
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.

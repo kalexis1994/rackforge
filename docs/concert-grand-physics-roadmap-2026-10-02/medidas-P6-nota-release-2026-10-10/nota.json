@@ -1,0 +1,504 @@
+{
+  "stage": "completed C4 physical note, release and diagnostic audio",
+  "all_gates_passed": false,
+  "approved_for_audition": true,
+  "complete_polyphonic_temporal_convergence": false,
+  "complete_energy_certificate": false,
+  "diagnostic_listening": true,
+  "sampled_audio_used": false,
+  "keys": [
+    60,
+    67,
+    72
+  ],
+  "wires_per_key": 3,
+  "key": 60,
+  "velocity": 84,
+  "pedal": false,
+  "contact_rate_hz": 256000,
+  "coast_rate_hz": 128000,
+  "capture_rate_hz": 128000,
+  "output_rate_hz": 48000,
+  "pressure_gain_per_pa": 0.25,
+  "lead_s": 0.1,
+  "schedule": [
+    [
+      0.0,
+      "on",
+      60,
+      84
+    ],
+    [
+      0.16,
+      "off",
+      60,
+      0
+    ]
+  ],
+  "initial_duration_s": 0.4,
+  "maximum_duration_s": 0.8,
+  "tail_rms_relative_limit": 0.01,
+  "criteria": {
+    "band_relative": 0.01,
+    "hermite_oracle_relative": 1e-10,
+    "band_energy_grid_relative": 0.001,
+    "band_error_grid_absolute": 0.0001,
+    "release_replay_relative": 1e-09
+  },
+  "reference_report_sha256": "aa281f3c3494621e9f500b604165722e97f9c67f76f8816ac3c5215219446886",
+  "source_sha256": {
+    "measure-concert-grand-native-bands.py": "215a8f7ab4530b9718f0da846decf6590417b552d3e5641b3e47f34e19d8de0f",
+    "concert_grand_band_diagnostics.py": "6589fb3d567855e6b05188e6e52145ad232acaec688bacef93359f11bb3ef242",
+    "concert_grand_uniform_spectra.py": "f1ed9bc37a149f0bbf92019e4664b0e332da7206b1116fed966d318672e69417",
+    "concert_grand_window_spectra.py": "ba4f6dfdb7d3fd4c62dcffae7430607aeed96eed52345e3ec5c9cb741269b65c",
+    "concert_grand_cell_audio.py": "57c3bccf6c0bbe0c930794ccc5710f94b1a26873722e461f7ff72ef254acacf9",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46",
+    "concert_grand_audition_air.py": "de66a1c93f5a5a8b89adf485e87f22a2c8428bbd9f9e794b8790dab441f62eb6",
+    "measure-concert-grand-coast-bands.py": "71c7bf15b019f1e78e662d77ac9ff3ef83be02796228986fd52cd4ac04461b06",
+    "render-concert-grand-note-release.py": "75deef2d2479145e8c46c666c795a823455738c2fb96219006622a455bdc65b8",
+    "concert_grand_note_trace.py": "c3d5a3da9bed4b6a9f5d8847fcc3ea6d46506c133fcbb79fa2c38ae16d22c70a",
+    "concert_grand_integrated_phrase.py": "018b19a265bf5669ed3b9ec51ba1d67610b9d6643633919b686cbadb3b584557",
+    "render-concert-grand-integrated-phrase.py": "9317b5bc61e768638028677e738690e719ef9bf13f063dfcf9d73c8d4e962a33",
+    "concert_grand_damper_control.py": "bd38482212fea96774f361c15b9c5f4fb37ed9653e5081f2e14fdb15eeeeed9a"
+  },
+  "release_cases": [
+    {
+      "rate_hz": 64000,
+      "seconds": 30.22563960001571,
+      "duration_s": 0.008,
+      "absolute_start_s": 0.184,
+      "damper_heat_j": 0.00021693865893987469,
+      "air_work_j": 2.5580328866414182e-06,
+      "material_heat_j": 1.3572163205318944e-05,
+      "mechanical_work_relative": 1.1164905556503189e-13,
+      "windows": {
+        "rectangular": {
+          "total_relative": 0.0002124344158185788,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 0.00012418158597376117,
+              "reference_energy_share": 0.7838457738089102,
+              "absolute_relative_to_total": 0.00010994424788469087
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 0.0003679264675377397,
+              "reference_energy_share": 0.2125937985478311,
+              "absolute_relative_to_total": 0.0001696431494949803
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.0007840306586341634,
+              "reference_energy_share": 0.003455731499598911,
+              "absolute_relative_to_total": 4.608961087210371e-05
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.004518529943752346,
+              "reference_energy_share": 0.00010469614365977856,
+              "absolute_relative_to_total": 4.62341105714419e-05
+            }
+          ],
+          "all_bands_1_percent_passed": true
+        },
+        "hann": {
+          "total_relative": 0.00019873826195819736,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 0.0001280996735693402,
+              "reference_energy_share": 0.7349530251678902,
+              "absolute_relative_to_total": 0.00010981908325129061
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 0.0002939922650300999,
+              "reference_energy_share": 0.2650426886018074,
+              "absolute_relative_to_total": 0.0001513539705150768
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.023309654920695342,
+              "reference_energy_share": 4.285913325071584e-06,
+              "absolute_relative_to_total": 4.825669072483274e-05
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 2.6344538042178116,
+              "reference_energy_share": 3.1697740448107506e-10,
+              "absolute_relative_to_total": 4.6903444752174374e-05
+            }
+          ],
+          "all_bands_1_percent_passed": false
+        }
+      },
+      "state_relative_to256": {
+        "mechanical": 0.0009010241278647062,
+        "wave": 0.005567681881713296,
+        "relaxation": 0.0005607011659551391
+      },
+      "local_1_percent_passed": false
+    },
+    {
+      "rate_hz": 128000,
+      "seconds": 62.323532600014005,
+      "duration_s": 0.008,
+      "absolute_start_s": 0.184,
+      "damper_heat_j": 0.00021694172389979407,
+      "air_work_j": 2.5549293177609e-06,
+      "material_heat_j": 1.3574117892939562e-05,
+      "mechanical_work_relative": 5.752237410673468e-14,
+      "windows": {
+        "rectangular": {
+          "total_relative": 4.278370882095376e-05,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 2.5196663475150715e-05,
+              "reference_energy_share": 0.7838457738089102,
+              "absolute_relative_to_total": 2.2307882390585992e-05
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 7.406072534356171e-05,
+              "reference_energy_share": 0.2125937985478311,
+              "absolute_relative_to_total": 3.4147841510955675e-05
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.0001551621257320271,
+              "reference_energy_share": 0.003455731499598911,
+              "absolute_relative_to_total": 9.121278509102863e-06
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.0008932218439714336,
+              "reference_energy_share": 0.00010469614365977856,
+              "absolute_relative_to_total": 9.139547156504565e-06
+            }
+          ],
+          "all_bands_1_percent_passed": true
+        },
+        "hann": {
+          "total_relative": 3.964913642756692e-05,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 2.538833040210936e-05,
+              "reference_energy_share": 0.7349530251678902,
+              "absolute_relative_to_total": 2.1765263660342683e-05
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 5.898482499625565e-05,
+              "reference_energy_share": 0.2650426886018074,
+              "absolute_relative_to_total": 3.0366742684220645e-05
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.00461479266865666,
+              "reference_energy_share": 4.285913325071584e-06,
+              "absolute_relative_to_total": 9.553750294813324e-06
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.5175779687892698,
+              "reference_energy_share": 3.1697740448107506e-10,
+              "absolute_relative_to_total": 9.214885311400602e-06
+            }
+          ],
+          "all_bands_1_percent_passed": false
+        }
+      },
+      "state_relative_to256": {
+        "mechanical": 0.00010608419418332478,
+        "wave": 0.0011122800679057349,
+        "relaxation": 0.00011205458094588399
+      },
+      "local_1_percent_passed": false
+    },
+    {
+      "rate_hz": 256000,
+      "seconds": 111.48569160001352,
+      "duration_s": 0.008,
+      "absolute_start_s": 0.184,
+      "damper_heat_j": 0.0002169424346299313,
+      "air_work_j": 2.5541550538282372e-06,
+      "material_heat_j": 1.3574610907687245e-05,
+      "mechanical_work_relative": 1.836970819135291e-14,
+      "windows": {
+        "rectangular": {
+          "total_relative": 0.0,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 0.0,
+              "reference_energy_share": 0.7838457738089102,
+              "absolute_relative_to_total": 0.0
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 0.0,
+              "reference_energy_share": 0.2125937985478311,
+              "absolute_relative_to_total": 0.0
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.0,
+              "reference_energy_share": 0.003455731499598911,
+              "absolute_relative_to_total": 0.0
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.0,
+              "reference_energy_share": 0.00010469614365977856,
+              "absolute_relative_to_total": 0.0
+            }
+          ],
+          "all_bands_1_percent_passed": true
+        },
+        "hann": {
+          "total_relative": 0.0,
+          "bands": [
+            {
+              "lower_hz": 60.0,
+              "upper_hz": 800.0,
+              "relative": 0.0,
+              "reference_energy_share": 0.7349530251678902,
+              "absolute_relative_to_total": 0.0
+            },
+            {
+              "lower_hz": 800.0,
+              "upper_hz": 2500.0,
+              "relative": 0.0,
+              "reference_energy_share": 0.2650426886018074,
+              "absolute_relative_to_total": 0.0
+            },
+            {
+              "lower_hz": 2500.0,
+              "upper_hz": 6000.0,
+              "relative": 0.0,
+              "reference_energy_share": 4.285913325071584e-06,
+              "absolute_relative_to_total": 0.0
+            },
+            {
+              "lower_hz": 6000.0,
+              "upper_hz": 12000.0,
+              "relative": 0.0,
+              "reference_energy_share": 3.1697740448107506e-10,
+              "absolute_relative_to_total": 0.0
+            }
+          ],
+          "all_bands_1_percent_passed": true
+        }
+      },
+      "state_relative_to256": {
+        "mechanical": 0.0,
+        "wave": 0.0,
+        "relaxation": 0.0
+      },
+      "local_1_percent_passed": true
+    }
+  ],
+  "seconds": 2193.7241421999643,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "mechanical_coordinates": 4065,
+  "air_states": 250428,
+  "packed_residue_ram_bytes": 191397888,
+  "new_disk_cache": false,
+  "progress": {
+    "physical_time_s": 0.399390625,
+    "duration_s": 0.4,
+    "seconds": 1901.5918917999952,
+    "pedal": false,
+    "contact_steps": 412,
+    "coast_steps": 50916,
+    "recontact_retries": 0
+  },
+  "trajectory": {
+    "seconds": 1908.1772389999824,
+    "pedal": false,
+    "felt_heat_j": 0.0010126453547295862,
+    "material_heat_j": 0.0012603653752177079,
+    "damper_heat_j": 0.0014982985143764365,
+    "external_head_work_j": 0.007771642442348359,
+    "launches": [
+      {
+        "time_s": 0.0,
+        "key": 60,
+        "external_work_j": 0.007771642442348359
+      }
+    ],
+    "maximum_felt_force_n": 13.541393381213481,
+    "max_mechanical_iterations": 5,
+    "contact_steps": 412,
+    "coast_steps": 50994,
+    "recontact_retries": 0,
+    "sympathetic_G4_before_strike_modal_norm_m": 4.172975762413959e-06,
+    "final_mechanical_j": 0.0036775821628536004,
+    "radiation_ledger_deferred": true,
+    "complete_energy_certificate": false
+  },
+  "accepted_checkpoint_times_s": [
+    0.16,
+    0.184,
+    0.192,
+    0.4
+  ],
+  "mechanical_work_ledger": {
+    "air_port_work_j": 0.00032275103517887135,
+    "residual_j": 7.843118515760139e-15,
+    "relative": 1.0091970357542829e-12,
+    "scope": "Mechanical/felt/damper/air-port work; radiation ledger deferred."
+  },
+  "tail_check": {
+    "duration_s": 0.4,
+    "held_rms": 0.10446169987491756,
+    "last20ms_rms": 0.0006961038569803229,
+    "relative": 0.006663723238410227,
+    "passed": true
+  },
+  "tail_extensions": [],
+  "physical_duration_s": 0.4,
+  "audio_file": {
+    "path": "C:\\SHARED\\Piano-nota-release-2026-10-10\\C4-84-sin-pedal-128k.wav",
+    "sha256": "a39511cbf5881996b921b12ab013de53cb4206d78350c66b622a070380fabfeb",
+    "bytes": 193394,
+    "frames": 24167,
+    "seconds": 0.5034791666666667,
+    "peak": 0.2690223753452301,
+    "finite": true,
+    "format": "FLOAT32 stereo",
+    "no_output_fade": true
+  },
+  "prior16k_prefix_comparison": {
+    "waveform_relative": 0.006836052033456287,
+    "bands": [
+      {
+        "lower_hz": 0,
+        "upper_hz": 60,
+        "reference_energy_share": 0.00020705613526600115,
+        "relative_error": 0.0009883187490310824,
+        "absolute_error_relative_to_full": 1.4221358551508569e-05
+      },
+      {
+        "lower_hz": 60,
+        "upper_hz": 800,
+        "reference_energy_share": 0.9700004914489763,
+        "relative_error": 0.004389725764163971,
+        "absolute_error_relative_to_full": 0.0043233795792294895
+      },
+      {
+        "lower_hz": 800,
+        "upper_hz": 2500,
+        "reference_energy_share": 0.02974228871333994,
+        "relative_error": 0.026164346827983104,
+        "absolute_error_relative_to_full": 0.004512290897961555
+      },
+      {
+        "lower_hz": 2500,
+        "upper_hz": 6000,
+        "reference_energy_share": 3.072350744922158e-05,
+        "relative_error": 0.13627233612905032,
+        "absolute_error_relative_to_full": 0.0007553410682509817
+      },
+      {
+        "lower_hz": 6000,
+        "upper_hz": 12000,
+        "reference_energy_share": 7.248650630787382e-06,
+        "relative_error": 0.02236767402352081,
+        "absolute_error_relative_to_full": 6.022120052040156e-05
+      },
+      {
+        "lower_hz": 12000,
+        "upper_hz": 24001,
+        "reference_energy_share": 1.219154433760697e-05,
+        "relative_error": 0.7633933091101633,
+        "absolute_error_relative_to_full": 0.0026654940068924584
+      }
+    ],
+    "waveform_1_percent_passed": true,
+    "bands_60_12000_1_percent_passed": false,
+    "path": "C:\\SHARED\\Piano-contacto-integrado-2026-10-09\\Frase-integrada-sin-pedal.wav",
+    "sha256": "87e7399025574f6cb18632f3ca9a9a2949bf85852f2af63ab83c504d15e8a181",
+    "report_sha256": "de6f62fee6c5bc2a19a391db159a75e69e1296937bc7680df19320db7d9c03fc",
+    "physical_prefix_s": 0.12,
+    "scope": "Same physical launch/events before note-off. Different temporal discretization, not Steinway fidelity."
+  },
+  "release_replay": {
+    "states": 1.8401493159113007e-14,
+    "trace": 9.934509269540614e-15,
+    "passed": true
+  },
+  "release_spectral_data": {
+    "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-nota-release-2026-10-10\\release.npz",
+    "sha256": "0179265f1d9dc3031fadfa30e76b9ef1ddfea90f6522ab0b7af2e3dbdf0e85e3",
+    "bytes": 478469
+  },
+  "source_and_cache_unchanged": true
+}

@@ -195,6 +195,18 @@ contacto/coast para que igualar tasas no mande todo al solver de contacto;
 protocolo concreto en el informe. Después duración/release, frase y F4.
 Sin selección de timbre ni cambios al plugin instalado; gates globales falsos.
 
+La [C4/84 completa con release físico](RESULTADOS-P6-nota-release.md) ya está
+renderizada a contacto 256/coast 128 kHz: 400 ms físicos, 0,503 s de WAV,
+cola a −43,5 dB sin fade. Trayectoria 31,80 min; total con controles 36,56 min.
+Reproducción del release a la misma tasa: estados 1,84e−14. Cierre de trabajo
+mecánico 1,01e−12 relativo. Fuentes, R, tabla, audio y bandas autenticados;
+ninguna historia o caché grande adicional. Audio sólo en SHARED.
+64/128 pasan bandas rectangulares del tramo, pero **fallan Hann 6–12 kHz**
+(263,445/51,758 %; referencia de energía muy pequeña, gate conservado).
+Malla Hann pasa; malla rectangular falla energía (0,12454 % frente a 0,1 %).
+Escucha diagnóstica, sin aprobación global. Sigue frase corta/F4 y conservar
+los pendientes de precisión; evaluar el audio antes de cambiar más física.
+
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.
 Se prioriza esa cobertura y su carga acústica antes de otra escucha musical

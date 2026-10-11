@@ -1,0 +1,115 @@
+{
+  "report_sha256": "0d9233b1f82962bc4a67527f4c980af04e9872ffac14bb6ef15fd9bbdc854e0f",
+  "verifier_sha256": "1b7f50134297190674e96b4cd610bfcc16654d356557ba817bcf24518c2ce4bc",
+  "source_verified": {
+    "measure-concert-grand-native-bands.py": true,
+    "concert_grand_band_diagnostics.py": true,
+    "concert_grand_uniform_spectra.py": true,
+    "concert_grand_window_spectra.py": true,
+    "concert_grand_cell_audio.py": true,
+    "concert_grand_shared_strings.py": true,
+    "concert_grand_shared_kernels.py": true,
+    "concert_grand_exponential_contact.py": true,
+    "concert_grand_packed_air.py": true,
+    "render-concert-grand-shared-phrase.py": true,
+    "concert_grand_audition_air.py": true,
+    "measure-concert-grand-coast-bands.py": true,
+    "render-concert-grand-note-release.py": true,
+    "concert_grand_note_trace.py": true,
+    "concert_grand_integrated_phrase.py": true,
+    "render-concert-grand-integrated-phrase.py": true,
+    "concert_grand_damper_control.py": true
+  },
+  "cache_verified": {
+    "board": true,
+    "residue": true
+  },
+  "audio_verified": true,
+  "audio_peak": 0.2690223753452301,
+  "tail_relative": 0.006663723238410227,
+  "spectral_archive_verified": true,
+  "mechanical_ledger_arithmetic_verified": true,
+  "independently_integrated_bands": [
+    {
+      "rate_hz": 64000,
+      "window": "rectangular",
+      "band_relative": [
+        0.00012418158597376117,
+        0.0003679264675377397,
+        0.0007840306586341634,
+        0.004518529943752346
+      ],
+      "nested_energy_relative": 0.0012454004013898747,
+      "nested_error_absolute": 2.2307673111060218e-07,
+      "grid_passed": false
+    },
+    {
+      "rate_hz": 64000,
+      "window": "hann",
+      "band_relative": [
+        0.0001280996735693402,
+        0.0002939922650300999,
+        0.023309654920695342,
+        2.6344538042178116
+      ],
+      "nested_energy_relative": 0.0006161034666562496,
+      "nested_error_absolute": 9.183362322628952e-05,
+      "grid_passed": true
+    },
+    {
+      "rate_hz": 128000,
+      "window": "rectangular",
+      "band_relative": [
+        2.5196663475150715e-05,
+        7.406072534356171e-05,
+        0.0001551621257320271,
+        0.0008932218439714336
+      ],
+      "nested_energy_relative": 0.0012454004013898747,
+      "nested_error_absolute": 4.4715287093717256e-08,
+      "grid_passed": false
+    },
+    {
+      "rate_hz": 128000,
+      "window": "hann",
+      "band_relative": [
+        2.538833040210936e-05,
+        5.898482499625565e-05,
+        0.00461479266865666,
+        0.5175779687892698
+      ],
+      "nested_energy_relative": 0.0006161034666562496,
+      "nested_error_absolute": 1.7953903764800216e-05,
+      "grid_passed": true
+    },
+    {
+      "rate_hz": 256000,
+      "window": "rectangular",
+      "band_relative": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "nested_energy_relative": 0.0012454004013898747,
+      "nested_error_absolute": 0.0,
+      "grid_passed": false
+    },
+    {
+      "rate_hz": 256000,
+      "window": "hann",
+      "band_relative": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "nested_energy_relative": 0.0006161034666562496,
+      "nested_error_absolute": 0.0,
+      "grid_passed": true
+    }
+  ],
+  "nested_grid_passed": false,
+  "independent_hermite_oracle_measured": false,
+  "full_temporal_convergence_established": false
+}

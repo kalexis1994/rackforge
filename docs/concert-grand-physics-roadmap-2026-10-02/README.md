@@ -180,6 +180,21 @@ dos velocidades y fuerzas de puerto emparejadas con las mitades mecánicas,
 equivalencia/work/coste primero; luego mismo coast, duración/release y F4.
 Hipótesis registrada, no causa exclusiva demostrada. Gates globales falsos.
 
+El [puerto con dos fuerzas y velocidades distintas](RESULTADOS-P6-puerto-dos-fuerzas.md)
+ya se implementa conservando todo el potencial y la memoria del aire.
+Cuatro pruebas independientes pasan. Ensayo grande 7,44 min: a 128 kHz
+Hann alto mejora **1,268 → 0,335 %** y cota de onda **2,200 → 0,407 %**
+frente al puerto constante anterior. A 32/64 falla presión alta;
+a 128/256 pasan los controles locales, pero cuestan **3,595/6,628×**
+el splitting actual 128. Se rechaza como aceleración y se conserva como
+control. Fuentes, datos, ledger, cuadraturas y cotas verificados; misma
+R/estado y ningún audio duplicado. Se cierra esta hipótesis de integración.
+Sigue **nota completa C4/84 con apagador y escucha**, usando el método
+actual, antes de otra cadena de diagnósticos pequeños. Revisar la ruta
+contacto/coast para que igualar tasas no mande todo al solver de contacto;
+protocolo concreto en el informe. Después duración/release, frase y F4.
+Sin selección de timbre ni cambios al plugin instalado; gates globales falsos.
+
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.
 Se prioriza esa cobertura y su carga acústica antes de otra escucha musical

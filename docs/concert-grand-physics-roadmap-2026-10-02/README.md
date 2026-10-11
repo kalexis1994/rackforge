@@ -207,6 +207,22 @@ Malla Hann pasa; malla rectangular falla energía (0,12454 % frente a 0,1 %).
 Escucha diagnóstica, sin aprobación global. Sigue frase corta/F4 y conservar
 los pendientes de precisión; evaluar el audio antes de cambiar más física.
 
+La [entrada musical y demanda de las piezas](RESULTADOS-P6-entrada-MIDI.md)
+ya conserva tempo, notas, velocidades y controladores de los MIDI originales.
+Dos parsers coinciden en 6028/11382 eventos; cuantización máxima 1,3021 µs.
+Cinco pruebas pasan: repetición/pedal/release por bloques conserva estados
+idénticos, y el nuevo constructor reproduce las matrices del banco anterior.
+Nocturno/Campanella necesitan 70/75 alturas; una matriz mecánica actual
+ocuparía 49,18/56,40 GiB. Captura monolítica: 259,56/318,04 GiB de B/V.
+Los primeros diez segundos de Campanella sólo usan D#4/D#5/D#6/D#7:
+se construye ese banco de 5218 coordenadas y doce cuerdas. Una sonda real
+de ataque de 6 ms pasa reloj/captura/ledger mecánico (2,809e−11 relativo),
+con buffer de 257 nudos; tarda 42,516 s y conserva el coste alto.
+Misma tabla/R, sin audio ni cachés nuevos. **Pendientes para escuchar ese
+fragmento:** presión/resampleo continuos, CC64 continuo y pedal suave CC67
+(ambos aparecen en el MIDI). Después ampliar duración con coste medido;
+para la pieza entera, eliminar matrices globales densas. Gates globales falsos.
+
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.
 Se prioriza esa cobertura y su carga acústica antes de otra escucha musical

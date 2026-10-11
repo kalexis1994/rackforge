@@ -1,0 +1,138 @@
+{
+  "stage": "four-key bank and event/capture probe completed",
+  "plan_report_sha256": "55c92764fc7f9e370d2e31c0ecd3297d73cbcb921bcef9192098f4a3dd6577e5",
+  "source_sha256": {
+    "measure-concert-grand-musical-register.py": "9867132a64faf5ca2c7bc37a2fa5cdfecc5261f4599a8cddf6cca922924e1af1",
+    "concert_grand_register.py": "8f972912a89863770e63194e1211b2ca22300227d08ac3e421375f30c19b8832",
+    "concert_grand_performance.py": "f1ff21f67591d1e35a9d5f63ba825f0df019b55ab1c69b95ceff4b480a2cd072",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46"
+  },
+  "keys": [
+    63,
+    75,
+    87,
+    99
+  ],
+  "sampled_audio_used": false,
+  "new_disk_cache": false,
+  "audio_files": [],
+  "faithful_midi_render": false,
+  "soft_pedal_implemented": false,
+  "scope": "Four real opening pitches, one 6ms cost/attack probe with original first velocity, frozen felt and fully lifted sustain. No soft pedal or complete musical phrase.",
+  "all_gates_passed": false,
+  "seconds": 127.30829489999451,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "register": {
+    "keys": [
+      63,
+      75,
+      87,
+      99
+    ],
+    "wires_per_key": 3,
+    "wire_tuning_offsets_cents": [
+      -0.4,
+      0.0,
+      0.6
+    ],
+    "mechanical_coordinates": 5218,
+    "one_dense_core_matrix_bytes": 217486368,
+    "matrix_budget_scope": "One matrix, not peak RAM; several matrices/factors are constructed.",
+    "wire_lengths_m": {
+      "63": 0.521355777457303,
+      "75": 0.2606778887286515,
+      "87": 0.13033894436432575,
+      "99": 0.06516947218216287
+    },
+    "parameters_identified": false,
+    "same_assumed_wire_and_felt_law": true,
+    "construction_seconds": 11.225799600011669
+  },
+  "factor_seconds": 6.718474599998444,
+  "packed_residue_ram_bytes": 191397888,
+  "probe": {
+    "seconds": 42.51618510001572,
+    "launches": [
+      {
+        "tick": 0,
+        "key": 63,
+        "external_work_j": 0.0002878386089758652
+      }
+    ],
+    "contact_steps": 700,
+    "coast_steps": 418,
+    "recontact_retries": 0,
+    "chunks": 3,
+    "maximum_buffered_knots": 257,
+    "nominal_capture_buffer_bytes": 2493928,
+    "buffer_scope": "Knot arrays only; spline temporaries, mechanics and air are additional.",
+    "felt_heat_j": 1.4570420897436698e-05,
+    "material_heat_j": 1.6939683947557527e-07,
+    "damper_heat_j": 0.0,
+    "external_head_work_j": 0.0002878386089758652,
+    "air_port_work_j": 6.116448072607651e-08,
+    "final_mechanical_j": 0.00027303762675014035,
+    "mechanical_work_residual_j": -8.086484554624117e-15,
+    "binary_pedal_diagnostic": false,
+    "frozen_program_diagnostic": false,
+    "full_temporal_convergence_established": false
+  },
+  "capture": {
+    "chunks": 3,
+    "intervals": 768,
+    "maximum_board_displacement_norm": 6.442437181328554e-07,
+    "maximum_board_velocity_norm": 0.0008624695911035983
+  },
+  "first_original_midi_event": {
+    "tick": 262667,
+    "kind": "on",
+    "key": 63,
+    "value": 28,
+    "channel": 0
+  },
+  "final_states_finite": true,
+  "source_and_cache_unchanged": true
+}

@@ -1,0 +1,30 @@
+{
+  "plan_sha256": "55c92764fc7f9e370d2e31c0ecd3297d73cbcb921bcef9192098f4a3dd6577e5",
+  "independent_parser_sha256": "cccc5520789d63a0d83b958ef4b6cc908dd034dafefe95d00774bff0b8057d25",
+  "sources_verified": true,
+  "cases": [
+    {
+      "midi_sha256": "83ea472e303c1cbbd35c9a06cafb368a09be2fc5c4c793231b32816d0a91aa77",
+      "name": "chopin-nocturno-op9-2.mid",
+      "channel_events": 6028,
+      "independent_maximum_time_difference_s": 1.3020840725630478e-06,
+      "legacy_reference_matched": true
+    },
+    {
+      "midi_sha256": "af07dbf66a65bbb761ca0ef261e3657267350f62bb963d6f298d2ea46684122a",
+      "name": "liszt-la-campanella.mid",
+      "channel_events": 11382,
+      "independent_maximum_time_difference_s": 1.302085109955442e-06,
+      "legacy_reference_matched": true
+    }
+  ],
+  "register": {
+    "report_sha256": "e02839d8a97a23faaad50456562196e78ce542e35b0c8f5e111602e9d2381d1a",
+    "sources_verified": true,
+    "clock_and_capture_verified": true,
+    "mechanical_ledger_arithmetic_verified": true,
+    "mechanical_work_relative": 2.8093814736653887e-11,
+    "total_seconds": 127.30829489999451,
+    "state_arrays_independently_available": false
+  }
+}

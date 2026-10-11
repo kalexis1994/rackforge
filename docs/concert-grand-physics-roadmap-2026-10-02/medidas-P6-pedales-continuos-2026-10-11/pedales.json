@@ -1,0 +1,380 @@
+{
+  "stage": "continuous pedals and signed parameter work measured",
+  "preceding_stage_commit": "983552b7",
+  "source_sha256": {
+    "measure-concert-grand-pedal-action.py": "3ee751d10fc159a565ba8588768f31781d4d3375f959c6d7c2d5f66cf682d713",
+    "concert_grand_pedal_action.py": "5130cde1c2f9bf146429ff37ee37998ff25fdf1ce70d38eeae7e3d1c9009104e",
+    "concert_grand_performance.py": "0a4b491df156a8d2e494ca39673f4eed9b81be202e1e4a97693bf20a4d3015ff",
+    "concert_grand_register.py": "8f972912a89863770e63194e1211b2ca22300227d08ac3e421375f30c19b8832",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_pressure_stream.py": "7f9e98bca193e4fdb125c0e6596ac60a0575922f3dd4b43c31c1e24579f3923c",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46"
+  },
+  "plan_sha256": "55c92764fc7f9e370d2e31c0ecd3297d73cbcb921bcef9192098f4a3dd6577e5",
+  "midi_sha256": "af07dbf66a65bbb761ca0ef261e3657267350f62bb963d6f298d2ea46684122a",
+  "source_rate_hz": 128000,
+  "output_rate_hz": 48000,
+  "gain_per_pa": 0.25,
+  "sampled_audio_used": false,
+  "new_disk_cache": false,
+  "audio_files": [],
+  "all_gates_passed": false,
+  "faithful_complete_midi_render": false,
+  "parameters_identified": false,
+  "complete_temporal_convergence": false,
+  "criteria": {
+    "mechanical_work_relative": 1e-08
+  },
+  "scope": "6ms first attack with actual pre-strike controller values and a separate synthetic pedal-motion diagnostic; no full phrase, identified pedal geometry or timbre verdict.",
+  "incomplete_attempt_sha256": "8f982a7146e1b99f6e2d947bc1a41204d0cce082c7b2b786ef25db54805cab36",
+  "restart_reason": "First probe finished but a NumPy boolean gate was not JSON serializable; no contracted data or completed case was saved. Repeated after explicit scalar conversion, no physics change.",
+  "seconds": 182.43418509996263,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "register": {
+    "keys": [
+      63,
+      75,
+      87,
+      99
+    ],
+    "wires_per_key": 3,
+    "wire_tuning_offsets_cents": [
+      -0.4,
+      0.0,
+      0.6
+    ],
+    "mechanical_coordinates": 5218,
+    "one_dense_core_matrix_bytes": 217486368,
+    "matrix_budget_scope": "One matrix, not peak RAM; several matrices/factors are constructed.",
+    "wire_lengths_m": {
+      "63": 0.521355777457303,
+      "75": 0.2606778887286515,
+      "87": 0.13033894436432575,
+      "99": 0.06516947218216287
+    },
+    "parameters_identified": false,
+    "same_assumed_wire_and_felt_law": true
+  },
+  "cases": [
+    {
+      "name": "original_pre_attack_controllers",
+      "original_pre_attack_events": [
+        {
+          "tick": 0,
+          "kind": "program",
+          "key": 0,
+          "value": 0,
+          "channel": 0
+        },
+        {
+          "tick": 0,
+          "kind": "cc",
+          "key": 64,
+          "value": 127,
+          "channel": 0
+        },
+        {
+          "tick": 0,
+          "kind": "cc",
+          "key": 67,
+          "value": 127,
+          "channel": 0
+        }
+      ],
+      "attack_event": {
+        "tick": 262667,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0
+      },
+      "simulated_events": [
+        {
+          "tick": 0,
+          "kind": "on",
+          "key": 63,
+          "value": 28,
+          "channel": 0
+        }
+      ],
+      "cold_silent_pre_roll_s": 1.02604296875,
+      "metrics": {
+        "seconds": 44.95552279998083,
+        "launches": [
+          {
+            "tick": 0,
+            "key": 63,
+            "external_work_j": 0.0002878386089758652
+          }
+        ],
+        "contact_steps": 792,
+        "coast_steps": 372,
+        "recontact_retries": 0,
+        "chunks": 3,
+        "maximum_buffered_knots": 257,
+        "nominal_capture_buffer_bytes": 2493928,
+        "buffer_scope": "Knot arrays only; spline temporaries, mechanics and air are additional.",
+        "felt_heat_j": 1.3856795042265227e-05,
+        "material_heat_j": 1.1042700728532617e-07,
+        "damper_heat_j": 0.0,
+        "external_head_work_j": 0.0002878386089758652,
+        "air_port_work_j": 4.202970918053569e-08,
+        "final_mechanical_j": 0.0002738293571865781,
+        "mechanical_work_residual_j": -3.055597097576705e-14,
+        "binary_pedal_diagnostic": false,
+        "frozen_program_diagnostic": true,
+        "full_temporal_convergence_established": false,
+        "pedal_parameter_work_j": 0.0,
+        "pedal_action": {
+          "model": "prescribed damper lift and lateral three-wire felt overlap",
+          "travel_s": 0.03,
+          "key_return_s": 0.03,
+          "preload_exponent": 1.5,
+          "lateral_pitch_units": 1.0,
+          "hammer_width_pitch_units": 3.0,
+          "pedal_values_preserved": true,
+          "parameters_identified": false,
+          "damper_spring_or_mass_modeled": false,
+          "lateral_inertia_or_felt_variation_modeled": false,
+          "interrupted_stroke_velocity_reset": true,
+          "sostenuto_implemented": false,
+          "final_sustain_target": 1.0,
+          "final_soft_target": 1.0,
+          "frozen_program_diagnostic": true
+        }
+      },
+      "final_shift": 1.0,
+      "final_damper_levels": {
+        "63": 0.0,
+        "75": 0.0,
+        "87": 0.0,
+        "99": 0.0
+      },
+      "final_states_finite": true,
+      "pressure_metadata": {
+        "source_rate_hz": 128000,
+        "source_interpolation_taps": 12,
+        "source_delay_nodes": [
+          -5,
+          -4,
+          -3,
+          -2,
+          -1,
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "fft_size": 1485,
+        "maximum_internal_intervals": 1024,
+        "source_intervals": 768,
+        "internal_chunks": 3,
+        "retained_pressure_frames": 450,
+        "filter_length": 451,
+        "cached_transfer_bytes": 14432032,
+        "source_approximation_validated_globally": false
+      },
+      "native_frames": 1218,
+      "audio_frames": 457,
+      "audio_peak": 0.013988590579228586,
+      "audio_rms": 0.004254829956716677,
+      "mechanical_work_relative": 1.0615661006869693e-10,
+      "mechanical_work_gate_passed": true
+    },
+    {
+      "name": "moving_controls_diagnostic",
+      "original_pre_attack_events": [
+        {
+          "tick": 0,
+          "kind": "program",
+          "key": 0,
+          "value": 0,
+          "channel": 0
+        },
+        {
+          "tick": 0,
+          "kind": "cc",
+          "key": 64,
+          "value": 127,
+          "channel": 0
+        },
+        {
+          "tick": 0,
+          "kind": "cc",
+          "key": 67,
+          "value": 127,
+          "channel": 0
+        }
+      ],
+      "attack_event": {
+        "tick": 262667,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0
+      },
+      "simulated_events": [
+        {
+          "tick": 0,
+          "kind": "on",
+          "key": 63,
+          "value": 28,
+          "channel": 0
+        },
+        {
+          "tick": 32,
+          "kind": "cc",
+          "key": 67,
+          "value": 0,
+          "channel": 0
+        },
+        {
+          "tick": 512,
+          "kind": "cc",
+          "key": 64,
+          "value": 64,
+          "channel": 0
+        }
+      ],
+      "cold_silent_pre_roll_s": 1.02604296875,
+      "metrics": {
+        "seconds": 46.91414690000238,
+        "launches": [
+          {
+            "tick": 0,
+            "key": 63,
+            "external_work_j": 0.0002878386089758652
+          }
+        ],
+        "contact_steps": 790,
+        "coast_steps": 373,
+        "recontact_retries": 0,
+        "chunks": 3,
+        "maximum_buffered_knots": 257,
+        "nominal_capture_buffer_bytes": 2493928,
+        "buffer_scope": "Knot arrays only; spline temporaries, mechanics and air are additional.",
+        "felt_heat_j": 1.3936611652312915e-05,
+        "material_heat_j": 1.1107152921971393e-07,
+        "damper_heat_j": 2.836595511441625e-13,
+        "external_head_work_j": 0.0002878386089758652,
+        "air_port_work_j": 4.226094675396577e-08,
+        "final_mechanical_j": 0.0002752933853018193,
+        "mechanical_work_residual_j": -3.062811907169224e-14,
+        "binary_pedal_diagnostic": false,
+        "frozen_program_diagnostic": true,
+        "full_temporal_convergence_established": false,
+        "pedal_parameter_work_j": 1.5447207685283643e-06,
+        "pedal_action": {
+          "model": "prescribed damper lift and lateral three-wire felt overlap",
+          "travel_s": 0.03,
+          "key_return_s": 0.03,
+          "preload_exponent": 1.5,
+          "lateral_pitch_units": 1.0,
+          "hammer_width_pitch_units": 3.0,
+          "pedal_values_preserved": true,
+          "parameters_identified": false,
+          "damper_spring_or_mass_modeled": false,
+          "lateral_inertia_or_felt_variation_modeled": false,
+          "interrupted_stroke_velocity_reset": true,
+          "sostenuto_implemented": false,
+          "final_sustain_target": 0.5039370078740157,
+          "final_soft_target": 0.0,
+          "frozen_program_diagnostic": true
+        }
+      },
+      "final_shift": 0.8999686053240741,
+      "final_damper_levels": {
+        "63": 0.0,
+        "75": 0.0037424874190320066,
+        "87": 0.0037424874190320066,
+        "99": 0.0037424874190320066
+      },
+      "final_states_finite": true,
+      "pressure_metadata": {
+        "source_rate_hz": 128000,
+        "source_interpolation_taps": 12,
+        "source_delay_nodes": [
+          -5,
+          -4,
+          -3,
+          -2,
+          -1,
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "fft_size": 1485,
+        "maximum_internal_intervals": 1024,
+        "source_intervals": 768,
+        "internal_chunks": 3,
+        "retained_pressure_frames": 450,
+        "filter_length": 451,
+        "cached_transfer_bytes": 14432032,
+        "source_approximation_validated_globally": false
+      },
+      "native_frames": 1218,
+      "audio_frames": 457,
+      "audio_peak": 0.01403597505787417,
+      "audio_rms": 0.004266654465745493,
+      "mechanical_work_relative": 1.0583926551244483e-10,
+      "mechanical_work_gate_passed": true
+    }
+  ],
+  "data": {
+    "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-pedales-continuos-2026-10-11\\presion.npz",
+    "sha256": "825cebd87b67cdba0cc2ac1da7530679be6e0c301a8671001e76a9261fe5f3c6",
+    "bytes": 50167
+  },
+  "source_and_cache_unchanged": true,
+  "local_controls_passed": true
+}

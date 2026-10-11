@@ -70,12 +70,13 @@ class PerformanceControl:
 def play(system, contact, coast, dampers, events, end_tick, sink, *,
          contact_rate=256000, coast_rate=128000, capture_rate=128000,
          block_s=.125, allow_binary_pedal=False, allow_frozen_program=False,
-         progress=None):
+         progress=None, control=None):
     """One cold chronological trajectory; memory of board history is bounded.
 
 No clipping/truncation of unsupported MIDI: validate before launch. The
 caller constructs every requested string port, and explicitly supplies a
-tail and a sink. This does not certify convergence or implement half pedal.
+tail and a sink. A supplied control implements pedal travel/parameter work;
+the default retains the frozen binary path. This does not certify convergence.
 """
     if (not callable(sink) or contact_rate <= 0 or coast_rate <= 0 or capture_rate <= 0
             or contact_rate % coast_rate or contact_rate % capture_rate):
@@ -88,10 +89,16 @@ tail and a sink. This does not certify convergence or implement half pedal.
     ticks = [event['tick'] for event in events]
     if (ticks != sorted(ticks) or any(not isinstance(t, int) or not 0 <= t < end_tick for t in ticks)):
         raise ValueError('ordered events strictly inside the trajectory')
-    control = PerformanceControl(system.keys, allow_binary_pedal=allow_binary_pedal,
-                                 allow_frozen_program=allow_frozen_program)
+    custom_control = control is not None
+    control = control if custom_control else PerformanceControl(system.keys,
+        allow_binary_pedal=allow_binary_pedal, allow_frozen_program=allow_frozen_program)
+    if set(control.held) != set(system.keys):
+        raise ValueError('control must cover the constructed bank')
     control.validate(events)
+    if custom_control:
+        control.bind(system, contact)
     state = contact.initial_state(0.)
+    parameter_work = control.advance(system, state, 0.) if custom_control else 0.
     core = system.string
     def board(q):
         return core.board_transform @ q[core.sb]
@@ -122,6 +129,8 @@ tail and a sink. This does not certify convergence or implement half pedal.
         if tick + step > next_block or (cursor < len(events) and tick + step > events[cursor]['tick']):
             step = 1
         dt = step / contact_rate
+        if custom_control:
+            parameter_work += control.advance(system, state, now + dt / 2)
         levels = control.levels(now + dt / 2)
         v, heat0 = dampers.dissipate(state[1], dt / 2, levels)
         # Preserve the frozen event-alignment path when stride>1. Equal
@@ -138,6 +147,8 @@ tail and a sink. This does not certify convergence or implement half pedal.
                     raise
                 retries += 1
                 step, dt = 1, 1 / contact_rate
+                if custom_control:
+                    parameter_work += control.advance(system, state, now + dt / 2)
                 levels = control.levels(now + dt / 2)
                 v, heat0 = dampers.dissipate(state[1], dt / 2, levels)
                 middle, stats = contact.step((state[0], v, state[2], state[3]), dt, True)
@@ -145,6 +156,8 @@ tail and a sink. This does not certify convergence or implement half pedal.
         v, heat1 = dampers.dissipate(middle[1], dt / 2, levels)
         state = (middle[0], v, middle[2], middle[3])
         tick += step
+        if custom_control:
+            parameter_work += control.advance(system, state, tick / contact_rate)
         felt += stats['felt_loss_j']
         material += stats['material_loss_j']
         damper_heat += heat0 + heat1
@@ -174,8 +187,8 @@ tail and a sink. This does not certify convergence or implement half pedal.
     if cursor != len(events) or contact_steps + stride * coast_steps != end_tick:
         raise AssertionError('missed event or duration')
     final_energy = system.energy(*state[:2])
-    residual = final_energy - work + felt + material + damper_heat + air_work
-    return state, dict(seconds=time.perf_counter() - begin, launches=launches,
+    residual = final_energy - work - parameter_work + felt + material + damper_heat + air_work
+    result = dict(seconds=time.perf_counter() - begin, launches=launches,
                        contact_steps=contact_steps, coast_steps=coast_steps, recontact_retries=retries,
                        chunks=chunks, maximum_buffered_knots=maximum_knots,
                        nominal_capture_buffer_bytes=maximum_knots * (2 * core.nb * 8 + 8),
@@ -186,3 +199,7 @@ tail and a sink. This does not certify convergence or implement half pedal.
                        binary_pedal_diagnostic=allow_binary_pedal,
                        frozen_program_diagnostic=allow_frozen_program,
                        full_temporal_convergence_established=False)
+    if custom_control:
+        result.update(pedal_parameter_work_j=parameter_work, pedal_action=control.metadata(),
+                      frozen_program_diagnostic=control.allow_frozen_program)
+    return state, result

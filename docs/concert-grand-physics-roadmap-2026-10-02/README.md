@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-10. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-11. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -234,7 +234,26 @@ Verificación independiente de archivos/DTFT/resampleo/ledger aprobada.
 La malla 12,5→6,25 Hz **falla energía en 800–2500 Hz** (0,17854 %, límite
 0,1 %); se conserva, sin aprobación global ni temporal de una pieza.
 La trayectoria de 6 ms tarda 43,94 s: permanece el costo mecánico.
-Sigue CC64 continuo/CC67 con trabajo explícito, luego fragmento musical.
+La etapa de CC64 continuo/CC67 se registra a continuación; luego fragmento musical.
+
+La [acción continua de pedales](RESULTADOS-P6-pedales-continuos.md) conserva
+los valores CC64/67 y los lleva a posiciones prescritas, con supuestos de
+geometría y 30 ms de viaje. CC64 regula la precarga del parche disipativo;
+CC67 desplaza el área de contacto de tres cuerdas a dos, conservando las
+tres cuerdas y la ley local del fieltro. La acción de CC67 registra trabajo
+con signo cuando hay compresión. El solver actualiza sus coeficientes en
+caché; el control rechaza un solver sin esa sincronización.
+Ocho pruebas pasan: posiciones/medio pedal, contacto/trabajo, pre-roll frío,
+estados idénticos con distintos bloques y regresiones del reproductor/WAV.
+La geometría lateral y el apagador son supuestos; no se identifica el
+Steinway ni se modelan masas de los actuadores, fieltro lateral o sostenuto.
+Las dos sondas del banco de cuatro teclas/606 modos pasan trabajo local
+(residuo máximo 1,062e−10 relativo; límite 1e−8); fuente/plan/MIDI/arrays,
+resampleo y aritmética se verifican independientemente. Trayectorias de
+6 ms: 44,96/46,91 s. La acción móvil transfiere +1,545e−6 J, registrado
+por separado; no se aprueba el timbre o la convergencia de una pieza.
+Sin nuevas R ni WAVs diagnósticos de 6 ms en SHARED. Sigue un motivo corto del MIDI original,
+con presupuesto medido de ataque/coast y conservando los gates pendientes.
 
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.

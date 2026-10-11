@@ -1,0 +1,32 @@
+{
+  "stage": "independent pedal contracted-data verification",
+  "verifier_sha256": "ac02fd3b956346e7b8335df6f5e79b35cc47877408470abbdd75ec7823226938",
+  "sources_plan_midi_and_archive_hashes_passed": true,
+  "cases": [
+    {
+      "name": "original_pre_attack_controllers",
+      "clock_passed": true,
+      "original_pre_strike_values_preserved": true,
+      "scipy_resampling_passed": true,
+      "peak_rms_passed": true,
+      "nonnegative_heat_passed": true,
+      "signed_parameter_work_j": 0.0,
+      "mechanical_work_relative": 1.0615661186192649e-10,
+      "mechanical_work_gate_passed": true
+    },
+    {
+      "name": "moving_controls_diagnostic",
+      "clock_passed": true,
+      "original_pre_strike_values_preserved": true,
+      "scipy_resampling_passed": true,
+      "peak_rms_passed": true,
+      "nonnegative_heat_passed": true,
+      "signed_parameter_work_j": 1.5447207685283643e-06,
+      "mechanical_work_relative": 1.0583926725036737e-10,
+      "mechanical_work_gate_passed": true
+    }
+  ],
+  "local_controls_verified": true,
+  "global_physics_approved": false,
+  "scope": "Integrity, clock, scalar energy arithmetic and SciPy resampling of archived capsule pressure. Does not reconstruct modal states, actuator forces, or certify temporal/spatial convergence or piano timbre."
+}

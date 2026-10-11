@@ -1,0 +1,88 @@
+{
+  "stage": "independent contracted-data verification",
+  "verifier_sha256": "2a9daee7d650e4f02e0a4651ff1ef911236eb09eb13a86360f54ea74b7f51b50",
+  "source_hashes_passed": true,
+  "reference_hash_passed": true,
+  "archive_hash_size_and_finiteness_passed": true,
+  "archive_shapes": {
+    "frequency_hz": [
+      1913
+    ],
+    "analytic_pressure": [
+      1913,
+      2
+    ],
+    "streamed_pressure": [
+      1913,
+      2
+    ],
+    "streamed_native": [
+      1218,
+      2
+    ],
+    "legacy_native": [
+      1213,
+      2
+    ],
+    "streamed_audio": [
+      457,
+      2
+    ],
+    "legacy_audio": [
+      455,
+      2
+    ]
+  },
+  "pressure_band_metrics_reproduced": true,
+  "direct_dtft_passed": true,
+  "scipy_resampling_passed": true,
+  "resampling_maximum_absolute_errors": {
+    "streamed": 1.3877787807814457e-17,
+    "legacy": 0.0
+  },
+  "waveform_relative": 1.1225887038487763e-07,
+  "same_physical_probe_metrics_except_time": true,
+  "mechanical_work_residual_relative": 2.809375615782158e-11,
+  "nested_grid_criteria": {
+    "energy_relative": 0.001,
+    "absolute_error": 0.0001
+  },
+  "nested_grid_bands": [
+    {
+      "lower_hz": 60.0,
+      "upper_hz": 800.0,
+      "energy_relative_change": 0.00014651185824724543,
+      "absolute_error_change": 8.638974714102358e-17,
+      "energy_gate_passed": true,
+      "error_gate_passed": true
+    },
+    {
+      "lower_hz": 800.0,
+      "upper_hz": 2500.0,
+      "energy_relative_change": 0.0017854065673503414,
+      "absolute_error_change": 4.680550854784797e-17,
+      "energy_gate_passed": false,
+      "error_gate_passed": true
+    },
+    {
+      "lower_hz": 2500.0,
+      "upper_hz": 6000.0,
+      "energy_relative_change": 8.31223426961356e-06,
+      "absolute_error_change": 2.0704500715840961e-16,
+      "energy_gate_passed": true,
+      "error_gate_passed": true
+    },
+    {
+      "lower_hz": 6000.0,
+      "upper_hz": 12000.0,
+      "energy_relative_change": 2.661216132520827e-06,
+      "absolute_error_change": 4.769604601735358e-15,
+      "energy_gate_passed": true,
+      "error_gate_passed": true
+    }
+  ],
+  "nested_grid_all_passed": false,
+  "local_observer_controls_verified": true,
+  "global_physics_approved": false,
+  "scope": "Archive/source integrity, direct pressure DTFT, independent band quadrature, SciPy resampling and ledger arithmetic. Analytic source is archived frozen-observer output; B/V not retained on disk. Nested grids control band integration of this 6ms probe only."
+}

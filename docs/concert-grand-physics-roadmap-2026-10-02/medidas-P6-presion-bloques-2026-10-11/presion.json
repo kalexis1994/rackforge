@@ -1,0 +1,306 @@
+{
+  "stage": "bounded pressure and resampling control completed",
+  "all_gates_passed": false,
+  "diagnostic_listening": false,
+  "sampled_audio_used": false,
+  "audio_files": [],
+  "new_disk_cache": false,
+  "complete_temporal_convergence": false,
+  "complete_energy_certificate": false,
+  "pressure_source_interpolation_taps": 12,
+  "source_rate_hz": 128000,
+  "output_rate_hz": 48000,
+  "source_sha256": {
+    "measure-concert-grand-musical-register.py": "9867132a64faf5ca2c7bc37a2fa5cdfecc5261f4599a8cddf6cca922924e1af1",
+    "concert_grand_register.py": "8f972912a89863770e63194e1211b2ca22300227d08ac3e421375f30c19b8832",
+    "concert_grand_performance.py": "f1ff21f67591d1e35a9d5f63ba825f0df019b55ab1c69b95ceff4b480a2cd072",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46",
+    "measure-concert-grand-pressure-stream.py": "36c4fce37a6f0a3694aef204a04663cae2d328b7b2f64e3247fe7b286dce0297",
+    "concert_grand_pressure_stream.py": "7f9e98bca193e4fdb125c0e6596ac60a0575922f3dd4b43c31c1e24579f3923c",
+    "concert_grand_cell_audio.py": "57c3bccf6c0bbe0c930794ccc5710f94b1a26873722e461f7ff72ef254acacf9",
+    "concert_grand_band_diagnostics.py": "6589fb3d567855e6b05188e6e52145ad232acaec688bacef93359f11bb3ef242",
+    "concert_grand_uniform_spectra.py": "f1ed9bc37a149f0bbf92019e4664b0e332da7206b1116fed966d318672e69417"
+  },
+  "reference_report_sha256": "e02839d8a97a23faaad50456562196e78ce542e35b0c8f5e111602e9d2381d1a",
+  "criteria": {
+    "band_relative": 0.01,
+    "waveform_relative": 0.01,
+    "moment_transfer_relative": 1e-06
+  },
+  "scope": "Same assumed four-key/12-wire system; 6ms first attack only, frozen felt, sustain fully down, no soft pedal. Numerical observer/audio validation, not timbre identification.",
+  "seconds": 128.75237840000773,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "register": {
+    "keys": [
+      63,
+      75,
+      87,
+      99
+    ],
+    "wires_per_key": 3,
+    "wire_tuning_offsets_cents": [
+      -0.4,
+      0.0,
+      0.6
+    ],
+    "mechanical_coordinates": 5218,
+    "one_dense_core_matrix_bytes": 217486368,
+    "matrix_budget_scope": "One matrix, not peak RAM; several matrices/factors are constructed.",
+    "wire_lengths_m": {
+      "63": 0.521355777457303,
+      "75": 0.2606778887286515,
+      "87": 0.13033894436432575,
+      "99": 0.06516947218216287
+    },
+    "parameters_identified": false,
+    "same_assumed_wire_and_felt_law": true
+  },
+  "probe": {
+    "seconds": 43.93739369994728,
+    "launches": [
+      {
+        "tick": 0,
+        "key": 63,
+        "external_work_j": 0.0002878386089758652
+      }
+    ],
+    "contact_steps": 700,
+    "coast_steps": 418,
+    "recontact_retries": 0,
+    "chunks": 3,
+    "maximum_buffered_knots": 257,
+    "nominal_capture_buffer_bytes": 2493928,
+    "buffer_scope": "Knot arrays only; spline temporaries, mechanics and air are additional.",
+    "felt_heat_j": 1.4570420897436698e-05,
+    "material_heat_j": 1.6939683947557527e-07,
+    "damper_heat_j": 0.0,
+    "external_head_work_j": 0.0002878386089758652,
+    "air_port_work_j": 6.116448072607651e-08,
+    "final_mechanical_j": 0.00027303762675014035,
+    "mechanical_work_residual_j": -8.086484554624117e-15,
+    "binary_pedal_diagnostic": false,
+    "frozen_program_diagnostic": false,
+    "full_temporal_convergence_established": false
+  },
+  "streaming_pressure": {
+    "source_rate_hz": 128000,
+    "source_interpolation_taps": 12,
+    "source_delay_nodes": [
+      -5,
+      -4,
+      -3,
+      -2,
+      -1,
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "fft_size": 1485,
+    "maximum_internal_intervals": 1024,
+    "source_intervals": 768,
+    "internal_chunks": 3,
+    "retained_pressure_frames": 450,
+    "filter_length": 451,
+    "cached_transfer_bytes": 14432032,
+    "source_approximation_validated_globally": false
+  },
+  "source_callback_seconds": 0.0788829000084661,
+  "resampler_maximum_buffer_frames": 506,
+  "resampler_retained_frames": 56,
+  "streamed_native_frames": 1218,
+  "streamed_audio_frames": 457,
+  "source_trace_retained_for_short_oracle_only": true,
+  "final_states_finite": true,
+  "analytic_pressure_bands": {
+    "total_relative": 6.113598898847288e-11,
+    "bands": [
+      {
+        "lower_hz": 60.0,
+        "upper_hz": 800.0,
+        "relative": 2.4871398813427845e-15,
+        "reference_energy_share": 0.9929985140710064,
+        "absolute_relative_to_total": 2.4784177501148587e-15
+      },
+      {
+        "lower_hz": 800.0,
+        "upper_hz": 2500.0,
+        "relative": 7.773121838723305e-14,
+        "reference_energy_share": 0.00635528212944549,
+        "absolute_relative_to_total": 6.1967345480333e-15
+      },
+      {
+        "lower_hz": 2500.0,
+        "upper_hz": 6000.0,
+        "relative": 1.893534085284613e-12,
+        "reference_energy_share": 0.0005897972710426333,
+        "absolute_relative_to_total": 4.598588051885713e-14
+      },
+      {
+        "lower_hz": 6000.0,
+        "upper_hz": 12000.0,
+        "relative": 8.140144803720674e-09,
+        "reference_energy_share": 5.6406528505521236e-05,
+        "absolute_relative_to_total": 6.113597132912337e-11
+      }
+    ],
+    "all_bands_1_percent_passed": true
+  },
+  "nested_pressure_bands": {
+    "total_relative": 6.114075874909344e-11,
+    "bands": [
+      {
+        "lower_hz": 60.0,
+        "upper_hz": 800.0,
+        "relative": 2.400460966524466e-15,
+        "reference_energy_share": 0.9929862214680419,
+        "absolute_relative_to_total": 2.3920280029738347e-15
+      },
+      {
+        "lower_hz": 800.0,
+        "upper_hz": 2500.0,
+        "relative": 7.824327236600399e-14,
+        "reference_energy_share": 0.006367482989403793,
+        "absolute_relative_to_total": 6.2435400565811475e-15
+      },
+      {
+        "lower_hz": 2500.0,
+        "upper_hz": 6000.0,
+        "relative": 1.9019239836233073e-12,
+        "reference_energy_share": 0.0005898812968566045,
+        "absolute_relative_to_total": 4.619292552601553e-14
+      },
+      {
+        "lower_hz": 6000.0,
+        "upper_hz": 12000.0,
+        "relative": 8.14022303958956e-09,
+        "reference_energy_share": 5.641424569759428e-05,
+        "absolute_relative_to_total": 6.114074093372509e-11
+      }
+    ],
+    "all_bands_1_percent_passed": true
+  },
+  "legacy_wav_comparison": {
+    "waveform_relative": 1.1225887038487763e-07,
+    "bands": [
+      {
+        "lower_hz": 0,
+        "upper_hz": 60,
+        "reference_energy_share": 0.020659869907248753,
+        "relative_error": 3.878275097297959e-08,
+        "absolute_error_relative_to_full": 5.574454857482156e-09
+      },
+      {
+        "lower_hz": 60,
+        "upper_hz": 800,
+        "reference_energy_share": 0.9729152028364586,
+        "relative_error": 1.8860400365510324e-08,
+        "absolute_error_relative_to_full": 1.8603232014814218e-08
+      },
+      {
+        "lower_hz": 800,
+        "upper_hz": 2500,
+        "reference_energy_share": 0.005780291535767076,
+        "relative_error": 3.693034019969862e-07,
+        "absolute_error_relative_to_full": 2.8077483449658245e-08
+      },
+      {
+        "lower_hz": 2500,
+        "upper_hz": 6000,
+        "reference_energy_share": 0.0005818308094763983,
+        "relative_error": 1.664592741864377e-06,
+        "absolute_error_relative_to_full": 4.0151923379228204e-08
+      },
+      {
+        "lower_hz": 6000,
+        "upper_hz": 12000,
+        "reference_energy_share": 5.570235559835763e-05,
+        "relative_error": 7.0966037664936155e-06,
+        "absolute_error_relative_to_full": 5.296480017591617e-08
+      },
+      {
+        "lower_hz": 12000,
+        "upper_hz": 24001,
+        "reference_energy_share": 7.102555451028034e-06,
+        "relative_error": 3.1436458779560676e-05,
+        "absolute_error_relative_to_full": 8.378011163238644e-08
+      }
+    ],
+    "waveform_1_percent_passed": true,
+    "bands_60_12000_1_percent_passed": true,
+    "compared_frames": 455,
+    "legacy_frames": 455,
+    "new_frames": 457,
+    "extra_native_frames": 5,
+    "scope": "Same origin/gain/trajectory; common prefix, no alignment or normalization. New finite interpolation tail fully retained."
+  },
+  "source_moment_controls": [
+    {
+      "lower_hz": 60.0,
+      "upper_hz": 12000.0,
+      "zero_relative": 5.4585204056872275e-08,
+      "first_relative": 2.438909045742629e-09,
+      "independent_quadrature_nodes": 32
+    },
+    {
+      "lower_hz": 12000.0,
+      "upper_hz": 24000.0,
+      "zero_relative": 0.00015483678287467022,
+      "first_relative": 7.192671463323516e-06,
+      "independent_quadrature_nodes": 32
+    }
+  ],
+  "data": {
+    "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-presion-bloques-2026-10-11\\presion.npz",
+    "sha256": "ee3baf1fc7135ceeb3c613f48838ca9589910e5c1a5a6ed454bfe26786b7e88f",
+    "bytes": 172398
+  },
+  "source_and_cache_unchanged": true,
+  "local_observer_controls_passed": true
+}

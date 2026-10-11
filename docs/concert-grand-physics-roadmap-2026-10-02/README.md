@@ -219,9 +219,22 @@ se construye ese banco de 5218 coordenadas y doce cuerdas. Una sonda real
 de ataque de 6 ms pasa reloj/captura/ledger mecánico (2,809e−11 relativo),
 con buffer de 257 nudos; tarda 42,516 s y conserva el coste alto.
 Misma tabla/R, sin audio ni cachés nuevos. **Pendientes para escuchar ese
-fragmento:** presión/resampleo continuos, CC64 continuo y pedal suave CC67
-(ambos aparecen en el MIDI). Después ampliar duración con coste medido;
+fragmento:** CC64 continuo y pedal suave CC67 (ambos aparecen en el MIDI).
+La salida continua queda verificada en la etapa siguiente. Después ampliar duración con coste medido;
 para la pieza entera, eliminar matrices globales densas. Gates globales falsos.
+
+La [presión y escritura WAV por bloques](RESULTADOS-P6-presion-bloques.md)
+ya mantiene convolución, fase de resampleo y cola sin capturar toda la pieza.
+Siete pruebas pasan, incluida reproducción física con repetición y pedal;
+los estados finales no cambian. La misma sonda de cuatro teclas/606 modos
+coincide con el observador continuo (máximo por banda 8,1401e−9) y el audio
+anterior (0,00001123 %). Transferencia reutilizada 14,43 MB, cola estéreo de
+450 frames; no hay nueva caché grande o WAV de escucha de ese ataque de 6 ms.
+Verificación independiente de archivos/DTFT/resampleo/ledger aprobada.
+La malla 12,5→6,25 Hz **falla energía en 800–2500 Hz** (0,17854 %, límite
+0,1 %); se conserva, sin aprobación global ni temporal de una pieza.
+La trayectoria de 6 ms tarda 43,94 s: permanece el costo mecánico.
+Sigue CC64 continuo/CC67 con trabajo explícito, luego fragmento musical.
 
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.

@@ -90,7 +90,7 @@ A mapped pad does not also play its note.
 | switch-1.3–1.6 | Percussion on, Harmonic 2nd/3rd, Volume Soft/Normal, Decay Slow/Fast | toggle |
 | switch-1.7 / 1.8 | Upper Vibrato on / Scanner V1…C3 | toggle / cycle |
 | switch-2.1–2.4 | Preset key B, A#, F (Flutes 8' & 4'), A (Full Swell) | set |
-| switch-2.5 / 2.6 / 2.7 | Leslie off ↔ Chorale / Lower Vibrato / Mic Dynamic ↔ Condenser | toggle |
+| switch-2.5 / 2.6 / 2.7 | Leslie off ↔ Chorale / Lower Vibrato / Horn Mic Dynamic ↔ Condenser | toggle |
 | switch-2.8 | Tremolo while held, Chorale on release | hold |
 | step / step-2 | Preset key / Scanner mode, down and up | step |
 

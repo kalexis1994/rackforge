@@ -1,0 +1,53 @@
+{
+  "stage": "joint dynamics and observer replay verified",
+  "verifier_sha256": "0d207242ec7bdfdeedbf2e5c4d8fb787c7e205ddf00080a52abc9de77a10a655",
+  "reports_sha256": {
+    "maestro": "d2dada5c6ec424d93df429d4a58b5ec88c29c42b4f93ee958a9e9344866bbc54",
+    "almacenamiento-4-directo": "0c19471680970c4254d02f428e23de09178bc55e0d0de60180cb8377fe65bbac",
+    "presion-almacenamiento-4": "349d1db8846e3bec47f964550c1f7209ccda6e84703fee1f671556e757fdae71",
+    "conjunto-161": "f2ba44c86f403156b1738ebb36db342e57aa7a274700005c28b0171081a6f183",
+    "presion-conjunto-161-refit": "be54847de7f8ad1f07ecb440aeb9c9f47e359dd3fa7ddca5bde08d6ca5efd0a6",
+    "runtime-conjunto-161": "b9de0a32c1a736f7e9a55710f0452df1f4e2c60409a2657b7ef482ee277ec82a",
+    "runtime-conjunto-161-repeticion": "a6e7dd57fb5d1d3181bc6a105d53ca6db88693b929e5f6fe2f6f67285691dd12"
+  },
+  "storage_complement_relative": 4.291688910886323e-16,
+  "static_and_high_relative": [
+    3.5130929850646995e-09,
+    1.2934113943332654e-15
+  ],
+  "minimum_loss_eigenvalue": 7.2876089266061825,
+  "reconstructed_checkpoint_operators": true,
+  "unscaled_validation_replay": true,
+  "mobility": {
+    "rms": 0.04702135207571283,
+    "worst": 0.14896157918801467
+  },
+  "pressure": [
+    {
+      "model": "conjunto-161",
+      "rms": 0.1119789918477596,
+      "worst": 0.27047576928199396,
+      "gate_passed": false
+    },
+    {
+      "model": "presion-conjunto-161-refit",
+      "rms": 0.09988052490798696,
+      "worst": 0.2403572988201933,
+      "gate_passed": false
+    }
+  ],
+  "native_controls_recorded": 2,
+  "budget": [
+    {
+      "report": "runtime-conjunto-161",
+      "both_rates_passed": false
+    },
+    {
+      "report": "runtime-conjunto-161-repeticion",
+      "both_rates_passed": false
+    }
+  ],
+  "failed_gates_preserved": true,
+  "full_piano_realtime": false,
+  "scope": "Unscaled harmonic replay, source/data/checkpoint authentication and recorded native state/work verification. No full air transient, sampled pressure or whole-instrument certificate."
+}

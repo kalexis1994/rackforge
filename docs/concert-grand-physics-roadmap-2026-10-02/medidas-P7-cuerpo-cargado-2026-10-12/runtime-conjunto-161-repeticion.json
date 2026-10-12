@@ -1,0 +1,55 @@
+{
+  "stage": "native loaded diagnostic retimed after fit completion",
+  "producer_sha256": "e8fff15a309d01ffd33796cd178b8dabacb76213ddbad8d0f688f612d7b990cc",
+  "parent_report_sha256": "b9de0a32c1a736f7e9a55710f0452df1f4e2c60409a2657b7ef482ee277ec82a",
+  "native_executable_sha256": "6a93fc3200c23e89d03836333ce4e9bf1b141c564e7b5389d707925704541a46",
+  "mapping_sha256": "ab5e2f83681ee30e87f7df96306818958a55bbe8848bbe4fbe9075a24e89f6f9",
+  "rates": [
+    {
+      "coefficient_sha256": "a6b10e7d6a7cad8f6e95cef842302b904200d8f95aa11156853191ab28599e55",
+      "benchmark": {
+        "resonators": 176,
+        "latent_ports": 20,
+        "external_ports": 88,
+        "rate_hz": 44100,
+        "frames_per_buffer": 256,
+        "buffers": 2048,
+        "deadline_ms": 5.804988662131519,
+        "mean_ms": 0.8270357910156249,
+        "p50_ms": 0.7778,
+        "p95_ms": 1.0378,
+        "p99_ms": 1.2244000000000002,
+        "max_ms": 4.4763,
+        "callback_allocations": 0,
+        "checksum": 7.535622736035379e-08,
+        "p99_deadline_fraction": 0.21092203125000003,
+        "observed_body_budget_passed": false
+      }
+    },
+    {
+      "coefficient_sha256": "48dde9ea2d8c38be7618eab5233bfbcaaa0008418775372fcc659d5fb1083b80",
+      "benchmark": {
+        "resonators": 176,
+        "latent_ports": 20,
+        "external_ports": 88,
+        "rate_hz": 48000,
+        "frames_per_buffer": 256,
+        "buffers": 2048,
+        "deadline_ms": 5.333333333333333,
+        "mean_ms": 0.8004423339843775,
+        "p50_ms": 0.7857,
+        "p95_ms": 0.8785000000000001,
+        "p99_ms": 1.0098,
+        "max_ms": 1.2545,
+        "callback_allocations": 0,
+        "checksum": 4.772920770154572e-08,
+        "p99_deadline_fraction": 0.18933750000000002,
+        "observed_body_budget_passed": true
+      }
+    }
+  ],
+  "body_20percent_budget_passed_both_rates": false,
+  "no_fit_running_in_this_task": true,
+  "full_piano_realtime": false,
+  "scope": "Timing only; inherited native/Python/work controls on byte-identical coefficients. Pressure excluded; no CPU isolation or host realtime guarantee."
+}

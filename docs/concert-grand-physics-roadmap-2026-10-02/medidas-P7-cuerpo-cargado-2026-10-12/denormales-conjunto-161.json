@@ -1,0 +1,22 @@
+{
+  "stage": "native subnormal coefficient inspection",
+  "producer_sha256": "56baab9a8fe8373f4c3486940e8e69fdc7ed5c4c6a467663bf16e4a2f833be14",
+  "runtime_report_sha256": "b9de0a32c1a736f7e9a55710f0452df1f4e2c60409a2657b7ef482ee277ec82a",
+  "cases": [
+    {
+      "rate_hz": 44100.0,
+      "coefficient_sha256": "a6b10e7d6a7cad8f6e95cef842302b904200d8f95aa11156853191ab28599e55",
+      "subnormal_coefficients": 0,
+      "minimum_nonzero_transition_real": 1.7119856605898656e-13
+    },
+    {
+      "rate_hz": 48000.0,
+      "coefficient_sha256": "48dde9ea2d8c38be7618eab5233bfbcaaa0008418775372fcc659d5fb1083b80",
+      "subnormal_coefficients": 0,
+      "minimum_nonzero_transition_real": 1.865426911396356e-12
+    }
+  ],
+  "intermediate_arithmetic_or_live_states_traced": false,
+  "explains_timing_variance": false,
+  "full_piano_realtime": false
+}

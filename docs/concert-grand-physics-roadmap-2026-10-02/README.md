@@ -48,6 +48,16 @@ etapa de cobertura estructural.
 
 ### Prioridad actual: destilar el maestro a un instrumento realtime
 
+La primera etapa P7 queda guardada en **6b5cb0a8**. El
+[ajuste conjunto de movilidad y presión](RESULTADOS-P7-ajuste-conjunto.md)
+mantiene 161 modos, matrices positivas y momentos, e incluye presión en la
+dinámica. Movilidad 4,702 % RMS/14,896 % máximo; presión 11,198 % RMS, o
+9,988 % RMS/24,036 % máximo al recalcular el observador. Siguen fallando gates.
+Tres pruebas nuevas y replay independiente pasan; transformación por bloques
+reduce el defecto a ~1e−12. Costo nativo a 44,1 kHz varía y falla reserva de
+cuerpo, a 48 kHz pasa; se conservan ambas corridas. Sigue ajuste de dinámica
+y observador con proyección variable, después transitorios y cierre instrumental.
+
 El usuario solicita conservar la física en un modelo ejecutable en tiempo real.
 El motivo anterior queda guardado en **f0190e32**. La [primera etapa de
 destilación y sus pendientes](RESULTADOS-P7-destilacion-realtime.md) implementa

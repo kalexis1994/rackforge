@@ -1,0 +1,86 @@
+{
+  "deleted": [
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-avx2-realtime-2026-10-12\\avx2-body-bench.exe",
+      "sha256": "207b8b6bafd9acda70f5fd35c964e0bd23b26304720ded9db7b189078bffc1b6",
+      "bytes": 5015844
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-cuerpo-realtime-2026-10-12\\body-16-44100.bin",
+      "sha256": "559c6dcba2480e3c056454159080a6a99faca67716599cc2cde9276c41774814",
+      "bytes": 37912
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-cuerpo-realtime-2026-10-12\\body-16-48000.bin",
+      "sha256": "1e4f08663d85a5e3be57de809e766a146566c9d46926bba1ea8d0fc053bcb72e",
+      "bytes": 37912
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-cuerpo-realtime-2026-10-12\\body-bench.exe",
+      "sha256": "c2951041b8b387bbbd26c911e01be4d9b6dd4aa7efda7de95af6bbaf281ef40b",
+      "bytes": 4995671
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-espacial-realtime-2026-10-12\\spatial-body-bench.exe",
+      "sha256": "cc5260ed2722b71a3084a417fdfa34e2bc66b21676a77f1bb7d9cc08378a20ff",
+      "bytes": 5007586
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-estatico-realtime-2026-10-12\\ports-24.bin",
+      "sha256": "5de3d36ccf1ae516d772759a6c8e4bd979571776335911a9391359744b2f9559",
+      "bytes": 16912
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-estatico-realtime-2026-10-12\\static-body-128-44100.bin",
+      "sha256": "d5b61d21d519df09f2638b3499fc961d3ffb74083070bfa08040501e9910b1bb",
+      "bytes": 126488
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-estatico-realtime-2026-10-12\\static-body-128-48000.bin",
+      "sha256": "71ac98d28971dd2438564813137b5466c9483873c5e8f7b2b786676f0abf8529",
+      "bytes": 126488
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-estatico-realtime-2026-10-12\\static-body-bench.exe",
+      "sha256": "2b143905253cc814cbdc39d9e950418284721f9e3339c84dc28d68960c7dc0fa",
+      "bytes": 5007585
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-ilp-realtime-2026-10-12\\ilp-body-bench.exe",
+      "sha256": "dd7855f8eb753ad1b28e47a5e6f7eba51a8ab5457ead3ccba7dbd6d93ae194b6",
+      "bytes": 5013822
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-inspeccion-realtime-2026-10-12\\inspeccion.rs",
+      "sha256": "82dca4335b76992051f40a8a3f9fa680484cc8af8025b5df066e119376e089ad",
+      "bytes": 6784
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-inspeccion-realtime-2026-10-12\\inspeccion.s",
+      "sha256": "a8506fd4457f8b6bf1485bd45622400aaf56d86dc1d7063d9c4358d1d76501f1",
+      "bytes": 179190
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-modal-realtime-2026-10-12\\modal-body-bench.exe",
+      "sha256": "22eb717f2fd253a3870eb902e62180ea97a83e1008b244102da22f481929ca93",
+      "bytes": 4998871
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-vector-realtime-2026-10-12\\vector-asm.rs",
+      "sha256": "b29bf2edfe0abd960514cbdfbc2b90d2a68cef99460592d48a33b3ef0b740fa8",
+      "bytes": 7794
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-vector-realtime-2026-10-12\\vector-body-bench.exe",
+      "sha256": "85f3f2641bf5516ef541979da1ab4eeb498fc1eadd5e43a3b09e402350050b5c",
+      "bytes": 5013905
+    },
+    {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-vector-realtime-2026-10-12\\vector.asm",
+      "sha256": "a97d18cff706da5df69e79250d87282bc21dccd988de32e187b6d3fa8dab8db2",
+      "bytes": 213615
+    }
+  ],
+  "scope": "Obsolete P7 diagnostic coefficients and compiler scratch; frozen numeric reports/sources, selected dry model/consumer and loaded teacher retained",
+  "bytes": 35806379.0
+}

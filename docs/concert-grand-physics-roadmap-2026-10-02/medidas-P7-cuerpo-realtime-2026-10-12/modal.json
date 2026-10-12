@@ -1,0 +1,323 @@
+{
+  "stage": "exact modal dry-body runtime measured",
+  "parent_report_sha256": "b0bae7116c13e941d36b2f93caf0f50d6c38d571bdb8144024cecd55c7b58e5e",
+  "source_sha256": {
+    "distill-concert-grand-modal-body.py": "4134b263483b6ac3de8fec7994899f8c7f52ab6382c4d75e89004396c152d455",
+    "concert_grand_modal_runtime.py": "56f9eecb3595ef0ffcfd074ee37649abb09d85b362b90fe5abd11574c996e5b8",
+    "concert-grand-modal-body.rs": "a97bbdd7e88621b7e2d688ce6737666108ab72665f85ab62fa17db4f77059869"
+  },
+  "teacher_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "scope": "Dry 606-coordinate structural board and full material damping only. No air loading, strings, contact, pedals, microphone, audio, factory update or full-piano realtime approval.",
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "body_callback_budget_fraction": 0.2,
+  "cases": [
+    {
+      "states": 128,
+      "resonators": 64,
+      "reduction_used": true,
+      "mobility_rms_relative": 0.14516178036965102,
+      "mobility_worst_relative": 0.7099471601181669,
+      "transfer_gate_passed": false,
+      "rates": [
+        {
+          "rate_hz": 44100,
+          "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-modal-realtime-2026-10-12\\modal-body-128-44100.bin",
+          "coefficient_sha256": "d7e852b46f80cc1e96536320175e1079fef43660f68c79a75ac9e777364add0d",
+          "coefficient_bytes": 184344,
+          "verification": {
+            "native_python_modal_states_outputs_and_work_passed": true,
+            "maximum_step_energy_excess_relative": 0.0,
+            "final_reconstructed_energy_j": 3.420995250993864e-10,
+            "eigenvectors_condition": 1.049398222674667,
+            "eigen_equation_relative": 4.342039450906212e-15
+          },
+          "benchmark": {
+            "resonators": 64,
+            "ports": 88,
+            "rate_hz": 44100,
+            "frames_per_buffer": 256,
+            "buffers": 2048,
+            "deadline_ms": 5.804988662131519,
+            "mean_ms": 1.0799302246093758,
+            "p50_ms": 0.9859000000000001,
+            "p95_ms": 1.5447,
+            "p99_ms": 1.7425,
+            "max_ms": 3.4114,
+            "callback_allocations": 0,
+            "checksum": 3.8229752611412236e-08,
+            "p99_deadline_fraction": 0.3001728515625,
+            "observed_body_budget_passed": false
+          },
+          "coefficient_retained": false
+        },
+        {
+          "rate_hz": 48000,
+          "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-modal-realtime-2026-10-12\\modal-body-128-48000.bin",
+          "coefficient_sha256": "9c66f0111795549afa361089ea1a9a4ccfd877fe02582db975b00a5efd6feb0e",
+          "coefficient_bytes": 184344,
+          "verification": {
+            "native_python_modal_states_outputs_and_work_passed": true,
+            "maximum_step_energy_excess_relative": 0.0,
+            "final_reconstructed_energy_j": 2.648447424724173e-10,
+            "eigenvectors_condition": 1.049398222674667,
+            "eigen_equation_relative": 4.342039450906212e-15
+          },
+          "benchmark": {
+            "resonators": 64,
+            "ports": 88,
+            "rate_hz": 48000,
+            "frames_per_buffer": 256,
+            "buffers": 2048,
+            "deadline_ms": 5.333333333333333,
+            "mean_ms": 1.0693845703124991,
+            "p50_ms": 0.9655,
+            "p95_ms": 1.5537999999999998,
+            "p99_ms": 1.7775,
+            "max_ms": 9.130799999999999,
+            "callback_allocations": 0,
+            "checksum": 1.2374247485017913e-08,
+            "p99_deadline_fraction": 0.33328125000000003,
+            "observed_body_budget_passed": false
+          },
+          "coefficient_retained": false
+        }
+      ],
+      "body_budget_passed_both_rates": false,
+      "both_fidelity_and_body_budget_passed": false
+    },
+    {
+      "states": 256,
+      "resonators": 128,
+      "reduction_used": true,
+      "mobility_rms_relative": 0.0878923146980105,
+      "mobility_worst_relative": 0.4377079596568295,
+      "transfer_gate_passed": false,
+      "rates": [
+        {
+          "rate_hz": 44100,
+          "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-modal-realtime-2026-10-12\\modal-body-256-44100.bin",
+          "coefficient_sha256": "06dc1e182b1cf143af4f0351a4fb705013d69701ed61aa5356e7c2e774107785",
+          "coefficient_bytes": 368664,
+          "verification": {
+            "native_python_modal_states_outputs_and_work_passed": true,
+            "maximum_step_energy_excess_relative": 0.0,
+            "final_reconstructed_energy_j": 3.416899332392979e-10,
+            "eigenvectors_condition": 1.0403182727656461,
+            "eigen_equation_relative": 9.510775437096291e-15
+          },
+          "benchmark": {
+            "resonators": 128,
+            "ports": 88,
+            "rate_hz": 44100,
+            "frames_per_buffer": 256,
+            "buffers": 2048,
+            "deadline_ms": 5.804988662131519,
+            "mean_ms": 2.111792871093749,
+            "p50_ms": 1.9502,
+            "p95_ms": 3.1086,
+            "p99_ms": 3.2805,
+            "max_ms": 3.6597,
+            "callback_allocations": 0,
+            "checksum": 4.4118121583112874e-08,
+            "p99_deadline_fraction": 0.5651173828125,
+            "observed_body_budget_passed": false
+          },
+          "coefficient_retained": false
+        },
+        {
+          "rate_hz": 48000,
+          "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-modal-realtime-2026-10-12\\modal-body-256-48000.bin",
+          "coefficient_sha256": "6ea1edd7377e2b6efaa8843c7e6949a025f0d84a21da890e340b800045b7dba3",
+          "coefficient_bytes": 368664,
+          "verification": {
+            "native_python_modal_states_outputs_and_work_passed": true,
+            "maximum_step_energy_excess_relative": 0.0,
+            "final_reconstructed_energy_j": 2.6544607619440433e-10,
+            "eigenvectors_condition": 1.0403182727656461,
+            "eigen_equation_relative": 9.510775437096291e-15
+          },
+          "benchmark": {
+            "resonators": 128,
+            "ports": 88,
+            "rate_hz": 48000,
+            "frames_per_buffer": 256,
+            "buffers": 2048,
+            "deadline_ms": 5.333333333333333,
+            "mean_ms": 2.266219042968749,
+            "p50_ms": 2.1175,
+            "p95_ms": 3.305,
+            "p99_ms": 3.7376,
+            "max_ms": 4.9731000000000005,
+            "callback_allocations": 0,
+            "checksum": 1.711750127297003e-08,
+            "p99_deadline_fraction": 0.7008000000000001,
+            "observed_body_budget_passed": false
+          },
+          "coefficient_retained": false
+        }
+      ],
+      "body_budget_passed_both_rates": false,
+      "both_fidelity_and_body_budget_passed": false
+    },
+    {
+      "states": 512,
+      "resonators": 256,
+      "reduction_used": true,
+      "mobility_rms_relative": 0.02796048093980321,
+      "mobility_worst_relative": 0.20752145642522718,
+      "transfer_gate_passed": false,
+      "rates": [
+        {
+          "rate_hz": 44100,
+          "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-modal-realtime-2026-10-12\\modal-body-512-44100.bin",
+          "coefficient_sha256": "4e0abf23ca84e6bb29aef60db662894942718ab520ceb645a87faff9f4c05c87",
+          "coefficient_bytes": 737304,
+          "verification": {
+            "native_python_modal_states_outputs_and_work_passed": true,
+            "maximum_step_energy_excess_relative": 0.0,
+            "final_reconstructed_energy_j": 3.44123542764078e-10,
+            "eigenvectors_condition": 1.208960070478645,
+            "eigen_equation_relative": 2.0759478061381353e-14
+          },
+          "benchmark": {
+            "resonators": 256,
+            "ports": 88,
+            "rate_hz": 44100,
+            "frames_per_buffer": 256,
+            "buffers": 2048,
+            "deadline_ms": 5.804988662131519,
+            "mean_ms": 4.665209960937495,
+            "p50_ms": 4.3656,
+            "p95_ms": 6.337,
+            "p99_ms": 6.6297,
+            "max_ms": 13.519,
+            "callback_allocations": 0,
+            "checksum": 3.435368977669437e-07,
+            "p99_deadline_fraction": 1.1420694140625,
+            "observed_body_budget_passed": false
+          },
+          "coefficient_retained": false
+        },
+        {
+          "rate_hz": 48000,
+          "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-modal-realtime-2026-10-12\\modal-body-512-48000.bin",
+          "coefficient_sha256": "fe671c11fe0e0e4b7e37f4817a5ac91d49bdef10f33ff716e30f1494ba0bf9e2",
+          "coefficient_bytes": 737304,
+          "verification": {
+            "native_python_modal_states_outputs_and_work_passed": true,
+            "maximum_step_energy_excess_relative": 0.0,
+            "final_reconstructed_energy_j": 2.679968547000741e-10,
+            "eigenvectors_condition": 1.208960070478645,
+            "eigen_equation_relative": 2.0759478061381353e-14
+          },
+          "benchmark": {
+            "resonators": 256,
+            "ports": 88,
+            "rate_hz": 48000,
+            "frames_per_buffer": 256,
+            "buffers": 2048,
+            "deadline_ms": 5.333333333333333,
+            "mean_ms": 4.241483007812502,
+            "p50_ms": 4.1725,
+            "p95_ms": 4.789,
+            "p99_ms": 5.3994,
+            "max_ms": 6.8869,
+            "callback_allocations": 0,
+            "checksum": 3.8123727617541095e-07,
+            "p99_deadline_fraction": 1.0123875,
+            "observed_body_budget_passed": false
+          },
+          "coefficient_retained": false
+        }
+      ],
+      "body_budget_passed_both_rates": false,
+      "both_fidelity_and_body_budget_passed": false
+    },
+    {
+      "states": 1212,
+      "resonators": 606,
+      "reduction_used": false,
+      "mobility_rms_relative": 1.0763073682002809e-13,
+      "mobility_worst_relative": 3.3553643815882544e-13,
+      "transfer_gate_passed": true,
+      "rates": [
+        {
+          "rate_hz": 44100,
+          "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-modal-realtime-2026-10-12\\modal-body-1212-44100.bin",
+          "coefficient_sha256": "ccc80fd398084b9f4a36f982f4e5951b0234f73a906b9b7717a295dc83dbaaa8",
+          "coefficient_bytes": 1745304,
+          "verification": {
+            "native_python_modal_states_outputs_and_work_passed": true,
+            "maximum_step_energy_excess_relative": 0.0,
+            "final_reconstructed_energy_j": 3.444693586878851e-10,
+            "eigenvectors_condition": 1.3840111179771457,
+            "eigen_equation_relative": 5.8845970857825855e-15
+          },
+          "benchmark": {
+            "resonators": 606,
+            "ports": 88,
+            "rate_hz": 44100,
+            "frames_per_buffer": 256,
+            "buffers": 2048,
+            "deadline_ms": 5.804988662131519,
+            "mean_ms": 10.222043164062493,
+            "p50_ms": 10.1237,
+            "p95_ms": 11.0359,
+            "p99_ms": 12.769,
+            "max_ms": 17.3262,
+            "callback_allocations": 0,
+            "checksum": 1.8968230510501066e-07,
+            "p99_deadline_fraction": 2.199659765625,
+            "observed_body_budget_passed": false
+          },
+          "coefficient_retained": false
+        },
+        {
+          "rate_hz": 48000,
+          "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-modal-realtime-2026-10-12\\modal-body-1212-48000.bin",
+          "coefficient_sha256": "082a2e019ef498c42fb449d432653241976f9532d40957ee33f54bb72d36fc10",
+          "coefficient_bytes": 1745304,
+          "verification": {
+            "native_python_modal_states_outputs_and_work_passed": true,
+            "maximum_step_energy_excess_relative": 0.0,
+            "final_reconstructed_energy_j": 2.6847282586084653e-10,
+            "eigenvectors_condition": 1.3840111179771457,
+            "eigen_equation_relative": 5.8845970857825855e-15
+          },
+          "benchmark": {
+            "resonators": 606,
+            "ports": 88,
+            "rate_hz": 48000,
+            "frames_per_buffer": 256,
+            "buffers": 2048,
+            "deadline_ms": 5.333333333333333,
+            "mean_ms": 11.1722432617188,
+            "p50_ms": 11.098,
+            "p95_ms": 12.004900000000001,
+            "p99_ms": 14.0783,
+            "max_ms": 18.8104,
+            "callback_allocations": 0,
+            "checksum": 1.4650135355183517e-07,
+            "p99_deadline_fraction": 2.63968125,
+            "observed_body_budget_passed": false
+          },
+          "coefficient_retained": false
+        }
+      ],
+      "body_budget_passed_both_rates": false,
+      "both_fidelity_and_body_budget_passed": false
+    }
+  ],
+  "compiler_flags": [
+    "--edition=2021",
+    "-O"
+  ],
+  "seconds": 87.04430599999614,
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "budget_candidate_states": null,
+  "candidate_fidelity_gate_passed": false,
+  "source_and_teacher_unchanged": true,
+  "same_loss_matrix_and_held_force_equations": true,
+  "no_pole_clipping_or_independent_decay_refit": true
+}

@@ -1,0 +1,98 @@
+{
+  "stage": "loaded mobility diagnostic native runtime measured",
+  "seconds": 3.6208496999461204,
+  "body_report_sha256": "e403f863be635cfc077149f2ee1d77ff44167f7b3598e25afe51b716146bf59e",
+  "source_sha256": {
+    "measure-concert-grand-loaded-runtime.py": "6e9e425bb05bd2603342e143265eec57684f8e39c7e20175f57479575e4c46b4",
+    "concert_grand_realtime_body.py": "4783e98d961af70c7d6e096e71871966d00d5367bc5a625ad79c0d6c60c3fb9b",
+    "concert_grand_modal_runtime.py": "56f9eecb3595ef0ffcfd074ee37649abb09d85b362b90fe5abd11574c996e5b8",
+    "concert_grand_reciprocal_runtime.py": "06ab257de0f84899455ef71dbec40fa6dd3145ec177032c82d4ef0370307755b",
+    "concert-grand-reciprocal-body.rs": "8e74c50a46cd22a531f048429412d25996379ea3c170acd351477f736b722c69",
+    "concert-grand-spatial-body.rs": "fdb1911df86ee234e868e9a84f30ef8765a57fb278f5d62fa4628a591b5f05a2",
+    "distill-concert-grand-spatial-body.py": "a9e12e4f23b297d498440ccd1a25db750fb635873a97f9a3d0f441ab430cfdba"
+  },
+  "expanded_native_source_sha256": "45e37c32ac54bb853cc359858bf9619bbb41358ac05d65725c66e32e0c267f56",
+  "native_executable_sha256": "0f03b34d900403dc17a9348c8239094a6b7a6c5ec8691e6e40bed2c9a12ab27c",
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "compiler_flags": [
+    "--edition=2021",
+    "-O",
+    "-C",
+    "target-cpu=native"
+  ],
+  "modes": 114,
+  "native_resonators": 126,
+  "latent_ports": 20,
+  "mapping_sha256": "ab5e2f83681ee30e87f7df96306818958a55bbe8848bbe4fbe9075a24e89f6f9",
+  "exact_modal_transfer_relative": 1.7012747230053266e-13,
+  "symmetric_residue_defect_relative": 3.2770671592282796e-14,
+  "rates": [
+    {
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-cargado-runtime-2026-10-12\\body-44100.bin",
+      "coefficient_sha256": "bedf4a751f37fd7f8b43df1574916d642b575a42f57c20db2b88ca824aa3b185",
+      "coefficient_bytes": 49416,
+      "verification": {
+        "native_python_final_states_outputs_and_work_passed": true,
+        "python_reconstructed_step_energy_excess_relative": 0.0,
+        "eigenvectors_condition": 46.258636101984386,
+        "eigen_equation_relative": 2.0140608112614648e-15
+      },
+      "benchmark": {
+        "resonators": 126,
+        "latent_ports": 20,
+        "external_ports": 88,
+        "rate_hz": 44100,
+        "frames_per_buffer": 256,
+        "buffers": 2048,
+        "deadline_ms": 5.804988662131519,
+        "mean_ms": 0.6229558105468763,
+        "p50_ms": 0.6148,
+        "p95_ms": 0.6704,
+        "p99_ms": 0.7736000000000001,
+        "max_ms": 0.9525,
+        "callback_allocations": 0,
+        "checksum": 5.941798239652021e-08,
+        "p99_deadline_fraction": 0.1332646875,
+        "observed_body_budget_passed": true
+      }
+    },
+    {
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-cargado-runtime-2026-10-12\\body-48000.bin",
+      "coefficient_sha256": "3c5b6f97af785405cbbfa3243d091427d877cc2da4a7d075ab6166cbd713f4e5",
+      "coefficient_bytes": 49416,
+      "verification": {
+        "native_python_final_states_outputs_and_work_passed": true,
+        "python_reconstructed_step_energy_excess_relative": 0.0,
+        "eigenvectors_condition": 46.258636101984386,
+        "eigen_equation_relative": 2.0140608112614648e-15
+      },
+      "benchmark": {
+        "resonators": 126,
+        "latent_ports": 20,
+        "external_ports": 88,
+        "rate_hz": 48000,
+        "frames_per_buffer": 256,
+        "buffers": 2048,
+        "deadline_ms": 5.333333333333333,
+        "mean_ms": 0.6151656249999982,
+        "p50_ms": 0.6071,
+        "p95_ms": 0.6629,
+        "p99_ms": 0.7648,
+        "max_ms": 0.9669,
+        "callback_allocations": 0,
+        "checksum": 4.4075543752563826e-08,
+        "p99_deadline_fraction": 0.14340000000000003,
+        "observed_body_budget_passed": true
+      }
+    }
+  ],
+  "parent_mobility_gate_passed": false,
+  "body_20percent_budget_passed_both_rates": true,
+  "diagnostic_only": true,
+  "pressure_included": false,
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "factory_updated": false,
+  "source_unchanged": true,
+  "verification_scope": "Native final state/checksum/work parity; per-step energy on reconstructed Python trajectory. Host-specific, no WASM or live port closure."
+}

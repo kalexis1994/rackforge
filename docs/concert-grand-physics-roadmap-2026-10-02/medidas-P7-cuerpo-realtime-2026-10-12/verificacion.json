@@ -1,0 +1,22 @@
+{
+  "stage": "independent P7 source/data/gate verification",
+  "verifier_sha256": "28d913552eb96bb0f08aa79beba4f27f60c24db2a77cf5e3e023295295d5e4b7",
+  "source_teacher_report_hashes_passed": true,
+  "reports_sha256": {
+    "destilacion.json": "b0bae7116c13e941d36b2f93caf0f50d6c38d571bdb8144024cecd55c7b58e5e",
+    "modal.json": "a295a80a97f259fbab1175c6e2e8f2a655f97a39f2cc87f7d76d0f860c1b4a5f",
+    "espacial.json": "dd586a74ff7332f7a3f6163258d72f349fb6025b20ecdc03850c48ee87dcf437",
+    "estatico.json": "0aa177aa92e560e759318691dc86d99614ea1663382b02b65fd4ee4c14a0586c",
+    "reciproco.json": "92ce4f1c79b21bde3d48717062e3db77886d34a414475f2c029b6b146c7f322b",
+    "vector.json": "9f9c08b35dcab5ee277e5ace3172cf35669d85c1236a97a97ed03508d2504c58",
+    "avx2.json": "68c36f86a23ceef84e9c63da24c5a69c65ac93c1332bf10eb3407495bb2ed68b",
+    "ilp.json": "e84dbe9c6a919aaf585ca6fa8761e4dc3464257f2bc9938a83646d4c83f9e3bd"
+  },
+  "candidate_report_sha256": "32ebd16dfeb68332c162809ec9dc628baf3965747fc4352f17c2bff8d4e000ba",
+  "retained_coefficients_hash_identical": true,
+  "native_python_controls_recorded": 72,
+  "fidelity_and_cpu_gates_recomputed": true,
+  "failed_20percent_body_reserve_preserved": true,
+  "full_piano_realtime": false,
+  "scope": "Authentication and scalar gate arithmetic only; no independent modal replay or new benchmark, no air/contact/pedal/pressure/polyphonic/WASM certificate."
+}

@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-11. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-12. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -45,6 +45,36 @@ etapa de cobertura estructural.
   el 2026-10-03; no se selecciona ni empaqueta automáticamente un piloto.
 
 ## Orden y estado
+
+### Prioridad actual: destilar el maestro a un instrumento realtime
+
+El usuario solicita conservar la física en un modelo ejecutable en tiempo real.
+El motivo anterior queda guardado en **f0190e32**. La [primera etapa de
+destilación y sus pendientes](RESULTADOS-P7-destilacion-realtime.md) implementa
+un núcleo Rust de tabla seca, con preparación fuera del callback y puertos
+recíprocos. Compresión espacial 88→20 conserva los 606 modos y las pérdidas
+cruzadas; error complejo de movilidad 1,092 % RMS/8,527 % máximo.
+44,1 kHz/256: P99 **2,5914 ms**, plazo 5,805 ms; sin asignaciones durante
+el callback medido. **Falla la reserva de 20 %** para el cuerpo: consume
+44,64 % del plazo. Se conserva sólo como diagnóstico, fuera del plugin.
+Ocho pruebas y 72 controles nativos/Python; hashes/gates autenticados.
+No hay WAV nuevo ni aprobación global. Las reducciones de estados y pruebas
+de SIMD que no cumplieron se registran, sin ocultar sus fallos.
+
+Ya está en curso la reducción de **tabla + carga acústica causal + presión**:
+[maestro cargado, ajustes positivos y límites](RESULTADOS-P7-cuerpo-cargado.md).
+El diagnóstico de 114 modos pasa la reserva de cuerpo (0,7736 ms P99 a
+44,1 kHz/256), pero falla fidelidad de movilidad y presión. El banco de
+161 modos pasa reserva de cuerpo (0,9581 ms P99), pero falla fidelidad:
+movilidad 4,074 % RMS/13,056 % máximo, presión 13,763 % RMS/28,611 % máximo.
+La identificación de pérdidas se acelera 5,023×
+con Woodbury/adjuntos directos, conservando su objetivo y gradiente.
+21 pruebas pasan; replay de seis movilidades/cinco observadores y cuatro
+controles nativos registrados. Sigue seleccionar estados considerando
+conjuntamente movilidad y presión, cerrar su observación temporal/digital, después
+cuerdas/contacto/pedales vivos, cierre de puertos y presupuesto total/WASM.
+La reducción seca aislada no sustituye el modelo del piano. Ver el orden,
+criterios y alcance en el informe P7 antes de iniciar otra búsqueda.
 
 El usuario rechazó la maqueta MIDI de cuatro muestras transpuestas por su
 sonido y falta de resonancia. Se prioriza una trayectoria de cuerdas vivas

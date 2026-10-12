@@ -1,0 +1,26 @@
+{
+  "stage": "failed before validation; no fitted model retained",
+  "teacher_report_sha256": "d2dada5c6ec424d93df429d4a58b5ec88c29c42b4f93ee958a9e9344866bbc54",
+  "bank_report_sha256": "c8c859803af8e6f79a6543ce1c34a035f72a4d03b8ac9a0ebcdf8e33491f020c",
+  "source_sha256": {
+    "fit-concert-grand-coupled-loaded-bank.py": "4559c81ab2b07c9fbaebb9aa9edd6b6e8513f854b79bb97db238bc27c7c5086c",
+    "concert_grand_coupled_mobility_fit.py": "804c8bb9e6f41cb1b3d2fa4891dffa181af3f74ca02b86c17df604cf975e3fe2",
+    "concert_grand_realtime_body.py": "4783e98d961af70c7d6e096e71871966d00d5367bc5a625ad79c0d6c60c3fb9b"
+  },
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "auditory_approval": false,
+  "scope": "Loaded harmonic mobility with fixed stiffness/mass/ports, positive diagonal+low-rank coupled damping. Pressure/runtime pending.",
+  "seconds": 101.61179839994293,
+  "progress": {
+    "seconds": 101.55235549993813,
+    "loss": 0.01049461963377218,
+    "gradient_max": 3.576454707128965E-05
+  },
+  "failure": {
+    "exit_code": 1,
+    "corrected_producer": "fit-concert-grand-coupled-loaded-bank-v2.py",
+    "no_validated_result": true,
+    "error": "modal_response received ports transposed (20x114 instead of 114x20)"
+  }
+}

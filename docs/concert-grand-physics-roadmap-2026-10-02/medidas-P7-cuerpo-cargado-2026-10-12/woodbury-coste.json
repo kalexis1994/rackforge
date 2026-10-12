@@ -1,0 +1,35 @@
+{
+  "stage": "loaded fit solver parity and offline timing",
+  "source_sha256": {
+    "measure-concert-grand-woodbury-fit.py": "a9d81e9f9966b7df314e67404a29a7b1b8f61e18a276e9691c27d63ca2fcb854",
+    "concert_grand_coupled_mobility_fit.py": "804c8bb9e6f41cb1b3d2fa4891dffa181af3f74ca02b86c17df604cf975e3fe2",
+    "concert_grand_woodbury_mobility_fit.py": "b3a42cc97cf9480a3b1a735b68150534aee328eaf14b883d27322ad08d129ba5"
+  },
+  "teacher_report_sha256": "d2dada5c6ec424d93df429d4a58b5ec88c29c42b4f93ee958a9e9344866bbc54",
+  "bank_report_sha256": "0ddfb205e54ea2b10f89457a1409e6171ad8806b6b1647e63873fef6453f009e",
+  "frequencies": 348,
+  "modes": 161,
+  "ports": 20,
+  "loss_rank": 8,
+  "objective_relative": 1.20498949413192e-16,
+  "gradient_relative": 5.185242818358203e-16,
+  "seconds": {
+    "dense": [
+      0.6856175999855623,
+      0.726631399942562,
+      0.7525878000305966,
+      0.6864911000011489,
+      0.7843601000495255
+    ],
+    "woodbury": [
+      0.14465329993981868,
+      0.1590120999608189,
+      0.1421511999797076,
+      0.1406477999407798,
+      0.14681040006689727
+    ]
+  },
+  "median_speedup": 5.023261828419183,
+  "scope": "Offline objective+gradient only on this CPU; same mathematical problem, not callback/full-render acceleration.",
+  "full_piano_realtime": false
+}

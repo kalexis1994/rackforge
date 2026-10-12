@@ -1,0 +1,72 @@
+{
+  "stage": "hash-identical standalone dry-body diagnostic retained",
+  "exporter_sha256": "5d0fda4077cdb8ae08adf81b0b32a1e7b902da76baf1f9a391f3c81407d30e35",
+  "measured_report_sha256": "92ce4f1c79b21bde3d48717062e3db77886d34a414475f2c029b6b146c7f322b",
+  "teacher_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "model": "606 coordinates, full material loss, 20 reciprocal spatial force/velocity channels",
+  "mechanical_poles_removed": 0,
+  "external_ports": 88,
+  "mapping_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-candidato-realtime-2026-10-12\\ports-20.bin",
+  "mapping_sha256": "ab5e2f83681ee30e87f7df96306818958a55bbe8848bbe4fbe9075a24e89f6f9",
+  "mapping_bytes": 14096,
+  "rates": [
+    {
+      "rate_hz": 44100,
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-candidato-realtime-2026-10-12\\body-44100.bin",
+      "coefficient_sha256": "1a76f85f24c055e7f5959c00603dae159b04ed196ad8074c88b51d515814adab",
+      "coefficient_bytes": 237576,
+      "previously_measured_benchmark": {
+        "resonators": 606,
+        "latent_ports": 20,
+        "external_ports": 88,
+        "rate_hz": 44100,
+        "frames_per_buffer": 256,
+        "buffers": 2048,
+        "deadline_ms": 5.804988662131519,
+        "mean_ms": 2.293293652343752,
+        "p50_ms": 2.2728,
+        "p95_ms": 2.428,
+        "p99_ms": 2.5914,
+        "max_ms": 3.3438,
+        "callback_allocations": 0,
+        "checksum": 1.450586723613805e-07,
+        "p99_deadline_fraction": 0.44640914062500003,
+        "observed_body_budget_passed": false
+      }
+    },
+    {
+      "rate_hz": 48000,
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-candidato-realtime-2026-10-12\\body-48000.bin",
+      "coefficient_sha256": "d3bac339544ac17bf32b2c61f8133f27acf7b5bf0a3791f92a56514b9a347686",
+      "coefficient_bytes": 237576,
+      "previously_measured_benchmark": {
+        "resonators": 606,
+        "latent_ports": 20,
+        "external_ports": 88,
+        "rate_hz": 48000,
+        "frames_per_buffer": 256,
+        "buffers": 2048,
+        "deadline_ms": 5.333333333333333,
+        "mean_ms": 2.2635921386718705,
+        "p50_ms": 2.2425,
+        "p95_ms": 2.3923,
+        "p99_ms": 2.5686,
+        "max_ms": 3.3289,
+        "callback_allocations": 0,
+        "checksum": 1.1963153903727863e-07,
+        "p99_deadline_fraction": 0.4816125,
+        "observed_body_budget_passed": false
+      }
+    }
+  ],
+  "mobility_rms_relative": 0.010918261736552318,
+  "mobility_worst_relative": 0.08526688559411662,
+  "diagnostic_only": true,
+  "observed_standalone_deadline_passed": true,
+  "strict_body_20percent_budget_passed": false,
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "factory_updated": false,
+  "scope": "Dry 606-coordinate structural board and full material damping only. No air loading, strings, contact, pedals, microphone, audio, factory update or full-piano realtime approval.",
+  "seconds": 4.026445999974385
+}

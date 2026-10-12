@@ -1,0 +1,156 @@
+{
+  "stage": "full loaded harmonic teacher dataset measured",
+  "teacher_board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "candidate_report_sha256": "32ebd16dfeb68332c162809ec9dc628baf3965747fc4352f17c2bff8d4e000ba",
+  "mapping_sha256": "ab5e2f83681ee30e87f7df96306818958a55bbe8848bbe4fbe9075a24e89f6f9",
+  "source_sha256": {
+    "measure-concert-grand-loaded-teacher.py": "744e3e53b0522b6eb38fdcbd246fca26606a72a8052c328d02853ebfcdb4dc17",
+    "concert_grand_loaded_teacher.py": "50a85d9376d30008941ed377e9a5ba9ca573e8549cd163ab5c5cfa851a0b11d2",
+    "concert_grand_cell_observer.py": "8978333039a9ab2aa9e210dfc9fb9b141d6dab6b0489ad733c1795bddccc7d8a",
+    "concert_grand_cell_audio.py": "57c3bccf6c0bbe0c930794ccc5710f94b1a26873722e461f7ff72ef254acacf9"
+  },
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "no_acoustic_rank_192_reduction": true,
+  "new_R_or_modal_history": false,
+  "scopes": [
+    "Frozen assumed physical full harmonic operator; not identified Steinway.",
+    "Linear force/velocity/pressure only; no hammer/string/notes/pedal/MIDI/transient certificate."
+  ],
+  "seconds": 240.4125399000477,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "observer_kernel_shape": [
+    445,
+    2,
+    606
+  ],
+  "observer_source_report_sha256": "3f53ed59ba4fbc1767f94dbb033af1a7b89a4bfba91d1ed6e10ba17c9a268dee",
+  "microphones": [
+    [
+      0.55,
+      0.5,
+      0.66
+    ],
+    [
+      0.85,
+      0.5,
+      0.66
+    ]
+  ],
+  "observer_rate_hz": 128000,
+  "kernel_interpolation": "same cubic retarded cell kernel",
+  "board_coordinates": 606,
+  "acoustic_coordinates": 606,
+  "acoustic_correlation_shape": [
+    650,
+    606,
+    606
+  ],
+  "training_frequencies": 1189,
+  "validation_frequencies": 111,
+  "total_frequencies": 1300,
+  "held_out_input_keys": [
+    24,
+    33,
+    42,
+    50,
+    57,
+    65,
+    72,
+    79,
+    85,
+    96,
+    104
+  ],
+  "latent_ports": 20,
+  "frequency_block": 12,
+  "offline_blas_threads": 6,
+  "offline_threadpools": [
+    {
+      "user_api": "blas",
+      "internal_api": "openblas",
+      "num_threads": 6,
+      "prefix": "libscipy_openblas",
+      "filepath": "C:\\Users\\kalex\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\site-packages\\numpy.libs\\libscipy_openblas64_-9e3e5a4229c1ca39f10dc82bba9e2b2b.dll",
+      "version": "0.3.30",
+      "threading_layer": "pthreads",
+      "architecture": "Haswell"
+    },
+    {
+      "user_api": "blas",
+      "internal_api": "openblas",
+      "num_threads": 6,
+      "prefix": "libscipy_openblas",
+      "filepath": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-refit\\rackforge\\target\\refit-venv\\Lib\\site-packages\\scipy.libs\\libscipy_openblas-197ee2fc9b4d071f7e048078cac74115.dll",
+      "version": "0.3.31.dev",
+      "threading_layer": "pthreads",
+      "architecture": "Haswell"
+    }
+  ],
+  "progress": {
+    "done": 1300,
+    "total": 1300
+  },
+  "reciprocity_relative": 9.24846411913644e-16,
+  "minimum_hermitian_mobility_relative": 0.0,
+  "batch_controls": [
+    {
+      "frequency_hz": 20.0,
+      "batched_scalar_impedance_relative": 4.854557549690534e-14
+    },
+    {
+      "frequency_hz": 28.152606992305813,
+      "batched_scalar_impedance_relative": 3.6415975541122385e-14
+    },
+    {
+      "frequency_hz": 36.0,
+      "batched_scalar_impedance_relative": 2.6406365015864364e-14
+    }
+  ],
+  "data_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-cuerpo-cargado-2026-10-12\\maestro.npz",
+  "data_sha256": "8dd582d386e1ed25d576a0a04ad156534ae5515346b6d5e0bb34d64ef121fc4f",
+  "data_bytes": 13892359,
+  "geometry_only_mobility_error": {
+    "rms": 0.012752623250925934,
+    "worst": 0.08597351686927798
+  },
+  "geometry_only_pressure_error": {
+    "rms": 0.013644541446224345,
+    "worst": 0.03304681389264313
+  },
+  "source_and_cache_unchanged": true,
+  "no_acoustic_projection": true,
+  "no_parameter_fit_yet": true
+}

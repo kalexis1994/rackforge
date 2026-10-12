@@ -48,6 +48,14 @@ etapa de cobertura estructural.
 
 ### Prioridad actual: destilar el maestro a un instrumento realtime
 
+El ajuste conjunto anterior está en **747f3917**. La
+[proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
+mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;
+presión 6,730 % RMS, o **5,937 % RMS/12,003 % máximo** con observador sobre las
+1189 frecuencias. Dos pruebas nuevas y replay pasan. Siguen fallando fidelidad
+y reserva de cuerpo (P99 1,2318/1,1923 ms). Sigue enriquecer/pesar las peores
+sondas del entrenamiento, sin seleccionar sobre la validación.
+
 La primera etapa P7 queda guardada en **6b5cb0a8**. El
 [ajuste conjunto de movilidad y presión](RESULTADOS-P7-ajuste-conjunto.md)
 mantiene 161 modos, matrices positivas y momentos, e incluye presión en la

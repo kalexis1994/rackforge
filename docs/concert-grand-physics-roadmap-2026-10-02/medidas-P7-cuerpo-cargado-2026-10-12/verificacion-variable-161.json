@@ -1,0 +1,41 @@
+{
+  "stage": "variable projection independent replay verified",
+  "verifier_sha256": "d812baf8c7cc1125c0dad824ef05aabe437dd37f2d231a9eb7ce3bf840b03d59",
+  "reports_sha256": {
+    "maestro": "d2dada5c6ec424d93df429d4a58b5ec88c29c42b4f93ee958a9e9344866bbc54",
+    "almacenamiento-4-directo": "0c19471680970c4254d02f428e23de09178bc55e0d0de60180cb8377fe65bbac",
+    "presion-almacenamiento-4": "349d1db8846e3bec47f964550c1f7209ccda6e84703fee1f671556e757fdae71",
+    "conjunto-161": "f2ba44c86f403156b1738ebb36db342e57aa7a274700005c28b0171081a6f183",
+    "presion-conjunto-161-refit": "be54847de7f8ad1f07ecb440aeb9c9f47e359dd3fa7ddca5bde08d6ca5efd0a6",
+    "variable-161": "2b8ae687cc328b9c4cc6be36700d58073b7858add7f3240af6461ba1aa147502",
+    "variable-161-observador-completo": "8280e9ece1ab13ca7feaef6c78cac3b2f6a3fc286e0df1d8dc3cfea566148efc",
+    "runtime-variable-161": "baaa804ce7031c220627f82f50571940bd79aacced78d41f4c16f34f4af07cf0"
+  },
+  "checkpoint_operators_reconstructed": true,
+  "static_complement_relative": 4.3312473902881077e-16,
+  "static_and_high_relative": [
+    3.5130824691707056e-09,
+    1.556118506987923e-15
+  ],
+  "minimum_loss_eigenvalue": 5.684076076251465,
+  "inner_stationarity_relative": [
+    3.335616721152119e-14,
+    5.900727558932347e-14
+  ],
+  "mobility": {
+    "rms": 0.04544927766458456,
+    "worst": 0.1453277925621017
+  },
+  "pressure": {
+    "rms": 0.06729670914353346,
+    "worst": 0.19242315882719027
+  },
+  "all_training_pressure": {
+    "rms": 0.05936804319962912,
+    "worst": 0.12003024146125199
+  },
+  "native_controls_recorded": 2,
+  "gates_recomputed": true,
+  "full_piano_realtime": false,
+  "scope": "Unscaled harmonic/normal-equation replay and recorded native work controls only. No full-air time, sampled pressure, whole piano or WASM certificate."
+}

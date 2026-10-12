@@ -104,12 +104,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Organ.rfplugin",
         "plugin_id": "org.rackforge.organ",
-        "version": "0.50.0",
+        "version": "0.52.0",
         "url": (
             "https://github.com/kalexis1994/RF-Organ/"
-            "releases/download/v0.50.0/RF-Organ.rfplugin"
+            "releases/download/v0.52.0/RF-Organ.rfplugin"
         ),
-        "sha256": "97579065874359892034f0f0bb2750892c7104465b6cc8199c93ac811111e73c",
+        "sha256": "92aee1cc67f4d908da4998de3fb121ea7c818ad866d4bcec7520620cff67ef62",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

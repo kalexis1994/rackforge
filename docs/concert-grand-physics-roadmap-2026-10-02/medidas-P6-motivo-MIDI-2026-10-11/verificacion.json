@@ -1,0 +1,21 @@
+{
+  "stage": "independent musical opening verification",
+  "verifier_sha256": "1e7611003d968a89e62d78e688c90edbd7592c800d36790873d3088e5abd6d22",
+  "sources_plan_midi_and_audio_hashes_passed": true,
+  "original_events_and_launches_passed": true,
+  "clock_and_audio_frames_passed": true,
+  "frames": 51049,
+  "seconds": 1.0635208333333332,
+  "format": "FLOAT32 stereo 48k",
+  "peak": 0.03954291343688965,
+  "tail20ms_rms": 2.0101877893229943e-06,
+  "tail20ms_relative_db": -85.87664066914789,
+  "last_sample_relative_to_peak": 4.359696070301979e-12,
+  "physical_tail_40db_gate_passed": true,
+  "mechanical_work_relative": 1.6996780419480454e-13,
+  "mechanical_work_gate_passed": true,
+  "all_keys_and_dampers_released": true,
+  "diagnostic_listening": true,
+  "global_physics_approved": false,
+  "scope": "Event/source integrity, WAV format, frame clock, peak/physical tail and scalar work arithmetic. No independent modal replay or temporal/spatial convergence and no Steinway identification."
+}

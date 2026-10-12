@@ -1,0 +1,422 @@
+{
+  "stage": "original opening and physical release rendered",
+  "preceding_stage_commit": "daba4ff5",
+  "source_sha256": {
+    "render-concert-grand-physical-midi.py": "871017e3deea7ed4cf58c00ea23d46da2cad7516d40f7c4a5de13297acf37c09",
+    "concert_grand_midi_excerpt.py": "261f11d40b142f93eb2ec37f38aa69c8ed8fb7ffacd5d581747a8be63e1c1333",
+    "concert_grand_pedal_action.py": "5130cde1c2f9bf146429ff37ee37998ff25fdf1ce70d38eeae7e3d1c9009104e",
+    "concert_grand_performance.py": "593da7ab629aa34ae0d375554141ac4119320f2335ccb7d189221b5eb18af855",
+    "concert_grand_register.py": "8f972912a89863770e63194e1211b2ca22300227d08ac3e421375f30c19b8832",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_pressure_stream.py": "7f9e98bca193e4fdb125c0e6596ac60a0575922f3dd4b43c31c1e24579f3923c",
+    "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46"
+  },
+  "plan_sha256": "55c92764fc7f9e370d2e31c0ecd3297d73cbcb921bcef9192098f4a3dd6577e5",
+  "midi": "C:\\Users\\kalex\\OneDrive\\Documents\\piano-comparacion\\09-midi\\liszt-la-campanella.mid",
+  "midi_sha256": "af07dbf66a65bbb761ca0ef261e3657267350f62bb963d6f298d2ea46684122a",
+  "excerpt": {
+    "original_first_attack_tick": 262667,
+    "cold_silent_pre_roll_s": 1.02604296875,
+    "original_absolute_cut_tick": 446987,
+    "original_excerpt_duration_s": 0.72,
+    "tail_duration_s": 0.24,
+    "end_tick": 245760,
+    "original_pre_attack_events": [
+      {
+        "tick": 0,
+        "kind": "program",
+        "key": 0,
+        "value": 0,
+        "channel": 0
+      },
+      {
+        "tick": 0,
+        "kind": "cc",
+        "key": 64,
+        "value": 127,
+        "channel": 0
+      },
+      {
+        "tick": 0,
+        "kind": "cc",
+        "key": 67,
+        "value": 127,
+        "channel": 0
+      }
+    ],
+    "original_shifted_events": [
+      {
+        "tick": 0,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0
+      },
+      {
+        "tick": 5333,
+        "kind": "on",
+        "key": 75,
+        "value": 14,
+        "channel": 0
+      },
+      {
+        "tick": 39333,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0
+      },
+      {
+        "tick": 51666,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0
+      },
+      {
+        "tick": 133000,
+        "kind": "on",
+        "key": 75,
+        "value": 33,
+        "channel": 0
+      },
+      {
+        "tick": 142333,
+        "kind": "on",
+        "key": 63,
+        "value": 21,
+        "channel": 0
+      },
+      {
+        "tick": 165000,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0
+      },
+      {
+        "tick": 178000,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0
+      }
+    ],
+    "synthetic_closing_events": [
+      {
+        "tick": 184320,
+        "kind": "cc",
+        "key": 64,
+        "value": 0,
+        "channel": 0
+      }
+    ],
+    "simulated_events": [
+      {
+        "tick": 0,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0
+      },
+      {
+        "tick": 5333,
+        "kind": "on",
+        "key": 75,
+        "value": 14,
+        "channel": 0
+      },
+      {
+        "tick": 39333,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0
+      },
+      {
+        "tick": 51666,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0
+      },
+      {
+        "tick": 133000,
+        "kind": "on",
+        "key": 75,
+        "value": 33,
+        "channel": 0
+      },
+      {
+        "tick": 142333,
+        "kind": "on",
+        "key": 63,
+        "value": 21,
+        "channel": 0
+      },
+      {
+        "tick": 165000,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0
+      },
+      {
+        "tick": 178000,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0
+      },
+      {
+        "tick": 184320,
+        "kind": "cc",
+        "key": 64,
+        "value": 0,
+        "channel": 0
+      }
+    ],
+    "original_attacks": 4,
+    "original_note_offs": 4,
+    "no_pitch_or_velocity_changes": true,
+    "cut_after_all_original_key_releases": true
+  },
+  "contact_rate_hz": 256000,
+  "coast_rate_hz": 128000,
+  "capture_rate_hz": 128000,
+  "diagnostic_listening": true,
+  "sampled_audio_used": false,
+  "audio_files": [
+    "C:\\SHARED\\Piano-motivo-MIDI-2026-10-11\\Campanella-inicio-fisico.wav"
+  ],
+  "new_disk_cache": false,
+  "all_gates_passed": false,
+  "complete_temporal_convergence": false,
+  "complete_energy_certificate": false,
+  "physics_parameters_identified": false,
+  "faithful_complete_midi_render": false,
+  "inherited_precision_failures_preserved": true,
+  "criteria": {
+    "mechanical_work_relative": 1e-08
+  },
+  "scope": "Original cold opening events and pre-strike controllers; explicit synthetic sustain return after all excerpt key releases. Same assumed four-key piano, no timbre or full-phrase convergence claim.",
+  "failed_attempt": {
+    "report_sha256": "b438b5341e51d637f6acc9d5173543451a03e25cf82e1f93f7676f8a6f2c509a",
+    "partial_audio_sha256": "44894a2df881a8907e0c4250ca50f568c8d64bdd3f4ecd5c430a83e576078a8e",
+    "partial_audio_bytes": 66048,
+    "failure": "ValueError('changed physical boundary between pressure blocks')",
+    "last_progress": {
+      "physical_time_s": 0.0769765625,
+      "duration_s": 0.96,
+      "seconds": 375.3244055999676,
+      "chunks": 9
+    },
+    "source_sha256": {
+      "render-concert-grand-physical-midi.py": "c0e040fc9560aef9b1b076cdf057b850a88dc44564834e9f773ebc19f3517255",
+      "concert_grand_midi_excerpt.py": "261f11d40b142f93eb2ec37f38aa69c8ed8fb7ffacd5d581747a8be63e1c1333",
+      "concert_grand_pedal_action.py": "5130cde1c2f9bf146429ff37ee37998ff25fdf1ce70d38eeae7e3d1c9009104e",
+      "concert_grand_performance.py": "0a4b491df156a8d2e494ca39673f4eed9b81be202e1e4a97693bf20a4d3015ff",
+      "concert_grand_register.py": "8f972912a89863770e63194e1211b2ca22300227d08ac3e421375f30c19b8832",
+      "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+      "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+      "concert_grand_packed_air.py": "0549beede58db840f492af8e7ea87b6e60cd77b9b0e33ccff1efa9bf95dbca8e",
+      "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+      "concert_grand_pressure_stream.py": "7f9e98bca193e4fdb125c0e6596ac60a0575922f3dd4b43c31c1e24579f3923c",
+      "render-concert-grand-shared-phrase.py": "c86a381b943df4a7103dffad37174d2ccee69922ae87de11fd545648dbee6a46"
+    }
+  },
+  "restart_reason": "Use original uniform B/V knots at shared boundaries; remove redundant spline evaluation, keep dynamics and pressure continuity criterion unchanged.",
+  "seconds": 5355.47921119997,
+  "cache_reused": true,
+  "cache_mass_control_relative": 1.0256564557881931e-13,
+  "cache_transfer_controls": [
+    {
+      "hz": 60.0,
+      "impedance_ZRX_relative": [
+        3.3283415811362216e-05,
+        0.00013100606865018647,
+        7.762167919476454e-07
+      ],
+      "frozen_error_absolute": 4.846654761553326e-15
+    },
+    {
+      "hz": 1881.9607122235952,
+      "impedance_ZRX_relative": [
+        0.001283201122443164,
+        0.001773509500687738,
+        0.0007997512748532979
+      ],
+      "frozen_error_absolute": 1.5276408610320757e-16
+    },
+    {
+      "hz": 6000.0,
+      "impedance_ZRX_relative": [
+        0.006674454175948889,
+        0.004949512175617137,
+        0.009211977437907108
+      ],
+      "frozen_error_absolute": 1.052977149917922e-15
+    }
+  ],
+  "cache_R_sha256": "484c8bcdbb334e97b26a8044536f2a5f19e3da2004df44b01c1df8b6d29777f7",
+  "cache_R_bytes": 1909627328,
+  "board_sha256": "eb976d08d13ab086aa32d61ee6d38307666c95f726046addfd01e7289fef266e",
+  "cache_manifest_sha256": "bc2cb6a82db0a75ece2606185a736628d688a366d87e4efcee6a26d435893de6",
+  "physical_source_report_sha256": "cd68e681c58df57c80036490dfe7c0fdafec0ce7ffd0e3657085359ee93f3817",
+  "reduction_basis_sha256": "cebedd1507cbe0ee07f96017b79bad3b4ccbcf853fcff2bfc3e89c2b8f9a9cb0",
+  "acoustic_accuracy_gate_passed": false,
+  "inherited_worst_loaded_pressure_relative": 0.09202110751569807,
+  "acoustic_rank": 192,
+  "board_coordinates": 606,
+  "register": {
+    "keys": [
+      63,
+      75,
+      87,
+      99
+    ],
+    "wires_per_key": 3,
+    "wire_tuning_offsets_cents": [
+      -0.4,
+      0.0,
+      0.6
+    ],
+    "mechanical_coordinates": 5218,
+    "one_dense_core_matrix_bytes": 217486368,
+    "matrix_budget_scope": "One matrix, not peak RAM; several matrices/factors are constructed.",
+    "wire_lengths_m": {
+      "63": 0.521355777457303,
+      "75": 0.2606778887286515,
+      "87": 0.13033894436432575,
+      "99": 0.06516947218216287
+    },
+    "parameters_identified": false,
+    "same_assumed_wire_and_felt_law": true
+  },
+  "progress": {
+    "physical_time_s": 0.9563046875,
+    "duration_s": 0.96,
+    "seconds": 5255.001570600027,
+    "chunks": 119
+  },
+  "metrics": {
+    "seconds": 5268.552397700027,
+    "launches": [
+      {
+        "tick": 0,
+        "key": 63,
+        "external_work_j": 0.0002878386089758652
+      },
+      {
+        "tick": 5333,
+        "key": 75,
+        "external_work_j": 3.597982612198316e-05
+      },
+      {
+        "tick": 133000,
+        "key": 75,
+        "external_work_j": 0.0004360337879194796
+      },
+      {
+        "tick": 142333,
+        "key": 63,
+        "external_work_j": -0.00012277774064040092
+      }
+    ],
+    "contact_steps": 3604,
+    "coast_steps": 121078,
+    "recontact_retries": 0,
+    "chunks": 120,
+    "maximum_buffered_knots": 1025,
+    "nominal_capture_buffer_bytes": 9946600,
+    "buffer_scope": "Knot arrays only; spline temporaries, mechanics and air are additional.",
+    "felt_heat_j": 5.116752179847669e-05,
+    "material_heat_j": 2.3362945291252536e-05,
+    "damper_heat_j": 2.418017820089556e-05,
+    "external_head_work_j": 0.0006370744823769271,
+    "air_port_work_j": 5.163465567272812e-06,
+    "final_mechanical_j": 0.0005332003715191378,
+    "mechanical_work_residual_j": 1.0828215087814799e-16,
+    "binary_pedal_diagnostic": false,
+    "frozen_program_diagnostic": true,
+    "full_temporal_convergence_established": false,
+    "pedal_parameter_work_j": 0.0,
+    "pedal_action": {
+      "model": "prescribed damper lift and lateral three-wire felt overlap",
+      "travel_s": 0.03,
+      "key_return_s": 0.03,
+      "preload_exponent": 1.5,
+      "lateral_pitch_units": 1.0,
+      "hammer_width_pitch_units": 3.0,
+      "pedal_values_preserved": true,
+      "parameters_identified": false,
+      "damper_spring_or_mass_modeled": false,
+      "lateral_inertia_or_felt_variation_modeled": false,
+      "interrupted_stroke_velocity_reset": true,
+      "sostenuto_implemented": false,
+      "final_sustain_target": 0.0,
+      "final_soft_target": 1.0,
+      "frozen_program_diagnostic": true
+    }
+  },
+  "audio": {
+    "frames": 51049,
+    "seconds": 1.0635208333333332,
+    "peak_before_float32": 0.03954291345357206,
+    "output_rate_hz": 48000,
+    "format": "FLOAT32",
+    "pressure_gain_per_pa": 0.25,
+    "last20ms_rms": 2.0101877895220072e-06,
+    "pressure": {
+      "source_rate_hz": 128000,
+      "source_interpolation_taps": 12,
+      "source_delay_nodes": [
+        -5,
+        -4,
+        -3,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "fft_size": 1485,
+      "maximum_internal_intervals": 1024,
+      "source_intervals": 122880,
+      "internal_chunks": 120,
+      "retained_pressure_frames": 450,
+      "filter_length": 451,
+      "cached_transfer_bytes": 14432032,
+      "source_approximation_validated_globally": false
+    },
+    "resampling_retained_frames": 56,
+    "output_fade_used": false,
+    "path": "C:\\SHARED\\Piano-motivo-MIDI-2026-10-11\\Campanella-inicio-fisico.wav",
+    "sha256": "73c808a08b6220ac2f15e595451061fcdf6bc3e4768805c13f50a2163a103d9e",
+    "bytes": 408480
+  },
+  "final_states_finite": true,
+  "final_damper_levels": {
+    "63": 1.0,
+    "75": 1.0,
+    "87": 1.0,
+    "99": 1.0
+  },
+  "final_lateral_shift": 1.0,
+  "final_held_counts": {
+    "63": 0,
+    "75": 0,
+    "87": 0,
+    "99": 0
+  },
+  "mechanical_work_relative": 1.6996780419480454e-13,
+  "mechanical_work_gate_passed": true,
+  "source_and_cache_unchanged": true
+}

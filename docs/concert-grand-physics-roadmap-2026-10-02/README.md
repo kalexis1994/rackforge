@@ -255,6 +255,23 @@ por separado; no se aprueba el timbre o la convergencia de una pieza.
 Sin nuevas R ni WAVs diagnósticos de 6 ms en SHARED. Sigue un motivo corto del MIDI original,
 con presupuesto medido de ataque/coast y conservando los gates pendientes.
 
+El [primer motivo original con pedales](RESULTADOS-P6-motivo-MIDI.md) ya se
+puede escuchar: cuatro ataques suaves de La Campanella, tiempos/velocidades y
+note-off originales, CC64/67 originales y un cierre CC64=0 declarado a 0,72 s.
+Se integran 0,96 s con estados compartidos; WAV único de 1,064 s en
+`C:/SHARED/Piano-motivo-MIDI-2026-10-11/Campanella-inicio-fisico.wav`.
+La primera ejecución detecta una frontera B/V perturbada por una spline
+redundante; pasar los nudos uniformes nativos conserva fronteras bit a bit.
+Cinco pruebas pasan, incluida la regresión de 120 bloques, sin relajar el
+criterio de continuidad. Sólo se reemplaza el WAV parcial de ese intento.
+Verificación de fuentes/MIDI/audio, eventos, reloj, frames y balance escalar
+aprobada: residuo relativo 1,700e−13, cola final −85,877 dB respecto al pico,
+sin fade ni normalización. Todos los apagadores modelados terminan apoyados.
+Dinámica 87,809 min; productor completo 89,258 min. Ese costo exige perfilar
+y acelerar la integración antes de extender el fragmento. No hay aprobación
+global, identificación del Steinway ni nuevo paquete; los gates de malla,
+temporales y espaciales anteriores siguen pendientes.
+
 La primera frase SI fue rechazada por timbre oscuro y cortes secos. El
 refinamiento temporal no validó la cobertura modal de la tabla hasta 6 kHz.
 Se prioriza esa cobertura y su carga acústica antes de otra escucha musical

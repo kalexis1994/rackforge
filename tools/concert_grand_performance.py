@@ -9,7 +9,6 @@ from collections import Counter
 import time
 
 import numpy as np
-from scipy.interpolate import CubicHermiteSpline
 from concert_grand_damped_coast import engagement
 
 
@@ -173,8 +172,13 @@ the default retains the frozen binary path. This does not certify convergence.
             start_tick = round(T[0] * contact_rate)
             sample_count = (tick - start_tick) // capture
             local = np.arange(sample_count + 1) / capture_rate
-            spline = CubicHermiteSpline(np.asarray(T) - T[0], np.asarray(B), np.asarray(V), axis=0)
-            sink(start_tick / contact_rate, (local, spline(local), spline(local, 1)))
+            # Samples are already on the uniform integer capture clock.
+            # Re-evaluating a spline on t_absolute-t_start perturbs the last
+            # B/V knot through floating cancellation and breaks its identical
+            # shared frontier with the next block. Pass the native knots.
+            if len(B) != sample_count + 1 or len(V) != sample_count + 1:
+                raise AssertionError('missing native capture knot')
+            sink(start_tick / contact_rate, (local, np.asarray(B), np.asarray(V)))
             chunks += 1
             T, B, V = [T[-1]], [B[-1]], [V[-1]]
             next_block = min(next_block + block, end_tick)

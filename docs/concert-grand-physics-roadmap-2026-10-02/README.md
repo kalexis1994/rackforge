@@ -170,6 +170,12 @@ La auditoría por cuerda añade un rechazo: la restricción compartida pasa
 ledger total, pero falla energía individual, máximo **4,916e−7** frente
 a 1e−9. En puente fijo/sin contacto no hay intercambio físico entre cuerdas.
 Se preserva el control y sigue separar las restricciones de energía.
+La continuación usa raíces independientes: a 2,048 MHz, estado **0,638741 %**,
+errores de energía por cuerda **1,851e−10 / 4,126e−11 / 1,228e−10**, pasando
+1e−9 en los 6 ms. Siete pruebas actuales del prototipo pasan; suite acumulada
+de 39. Referencias finas reutilizadas y control compartido exacto. CPU sigue
+rechazado: media **1.039,585 ms** frente a **0,125 ms**, sin cuerpo/contacto.
+Se arregla el invariante local sin seleccionar una ruta de ejecución.
 
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)

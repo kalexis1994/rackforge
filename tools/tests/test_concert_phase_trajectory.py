@@ -1,4 +1,5 @@
 import json
+import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
@@ -17,6 +18,8 @@ class PhaseTrajectoryTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[2]
         subprocess.run(['rustc','--edition=2021','-O','--cfg','concert_phase_library',
             str(root/'tools/concert-grand-phase-trajectory.rs'),'-o',str(cls.exe)],check=True)
+        spec=importlib.util.spec_from_file_location('wire_audit',root/'tools/audit-concert-grand-phase-wire-energy.py')
+        cls.audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(cls.audit)
 
     @classmethod
     def tearDownClass(cls):cls.temp.cleanup()
@@ -76,6 +79,28 @@ class PhaseTrajectoryTests(unittest.TestCase):
         self.assertFalse(native['completed']);self.assertEqual(native['completed_microframes'],0)
         np.testing.assert_array_equal(native['q'],f['q']);np.testing.assert_array_equal(native['v'],f['v'])
         self.assertEqual(native['allocations'],0)
+
+    def test_each_decoupled_wire_closes_its_own_energy(self):
+        f=self.coast(96,.000125);initial=self.audit.wire_energies(f,f['q'],f['v'])
+        native=self.run_native(f,'verify',16,96)
+        shared=self.run_native(f,'verify',16,96,'--shared-energy-root')
+        final=self.audit.wire_energies(f,native['q'],native['v'])
+        shared_final=self.audit.wire_energies(f,shared['q'],shared['v'])
+        self.assertTrue(native['per_wire_energy_constraint'])
+        self.assertLess(max(abs(final-initial)/initial),1e-9)
+        self.assertGreater(max(abs(shared_final-initial)/initial),1e-9)
+        self.assertLess(shared['work_relative_max'],1e-9)
+        self.assertEqual(native['allocations'],0)
+
+    def test_empty_wire_remains_empty_while_other_wires_are_active(self):
+        f=self.coast(12,.0005);width=48
+        f['q'][:width]=0.;f['v'][:width]=0.
+        native=self.run_native(f,'verify',16,64)
+        self.assertTrue(native['completed'])
+        np.testing.assert_array_equal(native['q'][:width],np.zeros(width))
+        np.testing.assert_array_equal(native['v'][:width],np.zeros(width))
+        self.assertEqual(native['initial_wire_energy_j'][0],0.)
+        self.assertEqual(native['final_wire_energy_j'][0],0.)
 
     def test_coupled_trajectory_refines_against_continuous_ode(self):
         f=self.coast(4,.0005);ns=len(f['q'])-1;core=f['system'].string

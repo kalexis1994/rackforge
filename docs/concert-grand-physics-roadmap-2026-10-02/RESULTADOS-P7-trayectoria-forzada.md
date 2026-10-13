@@ -146,6 +146,45 @@ anterior ni sus gates, y no se integra en el plugin.
 
 ## Validación y continuación
 
+### Restricciones independientes por cuerda
+
+El candidato compartido y su rechazo local quedan congelados en **164f3481**.
+La [medición de las restricciones independientes](medidas-P7-cuerdas-nativas-2026-10-13/phase-trajectory-wire-roots.json)
+autentica ese snapshot y reutiliza sus referencias finas, sin volver a
+integrarlas ni copiar sus datos. `--shared-energy-root` conserva el control
+anterior y reproduce exactamente sus arrays, ledger y lambda.
+
+El solver experimental usa ahora tres raíces `lambda_i`: cada dirección
+está restringida a su propia cuerda y cada raíz impone `Ei(z1)=Ei(z0)`.
+Las raíces se acoplan a las condiciones de centro, con la misma tolerancia
+local y publicación atómica de q/v. No se agrega intercambio entre cuerdas.
+**Esta condición corresponde al puente fijo y ausencia de contacto**; un
+futuro martillo/cuerpo acoplado debe incorporar su trabajo, pérdidas y
+transferencias físicas, no imponer energía individual constante.
+
+A 2,048 MHz/N1/orden8, en los mismos 6 ms:
+
+| Control | Error final de estado | Error final de energía por cuerda | Resultado local |
+|---|---:|---:|---|
+| Raíz compartida | 0,638734 % | 4,916e−7 / 4,500e−7 / 8,333e−8 | Falla 1e−9 |
+| Raíces independientes | **0,638741 %** | **1,851e−10 / 4,126e−11 / 1,228e−10** | Pasa 1e−9 |
+
+La evaluación energética es independiente, mediante matrices espaciales
+densas, el mismo potencial SI y la energía cinética/modal original. El caso
+independiente pasa estado, ledger total y energía final por cuerda sólo en
+esta ventana. No amplía aprobación temporal, de contacto o del instrumento.
+
+CPU vuelve a fallar: ocho buffers de 0,125 ms, media **1.039,585 ms**,
+P99/máximo **1.076,166 ms**, cero asignaciones. El benchmark avanza 1 ms
+físico y también pasa energía por cuerda, máximo **3,206e−11**. La corrección
+local arregla un invariante; **no es una optimización de tiempo del motor**.
+Tablas contabilizadas siguen en 16,312 MB y cuatro iteraciones máximas.
+
+Pasan las **siete pruebas actuales** del prototipo, con dos regresiones
+nuevas: el cierre individual que la raíz compartida viola y una cuerda
+vacía que permanece vacía mientras las otras vibran. Las 32 pruebas
+anteriores pasaron en esta etapa; la suite acumulada contiene **39**.
+
 **37 pruebas pasan**: cinco nuevas de gradiente cúbico independiente,
 reconstrucción axial Duhamel, portadores libres sin corrección, estado no
 publicado al fallar y refinamiento contra ODE continuo de cuatro modos;

@@ -66,6 +66,31 @@ fn energy(
     value
 }
 
+fn wire_energies(
+    wires: &mut [Wire],
+    omega2: &[f64],
+    q: &[f64],
+    v: &[f64],
+    gradient: Option<&mut [f64]>,
+) -> [f64; 3] {
+    let width = wires[0].size();
+    let mut values = [0.; 3];
+    let mut gradient = gradient;
+    for (i, wire) in wires.iter_mut().enumerate() {
+        let range = i * width..(i + 1) * width;
+        values[i] = 0.5
+            * (range.clone())
+                .map(|j| v[j] * v[j] + omega2[j] * q[j] * q[j])
+                .sum::<f64>();
+        values[i] += if let Some(ref mut g) = gradient {
+            wire.point_nonlinearity(&q[range.clone()], &mut g[range])
+        } else {
+            wire.nonlinear_potential(&q[range], 0.)
+        };
+    }
+    values
+}
+
 #[derive(Default)]
 struct Stats {
     iterations: usize,
@@ -103,6 +128,7 @@ struct Trajectory {
     sample_q: Vec<f64>,
     gradient: Vec<f64>,
     constrained: bool,
+    per_wire_constraint: bool,
     limit: usize,
 }
 impl Trajectory {
@@ -183,6 +209,7 @@ impl Trajectory {
             sample_q: vec![0.; size],
             gradient: vec![0.; size],
             constrained: true,
+            per_wire_constraint: true,
             limit: 32,
         }
     }
@@ -230,10 +257,62 @@ impl Trajectory {
         }
         Err("energy root did not converge")
     }
+    fn project_wires(
+        &mut self,
+        target: &[f64; 3],
+        mut lambda: [f64; 3],
+    ) -> Result<[f64; 3], &'static str> {
+        let width = self.wires[0].size();
+        for _ in 0..12 {
+            for j in 0..self.q.len() {
+                self.end_q[j] = self.raw_q[j] - lambda[j / width] * self.direction_q[j];
+                self.end_v[j] = self.raw_v[j] - lambda[j / width] * self.direction_v[j];
+            }
+            let values = wire_energies(
+                &mut self.wires,
+                &self.omega2,
+                &self.end_q,
+                &self.end_v,
+                Some(&mut self.gradient),
+            );
+            let mut converged = true;
+            for i in 0..3 {
+                if !values[i].is_finite() {
+                    return Err("nonfinite wire energy root");
+                }
+                if (values[i] - target[i]).abs() <= 1e-13 * target[i].abs().max(1e-30) {
+                    continue;
+                }
+                converged = false;
+                let derivative = -(i * width..(i + 1) * width)
+                    .map(|j| {
+                        (self.omega2[j] * self.end_q[j] + self.gradient[j]) * self.direction_q[j]
+                            + self.end_v[j] * self.direction_v[j]
+                    })
+                    .sum::<f64>();
+                if !derivative.is_finite() || derivative.abs() <= 1e-30 {
+                    return Err("singular wire energy root");
+                }
+                lambda[i] -= (values[i] - target[i]) / derivative;
+                if !lambda[i].is_finite() || lambda[i].abs() > 0.25 {
+                    return Err("wire energy root left local basin");
+                }
+            }
+            if converged {
+                return Ok(lambda);
+            }
+        }
+        Err("wire energy roots did not converge")
+    }
     fn step(&mut self) -> Result<Stats, &'static str> {
         let size = self.q.len();
         let width = self.wires[0].size();
         let start_energy = self.energy();
+        let target_wires = if self.per_wire_constraint {
+            wire_energies(&mut self.wires, &self.omega2, &self.q, &self.v, None)
+        } else {
+            [0.; 3]
+        };
         for j in 0..size {
             self.center_q[j] = self.q[j];
             self.center_v[j] = self.v[j];
@@ -259,6 +338,7 @@ impl Trajectory {
             .sqrt()
             .max(1e-30);
         let mut lambda = 0.;
+        let mut wire_lambda = [0.; 3];
         let nl = width - self.transverse_indices.len() / 3;
         for iteration in 1..=self.limit {
             self.kernel_q.copy_from_slice(&self.center_q);
@@ -329,7 +409,12 @@ impl Trajectory {
             );
             let raw_work = (raw_energy - start_energy).abs() / start_energy.abs().max(1e-30);
             if self.constrained {
-                lambda = self.project(start_energy, lambda)?.0;
+                if self.per_wire_constraint {
+                    wire_lambda = self.project_wires(&target_wires, wire_lambda)?;
+                    lambda = wire_lambda.iter().map(|x| x.abs()).fold(0., f64::max);
+                } else {
+                    lambda = self.project(start_energy, lambda)?.0;
+                }
             } else {
                 self.end_q.copy_from_slice(&self.raw_q);
                 self.end_v.copy_from_slice(&self.raw_v);
@@ -484,6 +569,7 @@ fn main() {
         !args.iter().any(|x| x == "--no-axial-waveform"),
     );
     model.constrained = !args.iter().any(|x| x == "--unconstrained");
+    model.per_wire_constraint = !args.iter().any(|x| x == "--shared-energy-root");
     if let Some(limit) = args
         .iter()
         .find_map(|x| x.strip_prefix("--iteration-limit="))
@@ -496,6 +582,7 @@ fn main() {
         }
     }
     let initial = model.energy();
+    let initial_wires = wire_energies(&mut model.wires, &model.omega2, &model.q, &model.v, None);
     let start = Instant::now();
     let bench = args.get(2).is_some_and(|x| x == "bench");
     let buffers = if bench {
@@ -548,6 +635,7 @@ fn main() {
     let allocations = phase::allocation_count() - allocations_before;
     let elapsed = start.elapsed().as_secs_f64();
     let energy = model.energy();
+    let final_wires = wire_energies(&mut model.wires, &model.omega2, &model.q, &model.v, None);
     model.q.push(q[size - 1]);
     model.v.push(0.);
     let mean = if times.is_empty() {
@@ -561,5 +649,5 @@ fn main() {
     let failure_json = failure
         .map(|s| format!("{:?}", s))
         .unwrap_or_else(|| "null".to_string());
-    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0));
+    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"initial_wire_energy_j\":{:?},\"final_wire_energy_j\":{:?},\"per_wire_energy_constraint\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,initial_wires,final_wires,model.per_wire_constraint,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0));
 }

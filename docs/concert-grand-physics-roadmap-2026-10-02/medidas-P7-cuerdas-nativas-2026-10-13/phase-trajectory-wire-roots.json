@@ -1,0 +1,251 @@
+{
+  "stage": "independent wire energy roots in phase trajectory",
+  "source_sha256": {
+    "measure-concert-grand-native-strings.py": "cf5da1c3225751639e1fc7985a4892662edf18e4e777b4e175879e2e58b2a5a2",
+    "concert-grand-native-strings.rs": "2dad1e3e5f6c93af81d9599dd4851236e3fed9aa01530224fdb1b3377d0e65cf",
+    "concert_grand_native_strings.py": "4c0cae8d1155dab1a97c3ddbfa2afa6f6f08afb1e90167edbdfe7d14f78be450",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "concert-grand-phase-forces.rs": "b69c7ed7c60706e53a8e32032c44ed60451d73a5e85e3a986d5cc63947537056",
+    "concert-grand-phase-trajectory.rs": "b224be428a4fd28e3f513962e7af0d5451d2e8985ac8060b32b954a26a9172c1",
+    "measure-concert-grand-phase-trajectory.py": "22b26a4b6b57e1baf530c77153ba742e1ef1e27d220cfaf6fad697529d587324",
+    "concert_grand_phase_forces.py": "02854406da8aa6516c311fac97445be44dcf2d23fcebc3eb8dff82b5c4d902c8",
+    "tests/test_concert_phase_trajectory.py": "68d9fe0601c35c154a5976b52c544374560f6cc0436cd7ba045912e72059e44b",
+    "measure-concert-grand-phase-wire-roots.py": "bd33932a33f428ba9fae756286c8c397cef93bce6f84c24505ffb47a94c977f2",
+    "audit-concert-grand-phase-wire-energy.py": "1af89c60a2addb47f1f112bdc2247c39b4f77104a5679d803240a099e18608ac"
+  },
+  "reference_report_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-13\\phase-trajectory.json",
+  "reference_report_sha256": "a4bf16878ed7cb6c15d2919f076aa42f05ad96aed1f8b78026e99ac4bfbd5a4b",
+  "reference_ref": "164f3481",
+  "reference_sources_authenticated_from_git": true,
+  "reference_reintegrated": false,
+  "executable_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\trajectory.exe",
+  "executable_sha256": "f601523be5c75d5545fb5d31a1d571fc680b54aea4577ddc91b9c5e5ba194a65",
+  "teacher_cases": [
+    {
+      "label": "teacher-8192000",
+      "command": [
+        "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-checked16-final-2026-10-13\\native-strings.exe",
+        "local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-8192000.bin",
+        "verify"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-8192000.bin",
+      "coefficient_sha256": "dd1314547e5a7b6d57b6a35e42ac20275277a6df56588ea062eec5b517e205e0",
+      "elapsed_s": 8.20455010002479,
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\teacher-8192000.json",
+      "result_sha256": "35d9449baefb17314f0999c59e632afe52d5321ec5ccefeb410b00eb49f8c1a7",
+      "completed": true,
+      "work_relative_max": 1.0463846742071121e-13,
+      "maximum_iterations": 4,
+      "work_1e9_gate_passed": true,
+      "rate_hz": 8192000,
+      "force_peak_n": 0,
+      "checked_reference": true,
+      "reference_local_work_max": 9.97128908831154e-15
+    },
+    {
+      "label": "teacher-16384000",
+      "command": [
+        "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-checked16-final-2026-10-13\\native-strings.exe",
+        "local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-16384000.bin",
+        "verify"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-16384000.bin",
+      "coefficient_sha256": "4407cc5595458584bc44573145799349419978bf9b65ece6bfe849de4bfef868",
+      "elapsed_s": 13.388942599995062,
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\teacher-16384000.json",
+      "result_sha256": "339df4414ea6f2258f5e4b4bf1fbb88a50b38f424fd2553138abb84ea4b086e2",
+      "completed": true,
+      "work_relative_max": 8.972958819348933e-13,
+      "maximum_iterations": 3,
+      "work_1e9_gate_passed": true,
+      "rate_hz": 16384000,
+      "force_peak_n": 0,
+      "checked_reference": true,
+      "reference_local_work_max": 3.7242164064748625e-15
+    }
+  ],
+  "reference_state_refinement_relative": 0.0011846656607777905,
+  "reference_pair_passed": true,
+  "transverse": 96,
+  "axial": 192,
+  "note": 60,
+  "seed": 83,
+  "duration_s": 0.006,
+  "contact_included": false,
+  "pressure_included": false,
+  "pedals_included": false,
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "factory_updated": false,
+  "numerical_energy_constraint": true,
+  "physical_dissipation": false,
+  "heat_j": 0.0,
+  "cases": [
+    {
+      "label": "independent-wire-roots",
+      "command": [
+        "local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\coast-input.bin",
+        "verify",
+        "1",
+        "8"
+      ],
+      "elapsed_s": 49.83627379999962,
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\coast-input.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\independent-wire-roots.json",
+      "result_sha256": "938185217dccf02c408ab1756dd78e888a6b51c10532196bc9166496629e59e1",
+      "completed": true,
+      "failure": null,
+      "work_relative_max": 1.1004699073102178e-10,
+      "raw_local_work_relative_max": 1.1669637860576816e-06,
+      "numerical_lambda_abs_max": 8.582022290078065e-07,
+      "midpoint_residual_relative_max": 2.75815602682345e-12,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16311816,
+      "per_wire_energy_constraint": true,
+      "forced_axial_waveform": true,
+      "numerical_energy_constraint": true,
+      "seconds": 49.6707169,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.13114185149666222,
+        0.1725064981807752,
+        0.15842084828498257
+      ],
+      "wire_energy_relative": [
+        1.8507970935945441e-10,
+        4.12627001003101e-11,
+        1.2282959054043348e-10
+      ],
+      "maximum_wire_energy_relative": 1.8507970935945441e-10,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.006387405822246195,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": true
+    },
+    {
+      "label": "shared-wire-control",
+      "command": [
+        "local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\coast-input.bin",
+        "verify",
+        "1",
+        "8",
+        "--shared-energy-root"
+      ],
+      "elapsed_s": 48.92326989991125,
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\coast-input.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\shared-wire-control.json",
+      "result_sha256": "dff04c28449410b82d6a96db274468cb55982cfd3f0fc86fdd068ecfa0597b94",
+      "completed": true,
+      "failure": null,
+      "work_relative_max": 9.283294168420331e-11,
+      "raw_local_work_relative_max": 1.1677562559398795e-06,
+      "numerical_lambda_abs_max": 5.786541103763436e-07,
+      "midpoint_residual_relative_max": 6.820922388382316e-13,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16311816,
+      "per_wire_energy_constraint": false,
+      "forced_axial_waveform": true,
+      "numerical_energy_constraint": true,
+      "seconds": 48.8371975,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.13114178705200938,
+        0.1725065758154303,
+        0.15842083510293548
+      ],
+      "wire_energy_relative": [
+        4.915968760885323e-07,
+        4.499977555919135e-07,
+        8.333187204840131e-08
+      ],
+      "maximum_wire_energy_relative": 4.915968760885323e-07,
+      "per_wire_1e9_gate_passed": false,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.00638733809273123,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": false,
+      "frozen_shared_arrays_and_work_equal": true
+    }
+  ],
+  "seconds": 107.4362629998941,
+  "benchmark": {
+    "label": "wire-root-benchmark",
+    "command": [
+      "local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\trajectory.exe",
+      "local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\coast-input.bin",
+      "bench",
+      "1",
+      "8",
+      "8"
+    ],
+    "elapsed_s": 8.40283759997692,
+    "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\coast-input.bin",
+    "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+    "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-wire-roots-2026-10-13\\wire-root-benchmark.json",
+    "result_sha256": "b236edd3a1d675cbac535e2a780412ebf20e430a61c9ff2403cc8d6c1bf526ff",
+    "completed": true,
+    "failure": null,
+    "work_relative_max": 1.737899579282149e-11,
+    "raw_local_work_relative_max": 1.1669637860576816e-06,
+    "numerical_lambda_abs_max": 8.582022290078065e-07,
+    "midpoint_residual_relative_max": 2.75815602682345e-12,
+    "maximum_iterations": 4,
+    "allocations": 0,
+    "known_prepared_bytes": 16311816,
+    "per_wire_energy_constraint": true,
+    "forced_axial_waveform": true,
+    "numerical_energy_constraint": true,
+    "seconds": 8.3166792,
+    "initial_wire_energy_j": [
+      0.1311418515209339,
+      0.1725064981878933,
+      0.15842084830444134
+    ],
+    "final_wire_energy_j": [
+      0.13114185151672936,
+      0.1725064981868654,
+      0.1584208483016436
+    ],
+    "wire_energy_relative": [
+      3.206111034250863e-11,
+      5.958616041406262e-12,
+      1.7660139409828828e-11
+    ],
+    "maximum_wire_energy_relative": 3.206111034250863e-11,
+    "per_wire_1e9_gate_passed": true,
+    "total_work_1e9_gate_passed": true,
+    "benchmark": {
+      "buffers": 8,
+      "mean_ms": 1039.5845625,
+      "p99_ms": 1076.1661,
+      "max_ms": 1076.1661,
+      "allocations": 0,
+      "rate_hz": 2048000,
+      "microframes_per_buffer": 256,
+      "deadline_ms": 0.125,
+      "physical_duration_s": 0.001,
+      "isolated_component_budget_passed": false
+    }
+  },
+  "sources_unchanged": true,
+  "reference_report_unchanged": true
+}
